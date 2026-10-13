@@ -414,7 +414,7 @@ impl Value {
         // handles and values assembled from other arenas grow the buffer as
         // needed.
         let hint = if self.node == self.arena.root() {
-            self.arena.input().len().max(64)
+            self.arena.input_len().max(64)
         } else {
             256
         };

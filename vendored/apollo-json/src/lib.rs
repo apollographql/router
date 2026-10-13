@@ -167,7 +167,7 @@ mod stream;
 mod text;
 mod utf8;
 
-pub use builder::{NewValue, PathSegment, ValueBuilder};
+pub use builder::{MergePolicy, NewValue, PathSegment, ValueBuilder};
 pub use cursor::ValueMut;
 pub use de::{from_slice, from_slice_with_buffers, from_str, from_value};
 pub use document::{JsonKind, Value, ValueRef};

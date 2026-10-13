@@ -19,7 +19,7 @@
 use std::borrow::Cow;
 use std::sync::Arc;
 
-use crate::arena::Arena;
+use crate::arena::{Arena, ForeignId};
 use crate::document::Value;
 use crate::error::JsonError;
 use crate::node::{Child, Entry, KeyRef, Node, NodeId};
@@ -368,8 +368,11 @@ impl ValueBuilder {
     pub fn from_value(value: Value) -> Self {
         let Value { arena, node: root } = value;
         match Arc::try_unwrap(arena) {
-            Ok(owned) => ValueBuilder {
-                arena: owned,
+            Ok(mut owned) => ValueBuilder {
+                arena: {
+                    owned.mark_edited();
+                    owned
+                },
                 root: Child::local(root),
                 array_overlays: Vec::new(),
                 object_overlays: Vec::new(),
@@ -407,14 +410,16 @@ impl ValueBuilder {
         }
         match self.root.as_local() {
             Some(id) => Value::rooted(self.arena, id),
-            // Never mutated: the sealed value is the adopted one.
             None => {
-                let fref = self
-                    .arena
-                    .foreign_ref(self.root.as_foreign().expect("root is foreign"));
-                Value {
-                    arena: Arc::clone(&fref.arena),
-                    node: fref.node,
+                let id = self.root.as_foreign().expect("root is foreign");
+                match self.arena.foreign_target(id) {
+                    // Never mutated: the sealed value is the adopted one.
+                    (Some(arena), node) => Value {
+                        arena: Arc::clone(arena),
+                        node,
+                    },
+                    // The adopted root's arena was absorbed into this one.
+                    (None, node) => Value::rooted(self.arena, node),
                 }
             }
         }
@@ -729,6 +734,350 @@ impl ValueBuilder {
         }
     }
 
+    /// Deep-merges `other` into this document the way execution merges a
+    /// subgraph response into the response being assembled.
+    ///
+    /// A member or element `other` has and this document lacks is taken from
+    /// `other` whatever it is, `null` included. Where both hold an object, or
+    /// both an array, the merge descends; arrays merge index-wise and extra
+    /// elements are appended. Anywhere else `policy` decides whether the
+    /// incoming value replaces the one in place.
+    ///
+    /// The merge takes `other` by value so that it can take its storage over.
+    /// When `other` holds the last reference to its arena, that arena is
+    /// absorbed: its storage moves into this document's arena and its nodes
+    /// become local ones, so the subtrees the merge adopts from it are part of
+    /// this document, and a later edit through them is in place rather than a
+    /// copy. Arenas that only `other` referenced are absorbed the same way,
+    /// provided its references into each one are to subtrees that do not
+    /// overlap. Otherwise `other` is adopted by reference, as
+    /// [`ValueBuilder::merge`] adopts it.
+    ///
+    /// ```
+    /// use apollo_json::{BuilderRef, JsonKind, MergePolicy, Value, json};
+    ///
+    /// /// A `null` arriving never overwrites a value already in place.
+    /// struct KeepOnNull;
+    /// impl MergePolicy for KeepOnNull {
+    ///     fn replace(&mut self, _: Option<&str>, _: BuilderRef<'_>, incoming: BuilderRef<'_>) -> bool {
+    ///         incoming.kind() != JsonKind::Null
+    ///     }
+    /// }
+    ///
+    /// let mut builder = json!({"a": 1, "b": {"c": 2}}).edit();
+    /// builder.merge_from(json!({"a": null, "b": {"d": 3}, "e": null}), &mut KeepOnNull);
+    /// assert_eq!(builder.seal(), json!({"a": 1, "b": {"c": 2, "d": 3}, "e": null}));
+    /// ```
+    pub fn merge_from(&mut self, other: Value, policy: &mut impl MergePolicy) {
+        let source = self.take_in(other);
+        let root_shape = self.child_shape(self.root);
+        let source_shape = match &source {
+            MergeSource::Local(node) => shape_of(self.arena.node(*node)),
+            MergeSource::Foreign(arena, node) => shape_of(arena.node(*node)),
+        };
+        if root_shape == Shape::Scalar || root_shape != source_shape {
+            let incoming = match &source {
+                MergeSource::Local(node) => crate::peek::BuilderRef::new(self, Child::local(*node)),
+                MergeSource::Foreign(arena, node) => {
+                    crate::peek::BuilderRef::in_arena(self, arena, *node)
+                }
+            };
+            if policy.replace(
+                None,
+                crate::peek::BuilderRef::new(self, self.root),
+                incoming,
+            ) {
+                self.root = match source {
+                    MergeSource::Local(node) => Child::local(node),
+                    MergeSource::Foreign(arena, node) => self.arena.push_foreign(arena, node),
+                };
+            }
+            return;
+        }
+        let root = self.localize_root();
+        let mut stack = vec![(root, source)];
+        while let Some((target, source)) = stack.pop() {
+            match source {
+                MergeSource::Local(node) => self.merge_local(target, node, policy, &mut stack),
+                MergeSource::Foreign(arena, node) => {
+                    self.merge_foreign(target, &arena, node, policy, &mut stack);
+                }
+            }
+        }
+    }
+
+    /// Where a merge reads a container from: this arena, or another one.
+    fn merge_source(&self, child: Child) -> MergeSource {
+        match self.arena.local_node(child) {
+            Some(node) => MergeSource::Local(node),
+            None => {
+                let id = child.as_foreign().expect("child is foreign");
+                let (arena, node) = self.arena.foreign_target(id);
+                MergeSource::Foreign(Arc::clone(arena.expect("not absorbed")), node)
+            }
+        }
+    }
+
+    /// Merges the local container `source` into the local container
+    /// `target`. Members of `source` are already this arena's, so a member
+    /// taken over keeps its key and child as they are.
+    fn merge_local(
+        &mut self,
+        target: NodeId,
+        source: NodeId,
+        policy: &mut impl MergePolicy,
+        stack: &mut Vec<(NodeId, MergeSource)>,
+    ) {
+        match self.arena.node(source) {
+            Node::Object(slab) => {
+                let absent = self
+                    .arena
+                    .entries(slab)
+                    .iter()
+                    .filter(|entry| {
+                        let key = self.arena.key_unescaped(entry.key);
+                        self.find_member_bytes(target, key.as_bytes()).is_none()
+                    })
+                    .count();
+                if absent > 0 {
+                    self.reserve_entries(target, absent);
+                }
+                for index in 0..slab.len() {
+                    let entry = self.arena.entries(slab)[index];
+                    let key = self.arena.key_unescaped(entry.key);
+                    match self.find_member_bytes(target, key.as_bytes()) {
+                        None => self.push_entry(target, entry),
+                        Some(j) => {
+                            let existing = self.object_child(target, j);
+                            let key = key.into_owned();
+                            if let Some(child) = self.merge_slot_local(
+                                Some(&key),
+                                existing,
+                                entry.child,
+                                policy,
+                                stack,
+                            ) {
+                                self.set_object_child(target, j, child);
+                            }
+                        }
+                    }
+                }
+            }
+            Node::Array(slab) => {
+                let present = self.array_len(target);
+                if slab.len() > present {
+                    self.reserve_children(target, slab.len() - present);
+                }
+                for index in 0..slab.len() {
+                    let child = self.arena.children(slab)[index];
+                    if index < present {
+                        let existing = self.array_child(target, index);
+                        if let Some(child) =
+                            self.merge_slot_local(None, existing, child, policy, stack)
+                        {
+                            self.set_array_child(target, index, child);
+                        }
+                    } else {
+                        self.push_child(target, child);
+                    }
+                }
+            }
+            _ => unreachable!("only containers are merged into"),
+        }
+    }
+
+    /// Merges one local incoming child into one target slot holding
+    /// `existing`, returning what the slot should hold now, if that changed.
+    fn merge_slot_local(
+        &mut self,
+        key: Option<&str>,
+        existing: Child,
+        incoming: Child,
+        policy: &mut impl MergePolicy,
+        stack: &mut Vec<(NodeId, MergeSource)>,
+    ) -> Option<Child> {
+        let shape = self.child_shape(existing);
+        if shape != Shape::Scalar && shape == self.child_shape(incoming) {
+            let local = self.localize_child(existing);
+            let source = self.merge_source(incoming);
+            stack.push((local, source));
+            return Some(Child::local(local));
+        }
+        let replace = policy.replace(
+            key,
+            crate::peek::BuilderRef::new(self, existing),
+            crate::peek::BuilderRef::new(self, incoming),
+        );
+        replace.then_some(incoming)
+    }
+
+    /// Merges the container `source` of another arena into the local
+    /// container `target`: what is taken over is adopted as
+    /// [`ValueBuilder::merge`] adopts it.
+    fn merge_foreign(
+        &mut self,
+        target: NodeId,
+        src: &Arc<Arena>,
+        source: NodeId,
+        policy: &mut impl MergePolicy,
+        stack: &mut Vec<(NodeId, MergeSource)>,
+    ) {
+        match src.node(source) {
+            Node::Object(slab) => {
+                for entry in src.entries(slab) {
+                    let key = src.key_unescaped(entry.key);
+                    let (owner, node) = src.resolve_owner(entry.child);
+                    match self.find_member_bytes(target, key.as_bytes()) {
+                        None => {
+                            let key = KeyRef::Owned(self.arena.alloc_text(&key));
+                            let child = self.import_child(owner, node);
+                            self.push_entry(target, Entry { key, child });
+                        }
+                        Some(j) => {
+                            let existing = self.object_child(target, j);
+                            if let Some(child) = self.merge_slot_foreign(
+                                Some(&key),
+                                existing,
+                                owner,
+                                node,
+                                policy,
+                                stack,
+                            ) {
+                                self.set_object_child(target, j, child);
+                            }
+                        }
+                    }
+                }
+            }
+            Node::Array(slab) => {
+                for (index, &child) in src.children(slab).iter().enumerate() {
+                    let (owner, node) = src.resolve_owner(child);
+                    if index < self.array_len(target) {
+                        let existing = self.array_child(target, index);
+                        if let Some(child) =
+                            self.merge_slot_foreign(None, existing, owner, node, policy, stack)
+                        {
+                            self.set_array_child(target, index, child);
+                        }
+                    } else {
+                        let child = self.import_child(owner, node);
+                        self.push_child(target, child);
+                    }
+                }
+            }
+            _ => unreachable!("only containers are merged into"),
+        }
+    }
+
+    /// Merges `node` of the arena `owner` into one target slot holding
+    /// `existing`, returning what the slot should hold now, if that changed.
+    /// A replacement is adopted by reference.
+    fn merge_slot_foreign(
+        &mut self,
+        key: Option<&str>,
+        existing: Child,
+        owner: Arc<Arena>,
+        node: NodeId,
+        policy: &mut impl MergePolicy,
+        stack: &mut Vec<(NodeId, MergeSource)>,
+    ) -> Option<Child> {
+        let shape = self.child_shape(existing);
+        if shape != Shape::Scalar && shape == shape_of(owner.node(node)) {
+            let local = self.localize_child(existing);
+            stack.push((local, MergeSource::Foreign(owner, node)));
+            return Some(Child::local(local));
+        }
+        let replace = policy.replace(
+            key,
+            crate::peek::BuilderRef::new(self, existing),
+            crate::peek::BuilderRef::in_arena(self, &owner, node),
+        );
+        replace.then(|| self.arena.push_foreign(owner, node))
+    }
+
+    /// Brings `value` into this builder as a merge source, absorbing its
+    /// arena when `value` holds the last reference to it.
+    fn take_in(&mut self, value: Value) -> MergeSource {
+        let Value { arena, node } = value;
+        let arena = match Arc::try_unwrap(arena) {
+            Ok(arena) => arena,
+            Err(shared) => return MergeSource::Foreign(shared, node),
+        };
+        if !self.arena.fits_absorb(&arena) {
+            return MergeSource::Foreign(Arc::new(arena), node);
+        }
+        let first_foreign = self.arena.foreign_len();
+        let absorbed = self.arena.absorb(arena);
+        self.absorb_referenced(first_foreign);
+        MergeSource::Local(node + absorbed.node_offset)
+    }
+
+    /// Absorbs the arenas referenced from foreign entries `from` onwards that
+    /// nothing else references, then those their entries reference, and so
+    /// on. An arena qualifies when every handle to it is one of those entries
+    /// and the subtrees they name are disjoint, so that once its nodes are
+    /// local each one is still reached from exactly one place. Entries into
+    /// an absorbed arena become aliases of the local nodes.
+    fn absorb_referenced(&mut self, mut from: usize) {
+        let mut groups: Vec<(usize, ForeignId)> = Vec::new();
+        let mut nodes: Vec<NodeId> = Vec::new();
+        loop {
+            let to = self.arena.foreign_len();
+            if from == to {
+                return;
+            }
+            groups.clear();
+            for id in from as ForeignId..to as ForeignId {
+                if let (Some(arena), _) = self.arena.foreign_target(id) {
+                    groups.push((Arc::as_ptr(arena) as usize, id));
+                }
+            }
+            from = to;
+            groups.sort_unstable();
+            for group in groups.chunk_by(|a, b| a.0 == b.0) {
+                let (Some(arena), _) = self.arena.foreign_target(group[0].1) else {
+                    unreachable!("grouped entries hold an arena");
+                };
+                if Arc::strong_count(arena) != group.len() || Arc::weak_count(arena) != 0 {
+                    continue;
+                }
+                nodes.clear();
+                nodes.extend(group.iter().map(|&(_, id)| self.arena.foreign_target(id).1));
+                if !arena.subtrees_disjoint(&mut nodes) {
+                    continue;
+                }
+                self.absorb_group(group);
+            }
+        }
+    }
+
+    /// Absorbs the arena every entry in `group` points into, which those
+    /// entries alone hold, and turns the entries into aliases. Leaves them
+    /// as they were if the arena does not fit.
+    fn absorb_group(&mut self, group: &[(usize, ForeignId)]) {
+        let mut handle = None;
+        for &(_, id) in group {
+            handle = self.arena.take_foreign(id);
+        }
+        let handle = handle.expect("the group is not empty");
+        let restore = |builder: &mut Self, handle: Arc<Arena>| {
+            for &(_, id) in group {
+                builder.arena.restore_foreign(id, Arc::clone(&handle));
+            }
+        };
+        let arena = match Arc::try_unwrap(handle) {
+            Ok(arena) => arena,
+            Err(handle) => return restore(self, handle),
+        };
+        if !self.arena.fits_absorb(&arena) {
+            return restore(self, Arc::new(arena));
+        }
+        let absorbed = self.arena.absorb(arena);
+        for &(_, id) in group {
+            self.arena.alias_foreign(id, absorbed.node_offset);
+        }
+    }
+
     /// Merges one source child into one target slot: descend when both sides
     /// are the same container shape, replace (by reference) otherwise.
     fn merge_slot(
@@ -844,13 +1193,16 @@ impl ValueBuilder {
     /// children become references into the source arena (path copying, one
     /// level at a time).
     fn localize_child(&mut self, child: Child) -> NodeId {
-        if let Some(id) = child.as_local() {
+        if let Some(id) = self.arena.local_node(child) {
             return id;
         }
-        let fref = self
+        let (src, node) = match self
             .arena
-            .foreign_ref(child.as_foreign().expect("child is foreign"));
-        let (src, node) = (Arc::clone(&fref.arena), fref.node);
+            .foreign_target(child.as_foreign().expect("child is foreign"))
+        {
+            (Some(arena), node) => (Arc::clone(arena), node),
+            (None, _) => unreachable!("local_node resolves absorbed entries"),
+        };
         let copied = match src.node(node) {
             Node::Null => Node::Null,
             Node::Bool(b) => Node::Bool(b),
@@ -945,7 +1297,7 @@ impl ValueBuilder {
     fn push_entry(&mut self, id: NodeId, entry: Entry) {
         let index = self.open_object(id);
         let Grown { run, len, .. } = self.object_overlays[index];
-        let run = self.arena.grow_entries(run, len);
+        let run = self.arena.grow_entries(run, len, 1, false);
         self.arena.entries_mut(run)[len] = entry;
         self.object_overlays[index].run = run;
         self.object_overlays[index].len = len + 1;
@@ -955,10 +1307,25 @@ impl ValueBuilder {
     fn push_child(&mut self, id: NodeId, child: Child) {
         let index = self.open_array(id);
         let Grown { run, len, .. } = self.array_overlays[index];
-        let run = self.arena.grow_children(run, len);
+        let run = self.arena.grow_children(run, len, 1, false);
         self.arena.children_mut(run)[len] = child;
         self.array_overlays[index].run = run;
         self.array_overlays[index].len = len + 1;
+    }
+
+    /// Makes room in the local object `id` for `extra` more members, exactly,
+    /// for a caller that knows how many it is about to append.
+    fn reserve_entries(&mut self, id: NodeId, extra: usize) {
+        let index = self.open_object(id);
+        let Grown { run, len, .. } = self.object_overlays[index];
+        self.object_overlays[index].run = self.arena.grow_entries(run, len, extra, true);
+    }
+
+    /// Makes room in the local array `id` for `extra` more elements, exactly.
+    fn reserve_children(&mut self, id: NodeId, extra: usize) {
+        let index = self.open_array(id);
+        let Grown { run, len, .. } = self.array_overlays[index];
+        self.array_overlays[index].run = self.arena.grow_children(run, len, extra, true);
     }
 
     /// Removes member `at` of the local object `id`, keeping the order of the
@@ -1215,6 +1582,28 @@ impl std::fmt::Debug for ValueBuilder {
     }
 }
 
+/// Decides what [`ValueBuilder::merge_from`] does where both documents hold
+/// a value and it does not descend: they are not both objects or both
+/// arrays.
+pub trait MergePolicy {
+    /// Whether `incoming` replaces `existing`. `key` is the member's key, or
+    /// `None` for an array element or the root.
+    fn replace(
+        &mut self,
+        key: Option<&str>,
+        existing: crate::BuilderRef<'_>,
+        incoming: crate::BuilderRef<'_>,
+    ) -> bool;
+}
+
+/// A container a merge reads from.
+enum MergeSource {
+    /// A node of the builder's own arena, absorbed or not.
+    Local(NodeId),
+    /// A node of another arena.
+    Foreign(Arc<Arena>, NodeId),
+}
+
 /// A container opened for growth: its run in the arena's slabs, of which the
 /// first `len` elements are written.
 #[derive(Clone, Copy)]
@@ -1226,4 +1615,122 @@ struct Grown {
 
 fn overlay_index(index: usize) -> u32 {
     u32::try_from(index).expect("overlay count within range")
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::{BuilderRef, JsonKind, json};
+
+    /// Execution-merge replacement rules: an incoming `null` and a container
+    /// meeting the other container kind keep what is there.
+    struct Execution;
+
+    impl MergePolicy for Execution {
+        fn replace(
+            &mut self,
+            _: Option<&str>,
+            existing: BuilderRef<'_>,
+            incoming: BuilderRef<'_>,
+        ) -> bool {
+            !matches!(
+                (existing.kind(), incoming.kind()),
+                (_, JsonKind::Null)
+                    | (JsonKind::Object, JsonKind::Array)
+                    | (JsonKind::Array, JsonKind::Object)
+            )
+        }
+    }
+
+    fn parse(json: &str) -> Value {
+        Value::parse(json.as_bytes().to_vec()).unwrap()
+    }
+
+    /// Places handles into `response` under `p0`, `p1`, ... the way a fetch
+    /// places entities.
+    fn place(response: &Value, paths: &[&[PathSegment<'_>]]) -> Value {
+        let mut builder = ValueBuilder::new();
+        for (i, path) in paths.iter().enumerate() {
+            let handle = response.get_path(path).unwrap();
+            builder.set(format!("p{i}").as_str(), handle).unwrap();
+        }
+        builder.seal()
+    }
+
+    fn merge(base: Value, other: Value) -> Value {
+        let mut builder = base.edit();
+        builder.merge_from(other, &mut Execution);
+        builder.seal()
+    }
+
+    #[test]
+    fn a_uniquely_held_source_and_the_response_it_places_are_absorbed() {
+        let response = parse(r#"{"items":[{"id":1},{"id":2}]}"#);
+        let placed = place(
+            &response,
+            &[
+                &[PathSegment::Key("items"), PathSegment::Index(0)],
+                &[PathSegment::Key("items"), PathSegment::Index(1)],
+            ],
+        );
+        drop(response);
+
+        let merged = merge(json!({}), placed);
+        assert_eq!(merged.arena.live_foreign(), 0);
+
+        // A later merge into a placed subtree edits it where it is.
+        let merged = merge(merged, parse(r#"{"p1":{"name":"two"}}"#));
+        assert_eq!(merged.arena.live_foreign(), 0);
+        assert_eq!(merged, json!({"p0":{"id":1},"p1":{"id":2,"name":"two"}}));
+    }
+
+    #[test]
+    fn overlapping_placements_keep_the_response_by_reference() {
+        let items: &[PathSegment<'_>] = &[PathSegment::Key("items")];
+        let item: &[PathSegment<'_>] = &[PathSegment::Key("items"), PathSegment::Index(0)];
+        // The same subtree twice, and a subtree inside another one. Absorbing
+        // the response would leave one node reached from two places, so an
+        // edit through `p1` would show through `p0`.
+        for (paths, p0) in [
+            ([item, item], json!({"id":1})),
+            ([items, item], json!([{"id":1}])),
+        ] {
+            let response = parse(r#"{"items":[{"id":1}]}"#);
+            let placed = place(&response, &paths);
+            drop(response);
+            let merged = merge(json!({}), placed);
+            assert_eq!(merged.arena.live_foreign(), 2);
+            let merged = merge(merged, parse(r#"{"p1":{"name":"one"}}"#));
+            assert_eq!(merged.get("p0").unwrap(), p0);
+            assert_eq!(merged.get("p1").unwrap(), json!({"id":1,"name":"one"}));
+        }
+    }
+
+    #[test]
+    fn a_shared_source_is_adopted_by_reference() {
+        let source = parse(r#"{"a":{"b":1}}"#);
+        let merged = merge(json!({}), source.clone());
+        assert_eq!(merged.arena.live_foreign(), 1, "only the adopted member");
+        let merged = merge(merged, parse(r#"{"a":{"c":2}}"#));
+        assert_eq!(merged, json!({"a":{"b":1,"c":2}}));
+        assert_eq!(source, json!({"a":{"b":1}}));
+    }
+
+    #[test]
+    fn absorbed_inputs_serialize_and_stream_from_their_own_buffers() {
+        let long = "x".repeat(300);
+        let first = parse(&format!(r#"{{"a":"{long}","esc":"q\"uote"}}"#));
+        let second = parse(&format!(r#"{{"b":"{long}","n":12.50}}"#));
+        let merged = merge(merge(json!({"base":true}), first), second);
+        let expected =
+            format!(r#"{{"base":true,"a":"{long}","esc":"q\"uote","b":"{long}","n":12.50}}"#);
+        assert_eq!(merged.to_string(), expected);
+        let streamed: Vec<u8> = merged
+            .clone()
+            .into_chunks(64)
+            .flat_map(|chunk| chunk.to_vec())
+            .collect();
+        assert_eq!(streamed, expected.as_bytes());
+        assert_eq!(merged.get("esc").unwrap().as_str().unwrap(), "q\"uote");
+    }
 }

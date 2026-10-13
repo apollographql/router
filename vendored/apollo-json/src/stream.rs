@@ -75,8 +75,7 @@ impl Chunks {
     /// accumulated first, to preserve output order), copied otherwise.
     fn emit_span(&mut self, arena: &Arena, span: Span) -> Option<Bytes> {
         if span.len as usize >= self.zero_copy_min() {
-            let start = span.start as usize;
-            let slice = arena.input_bytes().slice(start..start + span.len as usize);
+            let slice = arena.span_shared(span);
             match self.flush() {
                 Some(chunk) => {
                     self.queued = Some(slice);
@@ -85,7 +84,7 @@ impl Chunks {
                 None => Some(slice),
             }
         } else {
-            self.accum.extend_from_slice(span.slice(arena.input()));
+            self.accum.extend_from_slice(arena.span_bytes(span));
             None
         }
     }
@@ -186,7 +185,7 @@ impl Chunks {
                 self.accum.push(b'"');
                 match entry.key {
                     KeyRef::Span { span, .. } => {
-                        self.accum.extend_from_slice(span.slice(arena.input()));
+                        self.accum.extend_from_slice(arena.span_bytes(span));
                     }
                     KeyRef::Owned(text) => escape_into(arena.text(text), &mut self.accum),
                 }

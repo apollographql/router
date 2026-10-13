@@ -36,8 +36,13 @@ pub(crate) const DEFAULT_NODE_ESTIMATE: usize = 8;
 
 /// A reference to a node owned by another arena. Holding the `Arc` keeps the
 /// foreign arena (and everything it pins) alive.
+///
+/// `arena` is `None` once the arena the reference pointed into has been
+/// absorbed into this one ([`Arena::absorb`]): the entry then names a local
+/// node, so children that already carry its foreign id resolve here without
+/// being rewritten.
 pub(crate) struct ForeignRef {
-    pub(crate) arena: Arc<Arena>,
+    pub(crate) arena: Option<Arc<Arena>>,
     pub(crate) node: NodeId,
 }
 
@@ -46,6 +51,12 @@ pub(crate) struct Arena {
     /// `Bytes` (inside [`Utf8Bytes`]) so streaming serialization can yield
     /// untouched spans as zero-copy slices sharing this buffer.
     input: Utf8Bytes,
+    /// Inputs of arenas absorbed into this one, each with the offset its
+    /// spans were moved to. Spans address the inputs as one sequence: this
+    /// arena's own input first, then these in order.
+    absorbed_inputs: Vec<(u32, Utf8Bytes)>,
+    /// Where the next absorbed input starts in that sequence.
+    input_end: u32,
     chunks: Vec<Vec<Node>>,
     /// Total nodes across chunks, kept so pushes do not recompute it.
     node_count: u32,
@@ -61,6 +72,11 @@ pub(crate) struct Arena {
     /// view that retains more than it can reach (see
     /// `Value::is_self_contained`).
     root: NodeId,
+    /// Whether the nodes are exactly as the parser wrote them. The parser
+    /// writes a container after its members, so every subtree is the
+    /// contiguous id range ending at its root, which is what lets
+    /// [`Arena::subtrees_disjoint`] check references for overlap cheaply.
+    pristine: bool,
 }
 
 impl Arena {
@@ -73,6 +89,8 @@ impl Arena {
         let base_bytes = chunk.capacity() * mem::size_of::<Node>();
         Arena {
             input: Utf8Bytes::new(),
+            absorbed_inputs: Vec::new(),
+            input_end: 0,
             chunks: vec![chunk],
             node_count: 0,
             children: Slabs::new(),
@@ -81,6 +99,7 @@ impl Arena {
             foreign: Vec::new(),
             base_bytes,
             root: 0,
+            pristine: false,
         }
     }
 
@@ -95,20 +114,55 @@ impl Arena {
         self.root
     }
 
+    /// This arena's own input, without any absorbed one.
+    #[cfg(test)]
     pub(crate) fn input(&self) -> &[u8] {
         &self.input
+    }
+
+    /// Total length of the inputs spans address, absorbed ones included.
+    pub(crate) fn input_len(&self) -> usize {
+        self.input_end as usize
+    }
+
+    /// The input holding `span`, and the offset its spans start at.
+    fn segment(&self, span: Span) -> (&Utf8Bytes, usize) {
+        match self.absorbed_inputs.first() {
+            Some(&(first, _)) if span.start >= first => {
+                let at = self
+                    .absorbed_inputs
+                    .partition_point(|&(start, _)| start <= span.start)
+                    - 1;
+                let (start, ref input) = self.absorbed_inputs[at];
+                (input, start as usize)
+            }
+            _ => (&self.input, 0),
+        }
     }
 
     /// The `span` of the input as validated text. Spans are recorded at
     /// token boundaries (quotes and digits are ASCII), so they cannot split
     /// a multi-byte character.
     pub(crate) fn input_utf8(&self, span: Span) -> ValidatedUtf8<'_> {
-        self.input.utf8().slice(span.range())
+        let (input, offset) = self.segment(span);
+        let range = span.range();
+        input.utf8().slice(range.start - offset..range.end - offset)
     }
 
-    /// The input as a shareable buffer, for zero-copy chunk slices.
-    pub(crate) fn input_bytes(&self) -> &Bytes {
-        self.input.as_shared()
+    /// The bytes of `span`.
+    pub(crate) fn span_bytes(&self, span: Span) -> &[u8] {
+        let (input, offset) = self.segment(span);
+        let range = span.range();
+        &input[range.start - offset..range.end - offset]
+    }
+
+    /// The bytes of `span` as a zero-copy slice of the shared input buffer.
+    pub(crate) fn span_shared(&self, span: Span) -> Bytes {
+        let (input, offset) = self.segment(span);
+        let range = span.range();
+        input
+            .as_shared()
+            .slice(range.start - offset..range.end - offset)
     }
 
     /// Attaches the input bytes after parsing (the parser reads the buffer
@@ -116,7 +170,20 @@ impl Arena {
     pub(crate) fn set_input(&mut self, input: Utf8Bytes) {
         debug_assert!(self.input.is_empty(), "input attached twice");
         self.base_bytes += input.len();
+        self.input_end = u32::try_from(input.len()).expect("input length within the arena cap");
         self.input = input;
+    }
+
+    /// Records that the nodes are exactly as the parser wrote them; see
+    /// [`Arena::subtrees_disjoint`].
+    pub(crate) fn mark_pristine(&mut self) {
+        self.pristine = true;
+    }
+
+    /// Records that the nodes may no longer be in parser order, because a
+    /// builder has taken the arena over.
+    pub(crate) fn mark_edited(&mut self) {
+        self.pristine = false;
     }
 
     /// Approximate bytes retained by this arena.
@@ -129,6 +196,9 @@ impl Arena {
     /// keeps the chunk storage capacity for the next parse.
     pub(crate) fn reset(&mut self) {
         self.input = Utf8Bytes::new();
+        self.absorbed_inputs.clear();
+        self.input_end = 0;
+        self.pristine = false;
         for chunk in &mut self.chunks {
             chunk.clear();
         }
@@ -197,20 +267,32 @@ impl Arena {
         self.children.get_mut(slab)
     }
 
-    /// Makes room in a container's child run for one more element past its
-    /// first `used`; see [`Slabs::grow`].
-    pub(crate) fn grow_children(&mut self, run: SlabRef, used: usize) -> SlabRef {
-        self.children.grow(run, used, Child::local(0))
+    /// Makes room in a container's child run for `extra` more elements past
+    /// its first `used`; see [`Slabs::grow`].
+    pub(crate) fn grow_children(
+        &mut self,
+        run: SlabRef,
+        used: usize,
+        extra: usize,
+        exact: bool,
+    ) -> SlabRef {
+        self.children.grow(run, used, extra, exact, Child::local(0))
     }
 
-    /// Makes room in an object's entry run for one more member past its first
-    /// `used`; see [`Slabs::grow`].
-    pub(crate) fn grow_entries(&mut self, run: SlabRef, used: usize) -> SlabRef {
+    /// Makes room in an object's entry run for `extra` more members past its
+    /// first `used`; see [`Slabs::grow`].
+    pub(crate) fn grow_entries(
+        &mut self,
+        run: SlabRef,
+        used: usize,
+        extra: usize,
+        exact: bool,
+    ) -> SlabRef {
         let filler = Entry {
             key: KeyRef::Owned(SlabRef::EMPTY),
             child: Child::local(0),
         };
-        self.entries.grow(run, used, filler)
+        self.entries.grow(run, used, extra, exact, filler)
     }
 
     pub(crate) fn alloc_entries(&mut self, items: &[Entry]) -> SlabRef {
@@ -262,7 +344,7 @@ impl Arena {
             KeyRef::Span {
                 span,
                 escaped: false,
-            } => span.len as usize == other.len() && span.slice(&self.input) == other,
+            } => span.len as usize == other.len() && self.span_bytes(span) == other,
             KeyRef::Span {
                 span,
                 escaped: true,
@@ -281,7 +363,7 @@ impl Arena {
             KeyRef::Span {
                 span,
                 escaped: false,
-            } => span.len as usize == other.len() && span.slice(&self.input) == other.as_bytes(),
+            } => span.len as usize == other.len() && self.span_bytes(span) == other.as_bytes(),
             KeyRef::Span {
                 span,
                 escaped: true,
@@ -302,18 +384,37 @@ impl Arena {
             .filter(|&id| id < crate::node::CHILD_INDEX_LIMIT)
             .expect("foreign reference count exceeds the 2^31 foreign id space");
         self.base_bytes += mem::size_of::<ForeignRef>();
-        self.foreign.push(ForeignRef { arena, node });
+        self.foreign.push(ForeignRef {
+            arena: Some(arena),
+            node,
+        });
         Child::foreign(id)
     }
 
-    /// Whether this arena references nodes owned by other arenas (and
-    /// therefore pins them).
+    /// Whether this arena retains more than its own document: it references
+    /// nodes owned by other arenas (and therefore pins them), or it has
+    /// absorbed another arena, whose unreferenced nodes it keeps.
     pub(crate) fn has_foreign(&self) -> bool {
-        !self.foreign.is_empty()
+        !self.foreign.is_empty() || !self.absorbed_inputs.is_empty()
     }
 
-    pub(crate) fn foreign_ref(&self, id: ForeignId) -> &ForeignRef {
-        &self.foreign[id as usize]
+    /// The node a foreign child names: in another arena, or (for an entry
+    /// whose arena was absorbed) in this one, when the arena is `None`.
+    pub(crate) fn foreign_target(&self, id: ForeignId) -> (Option<&Arc<Arena>>, NodeId) {
+        let fref = &self.foreign[id as usize];
+        (fref.arena.as_ref(), fref.node)
+    }
+
+    /// The local node a child names, if it lives in this arena: a local
+    /// child, or a foreign one whose arena has been absorbed.
+    pub(crate) fn local_node(&self, child: Child) -> Option<NodeId> {
+        match child.as_local() {
+            Some(id) => Some(id),
+            None => match self.foreign_target(child.as_foreign().expect("child is foreign")) {
+                (None, node) => Some(node),
+                (Some(_), _) => None,
+            },
+        }
     }
 
     /// Resolves a child slot to the arena that owns the node, cloning the
@@ -321,9 +422,214 @@ impl Arena {
     pub(crate) fn resolve_owner(self: &Arc<Self>, child: Child) -> (Arc<Arena>, NodeId) {
         match child.as_local() {
             Some(id) => (Arc::clone(self), id),
-            None => {
-                let fref = self.foreign_ref(child.as_foreign().expect("child is foreign"));
-                (Arc::clone(&fref.arena), fref.node)
+            None => match self.foreign_target(child.as_foreign().expect("child is foreign")) {
+                (Some(arena), node) => (Arc::clone(arena), node),
+                (None, node) => (Arc::clone(self), node),
+            },
+        }
+    }
+
+    /// Whether the subtrees rooted at `nodes` share no node, judged from the
+    /// parser's layout: a parsed container follows its members, so a subtree
+    /// is the id range from its leftmost descendant up to its root. Arenas a
+    /// builder has edited lose that layout, so for them only a single
+    /// reference counts as disjoint. Sorts `nodes`.
+    pub(crate) fn subtrees_disjoint(&self, nodes: &mut [NodeId]) -> bool {
+        if nodes.len() <= 1 {
+            return true;
+        }
+        if !self.pristine {
+            return false;
+        }
+        nodes.sort_unstable();
+        nodes
+            .windows(2)
+            .all(|pair| pair[0] < self.leftmost_descendant(pair[1]))
+    }
+
+    /// The smallest id in the subtree rooted at `node`, in parser layout.
+    fn leftmost_descendant(&self, mut node: NodeId) -> NodeId {
+        loop {
+            let first = match self.node(node) {
+                Node::Array(slab) => self.children(slab).first().copied(),
+                Node::Object(slab) => self.entries(slab).first().map(|entry| entry.child),
+                _ => None,
+            };
+            match first.and_then(Child::as_local) {
+                Some(child) => node = child,
+                None => return node,
+            }
+        }
+    }
+
+    /// Whether [`Arena::absorb`] can take `other`: the combined arena has
+    /// to fit the id, input and chunk index ranges.
+    pub(crate) fn fits_absorb(&self, other: &Arena) -> bool {
+        let node_offset = self.chunks.len() * CHUNK_NODES;
+        let limit = crate::node::CHILD_INDEX_LIMIT as usize;
+        node_offset + (other.node_count as usize) < limit
+            && self.foreign.len() + other.foreign.len() < limit
+            && self.input_end as usize + other.input_end as usize <= u32::MAX as usize
+            && self.children.can_absorb(&other.children)
+            && self.entries.can_absorb(&other.entries)
+            && self.text.can_absorb(&other.text)
+    }
+
+    /// Moves `other`'s storage into this arena, so its nodes become local
+    /// ones. Node chunks, slab chunks and the input buffer move rather than
+    /// being copied; every id, slab reference and span in them is shifted by
+    /// where it landed. Returns the shifts to apply to ids that pointed into
+    /// `other`. The caller checks [`Arena::fits_absorb`] first.
+    pub(crate) fn absorb(&mut self, mut other: Arena) -> Absorbed {
+        debug_assert!(self.fits_absorb(&other));
+        let node_offset = self.chunks.len() * CHUNK_NODES;
+        let foreign_offset = self.foreign.len();
+        let shift = Shift {
+            node: node_offset as u32,
+            foreign: foreign_offset as u32,
+            input: self.input_end,
+            children: self.children.chunk_count(),
+            entries: self.entries.chunk_count(),
+            text: self.text.chunk_count(),
+        };
+
+        for chunk in &mut other.chunks {
+            for node in chunk.iter_mut() {
+                *node = shift.node_value(*node);
+            }
+        }
+        other
+            .children
+            .for_each_mut(|child| *child = shift.child(*child));
+        other
+            .entries
+            .for_each_mut(|entry| *entry = shift.entry(*entry));
+        for fref in &mut other.foreign {
+            if fref.arena.is_none() {
+                fref.node += shift.node;
+            }
+        }
+
+        self.node_count = shift.node + other.node_count;
+        self.chunks.append(&mut other.chunks);
+        self.children.absorb(&mut other.children);
+        self.entries.absorb(&mut other.entries);
+        self.text.absorb(&mut other.text);
+        self.foreign.append(&mut other.foreign);
+        let input = std::mem::replace(&mut other.input, Utf8Bytes::new());
+        if !input.is_empty() {
+            self.absorbed_inputs.push((self.input_end, input));
+        }
+        for (start, input) in other.absorbed_inputs.drain(..) {
+            self.absorbed_inputs.push((self.input_end + start, input));
+        }
+        self.input_end += other.input_end;
+        self.base_bytes += other.base_bytes;
+        self.pristine = false;
+        Absorbed {
+            node_offset: shift.node,
+        }
+    }
+
+    /// Takes the arena handle out of foreign entry `id`, leaving the entry
+    /// to be re-pointed with [`Arena::alias_foreign`] or restored with
+    /// [`Arena::restore_foreign`].
+    pub(crate) fn take_foreign(&mut self, id: ForeignId) -> Option<Arc<Arena>> {
+        self.foreign[id as usize].arena.take()
+    }
+
+    /// Puts an arena handle taken with [`Arena::take_foreign`] back.
+    pub(crate) fn restore_foreign(&mut self, id: ForeignId, arena: Arc<Arena>) {
+        self.foreign[id as usize].arena = Some(arena);
+    }
+
+    /// Re-points foreign entry `id`, whose arena handle was taken, at the
+    /// local node its node became when that arena was absorbed `offset` ids
+    /// along.
+    pub(crate) fn alias_foreign(&mut self, id: ForeignId, offset: NodeId) {
+        let fref = &mut self.foreign[id as usize];
+        debug_assert!(fref.arena.is_none(), "the arena handle was taken");
+        fref.node += offset;
+    }
+
+    /// Number of foreign entries that still point into another arena.
+    #[cfg(test)]
+    pub(crate) fn live_foreign(&self) -> usize {
+        self.foreign
+            .iter()
+            .filter(|fref| fref.arena.is_some())
+            .count()
+    }
+
+    /// Number of foreign entries, for walking those an absorption appended.
+    pub(crate) fn foreign_len(&self) -> usize {
+        self.foreign.len()
+    }
+}
+
+/// Where an absorbed arena's ids landed; see [`Arena::absorb`].
+#[derive(Clone, Copy)]
+pub(crate) struct Absorbed {
+    pub(crate) node_offset: NodeId,
+}
+
+/// How each kind of index moves when one arena is absorbed into another.
+#[derive(Clone, Copy)]
+struct Shift {
+    node: u32,
+    foreign: u32,
+    input: u32,
+    children: u16,
+    entries: u16,
+    text: u16,
+}
+
+impl Shift {
+    fn span(self, span: Span) -> Span {
+        Span {
+            start: span.start + self.input,
+            len: span.len,
+        }
+    }
+
+    fn child(self, child: Child) -> Child {
+        match child.as_local() {
+            Some(id) => Child::local(id + self.node),
+            None => Child::foreign(child.as_foreign().expect("child is foreign") + self.foreign),
+        }
+    }
+
+    fn key(self, key: KeyRef) -> KeyRef {
+        match key {
+            KeyRef::Span { span, escaped } => KeyRef::Span {
+                span: self.span(span),
+                escaped,
+            },
+            KeyRef::Owned(text) => KeyRef::Owned(text.shift_chunk(self.text)),
+        }
+    }
+
+    fn entry(self, entry: Entry) -> Entry {
+        Entry {
+            key: self.key(entry.key),
+            child: self.child(entry.child),
+        }
+    }
+
+    fn node_value(self, node: Node) -> Node {
+        match node {
+            Node::Null | Node::Bool(_) => node,
+            Node::Number(span) => Node::Number(self.span(span)),
+            Node::String { span, escaped } => Node::String {
+                span: self.span(span),
+                escaped,
+            },
+            Node::OwnedNumber(text) => Node::OwnedNumber(text.shift_chunk(self.text)),
+            Node::OwnedString(text) => Node::OwnedString(text.shift_chunk(self.text)),
+            Node::Array(slab) => Node::Array(slab.shift_chunk(self.children)),
+            Node::Object(slab) => Node::Object(slab.shift_chunk(self.entries)),
+            Node::MutArray(_) | Node::MutObject(_) => {
+                unreachable!("only sealed arenas are absorbed")
             }
         }
     }
@@ -336,6 +642,9 @@ impl Drop for Arena {
     fn drop(&mut self) {
         let mut pending = mem::take(&mut self.foreign);
         while let Some(ForeignRef { arena, .. }) = pending.pop() {
+            let Some(arena) = arena else {
+                continue;
+            };
             if let Ok(mut inner) = Arc::try_unwrap(arena) {
                 // Strip the doomed arena's own references before it drops so
                 // its `Drop` sees an empty table and does not recurse.
@@ -351,10 +660,10 @@ impl Drop for Arena {
 pub(crate) fn resolve_shared(arena: &Arc<Arena>, child: Child) -> (&Arc<Arena>, NodeId) {
     match child.as_local() {
         Some(id) => (arena, id),
-        None => {
-            let fref = arena.foreign_ref(child.as_foreign().expect("child is foreign"));
-            (&fref.arena, fref.node)
-        }
+        None => match arena.foreign_target(child.as_foreign().expect("child is foreign")) {
+            (Some(owner), node) => (owner, node),
+            (None, node) => (arena, node),
+        },
     }
 }
 
@@ -364,10 +673,10 @@ pub(crate) fn resolve_shared(arena: &Arc<Arena>, child: Child) -> (&Arc<Arena>, 
 pub(crate) fn resolve(arena: &Arena, child: Child) -> (&Arena, NodeId) {
     match child.as_local() {
         Some(id) => (arena, id),
-        None => {
-            let fref = arena.foreign_ref(child.as_foreign().expect("child is foreign"));
-            (&fref.arena, fref.node)
-        }
+        None => match arena.foreign_target(child.as_foreign().expect("child is foreign")) {
+            (Some(owner), node) => (owner, node),
+            (None, node) => (arena, node),
+        },
     }
 }
 

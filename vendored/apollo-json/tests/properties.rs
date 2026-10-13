@@ -9,7 +9,7 @@
 // stress, so this suite is native-only.
 #![cfg(not(miri))]
 
-use apollo_json::{NewValue, PathSegment, ValueBuilder};
+use apollo_json::{BuilderRef, JsonKind, MergePolicy, NewValue, PathSegment, ValueBuilder};
 use proptest::prelude::*;
 use serde_json::Value;
 
@@ -311,6 +311,75 @@ fn merge_reference(target: &mut Value, source: &Value) {
     }
 }
 
+/// Execution-merge semantics, as [`ExecutionPolicy`] configures
+/// `merge_from`: a slot the target lacks takes the source's value, `null`
+/// included; same-kind containers merge; an incoming `null` keeps what is
+/// there; an object meeting an array, either way, keeps the target's; any
+/// other pair takes the source's.
+fn execution_reference(target: &mut Value, source: &Value) {
+    match (target, source) {
+        (Value::Object(t), Value::Object(s)) => {
+            for (key, sv) in s {
+                match t.get_mut(key) {
+                    Some(tv) => execution_reference(tv, sv),
+                    None => {
+                        t.insert(key.clone(), sv.clone());
+                    }
+                }
+            }
+        }
+        (Value::Array(t), Value::Array(s)) => {
+            for (i, sv) in s.iter().enumerate() {
+                if i < t.len() {
+                    execution_reference(&mut t[i], sv);
+                } else {
+                    t.push(sv.clone());
+                }
+            }
+        }
+        (_, Value::Null) => {}
+        (Value::Object(_), Value::Array(_)) | (Value::Array(_), Value::Object(_)) => {}
+        (t, s) => *t = s.clone(),
+    }
+}
+
+/// The policy [`execution_reference`] models.
+struct ExecutionPolicy;
+
+impl MergePolicy for ExecutionPolicy {
+    fn replace(
+        &mut self,
+        _: Option<&str>,
+        existing: BuilderRef<'_>,
+        incoming: BuilderRef<'_>,
+    ) -> bool {
+        !matches!(
+            (existing.kind(), incoming.kind()),
+            (_, JsonKind::Null)
+                | (JsonKind::Object, JsonKind::Array)
+                | (JsonKind::Array, JsonKind::Object)
+        )
+    }
+}
+
+/// Builds a document the way a fetch places entities: an object whose
+/// members are handles into `source`, adopted by reference, at the paths
+/// `picks` selects (repeats allowed, so one subtree can be placed twice).
+fn place(source: &apollo_json::Value, model: &Value, picks: &[u16]) -> (apollo_json::Value, Value) {
+    let paths = all_paths(model);
+    let mut builder = ValueBuilder::new();
+    let mut placed_model = serde_json::Map::new();
+    for (i, pick) in picks.iter().enumerate() {
+        let path = &paths[*pick as usize % paths.len()];
+        let key = format!("p{i}");
+        builder
+            .set(key.as_str(), handle_at(source, path))
+            .expect("root is an object");
+        placed_model.insert(key, value_at(model, path).clone());
+    }
+    (builder.seal(), Value::Object(placed_model))
+}
+
 // --- properties -----------------------------------------------------------
 
 proptest! {
@@ -459,6 +528,73 @@ proptest! {
         prop_assert_eq!(&semantic(&merged.to_vec()), &expected);
         prop_assert_eq!(target.to_vec(), target_bytes);
         prop_assert_eq!(source.to_vec(), source_bytes);
+    }
+
+    /// `merge_from` agrees with the execution-merge model whether the source
+    /// is absorbed (its handle is the last) or adopted by reference (another
+    /// handle is held), and a held source never observes the merge.
+    #[test]
+    fn merge_from_agrees_with_execution_model(
+        target_model in arb_value(),
+        source_model in arb_value(),
+        hold_source in any::<bool>(),
+    ) {
+        let target = parse_model(&target_model);
+        let source = parse_model(&source_model);
+        let source_bytes = source.to_vec();
+        let held = hold_source.then(|| source.clone());
+
+        let mut expected = target_model.clone();
+        execution_reference(&mut expected, &source_model);
+
+        let mut builder = target.edit();
+        builder.merge_from(source, &mut ExecutionPolicy);
+        let merged = builder.seal();
+
+        prop_assert_eq!(&semantic(&merged.to_vec()), &expected);
+        if let Some(held) = held {
+            prop_assert_eq!(held.to_vec(), source_bytes);
+        }
+    }
+
+    /// Merges chain the way execution's do: later sources merge into
+    /// subtrees an earlier merge took from another document, which places
+    /// handles into a parsed response, possibly the same subtree at two
+    /// paths. Each placed copy must stay independent of the others, as the
+    /// expanded model's copies are, whether or not the response is absorbed.
+    #[test]
+    fn chained_merges_keep_placed_copies_independent(
+        response_model in arb_value(),
+        picks in prop::collection::vec(any::<u16>(), 1..4),
+        later_models in prop::collection::vec(arb_container(), 1..3),
+        hold_response in any::<bool>(),
+    ) {
+        let response = parse_model(&response_model);
+        let response_bytes = response.to_vec();
+        let held = hold_response.then(|| response.clone());
+        let (placed, placed_model) = place(&response, &response_model, &picks);
+        drop(response);
+
+        let mut expected = Value::Object(serde_json::Map::new());
+        execution_reference(&mut expected, &placed_model);
+        let mut merged = ValueBuilder::new().seal();
+        let mut builder = merged.edit();
+        builder.merge_from(placed, &mut ExecutionPolicy);
+        merged = builder.seal();
+
+        // Each later document merges into one placed copy only.
+        for (i, later_model) in later_models.iter().enumerate() {
+            let key = format!("p{}", i % picks.len());
+            let wrapped = serde_json::json!({ key: later_model });
+            execution_reference(&mut expected, &wrapped);
+            let mut builder = merged.edit();
+            builder.merge_from(parse_model(&wrapped), &mut ExecutionPolicy);
+            merged = builder.seal();
+            prop_assert_eq!(&semantic(&merged.to_vec()), &expected);
+        }
+        if let Some(held) = held {
+            prop_assert_eq!(held.to_vec(), response_bytes);
+        }
     }
 
     /// The retention boundary: `into_self_contained` and `detach` preserve

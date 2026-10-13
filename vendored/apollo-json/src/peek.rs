@@ -51,6 +51,17 @@ impl<'b> BuilderRef<'b> {
         }
     }
 
+    /// Views `node` of an arena the builder does not own, such as the source
+    /// of a merge it adopts by reference.
+    pub(crate) fn in_arena(builder: &'b ValueBuilder, arena: &'b Arena, node: NodeId) -> Self {
+        BuilderRef {
+            builder,
+            arena,
+            node,
+            local: false,
+        }
+    }
+
     fn node(&self) -> Node {
         self.arena.node(self.node)
     }

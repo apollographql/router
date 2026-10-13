@@ -195,6 +195,22 @@ impl Utf8Slabs {
     pub(crate) fn reset(&mut self) {
         self.0.reset();
     }
+
+    /// See [`Slabs::chunk_count`].
+    pub(crate) fn chunk_count(&self) -> u16 {
+        self.0.chunk_count()
+    }
+
+    /// See [`Slabs::can_absorb`].
+    pub(crate) fn can_absorb(&self, other: &Utf8Slabs) -> bool {
+        self.0.can_absorb(&other.0)
+    }
+
+    /// See [`Slabs::absorb`]. Text needs no rewriting, so the chunks move as
+    /// they are.
+    pub(crate) fn absorb(&mut self, other: &mut Utf8Slabs) {
+        self.0.absorb(&mut other.0);
+    }
 }
 
 #[cfg(test)]

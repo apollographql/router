@@ -7,7 +7,8 @@
 #
 # This copy carries local changes that must land upstream before the next
 # re-vendor: the apollo-errors 0.8.1 bump, the member-scan cursor in
-# document.rs, and in-arena container growth.
+# document.rs, in-arena container growth, and merge_from absorbing a uniquely
+# held source.
 #
 # apollo-errors must be the same version the router links through
 # apollo-configuration and apollo-qos. Each version declares its own linkme

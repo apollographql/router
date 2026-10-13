@@ -34,6 +34,18 @@ impl SlabRef {
         self.len as usize
     }
 
+    /// This run after the store it lives in was appended to another one
+    /// whose chunks come first; see [`Slabs::absorb`].
+    pub(crate) fn shift_chunk(self, by: u16) -> SlabRef {
+        if self.len == 0 {
+            return SlabRef::EMPTY;
+        }
+        SlabRef {
+            chunk: self.chunk + by,
+            ..self
+        }
+    }
+
     /// The first `len` elements of this run.
     pub(crate) fn prefix(self, len: usize) -> SlabRef {
         debug_assert!(len <= self.len as usize, "prefix within the run");
@@ -50,8 +62,8 @@ impl SlabRef {
 pub(crate) struct Slabs<T> {
     chunks: Vec<Vec<T>>,
     /// The chunk currently being filled. Chunks after it are cleared
-    /// leftovers from a recycled store, reused before anything new is
-    /// allocated.
+    /// leftovers from a recycled store, or chunks absorbed from another
+    /// store, and are filled before anything new is allocated.
     current: usize,
     /// Elements per full chunk.
     chunk_elems: usize,
@@ -122,32 +134,47 @@ impl<T: Copy> Slabs<T> {
         &mut self.chunks[slab.chunk as usize][start..start + slab.len as usize]
     }
 
-    /// Makes room in `run` for at least one element past its first `used`,
-    /// returning the run to write into; elements past `used` are `filler`
-    /// until written.
+    /// Makes room in `run` for at least `extra` elements past its first
+    /// `used`, returning the run to write into; elements past `used` are
+    /// `filler` until written.
     ///
     /// A run that ends the chunk being filled grows where it is. Any other
-    /// run moves to the end of storage with room to double, so a container
-    /// growing one element at a time is copied O(log n) times, and the run it
-    /// leaves behind is dead space in the chunk, like any replaced slot.
-    pub(crate) fn grow(&mut self, run: SlabRef, used: usize, filler: T) -> SlabRef {
+    /// run moves to the end of storage. With `exact` it gets exactly the room
+    /// asked for, for a caller that knows how much it will write; otherwise
+    /// it gets room to double, so a container growing one element at a time
+    /// is copied O(log n) times. The run left behind is dead space in its
+    /// chunk, like any replaced slot.
+    pub(crate) fn grow(
+        &mut self,
+        run: SlabRef,
+        used: usize,
+        extra: usize,
+        exact: bool,
+        filler: T,
+    ) -> SlabRef {
         debug_assert!(used <= run.len(), "the used prefix lies within the run");
-        if used < run.len() {
+        let needed = used + extra;
+        if needed <= run.len() {
             return run;
         }
         if used > 0 && run.chunk as usize == self.current {
             let chunk = &mut self.chunks[self.current];
             let end = run.start as usize + used;
-            if end == chunk.len() && end < chunk.capacity() {
-                let extra = used.max(4).min(chunk.capacity() - end);
-                chunk.resize(end + extra, filler);
+            if end == chunk.len() && chunk.capacity() - end >= extra {
+                let room = if exact { extra } else { extra.max(used.max(4)) };
+                let room = room.min(chunk.capacity() - end);
+                chunk.resize(end + room, filler);
                 return SlabRef {
-                    len: u32::try_from(used + extra).expect("slab length within the arena cap"),
+                    len: u32::try_from(used + room).expect("slab length within the arena cap"),
                     ..run
                 };
             }
         }
-        let capacity = (used * 2).max(used + 4);
+        let capacity = if exact {
+            needed
+        } else {
+            (used * 2).max(used + 4).max(needed)
+        };
         if !self.fits_in_current(capacity) {
             self.provision(capacity);
         }
@@ -177,6 +204,34 @@ impl<T: Copy> Slabs<T> {
         }
     }
 
+    /// Number of chunks, which is what a store absorbed into this one shifts
+    /// its runs by.
+    pub(crate) fn chunk_count(&self) -> u16 {
+        u16::try_from(self.chunks.len()).expect("chunk count within the arena cap")
+    }
+
+    /// Whether `other`'s chunks can follow this store's within the chunk
+    /// index range.
+    pub(crate) fn can_absorb(&self, other: &Slabs<T>) -> bool {
+        self.chunks.len() + other.chunks.len() <= usize::from(u16::MAX)
+    }
+
+    /// Applies `f` to every stored element, live or not.
+    pub(crate) fn for_each_mut(&mut self, mut f: impl FnMut(&mut T)) {
+        for chunk in &mut self.chunks {
+            chunk.iter_mut().for_each(&mut f);
+        }
+    }
+
+    /// Moves `other`'s chunks after this store's; its runs move by
+    /// [`Slabs::chunk_count`] as it was before the call. The moved chunks
+    /// are filled after the current one, as recycled ones are.
+    pub(crate) fn absorb(&mut self, other: &mut Slabs<T>) {
+        self.bytes += other.bytes;
+        other.bytes = 0;
+        self.chunks.append(&mut other.chunks);
+    }
+
     fn fits_in_current(&self, need: usize) -> bool {
         self.chunks
             .get(self.current)
@@ -197,9 +252,10 @@ impl<T: Copy> Slabs<T> {
                 return;
             }
         }
-        // Reuse the next cleared leftover chunk that can hold the run.
+        // Reuse the next later chunk with room for the run.
         for next in self.current + 1..self.chunks.len() {
-            if need <= self.chunks[next].capacity() {
+            let chunk = &self.chunks[next];
+            if chunk.len() + need <= chunk.capacity() {
                 self.current = next;
                 return;
             }
@@ -240,7 +296,7 @@ mod tests {
     /// Appends one element to the used prefix of `run`, the way a builder
     /// grows an open container.
     fn push(slabs: &mut Slabs<u32>, run: SlabRef, used: usize, value: u32) -> SlabRef {
-        let run = slabs.grow(run, used, u32::MAX);
+        let run = slabs.grow(run, used, 1, false, u32::MAX);
         slabs.get_mut(run)[used] = value;
         run
     }

@@ -142,6 +142,7 @@ pub(crate) fn parse_prefix(
         });
     }
     arena.set_input(Utf8Bytes::copy_of(input.slice(..consumed)));
+    arena.mark_pristine();
     Ok((Parsed { arena, root }, consumed))
 }
 
@@ -187,6 +188,7 @@ pub(crate) fn parse_with(
     let root = root?.as_local().expect("parse only creates local nodes");
     let mut arena = parser.arena;
     arena.set_input(input);
+    arena.mark_pristine();
     Ok(Parsed { arena, root })
 }
 

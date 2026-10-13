@@ -82,12 +82,13 @@ impl Sink {
             Some(id) => Value::rooted(self.arena, id),
             // The root itself was adopted: the output is the adopted value.
             None => {
-                let fref = self
-                    .arena
-                    .foreign_ref(root.as_foreign().expect("root is foreign"));
-                Value {
-                    arena: Arc::clone(&fref.arena),
-                    node: fref.node,
+                let id = root.as_foreign().expect("root is foreign");
+                match self.arena.foreign_target(id) {
+                    (Some(arena), node) => Value {
+                        arena: Arc::clone(arena),
+                        node,
+                    },
+                    (None, node) => Value::rooted(self.arena, node),
                 }
             }
         }

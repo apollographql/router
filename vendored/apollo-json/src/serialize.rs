@@ -26,11 +26,11 @@ pub(crate) fn serialize(root: ValueRef<'_>, capacity_hint: usize) -> Vec<u8> {
                 Node::Null => out.extend_from_slice(b"null"),
                 Node::Bool(true) => out.extend_from_slice(b"true"),
                 Node::Bool(false) => out.extend_from_slice(b"false"),
-                Node::Number(span) => out.extend_from_slice(span.slice(value.arena.input())),
+                Node::Number(span) => out.extend_from_slice(value.arena.span_bytes(span)),
                 Node::OwnedNumber(text) => out.extend_from_slice(value.arena.text(text)),
                 Node::String { span, .. } => {
                     out.push(b'"');
-                    out.extend_from_slice(span.slice(value.arena.input()));
+                    out.extend_from_slice(value.arena.span_bytes(span));
                     out.push(b'"');
                 }
                 Node::OwnedString(text) => {
@@ -95,7 +95,7 @@ pub(crate) fn serialize(root: ValueRef<'_>, capacity_hint: usize) -> Vec<u8> {
                 out.push(b'"');
                 match entry.key {
                     KeyRef::Span { span, .. } => {
-                        out.extend_from_slice(span.slice(value.arena.input()));
+                        out.extend_from_slice(value.arena.span_bytes(span));
                     }
                     KeyRef::Owned(text) => escape_into(value.arena.text(text), &mut out),
                 }

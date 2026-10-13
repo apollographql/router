@@ -150,11 +150,11 @@ pub(crate) trait ValueExt {
 
 impl ValueExt for Value {
     fn deep_merge(&mut self, other: Self) {
-        merge_in_place(self, &other, None);
+        merge_in_place(self, other, None);
     }
 
     fn type_aware_deep_merge(&mut self, other: Self, schema: &Schema) {
-        merge_in_place(self, &other, Some(schema));
+        merge_in_place(self, other, Some(schema));
     }
 
     #[cfg(test)]
@@ -611,121 +611,72 @@ fn empty_container(shape: Shape) -> NewValue<'static> {
 
 /// Deep-merges `other` into `base` in place.
 ///
-/// One builder spans the whole walk: `base` is moved into it, so a base nothing
-/// else holds is edited in its own arena rather than copied on write, each
-/// container is descended into rather than rebuilt, and a subtree taken from
-/// `other` is written as
-/// [`NewValue::Node`], which the arena stores as a reference. Rebuilding each
-/// container instead — the shape a pure walk over sealed values takes — costs
-/// an arena and a copy of every key per object node on the path.
+/// `base` is moved into a builder, so a base nothing else holds is edited in
+/// its own arena rather than copied on write, and `other` is handed to
+/// [`ValueBuilder::merge_from`] by value: when nothing else holds it either,
+/// its storage moves into the base's arena, so a later merge into what it
+/// brought is in place too.
 ///
 /// Object keys union, keeping `base`'s order and appending keys only `other`
-/// has; array elements merge index-wise with extras appended; a `null` in
-/// `other` leaves `base` alone; a container meeting the other container kind
-/// keeps `base`.
-fn merge_in_place(base: &mut Value, other: &Value, schema: Option<&Schema>) {
+/// has; array elements merge index-wise with extras appended; a member or
+/// element `base` lacks takes `other`'s value, `null` included; elsewhere a
+/// `null` in `other` leaves `base` alone and a container meeting the other
+/// container kind keeps `base`.
+fn merge_in_place(base: &mut Value, other: Value, schema: Option<&Schema>) {
     match (base.kind(), other.kind()) {
         (JsonKind::Object, JsonKind::Object) | (JsonKind::Array, JsonKind::Array) => {}
-        (_, JsonKind::Null) => return,
-        (JsonKind::Object, JsonKind::Array) => {
-            // XXX(@goto-bus-stop): this should be fallible..?
-            tracing::debug!("trying to replace an object with an array");
-            return;
-        }
-        (JsonKind::Array, JsonKind::Object) => {
-            // XXX(@goto-bus-stop): this should be fallible..?
-            tracing::debug!("trying to replace an array with an object");
-            return;
-        }
-        // Scalars, and any container meeting a scalar, take the incoming value
-        // whole -- adopted by reference, not copied.
-        _ => {
-            *base = other.clone();
+        // Anything else takes the incoming value whole, unless the kinds alone
+        // say to keep what is there.
+        (existing, incoming) => {
+            if ExecutionMerge::replaces(existing, incoming) {
+                *base = other;
+            }
             return;
         }
     }
 
     let mut builder = std::mem::take(base).edit();
-    merge_into_cursor(&mut builder.root_mut(), other, schema);
+    builder.merge_from(other, &mut ExecutionMerge { schema });
     *base = builder.seal();
 }
 
-/// Merges `other` into the container the cursor addresses. Both sides are the
-/// same container kind; the caller has already settled that.
-fn merge_into_cursor(cursor: &mut ValueMut<'_>, other: &Value, schema: Option<&Schema>) {
-    match other.kind() {
-        JsonKind::Object => {
-            for (key, incoming) in other.object_iter() {
-                merge_one(cursor, MergeSlot::Key(&key), &incoming, schema);
-            }
-        }
-        JsonKind::Array => {
-            for (index, incoming) in other.array_iter().enumerate() {
-                merge_one(cursor, MergeSlot::Index(index), &incoming, schema);
-            }
-        }
-        _ => unreachable!("caller settled that both sides are containers"),
-    }
+/// What execution's merge does where both responses hold a value and it does
+/// not descend.
+struct ExecutionMerge<'a> {
+    schema: Option<&'a Schema>,
 }
 
-/// One slot of the container a cursor addresses.
-#[derive(Clone, Copy)]
-enum MergeSlot<'a> {
-    Key(&'a str),
-    Index(usize),
-}
-
-impl<'a> From<MergeSlot<'a>> for apollo_json::PathSegment<'a> {
-    fn from(slot: MergeSlot<'a>) -> Self {
-        match slot {
-            MergeSlot::Key(key) => apollo_json::PathSegment::Key(key),
-            MergeSlot::Index(index) => apollo_json::PathSegment::Index(index),
+impl ExecutionMerge<'_> {
+    /// The replacement rules that depend only on the two kinds: a `null` in
+    /// `other` never overwrites what `base` already holds, and a container
+    /// meeting the other container kind keeps `base`'s.
+    fn replaces(existing: JsonKind, incoming: JsonKind) -> bool {
+        match (existing, incoming) {
+            (_, JsonKind::Null) => false,
+            (JsonKind::Object, JsonKind::Array) => {
+                // XXX(@goto-bus-stop): this should be fallible..?
+                tracing::debug!("trying to replace an object with an array");
+                false
+            }
+            (JsonKind::Array, JsonKind::Object) => {
+                // XXX(@goto-bus-stop): this should be fallible..?
+                tracing::debug!("trying to replace an array with an object");
+                false
+            }
+            _ => true,
         }
     }
 }
 
-/// Merges one incoming value into one slot: descend when both sides are the
-/// same container kind, otherwise write the incoming value by reference.
-fn merge_one(
-    cursor: &mut ValueMut<'_>,
-    slot: MergeSlot<'_>,
-    incoming: &Value,
-    schema: Option<&Schema>,
-) {
-    let existing = match slot {
-        MergeSlot::Key(key) => cursor.value().get(key).map(|value| value.kind()),
-        MergeSlot::Index(index) => cursor.value().index(index).map(|value| value.kind()),
-    };
-    match (existing, incoming.kind()) {
-        // An absent slot takes the incoming value whatever its shape,
-        // including a null: a subgraph reporting a field as null still has to
-        // land, because value completion reads it back to decide whether the
-        // field or its parent is the one nullified. This arm therefore comes
-        // before the null case, which only protects a value already present.
-        (None, _) => {
-            let _ = cursor.set(slot, NewValue::Node(incoming.clone()));
-        }
-        // A null in `other` never overwrites what `base` already holds.
-        (_, JsonKind::Null) => {}
-        (Some(JsonKind::Object), JsonKind::Object) | (Some(JsonKind::Array), JsonKind::Array) => {
-            if let Ok(mut child) = cursor.child_mut(slot) {
-                merge_into_cursor(&mut child, incoming, schema);
-            }
-        }
-        (Some(JsonKind::Object), JsonKind::Array) => {
-            // XXX(@goto-bus-stop): this should be fallible..?
-            tracing::debug!("trying to replace an object with an array");
-        }
-        (Some(JsonKind::Array), JsonKind::Object) => {
-            // XXX(@goto-bus-stop): this should be fallible..?
-            tracing::debug!("trying to replace an array with an object");
-        }
-        (Some(_), _) => {
-            if keeps_more_specific_typename(cursor, slot, incoming, schema) {
-                return;
-            }
-            let _ = cursor.set(slot, NewValue::Node(incoming.clone()));
-        }
+impl apollo_json::MergePolicy for ExecutionMerge<'_> {
+    fn replace(
+        &mut self,
+        key: Option<&str>,
+        existing: apollo_json::BuilderRef<'_>,
+        incoming: apollo_json::BuilderRef<'_>,
+    ) -> bool {
+        Self::replaces(existing.kind(), incoming.kind())
+            && !keeps_more_specific_typename(key, existing, incoming, self.schema)
     }
 }
 
@@ -733,24 +684,18 @@ fn merge_one(
 /// one, in which case the incoming value is the less specific of the two and
 /// the response keeps what it has.
 fn keeps_more_specific_typename(
-    cursor: &ValueMut<'_>,
-    slot: MergeSlot<'_>,
-    incoming: &Value,
+    key: Option<&str>,
+    existing: apollo_json::BuilderRef<'_>,
+    incoming: apollo_json::BuilderRef<'_>,
     schema: Option<&Schema>,
 ) -> bool {
-    let MergeSlot::Key(TYPENAME) = slot else {
+    if key != Some(TYPENAME) {
         return false;
-    };
+    }
     let Some(schema) = schema else {
         return false;
     };
-    let (Some(existing), Some(incoming)) = (
-        cursor
-            .value()
-            .get(TYPENAME)
-            .and_then(|value| value.as_str().map(|text| text.into_owned())),
-        incoming.as_str_owned(),
-    ) else {
+    let (Some(existing), Some(incoming)) = (existing.as_str(), incoming.as_str()) else {
         return false;
     };
     schema.is_subtype(&incoming, &existing)
