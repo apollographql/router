@@ -12,7 +12,7 @@ executors:
   amd_linux_build: &amd_linux_build_executor
     docker:
       - image: ghcr.io/apollographql/ci-utility-docker-images/apollo-rust-builder:0.30.12
-    resource_class: xlarge
+    resource_class: xlarge.gen2
     environment:
       CARGO_BUILD_JOBS: 4
       MISE_ENV: ci
@@ -42,7 +42,7 @@ executors:
         command: [ "redis-server", "--protected-mode", "no", "--port", "7005", "--cluster-enabled", "yes" ]
       - image: cimg/redis:7.4.11
         command: [ "sh", "-c", "sleep 30; echo yes | redis-cli --cluster create --cluster-replicas 1 localhost:7000 localhost:7001 localhost:7002 localhost:7003 localhost:7004 localhost:7005" ]
-    resource_class: 2xlarge
+    resource_class: 2xlarge.gen2
     environment:
       MISE_ENV: ci
       CARGO_BUILD_JOBS: 4
@@ -60,6 +60,12 @@ executors:
     environment:
       MISE_ENV: ci
       CARGO_BUILD_JOBS: 4
+      # NOTE(fnichol): With full debuginfo each `apollo-router` test binary is
+      # ~4GB and needs ~11GiB to link with GNU ld, so concurrent links exceed
+      # this executor's 32GiB and get OOM-killed. Line tables keep file:line in
+      # backtraces while cutting link memory to ~3.7GiB.
+      CARGO_PROFILE_DEV_DEBUG: line-tables-only
+      CARGO_PROFILE_TEST_DEBUG: line-tables-only
   macos_build: &macos_build_executor
     macos:
       # See https://circleci.com/docs/xcode-policy along with the support matrix
@@ -130,7 +136,7 @@ common_job_environment: &common_job_environment
   CARGO_NET_GIT_FETCH_WITH_CLI: "true"
   RUST_BACKTRACE: full
   CARGO_INCREMENTAL: 0
-  MISE_VERSION: v2025.9.12
+  MISE_VERSION: v2026.9.18
 commands:
   setup_environment:
     parameters:
@@ -531,6 +537,21 @@ jobs:
       - setup_environment:
           platform: << parameters.platform >>
       - xtask_test
+      # Native plugin builds may set `--cfg tracing_unstable`, which compiles code paths (such as
+      # structured `valuable` log fields) that the default build excludes. Exercise them nightly on
+      # one platform, since changing RUSTFLAGS forces a full rebuild.
+      - when:
+          condition:
+            and:
+              - equal: [true, << parameters.nightly >>]
+              - equal: [*amd_linux_test_executor, << parameters.platform >>]
+          steps:
+            - run:
+                name: Run tracing_unstable telemetry tests
+                environment:
+                  RUSTFLAGS: "--cfg tracing_unstable"
+                command: |
+                  cargo test --locked -p apollo-router --lib plugins::telemetry::fmt_layer
       # Temporarily disable cargo-fuzz https://github.com/apollographql/router/pull/7488
       # - when:
       #     condition:
@@ -881,7 +902,7 @@ jobs:
   publish_github_release:
     docker:
       - image: ghcr.io/apollographql/ci-utility-docker-images/apollo-rust-builder:0.30.12
-    resource_class: small
+    resource_class: xlarge
     environment:
       <<: *common_job_environment
       VERSION: << pipeline.git.tag >>

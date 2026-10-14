@@ -1,11 +1,8 @@
-use std::fmt::Debug;
 use std::ops::ControlFlow;
 use std::sync::Arc;
 
 use futures::future;
 use futures::stream;
-use schemars::JsonSchema;
-use serde::Deserialize;
 use tower::BoxError;
 use tower::ServiceBuilder;
 use tower_service::Service;
@@ -20,12 +17,14 @@ use crate::services::execution;
 use crate::services::header_masking::MaskingRulesMap;
 
 /// What information is passed to a router request/response stage
-#[derive(Clone, Debug, Default, Deserialize, PartialEq, JsonSchema)]
-#[serde(default, deny_unknown_fields)]
+#[apollo_configuration::configuration]
+#[derive(PartialEq)]
 pub(super) struct ExecutionRequestConf {
     /// Send the headers
     pub(super) headers: bool,
     /// Send the context
+    // ContextConf's Selective tuple variant holds a HashSet, which has no Validate impl.
+    #[config(skip_validate)]
     pub(super) context: ContextConf,
     /// Send the body
     pub(super) body: bool,
@@ -40,12 +39,14 @@ pub(super) struct ExecutionRequestConf {
 }
 
 /// What information is passed to a router request/response stage
-#[derive(Clone, Debug, Default, Deserialize, PartialEq, JsonSchema)]
-#[serde(default, deny_unknown_fields)]
+#[apollo_configuration::configuration]
+#[derive(PartialEq)]
 pub(super) struct ExecutionResponseConf {
     /// Send the headers
     pub(super) headers: bool,
     /// Send the context
+    // ContextConf's Selective tuple variant holds a HashSet, which has no Validate impl.
+    #[config(skip_validate)]
     pub(super) context: ContextConf,
     /// Send the body (can be true/false or selective with data/errors/extensions)
     pub(super) body: BodyConf,
@@ -57,8 +58,8 @@ pub(super) struct ExecutionResponseConf {
     pub(super) url: Option<String>,
 }
 
-#[derive(Clone, Debug, Default, Deserialize, PartialEq, JsonSchema)]
-#[serde(default)]
+#[apollo_configuration::configuration]
+#[derive(PartialEq)]
 pub(super) struct ExecutionStage {
     /// The request configuration
     pub(super) request: ExecutionRequestConf,

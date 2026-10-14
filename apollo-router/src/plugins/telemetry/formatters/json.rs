@@ -269,17 +269,36 @@ where
 /// By collecting first we can drop the empty-string `message` when a real one is present.
 struct EventFieldCollector {
     fields: Vec<(String, serde_json::Value)>,
+    /// Why a field fell back to its Debug string, keyed by field name. Written as the single
+    /// [`SERIALIZATION_ERRORS_KEY`] entry after the event's own fields.
+    serialization_errors: serde_json::Map<String, serde_json::Value>,
 }
+
+/// Top-level key for [`EventFieldCollector::serialization_errors`]. A fixed key, rather than one
+/// per failing field, keeps log-backend index mappings stable.
+const SERIALIZATION_ERRORS_KEY: &str = "serialization_errors";
 
 impl EventFieldCollector {
     fn new() -> Self {
-        Self { fields: Vec::new() }
+        Self {
+            fields: Vec::new(),
+            serialization_errors: serde_json::Map::new(),
+        }
     }
 
+    /// Writes the buffered fields, then any serialization errors.
+    ///
+    /// If the event has its own `serialization_errors` field, that field is written and the
+    /// collected errors are left out, so the line never has a duplicate key and never loses
+    /// the plugin's data. The fallen-back fields still carry their Debug strings.
     fn serialize_into<M: SerializeMap>(self, map: &mut M) -> Result<(), M::Error> {
         let has_real_message = self.fields.iter().any(|(k, v)| {
             k == "message" && !matches!(v, serde_json::Value::String(s) if s.is_empty())
         });
+        let has_own_serialization_errors = self
+            .fields
+            .iter()
+            .any(|(k, _)| k == SERIALIZATION_ERRORS_KEY);
         for (key, value) in self.fields {
             if key == "message"
                 && has_real_message
@@ -289,43 +308,76 @@ impl EventFieldCollector {
             }
             map.serialize_entry(key.as_str(), &value)?;
         }
+        if !self.serialization_errors.is_empty() && !has_own_serialization_errors {
+            map.serialize_entry(SERIALIZATION_ERRORS_KEY, &self.serialization_errors)?;
+        }
         Ok(())
     }
+}
+
+/// Field name without the `r#` prefix that tracing keeps for raw identifiers such as `r#type`.
+fn field_name(field: &Field) -> &str {
+    let name = field.name();
+    name.strip_prefix("r#").unwrap_or(name)
 }
 
 impl field::Visit for EventFieldCollector {
     fn record_f64(&mut self, field: &Field, value: f64) {
         self.fields
-            .push((field.name().to_owned(), serde_json::Value::from(value)));
+            .push((field_name(field).to_owned(), serde_json::Value::from(value)));
     }
 
     fn record_i64(&mut self, field: &Field, value: i64) {
         self.fields
-            .push((field.name().to_owned(), serde_json::Value::from(value)));
+            .push((field_name(field).to_owned(), serde_json::Value::from(value)));
     }
 
     fn record_u64(&mut self, field: &Field, value: u64) {
         self.fields
-            .push((field.name().to_owned(), serde_json::Value::from(value)));
+            .push((field_name(field).to_owned(), serde_json::Value::from(value)));
     }
 
     fn record_bool(&mut self, field: &Field, value: bool) {
         self.fields
-            .push((field.name().to_owned(), serde_json::Value::from(value)));
+            .push((field_name(field).to_owned(), serde_json::Value::from(value)));
     }
 
     fn record_str(&mut self, field: &Field, value: &str) {
         self.fields
-            .push((field.name().to_owned(), serde_json::Value::from(value)));
+            .push((field_name(field).to_owned(), serde_json::Value::from(value)));
     }
 
     fn record_debug(&mut self, field: &Field, value: &dyn std::fmt::Debug) {
-        let name = field.name();
-        let name = name.strip_prefix("r#").unwrap_or(name);
         self.fields.push((
-            name.to_owned(),
+            field_name(field).to_owned(),
             serde_json::Value::from(format!("{value:?}")),
         ));
+    }
+
+    /// ROUTER-2100: without this, the trait's default implementation forwards to
+    /// `record_debug`, which renders the field as a flat Debug string instead of a
+    /// nested JSON object.
+    ///
+    /// Only compiled when the build sets `--cfg tracing_unstable`, which is what makes
+    /// `record_value` exist on `field::Visit` in the first place.
+    ///
+    /// A value with no JSON representation falls back to its Debug string, and the reason is
+    /// recorded under `serialization_errors.<name>`. The error goes in the log line rather than
+    /// a separate event because emitting an event from inside the formatter can recurse.
+    #[cfg(tracing_unstable)]
+    fn record_value(&mut self, field: &Field, value: valuable::Value<'_>) {
+        let name = field_name(field);
+        match serde_json::to_value(valuable_serde::Serializable::new(value)) {
+            Ok(json) => self.fields.push((name.to_owned(), json)),
+            Err(error) => {
+                self.fields.push((
+                    name.to_owned(),
+                    serde_json::Value::from(format!("{value:?}")),
+                ));
+                self.serialization_errors
+                    .insert(name.to_owned(), serde_json::Value::from(error.to_string()));
+            }
+        }
     }
 }
 
@@ -632,14 +684,23 @@ mod test {
     use opentelemetry::trace::TracerProvider as _;
     use opentelemetry_sdk::trace::SdkTracerProvider;
     use tracing::subscriber;
+    use tracing_core::Callsite;
     use tracing_core::Event;
+    use tracing_core::Kind;
+    use tracing_core::Level;
+    use tracing_core::Metadata;
     use tracing_core::Subscriber;
+    use tracing_core::field::FieldSet;
+    use tracing_core::field::Visit;
+    use tracing_core::identify_callsite;
+    use tracing_core::subscriber::Interest;
     use tracing_subscriber::Layer;
     use tracing_subscriber::Registry;
     use tracing_subscriber::layer::Context;
     use tracing_subscriber::layer::SubscriberExt;
     use tracing_subscriber::registry::LookupSpan;
 
+    use super::EventFieldCollector;
     use super::JsonAwareStr;
     use crate::plugins::telemetry::dynamic_attribute::DynAttributeLayer;
     use crate::plugins::telemetry::dynamic_attribute::SpanDynAttribute;
@@ -762,5 +823,96 @@ mod test {
         };
         let out = serde_json::to_string(&s).unwrap();
         assert_eq!(out, r#""{not valid json}""#);
+    }
+
+    #[test]
+    fn test_event_field_collector_strips_raw_identifier_prefix() {
+        // tracing's macros already strip `r#` from field names, but names declared any other
+        // way keep it, so every `record_*` method has to strip it the same way.
+        struct RawCallsite;
+        impl Callsite for RawCallsite {
+            fn set_interest(&self, _: Interest) {}
+            fn metadata(&self) -> &Metadata<'_> {
+                &RAW_METADATA
+            }
+        }
+        static RAW_CALLSITE: RawCallsite = RawCallsite;
+        static RAW_METADATA: Metadata<'static> = Metadata::new(
+            "raw",
+            "raw",
+            Level::INFO,
+            None,
+            None,
+            None,
+            FieldSet::new(
+                &["r#f64", "r#i64", "r#u64", "r#bool", "r#str", "r#debug"],
+                identify_callsite!(&RAW_CALLSITE),
+            ),
+            Kind::EVENT,
+        );
+        let field = |name| RAW_METADATA.fields().field(name).expect("declared field");
+
+        let mut collector = EventFieldCollector::new();
+        collector.record_f64(&field("r#f64"), 1.5);
+        collector.record_i64(&field("r#i64"), -1);
+        collector.record_u64(&field("r#u64"), 1);
+        collector.record_bool(&field("r#bool"), true);
+        collector.record_str(&field("r#str"), "query");
+        collector.record_debug(&field("r#debug"), &Some(1));
+
+        let names: Vec<&str> = collector
+            .fields
+            .iter()
+            .map(|(name, _)| name.as_str())
+            .collect();
+        assert_eq!(names, ["f64", "i64", "u64", "bool", "str", "debug"]);
+    }
+
+    /// Serializes the collector the way the formatter does, as the fields of one JSON object.
+    fn collector_json(collector: EventFieldCollector) -> String {
+        use serde::ser::SerializeMap;
+        use serde::ser::Serializer as _;
+
+        let mut out = Vec::new();
+        let mut serializer = serde_json::Serializer::new(&mut out);
+        let mut map = serializer.serialize_map(None).unwrap();
+        collector.serialize_into(&mut map).unwrap();
+        map.end().unwrap();
+        String::from_utf8(out).unwrap()
+    }
+
+    #[test]
+    fn test_event_field_collector_groups_serialization_errors_under_one_key() {
+        let mut collector = EventFieldCollector::new();
+        collector
+            .fields
+            .push(("payload".into(), "{[1]: true}".into()));
+        collector
+            .serialization_errors
+            .insert("payload".into(), "reason".into());
+
+        assert_eq!(
+            collector_json(collector),
+            r#"{"payload":"{[1]: true}","serialization_errors":{"payload":"reason"}}"#
+        );
+    }
+
+    #[test]
+    fn test_event_field_collector_keeps_own_serialization_errors_field() {
+        let mut collector = EventFieldCollector::new();
+        collector
+            .fields
+            .push(("payload".into(), "{[1]: true}".into()));
+        collector
+            .fields
+            .push(("serialization_errors".into(), "from the plugin".into()));
+        collector
+            .serialization_errors
+            .insert("payload".into(), "reason".into());
+
+        assert_eq!(
+            collector_json(collector),
+            r#"{"payload":"{[1]: true}","serialization_errors":"from the plugin"}"#
+        );
     }
 }

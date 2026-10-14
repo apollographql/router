@@ -112,7 +112,7 @@ impl ApolloExporter {
             apollo_key: apollo_key.to_string(),
             client: reqwest::Client::builder()
                 .no_gzip()
-                .timeout(batch_config.max_export_timeout)
+                .timeout(*batch_config.max_export_timeout)
                 .build()
                 .map_err(BoxError::from)?,
             header,
@@ -123,7 +123,7 @@ impl ApolloExporter {
     pub(crate) fn start(self) -> Sender {
         let (tx, mut rx) = mpsc::channel::<SingleStatsReport>(self.batch_config.max_queue_size);
         tokio::spawn(async move {
-            let timeout = tokio::time::interval(self.batch_config.scheduled_delay);
+            let timeout = tokio::time::interval(*self.batch_config.scheduled_delay);
             let mut report = Report::default();
 
             tokio::pin!(timeout);

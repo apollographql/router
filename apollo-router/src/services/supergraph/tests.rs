@@ -3838,6 +3838,7 @@ async fn test_cache_warmup() {
     use tower::ServiceBuilder;
 
     use crate::pipeline::build_supergraph_pipeline;
+    use crate::pipeline::tests::stage_stack::required_stage_plugins;
     use crate::query_planner::QueryPlan;
     use crate::services::QueryPlannerResponse;
     use crate::services::layers::persisted_queries::PersistedQueryExpander;
@@ -3925,7 +3926,7 @@ async fn test_cache_warmup() {
         schema.clone(),
         Arc::new(Default::default()),
         Arc::new(configuration.clone()),
-        Default::default(),
+        required_stage_plugins().await,
         crate::services::SubgraphServices {
             services: Default::default(),
         },
@@ -3982,7 +3983,7 @@ async fn test_cache_warmup() {
         schema.clone(),
         Arc::new(Default::default()),
         Arc::new(configuration.clone()),
-        Default::default(),
+        required_stage_plugins().await,
         crate::services::SubgraphServices {
             services: Default::default(),
         },

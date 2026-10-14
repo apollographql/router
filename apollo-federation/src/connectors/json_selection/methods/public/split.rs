@@ -11,6 +11,8 @@ use crate::connectors::json_selection::helpers::json_type_name;
 use crate::connectors::json_selection::immutable::InputPath;
 use crate::connectors::json_selection::location::Ranged;
 use crate::connectors::json_selection::location::WithRange;
+use crate::connectors::json_selection::methods::common::could_satisfy;
+use crate::connectors::json_selection::methods::common::present_part;
 use crate::connectors::spec::ConnectSpec;
 use crate::impl_arrow_method;
 
@@ -238,34 +240,31 @@ fn split_shape(
     // Validate separator argument shape
     let sep_shape =
         separator_arg.compute_output_shape(context, input_shape.clone(), dollar_shape.clone());
-    if !(sep_shape.is_unknown() || matches!(sep_shape.case(), ShapeCase::Name(_, _))) {
-        let mismatches = Shape::string([]).validate(&sep_shape);
-        if mismatches.is_some() {
-            return Shape::error(
-                format!(
-                    "Method ->{} requires a string separator",
-                    method_name.as_ref()
-                ),
-                location,
-            );
-        }
+    if !could_satisfy(&Shape::string([]), &sep_shape) {
+        return Shape::error(
+            format!(
+                "Method ->{} requires a string separator",
+                method_name.as_ref()
+            ),
+            location,
+        );
     }
 
     // Validate limit argument shape if present
     if let Some(limit_arg) = args.args.get(1) {
         let limit_shape =
             limit_arg.compute_output_shape(context, input_shape.clone(), dollar_shape);
-        if !(limit_shape.is_unknown() || matches!(limit_shape.case(), ShapeCase::Name(_, _))) {
-            let mismatches = Shape::int([]).validate(&limit_shape);
-            if mismatches.is_some() {
-                return Shape::error(
-                    format!(
-                        "Method ->{} limit argument must be a non-negative integer",
-                        method_name.as_ref()
-                    ),
-                    location,
-                );
-            }
+        // At runtime, a limit with no value is ignored.
+        if present_part(&limit_shape)
+            .is_some_and(|limit_shape| !could_satisfy(&Shape::int([]), &limit_shape))
+        {
+            return Shape::error(
+                format!(
+                    "Method ->{} limit argument must be a non-negative integer",
+                    method_name.as_ref()
+                ),
+                location,
+            );
         }
     }
 

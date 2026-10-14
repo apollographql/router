@@ -1,0 +1,22 @@
+# Exercises the two connector cases the `all` block alone under-reports.
+#
+# `all.enabled: false` with a source that sets `enabled: true`: the per-source flag wins in
+# `ConnectorCacheConfiguration::is_source_enabled`, so this deployment does cache and the usage
+# metric must say so — keying on `all.enabled` alone would read it as disabled.
+#
+# `all.cache_key_headers: []` is the documented "no header partitions the cache key" opt-out, so
+# the header attribute keys on non-emptiness rather than presence; the per-source list is what
+# makes it true here.
+response_cache:
+  enabled: true
+  connector:
+    all:
+      redis:
+        urls: ["redis://test"]
+      ttl: 60s
+      enabled: false
+      cache_key_headers: []
+    sources:
+      products.rest_api:
+        enabled: true
+        cache_key_headers: ["authorization"]
