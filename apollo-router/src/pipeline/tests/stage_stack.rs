@@ -46,7 +46,7 @@ async fn stage_plugins(plugins: &[(&str, serde_json::Value)]) -> Plugins {
     registry
 }
 
-/// Every plugin both stages require, with traffic shaping left at its defaults.
+/// Every mandatory plugin the stack builders apply, with traffic shaping left at its defaults.
 pub(crate) async fn required_stage_plugins() -> Arc<Plugins> {
     Arc::new(stage_plugins(&[(APOLLO_TRAFFIC_SHAPING, serde_json::json!({}))]).await)
 }
