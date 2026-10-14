@@ -1,4 +1,4 @@
-### Keep executable directives and their argument types through connector expansion ([Issue #RH-1375](https://apollographql.atlassian.net/browse/RH-1375))
+### Keep executable directives and their argument types through connector expansion
 
 Composing connector subgraphs alongside an executable directive whose argument references a custom type (for example `directive @ownership(owners: [Owner!]) on FIELD` with `enum Owner`) failed satisfiability validation with `INTERNAL_ERROR: Cannot wrap an undefined/null type` (Rust: `Directive argument's inner type does not refer to an existing input type`).
 
