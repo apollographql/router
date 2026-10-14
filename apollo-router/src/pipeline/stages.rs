@@ -408,13 +408,14 @@ fn debug_assert_boxed_type_name_bounded<S>() {
         name.len(),
         name.get(..500).unwrap_or(name),
     );
-    // A shaping getter already returns an `OptionLayer`; wrapping it in another one names the
-    // service beneath three times instead of twice.
+    // `apply_plugin_layer` wraps its getter's layer in an `OptionLayer`; a getter that already
+    // returns one names the service beneath three times instead of twice.
     let nested = name.find("tower::util::either::Either<tower::util::either::Either<");
     debug_assert!(
         nested.is_none(),
-        "an optional layer is wrapped in a second optional layer; apply the getter's layer \
-         as returned. The doubled layer: {}",
+        "an optional layer is wrapped in a second optional layer, usually because \
+         `apply_plugin_layer` was given a getter that already returns an `OptionLayer`. \
+         The doubled layer: {}",
         // From the match on, so the message names the doubled layer, not the top of the box.
         nested.map_or("", |at| name.get(at..at + 500).unwrap_or(&name[at..])),
     );
