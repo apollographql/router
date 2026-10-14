@@ -116,6 +116,7 @@ fn cache_key(request: &SubgraphRequest) -> CacheKey {
     let body = http_request.body_mut();
     if let (Some(name), Some(query)) = (&body.operation_name, &body.query)
         && let Some(rest) = query.strip_prefix(&format!("query {name}"))
+        && !rest.starts_with(|c: char| c == '_' || c.is_ascii_alphanumeric())
     {
         body.query = Some(format!("query{rest}"));
         body.operation_name = None;
@@ -454,6 +455,80 @@ mod tests {
         )
         .await;
         assert_eq!(sent, 2, "each fetch node sends its own representations");
+    }
+
+    /// The cache key of a request sending `query` named `operation_name`, with fixed variables.
+    fn test_cache_key(query: &str, operation_name: Option<&str>) -> super::CacheKey {
+        let body = graphql::Request::fake_builder()
+            .query(query)
+            .and_operation_name(operation_name.map(str::to_string))
+            .variable(
+                "representations",
+                json!([{ "__typename": "Product", "upc": "1" }]),
+            )
+            .build();
+        super::cache_key(
+            &SubgraphRequest::fake_builder()
+                .subgraph_request(http::Request::new(body))
+                .build(),
+        )
+    }
+
+    #[test]
+    fn cache_key_leaves_out_only_the_operation_name() {
+        let named_a = test_cache_key(
+            "query A($r:[_Any!]!){_entities(representations:$r){__typename}}",
+            Some("A"),
+        );
+        let named_b = test_cache_key(
+            "query B($r:[_Any!]!){_entities(representations:$r){__typename}}",
+            Some("B"),
+        );
+        assert!(
+            named_a == named_b,
+            "queries differing only in their name share a key"
+        );
+
+        let anonymous = test_cache_key(
+            "query($r:[_Any!]!){_entities(representations:$r){__typename}}",
+            None,
+        );
+        assert!(
+            anonymous == named_a,
+            "an anonymous query is the same query without a name"
+        );
+
+        let other_name = test_cache_key(
+            "query B($r:[_Any!]!){_entities(representations:$r){__typename}}",
+            Some("A"),
+        );
+        assert!(
+            other_name != named_a,
+            "a query naming another operation keeps its name"
+        );
+
+        let other_body = test_cache_key(
+            "query B($r:[_Any!]!){_entities(representations:$r){id}}",
+            Some("B"),
+        );
+        assert!(
+            other_body != named_a,
+            "different query bodies don't share a key"
+        );
+
+        let longer_name = test_cache_key(
+            "query Op__12($r:[_Any!]!){_entities(representations:$r){__typename}}",
+            Some("Op__1"),
+        );
+        // What stripping `Op__1` from `Op__12` without a name boundary would leave.
+        let stripped = test_cache_key(
+            "query2($r:[_Any!]!){_entities(representations:$r){__typename}}",
+            None,
+        );
+        assert!(
+            longer_name != stripped,
+            "the name is only stripped up to a name boundary"
+        );
     }
 
     #[tokio::test(flavor = "multi_thread")]
