@@ -48,9 +48,11 @@ use super::plugin::build_entity_debug_entry;
 use super::plugin::build_entity_store_document;
 use super::plugin::get_invalidation_entity_keys_from_schema;
 use super::plugin::hash_private_id;
+use super::plugin::marks_query_private;
 use super::plugin::non_entity_errors;
 use super::plugin::reindex_entity_errors;
 use super::plugin::remember_private_query;
+use super::plugin::succeeded_without_errors;
 use super::plugin::update_cache_control;
 use super::storage;
 use super::storage::CacheEntry;
@@ -63,6 +65,7 @@ use crate::error::FetchError;
 use crate::graphql;
 use crate::json_ext::Object;
 use crate::plugins::authorization::CacheKeyMetadata;
+use crate::plugins::connectors::declared_errors::HasDeclaredErrors;
 use crate::plugins::connectors::query_plans::get_connectors;
 use crate::plugins::response_cache::cache_key::ConnectorCacheKeyEntity;
 use crate::plugins::response_cache::cache_key::ConnectorCacheKeyRoot;
@@ -975,8 +978,21 @@ impl ConnectorCacheService {
             response_cache_control.merge_no_store(req_cc);
         }
 
+        // Checked separately because `include_subgraph_errors` may have kept declared errors out
+        // of `errors`. Their paths follow the upstream order, not the entity order, so a declared
+        // error rules out storing every entity in this response.
+        let has_declared_errors = response
+            .response
+            .extensions()
+            .get::<HasDeclaredErrors>()
+            .is_some_and(|marker| marker.0);
+
         // Track private queries in the LRU so future requests can short-circuit
-        if response_cache_control.private() && !is_known_private {
+        if !is_known_private
+            && succeeded_without_errors(&response.response)
+            && !has_declared_errors
+            && marks_query_private(&response_cache_control)
+        {
             remember_private_query(private_queries, private_query_key, lru_size_instrument).await;
         }
 
@@ -1076,7 +1092,7 @@ impl ConnectorCacheService {
                         // to avoid persisting error data until TTL expires.
                         let reindexed_errors =
                             reindex_entity_errors(&errors, entity_idx, new_entity_idx);
-                        let has_errors = !reindexed_errors.is_empty();
+                        let has_errors = has_declared_errors || !reindexed_errors.is_empty();
                         new_errors.extend(reindexed_errors);
 
                         // Append private_id to cache key if response was discovered
@@ -1722,14 +1738,15 @@ impl ConnectorRequestCacheService {
                     }
 
                     // Track private queries in the LRU so future requests can short-circuit
-                    if cache_control.private() && !is_known_private {
+                    if !is_known_private && marks_query_private(&cache_control) {
                         remember_private_query(
                             &private_queries,
                             private_query_key,
                             &lru_size_instrument,
                         )
                         .await;
-
+                    }
+                    if cache_control.private() && !is_known_private {
                         // Update cache key with private_id suffix now that we know the
                         // response is private (matching subgraph pattern at line 1278)
                         if let Some(ref s) = private_id {
