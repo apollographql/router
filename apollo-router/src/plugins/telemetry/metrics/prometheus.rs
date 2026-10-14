@@ -1,9 +1,19 @@
+use std::sync::Arc;
+use std::sync::Weak;
 use std::task::Context;
 use std::task::Poll;
+use std::time::Duration;
 
 use futures::future::BoxFuture;
 use http::StatusCode;
+use opentelemetry_prometheus::PrometheusExporter;
 use opentelemetry_prometheus::ResourceSelector;
+use opentelemetry_sdk::error::OTelSdkResult;
+use opentelemetry_sdk::metrics::InstrumentKind;
+use opentelemetry_sdk::metrics::Pipeline;
+use opentelemetry_sdk::metrics::Temporality;
+use opentelemetry_sdk::metrics::data::ResourceMetrics;
+use opentelemetry_sdk::metrics::reader::MetricReader;
 use prometheus::Encoder;
 use prometheus::Registry;
 use prometheus::TextEncoder;
@@ -15,7 +25,7 @@ use tower_service::Service;
 use crate::ListenAddr;
 use crate::metrics::aggregation::MeterProviderType;
 use crate::plugins::telemetry::config::Conf;
-use crate::plugins::telemetry::metrics::OverflowMetricExporter;
+use crate::plugins::telemetry::metrics::OverflowTracker;
 use crate::plugins::telemetry::reload::metrics::MetricsBuilder;
 use crate::plugins::telemetry::reload::metrics::MetricsConfigurator;
 use crate::services::router;
@@ -77,22 +87,74 @@ impl MetricsConfigurator for Config {
     fn configure(&self, builder: &mut MetricsBuilder) -> Result<(), BoxError> {
         let registry = Registry::new();
 
-        let exporter = opentelemetry_prometheus::exporter()
-            .with_resource_selector(self.resource_selector)
-            .with_registry(registry.clone())
-            .build()?;
+        let exporter = SharedPrometheusExporter::from(
+            opentelemetry_prometheus::exporter()
+                .with_resource_selector(self.resource_selector)
+                .with_registry(registry.clone())
+                .build()?,
+        );
 
-        // Wrap with overflow detection to increment cardinality_overflow counter on pull
-        let reader = OverflowMetricExporter::new_pull(exporter);
-        builder.with_reader(MeterProviderType::Public, reader);
-        builder.with_prometheus_registry(registry);
+        builder.with_reader(MeterProviderType::Public, exporter.clone());
+        // Scrapes bypass reader wrappers, so the endpoint checks each scrape for overflow itself
+        builder.with_prometheus_registry(PrometheusEndpoint {
+            registry,
+            exporter,
+            overflow_tracker: Some(OverflowTracker::default()),
+        });
 
         Ok(())
     }
 }
 
-pub(crate) struct PrometheusService {
+/// The Prometheus exporter, shared by the public meter provider, which reads from it, and the
+/// endpoint, which collects from it directly to name overflowing metrics.
+#[derive(Clone, Debug)]
+pub(crate) struct SharedPrometheusExporter(Arc<PrometheusExporter>);
+
+impl From<PrometheusExporter> for SharedPrometheusExporter {
+    fn from(exporter: PrometheusExporter) -> Self {
+        Self(Arc::new(exporter))
+    }
+}
+
+impl MetricReader for SharedPrometheusExporter {
+    fn register_pipeline(&self, pipeline: Weak<Pipeline>) {
+        self.0.register_pipeline(pipeline)
+    }
+
+    fn collect(&self, rm: &mut ResourceMetrics) -> OTelSdkResult {
+        self.0.collect(rm)
+    }
+
+    fn force_flush(&self) -> OTelSdkResult {
+        self.0.force_flush()
+    }
+
+    fn shutdown_with_timeout(&self, timeout: Duration) -> OTelSdkResult {
+        self.0.shutdown_with_timeout(timeout)
+    }
+
+    fn temporality(&self, kind: InstrumentKind) -> Temporality {
+        self.0.temporality(kind)
+    }
+}
+
+/// What the Prometheus endpoint serves scrapes from: the metrics registry, the exporter behind
+/// it, and the tracker that scrapes use to count cardinality overflow.
+#[derive(Clone, Debug)]
+pub(crate) struct PrometheusEndpoint {
+    /// The metrics each scrape gathers.
     pub(crate) registry: Registry,
+    /// The exporter that `registry` gathers from. Collecting from it directly gives the same
+    /// metrics with their OpenTelemetry names.
+    pub(crate) exporter: SharedPrometheusExporter,
+    /// Counts cardinality overflow on each scrape. Present when Prometheus is the public meter
+    /// provider's only exporter; `None` when a push exporter counts instead.
+    pub(crate) overflow_tracker: Option<OverflowTracker>,
+}
+
+pub(crate) struct PrometheusService {
+    pub(crate) endpoint: PrometheusEndpoint,
 }
 
 impl Service<router::Request> for PrometheusService {
@@ -105,8 +167,20 @@ impl Service<router::Request> for PrometheusService {
     }
 
     fn call(&mut self, req: router::Request) -> Self::Future {
-        let metric_families = self.registry.gather();
+        let endpoint = self.endpoint.clone();
+        // Endpoint services are buffered, so `call` runs on the buffer worker task. Doing the work
+        // in the response future keeps the overflow counter on the task handling the scrape. That
+        // only matters for task-local test meter providers (`with_metrics`); in production the
+        // counter goes to the global meter provider whichever task records it.
         Box::pin(async move {
+            // As with the push exporters, the counter shows up from the next collection.
+            let metric_families = match &endpoint.overflow_tracker {
+                Some(overflow_tracker) => overflow_tracker.gather_and_record(
+                    || endpoint.registry.gather(),
+                    |metrics| endpoint.exporter.collect(metrics),
+                ),
+                None => endpoint.registry.gather(),
+            };
             let encoder = TextEncoder::new();
             let mut result = Vec::new();
             encoder.encode(&metric_families, &mut result)?;
