@@ -233,6 +233,13 @@ traffic_shaping:
     deduplicate_query: true # Enable query deduplication for all subgraphs.
 ```
 
+<<<<<<< HEAD
+=======
+The operation name isn't part of the comparison. The query planner gives every subgraph fetch its own operation name, so this lets fetches within a single client request share a request too, when they send the same query and variables to the same subgraph. Subgraph request hooks in coprocessors, Rhai scripts, and plugins run once for each shared request and see the operation name of the first request that started it.
+
+For subgraphs with query deduplication enabled, the router reports the [`apollo.router.subgraph_deduplication.requests`](/graphos/routing/observability/router-telemetry-otel/enabling-telemetry/standard-instruments#query-deduplication) counter to your metrics exporters and to GraphOS. Use it to see how many subgraph requests reuse the response of an identical in-flight request.
+
+>>>>>>> 83ba67e (fix(router): ignore the operation name when deduplicating subgraph queries (#10465))
 ### HTTP/2
 
 <HttpConnection type="subgraph" />
