@@ -233,17 +233,17 @@ pub(crate) fn build_subgraph_service(
         // The rate limit can't be cloned, so neither box beneath this buffer needs `Clone`; the
         // buffer is what makes the stack cloneable again.
         .layer(box_layer())
-        .apply_required_plugin_option_layer(plugins, |t: &TrafficShaping| {
+        .apply_required_plugin_layer(plugins, |t: &TrafficShaping| {
             t.subgraph_error_response_layer(name)
         })
-        .apply_required_plugin_option_layer(plugins, |t: &TrafficShaping| {
+        .apply_required_plugin_layer(plugins, |t: &TrafficShaping| {
             t.load_shed_layer(ShapingTarget::Subgraph(name))
         })
-        .apply_required_plugin_option_layer(plugins, |t: &TrafficShaping| {
+        .apply_required_plugin_layer(plugins, |t: &TrafficShaping| {
             t.rate_limit_layer(ShapingTarget::Subgraph(name))
         })
         .layer(box_layer())
-        .apply_required_plugin_option_layer(plugins, |t: &TrafficShaping| {
+        .apply_required_plugin_layer(plugins, |t: &TrafficShaping| {
             t.subgraph_deduplication_layer(name)
         })
         // The circuit judges execution, never admission: what admission turns away never
@@ -253,13 +253,11 @@ pub(crate) fn build_subgraph_service(
         .apply_plugin_layer(plugins, |c: &CircuitBreaker| c.subgraph_circuit_layer(name))
         // Below deduplication, one timeout covers every request joined to the same fetch, and it
         // bounds the plugins and the call beneath it.
-        .apply_required_plugin_option_layer(plugins, |t: &TrafficShaping| {
-            t.subgraph_timeout_layer(name)
-        })
-        .apply_required_plugin_option_layer(plugins, |t: &TrafficShaping| {
+        .apply_required_plugin_layer(plugins, |t: &TrafficShaping| t.subgraph_timeout_layer(name))
+        .apply_required_plugin_layer(plugins, |t: &TrafficShaping| {
             t.subgraph_compression_layer(name)
         })
-        .apply_required_plugin_option_layer(plugins, |t: &TrafficShaping| {
+        .apply_required_plugin_layer(plugins, |t: &TrafficShaping| {
             t.subgraph_backpressure_buffer_layer(name)
         })
         .rust_plugins(plugins.clone(), |plugin, service| {
@@ -316,13 +314,13 @@ pub(crate) fn build_connector_request_services(
                 .apply_plugin_layer(plugins, Telemetry::instrument_connector_layer)
                 .buffered()
                 .layer(box_layer())
-                .apply_required_plugin_option_layer(plugins, |t: &TrafficShaping| {
+                .apply_required_plugin_layer(plugins, |t: &TrafficShaping| {
                     t.connector_source_error_response_layer(&source)
                 })
-                .apply_required_plugin_option_layer(plugins, |t: &TrafficShaping| {
+                .apply_required_plugin_layer(plugins, |t: &TrafficShaping| {
                     t.load_shed_layer(ShapingTarget::ConnectorSource(&source))
                 })
-                .apply_required_plugin_option_layer(plugins, |t: &TrafficShaping| {
+                .apply_required_plugin_layer(plugins, |t: &TrafficShaping| {
                     t.rate_limit_layer(ShapingTarget::ConnectorSource(&source))
                 })
                 // The operation's `max_requests` is admission too: a request over it is never sent,
@@ -332,13 +330,13 @@ pub(crate) fn build_connector_request_services(
                 .apply_plugin_layer(plugins, |c: &CircuitBreaker| {
                     c.connector_source_circuit_layer(&source)
                 })
-                .apply_required_plugin_option_layer(plugins, |t: &TrafficShaping| {
+                .apply_required_plugin_layer(plugins, |t: &TrafficShaping| {
                     t.connector_source_timeout_layer(&source)
                 })
-                .apply_required_plugin_option_layer(plugins, |t: &TrafficShaping| {
+                .apply_required_plugin_layer(plugins, |t: &TrafficShaping| {
                     t.connector_source_compression_layer(&source)
                 })
-                .apply_required_plugin_option_layer(plugins, |t: &TrafficShaping| {
+                .apply_required_plugin_layer(plugins, |t: &TrafficShaping| {
                     t.connector_source_backpressure_buffer_layer(&source)
                 })
                 .rust_plugins(plugins.clone(), |plugin, service| {
@@ -412,12 +410,13 @@ fn debug_assert_boxed_type_name_bounded<S>() {
     );
     // A shaping getter already returns an `OptionLayer`; wrapping it in another one names the
     // service beneath three times instead of twice.
+    let nested = name.find("tower::util::either::Either<tower::util::either::Either<");
     debug_assert!(
-        !name.contains("Either<tower::util::either::Either<"),
-        "an optional layer is wrapped in a second optional layer. Apply a getter that returns an \
-         `OptionLayer` with `apply_required_plugin_option_layer`, not \
-         `apply_required_plugin_layer`. The type starts: {}",
-        name.get(..500).unwrap_or(name),
+        nested.is_none(),
+        "an optional layer is wrapped in a second optional layer; apply the getter's layer \
+         as returned. The doubled layer: {}",
+        // From the match on, so the message names the doubled layer, not the top of the box.
+        nested.map_or("", |at| name.get(at..at + 500).unwrap_or(&name[at..])),
     );
 }
 
@@ -690,9 +689,8 @@ pub(crate) fn build_warmup_service(
 
 #[cfg(test)]
 mod boxed_type_names {
-    use std::sync::Arc;
-
     use super::*;
+    use crate::pipeline::tests::stage_stack::required_stage_plugins;
 
     // Building a stack runs each box's type-name check, a debug assertion.
     #[tokio::test]
@@ -701,7 +699,7 @@ mod boxed_type_names {
         build_subgraph_service(
             "s",
             http.boxed_clone(),
-            &Arc::new(Plugins::default()),
+            &required_stage_plugins().await,
             &Configuration::default(),
         );
     }
@@ -711,7 +709,7 @@ mod boxed_type_names {
         let (http, _) = tower_test::mock::pair();
         build_connector_request_services(
             IndexMap::from([("s.a".to_string(), http.boxed_clone())]),
-            &Arc::new(Plugins::default()),
+            &required_stage_plugins().await,
         );
     }
 }

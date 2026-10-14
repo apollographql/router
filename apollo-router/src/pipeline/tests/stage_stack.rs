@@ -16,6 +16,7 @@ use crate::pipeline::build_connector_request_services;
 use crate::pipeline::build_subgraph_services;
 use crate::plugin::PluginInit;
 use crate::plugin::PluginUnstable;
+use crate::plugins::traffic_shaping::APOLLO_TRAFFIC_SHAPING;
 use crate::services::Plugins;
 use crate::services::SubgraphRequest;
 use crate::services::SubgraphResponse;
@@ -43,6 +44,11 @@ async fn stage_plugins(plugins: &[(&str, serde_json::Value)]) -> Plugins {
         registry.insert(name.to_string(), plugin);
     }
     registry
+}
+
+/// Every plugin both stages require, with traffic shaping left at its defaults.
+pub(crate) async fn required_stage_plugins() -> Arc<Plugins> {
+    Arc::new(stage_plugins(&[(APOLLO_TRAFFIC_SHAPING, serde_json::json!({}))]).await)
 }
 
 pub(crate) type Handle = tower_test::mock::Handle<SubgraphRequest, SubgraphResponse>;

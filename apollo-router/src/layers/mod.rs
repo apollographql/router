@@ -473,28 +473,18 @@ pub(crate) trait InternalServiceBuilderExt<L>: Sized {
 
     /// Apply the layer of a *mandatory* plugin to a service stack.
     ///
-    /// Same as [`Self::apply_plugin_layer`], except that a missing plugin is treated as a
-    /// bug rather than a supported configuration: the miss panics instead of quietly
-    /// reducing the stack to a no-op.
+    /// Unlike [`Self::apply_plugin_layer`], the layer is applied as returned, without an
+    /// [`OptionLayer`] around it: `create_plugins` always registers the plugin, so a pass-through
+    /// side would never be taken and would only double the type of the service beneath.
+    ///
+    /// # Panics
+    ///
+    /// When the plugin is missing from the registry, since that is a router bug.
     fn apply_required_plugin_layer<P, OutLayer>(
         self,
         plugins: &Plugins,
         get_layer: impl FnOnce(&P) -> OutLayer,
-    ) -> ServiceBuilder<Stack<OptionLayer<OutLayer>, L>>
-    where
-        P: PluginPrivate;
-
-    /// Apply a *mandatory* plugin's layer that the plugin itself may leave out.
-    ///
-    /// Same as [`Self::apply_required_plugin_layer`], for a getter that already returns an
-    /// [`OptionLayer`] because the plugin's configuration decides whether the layer applies.
-    /// The layer is applied as returned. A second [`OptionLayer`] would make the type name the
-    /// service beneath it three times instead of twice.
-    fn apply_required_plugin_option_layer<P, OutLayer>(
-        self,
-        plugins: &Plugins,
-        get_layer: impl FnOnce(&P) -> OptionLayer<OutLayer>,
-    ) -> ServiceBuilder<Stack<OptionLayer<OutLayer>, L>>
+    ) -> ServiceBuilder<Stack<OutLayer, L>>
     where
         P: PluginPrivate;
 }
@@ -504,23 +494,6 @@ fn find_plugin<P: PluginPrivate>(plugins: &Plugins) -> Option<&P> {
     plugins
         .values()
         .find_map(|plugin| plugin.as_any().downcast_ref::<P>())
-}
-
-/// Find the instance of a mandatory plugin type `P`, or `None` when the registry is empty.
-///
-/// # Panics
-///
-/// When the registry has plugins but not `P`, since every pipeline registers it.
-fn find_required_plugin<P: PluginPrivate>(plugins: &Plugins) -> Option<&P> {
-    let plugin = find_plugin::<P>(plugins);
-    if plugin.is_none() && !plugins.is_empty() {
-        panic!(
-            "mandatory plugin {} is missing from the plugin registry, so its layer will not \
-             be applied to the pipeline; this is a router bug",
-            std::any::type_name::<P>()
-        );
-    }
-    plugin
 }
 
 impl<L> InternalServiceBuilderExt<L> for ServiceBuilder<L> {
@@ -553,24 +526,18 @@ impl<L> InternalServiceBuilderExt<L> for ServiceBuilder<L> {
         self,
         plugins: &Plugins,
         get_layer: impl FnOnce(&P) -> OutLayer,
-    ) -> ServiceBuilder<Stack<OptionLayer<OutLayer>, L>>
+    ) -> ServiceBuilder<Stack<OutLayer, L>>
     where
         P: PluginPrivate,
     {
-        self.option_layer(find_required_plugin::<P>(plugins).map(get_layer))
-    }
-
-    fn apply_required_plugin_option_layer<P, OutLayer>(
-        self,
-        plugins: &Plugins,
-        get_layer: impl FnOnce(&P) -> OptionLayer<OutLayer>,
-    ) -> ServiceBuilder<Stack<OptionLayer<OutLayer>, L>>
-    where
-        P: PluginPrivate,
-    {
-        let layer = find_required_plugin::<P>(plugins)
-            .map_or_else(|| tower::util::option_layer(None), get_layer);
-        self.layer(layer)
+        let plugin = find_plugin::<P>(plugins).unwrap_or_else(|| {
+            panic!(
+                "mandatory plugin {} is missing from the plugin registry, so its layer will not \
+                 be applied to the pipeline; this is a router bug",
+                std::any::type_name::<P>()
+            )
+        });
+        self.layer(get_layer(plugin))
     }
 }
 
@@ -580,16 +547,8 @@ mod tests {
 
     use super::InternalServiceBuilderExt;
     use crate::plugins::headers::Headers;
-    use crate::plugins::traffic_shaping::TrafficShaping;
     use crate::services::Plugins;
     use crate::test_harness::MockedSubgraphs;
-
-    #[test]
-    fn apply_required_plugin_layer_skips_empty_registry() {
-        let plugins = Plugins::default();
-        let _ = ServiceBuilder::new()
-            .apply_required_plugin_layer(&plugins, Headers::router_masking_layer);
-    }
 
     #[test]
     #[should_panic(expected = "mandatory plugin")]
@@ -601,19 +560,5 @@ mod tests {
         );
         let _ = ServiceBuilder::new()
             .apply_required_plugin_layer(&plugins, Headers::router_masking_layer);
-    }
-
-    #[test]
-    #[should_panic(expected = "mandatory plugin")]
-    fn apply_required_plugin_option_layer_panics_when_mandatory_plugin_is_missing() {
-        let mut plugins = Plugins::default();
-        plugins.insert(
-            "unrelated".to_string(),
-            Box::new(MockedSubgraphs::default()),
-        );
-        let _ = ServiceBuilder::new()
-            .apply_required_plugin_option_layer(&plugins, |t: &TrafficShaping| {
-                t.subgraph_timeout_layer("s")
-            });
     }
 }
