@@ -571,7 +571,7 @@ impl TrafficShaping {
             shaping
                 .deduplicate_query
                 .unwrap_or_default()
-                .then(QueryDeduplicationLayer::default)
+                .then(|| QueryDeduplicationLayer::new(name))
         }))
     }
 

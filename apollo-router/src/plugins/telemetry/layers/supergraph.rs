@@ -358,7 +358,8 @@ where
                             .tracing
                             .response_trace_id
                             .header_name
-                            .clone()
+                            .as_deref()
+                            .cloned()
                             .unwrap_or_else(|| DEFAULT_EXPOSE_TRACE_ID_HEADER_NAME.clone())
                     });
 

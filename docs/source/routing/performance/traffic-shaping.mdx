@@ -233,6 +233,8 @@ traffic_shaping:
     deduplicate_query: true # Enable query deduplication for all subgraphs.
 ```
 
+For subgraphs with query deduplication enabled, the router reports the [`apollo.router.subgraph_deduplication.requests`](/graphos/routing/observability/router-telemetry-otel/enabling-telemetry/standard-instruments#query-deduplication) counter to your metrics exporters and to GraphOS. Use it to see how many subgraph requests reuse the response of an identical in-flight request.
+
 ### HTTP/2
 
 <HttpConnection type="subgraph" />

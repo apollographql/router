@@ -143,7 +143,7 @@ impl Config {
                     .with_retry_policy(no_retries())
                     .with_tls_config(ClientTlsConfig::new().with_native_roots())
                     .with_endpoint(endpoint.as_str())
-                    .with_timeout(batch_config.max_export_timeout)
+                    .with_timeout(*batch_config.max_export_timeout)
                     .with_metadata(metadata.clone())
                     .with_compression(opentelemetry_otlp::Compression::Gzip)
                     .with_temporality(Temporality::Delta)
@@ -155,7 +155,7 @@ impl Config {
                     .with_retry_policy(no_retries())
                     .with_tls_config(ClientTlsConfig::new().with_native_roots())
                     .with_endpoint(endpoint.as_str())
-                    .with_timeout(batch_config.max_export_timeout)
+                    .with_timeout(*batch_config.max_export_timeout)
                     .with_metadata(metadata.clone())
                     .with_compression(opentelemetry_otlp::Compression::Gzip)
                     .with_temporality(Temporality::Delta)
@@ -174,7 +174,7 @@ impl Config {
                 let exporter = MetricExporter::builder()
                     .with_http()
                     .with_retry_policy(no_retries())
-                    .with_timeout(batch_config.max_export_timeout)
+                    .with_timeout(*batch_config.max_export_timeout)
                     .with_temporality(Temporality::Delta)
                     .with_compression(opentelemetry_otlp::Compression::Gzip)
                     .with_headers(headers.clone())
@@ -185,7 +185,7 @@ impl Config {
                 let realtime_exporter = MetricExporter::builder()
                     .with_http()
                     .with_retry_policy(no_retries())
-                    .with_timeout(batch_config.max_export_timeout)
+                    .with_timeout(*batch_config.max_export_timeout)
                     .with_temporality(Temporality::Delta)
                     .with_compression(opentelemetry_otlp::Compression::Gzip)
                     .with_headers(headers)
@@ -214,7 +214,7 @@ impl Config {
             named_realtime_exporter,
             BlockingSafeTokioRuntime::new_for_metrics(),
         )
-        .with_interval(batch_config.scheduled_delay)
+        .with_interval(*batch_config.scheduled_delay)
         .build();
 
         let resource = Resource::builder_empty()

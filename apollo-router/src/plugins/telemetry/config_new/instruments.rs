@@ -3414,7 +3414,7 @@ mod tests {
                                             problems: mapping_problems,
                                             declared_errors: vec![],
                                         },
-                                        break_status: None,
+                                        answered_by_router: false,
                                     };
                                     connector_instruments
                                         .take()

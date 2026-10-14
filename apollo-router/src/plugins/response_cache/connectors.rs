@@ -1351,7 +1351,7 @@ impl ConnectorRequestCacheService {
                             transport_outcome: TransportOutcome::Error(
                                 apollo_federation::connectors::runtime::errors::Error::InvalidCacheControl(message),
                             ),
-                            break_status: None,
+                            answered_by_router: true,
                             mapped_response:
                                 apollo_federation::connectors::runtime::responses::MappedResponse::Error {
                                     error: runtime_error,
@@ -1644,7 +1644,9 @@ impl ConnectorRequestCacheService {
                 // downstream — telemetry selectors, the coprocessor `ConnectorResponse` stage,
                 // public connector plugins — reads a hit exactly as it reads a fetch, so none
                 // of them need a cache concept. This mirrors the subgraph path, which builds a
-                // `subgraph::Response` on a hit and lets its status default to 200.
+                // `subgraph::Response` on a hit and lets its status default to 200. Only the
+                // circuit breaker is told, through `answered_by_router`: a hit says nothing about
+                // the source's health.
                 //
                 // The status is the one the origin actually sent (replayed from the entry)
                 // rather than a blanket 200, because `@connect(errors: { is_success: ... })`
@@ -1656,7 +1658,7 @@ impl ConnectorRequestCacheService {
                     context: request.context,
                     subgraph_name,
                     transport_outcome: TransportOutcome::Response(http_response),
-                    break_status: None,
+                    answered_by_router: true,
                     mapped_response:
                         apollo_federation::connectors::runtime::responses::MappedResponse::Data {
                             data: entry.data,
@@ -2156,6 +2158,47 @@ fn connector_key_inputs(
     root.insert(ByteString::from("context"), Value::Object(context_obj));
     root.insert(ByteString::from("headers"), Value::Object(headers_obj));
     Value::Object(root)
+}
+
+/// The connector request cache for `source_name` in front of `service`, as the response cache
+/// places it for a source it caches, with `store` as a mock Redis behind it.
+#[cfg(all(
+    test,
+    any(not(feature = "ci"), all(target_arch = "x86_64", target_os = "linux"))
+))]
+pub(crate) async fn request_cache_for_test(
+    service: ConnectorRequestBoxCloneService,
+    source_name: &str,
+    store: Arc<dyn fred::mocks::Mocks>,
+) -> ConnectorRequestBoxCloneService {
+    use tower::ServiceExt as _;
+
+    let config = storage::redis::Config::test(false, "connector-request-cache");
+    let (_drop_tx, drop_rx) = tokio::sync::broadcast::channel(1);
+    let storage = Storage::mocked(&config, false, store, drop_rx)
+        .await
+        .expect("mock storage builds");
+    let supergraph_schema = Arc::new(
+        Schema::parse_and_validate("type Query { hello: String }", "schema.graphql").unwrap(),
+    );
+
+    ConnectorRequestCacheService {
+        service,
+        storage: Arc::new(StorageInterface::for_connectors(storage)),
+        source_name: source_name.to_string(),
+        connector_ttl: Duration::from_secs(60),
+        private_id_key: None,
+        debug: false,
+        supergraph_schema,
+        subgraph_enums: Default::default(),
+        private_queries: Arc::new(RwLock::new(LruCache::new(
+            std::num::NonZeroUsize::new(1).unwrap(),
+        ))),
+        lru_size_instrument: LruSizeInstrument::new("test.private_queries.lru.size"),
+        indexes: Default::default(),
+        cache_key_headers: Arc::new([]),
+    }
+    .boxed_clone()
 }
 
 #[cfg(test)]

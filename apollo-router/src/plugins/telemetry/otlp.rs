@@ -5,10 +5,7 @@ use apollo_redaction::Redacted;
 use http::Uri;
 use opentelemetry_otlp::RetryPolicy;
 use opentelemetry_sdk::metrics::Temporality as SdkTemporality;
-use schemars::JsonSchema;
-use serde::Deserialize;
 use serde::Serialize;
-use serde_json::Value;
 use tonic::transport::Certificate;
 use tonic::transport::ClientTlsConfig;
 use tonic::transport::Identity;
@@ -18,23 +15,21 @@ use url::Url;
 use crate::plugins::telemetry::config::SamplerOption;
 use crate::plugins::telemetry::tracing::BatchProcessorConfig;
 
-#[derive(Debug, Clone, Deserialize, JsonSchema, Default, PartialEq)]
-#[serde(deny_unknown_fields)]
+#[apollo_configuration::configuration]
+#[derive(Default, PartialEq)]
 #[schemars(rename = "OTLPConfig")]
 pub(crate) struct Config {
     /// Enable otlp
+    #[config(required)]
     pub(crate) enabled: bool,
 
     /// The endpoint to send data to
-    #[serde(default)]
     pub(crate) endpoint: Option<String>,
 
     /// The protocol to use when sending data
-    #[serde(default)]
     pub(crate) protocol: Protocol,
 
     /// gRPC configuration settings
-    #[serde(default)]
     // `GrpcExporter` holds a private key, so it cannot serialize its default.
     #[schemars(extend("default" = {
         "ca": null,
@@ -46,16 +41,13 @@ pub(crate) struct Config {
     pub(crate) grpc: GrpcExporter,
 
     /// HTTP configuration settings
-    #[serde(default)]
     pub(crate) http: HttpExporter,
 
     /// Batch processor settings
-    #[serde(default)]
     pub(crate) batch_processor: BatchProcessorConfig,
 
     /// Temporality for export (default: `Cumulative`).
     /// Note that when exporting to Datadog agent use `Delta`.
-    #[serde(default)]
     pub(crate) temporality: Temporality,
 
     /// Per-exporter sampler for tracing.
@@ -73,7 +65,7 @@ pub(crate) struct Config {
     /// startup. If this OTLP endpoint targets the Datadog agent, the agent may receive incomplete
     /// traces; if it targets a different backend (e.g. Jaeger or Grafana Tempo), subsampling
     /// independently is safe.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub(crate) sampler: Option<SamplerOption>,
 }
 
@@ -254,15 +246,15 @@ pub(super) fn process_endpoint(
         .transpose()
 }
 
-#[derive(Debug, Clone, Deserialize, Serialize, Default, JsonSchema, PartialEq)]
-#[serde(deny_unknown_fields, default)]
+#[apollo_configuration::configuration]
+#[derive(Serialize, PartialEq)]
 pub(crate) struct HttpExporter {
     /// Headers to send on report requests
     pub(crate) headers: HashMap<String, String>,
 }
 
-#[derive(Debug, Clone, Deserialize, Default, JsonSchema, PartialEq)]
-#[serde(deny_unknown_fields, default)]
+#[apollo_configuration::configuration]
+#[derive(PartialEq)]
 pub(crate) struct GrpcExporter {
     /// The optional domain name for tls config.
     /// Note that domain name is will be defaulted to match the endpoint is not explicitly set.
@@ -277,13 +269,25 @@ pub(crate) struct GrpcExporter {
     pub(crate) key: Option<Redacted<String>>,
 
     /// gRPC metadata
+    // http::HeaderMap has no Validate impl.
+    #[config(skip_validate)]
     #[serde(with = "http_serde::header_map")]
     #[schemars(schema_with = "header_map", default)]
     pub(crate) metadata: http::HeaderMap,
 }
 
-fn header_map(generator: &mut schemars::SchemaGenerator) -> schemars::Schema {
-    HashMap::<String, Value>::json_schema(generator)
+/// `http_serde::header_map` reads each value as a string or a list of strings. Declaring them as
+/// strings also keeps an expanded `${env.NAME}` such as `12345` a string.
+fn header_map(_generator: &mut schemars::SchemaGenerator) -> schemars::Schema {
+    schemars::json_schema!({
+        "type": "object",
+        "additionalProperties": {
+            "anyOf": [
+                { "type": "string" },
+                { "type": "array", "items": { "type": "string" } }
+            ]
+        }
+    })
 }
 
 impl GrpcExporter {
@@ -325,19 +329,19 @@ impl GrpcExporter {
     }
 }
 
-#[derive(Debug, Default, Clone, Deserialize, Serialize, JsonSchema, PartialEq)]
-#[serde(deny_unknown_fields, rename_all = "snake_case")]
+#[apollo_configuration::configuration]
+#[derive(Serialize, PartialEq)]
 pub(crate) enum Protocol {
-    #[default]
+    #[config(default)]
     Grpc,
     Http,
 }
 
-#[derive(Debug, Default, Clone, Deserialize, Serialize, JsonSchema, PartialEq, Copy)]
-#[serde(deny_unknown_fields, rename_all = "snake_case")]
+#[apollo_configuration::configuration]
+#[derive(Serialize, PartialEq, Copy)]
 pub(crate) enum Temporality {
     /// Export cumulative metrics.
-    #[default]
+    #[config(default)]
     Cumulative,
     /// Export delta metrics. `Delta` should be used when exporting to DataDog Agent.
     Delta,

@@ -204,6 +204,16 @@ impl StorageInterface {
     pub(crate) fn replace_storage(&self, storage: Storage) -> Option<()> {
         self.all.as_ref()?.set(storage).ok()
     }
+
+    /// A `StorageInterface` whose connector `all` layer is `storage`, with nothing for subgraphs.
+    pub(crate) fn for_connectors(storage: Storage) -> Self {
+        Self {
+            all: None,
+            subgraphs: HashMap::new(),
+            connector_all: Some(Arc::new(storage.into())),
+            connector_sources: HashMap::new(),
+        }
+    }
 }
 
 #[cfg(all(
@@ -1325,6 +1335,50 @@ impl Service<subgraph::Request> for CacheService {
     }
 }
 
+/// The response cache for subgraph `name` in front of `service`, as the response cache places it
+/// for a subgraph it caches, with `store` as a mock Redis behind it.
+#[cfg(all(
+    test,
+    any(not(feature = "ci"), all(target_arch = "x86_64", target_os = "linux"))
+))]
+pub(crate) async fn subgraph_cache_for_test(
+    service: subgraph::BoxCloneService,
+    name: &str,
+    store: Arc<dyn fred::mocks::Mocks>,
+) -> subgraph::BoxCloneService {
+    let config = storage::redis::Config::test(false, "subgraph-cache");
+    let (_drop_tx, drop_rx) = tokio::sync::broadcast::channel(1);
+    let storage = Storage::mocked(&config, false, store, drop_rx)
+        .await
+        .expect("mock storage builds");
+    let supergraph_schema = Arc::new(
+        Schema::parse_and_validate(
+            "type Query { hello: String } type Product { upc: String name: String }",
+            "schema.graphql",
+        )
+        .unwrap(),
+    );
+
+    CacheService {
+        service,
+        name: name.to_string(),
+        entity_type: None,
+        storage: Arc::new(storage.into()),
+        subgraph_ttl: Duration::from_secs(60),
+        private_queries: Arc::new(RwLock::new(LruCache::new(
+            std::num::NonZeroUsize::new(1).unwrap(),
+        ))),
+        private_id_key_name: None,
+        debug: false,
+        supergraph_schema,
+        subgraph_enums: Default::default(),
+        lru_size_instrument: LruSizeInstrument::new("test.private_queries.lru.size"),
+        indexes: Default::default(),
+        cdn_invalidation_enabled: false,
+    }
+    .boxed_clone()
+}
+
 impl CacheService {
     async fn call_inner(
         mut self,
@@ -1395,7 +1449,8 @@ impl CacheService {
                                 .build(),
                         )
                         .extensions(Object::default())
-                        .build());
+                        .build()
+                        .answered_by_router());
                 }
             };
 
@@ -1561,7 +1616,7 @@ impl CacheService {
                     CacheSubgraph(cache_hit),
                 );
 
-                Ok(response)
+                Ok(response.answered_by_router())
             }
             ControlFlow::Continue((
                 request,
@@ -1762,7 +1817,7 @@ impl CacheService {
         ))
         .await?
         {
-            ControlFlow::Break(response) => Ok(response),
+            ControlFlow::Break(response) => Ok(response.answered_by_router()),
             ControlFlow::Continue((request, mut cache_result)) => {
                 let context = request.context.clone();
                 let mut debug_subgraph_request = None;
@@ -1841,25 +1896,32 @@ impl CacheService {
                     }
                 };
 
-                let mut cache_control =
+                let response_cache_control =
                     response.subgraph_cache_control(self.subgraph_ttl.into())?;
 
                 save_original_cache_control(
                     response.id.clone(),
                     &response.context,
-                    cache_control.clone(),
+                    response_cache_control.clone(),
                 );
 
-                if let Some(control_from_cached) = cache_result.1 {
-                    cache_control = cache_control.merge(&control_from_cached);
-                }
+                // The entities this response fetched are stored under its own Cache-Control. The
+                // client header also covers the entities served from cache in this fetch, so it is
+                // only as fresh as the oldest of them. Storing that merged value instead would
+                // give fresh entities the remaining lifetime of their cached siblings.
+                let mut store_cache_control = response_cache_control.clone();
+                let mut header_cache_control = match cache_result.1 {
+                    Some(control_from_cached) => response_cache_control.merge(&control_from_cached),
+                    None => response_cache_control,
+                };
 
-                // if the request had no_store on it, propagate that to this cache control
+                // if the request had no_store on it, propagate that to both cache controls
                 if let Some(request_cache_control) = request_cache_control {
-                    cache_control.merge_no_store(&request_cache_control);
+                    header_cache_control.merge_no_store(&request_cache_control);
+                    store_cache_control.merge_no_store(&request_cache_control);
                 }
 
-                if !is_known_private && cache_control.private() {
+                if !is_known_private && store_cache_control.private() {
                     self.private_queries
                         .write()
                         .await
@@ -1870,7 +1932,7 @@ impl CacheService {
                     storage,
                     self.subgraph_ttl,
                     &mut response,
-                    cache_control.clone(),
+                    store_cache_control,
                     cache_result.0,
                     is_known_private,
                     private_id,
@@ -1880,7 +1942,7 @@ impl CacheService {
                 )
                 .await?;
 
-                cache_control.update_response_headers(response.response.headers_mut())?;
+                header_cache_control.update_response_headers(response.response.headers_mut())?;
 
                 Ok(response)
             }

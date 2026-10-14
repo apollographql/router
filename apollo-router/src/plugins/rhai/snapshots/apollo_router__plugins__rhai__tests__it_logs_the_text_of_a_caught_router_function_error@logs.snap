@@ -1,0 +1,12 @@
+---
+source: apollo-router/src/plugins/rhai/tests.rs
+expression: yaml
+---
+- fields:
+    target: ""
+  level: ERROR
+  message: "missing header: header 'x-custom-header' not found"
+- fields:
+    target: ""
+  level: ERROR
+  message: "header 'x-custom-header' not found"

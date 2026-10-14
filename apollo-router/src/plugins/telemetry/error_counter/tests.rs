@@ -162,7 +162,7 @@ async fn test_count_connector_errors_counts_declared_errors() {
                         .into_parts()
                         .0,
                 }),
-                break_status: None,
+                answered_by_router: false,
                 mapped_response: MappedResponse::Data {
                     data: json!({ "account": { "balance": 0 } }),
                     key: ResponseKey::RootField {
@@ -263,7 +263,7 @@ async fn declared_errors_are_protected_from_double_counting_by_the_lift_not_the_
                         .into_parts()
                         .0,
                 }),
-                break_status: None,
+                answered_by_router: false,
                 mapped_response: MappedResponse::Data {
                     data: json!({ "account": { "balance": 0 } }),
                     key: ResponseKey::RootField {
@@ -350,7 +350,7 @@ async fn test_count_connector_errors_ignores_failed_responses() {
                         .into_parts()
                         .0,
                 }),
-                break_status: None,
+                answered_by_router: false,
                 mapped_response: MappedResponse::Error {
                     error,
                     key,

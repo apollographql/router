@@ -457,12 +457,12 @@ async fn it_handles_cancelled_by_rhai() -> Result<(), BoxError> {
         entryA:
           index: 0
     - errors:
-        - message: "rhai execution error: 'Runtime error: cancelled expected failure (line 5, position 13)'"
+        - message: cancelled expected failure
     - data:
         entryA:
           index: 1
     - errors:
-        - message: "rhai execution error: 'Runtime error: cancelled expected failure (line 5, position 13)'"
+        - message: cancelled expected failure
     "###);
     }
 
@@ -551,7 +551,7 @@ async fn it_handles_single_request_cancelled_by_rhai() -> Result<(), BoxError> {
         entryA:
           index: 1
     - errors:
-        - message: "rhai execution error: 'Runtime error: cancelled expected failure (line 5, position 13)'"
+        - message: cancelled expected failure
     "###);
     }
 

@@ -579,7 +579,7 @@ mod tests {
                 problems: mapping_problems,
                 declared_errors: vec![],
             },
-            break_status: None,
+            answered_by_router: false,
         }
     }
 
@@ -600,7 +600,7 @@ mod tests {
                 key: response_key(),
                 problems: vec![],
             },
-            break_status: None,
+            answered_by_router: false,
         }
     }
 
@@ -629,7 +629,7 @@ mod tests {
                 problems: vec![],
                 declared_errors: vec![],
             },
-            break_status: None,
+            answered_by_router: false,
         }
     }
 
