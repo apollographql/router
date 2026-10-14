@@ -473,13 +473,12 @@ pub(crate) trait InternalServiceBuilderExt<L>: Sized {
 
     /// Apply the layer of a *mandatory* plugin to a service stack.
     ///
-    /// Unlike [`Self::apply_plugin_layer`], the layer is applied as returned, without an
-    /// [`OptionLayer`] around it: `create_plugins` always registers the plugin, so a pass-through
-    /// side would never be taken and would only double the type of the service beneath.
+    /// Unlike [`Self::apply_plugin_layer`], the layer is applied as the getter returns it,
+    /// never skipped.
     ///
     /// # Panics
     ///
-    /// When the plugin is missing from the registry, since that is a router bug.
+    /// If the plugin is missing from the registry.
     fn apply_required_plugin_layer<P, OutLayer>(
         self,
         plugins: &Plugins,
