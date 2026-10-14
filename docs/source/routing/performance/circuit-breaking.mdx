@@ -169,7 +169,7 @@ Subgraphs and connector sources are configured independently: an `all` block und
 Every request to a subgraph or connector source passes through two phases, and the circuit sits between them:
 
 - **Admission** is the router deciding whether to send the request at all: a traffic shaping [rate limit](./traffic-shaping#rate-limiting) and the load shedding in front of it, and a connector's [`max_requests`](/graphos/routing/connectors/limits) limit. These run before the circuit, so a request they turn away never reaches it and isn't recorded, as either a failure or a success. The router's own throttling can't open the circuit of a healthy target, and a throttled request can't stand in for the probe that closes one.
-- **Execution** is everything the router does to fulfill an admitted request: [coprocessors](/router/customizations/coprocessor), [rhai scripts](/graphos/routing/customization/rhai), the [response cache](./caching/response-caching) (except a connector's entity lookups, which happen first; see [Cached connector entities](#cached-connector-entities)), your own [native Rust plugins](/graphos/routing/customization/native), and the call to the target, all bounded by the target's [traffic shaping timeout](./traffic-shaping#timeouts). These run behind the circuit, so the circuit judges its target by the outcome of all of them together.
+- **Execution** is everything the router does to fulfill an admitted request: [coprocessors](/router/customizations/coprocessor), [rhai scripts](/graphos/routing/customization/rhai), the [response cache](./caching/response-caching), except for a connector's entity lookups (see [Cached connector entities](#cached-connector-entities)), your own [native Rust plugins](/graphos/routing/customization/native), and the call to the target, all bounded by the target's [traffic shaping timeout](./traffic-shaping#timeouts). These run behind the circuit, so the circuit judges its target by the outcome of all of them together.
 
 Identical requests joined by [query deduplication](./traffic-shaping#query-deduplication) are one call to the target, so they're recorded once, and each of them receives the same answer.
 
@@ -255,7 +255,9 @@ The router looks up a connector's entities in the [response cache](/graphos/rout
 
 - An entity fetch whose entities are all cached is served from the cache, with no error.
 - An entity fetch whose entities are only partly cached returns the cached entities. Each entity that isn't cached is `null`, with a `REQUEST_CIRCUIT_BREAKER_OPEN` error.
-- Every other request to the source fails with `REQUEST_CIRCUIT_BREAKER_OPEN`, including a root field fetch whose response is cached.
+- Every other request the router sends to the source fails with `REQUEST_CIRCUIT_BREAKER_OPEN`, including a root field fetch whose response is cached.
+
+A fully cached entity fetch never reaches the circuit, whether the circuit is open or closed. It isn't recorded as a success or a failure, isn't counted in `apollo.qos.circuit_breaker.requests`, opens no `apollo.qos.circuit_breaker` span, and can't be the probe that closes the circuit. In a partly cached fetch, only the request for the uncached entities reaches the circuit, and it's recorded like any other request.
 
 An entity counts as cached only when the response cache would also serve it with the circuit closed. If the cache is skipped, for example because caching is turned off for the source or the client sent `Cache-Control: no-cache`, the request goes to the source's circuit and is rejected.
 
