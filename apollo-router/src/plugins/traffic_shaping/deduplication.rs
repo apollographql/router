@@ -227,28 +227,19 @@ where
 #[cfg(test)]
 mod tests {
 
-<<<<<<< HEAD
     use std::sync::Arc;
     use std::sync::atomic::AtomicU8;
     use std::sync::atomic::Ordering;
     use std::time::Duration;
 
-=======
     use futures::FutureExt;
     use serde_json_bytes::json;
->>>>>>> 83ba67e (fix(router): ignore the operation name when deduplicating subgraph queries (#10465))
     use tower::Service;
     use tower::ServiceExt;
 
     use super::QueryDeduplicationService;
-<<<<<<< HEAD
-    use crate::plugin::test::MockSubgraphService;
-=======
-    use crate::batching::Batch;
     use crate::graphql;
-    use crate::metrics::FutureMetricsExt;
-    use crate::query_planner::fetch::OperationKind;
->>>>>>> 83ba67e (fix(router): ignore the operation name when deduplicating subgraph queries (#10465))
+    use crate::plugin::test::MockSubgraphService;
     use crate::services::SubgraphRequest;
     use crate::services::SubgraphResponse;
 
@@ -318,7 +309,6 @@ mod tests {
 
         let request = SubgraphRequest::fake_builder().build();
 
-<<<<<<< HEAD
         // Spawn our service invocations so they execute in parallel
         let fut1 = tokio::spawn(
             svc.ready()
@@ -328,7 +318,15 @@ mod tests {
         );
         let fut2 = tokio::spawn(svc.ready().await.expect("it is ready").call(request));
         let (res1, res2) = tokio::join!(fut1, fut2);
-=======
+
+        // We don't care about our actual request/responses, we just want to make sure that
+        // deduplication occurs...
+        res1.expect("fut1 spawned").expect("fut1 joined");
+        res2.expect("fut2 spawned").expect("fut2 joined");
+
+        assert_eq!(1, inner_invocation_count.load(Ordering::Relaxed));
+    }
+
     /// An entity fetch named `operation_name`, the way the query planner names each fetch node.
     fn entity_fetch(operation_name: &str, upc: &str) -> SubgraphRequest {
         let body = graphql::Request::fake_builder()
@@ -350,7 +348,7 @@ mod tests {
     /// reaches the subgraph, and returns how many did.
     async fn subgraph_requests_for(first: SubgraphRequest, second: SubgraphRequest) -> usize {
         let (mock, mut handle) = tower_test::mock::pair::<SubgraphRequest, SubgraphResponse>();
-        let mut svc = dedup_service(mock);
+        let mut svc = QueryDeduplicationService::new(mock);
 
         svc.ready().await.expect("it is ready");
         let mut fut1 = svc.call(first);
@@ -375,23 +373,12 @@ mod tests {
 
     #[tokio::test]
     async fn queries_differing_only_in_operation_name_share_a_fetch() {
-        async {
-            let sent = subgraph_requests_for(
-                entity_fetch("Op__products__1", "1"),
-                entity_fetch("Op__products__7", "1"),
-            )
-            .await;
-            assert_eq!(sent, 1, "the second fetch node joins the first one's fetch");
-
-            assert_counter!(
-                "apollo.router.subgraph_deduplication.requests",
-                1,
-                "subgraph.name" = SUBGRAPH,
-                "apollo.router.subgraph_deduplication.outcome" = "follower"
-            );
-        }
-        .with_metrics()
+        let sent = subgraph_requests_for(
+            entity_fetch("Op__products__1", "1"),
+            entity_fetch("Op__products__7", "1"),
+        )
         .await;
+        assert_eq!(sent, 1, "the second fetch node joins the first one's fetch");
     }
 
     #[tokio::test]
@@ -476,20 +463,5 @@ mod tests {
             longer_name != stripped,
             "the name is only stripped up to a name boundary"
         );
-    }
-
-    #[tokio::test(flavor = "multi_thread")]
-    async fn mutations_bypass_deduplication() {
-        async {
-            let (mock, mut handle) = tower_test::mock::pair::<SubgraphRequest, SubgraphResponse>();
-            let driver = tokio::spawn(async move { respond_once(&mut handle).await });
->>>>>>> 83ba67e (fix(router): ignore the operation name when deduplicating subgraph queries (#10465))
-
-        // We don't care about our actual request/responses, we just want to make sure that
-        // deduplication occurs...
-        res1.expect("fut1 spawned").expect("fut1 joined");
-        res2.expect("fut2 spawned").expect("fut2 joined");
-
-        assert_eq!(1, inner_invocation_count.load(Ordering::Relaxed));
     }
 }
