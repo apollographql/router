@@ -466,6 +466,8 @@ with additional attributes including the `service` and `code` found in [GraphQL 
 Additional diagnostic capabilities available in Studio now support viewing errors by `service` or `code`. The `service` dimension refers to the subgraph or connector where the error originated from.
 The `code` refers to the specific type of error that was raised by the router, federated subgraphs, or connectors.
 
+This includes the errors a connector's response mapping declares with `->withError`, which clients read in `extensions.connectorErrors` rather than in `errors`. Their `service` is the connector's subgraph, and their `code` is the one the mapping author supplied. They are counted at the connector, so `include_subgraph_errors` withholding one from a *client* does not suppress its metric, while a subgraph's `send: false` does withhold it from Studio.
+
 #### Cardinality limitations
 
 At scale, some metrics are known to hit cardinality limitations in the OTel reporting agent. When this happens, some of the metrics' attributes may no longer

@@ -116,7 +116,8 @@ LitExpr              ::= LitOpChain | LitPath | LitPrimitive | LitObject | LitAr
 LitOpChain           ::= LitExpr (LitOp LitExpr)+
 LitOp                ::= "??" | "?!"
 LitPath              ::= (LitPrimitive | LitObject | LitArray) NonEmptyPathTail
-LitPrimitive         ::= LitString | LitNumber | "true" | "false" | "null"
+LitPrimitive         ::= LitString | LitNumber | LitKeyword
+LitKeyword           ::= "true" | "false" | "null"
 LitString            ::= "'" ("\\'" | [^'])* "'" | '"' ('\\"' | [^"])* '"'
 LitNumber            ::= "-"? ([0-9]+ ("." [0-9]*)? | "." [0-9]+)
 LitObject            ::= SubSelection
@@ -126,6 +127,16 @@ SpacesOrComments     ::= (Spaces | Comment)+
 Spaces               ::= ("⎵" | "\t" | "\r" | "\n")+
 Comment              ::= "#" [^\n]*
 ```
+
+### Lexical conventions
+
+**Whitespace and comments may appear between any two tokens**, except where
+`NO_SPACE` forbids it (inside an `Identifier`, or between `$` and a variable
+name).
+
+**Terminals are longest-match**, so `nullField` is one `Identifier` rather
+than `LitKeyword` followed by `Field`. `LitNumber` is the one exception (see
+below), and `NamedSelectionList` extends the rule across items.
 
 The grammar above describes `connect/v0.4` and later. Earlier spec versions
 used a stricter grammar in which `LitObject` was a distinct rule from
@@ -306,6 +317,13 @@ whitespace-only separation — the two styles cannot be mixed within a
 single list. This rule is shared by the top-level `JSONSelection` and
 by `SubSelection` bodies, so braced and unbraced selection lists accept
 exactly the same separator conventions.
+
+One constraint is not expressible in the EBNF: **two items may not abut with
+an identifier character on each side and nothing between them.** Such a seam
+can only come from a name the parser stopped reading early (as when
+`alias: nullFoo` once parsed as `alias: null Foo`), so it is reported as an
+error rather than read as two items. Seams after a self-delimiting token are
+unaffected, so `{a{x}b}` still parses.
 
 ### `SubSelection ::= "{" NamedSelectionList "}"`
 
@@ -1171,13 +1189,22 @@ This rule and the JSON-superset property are independent: the
 JSON (JSON requires `:` or `,` between values), so JSON-shaped input
 pasted into a `LitExpr` context never triggers it.
 
-### `LitPrimitive ::= LitString | LitNumber | "true" | "false" | "null"`
+### `LitPrimitive ::= LitString | LitNumber | LitKeyword`
 
 ![LitPrimitive](./grammar/LitPrimitive.svg)
 
-Analogous to a JSON primitive value, with the only differences being that
-`LitNumber` does not currently support the exponential syntax, and `LitString`
-values can be single-quoted as well as double-quoted.
+Analogous to a JSON primitive value, except that `LitNumber` does not support
+exponents but does accept `123.` and `.5`, and `LitString` values may be
+single-quoted.
+
+### `LitKeyword ::= "true" | "false" | "null"`
+
+![LitKeyword](./grammar/LitKeyword.svg)
+
+By the longest-match rule, `null` and `null.foo` are literals but `nullField`
+is a `Key`. The keywords are not reserved: `null { x }` selects a field named
+`null` (see "Literals followed by a SubSelection" above), as does `$.null` in
+a `LitExpr`.
 
 ### `LitString ::= "'" ("\\'" | [^'])* "'" | '"' ('\\"' | [^"])* '"'`
 
@@ -1207,6 +1234,11 @@ present, and the fractional component can have zero digits when the integer
 component is present (as in `-123.`), but the fractional component must have at
 least one digit when there is no integer component, since `.` is not a valid
 numeric literal by itself.
+
+**This is the one exception to the longest-match rule.** When the `.` is
+followed by a character that could begin a `Key`, it belongs to a `PathStep`
+instead, so `1.foo` and `1."quoted"` are paths rooted at `1`, while `1.` and
+`1.->add(2)` are numbers. The EBNF above does not encode this lookahead.
 
 ### `LitObject ::= SubSelection`
 
