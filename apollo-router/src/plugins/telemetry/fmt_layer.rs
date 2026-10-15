@@ -558,7 +558,7 @@ connector:
     }
 
     /// Fields recorded with `tracing::field::valuable` only exist in builds that set
-    /// `--cfg tracing_unstable`; run these tests with `RUSTFLAGS="--cfg tracing_unstable"`.
+    /// `--cfg tracing_unstable`; the Linux CI test job exercises these tests.
     #[cfg(tracing_unstable)]
     mod valuable_fields {
         use super::*;
