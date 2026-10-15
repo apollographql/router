@@ -587,6 +587,10 @@ fn score_options<S: BulbSearchSpace>(
     for (i, choice) in options.iter().enumerate() {
         space.apply(candidate, decision, choice);
         let cost = space.cost(candidate);
+        debug_assert!(
+            cost >= floor,
+            "option {i} costs {cost}, below the decision's starting cost {floor}",
+        );
         // Dropping a non-viable option here keeps it out of the alt slice,
         // which is explored first, and out of the beam-width count that
         // decides whether another discrepancy iteration runs.
@@ -984,6 +988,23 @@ mod tests {
         assert_eq!(result.expect("complete plan").path, vec![0, 0]);
         // One scoring apply and one committing apply per level.
         assert_eq!(space.effort.get(), 4);
+    }
+
+    /// The floor stop is only sound for spaces whose cost never decreases.
+    #[test]
+    #[should_panic(expected = "below the decision's starting cost")]
+    fn scoring_rejects_a_cost_below_the_floor() {
+        let space = LevelSpace {
+            options_per_level: vec![vec![0, 1]],
+            cost_fn: Box::new(|_, level| 10.0 - level as f64),
+            effort: std::cell::Cell::new(0),
+        };
+        let config = BulbConfig {
+            beam_width: 1,
+            fuel: 0,
+            timeout: default_timeout(),
+        };
+        let _ = bulb_search(&space, initial(), config, None);
     }
 
     /// Options left unscored by the floor stop are still alternatives, so a
