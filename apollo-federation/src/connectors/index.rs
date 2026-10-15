@@ -55,6 +55,10 @@ pub struct ConnectorIndex {
     entity_resolvers: HashMap<Name, Vec<Arc<IndexedConnector>>>,
     /// connector coordinate -> static output shape of its `selection`.
     output_shapes: HashMap<Arc<str>, Shape>,
+    /// connector coordinate -> the field an `Implicit` (field-level) entity
+    /// resolver provides. Its `selection` describes that field's value, not
+    /// the entity.
+    implicit_fields: HashMap<Arc<str>, Name>,
     /// connector coordinate -> parent-data key condition for entering the
     /// connector, parsed against its subgraph schema. Present only for
     /// entity-resolver connectors with a resolvable key.
@@ -137,6 +141,11 @@ impl ConnectorIndex {
                 }
 
                 if let ConnectorPosition::Field(pos) = &connector.id.directive {
+                    if matches!(connector.entity_resolver, Some(EntityResolver::Implicit)) {
+                        index
+                            .implicit_fields
+                            .insert(entry.coordinate.clone(), pos.field.field_name().clone());
+                    }
                     index
                         .by_field
                         .entry((
@@ -179,13 +188,16 @@ impl ConnectorIndex {
         self.key_conditions.get(coordinate)
     }
 
-    /// Whether a connector's `selection` returns `field` at the top level of
-    /// its (object-shaped) output. `__typename` is always available. False
-    /// for non-object output shapes — a scalar connector resolves no entity
-    /// fields beyond its own.
+    /// Whether an entity-resolver connector provides `field` of the entity.
+    /// `__typename` is always available. A field-level (`Implicit`) resolver
+    /// provides only its own field. Otherwise, whether the `selection`
+    /// returns `field` at the top level of its (object-shaped) output.
     pub(crate) fn resolver_provides(&self, coordinate: &str, field: &str) -> bool {
         if field == "__typename" {
             return true;
+        }
+        if let Some(own_field) = self.implicit_fields.get(coordinate) {
+            return own_field == field;
         }
         match self.output_shapes.get(coordinate).map(|s| s.case()) {
             Some(ShapeCase::Object { fields, .. }) => fields.contains_key(field),
@@ -440,6 +452,22 @@ mod tests {
         assert!(index.resolver_provides(coordinate, "__typename"));
         assert!(!index.resolver_provides(coordinate, "email"));
         assert!(index.output_shape(coordinate).is_some());
+    }
+
+    /// A field-level resolver's selection describes its field's value
+    /// (`User.posts` returns `id title body` per post), so it provides only
+    /// its own field of the entity.
+    #[test]
+    fn field_resolver_provides_only_its_own_field() {
+        let index = index_from_supergraph(include_str!(
+            "../query_plan/incremental_planner/fixtures/connector_join_directive_link.graphql"
+        ))
+        .expect("index builds");
+        let coordinate = "connectors:User.posts[0]";
+        assert!(index.resolver_provides(coordinate, "posts"));
+        assert!(index.resolver_provides(coordinate, "__typename"));
+        assert!(!index.resolver_provides(coordinate, "id"));
+        assert!(!index.resolver_provides(coordinate, "title"));
     }
 
     /// A field connector that references no `$this` is keyed on
