@@ -3980,6 +3980,61 @@ fn connector_interface_object_field_connector_under_implementation() {
     "#);
 }
 
+/// A field connector's selection describes its field's value: `User.posts`
+/// selecting `name` does not make it a source for `User.name`, which takes
+/// the two-hop route through `d` to `b`.
+#[test]
+fn connector_field_selection_does_not_provide_entity_fields() {
+    let plan_str = plan_query_with_router_specs(
+        include_str!("../fixtures/connector_field_selection_not_entity_fields.graphql"),
+        "{ users { name } }",
+    );
+    insta::assert_snapshot!(plan_str, @r#"
+    QueryPlan {
+      Sequence {
+        Fetch(service: "a") {
+          {
+            users {
+              __typename
+              id
+            }
+          }
+        },
+        Flatten(path: "users.@") {
+          Fetch(service: "d") {
+            {
+              ... on User {
+                __typename
+                id
+              }
+            } =>
+            {
+              ... on User {
+                email
+              }
+            }
+          },
+        },
+        Flatten(path: "users.@") {
+          Fetch(service: "b") {
+            {
+              ... on User {
+                __typename
+                email
+              }
+            } =>
+            {
+              ... on User {
+                name
+              }
+            }
+          },
+        },
+      },
+    }
+    "#);
+}
+
 /// A connector selection that names an object field without sub-selections
 /// (address without braces) yields a non-object child shape; the query's
 /// sub-selections under it are kept whole in the connector fetch.
