@@ -38,6 +38,7 @@ use crate::configuration::Configuration;
 use crate::http_server_factory::Listener;
 use crate::http_server_factory::NetworkStream;
 use crate::metrics::FutureMetricsExt;
+use crate::plugins::limits::http2_header_list;
 use crate::plugins::telemetry::SpanMode;
 use crate::router::ApolloRouterError;
 use crate::router_factory::Endpoint;
@@ -96,23 +97,35 @@ pub(super) fn ensure_endpoints_consistency(
 
 pub(super) fn extra_endpoints(
     endpoints: MultiMap<ListenAddr, Endpoint>,
+    configuration: &Configuration,
 ) -> MultiMap<ListenAddr, Router> {
     let mut mm: MultiMap<ListenAddr, axum::Router> = Default::default();
     mm.extend(endpoints.into_iter().map(|(listen_addr, e)| {
         (
             listen_addr,
             e.into_iter()
-                .map(|e| {
-                    let mut router = e.into_router();
-                    if let Some(main_endpoint_layer) = ENDPOINT_CALLBACK.get() {
-                        router = main_endpoint_layer(router);
-                    }
-                    router
-                })
+                .map(|e| endpoint_router(e, configuration))
                 .collect::<Vec<_>>(),
         )
     }));
     mm
+}
+
+/// Builds a plugin endpoint's router, on any listener.
+///
+/// Plugin endpoints don't go through the limits plugin, so they get their own HTTP/2
+/// header-list check.
+pub(super) fn endpoint_router(endpoint: Endpoint, configuration: &Configuration) -> Router {
+    let mut router = endpoint
+        .into_router()
+        .layer(axum::middleware::from_fn_with_state(
+            configuration.limits.router.http2_header_list_limit(),
+            http2_header_list::reject_oversized,
+        ));
+    if let Some(main_endpoint_layer) = ENDPOINT_CALLBACK.get() {
+        router = main_endpoint_layer(router);
+    }
+    router
 }
 
 /// Binding different listen addresses to the same port will "relax" the requirements, which
@@ -506,12 +519,14 @@ fn configure_connection(
 ) -> Http1Builder<'_, TokioExecutor> {
     // NOTE: this is a builder that auto-detects http1/http2, so we can configure both and rely on
     // it to figure out whether we have an http1 or http2 connection
-    let max_header_list_size = u32::try_from(http2_max_headers_list_bytes.as_u64())
-        .inspect_err(|e| tracing::warn!("attempted to use an HTTP/2 header size limit greater than is allowed by u32 (~4.3gb): {e}"))
-        .unwrap_or(u32::MAX);
+    //
+    // h2 is given a larger limit than the configured one so that requests just over it reach the
+    // limits plugin, which rejects them with a 431 that telemetry records.
     conn_builder
         .http2()
-        .max_header_list_size(max_header_list_size);
+        .max_header_list_size(http2_header_list::advertised_size(
+            http2_max_headers_list_bytes,
+        ));
 
     let mut builder = conn_builder.http1();
 
@@ -964,5 +979,157 @@ mod tests {
         }
         .with_metrics()
         .await;
+    }
+
+    /// Browser-style cookies: one `cookie` field per ~100-byte crumb, totalling about `total` bytes
+    /// of header list.
+    fn cookie_crumbs(total: usize) -> Vec<String> {
+        (0..total / 138)
+            .map(|i| format!("c{i:04}={}", "v".repeat(94)))
+            .collect()
+    }
+
+    async fn send_h2c(
+        addr: &ListenAddr,
+        path: &str,
+        cookies: &[String],
+    ) -> http::Response<hyper::body::Incoming> {
+        let (ip, port) = addr.ip_and_port().unwrap();
+        let stream = tokio::net::TcpStream::connect((ip, port)).await.unwrap();
+        let (mut sender, conn) =
+            hyper::client::conn::http2::handshake(TokioExecutor::new(), TokioIo::new(stream))
+                .await
+                .unwrap();
+        tokio::spawn(conn);
+        let mut request = http::Request::builder()
+            .method("POST")
+            .uri(format!("http://{ip}:{port}{path}"));
+        for cookie in cookies {
+            request = request.header("cookie", cookie);
+        }
+        sender
+            .send_request(
+                request
+                    .body(http_body_util::Empty::<bytes::Bytes>::new())
+                    .unwrap(),
+            )
+            .await
+            .unwrap()
+    }
+
+    #[derive(Clone, Default)]
+    struct RouterSpanCounter(Arc<std::sync::atomic::AtomicUsize>);
+
+    impl<S: tracing::Subscriber> tracing_subscriber::Layer<S> for RouterSpanCounter {
+        fn on_new_span(
+            &self,
+            attrs: &tracing::span::Attributes<'_>,
+            _: &tracing::span::Id,
+            _: tracing_subscriber::layer::Context<'_, S>,
+        ) {
+            if attrs.metadata().name() == crate::plugins::telemetry::consts::ROUTER_SPAN_NAME {
+                self.0.fetch_add(1, Ordering::SeqCst);
+            }
+        }
+    }
+
+    #[tokio::test]
+    async fn it_returns_a_router_431_for_http2_header_lists_over_the_limit() {
+        use tracing_subscriber::layer::SubscriberExt;
+
+        // A current-thread runtime runs the server's tasks on this thread, under this subscriber.
+        let spans = RouterSpanCounter::default();
+        let _guard =
+            tracing::subscriber::set_default(tracing_subscriber::registry().with(spans.clone()));
+
+        let conf = Arc::new(Configuration::fake_builder().build().unwrap());
+        let endpoint = service_fn(|req: router::Request| async move {
+            router::Response::http_response_builder()
+                .response(http::Response::builder().body(body::empty())?)
+                .context(req.context)
+                .build()
+        })
+        .boxed();
+        let mut web_endpoints = MultiMap::new();
+        web_endpoints.insert(
+            conf.supergraph.listen.clone(),
+            Endpoint::from_router_service("/custom".to_string(), endpoint),
+        );
+        let (server, _) = init_with_config(router::service::empty().await, conf, web_endpoints)
+            .await
+            .unwrap();
+        let addr = server.graphql_listen_address().clone().unwrap();
+
+        // Both sizes are under the advertised 64 KiB, so h2 passes them to the limits plugin. They
+        // cover the bands where h2 would send its own bare 431 (20 KiB) or close the connection
+        // (60 KiB) if it enforced the limit itself.
+        for size in [20 * 1024, 60 * 1024] {
+            let response = send_h2c(&addr, "/", &cookie_crumbs(size)).await;
+            assert_eq!(
+                response.status(),
+                StatusCode::REQUEST_HEADER_FIELDS_TOO_LARGE
+            );
+            assert_eq!(
+                response.headers().get(CONTENT_TYPE).unwrap(),
+                APPLICATION_JSON.essence_str()
+            );
+        }
+        assert_eq!(spans.0.load(Ordering::SeqCst), 2, "one router span per 431");
+
+        let response = send_h2c(&addr, "/custom", &cookie_crumbs(4 * 1024)).await;
+        assert_eq!(response.status(), StatusCode::OK);
+        let response = send_h2c(&addr, "/custom", &cookie_crumbs(20 * 1024)).await;
+        assert_eq!(
+            response.status(),
+            StatusCode::REQUEST_HEADER_FIELDS_TOO_LARGE
+        );
+
+        server.shutdown().await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn it_advertises_a_larger_http2_header_list_size_than_the_limit() {
+        use tokio::io::AsyncReadExt;
+        use tokio::io::AsyncWriteExt;
+
+        const SETTINGS_FRAME: u8 = 0x4;
+        const SETTINGS_MAX_HEADER_LIST_SIZE: u16 = 0x6;
+
+        let (server, _) = init_with_config(
+            router::service::empty().await,
+            Arc::new(Configuration::fake_builder().build().unwrap()),
+            MultiMap::new(),
+        )
+        .await
+        .unwrap();
+        let (ip, port) = server
+            .graphql_listen_address()
+            .as_ref()
+            .unwrap()
+            .ip_and_port()
+            .unwrap();
+
+        // The server's SETTINGS frame is the first frame it sends after the client preface.
+        let mut stream = tokio::net::TcpStream::connect((ip, port)).await.unwrap();
+        stream
+            .write_all(b"PRI * HTTP/2.0\r\n\r\nSM\r\n\r\n\0\0\0\x04\0\0\0\0\0")
+            .await
+            .unwrap();
+        let mut header = [0u8; 9];
+        stream.read_exact(&mut header).await.unwrap();
+        assert_eq!(header[3], SETTINGS_FRAME);
+        let len = u32::from_be_bytes([0, header[0], header[1], header[2]]) as usize;
+        let mut payload = vec![0u8; len];
+        stream.read_exact(&mut payload).await.unwrap();
+
+        let max_header_list_size = payload
+            .as_chunks::<6>()
+            .0
+            .iter()
+            .find(|s| u16::from_be_bytes([s[0], s[1]]) == SETTINGS_MAX_HEADER_LIST_SIZE)
+            .map(|s| u32::from_be_bytes([s[2], s[3], s[4], s[5]]));
+        assert_eq!(max_header_list_size, Some(64 * 1024));
+
+        server.shutdown().await.unwrap();
     }
 }
