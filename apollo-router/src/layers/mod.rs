@@ -19,6 +19,8 @@ use crate::layers::map_future_with_request_data::MapFutureWithRequestDataLayer;
 use crate::layers::map_future_with_request_data::MapFutureWithRequestDataService;
 use crate::layers::sync_checkpoint::CheckpointLayer;
 use crate::layers::unconstrained_buffer::UnconstrainedBufferLayer;
+use crate::plugin::PluginPrivate;
+use crate::services::Plugins;
 use crate::services::supergraph;
 
 pub mod async_checkpoint;
@@ -460,3 +462,83 @@ pub trait ServiceExt<Request>: Service<Request> {
     }
 }
 impl<T: ?Sized, Request> ServiceExt<Request> for T where T: Service<Request> {}
+
+/// Helper type to name layers produced by [`ServiceBuilder::option_layer()`].
+type OptionLayer<L> = tower::util::Either<L, tower::layer::util::Identity>;
+
+/// Extension to [`ServiceBuilder`] for pipeline utilities that are not exposed to crate consumers.
+pub(crate) trait InternalServiceBuilderExt<L>: Sized {
+    /// Apply a plugin layer to a service stack.
+    ///
+    /// Provide the plugin layer to apply as a method reference.
+    ///
+    /// If the plugin isn't available in the `plugins` registry, this function is a no-op.
+    ///
+    /// ## Example
+    ///
+    /// To apply the limits plugin's header-list layer to a plugin endpoint:
+    ///
+    /// ```rust,ignore
+    /// ServiceBuilder::new()
+    ///     .apply_plugin_layer(&plugins, LimitsPlugin::endpoint_header_list_layer)
+    ///     .service(endpoint_service)
+    /// ```
+    fn apply_plugin_layer<P, OutLayer>(
+        self,
+        plugins: &Plugins,
+        get_layer: impl FnOnce(&P) -> OutLayer,
+    ) -> ServiceBuilder<Stack<OptionLayer<OutLayer>, L>>
+    where
+        P: PluginPrivate;
+}
+
+/// Find the single instance of plugin type `P` in the registry, if it was built.
+fn find_plugin<P: PluginPrivate>(plugins: &Plugins) -> Option<&P> {
+    plugins
+        .values()
+        .find_map(|plugin| plugin.as_any().downcast_ref::<P>())
+}
+
+impl<L> InternalServiceBuilderExt<L> for ServiceBuilder<L> {
+    fn apply_plugin_layer<P, OutLayer>(
+        self,
+        plugins: &Plugins,
+        get_layer: impl FnOnce(&P) -> OutLayer,
+    ) -> ServiceBuilder<Stack<OptionLayer<OutLayer>, L>>
+    where
+        P: PluginPrivate,
+    {
+        self.option_layer(find_plugin::<P>(plugins).map(get_layer))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use tower::ServiceBuilder;
+    use tower::layer::util::Identity;
+
+    use super::InternalServiceBuilderExt;
+    use crate::services::Plugins;
+    use crate::test_harness::MockedSubgraphs;
+
+    #[test]
+    fn apply_plugin_layer_uses_the_registered_plugin() {
+        let mut plugins = Plugins::default();
+        plugins.insert("mocks".to_string(), Box::new(MockedSubgraphs::default()));
+        let mut called = false;
+        let _ = ServiceBuilder::new().apply_plugin_layer(&plugins, |_: &MockedSubgraphs| {
+            called = true;
+            Identity::new()
+        });
+        assert!(called);
+    }
+
+    #[test]
+    fn apply_plugin_layer_skips_a_missing_plugin() {
+        let plugins = Plugins::default();
+        let _ =
+            ServiceBuilder::new().apply_plugin_layer(&plugins, |_: &MockedSubgraphs| -> Identity {
+                panic!("the layer getter must not run without the plugin")
+            });
+    }
+}
