@@ -12,6 +12,8 @@ use shape::Shape;
 use shape::ShapeCase;
 use shape::location::Location;
 use shape::location::SourceId;
+use shape::name::Name;
+use shape::name::NameCase;
 
 use super::Ref;
 use super::helpers::json_merge;
@@ -24,8 +26,10 @@ use super::location::OffsetRange;
 use super::location::Ranged;
 use super::location::WithRange;
 use super::methods::ArrowMethod;
+use super::methods::common::with_arg_errors;
 use super::parser::*;
 use super::selection_trie::SelectionTrie;
+use crate::connectors::json_selection::helpers::missing_as_null;
 use crate::connectors::spec::ConnectSpec;
 
 pub(super) type VarsWithPathsMap<'a> = IndexMap<KnownVariable, (&'a JSON, InputPath<JSON>)>;
@@ -232,6 +236,19 @@ pub(crate) struct ShapeContext {
     /// the *same* trie — each step of the recursion appends into one place.
     /// Inspectable with [`ShapeContext::consumption`] after recursion ends.
     consumption: Ref<RefCell<SelectionTrie>>,
+
+    /// The `->` method call whose shape is being computed with this context,
+    /// if any, which records the shapes its arguments produce. Each call gets
+    /// a child context of its own. See [`ShapeContext::compute_method_shape`].
+    method_call: Option<Ref<MethodCall>>,
+}
+
+/// The arguments of one `->` method call, identified by their source ranges,
+/// and the shapes they produced while the method's shape was computed.
+#[derive(Debug)]
+struct MethodCall {
+    arg_ranges: Vec<std::ops::Range<usize>>,
+    arg_shapes: RefCell<Vec<Shape>>,
 }
 
 impl ShapeContext {
@@ -247,6 +264,86 @@ impl ShapeContext {
             named_shapes: IndexMap::default(),
             source_id,
             consumption,
+            method_call: None,
+        }
+    }
+
+    /// Computes the result shape of a `->` method call with `compute`, then
+    /// carries over any errors in the shapes its arguments produced.
+    ///
+    /// At runtime, an error in an argument is reported whether or not the
+    /// method's result includes the argument's value, like the condition of
+    /// `->filter` or the separator of `->joinNotNull`. Shape errors are
+    /// metadata on the shape instead, so an error in an argument shape would
+    /// be lost whenever a method builds its result without it.
+    ///
+    /// `compute` gets a child context for this call, which records the shape
+    /// of each argument the method computes with it (see
+    /// [`Self::record_method_arg_shape`]). That keeps argument errors without
+    /// every method having to, and follows the method's own choice of which
+    /// arguments to evaluate and what `@` is bound to while it does. A nested
+    /// call gets its own child context, so each call only records its own
+    /// arguments.
+    ///
+    /// An error inside a union member, like one `->match` branch, may not
+    /// happen at runtime, but validation already rejects a union with an
+    /// error member, so it is carried over too.
+    ///
+    /// Anything this misses keeps the behavior from before it existed, with
+    /// the error dropped: an argument with no source range, parts of an
+    /// argument a method computes separately (see `ArrowMethodImpl::shape`),
+    /// and `->as`, whose variables carry their own errors to where they are
+    /// used.
+    pub(crate) fn compute_method_shape(
+        &self,
+        method_args: Option<&MethodArgs>,
+        compute: impl FnOnce(&ShapeContext) -> Shape,
+    ) -> Shape {
+        let arg_ranges: Vec<_> = method_args
+            .map(|args| args.args.iter().filter_map(|arg| arg.range()).collect())
+            .unwrap_or_default();
+        if arg_ranges.is_empty() {
+            // Nothing to record, so no child context is needed.
+            return compute(self);
+        }
+
+        // RefCell is not Sync, so Clippy flags this Arc, as in `Self::new`.
+        // The context never crosses threads, and `Ref` follows the shape-rs
+        // convention of `Ref<T> = Arc<T>`.
+        #[allow(clippy::arc_with_non_send_sync)]
+        let method_call = Ref::new(MethodCall {
+            arg_ranges,
+            arg_shapes: RefCell::new(Vec::new()),
+        });
+        let call_context = Self {
+            method_call: Some(method_call.clone()),
+            ..self.clone()
+        };
+        let result = compute(&call_context);
+        with_arg_errors(method_call.arg_shapes.borrow().iter(), result)
+    }
+
+    /// Records the shape `arg` produced, if `arg` is an argument of the method
+    /// call this context was created for by [`Self::compute_method_shape`].
+    fn record_method_arg_shape(&self, arg: &WithRange<LitExpr>, shape: &Shape) {
+        if let Some(method_call) = &self.method_call
+            && let Some(range) = arg.range()
+            && method_call.arg_ranges.contains(&range)
+        {
+            method_call.arg_shapes.borrow_mut().push(shape.clone());
+        }
+    }
+
+    /// Returns a clone of this context that shares the consumption trie but
+    /// is not the child of any method call, so shapes computed with it are
+    /// not recorded as method argument shapes. For computing an argument's
+    /// shape only for its consumption side effects, when the argument is
+    /// never evaluated at runtime (a short-circuited `->and`/`->or`), so its
+    /// errors must not be carried into the method's result shape.
+    pub(crate) fn without_method_call(&self) -> Self {
+        Self {
+            method_call: None,
+            ..self.clone()
         }
     }
 
@@ -1136,13 +1233,23 @@ impl ApplyToInternal for WithRange<PathList> {
                             None,
                         )
                     } else {
-                        let result_shape = method.shape(
-                            context,
-                            method_name,
-                            method_args.as_ref(),
-                            input_shape.clone(),
-                            dollar_shape.clone(),
-                        );
+                        let compute = |context: &ShapeContext| {
+                            method.shape(
+                                context,
+                                method_name,
+                                method_args.as_ref(),
+                                input_shape.clone(),
+                                dollar_shape.clone(),
+                            )
+                        };
+                        let result_shape = if method == ArrowMethod::As {
+                            // The result of `->as` is the shape of the bound
+                            // variables, which carry any errors in their own
+                            // shapes to where they are used.
+                            compute(context)
+                        } else {
+                            context.compute_method_shape(method_args.as_ref(), compute)
+                        };
 
                         // We special-case ArrowMethod::As in apply_to_path, so
                         // it makes sense to do so here as well.
@@ -1214,12 +1321,45 @@ impl ApplyToInternal for WithRange<PathList> {
                 // children. Subsequent recursion into `selection` records
                 // additional consumption (e.g. the subselection's own
                 // fields) on top.
-                context.record_consumption(&input_shape, true);
+                //
+                // The one exception is a subselection applied directly to a
+                // bare variable, with no key navigation in between, as in
+                // `price: { amount: $args.amount }`, whose input is the
+                // enclosing `@` (`$root`, or `$root.*`). Marking that input
+                // as a leaf would claim the whole variable was consumed, so
+                // it is marked only if the subselection read something under
+                // it. To tell, the subselection records into a fresh trie,
+                // which is then merged back into the shared one.
+                let bare_variable = match input_shape.case() {
+                    ShapeCase::Name(name, _) if !name_navigates(name) => Some(name.clone()),
+                    _ => None,
+                };
 
-                (
-                    selection.compute_output_shape(context, input_shape, dollar_shape.clone()),
-                    None,
-                )
+                if let Some(name) = bare_variable {
+                    let outer = context.consumption().replace(SelectionTrie::new());
+                    let output_shape = selection.compute_output_shape(
+                        context,
+                        input_shape.clone(),
+                        dollar_shape.clone(),
+                    );
+                    let inner = context.consumption().replace(outer);
+                    let read_under_input = inner.contains_name(&name);
+                    context.consumption().borrow_mut().extend(&inner);
+                    // Release `inner` before recording more, so the subtrees
+                    // it shares with the merged trie are uniquely owned again
+                    // and `Ref::make_mut` can update them in place.
+                    drop(inner);
+                    if read_under_input {
+                        context.record_consumption(&input_shape, true);
+                    }
+                    (output_shape, None)
+                } else {
+                    context.record_consumption(&input_shape, true);
+                    (
+                        selection.compute_output_shape(context, input_shape, dollar_shape.clone()),
+                        None,
+                    )
+                }
             }
 
             PathList::Empty => {
@@ -1447,7 +1587,7 @@ impl ApplyToInternal for WithRange<LitExpr> {
     ) -> Shape {
         let locations = self.shape_location(context.source_id());
 
-        match self.as_ref() {
+        let shape = match self.as_ref() {
             LitExpr::Null => Shape::null(locations),
             LitExpr::Bool(value) => Shape::bool_value(*value, locations),
             LitExpr::String(value) => Shape::string_value(value.as_str(), locations),
@@ -1487,10 +1627,14 @@ impl ApplyToInternal for WithRange<LitExpr> {
             LitExpr::Array(vec) => {
                 let mut shapes = Vec::with_capacity(vec.len());
                 for value in vec {
-                    shapes.push(value.compute_output_shape(
+                    // Elements with no value become null at runtime.
+                    shapes.push(missing_as_null(
                         context,
-                        input_shape.clone(),
-                        dollar_shape.clone(),
+                        value.compute_output_shape(
+                            context,
+                            input_shape.clone(),
+                            dollar_shape.clone(),
+                        ),
                     ));
                 }
                 Shape::array(shapes, Shape::none(), locations)
@@ -1549,7 +1693,12 @@ impl ApplyToInternal for WithRange<LitExpr> {
                     }
                 }
             }
-        }
+        };
+
+        // How `->` method calls keep the errors of their arguments. See
+        // `ShapeContext::compute_method_shape`.
+        context.record_method_arg_shape(self, &shape);
+        shape
     }
 }
 
@@ -1735,6 +1884,18 @@ impl WithRange<PathList> {
             .cloned()
             .unwrap_or_else(SelectionTrie::new)
     }
+}
+
+/// Whether a shape name navigates into its base variable through a field or
+/// item step, as opposed to naming the variable itself (`$root`, or
+/// `$root.*` when only array iteration markers follow the base).
+fn name_navigates(name: &Name) -> bool {
+    name.iter().any(|part| {
+        matches!(
+            part.case(),
+            NameCase::Field(..) | NameCase::Item(..) | NameCase::AnyField(_)
+        )
+    })
 }
 
 /// Helper to get the field from a shape or error if the object doesn't have that field.

@@ -1031,11 +1031,7 @@ expression: "&schema"
           ]
         },
         "pool_idle_timeout": {
-          "default": {
-            "nanos": 0,
-            "secs": 15
-          },
-          "description": "Specify a timeout for idle sockets being kept-alive in the client's connection pool",
+          "description": "Specify a timeout for idle sockets being kept-alive in the client's connection pool.\nDefaults to 15 seconds; `null` disables idle eviction.",
           "type": [
             "string",
             "null"
@@ -2975,11 +2971,7 @@ expression: "&schema"
           "description": "Enable global rate limiting"
         },
         "pool_idle_timeout": {
-          "default": {
-            "nanos": 0,
-            "secs": 15
-          },
-          "description": "Specify a timeout for idle sockets being kept-alive in the client's connection pool",
+          "description": "Specify a timeout for idle sockets being kept-alive in the client's connection pool.\nDefaults to 15 seconds; `null` disables idle eviction. A `sources.<name>` block that omits\nit uses the value from `connector.all`.",
           "type": [
             "string",
             "null"
@@ -11704,11 +11696,7 @@ expression: "&schema"
           "description": "Enable global rate limiting"
         },
         "pool_idle_timeout": {
-          "default": {
-            "nanos": 0,
-            "secs": 15
-          },
-          "description": "Specify a timeout for idle sockets being kept-alive in the client's connection pool",
+          "description": "Specify a timeout for idle sockets being kept-alive in the client's connection pool.\nDefaults to 15 seconds; `null` disables idle eviction. A `subgraphs.<name>` block that\nomits it uses the value from `all`.",
           "type": [
             "string",
             "null"

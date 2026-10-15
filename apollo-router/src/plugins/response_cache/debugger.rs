@@ -42,6 +42,10 @@ pub(super) struct CacheKeyContext {
     pub(super) subgraph_request: graphql::Request,
     pub(super) source: CacheKeySource,
     pub(super) cache_control: CacheControl,
+    /// For data fetched by this request, the cache's decision to store it; this is not
+    /// confirmation that the storage write succeeded. For a cache hit, whether its
+    /// `Cache-Control` allows storing. Callers set what the router's own rules allow, and
+    /// `update_metadata` applies the `Cache-Control` rules on top.
     pub(super) should_store: bool,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub(super) hashed_private_id: Option<String>,
@@ -233,8 +237,11 @@ impl CacheKeyContext {
         self
     }
 
+    /// Narrows the caller's `should_store` with the `Cache-Control` rules, so an entry the router
+    /// skipped for its own reasons (the request bypassed the cache, or the response had errors)
+    /// is never reported as stored.
     fn compute_should_store(mut self) -> Self {
-        self.should_store = self.cache_control.should_store();
+        self.should_store &= self.cache_control.should_store();
         // If it's private data but we don't have a private id to add into the primary cache key we won't cache it
         if self.cache_control.private() && self.hashed_private_id.is_none() {
             self.should_store = false;

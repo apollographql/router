@@ -76,6 +76,99 @@ Federation 2 pattern.
 
 By [@tninesling](https://github.com/tninesling) in <https://github.com/apollographql/router/pull/9832>
 
+### Process renamed root operation types in deterministic order ([PR #10396](https://github.com/apollographql/router/pull/10396))
+
+Renamed root operation types were processed using `HashMap`, which led to
+non-deterministic order. Re-generating the same supergraph schema could result in
+semantically equivalent schemas with different type ordering. Renamed root
+operation types are now processed in order using `IndexMap`.
+
+By [@dariuszkuc](https://github.com/dariuszkuc) in <https://github.com/apollographql/router/pull/10396>
+
+### Allow nested object literals in requestless connectors ([PR #10394](https://github.com/apollographql/router/pull/10394))
+
+A `@connect` directive with no `http:` (a virtual connector) failed composition
+with `REQUESTLESS_SELECTION_USES_REQUEST_DATA` when its selection contained a
+nested object literal, such as `price: { amount: 1395, currencyCode: "USD" }`,
+even though it reads nothing from a response. These selections now compose as
+expected. Selections that do read the response body, like `price { amount }` or a
+bare `$`, are still rejected.
+
+By [@benjamn](https://github.com/benjamn) in <https://github.com/apollographql/router/pull/10394>
+
+### Connector validation no longer rejects some `->` method calls that work at runtime ([PR #10286](https://github.com/apollographql/router/pull/10286))
+
+Composition could reject connector expressions that succeed at runtime, such as
+`$args.ids->map(@)->joinNotNull(",")`, because the shape checks for several `->`
+methods were stricter than the methods themselves. Validation now only rejects a
+method call when no possible value could make it succeed.
+
+The same applies to `isSuccess`, which counts a missing or non-boolean value as
+failure at runtime. Expressions like `$args.s?->eq("a")` or a `->match` without a
+boolean fallback no longer fail composition. Only an `isSuccess` expression that
+can never be a boolean, like `$.items->size`, is rejected.
+
+By [@benjamn](https://github.com/benjamn) in <https://github.com/apollographql/router/pull/10286>
+
+### Connector validation reports errors in `->` method arguments and accepts `null` array elements ([PR #10316](https://github.com/apollographql/router/pull/10316))
+
+Composition now rejects expressions with an error inside most `->` method
+arguments, like `$(true)->and($(1)->gt("x"))`, which always fail at runtime.
+`->in`, `->contains` and `->joinNotNull` no longer reject array elements that are
+`null` or have no value, which the runtime skips.
+
+By [@benjamn](https://github.com/benjamn) in <https://github.com/apollographql/router/pull/10316>
+
+### Fix connector mappings misreading names that begin with a keyword or a number ([PR #10260](https://github.com/apollographql/router/pull/10260))
+
+`JSONSelection` could stop reading a name partway through and treat the rest as a
+separate selection:
+
+- **Names beginning with `null`, `true`, or `false`.** `displayName: nullableName`
+  parsed as `displayName: null ableName`, assigning `null` to `displayName` and
+  adding a selection for `ableName`. In other positions, such as
+  `$(nullField ?? "fallback")`, it failed with an opaque
+  `nom::error::ErrorKind::Eof`.
+- **Paths rooted at a number.** `alias: 1.foo` parsed as `alias: 1.0 foo`, and
+  `$(1.foo)` failed to parse.
+
+Bare keys like `nullableName` or `outer { nullableName }` were never affected.
+
+A selection list also now rejects two items that abut with an identifier character
+on each side and nothing between them, so input like `alias: 1b: 2` is an error
+rather than two selections. Minified input like `{a{x}b}` still parses.
+
+By [@benjamn](https://github.com/benjamn) in <https://github.com/apollographql/router/pull/10260>
+
+### Cache sorted out-edges during query graph followup precompute ([PR #9690](https://github.com/apollographql/router/pull/9690))
+
+During federated query graph construction, `precompute_non_trivial_followup_edges()`
+called `out_edges()` once per edge, and each of those calls filtered and sorted a
+fresh list of the tail node's outgoing edges. On connector-heavy supergraphs, where
+many synthetic subgraphs share entity types and produce a dense cross-subgraph key
+graph, the same lists were rebuilt over and over.
+
+The filtered and sorted list is now computed once per tail node and reused. The
+edge set and its order are unchanged. On a connector-expanded supergraph with 32
+connectors, total allocation during router startup drops from 5.85 GB to 0.85 GB
+and startup time drops from 40.8s to 31.7s.
+
+By [@benjamn](https://github.com/benjamn) in <https://github.com/apollographql/router/pull/9690>
+
+### Reduce memory use and repeated work during query graph construction ([PR #10358](https://github.com/apollographql/router/pull/10358))
+
+Dense federated query graphs, including connector-expanded schemas, could reserve
+excessive memory and repeatedly filter identical outgoing edges during graph
+construction, increasing the cost of schema composition.
+
+Root-resolution and subgraph-entry transitions now reuse the final filtered
+followups for each destination. Filtered key followup vectors grow with the
+surviving edges instead of reserving space for every candidate. Transitions that
+retain all candidates keep exact-size preallocation, avoiding excess capacity on
+wide graphs. Followup edge membership and ordering are preserved.
+
+By [@cgati](https://github.com/cgati) in <https://github.com/apollographql/router/pull/10358>
+
 ## 🛠 Maintenance
 
 ### Connectors are validated as part of subgraph validation ([PR #10035](https://github.com/apollographql/router/pull/10035))

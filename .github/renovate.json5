@@ -24,6 +24,16 @@
       depNameTemplate: 'rust',
       datasourceTemplate: 'docker',
     },
+    // The mise that CircleCI installs.  It needs to stay current so CI resolves
+    // tools from the same mise registry backends as local dev and GitHub Actions.
+    {
+      customType: 'regex',
+      managerFilePatterns: ['/^\\.circleci/config\\.yml$/'],
+      matchStrings: ['MISE_VERSION:\\s*(?<currentValue>v[0-9]+\\.[0-9]+\\.[0-9]+)'],
+      depNameTemplate: 'mise',
+      packageNameTemplate: 'jdx/mise',
+      datasourceTemplate: 'github-releases',
+    },
   ],
   packageRules: [
     // Group all non-major dependencies in a single, auto-merged PR. They usually don't require manual intervention.
@@ -91,6 +101,16 @@
       matchManagers: ['custom.regex', 'dockerfile', 'mise', 'rust-release-channel'],
       groupName: 'rustc',
       minimumReleaseAge: '5 days',
+    },
+
+    // mise releases almost daily; monthly is plenty.  Not auto-merged, since a
+    // new mise can change which backend installs a tool.
+    {
+      matchManagers: ['custom.regex'],
+      matchPackageNames: ['jdx/mise'],
+      schedule: ['* 0-3 1 * *'],
+      minimumReleaseAge: '5 days',
+      automerge: false,
     },
 
     // Keep serde_yaml at 0.8.x - version 0.9.x has breaking changes and the
