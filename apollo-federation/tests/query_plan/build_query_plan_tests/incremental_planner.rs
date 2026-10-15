@@ -5656,9 +5656,9 @@ fn inc_defer_sibling_entity_fetches_stay_in_their_scope() {
     "###);
 }
 
-// Hub.i is shareable, so its possible types are the implementers every subgraph agrees on.
-// B's I has no Y, which leaves only X, so a Y fragment under Hub.i can never match and is
-// dropped.
+// Hub.i is shareable, so fragments under it are restricted to the implementers in the subgraph
+// that resolves it. B's I has no Y, so when B resolves Hub.i the Y fragment can never match and
+// is dropped.
 #[test]
 fn inc_fragment_outside_shareable_interface_members_is_dropped() {
     let planner = planner!(
@@ -5693,6 +5693,56 @@ fn inc_fragment_outside_shareable_interface_members_is_dropped() {
             hub {
               i {
                 __typename
+              }
+            }
+          }
+        }
+      },
+    }
+    "###
+    );
+}
+
+// Hub.i resolves in A or B, and each has an implementer of I the other lacks. Whichever subgraph
+// resolves it, one of the Y and Z fragments can never match, so the operation only plans if that
+// fragment is dropped.
+#[test]
+fn inc_fragment_outside_every_route_is_dropped() {
+    let planner = planner!(
+        config = incremental_config(),
+        A: r#"
+          type Query { t: T }
+          type T @key(fields: "id") { id: ID! hub: Hub @shareable }
+          type Hub @shareable { i: I }
+          interface I { name: String }
+          type X implements I @shareable { name: String }
+          type Y implements I { name: String }
+        "#,
+        B: r#"
+          type T @key(fields: "id") { id: ID! hub: Hub @shareable }
+          type Hub @shareable { i: I }
+          interface I { name: String }
+          type X implements I @shareable { name: String }
+          type Z implements I { name: String }
+        "#,
+    );
+    // validate_correctness = false: the correctness checker takes I's implementers from the
+    // supergraph, so it expects the dropped Z fragment in the response shape.
+    assert_plan!(
+        validate_correctness = false,
+        &planner,
+        "{ t { hub { i { ... on Y { name } ... on Z { name } } } } }",
+        @r###"
+    QueryPlan {
+      Fetch(service: "A") {
+        {
+          t {
+            hub {
+              i {
+                __typename
+                ... on Y {
+                  name
+                }
               }
             }
           }
