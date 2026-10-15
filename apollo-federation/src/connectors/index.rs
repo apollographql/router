@@ -234,7 +234,7 @@ fn resolver_entity_type(connector: &Connector, schema: &Schema) -> Option<Name> 
 
 /// The key guarding entry into an entity-resolver connector. A field
 /// connector that references no `$this` (only `$args` or constants) gets the
-/// singleton key `__typename`, as connector expansion gives it.
+/// singleton key `__typename` (see [`has_singleton_key`]).
 fn connector_entity_key(
     connector: &Connector,
     schema: &Schema,
@@ -242,7 +242,7 @@ fn connector_entity_key(
     if let Some(field_set) = connector.resolvable_key(schema)? {
         return Ok(Some(field_set));
     }
-    if !matches!(connector.entity_resolver, Some(EntityResolver::Implicit)) {
+    if !has_singleton_key(connector) {
         return Ok(None);
     }
     let parent_type = connector
@@ -258,6 +258,14 @@ fn connector_entity_key(
     )
     .map(Some)
     .map_err(|e| e.to_string())
+}
+
+/// Whether a field connector without a resolvable key is entered through the
+/// singleton key `__typename`. Connector expansion gives that key only from
+/// connect v0.4 on; before v0.4 such a connector has no key.
+fn has_singleton_key(connector: &Connector) -> bool {
+    connector.spec >= ConnectSpec::V0_4
+        && matches!(connector.entity_resolver, Some(EntityResolver::Implicit))
 }
 
 const TYPENAME_KEY: &str = "__typename";
@@ -305,14 +313,15 @@ pub(crate) fn add_connector_entity_keys(
             let Some(entity_type) = resolver_entity_type(&connector, schema) else {
                 continue;
             };
-            let Ok(Some(field_set)) = connector_entity_key(&connector, schema) else {
-                continue;
+            let field_set = match connector.resolvable_key(schema) {
+                Ok(Some(field_set)) => field_set,
+                Ok(None) if has_singleton_key(&connector) => {
+                    typename_keys.push((graph.clone(), entity_type, TYPENAME_KEY.to_string()));
+                    continue;
+                }
+                _ => continue,
             };
             let fields = field_set.serialize().no_indent().to_string();
-            if fields == TYPENAME_KEY {
-                typename_keys.push((graph.clone(), entity_type, fields));
-                continue;
-            }
             // Extraction rejects a key whose fields the subgraph doesn't define.
             let fields_defined = field_set.selection_set.selections.iter().all(|selection| {
                 selection
@@ -436,19 +445,37 @@ mod tests {
     }
 
     /// A field connector that references no `$this` is keyed on
-    /// `__typename`, as connector expansion keys it.
+    /// `__typename`, as connector expansion keys it from connect v0.4 on.
     #[test]
     fn field_resolver_without_this_keyed_on_typename() {
+        let index = index_from_supergraph(include_str!(
+            "../query_plan/incremental_planner/fixtures/connector_field_without_this.graphql"
+        ))
+        .expect("index builds");
+        for coordinate in ["products:Product.banner[0]", "products:Product.related[0]"] {
+            let key = index
+                .key_conditions(coordinate)
+                .expect("singleton key indexed");
+            assert_eq!(
+                key.to_string().split_whitespace().collect::<String>(),
+                "{__typename}",
+                "{coordinate}"
+            );
+        }
+    }
+
+    /// Before connect v0.4, expansion gives a field connector that references
+    /// no `$this` no key, so the index doesn't either.
+    #[test]
+    fn field_resolver_without_this_before_v0_4_has_no_key() {
         let index = index_from_supergraph(include_str!(
             "../query_plan/incremental_planner/fixtures/connector_output_shape.graphql"
         ))
         .expect("index builds");
-        let key = index
-            .key_conditions("connectors:User.staticAvatar[0]")
-            .expect("singleton key indexed");
-        assert_eq!(
-            key.to_string().split_whitespace().collect::<String>(),
-            "{__typename}"
+        assert!(
+            index
+                .key_conditions("connectors:User.staticAvatar[0]")
+                .is_none()
         );
     }
 
