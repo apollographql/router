@@ -11,9 +11,7 @@ pub(crate) fn validate_cost_directives(
     let Some(cost_directive_name) = CostSpecDefinition::cost_directive_name(schema) else {
         return Ok(());
     };
-    let cost_directive_referencers = schema
-        .referencers()
-        .get_directive(cost_directive_name.as_str());
+    let cost_directive_referencers = schema.referencers().get_directive(&cost_directive_name);
     for interface_field in &cost_directive_referencers.interface_fields {
         errors
             .errors

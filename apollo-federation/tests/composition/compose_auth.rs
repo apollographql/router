@@ -1,4 +1,5 @@
 use apollo_compiler::coord;
+use apollo_compiler::name;
 use apollo_federation::subgraph::typestate::Subgraph;
 use insta::assert_snapshot;
 
@@ -152,7 +153,7 @@ fn authenticated_has_correct_definition_in_supergraph() {
     // Validate the @authenticated directive definition is properly added
     let authenticated_directive = schema
         .directive_definitions
-        .get("authenticated")
+        .get(&name!("authenticated"))
         .expect("Expected @authenticated directive definition in supergraph");
 
     // Compare the directive definition with expected structure
@@ -523,6 +524,8 @@ fn specs_compose_in_consistent_order() {
 }
 
 mod transitive_auth {
+    use apollo_compiler::name;
+
     use crate::composition::ServiceDefinition;
     use crate::composition::assert_composition_errors;
     use crate::composition::compose_as_fed2_subgraphs;
@@ -1117,11 +1120,11 @@ mod transitive_auth {
         let interface_i = supergraph
             .schema()
             .schema()
-            .get_interface("I")
+            .get_interface(&name!("I"))
             .expect("interface I is defined");
         let requires_extra_field = interface_i
             .fields
-            .get("requiresExtra")
+            .get(&name!("requiresExtra"))
             .expect("field requiresExtra exists");
         assert!(
             requires_extra_field
@@ -1614,6 +1617,7 @@ mod propagate_auth {
     use apollo_compiler::Schema;
     use apollo_compiler::ast::Value;
     use apollo_compiler::collections::IndexMap;
+    use apollo_compiler::name;
     use apollo_compiler::schema::FieldDefinition;
     use apollo_federation::subgraph::typestate::Subgraph;
 
@@ -1665,7 +1669,7 @@ mod propagate_auth {
         let interface_i = supergraph
             .schema()
             .schema()
-            .get_interface("I")
+            .get_interface(&name!("I"))
             .expect("interface I exists in schema");
         assert!(
             interface_i
@@ -1839,16 +1843,22 @@ mod propagate_auth {
         let interface_i = supergraph
             .schema()
             .schema()
-            .get_interface("I")
+            .get_interface(&name!("I"))
             .expect("interface I exists in schema");
-        let field_i1 = interface_i.fields.get("i1").expect("field i1 exists");
+        let field_i1 = interface_i
+            .fields
+            .get(&name!("i1"))
+            .expect("field i1 exists");
         assert!(
             field_i1
                 .directives
                 .iter()
                 .any(|d| d.name == "authenticated")
         );
-        let field_i2 = interface_i.fields.get("i2").expect("field i2 exists");
+        let field_i2 = interface_i
+            .fields
+            .get(&name!("i2"))
+            .expect("field i2 exists");
         assert!(
             field_i2
                 .directives
@@ -1919,7 +1929,7 @@ mod propagate_auth {
         let interface_i = supergraph
             .schema()
             .schema()
-            .get_interface("I")
+            .get_interface(&name!("I"))
             .expect("interface I exists in schema");
         verify_field_access_control(
             &interface_i.fields,
@@ -1999,7 +2009,7 @@ mod propagate_auth {
         let interface_i = supergraph
             .schema()
             .schema()
-            .get_interface("I")
+            .get_interface(&name!("I"))
             .expect("interface I exists in schema");
         verify_field_access_control(
             &interface_i.fields,
@@ -2058,11 +2068,11 @@ mod propagate_auth {
         let interface_i = supergraph
             .schema()
             .schema()
-            .get_interface("I")
+            .get_interface(&name!("I"))
             .expect("interface I exists in schema");
         let field_extra = interface_i
             .fields
-            .get("extra")
+            .get(&name!("extra"))
             .expect("field extra exists on interface I");
         assert!(
             field_extra
@@ -2074,7 +2084,7 @@ mod propagate_auth {
         let type_t = supergraph
             .schema()
             .schema()
-            .get_object("T")
+            .get_object(&name!("T"))
             .expect("type T exists in schema");
         verify_field_access_control(
             &type_t.fields,
@@ -2141,11 +2151,11 @@ mod propagate_auth {
         let interface_i = supergraph
             .schema()
             .schema()
-            .get_interface("I")
+            .get_interface(&name!("I"))
             .expect("interface I exists in schema");
         let field_extra = interface_i
             .fields
-            .get("extra")
+            .get(&name!("extra"))
             .expect("field extra exists on interface I");
         assert!(
             field_extra
@@ -2169,11 +2179,11 @@ mod propagate_auth {
         let type_t = supergraph
             .schema()
             .schema()
-            .get_object("T")
+            .get_object(&name!("T"))
             .expect("type T exists in schema");
         let field_extra = type_t
             .fields
-            .get("extra")
+            .get(&name!("extra"))
             .expect("field extra exists on type T");
         assert!(
             field_extra
@@ -2197,11 +2207,11 @@ mod propagate_auth {
         let type_u = supergraph
             .schema()
             .schema()
-            .get_object("U")
+            .get_object(&name!("U"))
             .expect("type U exists in schema");
         let field_extra = type_u
             .fields
-            .get("extra")
+            .get(&name!("extra"))
             .expect("field extra exists on type U");
         assert!(
             !field_extra
@@ -2339,7 +2349,7 @@ mod propagate_auth {
         let interface_node = supergraph
             .schema()
             .schema()
-            .get_interface("Node")
+            .get_interface(&name!("Node"))
             .expect("interface Node exists in the schema");
         verify_field_access_control(
             &interface_node.fields,
@@ -2352,7 +2362,7 @@ mod propagate_auth {
         let interface_i = supergraph
             .schema()
             .schema()
-            .get_interface("I")
+            .get_interface(&name!("I"))
             .expect("interface I exists in the schema");
         verify_field_access_control(
             &interface_i.fields,
@@ -2363,7 +2373,7 @@ mod propagate_auth {
         );
         let field_extra_i = interface_i
             .fields
-            .get("extra")
+            .get(&name!("extra"))
             .expect("field extra exists on interface I");
         assert!(
             field_extra_i
@@ -2454,11 +2464,11 @@ mod propagate_auth {
         let type_t = supergraph
             .schema()
             .schema()
-            .get_object("T")
+            .get_object(&name!("T"))
             .expect("type T exists in the schema");
         let field_other_t = type_t
             .fields
-            .get("other")
+            .get(&name!("other"))
             .expect("field other exists on type T");
         assert!(
             field_other_t
@@ -2495,7 +2505,7 @@ mod propagate_auth {
     ) {
         let extended_type = schema
             .types
-            .get(target_type)
+            .get(&Name::new_unchecked(target_type))
             .unwrap_or_else(|| panic!("{target_type} exists in schema"));
         let directive = extended_type
             .directives()
@@ -2519,7 +2529,7 @@ mod propagate_auth {
         expected: Vec<Vec<&str>>,
     ) {
         let field = fields
-            .get(field_name)
+            .get(&Name::new_unchecked(field_name))
             .unwrap_or_else(|| panic!("field {field_name} exists"));
         let directive = field
             .directives

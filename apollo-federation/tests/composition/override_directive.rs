@@ -1,4 +1,5 @@
 use apollo_compiler::coord;
+use apollo_compiler::name;
 
 use crate::composition::ServiceDefinition;
 use crate::composition::assert_composition_errors;
@@ -37,7 +38,7 @@ fn override_single_field() {
         .schema()
         .schema()
         .types
-        .get("T")
+        .get(&name!("T"))
         .expect("T exists in the schema");
     insta::assert_snapshot!(type_t.to_string(), @r#"
     type T @join__type(graph: SUBGRAPH1, key: "k") @join__type(graph: SUBGRAPH2, key: "k") {
@@ -115,7 +116,7 @@ fn override_field_in_provides() {
         .schema()
         .schema()
         .types
-        .get("A")
+        .get(&name!("A"))
         .expect("A exists in the schema");
     insta::assert_snapshot!(type_a.to_string(), @r#"
     type A @join__type(graph: SUBGRAPH1, key: "id") @join__type(graph: SUBGRAPH2, key: "id") {
@@ -129,7 +130,7 @@ fn override_field_in_provides() {
         .schema()
         .schema()
         .types
-        .get("T")
+        .get(&name!("T"))
         .expect("T exists in the schema");
     insta::assert_snapshot!(type_t.to_string(), @r#"
     type T @join__type(graph: SUBGRAPH1, key: "k") @join__type(graph: SUBGRAPH2, key: "k") {
@@ -189,7 +190,7 @@ fn override_field_in_requires() {
         .schema()
         .schema()
         .types
-        .get("A")
+        .get(&name!("A"))
         .expect("A exists in the schema");
     insta::assert_snapshot!(type_a.to_string(), @r#"
     type A @join__type(graph: SUBGRAPH1, key: "id") @join__type(graph: SUBGRAPH2, key: "id") {
@@ -203,7 +204,7 @@ fn override_field_in_requires() {
         .schema()
         .schema()
         .types
-        .get("T")
+        .get(&name!("T"))
         .expect("T exists in the schema");
     insta::assert_snapshot!(type_t.to_string(), @r#"
     type T @join__type(graph: SUBGRAPH1, key: "k") @join__type(graph: SUBGRAPH2, key: "k") {
@@ -252,7 +253,7 @@ fn override_field_necessary_for_interface() {
         .schema()
         .schema()
         .types
-        .get("T")
+        .get(&name!("T"))
         .expect("T exists in the schema");
     insta::assert_snapshot!(type_t.to_string(), @r#"
     type T implements I @join__implements(graph: SUBGRAPH1, interface: "I") @join__type(graph: SUBGRAPH1, key: "k") @join__type(graph: SUBGRAPH2, key: "k") {
@@ -378,7 +379,7 @@ fn override_key_field() {
         .schema()
         .schema()
         .types
-        .get("T")
+        .get(&name!("T"))
         .expect("T exists in the schema");
     insta::assert_snapshot!(type_t.to_string(), @r#"
     type T @join__type(graph: SUBGRAPH1, key: "k") @join__type(graph: SUBGRAPH2, key: "k") {
@@ -523,7 +524,7 @@ fn override_field_that_is_key_in_another_type() {
         .schema()
         .schema()
         .types
-        .get("E")
+        .get(&name!("E"))
         .expect("E exists in the schema");
     insta::assert_snapshot!(type_e.to_string(), @r#"
     type E @join__type(graph: SUBGRAPH1) @join__type(graph: SUBGRAPH2) {
@@ -536,7 +537,7 @@ fn override_field_that_is_key_in_another_type() {
         .schema()
         .schema()
         .types
-        .get("T")
+        .get(&name!("T"))
         .expect("T exists in the schema");
     insta::assert_snapshot!(type_t.to_string(), @r#"
     type T @join__type(graph: SUBGRAPH1, key: "e { k }") @join__type(graph: SUBGRAPH2, key: "e { k }") {
@@ -882,7 +883,7 @@ mod progressive_override {
             .schema()
             .schema()
             .types
-            .get("T")
+            .get(&name!("T"))
             .expect("T exists in the schema");
         insta::assert_snapshot!(type_t.to_string(), @r#"
         type T @join__type(graph: SUBGRAPH1, key: "k") @join__type(graph: SUBGRAPH2, key: "k") {
@@ -1309,7 +1310,7 @@ fn override_with_unknown_target_still_adds_join_field() {
         .schema()
         .schema()
         .types
-        .get("Product")
+        .get(&name!("Product"))
         .expect("Product type exists");
 
     let product_str = product_type.to_string();
@@ -1338,7 +1339,7 @@ fn override_with_unknown_target_still_adds_join_field() {
     let api_product = api_schema
         .schema()
         .types
-        .get("Product")
+        .get(&name!("Product"))
         .expect("Product exists in API schema");
 
     insta::assert_snapshot!(api_product.to_string(), @r#"

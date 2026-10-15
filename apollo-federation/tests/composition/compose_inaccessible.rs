@@ -212,17 +212,17 @@ fn inaccessible_succeeds_if_imported_under_same_non_default_name() {
 
     let schema = supergraph.schema().schema();
     if let Some(query_type_name) = &schema.schema_definition.query
-        && let Some(ExtendedType::Object(query_obj)) = schema.types.get(query_type_name.as_str())
+        && let Some(ExtendedType::Object(query_obj)) = schema.types.get(&**query_type_name)
     {
         let q1 = query_obj
             .fields
-            .get("q1")
+            .get(&name!("q1"))
             .expect("Query.q1 should exist in supergraph");
         assert!(q1.directives.iter().any(|d| d.name == "private"));
 
         let q2 = query_obj
             .fields
-            .get("q2")
+            .get(&name!("q2"))
             .expect("Query.q2 should exist in supergraph");
         assert!(q2.directives.iter().any(|d| d.name == "private"));
     }
@@ -537,7 +537,7 @@ fn namespaced_inaccessible_composes_correctly() {
     // 6. Check that @federation__inaccessible is applied to InternalType
     let internal_type = schema
         .types
-        .get("InternalType")
+        .get(&name!("InternalType"))
         .expect("InternalType should exist");
     assert!(
         internal_type

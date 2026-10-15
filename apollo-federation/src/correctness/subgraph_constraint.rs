@@ -2,6 +2,7 @@
 
 use std::sync::Arc;
 
+use apollo_compiler::Name;
 use apollo_compiler::collections::IndexMap;
 use apollo_compiler::collections::IndexSet;
 use apollo_compiler::executable::Field;
@@ -81,7 +82,7 @@ impl<'a> SubgraphConstraint<'a> {
     // (Parent type & field type consistency in subgraphs) Considering the field's possible parent
     // types ( `self.subgraph_types`) and their possible entity subgraphs, find all object types
     // that the field can resolve to.
-    fn subgraph_types_for_field(&self, field_name: &str) -> Result<Self, FederationError> {
+    fn subgraph_types_for_field(&self, field_name: &Name) -> Result<Self, FederationError> {
         let mut possible_subgraphs = IndexSet::default();
         let mut subgraph_types = IndexSet::default();
         for parent_type in &self.subgraph_types {

@@ -3216,11 +3216,11 @@ impl FragmentSpreadCache {
             .insert(fragment_name.clone(), selection_set);
     }
 
-    pub(crate) fn get(&self, name: &str) -> Option<&SelectionSet> {
+    pub(crate) fn get(&self, name: &Name) -> Option<&SelectionSet> {
         self.fragment_selection_sets.get(name)
     }
 
-    pub(crate) fn contains(&self, name: &str) -> bool {
+    pub(crate) fn contains(&self, name: &Name) -> bool {
         self.fragment_selection_sets.contains_key(name)
     }
 

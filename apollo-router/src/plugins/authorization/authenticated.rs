@@ -225,7 +225,7 @@ impl<'a> AuthenticatedVisitor<'a> {
         t.directives().has(&self.authenticated_directive_name)
     }
 
-    fn implementors<'s>(&'s self, type_name: &str) -> impl Iterator<Item = &'s Name> + use<'s> {
+    fn implementors<'s>(&'s self, type_name: &Name) -> impl Iterator<Item = &'s Name> + use<'s> {
         self.implementers_map
             .get(type_name)
             .map(|implementers| implementers.iter())
@@ -263,7 +263,7 @@ impl<'a> AuthenticatedVisitor<'a> {
 
     fn implementors_with_authenticated_type_requirements(
         &self,
-        type_name: &str,
+        type_name: &Name,
         t: &schema::ExtendedType,
     ) -> bool {
         if t.is_interface() {
@@ -285,10 +285,11 @@ impl<'a> AuthenticatedVisitor<'a> {
         parent_type: &str,
         field: &ast::Field,
     ) -> bool {
-        if let Some(t) = self.schema.types.get(parent_type)
+        let parent_type = Name::new_unchecked(parent_type);
+        if let Some(t) = self.schema.types.get(&parent_type)
             && t.is_interface()
         {
-            for ty in self.implementors(parent_type) {
+            for ty in self.implementors(&parent_type) {
                 if let Ok(f) = self.schema.type_field(ty, &field.name)
                     && self.is_field_authenticated(f)
                 {
@@ -308,7 +309,7 @@ impl transform::Visitor for AuthenticatedVisitor<'_> {
     ) -> Result<Option<ast::OperationDefinition>, BoxError> {
         let operation_requires_authentication = self
             .schema
-            .get_object(root_type)
+            .get_object(&Name::new_unchecked(root_type))
             .is_some_and(|ty| ty.directives.has(&self.authenticated_directive_name));
 
         if operation_requires_authentication {
@@ -428,7 +429,7 @@ impl transform::Visitor for AuthenticatedVisitor<'_> {
         let fragment_requires_authentication = self
             .schema
             .types
-            .get(condition.as_str())
+            .get(&condition)
             .is_some_and(|type_definition| self.is_type_authenticated(type_definition));
 
         self.current_path

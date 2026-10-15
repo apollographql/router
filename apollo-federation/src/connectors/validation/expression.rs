@@ -748,6 +748,7 @@ pub(crate) fn parse_mapping_argument(
 #[cfg(test)]
 mod tests {
     use apollo_compiler::Schema;
+    use apollo_compiler::name;
     use rstest::rstest;
 
     use super::*;
@@ -838,8 +839,10 @@ mod tests {
         // Expanded, like the production path, so `SchemaInfo` gets the federation metadata.
         let federation_schema = expand_schema(parsed).expect("test schema expands");
         let schema = federation_schema.schema();
-        let object = schema.get_object("Query").expect("`Query` is defined");
-        let field = &object.fields["aField"];
+        let object = schema
+            .get_object(&name!("Query"))
+            .expect("`Query` is defined");
+        let field = &object.fields[&name!("aField")];
         let directive = field
             .directives
             .get("connect")

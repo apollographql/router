@@ -267,7 +267,7 @@ impl<'schema> ArgumentVisitor<'schema> {
         // At the root level, visit each argument to the entity field
         for arg in field.arguments.iter() {
             if let Some(input_type) = SchemaTypeRef::new(self.schema, arg.ty.inner_named_type()) {
-                let fields_by_type_name = entity_type.get_fields(arg.name.as_str());
+                let fields_by_type_name = entity_type.get_fields(&arg.name);
                 if fields_by_type_name.is_empty() {
                     return Err(Message {
                         code: Code::EntityResolverArgumentMismatch,
@@ -292,7 +292,7 @@ impl<'schema> ArgumentVisitor<'schema> {
                             if let (Some(entity_type), Some(entity_field_type_ref)) = (
                                 // Look up concrete object type and use it instead
                                 // of original entity_type.
-                                SchemaTypeRef::new(self.schema, type_name.as_str()),
+                                SchemaTypeRef::new(self.schema, type_name),
                                 SchemaTypeRef::new(self.schema, entity_field.ty.inner_named_type()),
                             ) {
                                 Some(Field {
@@ -339,7 +339,7 @@ impl<'schema> ArgumentVisitor<'schema> {
                 });
             };
 
-            let fields_by_type_name = entity_type.get_fields(name.as_str());
+            let fields_by_type_name = entity_type.get_fields(name);
             if fields_by_type_name.is_empty() {
                 return Err(Message {
                     code: Code::EntityResolverArgumentMismatch,
@@ -364,7 +364,7 @@ impl<'schema> ArgumentVisitor<'schema> {
                         if let (Some(entity_type), Some(entity_field_type_ref)) = (
                             // Look up concrete object type and use it instead of
                             // original entity_type.
-                            SchemaTypeRef::new(self.schema, type_name.as_str()),
+                            SchemaTypeRef::new(self.schema, type_name),
                             SchemaTypeRef::new(self.schema, entity_field.ty.inner_named_type()),
                         ) {
                             Some(Field {

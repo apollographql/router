@@ -100,7 +100,7 @@ impl VariableConditions {
     }
 
     /// Returns the condition kind of a variable, or None if there is no condition for the variable name.
-    fn condition_kind(&self, name: &str) -> Option<ConditionKind> {
+    fn condition_kind(&self, name: &Name) -> Option<ConditionKind> {
         self.0.get(name).copied()
     }
 

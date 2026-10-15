@@ -1121,9 +1121,8 @@ impl FederationSchema {
         else {
             return Ok(Vec::new());
         };
-        let list_size_directive_referencers = self
-            .referencers()
-            .get_directive(list_size_directive_name.as_str());
+        let list_size_directive_referencers =
+            self.referencers().get_directive(&list_size_directive_name);
 
         let mut applications = Vec::new();
         for field_definition_position in

@@ -27,7 +27,7 @@ pub(crate) struct SchemaTypeRef<'schema> {
 }
 
 impl<'schema> SchemaTypeRef<'schema> {
-    pub(super) fn new(schema: &'schema Schema, name: &str) -> Option<Self> {
+    pub(super) fn new(schema: &'schema Schema, name: &Name) -> Option<Self> {
         schema
             .types
             .get_full(name)
@@ -39,7 +39,7 @@ impl<'schema> SchemaTypeRef<'schema> {
         schema: &'schema Schema,
         node: &'schema Node<ObjectType>,
     ) -> Option<Self> {
-        SchemaTypeRef::new(schema, node.name.as_str())
+        SchemaTypeRef::new(schema, &node.name)
     }
 
     pub(super) fn shape(&self) -> Shape {
@@ -105,7 +105,7 @@ impl<'schema> SchemaTypeRef<'schema> {
                 self.schema.types.values().filter_map(|extended_type| {
                     if let ExtendedType::Object(object_type) = extended_type {
                         if object_type.implements_interfaces.contains(&i.name) {
-                            SchemaTypeRef::new(self.schema, object_type.name.as_str())
+                            SchemaTypeRef::new(self.schema, &object_type.name)
                                 .map(|type_ref| type_ref.shape_with_visited(visited, true))
                         } else {
                             None
@@ -118,7 +118,7 @@ impl<'schema> SchemaTypeRef<'schema> {
             ),
             ExtendedType::Union(u) => Shape::one(
                 u.members.iter().filter_map(|member_name| {
-                    SchemaTypeRef::new(self.schema, member_name.as_str())
+                    SchemaTypeRef::new(self.schema, member_name)
                         .map(|type_ref| type_ref.shape_with_visited(visited, true))
                 }),
                 [],
@@ -151,7 +151,7 @@ impl<'schema> SchemaTypeRef<'schema> {
         let base_shape = if visited.contains(inner_type_name.as_str()) {
             // Avoid infinite recursion for circular references
             Shape::name(inner_type_name.as_str(), [])
-        } else if let Some(named_type) = SchemaTypeRef::new(self.schema, inner_type_name.as_str()) {
+        } else if let Some(named_type) = SchemaTypeRef::new(self.schema, inner_type_name) {
             named_type.shape_with_visited(visited, false)
         } else {
             Shape::name(inner_type_name.as_str(), [])
@@ -203,8 +203,8 @@ impl<'schema> SchemaTypeRef<'schema> {
 
     pub(super) fn get_fields(
         &self,
-        field_name: &str,
-    ) -> IndexMap<String, &'schema Node<FieldDefinition>> {
+        field_name: &Name,
+    ) -> IndexMap<Name, &'schema Node<FieldDefinition>> {
         self.schema
             .types
             .get(self.name)
@@ -214,20 +214,20 @@ impl<'schema> SchemaTypeRef<'schema> {
                     .fields
                     .get(field_name)
                     .map(|field_def| {
-                        std::iter::once((o.name.to_string(), field_def)).collect::<IndexMap<_, _>>()
+                        std::iter::once((o.name.clone(), field_def)).collect::<IndexMap<_, _>>()
                     })
                     .unwrap_or_default(),
 
                 ExtendedType::Interface(i) => self
                     .schema
                     .implementers_map()
-                    .get(i.name.as_str())
+                    .get(&i.name)
                     .map(|implementers| {
                         implementers
                             .objects
                             .iter()
                             .chain(&implementers.interfaces)
-                            .filter_map(|name| SchemaTypeRef::new(self.schema, name.as_str()))
+                            .filter_map(|name| SchemaTypeRef::new(self.schema, name))
                             .flat_map(|type_ref| type_ref.get_fields(field_name))
                             .collect::<IndexMap<_, _>>()
                     })
@@ -237,7 +237,7 @@ impl<'schema> SchemaTypeRef<'schema> {
                     .members
                     .iter()
                     .flat_map(|m| {
-                        SchemaTypeRef::new(self.schema, m.as_str())
+                        SchemaTypeRef::new(self.schema, m)
                             .map(|type_ref| type_ref.get_fields(field_name))
                             .unwrap_or_default()
                     })

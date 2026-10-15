@@ -1,3 +1,4 @@
+use apollo_compiler::Name;
 use apollo_compiler::schema::ExtendedType;
 use apollo_federation::query_plan::requires_selection::Field;
 use apollo_federation::query_plan::requires_selection::InlineFragment;
@@ -11,21 +12,20 @@ use crate::json_ext::ValueExt;
 use crate::spec::Schema;
 use crate::spec::TYPENAME;
 
-pub(crate) fn execute_selection_set<'a>(
-    input_content: &'a Value,
+pub(crate) fn execute_selection_set(
+    input_content: &Value,
     selections: &[Selection],
     schema: &Schema,
-    mut current_type: Option<&'a str>,
+    mut current_type: Option<Name>,
 ) -> Value {
     let content = match input_content.as_object() {
         Some(o) => o,
         None => return Value::Null,
     };
 
-    current_type = content
-        .get(TYPENAME)
-        .and_then(|v| v.as_str())
-        .or(current_type);
+    if let Some(typename) = content.get(TYPENAME).and_then(|v| v.as_str()) {
+        current_type = Name::new(typename).ok();
+    }
 
     let mut output = Object::with_capacity(selections.len());
     for selection in selections {
@@ -36,17 +36,17 @@ pub(crate) fn execute_selection_set<'a>(
                 selections,
             }) => {
                 let selection_name = alias.as_ref().map(|a| a.as_str()).unwrap_or(name.as_str());
-                let field_type = current_type.and_then(|t| {
+                let field_type = current_type.as_ref().and_then(|t| {
                     schema
                         .supergraph_schema()
                         .types
                         .get(t)
                         .and_then(|ty| match ty {
                             apollo_compiler::schema::ExtendedType::Object(o) => {
-                                o.fields.get(name.as_str()).map(|f| &f.ty)
+                                o.fields.get(name).map(|f| &f.ty)
                             }
                             apollo_compiler::schema::ExtendedType::Interface(i) => {
-                                i.fields.get(name.as_str()).map(|f| &f.ty)
+                                i.fields.get(name).map(|f| &f.ty)
                             }
                             _ => None,
                         })
@@ -56,10 +56,10 @@ pub(crate) fn execute_selection_set<'a>(
                     None => {
                         if name == TYPENAME {
                             // if the __typename field was missing but we can infer it, fill it
-                            if let Some(ty) = current_type {
+                            if let Some(ty) = &current_type {
                                 output.insert(
                                     ByteString::from(selection_name.to_owned()),
-                                    Value::String(ByteString::from(ty.to_owned())),
+                                    Value::String(ByteString::from(ty.as_str().to_owned())),
                                 );
                                 continue;
                             }
@@ -91,7 +91,7 @@ pub(crate) fn execute_selection_set<'a>(
                                             schema,
                                             field_type
                                                 .as_ref()
-                                                .map(|ty| ty.inner_named_type().as_str()),
+                                                .map(|ty| ty.inner_named_type().clone()),
                                         )
                                     } else {
                                         element.clone()
@@ -106,7 +106,7 @@ pub(crate) fn execute_selection_set<'a>(
                                     value,
                                     selections,
                                     schema,
-                                    field_type.as_ref().map(|ty| ty.inner_named_type().as_str()),
+                                    field_type.as_ref().map(|ty| ty.inner_named_type().clone()),
                                 ),
                             );
                         } else {
@@ -121,9 +121,13 @@ pub(crate) fn execute_selection_set<'a>(
             }) => match type_condition {
                 None => continue,
                 Some(condition) => {
-                    if type_condition_matches(schema, current_type, condition)
-                        && let Value::Object(selected) =
-                            execute_selection_set(input_content, selections, schema, current_type)
+                    if type_condition_matches(schema, current_type.as_ref(), condition)
+                        && let Value::Object(selected) = execute_selection_set(
+                            input_content,
+                            selections,
+                            schema,
+                            current_type.clone(),
+                        )
                     {
                         for (key, value) in selected.into_iter() {
                             match output.entry(key) {
@@ -154,8 +158,8 @@ pub(crate) fn execute_selection_set<'a>(
 /// <https://spec.graphql.org/October2021/#ResolveAbstractType()>
 fn type_condition_matches(
     schema: &Schema,
-    current_type: Option<&str>,
-    type_condition: &str,
+    current_type: Option<&Name>,
+    type_condition: &Name,
 ) -> bool {
     // Not having a current type is probably invalid, but this is not the place to check it.
     let current_type = match current_type {

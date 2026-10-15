@@ -2453,16 +2453,16 @@ mod tests {
         let a = subgraphs.get("a").unwrap();
         // JS PORT NOTE: the original tests used the equivalent of `get_type`,
         // so we have to be careful about using `get_interface` here.
-        assert!(a.schema.schema().get_interface("A").is_some());
-        assert!(a.schema.schema().get_object("B").is_some());
+        assert!(a.schema.schema().get_interface(&name!("A")).is_some());
+        assert!(a.schema.schema().get_object(&name!("B")).is_some());
 
         let b = subgraphs.get("b").unwrap();
-        assert!(b.schema.schema().get_interface("A").is_none());
-        assert!(b.schema.schema().get_object("B").is_none());
+        assert!(b.schema.schema().get_interface(&name!("A")).is_none());
+        assert!(b.schema.schema().get_object(&name!("B")).is_none());
 
         let c = subgraphs.get("c").unwrap();
-        assert!(c.schema.schema().get_interface("A").is_none());
-        assert!(c.schema.schema().get_object("B").is_none());
+        assert!(c.schema.schema().get_interface(&name!("A")).is_none());
+        assert!(c.schema.schema().get_object(&name!("B")).is_none());
     }
 
     #[test]
@@ -2594,16 +2594,16 @@ mod tests {
         let a = subgraphs.get("a").unwrap();
         // JS PORT NOTE: the original tests used the equivalent of `get_type`,
         // so we have to be careful about using `get_union` here.
-        assert!(a.schema.schema().get_union("A").is_some());
-        assert!(a.schema.schema().get_object("B").is_some());
-        assert!(a.schema.schema().get_object("C").is_some());
-        assert!(a.schema.schema().get_object("D").is_some());
+        assert!(a.schema.schema().get_union(&name!("A")).is_some());
+        assert!(a.schema.schema().get_object(&name!("B")).is_some());
+        assert!(a.schema.schema().get_object(&name!("C")).is_some());
+        assert!(a.schema.schema().get_object(&name!("D")).is_some());
 
         let b = subgraphs.get("b").unwrap();
-        assert!(b.schema.schema().get_union("A").is_none());
-        assert!(b.schema.schema().get_object("B").is_none());
-        assert!(b.schema.schema().get_object("C").is_none());
-        assert!(b.schema.schema().get_object("D").is_some());
+        assert!(b.schema.schema().get_union(&name!("A")).is_none());
+        assert!(b.schema.schema().get_object(&name!("B")).is_none());
+        assert!(b.schema.schema().get_object(&name!("C")).is_none());
+        assert!(b.schema.schema().get_object(&name!("D")).is_some());
     }
 
     // JS PORT NOTE: the "handles types having only some of their fields removed in a subgraph correctly"
@@ -2742,16 +2742,16 @@ mod tests {
         let a = subgraphs.get("a").unwrap();
         // JS PORT NOTE: the original tests used the equivalent of `get_type`,
         // so we have to be careful about using `get_union` here.
-        assert!(a.schema.schema().get_union("A").is_some());
-        assert!(a.schema.schema().get_object("B").is_some());
-        assert!(a.schema.schema().get_object("C").is_some());
-        assert!(a.schema.schema().get_object("D").is_some());
+        assert!(a.schema.schema().get_union(&name!("A")).is_some());
+        assert!(a.schema.schema().get_object(&name!("B")).is_some());
+        assert!(a.schema.schema().get_object(&name!("C")).is_some());
+        assert!(a.schema.schema().get_object(&name!("D")).is_some());
 
         let b = subgraphs.get("b").unwrap();
-        assert!(b.schema.schema().get_union("A").is_none());
-        assert!(b.schema.schema().get_object("B").is_none());
-        assert!(b.schema.schema().get_object("C").is_none());
-        assert!(b.schema.schema().get_object("D").is_some());
+        assert!(b.schema.schema().get_union(&name!("A")).is_none());
+        assert!(b.schema.schema().get_object(&name!("B")).is_none());
+        assert!(b.schema.schema().get_object(&name!("C")).is_none());
+        assert!(b.schema.schema().get_object(&name!("D")).is_some());
     }
 
     #[test]
@@ -2816,7 +2816,11 @@ mod tests {
 
         assert_eq!(subgraphs.len(), 1);
         let subgraph = subgraphs.get("service").unwrap();
-        let input_type = subgraph.schema.schema().get_input_object("Input").unwrap();
+        let input_type = subgraph
+            .schema
+            .schema()
+            .get_input_object(&name!("Input"))
+            .unwrap();
         let input_field_a = input_type
             .fields
             .iter()
@@ -2913,11 +2917,11 @@ mod tests {
         .unwrap();
 
         let subgraph = subgraphs.get("a").unwrap();
-        let user_type = subgraph.schema.schema().get_object("User");
+        let user_type = subgraph.schema.schema().get_object(&name!("User"));
         assert!(user_type.is_some());
 
         let subgraph = subgraphs.get("b").unwrap();
-        let user_type = subgraph.schema.schema().get_object("User");
+        let user_type = subgraph.schema.schema().get_object(&name!("User"));
         assert!(user_type.is_none());
     }
 
@@ -3028,8 +3032,8 @@ mod tests {
 
         let subgraph = subgraphs.get("subgraph").unwrap();
         assert_snapshot!(subgraph.schema.schema().schema_definition.directives, @r#" @link(url: "https://specs.apollo.dev/link/v1.0") @link(url: "https://specs.apollo.dev/federation/v3.0", import: ["@key", "@requires", "@provides", "@external", "@tag", "@extends", "@shareable", "@inaccessible", "@override", "@composeDirective", "@interfaceObject"]) @link(url: "https://specs.apollo.dev/connect/v0.2", import: ["@connect"])"#);
-        assert_snapshot!(subgraph.schema.schema().type_field("Query", "f").unwrap().directives, @r#" @connect(http: {GET: "http://localhost/"}, selection: "$")"#);
-        assert_snapshot!(subgraph.schema.schema().get_object("T").unwrap().directives, @r#" @connect(http: {GET: "http://localhost/{$batch.id}"}, selection: "$")"#);
-        assert_snapshot!(subgraph.schema.schema().get_object("I").unwrap().directives, @r#" @interfaceObject @connect(http: {GET: "http://localhost/{$this.id}"}, selection: "f")"#);
+        assert_snapshot!(subgraph.schema.schema().type_field(&name!("Query"), &name!("f")).unwrap().directives, @r#" @connect(http: {GET: "http://localhost/"}, selection: "$")"#);
+        assert_snapshot!(subgraph.schema.schema().get_object(&name!("T")).unwrap().directives, @r#" @connect(http: {GET: "http://localhost/{$batch.id}"}, selection: "$")"#);
+        assert_snapshot!(subgraph.schema.schema().get_object(&name!("I")).unwrap().directives, @r#" @interfaceObject @connect(http: {GET: "http://localhost/{$this.id}"}, selection: "f")"#);
     }
 }

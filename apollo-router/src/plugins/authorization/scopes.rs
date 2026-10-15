@@ -125,7 +125,7 @@ fn scopes_argument(
 
 impl traverse::Visitor for ScopeExtractionVisitor<'_> {
     fn operation(&mut self, root_type: &str, node: &executable::Operation) -> Result<(), BoxError> {
-        if let Some(ty) = self.schema.types.get(root_type) {
+        if let Some(ty) = self.schema.types.get(&Name::new_unchecked(root_type)) {
             self.extracted_scopes.extend(scopes_argument(
                 ty.directives().get(&self.requires_scopes_directive_name),
             ));
@@ -289,7 +289,7 @@ impl<'a> ScopeFilteringVisitor<'a> {
         }
     }
 
-    fn implementors<'s>(&'s self, type_name: &str) -> impl Iterator<Item = &'s Name> + use<'s> {
+    fn implementors<'s>(&'s self, type_name: &Name) -> impl Iterator<Item = &'s Name> + use<'s> {
         self.implementers_map
             .get(type_name)
             .map(|implementers| implementers.iter())
@@ -328,7 +328,7 @@ impl<'a> ScopeFilteringVisitor<'a> {
 
     fn implementors_with_missing_type_requirements(
         &self,
-        type_name: &str,
+        type_name: &Name,
         t: &schema::ExtendedType,
     ) -> bool {
         if t.is_interface() {
@@ -350,10 +350,11 @@ impl<'a> ScopeFilteringVisitor<'a> {
         parent_type: &str,
         field: &ast::Field,
     ) -> bool {
-        if let Some(t) = self.schema.types.get(parent_type)
+        let parent_type = Name::new_unchecked(parent_type);
+        if let Some(t) = self.schema.types.get(&parent_type)
             && t.is_interface()
         {
-            for ty in self.implementors(parent_type) {
+            for ty in self.implementors(&parent_type) {
                 if let Ok(f) = self.schema.type_field(ty, &field.name)
                     && !self.is_field_authorized(f)
                 {
@@ -372,7 +373,8 @@ impl transform::Visitor for ScopeFilteringVisitor<'_> {
         root_type: &str,
         node: &ast::OperationDefinition,
     ) -> Result<Option<ast::OperationDefinition>, BoxError> {
-        let is_authorized = if let Some(ty) = self.schema.types.get(root_type) {
+        let is_authorized = if let Some(ty) = self.schema.types.get(&Name::new_unchecked(root_type))
+        {
             match ty.directives().get(&self.requires_scopes_directive_name) {
                 None => true,
                 Some(directive) => {
@@ -513,7 +515,7 @@ impl transform::Visitor for ScopeFilteringVisitor<'_> {
         let fragment_is_authorized = self
             .schema
             .types
-            .get(condition.as_str())
+            .get(&condition)
             .is_some_and(|ty| self.is_type_authorized(ty));
 
         self.current_path

@@ -703,10 +703,11 @@ mod helpers {
             if let Some(sub) = parsed.next_subselection() {
                 for named in sub.selections_iter() {
                     for field_name in named.names() {
+                        let field_name = Name::new(field_name)?;
                         let field_def = self
                             .original_schema
                             .schema()
-                            .type_field(key_for_type.type_name(), field_name)
+                            .type_field(key_for_type.type_name(), &field_name)
                             .map_err(|_| {
                                 FederationError::internal(format!(
                                     "field {} not found on type {}",
@@ -717,7 +718,7 @@ mod helpers {
 
                         insert_field_if_missing(
                             &key_for_type,
-                            Name::new(field_name)?,
+                            field_name.clone(),
                             Node::new(FieldDefinition {
                                 description: field_def.description.clone(),
                                 name: field_def.name.clone(),
@@ -1356,10 +1357,11 @@ mod helpers {
             if let Some(sub) = parsed.next_subselection() {
                 for named in sub.selections_iter() {
                     for field_name in named.names() {
+                        let field_name = Name::new(field_name)?;
                         let field_def = self
                             .original_schema
                             .schema()
-                            .type_field(key_for_type.type_name(), field_name)
+                            .type_field(key_for_type.type_name(), &field_name)
                             .map_err(|_| {
                                 FederationError::internal(format!(
                                     "field {} not found on type {}",
@@ -1370,7 +1372,7 @@ mod helpers {
 
                         insert_field_if_missing(
                             &key_for_type,
-                            Name::new(field_name)?,
+                            field_name.clone(),
                             Node::new(FieldDefinition {
                                 description: field_def.description.clone(),
                                 name: field_def.name.clone(),

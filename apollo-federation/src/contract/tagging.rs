@@ -291,7 +291,7 @@ mod tests {
             .expect("test schema should parse");
         crate::contract::testing::run_step(schema, step4_tag_inheriting)
             .types
-            .get(type_name)
+            .get(&apollo_compiler::Name::new_unchecked(type_name))
             .expect("type should exist")
             .to_string()
     }

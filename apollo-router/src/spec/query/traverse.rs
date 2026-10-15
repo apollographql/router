@@ -1,4 +1,5 @@
 use apollo_compiler::ExecutableDocument;
+use apollo_compiler::Name;
 use apollo_compiler::ast;
 use apollo_compiler::executable;
 use apollo_compiler::schema::FieldLookupError;
@@ -139,11 +140,12 @@ pub(crate) fn selection_set(
     parent_type: &str,
     set: &[executable::Selection],
 ) -> Result<(), BoxError> {
+    let parent_type_name = Name::new_unchecked(parent_type);
     set.iter().try_for_each(|def| match def {
         executable::Selection::Field(def) => {
             let field_def = &visitor
                 .schema()
-                .type_field(parent_type, &def.name)
+                .type_field(&parent_type_name, &def.name)
                 .map_err(|e| match e {
                     FieldLookupError::NoSuchType => format!("type `{parent_type}` not defined"),
                     FieldLookupError::NoSuchField(_, _) => {

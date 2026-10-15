@@ -7,6 +7,7 @@ use std::sync::Arc;
 use std::time::Instant;
 
 use apollo_compiler::Name;
+use apollo_compiler::name;
 use apollo_compiler::schema::Implementers;
 use apollo_compiler::validation::Valid;
 use apollo_federation::ApiSchemaOptions;
@@ -131,7 +132,7 @@ impl Schema {
 
         let mut subgraphs = HashMap::new();
         // TODO: error if not found?
-        if let Some(join_enum) = definitions.get_enum("join__Graph") {
+        if let Some(join_enum) = definitions.get_enum(&name!("join__Graph")) {
             for (name, url) in join_enum.values.values().filter_map(|value| {
                 let join_directive = value.directives.get("join__graph")?;
                 let name = join_directive
@@ -252,21 +253,30 @@ impl Schema {
     }
 
     pub(crate) fn is_subtype(&self, abstract_type: &str, maybe_subtype: &str) -> bool {
+        let (Ok(abstract_type), Ok(maybe_subtype)) =
+            (Name::new(abstract_type), Name::new(maybe_subtype))
+        else {
+            return false;
+        };
         self.supergraph_schema()
-            .is_subtype(abstract_type, maybe_subtype)
+            .is_subtype(&abstract_type, &maybe_subtype)
     }
 
     pub(crate) fn is_implementation(&self, interface: &str, implementor: &str) -> bool {
+        let (Ok(interface), Ok(implementor)) = (Name::new(interface), Name::new(implementor))
+        else {
+            return false;
+        };
         self.supergraph_schema()
-            .get_interface(interface)
+            .get_interface(&interface)
             .map(|interface| {
                 // FIXME: this looks backwards
-                interface.implements_interfaces.contains(implementor)
+                interface.implements_interfaces.contains(&implementor)
             })
             .unwrap_or(false)
     }
 
-    pub(crate) fn is_interface(&self, abstract_type: &str) -> bool {
+    pub(crate) fn is_interface(&self, abstract_type: &Name) -> bool {
         self.supergraph_schema()
             .get_interface(abstract_type)
             .is_some()
@@ -771,10 +781,10 @@ mod tests {
         let schema = Schema::parse(schema, &Default::default()).unwrap();
         let has_in_stock_field = |schema: &apollo_compiler::Schema| {
             schema
-                .get_object("Product")
+                .get_object(&name!("Product"))
                 .unwrap()
                 .fields
-                .contains_key("inStock")
+                .contains_key(&name!("inStock"))
         };
         assert!(has_in_stock_field(schema.supergraph_schema()));
         assert!(!has_in_stock_field(schema.api_schema()));

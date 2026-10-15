@@ -211,7 +211,7 @@ fn can_remove_introspection_selections() {
     if let Some(operation) = executable_document
         .operations
         .named
-        .get_mut("TestIntrospectionQuery")
+        .get_mut(&name!("TestIntrospectionQuery"))
     {
         let normalized_operation = normalize_operation(
             operation,
@@ -926,7 +926,11 @@ scalar FieldSet
 "#;
     let (schema, mut executable_document) =
         parse_schema_and_operation(operation_with_intf_object_typename);
-    if let Some(operation) = executable_document.operations.named.get_mut("TestQuery") {
+    if let Some(operation) = executable_document
+        .operations
+        .named
+        .get_mut(&name!("TestQuery"))
+    {
         let mut interface_objects: IndexSet<InterfaceTypeDefinitionPosition> = IndexSet::default();
         interface_objects.insert(InterfaceTypeDefinitionPosition {
             type_name: name!("Foo"),
@@ -2001,7 +2005,7 @@ type Cat { name: String }
     let operation = executable_document
         .operations
         .named
-        .get_mut("TestQuery")
+        .get_mut(&name!("TestQuery"))
         .expect("operation");
     let normalized = normalize_operation(
         operation,

@@ -1,3 +1,4 @@
+use apollo_compiler::name;
 use apollo_federation::composition::CompositionFailure;
 use apollo_federation::subgraph::test_utils::remove_indentation;
 use apollo_federation::subgraph::typestate::Subgraph;
@@ -46,7 +47,7 @@ mod basic_type_extensions {
             .schema
             .schema()
             .types
-            .get(name)
+            .get(&apollo_compiler::Name::new_unchecked(name))
             .unwrap()
             .to_string()
     }
@@ -827,7 +828,7 @@ mod override_tests {
             .schema()
             .schema()
             .types
-            .get("A")
+            .get(&name!("A"))
             .expect("A exists in the schema");
         assert_snapshot!(type_a.to_string(), @r#"
         type A @join__type(graph: SUBGRAPHA, key: "id") @join__type(graph: SUBGRAPHB, key: "id") {

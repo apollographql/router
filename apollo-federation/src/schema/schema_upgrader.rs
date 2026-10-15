@@ -5,6 +5,7 @@ use apollo_compiler::Node;
 use apollo_compiler::ast::Directive;
 use apollo_compiler::ast::Value;
 use apollo_compiler::collections::HashMap;
+use apollo_compiler::name;
 use apollo_compiler::schema::ExtendedType;
 use apollo_compiler::validation::Valid;
 use either::Either;
@@ -289,12 +290,12 @@ impl SchemaUpgrader {
         schema: &mut FederationSchema,
     ) -> Result<(), FederationError> {
         // both @provides and @requires will only have an object_fields referencer
-        for directive_name in ["requires", "provides"] {
-            let referencers = schema.referencers().get_directive(directive_name);
+        for directive_name in [name!("requires"), name!("provides")] {
+            let referencers = schema.referencers().get_directive(&directive_name);
             for field in &referencers.object_fields.clone() {
                 let field_type = field.make_mut(&mut schema.schema)?.make_mut();
 
-                for directive in field_type.directives.get_all_mut(directive_name) {
+                for directive in field_type.directives.get_all_mut(&directive_name) {
                     if let Some(arg) = directive
                         .make_mut()
                         .specified_argument_by_name_mut("fields")
@@ -308,7 +309,7 @@ impl SchemaUpgrader {
 
         // now do the exact same thing for @key. The difference is that the directive location will be object_types
         // rather than object_fields
-        let referencers = schema.referencers().get_directive("key");
+        let referencers = schema.referencers().get_directive(&name!("key"));
         for field in &referencers.object_types.clone() {
             let field_type = field.make_mut(&mut schema.schema)?.make_mut();
 
@@ -1430,18 +1431,18 @@ mod tests {
         let type_a_in_s1 = s1
             .schema()
             .schema()
-            .get_object("A")
+            .get_object(&name!("A"))
             .unwrap()
             .fields
-            .get("y")
+            .get(&name!("y"))
             .unwrap();
         let type_a_in_s2 = s2
             .schema()
             .schema()
-            .get_object("A")
+            .get_object(&name!("A"))
             .unwrap()
             .fields
-            .get("y")
+            .get(&name!("y"))
             .unwrap();
 
         assert_eq!(type_a_in_s1.directives.get_all("tag").count(), 0);
@@ -1877,13 +1878,13 @@ mod tests {
             s2.schema()
                 .schema()
                 .types
-                .get("T")
+                .get(&name!("T"))
                 .is_some_and(|t| !t.directives().has("external"))
         );
         assert!(
             s1.schema()
                 .schema()
-                .type_field("T", "x")
+                .type_field(&name!("T"), &name!("x"))
                 .is_ok_and(|f| f.directives.has("shareable"))
         );
     }
@@ -2029,7 +2030,7 @@ mod tests {
                 .schema()
                 .schema()
                 .types
-                .get("Subscription")
+                .get(&name!("Subscription"))
                 .is_some_and(|s| !s.directives().has("shareable"))
         );
         assert!(
@@ -2037,7 +2038,7 @@ mod tests {
                 .schema()
                 .schema()
                 .types
-                .get("Subscription")
+                .get(&name!("Subscription"))
                 .is_some_and(|s| !s.directives().has("shareable"))
         );
     }
@@ -2376,7 +2377,7 @@ mod tests {
         .expect("expands schema");
 
         // Type T should still be in the expanded schema
-        assert!(subgraph1.schema().schema.get_object("T").is_some());
+        assert!(subgraph1.schema().schema.get_object(&name!("T")).is_some());
         insta::assert_snapshot!(
             subgraph1.schema_string(),
             @r###"
@@ -2957,14 +2958,14 @@ scalar _FieldSet
         assert!(
             fed1.schema()
                 .schema()
-                .type_field("T", "x")
+                .type_field(&name!("T"), &name!("x"))
                 .is_ok_and(|f| f.directives.has("shareable"))
         );
         // The federation 2 subgraph is passed through untouched.
         assert!(
             fed2.schema()
                 .schema()
-                .type_field("T", "x")
+                .type_field(&name!("T"), &name!("x"))
                 .is_ok_and(|f| !f.directives.has("shareable"))
         );
     }
@@ -3028,7 +3029,7 @@ scalar _FieldSet
         assert!(
             fed2.schema()
                 .schema()
-                .type_field("T", "x")
+                .type_field(&name!("T"), &name!("x"))
                 .is_ok_and(|f| f.directives.has("shareable"))
         );
         // Definitions introduced after v2.5 are added under the federation prefix.
@@ -3036,7 +3037,7 @@ scalar _FieldSet
             fed2.schema()
                 .schema()
                 .directive_definitions
-                .contains_key("federation__cacheTag")
+                .contains_key(&name!("federation__cacheTag"))
         );
     }
 

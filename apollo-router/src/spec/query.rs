@@ -614,7 +614,7 @@ impl Query {
             Some(ExtendedType::Enum(enum_type)) => {
                 *output = input
                     .as_str()
-                    .filter(|s| enum_type.values.contains_key(*s))
+                    .filter(|s| Name::new(s).is_ok_and(|s| enum_type.values.contains_key(&s)))
                     .map(|_| input.clone())
                     .unwrap_or_default();
                 return Ok(());
@@ -633,7 +633,9 @@ impl Query {
                 // as long as it's not returned, having it in the internal data is ok and sometimes
                 // expected).
                 let Some(ExtendedType::Object(_) | ExtendedType::Interface(_)) =
-                    parameters.schema.types.get(input_type)
+                    Name::new(input_type)
+                        .ok()
+                        .and_then(|input_type| parameters.schema.types.get(&input_type))
                 else {
                     parameters.nullified.push(Path::from_response_slice(path));
                     *output = Value::Null;
@@ -873,7 +875,7 @@ impl Query {
                             .get_object(current_type.inner_named_type())
                             .or_else(|| {
                                 let input_value = input.get(field_name.as_str())?.as_str()?;
-                                parameters.schema.get_object(input_value)
+                                parameters.schema.get_object(&Name::new(input_value).ok()?)
                             });
 
                         if let Some(object_type) = object_type {
@@ -974,7 +976,7 @@ impl Query {
                         == type_condition.as_str()
                         || parameters
                             .schema
-                            .is_subtype(type_condition, current_type.inner_named_type().as_str());
+                            .is_subtype(type_condition, current_type.inner_named_type());
 
                     if is_apply {
                         // if this is the filtered query, we must keep the __typename field because the original query must know the type
@@ -1030,10 +1032,9 @@ impl Query {
                         // branch for why its done this way.
                         let is_apply = current_type.inner_named_type().as_str()
                             == type_condition.as_str()
-                            || parameters.schema.is_subtype(
-                                type_condition,
-                                current_type.inner_named_type().as_str(),
-                            );
+                            || parameters
+                                .schema
+                                .is_subtype(type_condition, current_type.inner_named_type());
 
                         if is_apply {
                             // if this is the filtered query, we must keep the __typename field because the original query must know the type
@@ -1088,8 +1089,9 @@ impl Query {
         // fragment-of-fragment blowups (e.g. `L1 = ...L0 ...L0`, `L2 = ...L1 ...L1`,
         // ...) into linear work.
         let mut visited_fragments: HashSet<&'a str> = HashSet::new();
+        let root_type_name = Name::new_unchecked(root_type_name);
         self.apply_root_selection_set_cached(
-            root_type_name,
+            &root_type_name,
             selection_set,
             parameters,
             input,
@@ -1102,7 +1104,7 @@ impl Query {
     #[allow(clippy::too_many_arguments)]
     fn apply_root_selection_set_cached<'a: 'b, 'b>(
         &'a self,
-        root_type_name: &str,
+        root_type_name: &Name,
         selection_set: &'a [Selection],
         parameters: &mut FormatParameters,
         input: &mut Object,
@@ -1128,7 +1130,10 @@ impl Query {
 
                     if name.as_str() == TYPENAME {
                         if !output.contains_key(field_name_str) {
-                            output.insert(field_name.clone(), Value::String(root_type_name.into()));
+                            output.insert(
+                                field_name.clone(),
+                                Value::String(root_type_name.as_str().into()),
+                            );
                         }
                     } else if let Some(input_value) = input.get_mut(field_name_str) {
                         let output_value = match output.entry((*field_name).clone()) {
@@ -1189,7 +1194,7 @@ impl Query {
 
                     // check if the fragment matches the input type directly, and if not, check if the
                     // input type is a subtype of the fragment's type condition (interface, union)
-                    let is_apply = (root_type_name == type_condition.as_str())
+                    let is_apply = (root_type_name == type_condition)
                         || parameters.schema.is_subtype(type_condition, root_type_name);
 
                     if is_apply {
@@ -1237,7 +1242,7 @@ impl Query {
                     {
                         // check if the fragment matches the input type directly, and if not, check if the
                         // input type is a subtype of the fragment's type condition (interface, union)
-                        let is_apply = (root_type_name == type_condition.as_str())
+                        let is_apply = (root_type_name == type_condition)
                             || parameters.schema.is_subtype(type_condition, root_type_name);
 
                         if is_apply {

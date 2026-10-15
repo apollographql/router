@@ -69,7 +69,7 @@ pub(crate) fn validate_provides_directives(
                 if !schema
                     .schema()
                     .types
-                    .get(provides.target_return_type.as_str())
+                    .get(provides.target_return_type)
                     .is_some_and(|t| t.is_object() || t.is_interface() || t.is_union())
                 {
                     errors.errors.push(SingleFederationError::ProvidesOnNonObjectField { message: format!("Invalid @provides directive on field \"{}.{}\": field has type \"{}\" which is not a Composite Type", provides.target.type_name(), provides.target.field_name(), provides.target_return_type) });

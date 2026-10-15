@@ -253,7 +253,7 @@ impl CostSpecDefinition {
                 .members
                 .iter()
                 .filter_map(|member_name| {
-                    let member_type = schema.schema().types.get(member_name.as_str())?;
+                    let member_type = schema.schema().types.get(&**member_name)?;
                     CostDirective::from_schema_directives(name, member_type.directives())
                 })
                 .max_by(|a, b| a.weight().partial_cmp(&b.weight()).unwrap()),

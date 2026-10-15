@@ -653,7 +653,9 @@ impl<'schema> SelectionValidator<'schema> {
                         });
                     }
 
-                    let fields_by_type_name = type_ref.get_fields(field_name.as_str());
+                    let fields_by_type_name = Name::new(field_name)
+                        .map(|field_name| type_ref.get_fields(&field_name))
+                        .unwrap_or_default();
                     if fields_by_type_name.is_empty() {
                         return Err(Message {
                             code: Code::SelectedFieldNotFound,
@@ -1072,7 +1074,10 @@ impl<'schema> GroupVisitor<LegacyGroup<'schema>, LegacyField<'schema>>
         group.selection.selections_iter().flat_map(|selection| {
             let mut results = Vec::new();
             for field_name in selection.names() {
-                if let Some(definition) = group.ty.fields.get(field_name) {
+                if let Some(definition) = Name::new(field_name)
+                    .ok()
+                    .and_then(|name| group.ty.fields.get(&name))
+                {
                     results.push(Ok(LegacyField {
                         selection,
                         definition,

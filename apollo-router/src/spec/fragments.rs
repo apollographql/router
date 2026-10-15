@@ -1,6 +1,7 @@
 use std::collections::HashMap;
 
 use apollo_compiler::ExecutableDocument;
+use apollo_compiler::Name;
 use serde::Deserialize;
 use serde::Serialize;
 
@@ -42,7 +43,7 @@ impl Fragments {
                 })
                 .collect::<Result<Vec<_>, _>>()?;
             let fragment = Fragment {
-                type_condition: type_condition.as_str().to_owned(),
+                type_condition: type_condition.clone(),
                 selection_set,
             };
 
@@ -61,6 +62,6 @@ impl Fragments {
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub(crate) struct Fragment {
-    pub(crate) type_condition: String,
+    pub(crate) type_condition: Name,
     pub(crate) selection_set: Vec<Selection>,
 }

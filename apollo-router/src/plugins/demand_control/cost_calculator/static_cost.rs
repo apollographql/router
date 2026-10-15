@@ -1,6 +1,7 @@
 use std::sync::Arc;
 
 use ahash::HashMap;
+use apollo_compiler::Name;
 use apollo_compiler::ast;
 use apollo_compiler::ast::NamedType;
 use apollo_compiler::executable::ExecutableDocument;
@@ -120,7 +121,7 @@ fn score_variable(
                 .cost_directive()
                 .map_or(1.0, |cost| cost.weight());
             for (arg_name, arg_val) in inner_args {
-                let arg_def = schema.input_field_definition(argument_definition.ty().name(), arg_name.as_str()).ok_or_else(|| {
+                let arg_def = Name::new(arg_name.as_str()).ok().and_then(|arg_name| schema.input_field_definition(argument_definition.ty().name(), &arg_name)).ok_or_else(|| {
                     DemandControlError::QueryParseFailure(format!(
                         "Argument {} was found in query, but its type ({}) was not found in the schema",
                         argument_definition.name(),

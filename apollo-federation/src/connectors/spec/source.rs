@@ -284,7 +284,7 @@ mod tests {
         insta::assert_debug_snapshot!(
             subgraph.schema
                 .referencers()
-                .get_directive(SOURCE_DIRECTIVE_NAME_IN_SPEC.as_str()),
+                .get_directive(&SOURCE_DIRECTIVE_NAME_IN_SPEC),
             @r###"
                 DirectiveReferencers {
                     schema: Some(

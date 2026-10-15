@@ -1,5 +1,6 @@
 // Path-specific type constraints imposed by the API schema.
 
+use apollo_compiler::Name;
 use apollo_compiler::collections::IndexSet;
 use apollo_compiler::executable::Field;
 
@@ -52,7 +53,7 @@ impl<'a> SchemaConstraint<'a> {
 
     /// (Parent type & field type consistency) Considering the field's possible parent types
     /// (`self.possible_types`), find all object types that the field can resolve to.
-    fn possible_types_for_field(&self, field_name: &str) -> Result<Self, FederationError> {
+    fn possible_types_for_field(&self, field_name: &Name) -> Result<Self, FederationError> {
         let mut possible_types = IndexSet::default();
         for parent_type in &self.possible_types {
             let parent_type_def = parent_type.get(self.schema.schema())?;

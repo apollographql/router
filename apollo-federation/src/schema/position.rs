@@ -2032,14 +2032,14 @@ impl SchemaDefinitionPosition {
     pub(crate) fn remove_directive_name(
         &self,
         schema: &mut FederationSchema,
-        name: &str,
+        name: &Name,
     ) -> Result<(), FederationError> {
         let is_link = Self::is_link(schema, name)?;
         self.remove_directive_name_references(&mut schema.referencers, name);
         self.make_mut(&mut schema.schema)
             .make_mut()
             .directives
-            .retain(|other_directive| other_directive.name != name);
+            .retain(|other_directive| other_directive.name != *name);
         if is_link {
             schema.links_metadata = LinksMetadata::from_schema(&schema.schema)?.map(Box::new);
         }
@@ -2095,7 +2095,7 @@ impl SchemaDefinitionPosition {
         Ok(())
     }
 
-    fn remove_directive_name_references(&self, referencers: &mut Referencers, name: &str) {
+    fn remove_directive_name_references(&self, referencers: &mut Referencers, name: &Name) {
         let Some(directive_referencers) = referencers.directives.get_mut(name) else {
             return;
         };
@@ -2604,7 +2604,7 @@ impl ScalarTypeDefinitionPosition {
     }
 
     /// Remove a directive application from this position by name.
-    pub(crate) fn remove_directive_name(&self, schema: &mut FederationSchema, name: &str) {
+    pub(crate) fn remove_directive_name(&self, schema: &mut FederationSchema, name: &Name) {
         let Some(type_) = self.try_make_mut(&mut schema.schema) else {
             return;
         };
@@ -2612,7 +2612,7 @@ impl ScalarTypeDefinitionPosition {
         type_
             .make_mut()
             .directives
-            .retain(|other_directive| other_directive.name != name);
+            .retain(|other_directive| other_directive.name != *name);
     }
 
     fn insert_references(
@@ -2649,7 +2649,7 @@ impl ScalarTypeDefinitionPosition {
         Ok(())
     }
 
-    fn remove_directive_name_references(&self, referencers: &mut Referencers, name: &str) {
+    fn remove_directive_name_references(&self, referencers: &mut Referencers, name: &Name) {
         let Some(directive_referencers) = referencers.directives.get_mut(name) else {
             return;
         };
@@ -2986,7 +2986,7 @@ impl ObjectTypeDefinitionPosition {
     }
 
     /// Remove a directive application from this position by name.
-    pub(crate) fn remove_directive_name(&self, schema: &mut FederationSchema, name: &str) {
+    pub(crate) fn remove_directive_name(&self, schema: &mut FederationSchema, name: &Name) {
         let Some(type_) = self.try_make_mut(&mut schema.schema) else {
             return;
         };
@@ -2994,7 +2994,7 @@ impl ObjectTypeDefinitionPosition {
         type_
             .make_mut()
             .directives
-            .retain(|other_directive| other_directive.name != name);
+            .retain(|other_directive| other_directive.name != *name);
     }
 
     pub(crate) fn insert_implements_interface(
@@ -3007,7 +3007,7 @@ impl ObjectTypeDefinitionPosition {
         self.insert_implements_interface_references(&mut schema.referencers, &name)
     }
 
-    pub(crate) fn remove_implements_interface(&self, schema: &mut FederationSchema, name: &str) {
+    pub(crate) fn remove_implements_interface(&self, schema: &mut FederationSchema, name: &Name) {
         let Some(type_) = self.try_make_mut(&mut schema.schema) else {
             return;
         };
@@ -3126,7 +3126,7 @@ impl ObjectTypeDefinitionPosition {
         Ok(())
     }
 
-    fn remove_directive_name_references(&self, referencers: &mut Referencers, name: &str) {
+    fn remove_directive_name_references(&self, referencers: &mut Referencers, name: &Name) {
         let Some(directive_referencers) = referencers.directives.get_mut(name) else {
             return;
         };
@@ -3149,7 +3149,7 @@ impl ObjectTypeDefinitionPosition {
         Ok(())
     }
 
-    fn remove_implements_interface_references(&self, referencers: &mut Referencers, name: &str) {
+    fn remove_implements_interface_references(&self, referencers: &mut Referencers, name: &Name) {
         let Some(interface_type_referencers) = referencers.interface_types.get_mut(name) else {
             return;
         };
@@ -3539,7 +3539,7 @@ impl ObjectFieldDefinitionPosition {
     }
 
     /// Remove a directive application from this position by name.
-    pub(crate) fn remove_directive_name(&self, schema: &mut FederationSchema, name: &str) {
+    pub(crate) fn remove_directive_name(&self, schema: &mut FederationSchema, name: &Name) {
         let Some(field) = self.try_make_mut(&mut schema.schema) else {
             return;
         };
@@ -3547,7 +3547,7 @@ impl ObjectFieldDefinitionPosition {
         field
             .make_mut()
             .directives
-            .retain(|other_directive| other_directive.name != name);
+            .retain(|other_directive| other_directive.name != *name);
     }
 
     /// Remove a directive application.
@@ -3628,7 +3628,7 @@ impl ObjectFieldDefinitionPosition {
         Ok(())
     }
 
-    fn remove_directive_name_references(&self, referencers: &mut Referencers, name: &str) {
+    fn remove_directive_name_references(&self, referencers: &mut Referencers, name: &Name) {
         let Some(directive_referencers) = referencers.directives.get_mut(name) else {
             return;
         };
@@ -3879,7 +3879,7 @@ impl ObjectFieldArgumentDefinitionPosition {
     }
 
     /// Remove a directive application from this position by name.
-    pub(crate) fn remove_directive_name(&self, schema: &mut FederationSchema, name: &str) {
+    pub(crate) fn remove_directive_name(&self, schema: &mut FederationSchema, name: &Name) {
         let Some(argument) = self.try_make_mut(&mut schema.schema) else {
             return;
         };
@@ -3887,7 +3887,7 @@ impl ObjectFieldArgumentDefinitionPosition {
         argument
             .make_mut()
             .directives
-            .retain(|other_directive| other_directive.name != name);
+            .retain(|other_directive| other_directive.name != *name);
     }
 
     fn insert(
@@ -3952,7 +3952,7 @@ impl ObjectFieldArgumentDefinitionPosition {
         Ok(())
     }
 
-    fn remove_directive_name_references(&self, referencers: &mut Referencers, name: &str) {
+    fn remove_directive_name_references(&self, referencers: &mut Referencers, name: &Name) {
         let Some(directive_referencers) = referencers.directives.get_mut(name) else {
             return;
         };
@@ -4371,7 +4371,7 @@ impl InterfaceTypeDefinitionPosition {
     }
 
     /// Remove a directive application from this position by name.
-    pub(crate) fn remove_directive_name(&self, schema: &mut FederationSchema, name: &str) {
+    pub(crate) fn remove_directive_name(&self, schema: &mut FederationSchema, name: &Name) {
         let Some(type_) = self.try_make_mut(&mut schema.schema) else {
             return;
         };
@@ -4379,7 +4379,7 @@ impl InterfaceTypeDefinitionPosition {
         type_
             .make_mut()
             .directives
-            .retain(|other_directive| other_directive.name != name);
+            .retain(|other_directive| other_directive.name != *name);
     }
 
     pub(crate) fn insert_implements_interface(
@@ -4392,7 +4392,7 @@ impl InterfaceTypeDefinitionPosition {
         self.insert_implements_interface_references(&mut schema.referencers, &name)
     }
 
-    pub(crate) fn remove_implements_interface(&self, schema: &mut FederationSchema, name: &str) {
+    pub(crate) fn remove_implements_interface(&self, schema: &mut FederationSchema, name: &Name) {
         let Some(type_) = self.try_make_mut(&mut schema.schema) else {
             return;
         };
@@ -4481,7 +4481,7 @@ impl InterfaceTypeDefinitionPosition {
         Ok(())
     }
 
-    fn remove_directive_name_references(&self, referencers: &mut Referencers, name: &str) {
+    fn remove_directive_name_references(&self, referencers: &mut Referencers, name: &Name) {
         let Some(directive_referencers) = referencers.directives.get_mut(name) else {
             return;
         };
@@ -4506,7 +4506,7 @@ impl InterfaceTypeDefinitionPosition {
         Ok(())
     }
 
-    fn remove_implements_interface_references(&self, referencers: &mut Referencers, name: &str) {
+    fn remove_implements_interface_references(&self, referencers: &mut Referencers, name: &Name) {
         let Some(interface_type_referencers) = referencers.interface_types.get_mut(name) else {
             return;
         };
@@ -4792,7 +4792,7 @@ impl InterfaceFieldDefinitionPosition {
     }
 
     /// Remove a directive application from this position by name.
-    pub(crate) fn remove_directive_name(&self, schema: &mut FederationSchema, name: &str) {
+    pub(crate) fn remove_directive_name(&self, schema: &mut FederationSchema, name: &Name) {
         let Some(field) = self.try_make_mut(&mut schema.schema) else {
             return;
         };
@@ -4800,7 +4800,7 @@ impl InterfaceFieldDefinitionPosition {
         field
             .make_mut()
             .directives
-            .retain(|other_directive| other_directive.name != name);
+            .retain(|other_directive| other_directive.name != *name);
     }
 
     /// Remove a directive application.
@@ -4881,7 +4881,7 @@ impl InterfaceFieldDefinitionPosition {
         Ok(())
     }
 
-    fn remove_directive_name_references(&self, referencers: &mut Referencers, name: &str) {
+    fn remove_directive_name_references(&self, referencers: &mut Referencers, name: &Name) {
         let Some(directive_referencers) = referencers.directives.get_mut(name) else {
             return;
         };
@@ -5135,7 +5135,7 @@ impl InterfaceFieldArgumentDefinitionPosition {
     }
 
     /// Remove a directive application from this position by name.
-    pub(crate) fn remove_directive_name(&self, schema: &mut FederationSchema, name: &str) {
+    pub(crate) fn remove_directive_name(&self, schema: &mut FederationSchema, name: &Name) {
         let Some(argument) = self.try_make_mut(&mut schema.schema) else {
             return;
         };
@@ -5143,7 +5143,7 @@ impl InterfaceFieldArgumentDefinitionPosition {
         argument
             .make_mut()
             .directives
-            .retain(|other_directive| other_directive.name != name);
+            .retain(|other_directive| other_directive.name != *name);
     }
 
     fn insert(
@@ -5208,7 +5208,7 @@ impl InterfaceFieldArgumentDefinitionPosition {
         Ok(())
     }
 
-    fn remove_directive_name_references(&self, referencers: &mut Referencers, name: &str) {
+    fn remove_directive_name_references(&self, referencers: &mut Referencers, name: &Name) {
         let Some(directive_referencers) = referencers.directives.get_mut(name) else {
             return;
         };
@@ -5513,7 +5513,7 @@ impl UnionTypeDefinitionPosition {
     }
 
     /// Remove a directive application from this position by name.
-    pub(crate) fn remove_directive_name(&self, schema: &mut FederationSchema, name: &str) {
+    pub(crate) fn remove_directive_name(&self, schema: &mut FederationSchema, name: &Name) {
         let Some(type_) = self.try_make_mut(&mut schema.schema) else {
             return;
         };
@@ -5521,7 +5521,7 @@ impl UnionTypeDefinitionPosition {
         type_
             .make_mut()
             .directives
-            .retain(|other_directive| other_directive.name != name);
+            .retain(|other_directive| other_directive.name != *name);
     }
 
     pub(crate) fn insert_member(
@@ -5534,7 +5534,7 @@ impl UnionTypeDefinitionPosition {
         self.insert_member_references(&mut schema.referencers, &name)
     }
 
-    pub(crate) fn remove_member(&self, schema: &mut FederationSchema, name: &str) {
+    pub(crate) fn remove_member(&self, schema: &mut FederationSchema, name: &Name) {
         let Some(type_) = self.try_make_mut(&mut schema.schema) else {
             return;
         };
@@ -5548,7 +5548,7 @@ impl UnionTypeDefinitionPosition {
     pub(crate) fn remove_member_recursive(
         &self,
         schema: &mut FederationSchema,
-        name: &str,
+        name: &Name,
     ) -> Result<(), FederationError> {
         self.remove_member(schema, name);
         let Some(type_) = self.try_get(&schema.schema) else {
@@ -5603,7 +5603,7 @@ impl UnionTypeDefinitionPosition {
         Ok(())
     }
 
-    fn remove_directive_name_references(&self, referencers: &mut Referencers, name: &str) {
+    fn remove_directive_name_references(&self, referencers: &mut Referencers, name: &Name) {
         let Some(directive_referencers) = referencers.directives.get_mut(name) else {
             return;
         };
@@ -5626,7 +5626,7 @@ impl UnionTypeDefinitionPosition {
         Ok(())
     }
 
-    fn remove_member_references(&self, referencers: &mut Referencers, name: &str) {
+    fn remove_member_references(&self, referencers: &mut Referencers, name: &Name) {
         let Some(object_type_referencers) = referencers.object_types.get_mut(name) else {
             return;
         };
@@ -5772,9 +5772,9 @@ impl UnionTypenameFieldDefinitionPosition {
     }
 
     fn insert_type_references(&self, referencers: &mut Referencers) -> Result<(), FederationError> {
-        let output_type_reference = "String";
+        let output_type_reference = name!("String");
         if let Some(scalar_type_referencers) =
-            referencers.scalar_types.get_mut(output_type_reference)
+            referencers.scalar_types.get_mut(&output_type_reference)
         {
             scalar_type_referencers.union_fields.insert(self.clone());
         } else {
@@ -5786,9 +5786,9 @@ impl UnionTypenameFieldDefinitionPosition {
     }
 
     fn remove_type_references(&self, referencers: &mut Referencers) {
-        let output_type_reference = "String";
+        let output_type_reference = name!("String");
         if let Some(scalar_type_referencers) =
-            referencers.scalar_types.get_mut(output_type_reference)
+            referencers.scalar_types.get_mut(&output_type_reference)
         {
             scalar_type_referencers.union_fields.shift_remove(self);
         }
@@ -5984,7 +5984,7 @@ impl EnumTypeDefinitionPosition {
     }
 
     /// Remove a directive application from this position by name.
-    pub(crate) fn remove_directive_name(&self, schema: &mut FederationSchema, name: &str) {
+    pub(crate) fn remove_directive_name(&self, schema: &mut FederationSchema, name: &Name) {
         let Some(type_) = self.try_make_mut(&mut schema.schema) else {
             return;
         };
@@ -5992,7 +5992,7 @@ impl EnumTypeDefinitionPosition {
         type_
             .make_mut()
             .directives
-            .retain(|other_directive| other_directive.name != name);
+            .retain(|other_directive| other_directive.name != *name);
     }
 
     fn insert_references(
@@ -6042,7 +6042,7 @@ impl EnumTypeDefinitionPosition {
         Ok(())
     }
 
-    fn remove_directive_name_references(&self, referencers: &mut Referencers, name: &str) {
+    fn remove_directive_name_references(&self, referencers: &mut Referencers, name: &Name) {
         let Some(directive_referencers) = referencers.directives.get_mut(name) else {
             return;
         };
@@ -6268,7 +6268,7 @@ impl EnumValueDefinitionPosition {
     }
 
     /// Remove a directive application from this position by name.
-    pub(crate) fn remove_directive_name(&self, schema: &mut FederationSchema, name: &str) {
+    pub(crate) fn remove_directive_name(&self, schema: &mut FederationSchema, name: &Name) {
         let Some(value) = self.try_make_mut(&mut schema.schema) else {
             return;
         };
@@ -6276,7 +6276,7 @@ impl EnumValueDefinitionPosition {
         value
             .make_mut()
             .directives
-            .retain(|other_directive| other_directive.name != name);
+            .retain(|other_directive| other_directive.name != *name);
     }
 
     fn insert_references(
@@ -6324,7 +6324,7 @@ impl EnumValueDefinitionPosition {
         Ok(())
     }
 
-    fn remove_directive_name_references(&self, referencers: &mut Referencers, name: &str) {
+    fn remove_directive_name_references(&self, referencers: &mut Referencers, name: &Name) {
         let Some(directive_referencers) = referencers.directives.get_mut(name) else {
             return;
         };
@@ -6546,7 +6546,7 @@ impl InputObjectTypeDefinitionPosition {
     }
 
     /// Remove a directive application from this position by name.
-    pub(crate) fn remove_directive_name(&self, schema: &mut FederationSchema, name: &str) {
+    pub(crate) fn remove_directive_name(&self, schema: &mut FederationSchema, name: &Name) {
         let Some(type_) = self.try_make_mut(&mut schema.schema) else {
             return;
         };
@@ -6554,7 +6554,7 @@ impl InputObjectTypeDefinitionPosition {
         type_
             .make_mut()
             .directives
-            .retain(|other_directive| other_directive.name != name);
+            .retain(|other_directive| other_directive.name != *name);
     }
 
     fn insert_references(
@@ -6606,7 +6606,7 @@ impl InputObjectTypeDefinitionPosition {
         Ok(())
     }
 
-    fn remove_directive_name_references(&self, referencers: &mut Referencers, name: &str) {
+    fn remove_directive_name_references(&self, referencers: &mut Referencers, name: &Name) {
         let Some(directive_referencers) = referencers.directives.get_mut(name) else {
             return;
         };
@@ -6852,7 +6852,7 @@ impl InputObjectFieldDefinitionPosition {
     }
 
     /// Remove a directive application from this position by name.
-    pub(crate) fn remove_directive_name(&self, schema: &mut FederationSchema, name: &str) {
+    pub(crate) fn remove_directive_name(&self, schema: &mut FederationSchema, name: &Name) {
         let Some(field) = self.try_make_mut(&mut schema.schema) else {
             return;
         };
@@ -6860,7 +6860,7 @@ impl InputObjectFieldDefinitionPosition {
         field
             .make_mut()
             .directives
-            .retain(|other_directive| other_directive.name != name);
+            .retain(|other_directive| other_directive.name != *name);
     }
 
     fn insert_references(
@@ -6913,7 +6913,7 @@ impl InputObjectFieldDefinitionPosition {
         Ok(())
     }
 
-    fn remove_directive_name_references(&self, referencers: &mut Referencers, name: &str) {
+    fn remove_directive_name_references(&self, referencers: &mut Referencers, name: &Name) {
         let Some(directive_referencers) = referencers.directives.get_mut(name) else {
             return;
         };
@@ -7372,7 +7372,7 @@ impl DirectiveArgumentDefinitionPosition {
     }
 
     /// Remove a directive application from this position by name.
-    pub(crate) fn remove_directive_name(&self, schema: &mut FederationSchema, name: &str) {
+    pub(crate) fn remove_directive_name(&self, schema: &mut FederationSchema, name: &Name) {
         let Some(argument) = self.try_make_mut(&mut schema.schema) else {
             return;
         };
@@ -7380,7 +7380,7 @@ impl DirectiveArgumentDefinitionPosition {
         argument
             .make_mut()
             .directives
-            .retain(|other_directive| other_directive.name != name);
+            .retain(|other_directive| other_directive.name != *name);
     }
 
     fn insert(
@@ -7445,7 +7445,7 @@ impl DirectiveArgumentDefinitionPosition {
         Ok(())
     }
 
-    fn remove_directive_name_references(&self, referencers: &mut Referencers, name: &str) {
+    fn remove_directive_name_references(&self, referencers: &mut Referencers, name: &Name) {
         let Some(directive_referencers) = referencers.directives.get_mut(name) else {
             return;
         };
@@ -8151,16 +8151,16 @@ mod tests {
         let referencers = schema.referencers();
 
         assert!(
-            referencers.object_types.get("User").is_none(),
+            referencers.object_types.get(&name!("User")).is_none(),
             "Referencers should not have old type name 'User' as a key after rename"
         );
 
         assert!(
-            referencers.object_types.get("Person").is_some(),
+            referencers.object_types.get(&name!("Person")).is_some(),
             "Referencers should have new type name 'Person' as a key after rename"
         );
 
-        let string_refs = referencers.scalar_types.get("String").unwrap();
+        let string_refs = referencers.scalar_types.get(&name!("String")).unwrap();
         assert!(
             string_refs
                 .object_fields
@@ -8176,7 +8176,7 @@ mod tests {
             "String referencers should not contain any fields on User type"
         );
 
-        let id_refs = referencers.scalar_types.get("ID").unwrap();
+        let id_refs = referencers.scalar_types.get(&name!("ID")).unwrap();
         assert!(
             id_refs
                 .object_fields
@@ -8192,7 +8192,7 @@ mod tests {
             "ID referencers should not contain any fields on User type"
         );
 
-        let post_refs = referencers.object_types.get("Post").unwrap();
+        let post_refs = referencers.object_types.get(&name!("Post")).unwrap();
         assert!(
             post_refs
                 .object_fields
@@ -8208,7 +8208,7 @@ mod tests {
             "Post referencers should not contain any fields on User type"
         );
 
-        let person_refs = referencers.object_types.get("Person").unwrap();
+        let person_refs = referencers.object_types.get(&name!("Person")).unwrap();
         assert!(
             person_refs
                 .object_fields

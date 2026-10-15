@@ -1,5 +1,6 @@
 use apollo_compiler::Node;
 use apollo_compiler::coord;
+use apollo_compiler::name;
 use apollo_compiler::schema::Value;
 use apollo_federation::Supergraph;
 
@@ -253,7 +254,7 @@ fn erase_empty_types_due_to_overridden_fields() {
         .expect("missing subgraph")
         .schema
         .schema();
-    assert!(!b.types.contains_key("User"));
+    assert!(!b.types.contains_key(&name!("User")));
 }
 
 #[test]

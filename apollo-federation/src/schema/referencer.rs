@@ -161,7 +161,7 @@ impl fmt::Debug for Referencers {
 }
 
 impl Referencers {
-    pub(crate) fn contains_type_name(&self, name: &str) -> bool {
+    pub(crate) fn contains_type_name(&self, name: &Name) -> bool {
         self.scalar_types.contains_key(name)
             || self.object_types.contains_key(name)
             || self.interface_types.contains_key(name)
@@ -172,7 +172,7 @@ impl Referencers {
 
     pub(crate) fn get_interface_type(
         &self,
-        name: &str,
+        name: &Name,
     ) -> Result<&InterfaceTypeReferencers, FederationError> {
         self.interface_types.get(name).ok_or_else(|| {
             SingleFederationError::Internal {
@@ -182,7 +182,7 @@ impl Referencers {
         })
     }
 
-    pub(crate) fn get_directive(&self, name: &str) -> &DirectiveReferencers {
+    pub(crate) fn get_directive(&self, name: &Name) -> &DirectiveReferencers {
         self.directives
             .get(name)
             .unwrap_or_else(|| &EMPTY_REFERENCERS)

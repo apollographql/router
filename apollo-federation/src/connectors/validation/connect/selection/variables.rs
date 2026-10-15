@@ -2,6 +2,7 @@
 
 use std::collections::HashMap;
 
+use apollo_compiler::Name;
 use apollo_compiler::Node;
 use apollo_compiler::Schema;
 use apollo_compiler::ast::FieldDefinition;
@@ -125,14 +126,15 @@ fn resolve_path(
     let parent_is_nullable = !field_type.is_non_null();
 
     for (nested_field_name, sub_trie) in path_selection.iter() {
+        let nested_field_key = Name::new(nested_field_name).ok();
         let nested_field_type = resolve_type(schema, field_type, field)
             .and_then(|extended_type| {
                 match extended_type {
                     ExtendedType::Enum(_) | ExtendedType::Scalar(_) => None,
-                    ExtendedType::Object(object) => object.fields.get(nested_field_name).map(|field| &field.ty),
-                    ExtendedType::InputObject(input_object) => input_object.fields.get(nested_field_name).map(|field| field.ty.as_ref()),
+                    ExtendedType::Object(object) => nested_field_key.as_ref().and_then(|name| object.fields.get(name)).map(|field| &field.ty),
+                    ExtendedType::InputObject(input_object) => nested_field_key.as_ref().and_then(|name| input_object.fields.get(name)).map(|field| field.ty.as_ref()),
                     // TODO: at the time of writing, you can't declare interfaces or unions in connectors schemas at all, so these aren't tested
-                    ExtendedType::Interface(interface) => interface.fields.get(nested_field_name).map(|field| &field.ty),
+                    ExtendedType::Interface(interface) => nested_field_key.as_ref().and_then(|name| interface.fields.get(name)).map(|field| &field.ty),
                     ExtendedType::Union(_) => {
                         return Err(Message {
                             code: Code::UnsupportedVariableType,
@@ -196,7 +198,9 @@ impl NamespaceResolver for ThisResolver<'_> {
         schema: &SchemaInfo,
     ) -> Result<(), Message> {
         for (root, sub_trie) in reference.selection.iter() {
-            let fields = self.object_type.get_fields(root);
+            let fields = Name::new(root)
+                .map(|root| self.object_type.get_fields(&root))
+                .unwrap_or_default();
 
             if fields.is_empty() {
                 return Err(Message {

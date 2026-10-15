@@ -1,3 +1,4 @@
+use apollo_compiler::name;
 use apollo_compiler::parser::Parser;
 use insta::assert_json_snapshot;
 use serde_json_bytes::json;
@@ -5416,9 +5417,9 @@ fn it_parses_default_floats() {
     let schema = Schema::parse(&schema, &Default::default()).unwrap();
     let value = schema
         .supergraph_schema()
-        .get_input_object("WithAllKindsOfFloats")
+        .get_input_object(&name!("WithAllKindsOfFloats"))
         .unwrap()
-        .fields["a_float_that_doesnt_fit_an_int"]
+        .fields[&name!("a_float_that_doesnt_fit_an_int")]
         .default_value
         .as_ref()
         .unwrap();

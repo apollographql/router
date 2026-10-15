@@ -1,4 +1,5 @@
 use apollo_compiler::coord;
+use apollo_compiler::name;
 use apollo_federation::composition::CompositionFailure;
 use apollo_federation::supergraph::Satisfiable;
 use apollo_federation::supergraph::Supergraph;
@@ -989,7 +990,7 @@ fn one_of_input_object_is_extracted_to_every_subgraph_defining_it() {
         let find_input = subgraph
             .schema
             .schema()
-            .get_input_object("FindInput")
+            .get_input_object(&name!("FindInput"))
             .expect("FindInput should exist");
         assert!(
             find_input.is_one_of(),

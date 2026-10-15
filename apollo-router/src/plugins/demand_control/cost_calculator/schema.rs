@@ -175,7 +175,7 @@ impl FieldDefinition {
 
     pub(in crate::plugins::demand_control) fn argument_by_name(
         &self,
-        argument_name: &str,
+        argument_name: &Name,
     ) -> Option<&InputDefinition> {
         self.arguments.get(argument_name)
     }
@@ -257,16 +257,16 @@ impl DemandControlledSchema {
 
     pub(in crate::plugins::demand_control) fn input_field_definition(
         &self,
-        type_name: &str,
-        field_name: &str,
+        type_name: &Name,
+        field_name: &Name,
     ) -> Option<&InputDefinition> {
         self.input_field_definitions.get(type_name)?.get(field_name)
     }
 
     pub(in crate::plugins::demand_control) fn output_field_definition(
         &self,
-        type_name: &str,
-        field_name: &str,
+        type_name: &Name,
+        field_name: &Name,
     ) -> Option<&FieldDefinition> {
         self.output_field_definitions
             .get(type_name)?

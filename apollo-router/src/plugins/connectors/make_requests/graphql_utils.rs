@@ -112,7 +112,7 @@ pub(super) fn get_entity_fields<'a>(
             Selection::FragmentSpread(f) => {
                 let fragment = document
                     .fragments
-                    .get(f.fragment_name.as_str())
+                    .get(&f.fragment_name)
                     .ok_or_else(|| InvalidOperation("missing fragment".into()))?;
                 for selection in fragment.selection_set.selections.iter() {
                     match selection {

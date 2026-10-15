@@ -1,6 +1,7 @@
 use apollo_compiler::Name;
 use apollo_compiler::Node;
 use apollo_compiler::ast::Value;
+use apollo_compiler::name;
 use apollo_compiler::schema::ExtendedType;
 use apollo_federation::assert_errors;
 use apollo_federation::subgraph::test_utils::BuildOption;
@@ -28,7 +29,7 @@ fn coerces_directive_argument_values() {
         .validated_schema()
         .schema()
         .types
-        .get("T")
+        .get(&name!("T"))
         .and_then(|ty| match ty {
             ExtendedType::Object(t) => Some(t),
             _ => None::<&Node<apollo_compiler::schema::ObjectType>>,
@@ -124,7 +125,7 @@ fn coerces_enum_value_to_non_null_string_on_custom_directive() {
         .validated_schema()
         .schema()
         .types
-        .get("T")
+        .get(&name!("T"))
         .and_then(|ty| {
             if let ExtendedType::Interface(i) = ty {
                 Some(i)
@@ -133,7 +134,10 @@ fn coerces_enum_value_to_non_null_string_on_custom_directive() {
             }
         })
         .expect("T interface not found");
-    let id_field = t_interface.fields.get("id").expect("id field exists");
+    let id_field = t_interface
+        .fields
+        .get(&name!("id"))
+        .expect("id field exists");
     let directive = id_field
         .directives
         .iter()
@@ -175,7 +179,7 @@ fn coerces_enum_literal_to_string_on_union_directive() {
         .validated_schema()
         .schema()
         .types
-        .get("SearchResult")
+        .get(&name!("SearchResult"))
         .and_then(|ty| {
             if let ExtendedType::Union(u) = ty {
                 Some(u)
@@ -217,7 +221,7 @@ fn coerces_enum_literal_to_string_on_scalar_directive() {
         .validated_schema()
         .schema()
         .types
-        .get("JSON")
+        .get(&name!("JSON"))
         .and_then(|ty| {
             if let ExtendedType::Scalar(s) = ty {
                 Some(s)
@@ -262,7 +266,7 @@ fn coerces_enum_literal_to_string_on_enum_type_directive() {
         .validated_schema()
         .schema()
         .types
-        .get("Status")
+        .get(&name!("Status"))
         .and_then(|ty| {
             if let ExtendedType::Enum(e) = ty {
                 Some(e)
@@ -308,7 +312,7 @@ fn coerces_enum_literal_to_string_on_enum_value_directive() {
         .validated_schema()
         .schema()
         .types
-        .get("Priority")
+        .get(&name!("Priority"))
         .and_then(|ty| {
             if let ExtendedType::Enum(e) = ty {
                 Some(e)
@@ -317,7 +321,10 @@ fn coerces_enum_literal_to_string_on_enum_value_directive() {
             }
         })
         .expect("Priority enum not found");
-    let high_value = priority_enum.values.get("HIGH").expect("HIGH value exists");
+    let high_value = priority_enum
+        .values
+        .get(&name!("HIGH"))
+        .expect("HIGH value exists");
     let directive = high_value
         .directives
         .iter()
@@ -350,7 +357,7 @@ fn coerces_string_to_enum() {
         .validated_schema()
         .schema()
         .types
-        .get("Query")
+        .get(&name!("Query"))
         .and_then(|ty| {
             if let ExtendedType::Object(obj) = ty {
                 Some(obj)
@@ -359,7 +366,7 @@ fn coerces_string_to_enum() {
             }
         })
         .expect("Query type not found");
-    let foo = query.fields.get("foo").expect("foo field exists");
+    let foo = query.fields.get(&name!("foo")).expect("foo field exists");
     let arg = foo.argument_by_name("arg").expect("arg argument exists");
 
     assert_eq!(
@@ -589,7 +596,7 @@ fn accepts_int_default_for_id_type() {
         .validated_schema()
         .schema()
         .types
-        .get("Query")
+        .get(&name!("Query"))
         .and_then(|ty| {
             if let ExtendedType::Object(obj) = ty {
                 Some(obj)
@@ -598,7 +605,7 @@ fn accepts_int_default_for_id_type() {
             }
         })
         .expect("Query type not found");
-    let test_field = query.fields.get("test").expect("test field exists");
+    let test_field = query.fields.get(&name!("test")).expect("test field exists");
     let arg = test_field
         .argument_by_name("arg")
         .expect("arg argument exists");
@@ -641,7 +648,7 @@ fn accepts_int_default_for_float_type() {
         .validated_schema()
         .schema()
         .types
-        .get("Query")
+        .get(&name!("Query"))
         .and_then(|ty| {
             if let ExtendedType::Object(obj) = ty {
                 Some(obj)
@@ -650,7 +657,7 @@ fn accepts_int_default_for_float_type() {
             }
         })
         .expect("Query type not found");
-    let test_field = query.fields.get("test").expect("test field exists");
+    let test_field = query.fields.get(&name!("test")).expect("test field exists");
     let arg = test_field
         .argument_by_name("arg")
         .expect("arg argument exists");

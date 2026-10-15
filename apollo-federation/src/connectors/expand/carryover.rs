@@ -273,7 +273,7 @@ pub(super) fn carryover_directives(
     // avoid recreating the logic for constructing the contextArguments
     // argument. This works because @fromContext is not allowed in connector
     // subgraphs, so we can always directly carry over argument values.
-    let referencers = from.referencers().get_directive("join__field");
+    let referencers = from.referencers().get_directive(&name!("join__field"));
     let fields = referencers
         .object_fields
         .iter()

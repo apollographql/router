@@ -1,3 +1,4 @@
+use apollo_compiler::name;
 use test_log::test;
 
 use super::ServiceDefinition;
@@ -1493,7 +1494,7 @@ fn from_context_field_in_all_subgraphs_preserves_join_field() {
         .schema()
         .schema()
         .types
-        .get("U")
+        .get(&name!("U"))
         .expect("U exists in the schema");
     insta::assert_snapshot!(type_u.to_string(), @r#"
     type U @join__type(graph: S1, key: "id") @join__type(graph: S2, key: "id") {

@@ -1,3 +1,4 @@
+use apollo_compiler::Name;
 use apollo_compiler::schema::ExtendedType;
 use apollo_compiler::ty;
 
@@ -131,7 +132,10 @@ fn validate_sized_fields_are_valid_lists(
         }
     };
     for field_name in sized_field_names {
-        if let Some(field) = fields.get(field_name.as_str()) {
+        if let Some(field) = Name::new(field_name)
+            .ok()
+            .and_then(|name| fields.get(&name))
+        {
             if !field.ty.is_list() {
                 errors
                     .errors

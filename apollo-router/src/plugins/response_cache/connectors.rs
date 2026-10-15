@@ -3,6 +3,7 @@ use std::collections::HashSet;
 use std::sync::Arc;
 use std::time::Duration;
 
+use apollo_compiler::Name;
 use apollo_compiler::Schema;
 use apollo_compiler::collections::IndexMap;
 use apollo_compiler::validation::Valid;
@@ -1984,9 +1985,12 @@ fn get_connector_root_cache_tags(
         .root_operation(apollo_compiler::ast::OperationType::Query)
         .ok_or_else(|| anyhow::anyhow!("no root query type in supergraph schema"))?;
     let query_object_type = supergraph_schema
-        .get_object(root_query_type.as_str())
+        .get_object(root_query_type)
         .ok_or_else(|| anyhow::anyhow!("cannot get root query type from supergraph schema"))?;
-    let field_def = match query_object_type.fields.get(field_name) {
+    let field_def = match Name::new(field_name)
+        .ok()
+        .and_then(|field_name| query_object_type.fields.get(&field_name))
+    {
         Some(f) => f,
         None => return Ok(HashSet::new()),
     };

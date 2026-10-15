@@ -2637,7 +2637,7 @@ mod tests {
             IndexSet::from_iter([name!("__typename"), name!("t1")]),
         )?;
 
-        let root_typename_tail = root_fields.get("__typename").unwrap();
+        let root_typename_tail = root_fields.get(&name!("__typename")).unwrap();
         assert_node_type(
             &query_graph,
             *root_typename_tail,
@@ -2648,7 +2648,7 @@ mod tests {
             None,
         )?;
 
-        let t1_node = root_fields.get("t1").unwrap();
+        let t1_node = root_fields.get(&name!("t1")).unwrap();
         assert_node_type(
             &query_graph,
             *t1_node,
@@ -2671,7 +2671,7 @@ mod tests {
             IndexSet::from_iter([name!("__typename"), name!("f1"), name!("f2"), name!("f3")]),
         )?;
 
-        let t1_typename_tail = t1_fields.get("__typename").unwrap();
+        let t1_typename_tail = t1_fields.get(&name!("__typename")).unwrap();
         assert_node_type(
             &query_graph,
             *t1_typename_tail,
@@ -2682,7 +2682,7 @@ mod tests {
             None,
         )?;
 
-        let t1_f1_tail = t1_fields.get("f1").unwrap();
+        let t1_f1_tail = t1_fields.get(&name!("f1")).unwrap();
         assert_node_type(
             &query_graph,
             *t1_f1_tail,
@@ -2700,7 +2700,7 @@ mod tests {
             0
         );
 
-        let t1_f2_tail = t1_fields.get("f2").unwrap();
+        let t1_f2_tail = t1_fields.get(&name!("f2")).unwrap();
         assert_node_type(
             &query_graph,
             *t1_f2_tail,
@@ -2718,7 +2718,7 @@ mod tests {
             0
         );
 
-        let t2_node = t1_fields.get("f3").unwrap();
+        let t2_node = t1_fields.get(&name!("f3")).unwrap();
         assert_node_type(
             &query_graph,
             *t2_node,
@@ -2741,7 +2741,7 @@ mod tests {
             IndexSet::from_iter([name!("__typename"), name!("t")]),
         )?;
 
-        let t2_typename_tail = t2_fields.get("__typename").unwrap();
+        let t2_typename_tail = t2_fields.get(&name!("__typename")).unwrap();
         assert_node_type(
             &query_graph,
             *t2_typename_tail,
@@ -2752,7 +2752,7 @@ mod tests {
             None,
         )?;
 
-        let t2_t_tail = t2_fields.get("t").unwrap();
+        let t2_t_tail = t2_fields.get(&name!("t")).unwrap();
         assert_node_type(
             &query_graph,
             *t2_t_tail,

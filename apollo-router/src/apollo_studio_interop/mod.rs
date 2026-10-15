@@ -650,7 +650,7 @@ impl UsageGenerator<'_> {
 
     fn extract_fields(&mut self, parent_type: &str, selection_set: &SelectionSet) {
         if !self.fields_by_interface.contains_key(parent_type) {
-            let field_schema_type = self.schema.types.get(parent_type);
+            let field_schema_type = self.schema.types.get(&Name::new_unchecked(parent_type));
             let is_interface = field_schema_type.is_some_and(|t| t.is_interface());
             self.fields_by_interface
                 .insert(parent_type.into(), is_interface);
@@ -824,7 +824,7 @@ impl UsageGenerator<'_> {
     ) {
         // For object references, we're only interested in input object types
         if let Some(ExtendedType::InputObject(input_object_type)) =
-            self.schema.types.get(type_name.to_string().as_str())
+            self.schema.types.get(&Name::new_unchecked(&type_name))
         {
             let obj_value_map: HashMap<String, &Node<Value>> = obj_value
                 .iter()
@@ -853,7 +853,7 @@ impl UsageGenerator<'_> {
         type_name: String,
         var_value: Option<&JsonValue>,
     ) {
-        match self.schema.types.get(type_name.to_string().as_str()) {
+        match self.schema.types.get(&Name::new_unchecked(&type_name)) {
             Some(ExtendedType::InputObject(input_object_type)) => {
                 match var_value {
                     // For input objects, we store input object references and process each of the field variables

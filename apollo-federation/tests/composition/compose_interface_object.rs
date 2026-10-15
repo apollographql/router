@@ -1,5 +1,6 @@
 use std::collections::HashSet;
 
+use apollo_compiler::name;
 use apollo_federation::composition::CompositionFailure;
 use apollo_federation::subgraph::typestate::Subgraph;
 use apollo_federation::supergraph::Satisfiable;
@@ -530,11 +531,11 @@ fn interface_object_with_inaccessible_field() {
         .schema()
         .schema()
         .types
-        .get("Item")
+        .get(&name!("Item"))
         .unwrap()
         .as_interface()
         .unwrap();
-    let id_field = item_interface.fields.get("id").unwrap();
+    let id_field = item_interface.fields.get(&name!("id")).unwrap();
     let id_directives: HashSet<_> = id_field.directives.iter().map(|d| d.to_string()).collect();
 
     assert!(
@@ -603,7 +604,7 @@ fn interface_object_field_tag_propagates_to_locally_external_field() {
     let name_field = supergraph
         .schema()
         .schema()
-        .type_field("Book", "name")
+        .type_field(&name!("Book"), &name!("name"))
         .expect("Book.name field should exist");
     assert_eq!(
         name_field.to_string(),
@@ -777,16 +778,16 @@ fn interface_object_shared_key_fields_omit_join_field() {
 
     let iface = schema
         .types
-        .get("I")
+        .get(&name!("I"))
         .expect("type I should exist")
         .as_interface()
         .expect("I should be an interface");
 
     // Key fields present in BOTH subgraphs should NOT have @join__field
-    for field_name in ["id", "code"] {
+    for field_name in [name!("id"), name!("code")] {
         let field = iface
             .fields
-            .get(field_name)
+            .get(&field_name)
             .expect("field should exist on interface I");
         let join_fields: Vec<_> = field
             .directives
@@ -801,10 +802,10 @@ fn interface_object_shared_key_fields_omit_join_field() {
     }
 
     // Fields present in only ONE subgraph should have @join__field
-    for field_name in ["onlyInA", "onlyInB"] {
+    for field_name in [name!("onlyInA"), name!("onlyInB")] {
         let field = iface
             .fields
-            .get(field_name)
+            .get(&field_name)
             .expect("field should exist on interface I");
         let has_join_field = field.directives.iter().any(|d| d.name == "join__field");
         assert!(
@@ -876,13 +877,16 @@ fn interface_object_shared_key_fields_with_three_subgraphs() {
 
     let iface = schema
         .types
-        .get("I")
+        .get(&name!("I"))
         .expect("type I should exist")
         .as_interface()
         .expect("I should be an interface");
 
     // `id` is in ALL three subgraphs → should NOT have @join__field
-    let id_field = iface.fields.get("id").expect("id field should exist");
+    let id_field = iface
+        .fields
+        .get(&name!("id"))
+        .expect("id field should exist");
     let id_join_fields: Vec<_> = id_field
         .directives
         .iter()
@@ -895,10 +899,10 @@ fn interface_object_shared_key_fields_with_three_subgraphs() {
     );
 
     // Fields in only one subgraph should have exactly 1 @join__field
-    for field_name in ["aOnly", "bOnly", "cOnly"] {
+    for field_name in [name!("aOnly"), name!("bOnly"), name!("cOnly")] {
         let field = iface
             .fields
-            .get(field_name)
+            .get(&field_name)
             .expect("field should exist on interface I");
         let join_count = field
             .directives
@@ -973,13 +977,16 @@ fn interface_object_partial_overlap_needs_join_field() {
 
     let iface = schema
         .types
-        .get("I")
+        .get(&name!("I"))
         .expect("type I should exist")
         .as_interface()
         .expect("I should be an interface");
 
     // `id` is in all three → no @join__field
-    let id_field = iface.fields.get("id").expect("id field should exist");
+    let id_field = iface
+        .fields
+        .get(&name!("id"))
+        .expect("id field should exist");
     let id_join_count = id_field
         .directives
         .iter()
@@ -993,7 +1000,7 @@ fn interface_object_partial_overlap_needs_join_field() {
     // `partial` is in A and B but NOT C → needs @join__field
     let partial_field = iface
         .fields
-        .get("partial")
+        .get(&name!("partial"))
         .expect("partial field should exist");
     let partial_join_count = partial_field
         .directives

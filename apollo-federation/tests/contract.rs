@@ -7,6 +7,7 @@
 //! result. They also go through the public API, so the crate's external surface is
 //! typechecked.
 
+use apollo_compiler::name;
 use apollo_federation::ApiSchemaOptions;
 use apollo_federation::composition::Satisfiable;
 use apollo_federation::composition::Supergraph;
@@ -234,7 +235,7 @@ fn include_filtering_leaves_introspection_types_alone() {
             .schema()
             .schema()
             .types
-            .get(name)
+            .get(&apollo_compiler::Name::new_unchecked(name))
             .unwrap_or_else(|| panic!("{name} should be present"));
         assert!(
             !ty.directives().has("inaccessible"),
@@ -338,7 +339,7 @@ fn never_masks_a_tagged_built_in_scalar() {
     );
     let supergraph = filter(&sdl, &[], &["private"], false);
 
-    let int = &supergraph.schema().schema().types["Int"];
+    let int = &supergraph.schema().schema().types[&name!("Int")];
     assert!(
         !int.directives().has("inaccessible"),
         "built-in `Int` should stay accessible, got: {int}"

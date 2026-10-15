@@ -7,9 +7,11 @@ use std::sync::Arc;
 use std::sync::OnceLock;
 use std::time::Duration;
 
+use apollo_compiler::Name;
 use apollo_compiler::Schema;
 use apollo_compiler::ast::NamedType;
 use apollo_compiler::collections::IndexMap;
+use apollo_compiler::name;
 use apollo_compiler::parser::Parser;
 use apollo_compiler::resolvers;
 use apollo_compiler::schema::ObjectType;
@@ -1271,7 +1273,7 @@ impl Drop for ResponseCache {
 /// Get the map of subgraph enum variant mapped with subgraph name
 fn get_subgraph_enums(supergraph_schema: &Valid<Schema>) -> HashMap<String, String> {
     let mut subgraph_enums = HashMap::new();
-    if let Some(graph_enum) = supergraph_schema.get_enum("join__Graph") {
+    if let Some(graph_enum) = supergraph_schema.get_enum(&name!("join__Graph")) {
         subgraph_enums.extend(graph_enum.values.iter().filter_map(
             |(enum_name, enum_value_def)| {
                 let subgraph_name = enum_value_def
@@ -2220,7 +2222,11 @@ fn get_invalidation_root_keys_from_schema(
             };
             // We don't use info.field_definition() because we need the directive
             // set in supergraph schema not in the executable document
-            let Some(field_def) = self.query_object_type.fields.get(info.field_name()) else {
+            let Some(field_def) = self
+                .query_object_type
+                .fields
+                .get(&Name::new_unchecked(info.field_name()))
+            else {
                 *result = Err(FetchError::MalformedRequest {
                     reason: "cannot get the field definition from supergraph schema".to_string(),
                 }
@@ -2296,7 +2302,7 @@ fn get_invalidation_root_keys_from_schema(
             reason: "cannot get the root operation from supergraph schema".to_string(),
         })?;
     let query_object_type = supergraph_schema
-        .get_object(root_query_type.as_str())
+        .get_object(root_query_type)
         .ok_or_else(|| FetchError::MalformedRequest {
             reason: "cannot get the root query type from supergraph schema".to_string(),
         })?;
@@ -2957,8 +2963,11 @@ pub(super) fn get_invalidation_entity_keys_from_schema(
             })
             .unwrap_or_default()
     };
+    let type_name = Name::new(typename).map_err(|_| FetchError::MalformedRequest {
+        reason: format!("can't find corresponding type for __typename {typename:?}"),
+    })?;
     // supports both Object types and Interface types (for interface objects with isInterfaceObject: true)
-    let all_directives: Vec<_> = match supergraph_schema.get_interface(typename) {
+    let all_directives: Vec<_> = match supergraph_schema.get_interface(&type_name) {
         // Jumping from an interface object
         Some(iface_type) => {
             // In this case, we can only support jumping from an interface object to another
@@ -2977,7 +2986,7 @@ pub(super) fn get_invalidation_entity_keys_from_schema(
         }
         // Jumping from a non-interface object
         None => {
-            let obj_type = supergraph_schema.get_object(typename).ok_or_else(|| {
+            let obj_type = supergraph_schema.get_object(&type_name).ok_or_else(|| {
                 FetchError::MalformedRequest {
                     reason: format!("can't find corresponding type for __typename {typename:?}"),
                 }
@@ -3065,9 +3074,9 @@ fn collect_key_field_sets(
     supergraph_schema: &Valid<Schema>,
     subgraph_enums: &HashMap<String, String>,
 ) -> Result<impl Iterator<Item = apollo_compiler::executable::FieldSet>, FetchError> {
-    Ok(supergraph_schema
-        .types
-        .get(typename)
+    Ok(Name::new(typename)
+        .ok()
+        .and_then(|typename| supergraph_schema.types.get(&typename))
         .ok_or_else(|| FetchError::MalformedRequest {
             reason: format!("unknown typename {typename:?} in representations"),
         })?

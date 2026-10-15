@@ -358,11 +358,7 @@ fn collect_from_selection_set<'a>(
                     .ok_or("Missing fragment definition")?;
                 let nested = collect_from_selection_set(
                     shared,
-                    // FIXME: use `ast::Name` everywhere so fallible conversion isn’t needed
-                    #[allow(clippy::unwrap_used)]
-                    &FieldType::new_named(
-                        (&fragment_definition.type_condition).try_into().unwrap(),
-                    ),
+                    &FieldType::new_named(fragment_definition.type_condition.clone()),
                     &fragment_definition.selection_set,
                 )?;
                 if nested.is_empty() {
@@ -380,7 +376,7 @@ fn collect_from_selection_set<'a>(
                         },
                         SubSelectionValue {
                             selection_set: shared.reconstruct_up_to_root(nested),
-                            type_name: fragment_definition.type_condition.clone(),
+                            type_name: fragment_definition.type_condition.to_string(),
                         },
                     );
                 } else {

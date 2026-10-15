@@ -401,9 +401,7 @@ fn validate_field_value(
                     if let Selection::InlineFragment(frag) = selection
                         && let Some(type_condition) = &frag.type_condition
                     {
-                        let Some(extended_type) =
-                            schema.schema().types.get(type_condition.as_str())
-                        else {
+                        let Some(extended_type) = schema.schema().types.get(type_condition) else {
                             errors.push(
                                 SingleFederationError::ContextSelectionInvalid { message: format!(
                                     "Inline fragment type condition invalid. Type '{}' does not exist in schema.", type_condition.as_str()
@@ -472,8 +470,10 @@ fn validate_field_value(
                         break;
                     } else {
                         // get the type
-                        let Some(type_condition_type) =
-                            schema.schema().types.get(type_condition.as_str())
+                        let Some(type_condition_type) = schema
+                            .schema()
+                            .types
+                            .get(&Name::new_unchecked(type_condition))
                         else {
                             bail!("Type not found for type condition: {}", type_condition);
                         };

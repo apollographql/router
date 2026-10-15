@@ -1,3 +1,4 @@
+use apollo_compiler::name;
 use apollo_federation::subgraph::Subgraph;
 
 #[test]
@@ -20,13 +21,18 @@ fn can_parse_and_expand() -> Result<(), String> {
         println!("{e}");
         String::from("failed to parse and expand the subgraph, see errors above for details")
     })?;
-    assert!(subgraph.schema.types.contains_key("T"));
-    assert!(subgraph.schema.directive_definitions.contains_key("key"));
+    assert!(subgraph.schema.types.contains_key(&name!("T")));
     assert!(
         subgraph
             .schema
             .directive_definitions
-            .contains_key("federation__requires")
+            .contains_key(&name!("key"))
+    );
+    assert!(
+        subgraph
+            .schema
+            .directive_definitions
+            .contains_key(&name!("federation__requires"))
     );
     Ok(())
 }
@@ -51,12 +57,17 @@ fn can_parse_and_expand_with_renames() -> Result<(), String> {
         println!("{e}");
         String::from("failed to parse and expand the subgraph, see errors above for details")
     })?;
-    assert!(subgraph.schema.directive_definitions.contains_key("myKey"));
     assert!(
         subgraph
             .schema
             .directive_definitions
-            .contains_key("provides")
+            .contains_key(&name!("myKey"))
+    );
+    assert!(
+        subgraph
+            .schema
+            .directive_definitions
+            .contains_key(&name!("provides"))
     );
     Ok(())
 }
@@ -81,12 +92,17 @@ fn can_parse_and_expand_with_namespace() -> Result<(), String> {
         println!("{e}");
         String::from("failed to parse and expand the subgraph, see errors above for details")
     })?;
-    assert!(subgraph.schema.directive_definitions.contains_key("key"));
     assert!(
         subgraph
             .schema
             .directive_definitions
-            .contains_key("fed__requires")
+            .contains_key(&name!("key"))
+    );
+    assert!(
+        subgraph
+            .schema
+            .directive_definitions
+            .contains_key(&name!("fed__requires"))
     );
     Ok(())
 }
@@ -121,7 +137,7 @@ fn can_parse_and_expand_preserves_user_definitions() -> Result<(), String> {
         println!("{e}");
         String::from("failed to parse and expand the subgraph, see errors above for details")
     })?;
-    assert!(subgraph.schema.types.contains_key("Purpose"));
+    assert!(subgraph.schema.types.contains_key(&name!("Purpose")));
     Ok(())
 }
 
@@ -142,8 +158,13 @@ fn can_parse_and_expand_works_with_fed_v1() -> Result<(), String> {
         println!("{e}");
         String::from("failed to parse and expand the subgraph, see errors above for details")
     })?;
-    assert!(subgraph.schema.types.contains_key("T"));
-    assert!(subgraph.schema.directive_definitions.contains_key("key"));
+    assert!(subgraph.schema.types.contains_key(&name!("T")));
+    assert!(
+        subgraph
+            .schema
+            .directive_definitions
+            .contains_key(&name!("key"))
+    );
     Ok(())
 }
 

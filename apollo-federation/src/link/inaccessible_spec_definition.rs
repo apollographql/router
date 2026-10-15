@@ -339,12 +339,15 @@ fn validate_inaccessible_in_default_value(
         // expected.
         (Value::Enum(_) | Value::String(_), ExtendedType::Enum(type_)) => {
             let value = match default_value {
-                Value::Enum(name) => name.as_str(),
-                Value::String(s) => s,
+                Value::Enum(name) => name.clone(),
+                Value::String(s) => match Name::new(s) {
+                    Ok(name) => name,
+                    Err(_) => return Ok(()),
+                },
                 // Guaranteed to be enum or string by parent match branch.
                 _ => unreachable!(),
             };
-            let Some(enum_value) = type_.values.get(value) else {
+            let Some(enum_value) = type_.values.get(&value) else {
                 return Ok(());
             };
             let enum_value_position = EnumValueDefinitionPosition {

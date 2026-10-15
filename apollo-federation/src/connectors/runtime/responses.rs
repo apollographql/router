@@ -312,8 +312,7 @@ impl<'a> GraphQLDataMapper<'a> {
                         }
 
                         Selection::FragmentSpread(spread) => {
-                            if let Some(fragment) =
-                                self.doc.fragments.get(spread.fragment_name.as_str())
+                            if let Some(fragment) = self.doc.fragments.get(&spread.fragment_name)
                                 && self.fragment_matches(data, fragment.type_condition())
                             {
                                 let mapped = self.map_data(data, &fragment.selection_set);
@@ -976,9 +975,8 @@ impl MappedResponse {
                                             }
 
                                             Selection::FragmentSpread(spread) => {
-                                                if let Some(fragment) = operation
-                                                    .fragments
-                                                    .get(spread.fragment_name.as_str())
+                                                if let Some(fragment) =
+                                                    operation.fragments.get(&spread.fragment_name)
                                                 {
                                                     for field_sel in
                                                         fragment.selection_set.selections.iter()

@@ -1,4 +1,5 @@
 use apollo_compiler::coord;
+use apollo_compiler::name;
 use apollo_federation::composition::CompositionOptions;
 use apollo_federation::composition::compose;
 use apollo_federation::composition::upgrade_subgraphs_if_necessary;
@@ -124,7 +125,7 @@ fn fed1_fieldset_with_tag_upgrades_successfully() {
     // Verify the upgraded schema has federation__FieldSet, not _FieldSet
     let schema = upgraded.validated_schema().schema();
     assert!(
-        schema.types.contains_key("federation__FieldSet"),
+        schema.types.contains_key(&name!("federation__FieldSet")),
         "Expected federation__FieldSet type in upgraded schema"
     );
 }

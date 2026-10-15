@@ -217,7 +217,7 @@ fn validate_input_value(
         (schema::ExtendedType::Scalar(_), _) => Ok(()),
 
         (schema::ExtendedType::Enum(def), Value::String(s)) => {
-            from_bool(def.values.contains_key(s.as_str()))
+            from_bool(Name::new(s.as_str()).is_ok_and(|s| def.values.contains_key(&s)))
         }
         (schema::ExtendedType::Enum(_), _) => Err(invalid()),
 
@@ -247,13 +247,14 @@ fn validate_input_value(
                 .keys()
                 .map(|k| k.as_str())
                 // filter to fields which are not present in the API schema
-                .filter(|&k| !def.fields.contains_key(k));
+                .filter(|&k| !Name::new(k).is_ok_and(|k| def.fields.contains_key(&k)));
 
             let mut unknown_input_fields = Vec::new();
 
             for input_field in unknown_input_fields_iter {
-                let present_in_supergraph_schema =
-                    supergraph_type_def_fields.is_some_and(|f| f.contains_key(input_field));
+                let present_in_supergraph_schema = supergraph_type_def_fields.is_some_and(|f| {
+                    Name::new(input_field).is_ok_and(|input_field| f.contains_key(&input_field))
+                });
 
                 // outright reject fields which are present_in_supergraph_schema and NOT present in API schema - those are @inaccessible
                 if present_in_supergraph_schema {
@@ -277,7 +278,7 @@ fn validate_input_value(
             if def.directives.get("oneOf").is_some() {
                 let provided_count = obj
                     .keys()
-                    .filter(|k| def.fields.contains_key(k.as_str()))
+                    .filter(|k| Name::new(k.as_str()).is_ok_and(|k| def.fields.contains_key(&k)))
                     .count();
                 if provided_count != 1 {
                     return Err(InvalidInputValue(format!(
@@ -288,7 +289,7 @@ fn validate_input_value(
                 }
                 if let Some((field_name, field_value)) = obj
                     .iter()
-                    .find(|(k, _)| def.fields.contains_key(k.as_str()))
+                    .find(|(k, _)| Name::new(k.as_str()).is_ok_and(|k| def.fields.contains_key(&k)))
                     && field_value.is_null()
                 {
                     return Err(InvalidInputValue(format!(

@@ -221,7 +221,7 @@ impl FederationBlueprint {
         };
         let is_fed2 = metadata.is_fed_2_schema();
         let all_directive_names = all_default_federation_directive_names();
-        if all_directive_names.contains(unknown_directive_name) {
+        if Name::new(unknown_directive_name).is_ok_and(|name| all_directive_names.contains(&name)) {
             // The directive name is "unknown" but it is a default federation directive name. So it
             // means one of a few things happened:
             //  1. it's a fed1 schema but the directive is fed2 only (only possible case for

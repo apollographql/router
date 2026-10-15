@@ -291,9 +291,9 @@ impl ComposeDirectiveManager {
 
                         // Ensure the directive being composed is defined
                         let name = compose_directive.arguments.name.split_at(1).1;
-                        let Some(directive) =
-                            subgraph.schema().schema().directive_definitions.get(name)
-                        else {
+                        let Some(directive) = Name::new(name).ok().and_then(|name| {
+                            subgraph.schema().schema().directive_definitions.get(&name)
+                        }) else {
                             error_reporter.add_compose_directive_error_for_undefined_directive(
                                 compose_directive.arguments.name,
                                 subgraph,

@@ -1,3 +1,4 @@
+use apollo_compiler::name;
 use test_log::test;
 
 use super::ServiceDefinition;
@@ -719,7 +720,7 @@ fn executable_directive_removed_when_no_executable_locations_intersection() {
             .schema()
             .schema()
             .directive_definitions
-            .contains_key("cacheControl"),
+            .contains_key(&name!("cacheControl")),
         "Supergraph should not contain @cacheControl when executable locations don't intersect"
     );
     assert_eq!(result.hints().len(), 1);
@@ -875,7 +876,7 @@ fn no_empty_policy_on_interface_object_field_propagation() {
         .schema()
         .schema()
         .types
-        .get("Book")
+        .get(&name!("Book"))
         .expect("Book should exist in supergraph");
     assert_snapshot!(book.to_string());
 }

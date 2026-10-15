@@ -1,3 +1,4 @@
+use apollo_compiler::name;
 use apollo_federation::subgraph::typestate::Subgraph;
 use insta::assert_snapshot;
 
@@ -136,7 +137,7 @@ fn misc_preserves_partial_input_object_defaults_without_expansion() {
     let query = supergraph
         .schema()
         .schema()
-        .get_object("Query")
+        .get_object(&name!("Query"))
         .expect("Query type should exist in the supergraph");
     assert_snapshot!(query);
 }
@@ -167,7 +168,7 @@ fn misc_preserves_defaults_inside_list_elements() {
     let query = supergraph
         .schema()
         .schema()
-        .get_object("Query")
+        .get_object(&name!("Query"))
         .expect("Query type should exist in the schema");
     assert_snapshot!(query);
 }
@@ -345,7 +346,7 @@ fn misc_existing_authenticated_directive_with_fed1() {
             .schema()
             .schema()
             .directive_definitions
-            .contains_key("@authenticated")
+            .contains_key(&apollo_compiler::Name::new_unchecked("@authenticated"))
     );
 }
 
@@ -618,6 +619,7 @@ fn misc_conflicting_subgraph_names_sanitization() {
 }
 
 mod supergraph_spec_imports {
+    use apollo_compiler::name;
     use apollo_federation::subgraph::typestate::Subgraph;
     use insta::assert_snapshot;
 
@@ -806,7 +808,7 @@ mod supergraph_spec_imports {
         let schema = supergraph.schema().schema();
 
         assert!(
-            !schema.directive_definitions.contains_key("policy"),
+            !schema.directive_definitions.contains_key(&name!("policy")),
             "Supergraph should NOT contain @policy when @link is not bootstrapped"
         );
     }

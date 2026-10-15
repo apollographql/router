@@ -845,7 +845,7 @@ fn ensure_expected_type_kind(
 
 /// Note: Non-null/list wrappers are ignored.
 fn is_custom_scalar(ty: &Type, schema: &FederationSchema) -> bool {
-    let type_name = ty.inner_named_type().as_str();
+    let type_name = ty.inner_named_type();
     schema
         .schema()
         .get_scalar(type_name)

@@ -442,7 +442,15 @@ impl fmt::Display for FetchDataPathElement {
 
 fn write_conditions(conditions: &Option<Vec<Name>>, f: &mut fmt::Formatter<'_>) -> fmt::Result {
     if let Some(conditions) = conditions {
-        write!(f, "|[{}]", conditions.join(","))
+        write!(
+            f,
+            "|[{}]",
+            conditions
+                .iter()
+                .map(Name::as_str)
+                .collect::<Vec<_>>()
+                .join(",")
+        )
     } else {
         Ok(())
     }

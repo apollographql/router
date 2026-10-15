@@ -1,3 +1,4 @@
+use apollo_compiler::Name;
 use apollo_compiler::executable;
 use serde::Deserialize;
 use serde::Serialize;
@@ -23,7 +24,7 @@ pub(crate) enum Selection {
     },
     InlineFragment {
         // Optional in specs but we fill it with the current type if not specified
-        type_condition: String,
+        type_condition: Name,
         include_skip: IncludeSkip,
         defer: Condition,
         defer_label: Option<String>,
@@ -109,19 +110,17 @@ impl Selection {
 
                 let type_condition = inline_fragment
                     .type_condition
-                    .as_ref()
-                    .map(|s| s.as_str())
-                    .unwrap_or(current_type)
-                    .to_owned();
+                    .clone()
+                    .unwrap_or_else(|| Name::new_unchecked(current_type));
 
-                let fragment_type = &type_condition;
+                let fragment_type = type_condition.as_str();
 
                 // this is the type we pass when extracting the fragment's selections
                 // If the type condition is a union or interface and the current type implements it, then we want
                 // to keep the current type when extracting the fragment's selections, as it is more precise
                 // than the interface.
                 // If it is not, then we use the type condition
-                let relevant_type = if schema.is_interface(type_condition.as_str()) {
+                let relevant_type = if schema.is_interface(&type_condition) {
                     let relevant_type = schema.most_precise(current_type, fragment_type);
                     relevant_type.unwrap_or(fragment_type)
                 } else {

@@ -212,6 +212,7 @@ mod tests {
     use apollo_compiler::Node;
     use apollo_compiler::Schema;
     use apollo_compiler::ast::Value;
+    use apollo_compiler::name;
     use apollo_compiler::parser::LineColumn;
     use apollo_compiler::schema::ExtendedType;
     use pretty_assertions::assert_eq;
@@ -235,10 +236,10 @@ mod tests {
         "#;
 
     fn connect_argument<'schema>(schema: &'schema Schema, name: &str) -> &'schema Node<Value> {
-        let ExtendedType::Object(query) = schema.types.get("Query").unwrap() else {
+        let ExtendedType::Object(query) = schema.types.get(&name!("Query")).unwrap() else {
             panic!("Query type not found");
         };
-        let field = query.fields.get("field").unwrap();
+        let field = query.fields.get(&name!("field")).unwrap();
         let directive = field.directives.get("connect").unwrap();
         directive.specified_argument_by_name(name).unwrap()
     }

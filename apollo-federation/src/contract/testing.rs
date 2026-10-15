@@ -264,7 +264,7 @@ impl<'a> Tester<'a> {
     pub(crate) fn directive(&self, name: &str) -> String {
         self.schema
             .directive_definitions
-            .get(name)
+            .get(&Name::new_unchecked(name))
             .unwrap_or_else(|| panic!("`@{name}` should be defined"))
             .to_string()
             .trim()
@@ -302,22 +302,25 @@ impl<'a> Tester<'a> {
         // `@directive(arg:)`
         if let Some(rest) = coordinate.strip_prefix('@') {
             let (directive_name, arg_name) = split_argument(rest)?;
-            let definition = self.schema.directive_definitions.get(directive_name)?;
+            let definition = self
+                .schema
+                .directive_definitions
+                .get(&Name::new(directive_name).ok()?)?;
             let argument = definition.argument_by_name(arg_name)?;
             return Some(argument.directives.clone());
         }
 
         let Some((type_name, member)) = coordinate.split_once('.') else {
-            let ty = self.schema.types.get(coordinate)?;
+            let ty = self.schema.types.get(&Name::new(coordinate).ok()?)?;
             return Some(ty.directives().iter().cloned().collect());
         };
-        let ty = self.schema.types.get(type_name)?;
+        let ty = self.schema.types.get(&Name::new(type_name).ok()?)?;
 
         // `Type.field(arg:)`
         if let Some((field_name, arg_name)) = split_argument(member) {
             let field = match ty {
-                ExtendedType::Object(obj) => obj.fields.get(field_name)?,
-                ExtendedType::Interface(iface) => iface.fields.get(field_name)?,
+                ExtendedType::Object(obj) => obj.fields.get(&Name::new(field_name).ok()?)?,
+                ExtendedType::Interface(iface) => iface.fields.get(&Name::new(field_name).ok()?)?,
                 _ => return None,
             };
             let argument = field.argument_by_name(arg_name)?;
@@ -326,20 +329,33 @@ impl<'a> Tester<'a> {
 
         // `Type.field`, covering enum values and input object fields
         match ty {
-            ExtendedType::Object(obj) => {
-                Some(obj.fields.get(member)?.directives.iter().cloned().collect())
-            }
-            ExtendedType::Interface(iface) => Some(
-                iface
-                    .fields
-                    .get(member)?
+            ExtendedType::Object(obj) => Some(
+                obj.fields
+                    .get(&Name::new(member).ok()?)?
                     .directives
                     .iter()
                     .cloned()
                     .collect(),
             ),
-            ExtendedType::InputObject(input) => Some(input.fields.get(member)?.directives.clone()),
-            ExtendedType::Enum(enm) => Some(enm.values.get(member)?.directives.clone()),
+            ExtendedType::Interface(iface) => Some(
+                iface
+                    .fields
+                    .get(&Name::new(member).ok()?)?
+                    .directives
+                    .iter()
+                    .cloned()
+                    .collect(),
+            ),
+            ExtendedType::InputObject(input) => Some(
+                input
+                    .fields
+                    .get(&Name::new(member).ok()?)?
+                    .directives
+                    .clone(),
+            ),
+            ExtendedType::Enum(enm) => {
+                Some(enm.values.get(&Name::new(member).ok()?)?.directives.clone())
+            }
             _ => None,
         }
     }

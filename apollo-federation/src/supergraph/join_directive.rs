@@ -6,6 +6,7 @@ use apollo_compiler::Node;
 use apollo_compiler::ast::Argument;
 use apollo_compiler::ast::Directive;
 use apollo_compiler::collections::IndexMap;
+use apollo_compiler::name;
 use itertools::Itertools;
 
 use super::get_subgraph;
@@ -19,7 +20,7 @@ use crate::schema::position::ObjectFieldDefinitionPosition;
 use crate::schema::position::ObjectTypeDefinitionPosition;
 use crate::schema::position::TypeDefinitionPosition;
 
-static JOIN_DIRECTIVE: &str = "join__directive";
+const JOIN_DIRECTIVE: Name = name!("join__directive");
 
 /// Converts `@join__directive(graphs: [A], name: "foo")` to `@foo` in the A subgraph.
 /// If the directive is a link directive on the schema definition, we also need
@@ -31,7 +32,7 @@ pub(super) fn extract(
 ) -> Result<(), FederationError> {
     let join_directives = supergraph_schema
         .referencers()
-        .get_directive(JOIN_DIRECTIVE);
+        .get_directive(&JOIN_DIRECTIVE);
     if join_directives.is_empty() {
         // No join directives found, nothing to do.
         return Ok(());

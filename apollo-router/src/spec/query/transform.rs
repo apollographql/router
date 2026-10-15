@@ -2,6 +2,7 @@ use std::collections::BTreeMap;
 use std::collections::HashMap;
 use std::collections::HashSet;
 
+use apollo_compiler::Name;
 use apollo_compiler::ast;
 use apollo_compiler::schema::FieldLookupError;
 use tower::BoxError;
@@ -380,13 +381,14 @@ pub(crate) fn selection_set(
     if set.is_empty() {
         return Ok(Some(Vec::new()));
     }
+    let parent_type_name = Name::new_unchecked(parent_type);
     let mut selections = Vec::new();
     for sel in set {
         match sel {
             ast::Selection::Field(def) => {
                 let field_def = visitor
                     .schema()
-                    .type_field(parent_type, &def.name)
+                    .type_field(&parent_type_name, &def.name)
                     .map_err(|e| match e {
                         FieldLookupError::NoSuchType => format!("type `{parent_type}` not defined"),
                         FieldLookupError::NoSuchField(_, _) => {

@@ -292,6 +292,7 @@ fn strip_deprecated_reason_null(
 #[cfg(test)]
 mod tests {
     use apollo_compiler::coord;
+    use apollo_compiler::name;
 
     use crate::composition::CompositionOptions;
     use crate::subgraph::typestate::Subgraph;
@@ -506,12 +507,12 @@ mod tests {
         let schema = supergraph.schema().schema();
         let status = schema
             .types
-            .get("Status")
+            .get(&name!("Status"))
             .expect("Status type should exist in schema");
         if let apollo_compiler::schema::ExtendedType::Enum(e) = status {
             let inactive = e
                 .values
-                .get("INACTIVE")
+                .get(&name!("INACTIVE"))
                 .expect("Status.INACTIVE should exist in schema");
             assert!(
                 inactive.directives.has("deprecated"),
@@ -551,12 +552,12 @@ mod tests {
         let schema = supergraph.schema().schema();
         let filter = schema
             .types
-            .get("Filter")
+            .get(&name!("Filter"))
             .expect("Filter type should exist in schema");
         if let apollo_compiler::schema::ExtendedType::InputObject(input) = filter {
             let field = input
                 .fields
-                .get("legacyId")
+                .get(&name!("legacyId"))
                 .expect("Filter.legacyId should exist in schema");
             assert!(
                 field.directives.has("deprecated"),
@@ -758,7 +759,10 @@ mod tests {
         supergraph
             .schema()
             .schema()
-            .type_field(ty, field)
+            .type_field(
+                &apollo_compiler::Name::new_unchecked(ty),
+                &apollo_compiler::Name::new_unchecked(field),
+            )
             .expect("field should exist in supergraph")
             .directives
             .has("deprecated")

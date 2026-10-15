@@ -465,7 +465,7 @@ impl<'a> TypeShapeWalker<'a> {
         Ok(())
     }
 
-    fn get_concrete_type_names_for_interface(&self, interface_name: &str) -> IndexSet<&str> {
+    fn get_concrete_type_names_for_interface(&self, interface_name: &Name) -> IndexSet<&str> {
         self.original_schema
             .schema()
             .types
@@ -489,8 +489,7 @@ impl<'a> TypeShapeWalker<'a> {
         interface: &InterfaceTypeDefinitionPosition,
         shape: &Shape,
     ) -> Result<(), FederationError> {
-        let concrete_name_set =
-            self.get_concrete_type_names_for_interface(interface.type_name.as_str());
+        let concrete_name_set = self.get_concrete_type_names_for_interface(&interface.type_name);
 
         match shape.case() {
             ShapeCase::Object { fields, .. } => {

@@ -1,3 +1,4 @@
+use apollo_compiler::name;
 use apollo_federation::supergraph::CompositionHint;
 use apollo_federation::supergraph::HintLevel;
 use apollo_federation::supergraph::Satisfiable;
@@ -953,7 +954,7 @@ mod executable_directives {
                 .schema()
                 .schema()
                 .directive_definitions
-                .contains_key("t"),
+                .contains_key(&name!("t")),
             "Directive @t should be removed from the supergraph when locations have no intersection"
         );
     }
@@ -1257,7 +1258,7 @@ In subgraph "Users", the description is:
         let order_type = api_schema
             .schema()
             .types
-            .get("Order")
+            .get(&name!("Order"))
             .expect("Order type in schema");
         let desc = order_type.description().map(|n| n.as_str()).unwrap_or("");
         assert_eq!(
@@ -1324,7 +1325,7 @@ In subgraph "Users", the description is:
         let product_type = api_schema
             .schema()
             .types
-            .get("Product")
+            .get(&name!("Product"))
             .expect("Product type exists in schema");
         let desc = product_type.description().map(|n| n.as_str()).unwrap_or("");
         assert_eq!(
@@ -1393,7 +1394,7 @@ In subgraph "Users", the description is:
         let product_type = api_schema
             .schema()
             .types
-            .get("Product")
+            .get(&name!("Product"))
             .expect("Product type in schema");
         let desc = product_type.description().map(|n| n.as_str()).unwrap_or("");
         assert_eq!(

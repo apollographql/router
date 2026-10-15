@@ -1,5 +1,6 @@
 use std::fs::read_to_string;
 
+use apollo_compiler::name;
 use insta::assert_debug_snapshot;
 use insta::assert_snapshot;
 use insta::glob;
@@ -93,7 +94,7 @@ fn it_preserves_one_of_on_input_objects() {
     let expanded = apollo_compiler::Schema::parse(&raw_sdl, "expanded.graphql")
         .expect("expanded supergraph should parse");
     let an_input = expanded
-        .get_input_object("AnInput")
+        .get_input_object(&name!("AnInput"))
         .expect("AnInput should exist");
     assert!(an_input.is_one_of(), "AnInput should keep @oneOf");
 }

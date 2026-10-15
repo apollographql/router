@@ -2153,7 +2153,13 @@ mod tests {
                 .mutation
                 .is_none()
         );
-        assert!(subgraph.schema().schema().get_scalar("Mutation").is_some());
+        assert!(
+            subgraph
+                .schema()
+                .schema()
+                .get_scalar(&name!("Mutation"))
+                .is_some()
+        );
     }
 
     /// When a schema has both an explicit `schema { ... }` definition and an
