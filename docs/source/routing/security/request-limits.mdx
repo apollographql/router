@@ -384,7 +384,7 @@ What a client gets depends on how far its header list is over the limit:
 |---|---|
 | Up to the limit | The request is served. |
 | Over the limit, up to the advertised size | `431 Request Header Fields Too Large` with a GraphQL error body. The response is recorded in `http.server.request.duration` and the `router` span like any other response. |
-| Over the advertised size | A `431` with no body, sent before the request reaches the router, so it isn't recorded. Much larger header lists close the connection without an HTTP response. |
+| Over the advertised size | A `431` with no body, sent before the request reaches the router, so it isn't recorded. Much larger header lists close the connection without an HTTP response; the router counts these closes in [`apollo.router.http2.server.connection.errors`](/graphos/routing/observability/router-telemetry-otel/enabling-telemetry/standard-instruments#server). |
 
 Plugin endpoints, such as the health check, also reject HTTP/2 requests over the limit with a `431`, without a body.
 
