@@ -21,6 +21,7 @@ use super::models::EntityResolver;
 use super::spec::ConnectSpec;
 use crate::error::FederationError;
 use crate::operation::FragmentSpreadCache;
+use crate::operation::Selection;
 use crate::operation::SelectionSet;
 use crate::operation::TYPENAME_FIELD;
 use crate::schema::FederationSchema;
@@ -222,6 +223,46 @@ impl ConnectorIndex {
             .iter()
             .map(|(service, subgraph)| (service.as_str(), subgraph.as_ref()))
     }
+}
+
+/// Strip array wrappers off a shape: a selection set on a list-typed field
+/// is checked against the element shape.
+pub(crate) fn unwrap_list_shape(shape: &Shape) -> &Shape {
+    let mut shape = shape;
+    while let ShapeCase::Array { tail, .. } = shape.case() {
+        shape = tail;
+    }
+    shape
+}
+
+/// Whether `shape` returns every field of `selections`. Shapes the planner
+/// can't inspect (scalars, unions, unknown JSON) count as providing
+/// everything, as they do when partitioning.
+pub(crate) fn shape_provides(shape: &Shape, selections: &SelectionSet) -> bool {
+    let ShapeCase::Object { fields, .. } = unwrap_list_shape(shape).case() else {
+        return true;
+    };
+    selections
+        .selections
+        .values()
+        .all(|selection| match selection {
+            Selection::Field(field_sel) => {
+                let name = field_sel.field.name();
+                if *name == TYPENAME_FIELD {
+                    return true;
+                }
+                let Some(child) = fields.get(name.as_str()) else {
+                    return false;
+                };
+                field_sel
+                    .selection_set
+                    .as_ref()
+                    .is_none_or(|child_ss| shape_provides(child, child_ss))
+            }
+            Selection::InlineFragment(fragment_sel) => {
+                shape_provides(shape, &fragment_sel.selection_set)
+            }
+        })
 }
 
 /// The entity type an entity-resolver connector produces: the type itself for

@@ -12,15 +12,21 @@ use tracing::trace;
 
 use super::super::defer::extract_defer_label;
 use super::super::defer::strip_defer_directive;
+use super::super::fetch_graph::FetchGroupKind;
 use super::super::fetch_graph::InputContribution;
 use super::super::fetch_graph::InputRewriteInfo;
 use super::super::shared_path::SharedPath;
 use super::FieldRoutingSearchSpace;
 use super::commit::field_response_elements;
+use super::commit::key_contains_selected_field;
+use super::requires::unconditioned_input_path;
 use super::routing::RoutingChoice;
 use super::state::PendingSelection;
 use super::state::PlanState;
+use crate::connectors::EntityResolver;
 use crate::connectors::index::IndexedConnector;
+use crate::connectors::index::shape_provides;
+use crate::connectors::index::unwrap_list_shape;
 use crate::error::FederationError;
 use crate::operation::FieldSelection;
 use crate::operation::InlineFragmentSelection;
@@ -48,16 +54,6 @@ struct DeferredConnectorSelection {
     /// The defer label the selection is under, including any @defer fragment
     /// crossed during partitioning.
     defer_ref: Option<String>,
-}
-
-/// Strip array wrappers off a shape: a selection set on a list-typed field
-/// is checked against the element shape.
-fn unwrap_list_shape(shape: &Shape) -> &Shape {
-    let mut shape = shape;
-    while let ShapeCase::Array { tail, .. } = shape.case() {
-        shape = tail;
-    }
-    shape
 }
 
 impl FieldRoutingSearchSpace {
@@ -97,7 +93,20 @@ impl FieldRoutingSearchSpace {
                 // the connector group merges at the pending's response path.
                 let source = self.node_source(pending.query_graph_node)?;
                 let key_locally_resolvable =
-                    self.can_resolve_in_place(pending.query_graph_node, key_conditions, &source)?;
+                    self.can_resolve_in_place(pending.query_graph_node, key_conditions, &source)?
+                        && self.connector_fetch_provides(
+                            state,
+                            pending.fetch_node,
+                            &pending.op_path,
+                            key_conditions,
+                        );
+                if !key_locally_resolvable
+                    && key_contains_selected_field(&pending.selection, key_conditions)
+                {
+                    return Err(FederationError::internal(
+                        "connector entity hop needs the field it fetches as its key",
+                    ));
+                }
                 let local_key = key_locally_resolvable
                     .then_some(Some(key_conditions))
                     .flatten();
@@ -454,6 +463,63 @@ impl FieldRoutingSearchSpace {
                 type_position: sub_ss.type_position.clone(),
                 selections: Arc::new(kept),
             }))
+        }
+    }
+
+    /// The static output shape of the connector backing `fetch_node` at
+    /// `op_path` (relative to the fetch), list wrappers stripped. `None` when
+    /// the fetch is not a connector fetch, or the path leaves the indexed
+    /// shape.
+    fn connector_shape_at(
+        &self,
+        state: &PlanState,
+        fetch_node: NodeIndex,
+        op_path: &SharedPath<Arc<OpPathElement>>,
+    ) -> Option<&Shape> {
+        let node = state.graph.node(fetch_node);
+        let connector = node.connector.as_ref()?;
+        let mut shape = self
+            .connector_index
+            .output_shape(&connector.id.coordinate())?;
+        // A root connector, or a field-level entity resolver, describes the
+        // value of its own field, which is the first field on the path.
+        // Type-level and `entity: true` resolvers describe the entity.
+        let mut skip_own_field =
+            matches!(
+                node.kind,
+                FetchGroupKind::Root { .. } | FetchGroupKind::RootHop { .. }
+            ) || matches!(connector.entity_resolver, Some(EntityResolver::Implicit));
+        for element in op_path.iter() {
+            let OpPathElement::Field(field) = element.as_ref() else {
+                continue;
+            };
+            if std::mem::take(&mut skip_own_field) {
+                continue;
+            }
+            let ShapeCase::Object { fields, .. } = unwrap_list_shape(shape).case() else {
+                return None;
+            };
+            shape = fields.get(field.name().as_str())?;
+        }
+        Some(unwrap_list_shape(shape))
+    }
+
+    /// Whether the fetch at `fetch_node` returns every field of `conditions`
+    /// at `op_path`. Always true for GraphQL fetches. A connector fetch returns
+    /// only what its `selection` maps, whatever the subgraph schema declares.
+    pub(super) fn connector_fetch_provides(
+        &self,
+        state: &PlanState,
+        fetch_node: NodeIndex,
+        op_path: &SharedPath<Arc<OpPathElement>>,
+        conditions: &SelectionSet,
+    ) -> bool {
+        if state.graph.node(fetch_node).connector.is_none() {
+            return true;
+        }
+        match self.connector_shape_at(state, fetch_node, &unconditioned_input_path(op_path)) {
+            Some(shape) => shape_provides(shape, conditions),
+            None => true,
         }
     }
 

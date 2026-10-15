@@ -296,15 +296,30 @@ impl FieldRoutingSearchSpace {
         // `can_resolve_in_place` cannot see.
         let key_locally_resolvable = match first_key {
             Some(key_conditions) => {
-                matches!(choice, RoutingChoice::KeyHopWithProvidedKey { .. })
+                (matches!(choice, RoutingChoice::KeyHopWithProvidedKey { .. })
                     || self.can_resolve_in_place(
                         pending.query_graph_node,
                         key_conditions,
                         &source,
-                    )?
+                    )?)
+                    && self.connector_fetch_provides(
+                        state,
+                        pending.fetch_node,
+                        &pending.op_path,
+                        key_conditions,
+                    )
             }
             None => true,
         };
+
+        if !key_locally_resolvable
+            && let Some(key_conditions) = first_key
+            && key_contains_selected_field(&pending.selection, key_conditions)
+        {
+            return Err(FederationError::internal(
+                "entity hop needs the field it fetches as its key",
+            ));
+        }
 
         // Key fields plus __typename, which identifies the entity type.
         let anchor_key = key_locally_resolvable.then_some(first_key).flatten();
@@ -1553,4 +1568,19 @@ pub(super) fn field_response_elements(
         }
     }
     Ok(elements)
+}
+
+/// Whether `selection` is a leaf field that `key` itself contains. Entering
+/// an entity to fetch a field of its own key is circular when that field
+/// isn't already available: routing the key would need the same hop again.
+pub(super) fn key_contains_selected_field(selection: &Selection, key: &SelectionSet) -> bool {
+    let Selection::Field(field_sel) = selection else {
+        return false;
+    };
+    if field_sel.selection_set.is_some() {
+        return false;
+    }
+    key.selections.values().any(|key_selection| {
+        matches!(key_selection, Selection::Field(key_field) if key_field.field.name() == field_sel.field.name())
+    })
 }
