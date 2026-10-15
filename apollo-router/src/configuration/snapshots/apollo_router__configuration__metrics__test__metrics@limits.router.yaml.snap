@@ -14,4 +14,7 @@ expression: "&metrics.non_zero()"
           opt.operation.warn_only: true
           opt.parser.max_recursion: true
           opt.parser.max_tokens: true
+          opt.request.http1_max_buf_size: true
+          opt.request.http1_max_headers: true
+          opt.request.http2_max_headers_list_bytes: true
           opt.request.max_size: true
