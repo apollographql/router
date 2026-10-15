@@ -363,7 +363,7 @@ pub(super) fn serve_router_on_listen_addr(
 ) -> (impl Future<Output = Listener>, oneshot::Sender<()>) {
     let opt_max_http1_headers = configuration.limits.router.http1_max_request_headers;
     let opt_max_http1_buf_size = configuration.limits.router.http1_max_request_buf_size;
-    let opt_max_http2_headers_list_bytes = configuration.limits.router.http2_max_headers_list_bytes;
+    let http2_max_headers_list_bytes = configuration.limits.router.http2_header_list_limit();
     let connection_shutdown_timeout = configuration.supergraph.connection_shutdown_timeout;
     let header_read_timeout = configuration.server.http.header_read_timeout;
     let tls_handshake_timeout = configuration.server.http.tls_handshake_timeout;
@@ -446,7 +446,7 @@ pub(super) fn serve_router_on_listen_addr(
                                         let hyper_service = TowerToHyperService::new(app);
 
                                         let mut builder = Builder::new(TokioExecutor::new());
-                                        let config = configure_connection(&mut builder, header_read_timeout, opt_max_http1_headers, opt_max_http1_buf_size, opt_max_http2_headers_list_bytes);
+                                        let config = configure_connection(&mut builder, header_read_timeout, opt_max_http1_headers, opt_max_http1_buf_size, http2_max_headers_list_bytes);
                                         let connection = config.serve_connection_with_upgrades(tokio_stream, hyper_service);
                                         handle_connection(connection, connection_handle, connection_shutdown, connection_shutdown_timeout, received_first_request).await;
                                     }
@@ -462,7 +462,7 @@ pub(super) fn serve_router_on_listen_addr(
                                         let tokio_stream = TokioIo::new(stream);
                                         let hyper_service = TowerToHyperService::new(app);
                                         let mut builder = Builder::new(TokioExecutor::new());
-                                        let config = configure_connection(&mut builder, header_read_timeout, opt_max_http1_headers, opt_max_http1_buf_size, opt_max_http2_headers_list_bytes);
+                                        let config = configure_connection(&mut builder, header_read_timeout, opt_max_http1_headers, opt_max_http1_buf_size, http2_max_headers_list_bytes);
                                         let connection = config.serve_connection_with_upgrades(tokio_stream, hyper_service);
                                         handle_connection(connection, connection_handle, connection_shutdown, connection_shutdown_timeout, received_first_request).await;
                                     },
@@ -507,7 +507,7 @@ pub(super) fn serve_router_on_listen_addr(
                                         let tokio_stream = TokioIo::new(tls_stream);
 
                                         let mut builder = Builder::new(TokioExecutor::new());
-                                        let config = configure_connection(&mut builder, header_read_timeout, opt_max_http1_headers, opt_max_http1_buf_size, opt_max_http2_headers_list_bytes);
+                                        let config = configure_connection(&mut builder, header_read_timeout, opt_max_http1_headers, opt_max_http1_buf_size, http2_max_headers_list_bytes);
                                         let connection = config
                                             .serve_connection_with_upgrades(tokio_stream, hyper_service);
 
@@ -541,17 +541,16 @@ fn configure_connection(
     header_read_timeout: Duration,
     opt_max_http1_headers: Option<usize>,
     opt_max_http1_buf_size: Option<ByteSize>,
-    opt_max_http2_headers_list_bytes: Option<ByteSize>,
+    http2_max_headers_list_bytes: ByteSize,
 ) -> Http1Builder<'_, TokioExecutor> {
     // NOTE: this is a builder that auto-detects http1/http2, so we can configure both and rely on
     // it to figure out whether we have an http1 or http2 connection
-    let mut builder = conn_builder.http2();
-    if let Some(max_header_list_size) = opt_max_http2_headers_list_bytes {
-        let max_header_list_size = u32::try_from(max_header_list_size.as_u64())
-            .inspect_err(|e| tracing::warn!("attempted to use an HTTP/2 header size limit greater than is allowed by u32 (~4.3gb): {e}"))
-            .unwrap_or(u32::MAX);
-        builder.max_header_list_size(max_header_list_size);
-    }
+    let max_header_list_size = u32::try_from(http2_max_headers_list_bytes.as_u64())
+        .inspect_err(|e| tracing::warn!("attempted to use an HTTP/2 header size limit greater than is allowed by u32 (~4.3gb): {e}"))
+        .unwrap_or(u32::MAX);
+    conn_builder
+        .http2()
+        .max_header_list_size(max_header_list_size);
 
     let mut builder = conn_builder.http1();
 

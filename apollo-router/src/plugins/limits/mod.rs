@@ -173,6 +173,20 @@ pub(crate) struct RouterLimitsConfig {
     pub(crate) introspection_max_depth: bool,
 }
 
+/// The HTTP/2 header-list limit when `http2_max_headers_list_bytes` is unset.
+///
+/// This is hyper's own default. The Router names it so it doesn't depend on a private hyper
+/// constant to know which limit applies.
+pub(crate) const DEFAULT_HTTP2_MAX_HEADERS_LIST_BYTES: ByteSize = ByteSize::kib(16);
+
+impl RouterLimitsConfig {
+    /// The HTTP/2 header-list limit in effect: the configured value or the default.
+    pub(crate) fn http2_header_list_limit(&self) -> ByteSize {
+        self.http2_max_headers_list_bytes
+            .unwrap_or(DEFAULT_HTTP2_MAX_HEADERS_LIST_BYTES)
+    }
+}
+
 /// Per-subgraph response size limits.
 #[derive(Debug, Default, Clone, Deserialize, Serialize, JsonSchema)]
 #[serde(deny_unknown_fields, default)]
