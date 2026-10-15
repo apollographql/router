@@ -491,7 +491,7 @@ mod test {
         let expansion = Expansion::builder().dev_mode(true).build();
 
         let config = crate::configuration::parse_configuration(
-            "cors:\n  origins:\n    - https://example.com\nexpose_query_plan: false\nhomepage:\n  enabled: true\n",
+            "plugins:\n  experimental.expose_query_plan: false\nhomepage:\n  enabled: true\n",
             expansion,
             crate::configuration::Migration::WithinMajor,
         )
@@ -513,10 +513,6 @@ mod test {
         assert_eq!(
             document["telemetry"]["exporters"]["tracing"]["response_trace_id"]["enabled"],
             true
-        );
-        assert_eq!(
-            document["cors"]["policies"][0]["origins"][0],
-            "https://example.com"
         );
     }
 

@@ -504,8 +504,8 @@ mod test {
 
     #[tokio::test(start_paused = true)]
     async fn license_expander_far_future_does_not_panic() {
-        let three_years_ms: u64 = 3 * 365 * 24 * 3600 * 1000;
-        let license = license_with_claim(three_years_ms - 1_000_000, three_years_ms);
+        let three_years = Duration::from_secs(3 * 365 * 24 * 3600);
+        let license = license_with_claim(three_years - Duration::from_secs(1_000), three_years);
 
         // Before the clamp fix this would panic with "invalid deadline; err=Invalid"
         // because the deadline exceeded tokio's timer wheel maximum of ~2^36 ms.
@@ -533,11 +533,12 @@ mod test {
         // within WARN_BEFORE_HALT_GRACE (28 days) of the clamped halt_at. The old code
         // only adjusted warn_at when both deadlines exceeded the cap, leaving a < 28-day
         // gap here. The new code anchors warn_at to halt_at - WARN_BEFORE_HALT_GRACE.
-        let half_grace_ms = (super::HALT_GRACE_PERIOD_DAYS / 2) * super::SECS_PER_DAY * 1000;
-        let warn_delta_ms = super::MAX_TIMER_DURATION_SECS * 1000 - half_grace_ms;
-        let three_years_ms: u64 = 3 * 365 * 24 * 3600 * 1000;
+        let half_grace =
+            Duration::from_secs((super::HALT_GRACE_PERIOD_DAYS / 2) * super::SECS_PER_DAY);
+        let warn_delta = super::MAX_TIMER_DURATION - half_grace;
+        let three_years = Duration::from_secs(3 * 365 * 24 * 3600);
 
-        let license = license_with_claim(warn_delta_ms, three_years_ms);
+        let license = license_with_claim(warn_delta, three_years);
 
         let events_stream = futures::stream::iter(vec![license])
             .expand_licenses()
@@ -556,10 +557,10 @@ mod test {
 
     #[tokio::test(start_paused = true)]
     async fn license_expander_far_future_halt_only_clamped() {
-        let three_years_ms: u64 = 3 * 365 * 24 * 3600 * 1000;
+        let three_years = Duration::from_secs(3 * 365 * 24 * 3600);
         // warn_at stays under the cap; only halt_at is clamped. This is the more likely
         // real-world shape and must preserve warn-before-halt ordering.
-        let license = license_with_claim(15_000, three_years_ms);
+        let license = license_with_claim(Duration::from_secs(15), three_years);
 
         let events_stream = futures::stream::iter(vec![license])
             .expand_licenses()
@@ -576,9 +577,9 @@ mod test {
         );
     }
 
-    #[tokio::test]
+    #[tokio::test(start_paused = true)]
     async fn license_expander() {
-        let events_stream = futures::stream::iter(vec![license_with_claim(15, 30)])
+        let events_stream = futures::stream::iter(vec![license_with_claim(WARN_SOON, HALT_LATER)])
             .expand_licenses()
             .map(SimpleEvent::from);
 
@@ -593,12 +594,13 @@ mod test {
         );
     }
 
-    #[tokio::test]
+    #[tokio::test(start_paused = true)]
     async fn license_expander_warn_now() {
-        let events_stream = futures::stream::iter(vec![license_with_claim(0, 15)])
-            .interleave_pending()
-            .expand_licenses()
-            .map(SimpleEvent::from);
+        let events_stream =
+            futures::stream::iter(vec![license_with_claim(Duration::ZERO, HALT_LATER)])
+                .interleave_pending()
+                .expand_licenses()
+                .map(SimpleEvent::from);
 
         let events = events_stream.collect::<Vec<_>>().await;
         assert_eq!(
@@ -609,10 +611,11 @@ mod test {
 
     #[tokio::test]
     async fn license_expander_halt_now() {
-        let events_stream = futures::stream::iter(vec![license_with_claim(0, 0)])
-            .interleave_pending()
-            .expand_licenses()
-            .map(SimpleEvent::from);
+        let events_stream =
+            futures::stream::iter(vec![license_with_claim(Duration::ZERO, Duration::ZERO)])
+                .interleave_pending()
+                .expand_licenses()
+                .map(SimpleEvent::from);
 
         let events = events_stream.collect::<Vec<_>>().await;
         assert_eq!(events, &[SimpleEvent::HaltLicense]);
@@ -632,22 +635,13 @@ mod test {
     #[tokio::test(start_paused = true)]
     async fn license_expander_claim_no_claim() {
         // Licenses with no claim do not clear checks as they are ignored if we move from entitled to unentitled, this is handled at the state machine level.
-        //
-        // Use paused virtual time so that the warn/halt boundaries (10ms in the future at the
-        // moment of claim arrival) cannot fire prematurely between the time we enqueue them and
-        // the time the consumer polls `checks.poll_expired`. Under real time, scheduler jitter
-        // could push the boundaries into the past before the upstream `no_claim()` was polled,
-        // taking the early-return branches in `reset_checks_for_licenses` and producing a
-        // different event ordering than the snapshot. Anchoring `to_positive_instant` to
-        // `tokio::time::Instant::now()` (see refactor in this file) means the queue's deadlines
-        // and `Instant::now()` share the same paused clock here, so deadlines only advance when
-        // the test driver decides — `collect::<Vec<_>>().await` auto-advances paused time when
-        // the runtime is otherwise idle, which deterministically fires the warn/halt entries.
-        let events_stream =
-            futures::stream::iter(vec![license_with_claim(10, 10), license_with_no_claim()])
-                .interleave_pending()
-                .expand_licenses()
-                .map(SimpleEvent::from);
+        let events_stream = futures::stream::iter(vec![
+            license_with_claim(WARN_SOON, HALT_LATER),
+            license_with_no_claim(),
+        ])
+        .interleave_pending()
+        .expand_licenses()
+        .map(SimpleEvent::from);
 
         let events = events_stream.collect::<Vec<_>>().await;
         assert_eq!(
@@ -661,13 +655,15 @@ mod test {
         );
     }
 
-    #[tokio::test]
+    #[tokio::test(start_paused = true)]
     async fn license_expander_no_claim_claim() {
-        let events_stream =
-            futures::stream::iter(vec![license_with_no_claim(), license_with_claim(15, 30)])
-                .interleave_pending()
-                .expand_licenses()
-                .map(SimpleEvent::from);
+        let events_stream = futures::stream::iter(vec![
+            license_with_no_claim(),
+            license_with_claim(WARN_SOON, HALT_LATER),
+        ])
+        .interleave_pending()
+        .expand_licenses()
+        .map(SimpleEvent::from);
 
         let events = events_stream.collect::<Vec<_>>().await;
         assert_eq!(
@@ -683,26 +679,17 @@ mod test {
 
     #[tokio::test(start_paused = true)]
     async fn license_expander_claim_pause_claim() {
-        // Use paused virtual time so the schedule of claim arrivals vs. warn/halt
-        // expirations is deterministic. The previous version of this test used real
-        // `tokio::time::sleep(200ms)` and asserted on event ordering, which raced with
-        // the producer task on slow / loaded systems.
-        //
-        // `to_positive_instant` returns a `tokio::time::Instant` anchored to the same
-        // virtual clock that `DelayQueue` reads, so advancing time here precisely fires
-        // the inserted warn/halt entries.
         let (tx, rx) = tokio::sync::mpsc::channel(10);
         let rx_stream = tokio_stream::wrappers::ReceiverStream::new(rx);
         let events_stream = rx_stream.expand_licenses().map(SimpleEvent::from);
 
         tokio::task::spawn(async move {
             // Simulate a new claim coming in between the warning and halt of the first.
-            // First claim: warn_at = now + 100ms, halt_at = now + 300ms.
-            let _ = tx.send(license_with_claim(100, 300)).await;
-            // Advance past the warn boundary (100ms) but before the halt boundary (300ms).
-            tokio::time::sleep(Duration::from_millis(200)).await;
-            // Second claim resets the schedule from "now" (200ms after start).
-            let _ = tx.send(license_with_claim(100, 300)).await;
+            let _ = tx.send(license_with_claim(WARN_SOON, HALT_LATER)).await;
+            // Paused time auto-advances past the first warn but not its halt.
+            tokio::time::sleep((WARN_SOON + HALT_LATER) / 2).await;
+            // The second claim resets the schedule from the new "now".
+            let _ = tx.send(license_with_claim(WARN_SOON, HALT_LATER)).await;
         });
         let events = events_stream.collect::<Vec<_>>().await;
         assert_eq!(
@@ -717,15 +704,25 @@ mod test {
         );
     }
 
-    fn license_with_claim(warn_delta: u64, halt_delta: u64) -> License {
+    /// Offsets for licenses whose warn and halt are both in the future.
+    ///
+    /// These must be large. `license_with_claim` anchors them to `SystemTime::now()`, which keeps
+    /// moving even when tokio time is paused, so any real time that passes before the expander
+    /// sees the license eats into them. With millisecond offsets a slow CI machine could push
+    /// halt into the past, skipping the earlier events. Tests use paused time so these timers
+    /// still fire instantly.
+    const WARN_SOON: Duration = Duration::from_secs(10);
+    const HALT_LATER: Duration = Duration::from_secs(60);
+
+    fn license_with_claim(warn_delta: Duration, halt_delta: Duration) -> License {
         let now = SystemTime::now();
         License {
             claims: Some(Claims {
                 iss: "".to_string(),
                 sub: "".to_string(),
                 aud: OneOrMany::One(Audience::SelfHosted),
-                warn_at: now + Duration::from_millis(warn_delta),
-                halt_at: now + Duration::from_millis(halt_delta),
+                warn_at: now + warn_delta,
+                halt_at: now + halt_delta,
                 tps: Default::default(),
                 allowed_features: Default::default(),
             }),

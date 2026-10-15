@@ -13,6 +13,8 @@ use std::time::Duration;
 use std::time::SystemTime;
 use std::time::UNIX_EPOCH;
 
+use apollo_router::_private::telemetry::DatadogPropagator;
+use apollo_router::_private::telemetry::datadog_pipeline;
 use buildstructor::buildstructor;
 use flate2::read::GzDecoder;
 use fred::clients::Client as RedisClient;
@@ -21,6 +23,7 @@ use fred::interfaces::KeysInterface;
 use fred::prelude::Config as RedisConfig;
 use fred::types::scan::Scanner;
 use futures::StreamExt;
+use futures::TryStreamExt;
 use http::header::ACCEPT;
 use http::header::CONTENT_TYPE;
 use mime::APPLICATION_JSON;
@@ -683,8 +686,9 @@ impl Telemetry {
                 .with_resource(resource)
                 .with_span_processor(
                     BatchSpanProcessor::builder(
-                        opentelemetry_datadog::new_pipeline()
+                        datadog_pipeline()
                             .with_service_name(service_name)
+                            .with_http_client(reqwest::Client::new())
                             .build_exporter()
                             .expect("datadog pipeline failed"),
                         runtime::Tokio,
@@ -715,7 +719,7 @@ impl Telemetry {
                     .headers()
                     .get("x-datadog-sampling-priority")
                     .cloned();
-                let propagator = opentelemetry_datadog::DatadogPropagator::new();
+                let propagator = DatadogPropagator::new();
                 propagator.inject_context(
                     &ctx,
                     &mut opentelemetry_http::HeaderInjector(request.headers_mut()),
@@ -761,7 +765,7 @@ impl Telemetry {
             Telemetry::Datadog => {
                 let span_ref = context.span();
                 let original_span_context = span_ref.span_context();
-                let propagator = opentelemetry_datadog::DatadogPropagator::new();
+                let propagator = DatadogPropagator::new();
                 let mut context = propagator.extract_with_context(context, &headers);
                 // We're going to override the sampled so that we can test sampling priority
                 if let Some(psr) = headers.get("x-datadog-sampling-priority") {
@@ -1452,11 +1456,17 @@ impl IntegrationTest {
     }
 
     /// Make a raw multipart request to the router.
+    ///
+    /// By default the form is streamed part by part. With `buffered`, it is collected first and
+    /// sent as a single body with a `Content-Length`. Use this when the router rejects the request
+    /// after reading only the first parts: if the rest of a streamed body is still arriving, the
+    /// router closes the connection and the client can hit a reset before it reads the response.
     #[allow(dead_code)]
     pub fn execute_multipart_request(
         &self,
         request: reqwest::multipart::Form,
         transform: Option<fn(reqwest::Request) -> reqwest::Request>,
+        buffered: bool,
     ) -> impl std::future::Future<Output = (String, reqwest::Response)> + use<> {
         assert!(
             self.router.is_some(),
@@ -1471,14 +1481,26 @@ impl IntegrationTest {
             let span_id = span.context().span().span_context().trace_id().to_string();
 
             async move {
-                let mut request = client
+                let builder = client
                     .post(url)
                     .header("apollographql-client-name", "custom_name")
                     .header("apollographql-client-version", "1.0")
-                    .header("apollo-require-preflight", "test")
-                    .multipart(request)
-                    .build()
-                    .unwrap();
+                    .header("apollo-require-preflight", "test");
+                let builder = if buffered {
+                    let content_type =
+                        format!("multipart/form-data; boundary={}", request.boundary());
+                    let chunks: Vec<bytes::Bytes> = request
+                        .into_stream()
+                        .try_collect()
+                        .await
+                        .expect("multipart form can be buffered");
+                    builder
+                        .header(CONTENT_TYPE, content_type)
+                        .body(chunks.concat())
+                } else {
+                    builder.multipart(request)
+                };
+                let mut request = builder.build().unwrap();
 
                 // Optionally transform the request if needed
                 let transformer = transform.unwrap_or(core::convert::identity);

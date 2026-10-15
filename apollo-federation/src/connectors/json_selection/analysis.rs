@@ -135,6 +135,8 @@ impl SelectionAnalysis {
 mod tests {
     use std::sync::Arc;
 
+    use shape::ShapeCase;
+
     use super::SelectionAnalysis;
     use crate::connectors::ConnectSpec;
     use crate::connectors::json_selection::JSONSelection;
@@ -209,6 +211,145 @@ mod tests {
         }
     }
 
+    #[test]
+    fn literal_subselection_has_no_root_consumption() {
+        // An object literal nested under an alias is a subselection over
+        // `@`, but when all of its values are literals it reads nothing from
+        // the input, so it must not mark `$root` itself as consumed.
+        for input in [
+            r#"id: "sku-4417" price: { amount: 1395 currencyCode: "USD" }"#,
+            r#"{ "id": "sku-4417", "price": { "amount": 1395, "currencyCode": "USD" } }"#,
+            r#"$({ "id": "sku-4417", "price": { "amount": 1395 } })"#,
+        ] {
+            let analysis = analyze(input);
+            match analysis.consumption().get("$root") {
+                None => {}
+                Some(root) => assert!(
+                    root.is_empty() && !root.is_leaf(),
+                    "expected no $root consumption for {input:?}, got {root} (leaf: {})",
+                    root.is_leaf(),
+                ),
+            }
+        }
+    }
+
+    #[test]
+    fn subselection_reading_other_variables_has_no_root_consumption() {
+        // Reading `$args` or `$config` inside a nested object literal reads
+        // nothing from `$root`, so `$root` must still not be marked consumed.
+        let cases = [
+            (
+                r#"id: "sku-4417" price: { amount: $args.amount currencyCode: "USD" }"#,
+                "$args { amount }",
+            ),
+            (
+                r#"{ "id": "sku-4417", "price": { "amount": $args.amount } }"#,
+                "$args { amount }",
+            ),
+            (
+                r#"id: "sku-4417" price: { amount: 1395 currencyCode: $config.currency }"#,
+                "$config { currency }",
+            ),
+        ];
+        for (input, expected) in cases {
+            let analysis = analyze(input);
+            assert_eq!(
+                analysis.consumption().to_string(),
+                expected,
+                "consumption trie mismatch for {input:?}",
+            );
+        }
+    }
+
+    #[test]
+    fn root_is_consumed_only_by_reading_root() {
+        // The general rule: a selection consumes `$root` if and only if
+        // something in it reads from `$root`. Literals, other variables,
+        // methods, nesting and spreads that don't read `$root` must leave no
+        // `$root` consumption, however deeply they are nested.
+        let no_root = [
+            r#"a: { b: { c: { d: 1 } } }"#,
+            r#"a: { b: [1, { c: 2 }] }"#,
+            r#"a: { b: $args.x->add(1) }"#,
+            r#"a: { b: $args.list->map({ id: @.id }) }"#,
+            r#"a: { b: $args.code->match(["A", "ACTIVE"], [@, "UNKNOWN"]) }"#,
+            r#"a: { b: $([1, 2])->first }"#,
+            r#"a: { b: $this.x c: $config.y d: $context.z }"#,
+            r#"a: { b: { c: $args.x } d: "e" }"#,
+            r#"a: { ...$args.extra b: 1 }"#,
+            r#"{ "a": { "b": { "c": $args.x } } }"#,
+            r#"$({ a: { b: $args.x } })"#,
+        ];
+        for input in no_root {
+            let analysis = analyze(input);
+            assert!(
+                analysis
+                    .consumption()
+                    .get("$root")
+                    .is_none_or(|root| root.is_empty() && !root.is_leaf()),
+                "expected no $root consumption for {input:?}, got {}",
+                analysis.consumption(),
+            );
+        }
+
+        let reads_root = [
+            r#"a: { b: { c: @.x } }"#,
+            r#"a: { b: { c: $.x } }"#,
+            r#"a: { b: { c } }"#,
+            r#"a: { b: { c: @->size } }"#,
+            r#"a: { b: { c: $->jsonStringify } }"#,
+            r#"a: { b: { ...$.extra } }"#,
+            r#"a: { b: $args.list->map({ id: $.id }) }"#,
+        ];
+        for input in reads_root {
+            let analysis = analyze(input);
+            assert!(
+                analysis
+                    .consumption()
+                    .get("$root")
+                    .is_some_and(|root| !root.is_empty() || root.is_leaf()),
+                "expected $root consumption for {input:?}, got {}",
+                analysis.consumption(),
+            );
+        }
+    }
+
+    #[test]
+    fn key_navigated_subselection_keeps_its_leaf() {
+        // A subselection reached through a key always marks that key as a
+        // leaf, even when the subselection's values are all literals, so the
+        // trie still records that the path must exist on the input.
+        let cases = [
+            (r#"$this.items { id: "x" }"#, "$this { items }"),
+            (r#"$this.a { b { id: "x" } }"#, "$this { a { b } }"),
+            (r#"a { b { id: "x" } }"#, "$root { a { b } }"),
+        ];
+        for (input, expected) in cases {
+            let analysis = analyze(input);
+            assert_eq!(
+                analysis.consumption().to_string(),
+                expected,
+                "consumption trie mismatch for {input:?}",
+            );
+        }
+    }
+
+    #[test]
+    fn subselection_reading_input_still_marks_it_consumed() {
+        // When the subselection does read from its input, the input path
+        // is still marked as a leaf, alongside whatever the children read.
+        let analysis = analyze(r#"id: "sku-4417" price: { amount }"#);
+        let root = analysis.consumption().get("$root").expect("$root entry");
+        assert!(root.is_leaf());
+        assert_eq!(root.to_string(), "amount");
+
+        for input in ["$", "@"] {
+            let analysis = analyze(input);
+            let root = analysis.consumption().get("$root").expect("$root entry");
+            assert!(root.is_leaf(), "expected bare {input} to consume $root");
+        }
+    }
+
     // ---- RH-1345 / CNN-1093 regression coverage at the SelectionAnalysis
     // level. These tests assert directly on the consumption trie produced
     // by `SelectionAnalysis::new` rather than going through the validator,
@@ -280,6 +421,161 @@ mod tests {
         let first = analysis.output_shape().pretty_print();
         let second = analysis.output_shape().pretty_print();
         assert_eq!(first, second);
+    }
+
+    // ---- Short-circuited `->and` / `->or` (PR #10316 review feedback).
+    // The runtime short-circuits left to right, so a statically-false
+    // `->and` receiver (or statically-true `->or` receiver) means no
+    // argument is ever evaluated. Static analysis still considers every
+    // argument: their variable consumption must be recorded (requestless
+    // connectors are diagnosed from this trie), while their errors must
+    // stay out of the output shape, since they can never occur. ----
+
+    #[test]
+    fn and_short_circuit_records_arg_consumption_without_arg_errors() {
+        let analysis = analyze("false->and($status)");
+        assert_eq!(analysis.consumption().to_string(), "$status");
+        assert!(
+            matches!(analysis.output_shape().case(), ShapeCase::Bool(None))
+                && !analysis.output_shape().has_errors(),
+            "expected clean Bool shape, got {}",
+            analysis.output_shape().pretty_print(),
+        );
+    }
+
+    #[test]
+    fn or_short_circuit_records_arg_consumption_without_arg_errors() {
+        let analysis = analyze("true->or($response.headers.trace)");
+        assert_eq!(
+            analysis.consumption().to_string(),
+            "$response { headers { trace } }"
+        );
+        assert!(
+            matches!(analysis.output_shape().case(), ShapeCase::Bool(None))
+                && !analysis.output_shape().has_errors(),
+            "expected clean Bool shape, got {}",
+            analysis.output_shape().pretty_print(),
+        );
+    }
+
+    #[test]
+    fn and_or_short_circuit_consider_every_argument() {
+        // Multiple right-hand arguments: all of their consumption is
+        // recorded, even positions after one that would (at runtime, for a
+        // non-literal receiver) end the evaluation.
+        let analysis = analyze("false->and($status, $response.headers.trace, $args.flag)");
+        assert_eq!(
+            analysis.consumption().to_string(),
+            "$args { flag } $response { headers { trace } } $status"
+        );
+
+        let analysis = analyze("true->or($status, $args.flag, $response.headers.trace)");
+        assert_eq!(
+            analysis.consumption().to_string(),
+            "$args { flag } $response { headers { trace } } $status"
+        );
+    }
+
+    #[test]
+    fn and_or_short_circuit_suppress_never_evaluated_arg_errors() {
+        // `1->gt("x")` is a static type error, but the argument can never be
+        // evaluated at runtime, so the error must not reach the output shape.
+        let analysis = analyze("false->and($status, 1->gt(\"x\"))");
+        assert_eq!(analysis.consumption().to_string(), "$status");
+        assert!(
+            matches!(analysis.output_shape().case(), ShapeCase::Bool(None))
+                && !analysis.output_shape().has_errors(),
+            "expected clean Bool shape, got {}",
+            analysis.output_shape().pretty_print(),
+        );
+
+        let analysis = analyze("true->or(2->lt(\"y\"), $response.headers.trace)");
+        assert_eq!(
+            analysis.consumption().to_string(),
+            "$response { headers { trace } }"
+        );
+        assert!(
+            matches!(analysis.output_shape().case(), ShapeCase::Bool(None))
+                && !analysis.output_shape().has_errors(),
+            "expected clean Bool shape, got {}",
+            analysis.output_shape().pretty_print(),
+        );
+    }
+
+    #[test]
+    fn and_or_without_short_circuit_still_surface_arg_errors() {
+        // Control: when the receiver does not statically short-circuit, the
+        // same argument error does surface (and consumption is recorded).
+        let analysis = analyze("true->and(1->gt(\"x\"))");
+        assert!(
+            analysis.output_shape().has_errors(),
+            "expected the ->gt error to surface, got {}",
+            analysis.output_shape().pretty_print(),
+        );
+
+        let analysis = analyze("false->or(1->gt(\"x\"))");
+        assert!(
+            analysis.output_shape().has_errors(),
+            "expected the ->gt error to surface, got {}",
+            analysis.output_shape().pretty_print(),
+        );
+    }
+
+    #[test]
+    fn and_or_short_circuit_through_literal_object_paths() {
+        // A path into a literal object preserves the literal field shape, so
+        // the receiver still folds to a known `false`, and a method call
+        // works as an object-literal value (v0.4+).
+        let analysis = analyze("{ foo: false->and($status) }.foo");
+        assert_eq!(analysis.consumption().to_string(), "$status");
+        assert!(
+            matches!(analysis.output_shape().case(), ShapeCase::Bool(None))
+                && !analysis.output_shape().has_errors(),
+            "expected clean Bool shape, got {}",
+            analysis.output_shape().pretty_print(),
+        );
+
+        // The non-short-circuited form works too: a statically-true `->and`
+        // receiver evaluates its argument, producing an unknown Bool.
+        let analysis = analyze("{ foo: true->and(false) }.foo");
+        assert!(
+            matches!(analysis.output_shape().case(), ShapeCase::Bool(None))
+                && !analysis.output_shape().has_errors(),
+            "expected clean Bool shape, got {}",
+            analysis.output_shape().pretty_print(),
+        );
+    }
+
+    #[test]
+    fn and_or_short_circuit_through_literal_array_first() {
+        // `->first` of a literal array preserves the literal element shape,
+        // so the receiver folds to a known `true`.
+        let analysis = analyze("[true, false]->first->or($status)");
+        assert_eq!(analysis.consumption().to_string(), "$status");
+        assert!(
+            matches!(analysis.output_shape().case(), ShapeCase::Bool(None))
+                && !analysis.output_shape().has_errors(),
+            "expected clean Bool shape, got {}",
+            analysis.output_shape().pretty_print(),
+        );
+    }
+
+    #[test]
+    fn nested_short_circuit_composes_with_normal_evaluation() {
+        // The inner `false->and(...)` short-circuits (consumption of $status
+        // recorded, `->gt` error suppressed); its unknown-Bool result feeds
+        // an outer `->or` that evaluates its argument normally.
+        let analysis = analyze("false->and($status, 1->gt(\"x\"))->or($response.headers.trace)");
+        assert_eq!(
+            analysis.consumption().to_string(),
+            "$response { headers { trace } } $status"
+        );
+        assert!(
+            matches!(analysis.output_shape().case(), ShapeCase::Bool(None))
+                && !analysis.output_shape().has_errors(),
+            "expected clean Bool shape, got {}",
+            analysis.output_shape().pretty_print(),
+        );
     }
 
     #[test]

@@ -2,8 +2,6 @@ use std::collections::HashMap;
 use std::sync::Arc;
 
 use apollo_federation::connectors::runtime::http_json_transport::TransportRequest;
-use schemars::JsonSchema;
-use serde::Deserialize;
 use tower::ServiceBuilder;
 use tower::ServiceExt;
 
@@ -44,11 +42,9 @@ impl ConnectorAuth {
 
 /// Configure connector authentication
 // Holds AWS credentials, so it cannot serialize its defaults: the schema declares them by hand.
-#[derive(Clone, Debug, Default, JsonSchema, Deserialize)]
-#[serde(rename_all = "snake_case", deny_unknown_fields)]
+#[apollo_configuration::configuration]
 #[schemars(rename = "AuthenticationConnectorConfig")]
 pub(crate) struct Config {
-    #[serde(default)]
     #[schemars(extend("default" = {}))]
     /// Create a configuration that will apply only to a specific source.
     pub(crate) sources: HashMap<String, AuthConfig>,

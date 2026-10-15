@@ -87,6 +87,8 @@ pub(crate) enum CacheKeySource {
     Subgraph,
     /// Data fetched from cache
     Cache,
+    /// Data fetched from connector
+    Connector,
 }
 
 /// Debug info for the CDN `Cache-Tag` header, once per response — the piece the per-entry
@@ -203,7 +205,13 @@ impl CacheKeyContext {
             // consume per-tag values for this subgraph — the Redis cache_tag index or CDN
             // invalidation; otherwise the operator has intentionally opted out of both and
             // missing @cacheTag directives are the expected, configured state.
-            if !self.has_tags && (self.indexes.cache_tag || self.cdn_invalidation_enabled) {
+            // `root_fields` is empty on placeholder entries recorded for requests that bypass
+            // the cache entirely (a known-private query with no `private_id`, for instance):
+            // no root field was identified, so there is nothing to say about its cache tags.
+            if !self.has_tags
+                && !root_fields.is_empty()
+                && (self.indexes.cache_tag || self.cdn_invalidation_enabled)
+            {
                 self.warnings.push(Warning {
                     code: "NO_CACHE_TAG_ON_ROOT_FIELD".to_string(),
                     links: vec![Link { url: String::from("https://www.apollographql.com/docs/graphos/routing/performance/caching/response-caching/invalidation#invalidation-methods"), title: "Add '@cacheTag' in your schema".to_string() }],

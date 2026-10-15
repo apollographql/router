@@ -281,7 +281,7 @@ async fn call_websocket(
     let service_name_for_task = service_name.to_string();
     let reconnect_delay = subgraph_cfg
         .reconnect_delay
-        .unwrap_or(Duration::from_secs(1));
+        .map_or(Duration::from_secs(1), |delay| *delay);
     // A reconnected connection that stays open at least this long is treated as
     // stable, and the per-disconnect retry budget refreshes. A subgraph that
     // flaps (accepts the handshake then drops faster than this) keeps burning
@@ -693,7 +693,7 @@ async fn setup_callback(
 
     // If not then put the subscription_id in the extensions for callback mode and continue
     // Do this if the topic doesn't already exist
-    let mut callback_url = config.public_url.clone();
+    let mut callback_url = (*config.public_url).clone();
     if callback_url.path_segments_mut().is_err() {
         callback_url = callback_url.join(&subscription_id)?;
     } else {

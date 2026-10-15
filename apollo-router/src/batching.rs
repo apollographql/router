@@ -86,6 +86,13 @@ impl fmt::Display for BatchQuery {
 }
 
 impl BatchQuery {
+    /// A query at index 0 of a new batch of one, for tests outside this module.
+    #[cfg(test)]
+    pub(crate) fn for_test() -> Self {
+        Batch::query_for_index(Arc::new(Batch::spawn_handler(1)), 0)
+            .expect("index 0 exists in a batch of one")
+    }
+
     /// The batch query a fetch to `subgraph_name` in this request joins, if it joins one: batching
     /// must be enabled for that subgraph, and the request's batch query must still be waiting for
     /// its fetches.

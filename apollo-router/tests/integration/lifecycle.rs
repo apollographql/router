@@ -81,23 +81,23 @@ async fn test_migrated_reload_and_invalid_replacement_preserves_introspection()
             r#"
 supergraph:
   introspection: true
-cors:
-  origins:
-    - https://example.com
+telemetry:
+  apollo:
+    otlp_tracing_sampler: 0.5
 "#,
         )
         .await;
     router.assert_reloaded().await;
-    router.assert_log_contained("CORS configuration has been migrated");
+    router.assert_log_contained("otlp_tracing_sampler has been removed");
 
     router
         .update_config(
             r#"
 supergraph:
   introspection: false
-cors:
-  origins:
-    - https://example.org
+telemetry:
+  apollo:
+    otlp_tracing_sampler: 0.5
 this_key_does_not_exist_anywhere: true
 "#,
         )

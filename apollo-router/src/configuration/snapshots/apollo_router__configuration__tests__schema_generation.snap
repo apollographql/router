@@ -337,12 +337,10 @@ expression: "&schema"
       ]
     },
     "ApolloUsageReportsBatchProcessorConfiguration": {
+      "additionalProperties": false,
       "properties": {
         "max_export_timeout": {
-          "default": {
-            "nanos": 0,
-            "secs": 30
-          },
+          "default": "30s",
           "description": "The maximum duration to export a batch of data.\nThe default value is 30 seconds.",
           "type": "string"
         },
@@ -354,10 +352,7 @@ expression: "&schema"
           "type": "integer"
         },
         "scheduled_delay": {
-          "default": {
-            "nanos": 0,
-            "secs": 5
-          },
+          "default": "5s",
           "description": "The delay interval in milliseconds between two consecutive processing\nof batches. The default value is 5 seconds.",
           "type": "string"
         }
@@ -409,6 +404,7 @@ expression: "&schema"
       "description": "Specify assumed role configuration.",
       "properties": {
         "external_id": {
+          "default": null,
           "description": "Unique identifier that might be required when you assume a role in another account.",
           "type": [
             "string",
@@ -630,6 +626,7 @@ expression: "&schema"
       "type": "object"
     },
     "AuthorizationDirectivesConfig": {
+      "additionalProperties": false,
       "properties": {
         "dry_run": {
           "default": false,
@@ -662,6 +659,7 @@ expression: "&schema"
       "type": "object"
     },
     "AuthorizationErrorConfig": {
+      "additionalProperties": false,
       "properties": {
         "log": {
           "default": true,
@@ -681,6 +679,7 @@ expression: "&schema"
       "type": "object"
     },
     "BatchProcessorConfig": {
+      "additionalProperties": false,
       "description": "Batch processor configuration",
       "properties": {
         "max_concurrent_exports": {
@@ -698,10 +697,7 @@ expression: "&schema"
           "type": "integer"
         },
         "max_export_timeout": {
-          "default": {
-            "nanos": 0,
-            "secs": 30
-          },
+          "default": "30s",
           "description": "The maximum duration to export a batch of data.\nThe default value is 30 seconds.",
           "type": "string"
         },
@@ -713,10 +709,7 @@ expression: "&schema"
           "type": "integer"
         },
         "scheduled_delay": {
-          "default": {
-            "nanos": 0,
-            "secs": 5
-          },
+          "default": "5s",
           "description": "The delay interval in milliseconds between two consecutive processing\nof batches. The default value is 5 seconds.",
           "type": "string"
         }
@@ -1145,11 +1138,7 @@ expression: "&schema"
           "description": "Use HTTP/2 to communicate with the coprocessor."
         },
         "pool_idle_timeout": {
-          "default": {
-            "nanos": 0,
-            "secs": 15
-          },
-          "description": "Specify a timeout for idle sockets being kept-alive in the client's connection pool",
+          "description": "Specify a timeout for idle sockets being kept-alive in the client's connection pool.\nDefaults to 15 seconds; `null` disables idle eviction.",
           "type": [
             "string",
             "null"
@@ -2145,6 +2134,14 @@ expression: "&schema"
           },
           "description": "Propagation of aggregated response_cache cache tags to the supergraph response.\nOff by default; opt in to surface cache tags to a CDN for tag-based purging. See\n`CdnInvalidationConfig` for the individual fields."
         },
+        "connector": {
+          "allOf": [
+            {
+              "$ref": "#/definitions/ConnectorCacheConfiguration"
+            }
+          ],
+          "description": "Configure response caching per connector source"
+        },
         "debug": {
           "default": false,
           "description": "Enable debug mode for the debugger",
@@ -2185,12 +2182,19 @@ expression: "&schema"
               "$ref": "#/definitions/SubgraphSubgraphConfiguration"
             }
           ],
+          "default": {
+            "all": {
+              "enabled": false,
+              "invalidation": null,
+              "private_id": null,
+              "redis": null,
+              "ttl": null
+            },
+            "subgraphs": {}
+          },
           "description": "Configure invalidation per subgraph"
         }
       },
-      "required": [
-        "subgraph"
-      ],
       "type": "object"
     },
     "Config7": {
@@ -2311,6 +2315,107 @@ expression: "&schema"
       "required": [
         "urls"
       ],
+      "type": "object"
+    },
+    "ConnectorCacheConfiguration": {
+      "additionalProperties": false,
+      "description": "Configuration for connector response caching: global defaults plus per-source overrides",
+      "properties": {
+        "all": {
+          "allOf": [
+            {
+              "$ref": "#/definitions/ConnectorCacheSource"
+            }
+          ],
+          "default": {
+            "cache_key_headers": null,
+            "enabled": null,
+            "invalidation": null,
+            "private_id": null,
+            "redis": null,
+            "ttl": null
+          },
+          "description": "Options applying to all connector sources"
+        },
+        "sources": {
+          "additionalProperties": {
+            "$ref": "#/definitions/ConnectorCacheSource"
+          },
+          "default": {},
+          "description": "Map of subgraph_name.connector_source_name to configuration",
+          "type": "object"
+        }
+      },
+      "type": "object"
+    },
+    "ConnectorCacheSource": {
+      "additionalProperties": false,
+      "description": "Per connector source configuration for response caching",
+      "properties": {
+        "cache_key_headers": {
+          "default": null,
+          "description": "The client request header names whose values are folded into this source's cache key.\n\n**Required on `all`**: the router refuses to start if connector caching is enabled and\n`all.cache_key_headers` is unset (see the plugin's startup validation). This is a deliberate\nsafety decision — the operator must consciously choose which request headers distinguish one\ncached connector response from another before enabling the feature. Because a plain value\ncannot express \"unset\" separately from \"explicitly empty\", the field is an `Option` and that\nrequirement is enforced at startup rather than at deserialization.\n\n**Optional per source**: a listed source inherits `all`'s value when this is `None`\n(omitted), or overrides it (including with an explicit empty list) when set.\n\nSemantics of the resolved list:\n- Header matching is case-insensitive; all values of a listed header (sorted) are hashed.\n- An empty list (`[]`) is a valid, explicit choice meaning \"no request header partitions\n  the cache\" — every caller with otherwise-equal inputs shares one entry.\n- Any header your REST API varies its response on that is NOT listed here will cause\n  different callers to share a cached response (a cross-user data-disclosure risk); any\n  header listed here that does not affect the response needlessly fragments the cache.",
+          "items": {
+            "type": "string"
+          },
+          "type": [
+            "array",
+            "null"
+          ]
+        },
+        "enabled": {
+          "default": null,
+          "description": "Activates caching for this connector source, overrides the global configuration",
+          "type": [
+            "boolean",
+            "null"
+          ]
+        },
+        "invalidation": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/SubgraphInvalidationConfig"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Invalidation configuration"
+        },
+        "private_id": {
+          "default": null,
+          "description": "Context key used to separate cache sections per user",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "redis": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/Config7"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Redis configuration"
+        },
+        "ttl": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/Ttl"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Expiration for all keys for this connector source, unless overridden by the `Cache-Control` header in connector responses"
+        }
+      },
       "type": "object"
     },
     "ConnectorConnectorLimitsConfiguration": {
@@ -2912,11 +3017,7 @@ expression: "&schema"
           "description": "Enable global rate limiting"
         },
         "pool_idle_timeout": {
-          "default": {
-            "nanos": 0,
-            "secs": 15
-          },
-          "description": "Specify a timeout for idle sockets being kept-alive in the client's connection pool",
+          "description": "Specify a timeout for idle sockets being kept-alive in the client's connection pool.\nDefaults to 15 seconds; `null` disables idle eviction. A `sources.<name>` block that omits\nit uses the value from `connector.all`.",
           "type": [
             "string",
             "null"
@@ -2977,6 +3078,7 @@ expression: "&schema"
       "type": "object"
     },
     "ConnectorStages": {
+      "additionalProperties": false,
       "description": "Configures the connector coprocessor stages",
       "properties": {
         "all": {
@@ -3503,6 +3605,7 @@ expression: "&schema"
           "description": "Specify assumed role configuration."
         },
         "profile_name": {
+          "default": null,
           "description": "The profile name used by this provider",
           "type": [
             "string",
@@ -4162,6 +4265,7 @@ expression: "&schema"
       "type": "object"
     },
     "ExecutionStage": {
+      "additionalProperties": false,
       "properties": {
         "request": {
           "allOf": [
@@ -4225,6 +4329,7 @@ expression: "&schema"
           "description": "Format of the trace ID in response headers"
         },
         "header_name": {
+          "default": null,
           "description": "Choose the header name to expose trace_id (default: apollo-trace-id)",
           "type": [
             "string",
@@ -6047,7 +6152,19 @@ expression: "&schema"
           "x-apollo-secret": true
         },
         "metadata": {
-          "additionalProperties": true,
+          "additionalProperties": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              }
+            ]
+          },
           "default": {},
           "description": "gRPC metadata",
           "type": "object"
@@ -7086,6 +7203,7 @@ expression: "&schema"
           "type": "boolean"
         },
         "audiences": {
+          "default": null,
           "description": "Expected audiences for tokens verified by that JWKS\n\nIf not specified, the audience will not be checked.",
           "items": {
             "type": "string"
@@ -7104,6 +7222,7 @@ expression: "&schema"
           "type": "array"
         },
         "issuers": {
+          "default": null,
           "description": "Expected issuers for tokens verified by that JWKS\n\nIf not specified, the issuer will not be checked.",
           "items": {
             "type": "string"
@@ -7334,6 +7453,7 @@ expression: "&schema"
           "description": "New aggregation settings to set"
         },
         "allowed_attribute_keys": {
+          "default": null,
           "description": "An allow-list of attribute keys that will be preserved for the instrument.\n\nAny attribute recorded for the instrument with a key not in this set will be\ndropped. If the set is empty, all attributes will be dropped, if `None` all\nattributes will be kept.",
           "items": {
             "type": "string"
@@ -7345,6 +7465,7 @@ expression: "&schema"
           "uniqueItems": true
         },
         "cardinality_limit": {
+          "default": null,
           "description": "Maximum number of distinct attribute combinations (cardinality) for this instrument.\n\nOverrides the global `cardinality_limit` from `MetricsCommon` for this specific metric.\nIf neither this nor the global limit is set, the OTel SDK default of 2000 applies.",
           "format": "uint32",
           "minimum": 1,
@@ -7354,6 +7475,7 @@ expression: "&schema"
           ]
         },
         "description": {
+          "default": null,
           "description": "New description to set to the instrument",
           "type": [
             "string",
@@ -7365,6 +7487,7 @@ expression: "&schema"
           "type": "string"
         },
         "rename": {
+          "default": null,
           "description": "Rename the metric to this name\n\nThis allows you to customize metric names for both OTLP and Prometheus exporters.\nNote: Prometheus will apply additional transformations (dots to underscores, unit suffixes).\nApollo metrics are not affected by this rename - they will retain original names.",
           "type": [
             "string",
@@ -7372,6 +7495,7 @@ expression: "&schema"
           ]
         },
         "unit": {
+          "default": null,
           "description": "New unit to set to the instrument",
           "type": [
             "string",
@@ -7765,20 +7889,15 @@ expression: "&schema"
       ]
     },
     "OtlpMetricsBatchProcessorConfiguration": {
+      "additionalProperties": false,
       "properties": {
         "max_export_timeout": {
-          "default": {
-            "nanos": 0,
-            "secs": 30
-          },
+          "default": "30s",
           "description": "The maximum duration to export a batch of data.\nThe default value is 30 seconds.",
           "type": "string"
         },
         "scheduled_delay": {
-          "default": {
-            "nanos": 0,
-            "secs": 5
-          },
+          "default": "5s",
           "description": "The delay interval in milliseconds between two consecutive processing\nof batches. The default value is 5 seconds.",
           "type": "string"
         }
@@ -8411,10 +8530,7 @@ expression: "&schema"
           "type": "boolean"
         },
         "interval": {
-          "default": {
-            "nanos": 0,
-            "secs": 1
-          },
+          "default": "1s",
           "description": "Interval for rate limiting",
           "type": "string"
         }
@@ -8472,7 +8588,7 @@ expression: "&schema"
       "description": "Configuration options pertaining to the readiness health interval sub-component.",
       "properties": {
         "sampling": {
-          "default": "0s",
+          "default": "5s",
           "description": "The sampling interval (default: 5s)",
           "type": [
             "string",
@@ -9486,6 +9602,7 @@ expression: "&schema"
       "additionalProperties": false,
       "properties": {
         "concurrency_limit": {
+          "default": null,
           "description": "The global concurrency limit",
           "format": "uint",
           "minimum": 0,
@@ -9528,6 +9645,7 @@ expression: "&schema"
       "type": "object"
     },
     "RouterStage": {
+      "additionalProperties": false,
       "properties": {
         "request": {
           "allOf": [
@@ -11389,6 +11507,7 @@ expression: "&schema"
           "description": "Enable compression for subgraphs (available compressions are deflate, br, gzip)"
         },
         "deduplicate_query": {
+          "default": null,
           "description": "Enable query deduplication",
           "type": [
             "boolean",
@@ -11445,11 +11564,7 @@ expression: "&schema"
           "description": "Enable HTTP2 for subgraphs"
         },
         "pool_idle_timeout": {
-          "default": {
-            "nanos": 0,
-            "secs": 15
-          },
-          "description": "Specify a timeout for idle sockets being kept-alive in the client's connection pool",
+          "description": "Specify a timeout for idle sockets being kept-alive in the client's connection pool.\nDefaults to 15 seconds; `null` disables idle eviction. A `subgraphs.<name>` block that\nomits it uses the value from `all`.",
           "type": [
             "string",
             "null"
@@ -11743,6 +11858,7 @@ expression: "&schema"
               "type": "null"
             }
           ],
+          "default": null,
           "description": "Enable callback mode for subgraph(s)"
         },
         "passthrough": {
@@ -11754,6 +11870,7 @@ expression: "&schema"
               "type": "null"
             }
           ],
+          "default": null,
           "description": "Enable passthrough mode for subgraph(s)"
         }
       },
@@ -12414,6 +12531,7 @@ expression: "&schema"
       "type": "object"
     },
     "SupergraphStage": {
+      "additionalProperties": false,
       "properties": {
         "request": {
           "allOf": [
@@ -12895,8 +13013,35 @@ expression: "&schema"
           "default": "",
           "description": "Any name except `reserved`.",
           "type": "string"
+        },
+        "nested": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/ValidatedNestedConfig"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "A nested section with its own rule."
         }
       },
+      "type": "object"
+    },
+    "ValidatedNestedConfig": {
+      "additionalProperties": false,
+      "description": "A nested section whose rule runs because its parent's field doesn't skip validation.",
+      "properties": {
+        "limit": {
+          "description": "At least 1.",
+          "format": "uint32",
+          "minimum": 0,
+          "type": "integer"
+        }
+      },
+      "required": [
+        "limit"
+      ],
       "type": "object"
     },
     "WebSocketConfiguration": {
