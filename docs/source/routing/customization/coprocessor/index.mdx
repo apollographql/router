@@ -228,6 +228,33 @@ If you use the `selective` configuration, you must use the new context key names
 
 </Note>
 
+#### Context keys for a specific subgraph request
+
+The context is shared by every subgraph request made for a client request, and subgraph requests can run in parallel. To pass data from a `SubgraphRequest` stage to the matching `SubgraphResponse` stage, store it under a context key that includes the subgraph request's ID, so parallel subgraph requests don't overwrite each other.
+
+In a subgraph stage, a `selective` entry can be an object with `append_subgraph_request_id: true`. The router then sends the context key named `name` followed by the current subgraph request's ID (the same value as the payload's [`subgraphRequestId`](/graphos/routing/customization/coprocessor/reference#subgraphrequestid)):
+
+```yaml title="router.yaml"
+coprocessor:
+  url: http://127.0.0.1:3000
+  subgraph:
+    all:
+      request:
+        subgraph_request_id: true
+      response:
+        subgraph_request_id: true
+        context:
+          selective:
+            - apollo::supergraph::operation_name
+            # Sends the key `my_coprocessor::state::<subgraph request ID>`
+            - name: "my_coprocessor::state::"
+              append_subgraph_request_id: true
+```
+
+With this configuration, the coprocessor's `SubgraphRequest` stage can return a context key named `my_coprocessor::state::` followed by its `subgraphRequestId`, and the `SubgraphResponse` stage for the same subgraph request receives it. If the `SubgraphResponse` stage returns a `context` that leaves the key out, the router removes it, as it does for any key it sent to a response stage.
+
+`append_subgraph_request_id` is only supported in `subgraph` stages. The router rejects it in other stages.
+
 ### Client configuration
 
 To use Unix Domain Sockets (UDS) to communicate with a coprocessor, use the following configuration:
