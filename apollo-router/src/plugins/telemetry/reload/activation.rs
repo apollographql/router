@@ -29,7 +29,11 @@ use opentelemetry::InstrumentationScope;
 use opentelemetry::propagation::TextMapCompositePropagator;
 use opentelemetry::trace::TracerProvider;
 use parking_lot::Mutex;
+<<<<<<< HEAD
 use prometheus::Registry;
+=======
+#[cfg(test)]
+>>>>>>> origin/dev
 use tokio::task::block_in_place;
 #[cfg(not(test))]
 use tokio::task::spawn_blocking;
@@ -38,7 +42,11 @@ use tracing_subscriber::Layer;
 use crate::metrics::aggregation::MeterProviderType;
 use crate::metrics::filter::FilterMeterProvider;
 use crate::metrics::meter_provider_internal;
+<<<<<<< HEAD
 use crate::plugins::telemetry::GLOBAL_TRACER_NAME;
+=======
+use crate::plugins::telemetry::metrics::prometheus::PrometheusEndpoint;
+>>>>>>> origin/dev
 use crate::plugins::telemetry::reload::otel::LayeredTracer;
 use crate::plugins::telemetry::reload::otel::OPENTELEMETRY_TRACER_HANDLE;
 use crate::plugins::telemetry::reload::otel::reload_fmt;
@@ -65,7 +73,7 @@ pub(crate) struct Activation {
     /// Therefore if this is None then Prometheus is not active
     /// This will be defaulted to the last applied registry via static unfortunately
     /// We can remove this static if eventually we have a facility for plugins to maintain state across reloads.
-    prometheus_registry: Option<Registry>,
+    prometheus_registry: Option<PrometheusEndpoint>,
 
     /// The new format layer
     new_logging_fmt_layer: Option<Box<dyn Layer<LayeredTracer> + Send + Sync>>,
@@ -87,7 +95,7 @@ pub(crate) struct TestInstrumentation {
 
 /// Allows us to keep track of the last registry that was used. Not ideal. Plugins would be better to have state
 /// that can be maintained across reloads.
-static REGISTRY: LazyLock<Mutex<Option<Registry>>> = LazyLock::new(Default::default);
+static REGISTRY: LazyLock<Mutex<Option<PrometheusEndpoint>>> = LazyLock::new(Default::default);
 
 impl Activation {
     pub(crate) fn new() -> Self {
@@ -149,7 +157,10 @@ impl Activation {
         }
     }
 
-    pub(crate) fn with_prometheus_registry(&mut self, prometheus_registry: Option<Registry>) {
+    pub(crate) fn with_prometheus_registry(
+        &mut self,
+        prometheus_registry: Option<PrometheusEndpoint>,
+    ) {
         self.prometheus_registry = prometheus_registry;
         #[cfg(test)]
         {
@@ -157,7 +168,7 @@ impl Activation {
         }
     }
 
-    pub(crate) fn prometheus_registry(&self) -> Option<Registry> {
+    pub(crate) fn prometheus_registry(&self) -> Option<PrometheusEndpoint> {
         self.prometheus_registry.clone()
     }
 
