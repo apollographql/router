@@ -22,6 +22,7 @@ use super::spec::ConnectSpec;
 use crate::error::FederationError;
 use crate::operation::FragmentSpreadCache;
 use crate::operation::SelectionSet;
+use crate::operation::TYPENAME_FIELD;
 use crate::schema::FederationSchema;
 use crate::schema::ValidFederationSchema;
 use crate::supergraph::extract_subgraphs_from_supergraph;
@@ -112,25 +113,18 @@ impl ConnectorIndex {
                 // synthetic @key. resolvable_key derives it from the
                 // connector's variable references per resolver kind
                 // ($args / $this / $batch).
-                if connector.entity_resolver.is_some() {
-                    let field_set =
-                        connector_entity_key(connector, schema.schema()).map_err(|e| {
-                            FederationError::internal(format!(
-                                "invalid key for connector {}: {e}",
-                                entry.coordinate
-                            ))
-                        })?;
-                    if let Some(field_set) = field_set {
-                        let selection_set = SelectionSet::from_selection_set(
-                            &field_set.selection_set,
-                            &FragmentSpreadCache::default(),
-                            schema,
-                            &|| Ok(()),
-                        )?;
-                        index
-                            .key_conditions
-                            .insert(entry.coordinate.clone(), Arc::new(selection_set));
-                    }
+                if connector.entity_resolver.is_some()
+                    && let Some(field_set) = connector_entity_key(connector, schema.schema())?
+                {
+                    let selection_set = SelectionSet::from_selection_set(
+                        &field_set.selection_set,
+                        &FragmentSpreadCache::default(),
+                        schema,
+                        &|| Ok(()),
+                    )?;
+                    index
+                        .key_conditions
+                        .insert(entry.coordinate.clone(), Arc::new(selection_set));
                 }
 
                 // Entity resolvers, keyed by the entity type they resolve.
@@ -238,8 +232,14 @@ fn resolver_entity_type(connector: &Connector, schema: &Schema) -> Option<Name> 
 fn connector_entity_key(
     connector: &Connector,
     schema: &Schema,
-) -> Result<Option<Valid<FieldSet>>, String> {
-    if let Some(field_set) = connector.resolvable_key(schema)? {
+) -> Result<Option<Valid<FieldSet>>, FederationError> {
+    let invalid_key = |e: String| {
+        FederationError::internal(format!(
+            "invalid key for connector {}: {e}",
+            connector.id.coordinate()
+        ))
+    };
+    if let Some(field_set) = connector.resolvable_key(schema).map_err(invalid_key)? {
         return Ok(Some(field_set));
     }
     if !has_singleton_key(connector) {
@@ -249,15 +249,15 @@ fn connector_entity_key(
         .id
         .directive
         .parent_type_name()
-        .ok_or_else(|| format!("Missing type {}", connector.id.coordinate()))?;
+        .ok_or_else(|| invalid_key("missing parent type".to_string()))?;
     FieldSet::parse_and_validate(
         Valid::assume_valid_ref(schema),
         parent_type,
-        TYPENAME_KEY,
+        TYPENAME_FIELD.as_str(),
         "",
     )
     .map(Some)
-    .map_err(|e| e.to_string())
+    .map_err(|e| invalid_key(e.to_string()))
 }
 
 /// Whether a field connector without a resolvable key is entered through the
@@ -267,8 +267,6 @@ fn has_singleton_key(connector: &Connector) -> bool {
     connector.spec >= ConnectSpec::V0_4
         && matches!(connector.entity_resolver, Some(EntityResolver::Implicit))
 }
-
-const TYPENAME_KEY: &str = "__typename";
 
 /// Adds to the supergraph the `@key` that connector expansion synthesizes for
 /// each entity-resolver connector whose type has no key in its subgraph. The
@@ -316,7 +314,7 @@ pub(crate) fn add_connector_entity_keys(
             let field_set = match connector.resolvable_key(schema) {
                 Ok(Some(field_set)) => field_set,
                 Ok(None) if has_singleton_key(&connector) => {
-                    typename_keys.push((graph.clone(), entity_type, TYPENAME_KEY.to_string()));
+                    typename_keys.push((graph.clone(), entity_type, TYPENAME_FIELD.to_string()));
                     continue;
                 }
                 _ => continue,
