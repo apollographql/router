@@ -1023,7 +1023,9 @@ impl FieldRoutingSearchSpace {
         // Under a shareable parent returning an inconsistent abstract type,
         // only intersection members may appear as fragment conditions —
         // others would make results depend on which subgraph resolved the
-        // parent.
+        // parent. A condition with no member in the intersection selects
+        // nothing, so it gets the type explosion, which drops it without
+        // counting a dropped field. With no option the site would be doomed.
         if let Some(filter) = &pending.narrowing.intersection_filter
             && let Some(type_cond) = &fragment_selection.inline_fragment.type_condition_position
         {
@@ -1031,7 +1033,7 @@ impl FieldRoutingSearchSpace {
                 .supergraph_schema
                 .possible_runtime_types(type_cond.clone())?;
             if cond_types.iter().all(|t| !filter.contains(&t.type_name)) {
-                return Ok(options);
+                return Ok(vec![RoutingChoice::TypeExplosion]);
             }
         }
 
