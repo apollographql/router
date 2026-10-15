@@ -1,5 +1,9 @@
 //! De-duplicate subgraph requests in flight. Implemented as a tower Layer.
 //!
+//! Identical queries in flight share one fetch. Queries that differ only in their operation name
+//! count as identical, so fetch nodes that send the same query and variables to the same subgraph
+//! share a fetch even though the query planner names each one differently.
+//!
 //! See [`Layer`] and [`tower::Service`] for more details.
 
 use std::collections::HashMap;
@@ -22,8 +26,17 @@ use crate::query_planner::fetch::OperationKind;
 use crate::services::SubgraphRequest;
 use crate::services::SubgraphResponse;
 
-#[derive(Default)]
-pub(crate) struct QueryDeduplicationLayer;
+pub(crate) struct QueryDeduplicationLayer {
+    subgraph_name: Arc<str>,
+}
+
+impl QueryDeduplicationLayer {
+    pub(crate) fn new(subgraph_name: &str) -> Self {
+        Self {
+            subgraph_name: subgraph_name.into(),
+        }
+    }
+}
 
 impl<S> Layer<S> for QueryDeduplicationLayer
 where
@@ -32,11 +45,84 @@ where
     type Service = QueryDeduplicationService<S>;
 
     fn layer(&self, service: S) -> Self::Service {
-        QueryDeduplicationService::new(service)
+        QueryDeduplicationService::new(service, self.subgraph_name.clone())
+    }
+}
+
+/// How the deduplication layer handled a subgraph request.
+#[derive(Copy, Clone, Debug, strum::IntoStaticStr)]
+#[strum(serialize_all = "snake_case")]
+enum Outcome {
+    /// The request was forwarded to the rest of the subgraph pipeline; identical requests
+    /// arriving while it is in flight share its response.
+    Leader,
+    /// The request reused the response of an identical in-flight request instead of being sent.
+    Follower,
+    /// The request is a query that is part of a batch, so it was never considered for
+    /// deduplication.
+    BypassedBatch,
+    /// The request is a mutation or subscription, so it was never considered for deduplication.
+    /// The operation kind is checked first, so this applies whether or not it is batched.
+    BypassedOperation,
+}
+
+impl_otel_value_from_static_str!(Outcome);
+
+/// Counts a request on `apollo.router.subgraph_deduplication.requests` once, when it finishes
+/// or is cancelled, using the last outcome it was given. A follower that retries after its
+/// leader went away is therefore counted under the role it ends with, not twice.
+struct OutcomeRecorder {
+    subgraph_name: Arc<str>,
+    outcome: Option<Outcome>,
+}
+
+impl OutcomeRecorder {
+    fn new(subgraph_name: Arc<str>) -> Self {
+        Self {
+            subgraph_name,
+            outcome: None,
+        }
+    }
+}
+
+impl Drop for OutcomeRecorder {
+    fn drop(&mut self) {
+        // A request cancelled before it was classified (still waiting for the wait map lock)
+        // is not counted.
+        if let Some(outcome) = self.outcome {
+            u64_counter_with_unit!(
+                "apollo.router.subgraph_deduplication.requests",
+                "Subgraph requests that reached query deduplication, by outcome",
+                "{request}",
+                1,
+                "subgraph.name" = self.subgraph_name.to_string(),
+                "apollo.router.subgraph_deduplication.outcome" = outcome
+            );
+        }
     }
 }
 
 type CacheKey = (http_ext::Request<Request>, Arc<CacheKeyMetadata>);
+
+/// The key `request` waits under for an identical fetch in flight.
+///
+/// The operation name is left out of the key, both the `operationName` field and the name in
+/// the query text: the planner gives every fetch node its own name, so two fetch nodes that
+/// send the same query with the same variables would otherwise never share a fetch. Requests
+/// reach this layer as the planner wrote them, a single operation starting with
+/// `query <operationName>`. A query in any other shape keeps its name in the key.
+fn cache_key(request: &SubgraphRequest) -> CacheKey {
+    let mut http_request: http_ext::Request<Request> = (&request.subgraph_request).into();
+    let body = http_request.body_mut();
+    if let (Some(name), Some(query)) = (&body.operation_name, &body.query)
+        && let Some(rest) = query.strip_prefix(&format!("query {name}"))
+        && !rest.starts_with(|c: char| c == '_' || c.is_ascii_alphanumeric())
+    {
+        body.query = Some(format!("query{rest}"));
+        body.operation_name = None;
+    }
+    (http_request, request.authorization.clone())
+}
 
 type WaitMap = Arc<Mutex<HashMap<CacheKey, Sender<Result<CloneSubgraphResponse, String>>>>>;
 
@@ -57,16 +143,18 @@ impl Clone for CloneSubgraphResponse {
 pub(crate) struct QueryDeduplicationService<S: Clone> {
     service: S,
     wait_map: WaitMap,
+    subgraph_name: Arc<str>,
 }
 
 impl<S> QueryDeduplicationService<S>
 where
     S: tower::Service<SubgraphRequest, Response = SubgraphResponse, Error = BoxError> + Clone,
 {
-    fn new(service: S) -> Self {
+    fn new(service: S, subgraph_name: Arc<str>) -> Self {
         QueryDeduplicationService {
             service,
             wait_map: Arc::new(Mutex::new(HashMap::new())),
+            subgraph_name,
         }
     }
 
@@ -74,6 +162,7 @@ where
         mut service: S,
         wait_map: WaitMap,
         request: SubgraphRequest,
+        recorder: &mut OutcomeRecorder,
     ) -> Result<SubgraphResponse, BoxError> {
         // Check if the request is part of a batch. If it is, completely bypass dedup since it
         // will break any request batches which this request is part of.
@@ -84,18 +173,19 @@ where
             .extensions()
             .with_lock(|lock| lock.contains_key::<BatchQuery>())
         {
+            recorder.outcome = Some(Outcome::BypassedBatch);
             return service.call(request).await;
         }
         loop {
             let mut locked_wait_map = wait_map.lock().await;
-            let authorization_cache_key = request.authorization.clone();
-            let cache_key = ((&request.subgraph_request).into(), authorization_cache_key);
+            let key = cache_key(&request);
 
-            match locked_wait_map.get_mut(&cache_key) {
+            match locked_wait_map.get_mut(&key) {
                 Some(waiter) => {
                     // Register interest in key
                     let mut receiver = waiter.subscribe();
                     drop(locked_wait_map);
+                    recorder.outcome = Some(Outcome::Follower);
 
                     match receiver.recv().await {
                         Ok(value) => {
@@ -117,13 +207,13 @@ where
                 None => {
                     let (tx, _rx) = broadcast::channel(1);
 
-                    locked_wait_map.insert(cache_key, tx.clone());
+                    locked_wait_map.insert(key, tx.clone());
                     drop(locked_wait_map);
+                    recorder.outcome = Some(Outcome::Leader);
 
                     let context = request.context.clone();
-                    let authorization_cache_key = request.authorization.clone();
                     let id = request.id.clone();
-                    let cache_key = ((&request.subgraph_request).into(), authorization_cache_key);
+                    let key = cache_key(&request);
                     let (res, handle) = {
                         // when _drop_signal is dropped, either by getting out of the block, returning
                         // the error from ready_oneshot or by cancellation, the drop_sentinel future will
@@ -132,7 +222,7 @@ where
                         let handle = tokio::task::spawn(async move {
                             let _ = drop_sentinel.await;
                             let mut locked_wait_map = wait_map.lock().await;
-                            locked_wait_map.remove(&cache_key);
+                            locked_wait_map.remove(&key);
                         });
 
                         (
@@ -191,67 +281,356 @@ where
     fn call(&mut self, request: SubgraphRequest) -> Self::Future {
         let service = self.service.clone();
         let mut inner = std::mem::replace(&mut self.service, service);
+        let wait_map = self.wait_map.clone();
+        let subgraph_name = self.subgraph_name.clone();
 
-        if request.operation_kind == OperationKind::Query {
-            let wait_map = self.wait_map.clone();
-
-            Box::pin(async move { Self::dedup(inner, wait_map, request).await })
-        } else {
-            Box::pin(async move { inner.call(request).await })
-        }
+        Box::pin(async move {
+            // Created inside the future so that a future which is never polled records nothing.
+            let mut recorder = OutcomeRecorder::new(subgraph_name);
+            if request.operation_kind == OperationKind::Query {
+                Self::dedup(inner, wait_map, request, &mut recorder).await
+            } else {
+                recorder.outcome = Some(Outcome::BypassedOperation);
+                inner.call(request).await
+            }
+        })
     }
 }
 
 #[cfg(test)]
 mod tests {
+    use std::sync::Arc;
 
+    use futures::FutureExt;
+    use serde_json_bytes::json;
     use tower::Service;
     use tower::ServiceExt;
 
     use super::QueryDeduplicationService;
+    use crate::batching::Batch;
+    use crate::graphql;
+    use crate::metrics::FutureMetricsExt;
+    use crate::query_planner::fetch::OperationKind;
     use crate::services::SubgraphRequest;
     use crate::services::SubgraphResponse;
 
-    // Testing strategy:
-    //  - Two calls with the same cache key are joined in the same task via tokio::join!.
-    //    join! polls fut1 first: it locks the wait_map, inserts an entry, calls the inner
-    //    service, and yields (pending on the mock response). join! then polls fut2: it finds
-    //    the entry and subscribes to the broadcast. Both are suspended before the driver ever
-    //    responds. This ordering is structural — cooperative scheduling in a single task —
-    //    not a timing assumption.
-    //  - The driver handles exactly one request. If dedup fails and fut2 reaches the inner
-    //    service a second time, the closed handle returns an error and res2 fails.
-    #[tokio::test(flavor = "multi_thread")]
-    async fn test_dedup_service() {
-        let (mock, mut handle) = tower_test::mock::pair::<SubgraphRequest, SubgraphResponse>();
+    const SUBGRAPH: &str = "products";
 
-        let driver = tokio::spawn(async move {
-            let (req, responder) = handle.next_request().await.unwrap();
+    fn dedup_service(
+        mock: tower_test::mock::Mock<SubgraphRequest, SubgraphResponse>,
+    ) -> QueryDeduplicationService<tower_test::mock::Mock<SubgraphRequest, SubgraphResponse>> {
+        QueryDeduplicationService::new(mock, SUBGRAPH.into())
+    }
+
+    /// Answers the next request that reaches the mock subgraph.
+    async fn respond_once(
+        handle: &mut tower_test::mock::Handle<SubgraphRequest, SubgraphResponse>,
+    ) {
+        let (req, responder) = handle.next_request().await.expect("a subgraph request");
+        responder.send_response(
+            SubgraphResponse::fake_builder()
+                .context(req.context)
+                .build(),
+        );
+    }
+
+    #[tokio::test]
+    async fn test_dedup_service() {
+        async {
+            let (mock, mut handle) = tower_test::mock::pair::<SubgraphRequest, SubgraphResponse>();
+            let mut svc = dedup_service(mock);
+            let request = SubgraphRequest::fake_builder().build();
+
+            svc.ready().await.expect("it is ready");
+            let mut fut1 = svc.call(request.clone());
+            svc.ready().await.expect("it is ready");
+            let mut fut2 = svc.call(request);
+
+            // Poll both callers before the mock answers: fut1 starts the fetch and fut2
+            // subscribes to its result.
+            assert!(futures::poll!(&mut fut1).is_pending());
+            assert!(futures::poll!(&mut fut2).is_pending());
+
+            let (req, responder) = handle.next_request().await.expect("the mock is called");
+            assert!(
+                handle.next_request().now_or_never().is_none(),
+                "the second caller joins the first fetch instead of calling the mock"
+            );
             responder.send_response(
                 SubgraphResponse::fake_builder()
                     .context(req.context)
                     .build(),
             );
-        });
 
-        let mut svc = QueryDeduplicationService::new(mock);
-        let request = SubgraphRequest::fake_builder().build();
+            fut1.await.expect("fut1 gets the response");
+            fut2.await.expect("fut2 gets the response");
 
-        // call() returns a lazy BoxFuture — no work happens yet. Both calls share the same
-        // wait_map Arc, so they will see each other's entries when polled.
+            assert_counter!(
+                "apollo.router.subgraph_deduplication.requests",
+                1,
+                "subgraph.name" = SUBGRAPH,
+                "apollo.router.subgraph_deduplication.outcome" = "leader"
+            );
+            assert_counter!(
+                "apollo.router.subgraph_deduplication.requests",
+                1,
+                "subgraph.name" = SUBGRAPH,
+                "apollo.router.subgraph_deduplication.outcome" = "follower"
+            );
+        }
+        .with_metrics()
+        .await;
+    }
+
+    /// An entity fetch named `operation_name`, the way the query planner names each fetch node.
+    fn entity_fetch(operation_name: &str, upc: &str) -> SubgraphRequest {
+        let body = graphql::Request::fake_builder()
+            .query(format!(
+                "query {operation_name}($representations:[_Any!]!){{_entities(representations:$representations){{...on Product{{name}}}}}}"
+            ))
+            .operation_name(operation_name)
+            .variable(
+                "representations",
+                json!([{ "__typename": "Product", "upc": upc }]),
+            )
+            .build();
+        SubgraphRequest::fake_builder()
+            .subgraph_request(http::Request::new(body))
+            .build()
+    }
+
+    /// Sends `first` and then `second` while `first` is in flight, answers every request that
+    /// reaches the subgraph, and returns how many did.
+    async fn subgraph_requests_for(first: SubgraphRequest, second: SubgraphRequest) -> usize {
+        let (mock, mut handle) = tower_test::mock::pair::<SubgraphRequest, SubgraphResponse>();
+        let mut svc = dedup_service(mock);
+
         svc.ready().await.expect("it is ready");
-        let fut1 = svc.call(request.clone());
+        let mut fut1 = svc.call(first);
         svc.ready().await.expect("it is ready");
-        let fut2 = svc.call(request);
+        let mut fut2 = svc.call(second);
+        assert!(futures::poll!(&mut fut1).is_pending());
+        assert!(futures::poll!(&mut fut2).is_pending());
 
-        // tokio::join! polls fut1 first. fut1 inserts a wait_map entry and yields waiting
-        // for the inner service response. join! then polls fut2, which finds the entry and
-        // subscribes to the broadcast. Both are suspended before the driver responds,
-        // guaranteeing deduplication.
-        let (res1, res2) = tokio::join!(fut1, fut2);
-        res1.expect("fut1 joined");
-        res2.expect("fut2 joined");
+        let mut sent = 0;
+        while let Some(Some((req, responder))) = handle.next_request().now_or_never() {
+            sent += 1;
+            responder.send_response(
+                SubgraphResponse::fake_builder()
+                    .context(req.context)
+                    .build(),
+            );
+        }
+        fut1.await.expect("fut1 gets a response");
+        fut2.await.expect("fut2 gets a response");
+        sent
+    }
 
-        crate::plugin::test::await_mock_driver(driver).await;
+    #[tokio::test]
+    async fn queries_differing_only_in_operation_name_share_a_fetch() {
+        async {
+            let sent = subgraph_requests_for(
+                entity_fetch("Op__products__1", "1"),
+                entity_fetch("Op__products__7", "1"),
+            )
+            .await;
+            assert_eq!(sent, 1, "the second fetch node joins the first one's fetch");
+
+            assert_counter!(
+                "apollo.router.subgraph_deduplication.requests",
+                1,
+                "subgraph.name" = SUBGRAPH,
+                "apollo.router.subgraph_deduplication.outcome" = "follower"
+            );
+        }
+        .with_metrics()
+        .await;
+    }
+
+    #[tokio::test]
+    async fn queries_with_different_variables_do_not_share_a_fetch() {
+        let sent = subgraph_requests_for(
+            entity_fetch("Op__products__1", "1"),
+            entity_fetch("Op__products__7", "2"),
+        )
+        .await;
+        assert_eq!(sent, 2, "each fetch node sends its own representations");
+    }
+
+    /// The cache key of a request sending `query` named `operation_name`, with fixed variables.
+    fn test_cache_key(query: &str, operation_name: Option<&str>) -> super::CacheKey {
+        let body = graphql::Request::fake_builder()
+            .query(query)
+            .and_operation_name(operation_name.map(str::to_string))
+            .variable(
+                "representations",
+                json!([{ "__typename": "Product", "upc": "1" }]),
+            )
+            .build();
+        super::cache_key(
+            &SubgraphRequest::fake_builder()
+                .subgraph_request(http::Request::new(body))
+                .build(),
+        )
+    }
+
+    #[test]
+    fn cache_key_leaves_out_only_the_operation_name() {
+        let named_a = test_cache_key(
+            "query A($r:[_Any!]!){_entities(representations:$r){__typename}}",
+            Some("A"),
+        );
+        let named_b = test_cache_key(
+            "query B($r:[_Any!]!){_entities(representations:$r){__typename}}",
+            Some("B"),
+        );
+        assert!(
+            named_a == named_b,
+            "queries differing only in their name share a key"
+        );
+
+        let anonymous = test_cache_key(
+            "query($r:[_Any!]!){_entities(representations:$r){__typename}}",
+            None,
+        );
+        assert!(
+            anonymous == named_a,
+            "an anonymous query is the same query without a name"
+        );
+
+        let other_name = test_cache_key(
+            "query B($r:[_Any!]!){_entities(representations:$r){__typename}}",
+            Some("A"),
+        );
+        assert!(
+            other_name != named_a,
+            "a query naming another operation keeps its name"
+        );
+
+        let other_body = test_cache_key(
+            "query B($r:[_Any!]!){_entities(representations:$r){id}}",
+            Some("B"),
+        );
+        assert!(
+            other_body != named_a,
+            "different query bodies don't share a key"
+        );
+
+        let longer_name = test_cache_key(
+            "query Op__12($r:[_Any!]!){_entities(representations:$r){__typename}}",
+            Some("Op__1"),
+        );
+        // What stripping `Op__1` from `Op__12` without a name boundary would leave.
+        let stripped = test_cache_key(
+            "query2($r:[_Any!]!){_entities(representations:$r){__typename}}",
+            None,
+        );
+        assert!(
+            longer_name != stripped,
+            "the name is only stripped up to a name boundary"
+        );
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn mutations_bypass_deduplication() {
+        async {
+            let (mock, mut handle) = tower_test::mock::pair::<SubgraphRequest, SubgraphResponse>();
+            let driver = tokio::spawn(async move { respond_once(&mut handle).await });
+
+            let mut svc = dedup_service(mock);
+            let request = SubgraphRequest::fake_builder()
+                .operation_kind(OperationKind::Mutation)
+                .build();
+            svc.ready().await.expect("it is ready");
+            svc.call(request).await.expect("the mutation is sent");
+
+            crate::plugin::test::await_mock_driver(driver).await;
+
+            assert_counter!(
+                "apollo.router.subgraph_deduplication.requests",
+                1,
+                "subgraph.name" = SUBGRAPH,
+                "apollo.router.subgraph_deduplication.outcome" = "bypassed_operation"
+            );
+        }
+        .with_metrics()
+        .await;
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn batched_queries_bypass_deduplication() {
+        async {
+            let (mock, mut handle) = tower_test::mock::pair::<SubgraphRequest, SubgraphResponse>();
+            let driver = tokio::spawn(async move { respond_once(&mut handle).await });
+
+            let mut svc = dedup_service(mock);
+            let request = SubgraphRequest::fake_builder().build();
+            let batch = Arc::new(Batch::spawn_handler(1));
+            let batch_query = Batch::query_for_index(batch, 0).expect("a valid batch index");
+            request
+                .context
+                .extensions()
+                .with_lock(|lock| lock.insert(batch_query));
+            svc.ready().await.expect("it is ready");
+            svc.call(request).await.expect("the query is sent");
+
+            crate::plugin::test::await_mock_driver(driver).await;
+
+            assert_counter!(
+                "apollo.router.subgraph_deduplication.requests",
+                1,
+                "subgraph.name" = SUBGRAPH,
+                "apollo.router.subgraph_deduplication.outcome" = "bypassed_batch"
+            );
+        }
+        .with_metrics()
+        .await;
+    }
+
+    // When the leader is dropped (for example by the timeout layer above), the waiting follower's
+    // broadcast closes and it retries. With no leader left it becomes the leader itself. Both the
+    // cancelled leader and the retried request are counted as leaders, and nothing is counted as a
+    // follower.
+    #[tokio::test(flavor = "multi_thread")]
+    async fn follower_of_a_cancelled_leader_is_counted_as_leader() {
+        async {
+            let (mock, mut handle) = tower_test::mock::pair::<SubgraphRequest, SubgraphResponse>();
+
+            let mut svc = dedup_service(mock);
+            let request = SubgraphRequest::fake_builder().build();
+            svc.ready().await.expect("it is ready");
+            let mut leader = svc.call(request.clone());
+            svc.ready().await.expect("it is ready");
+            let mut follower = svc.call(request);
+
+            // One poll takes the leader through the wait map and into the subgraph call, where it
+            // waits for a response. One poll of the follower finds the leader's entry and
+            // subscribes to its broadcast.
+            assert!(futures::poll!(&mut leader).is_pending());
+            let (_leader_request, _leader_responder) =
+                handle.next_request().await.expect("the leader's request");
+            assert!(futures::poll!(&mut follower).is_pending());
+
+            drop(leader);
+
+            // The follower retries as the new leader and sends its own request.
+            let (response, ()) = tokio::join!(follower, respond_once(&mut handle));
+            response.expect("the retried request is answered");
+
+            assert_counter!(
+                "apollo.router.subgraph_deduplication.requests",
+                2,
+                "subgraph.name" = SUBGRAPH,
+                "apollo.router.subgraph_deduplication.outcome" = "leader"
+            );
+            assert_counter_not_exists!(
+                "apollo.router.subgraph_deduplication.requests",
+                u64,
+                "subgraph.name" = SUBGRAPH,
+                "apollo.router.subgraph_deduplication.outcome" = "follower"
+            );
+        }
+        .with_metrics()
+        .await;
     }
 }

@@ -144,6 +144,11 @@ impl Query {
                     match self.subselections.get(&SubSelectionKey {
                         defer_label: response.label.clone(),
                         defer_conditions,
+                        defer_path: response
+                            .path
+                            .as_ref()
+                            .map(subselections::defer_path_from_response_path)
+                            .unwrap_or_default(),
                     }) {
                         Some(subselection) => {
                             let mut output =
@@ -1305,12 +1310,16 @@ impl Query {
     pub(crate) fn contains_error_path(
         &self,
         label: &Option<String>,
+        response_path: Option<&Path>,
         path: &Path,
         defer_conditions: BooleanValues,
     ) -> bool {
         let selection_set = match self.subselections.get(&SubSelectionKey {
             defer_label: label.clone(),
             defer_conditions,
+            defer_path: response_path
+                .map(subselections::defer_path_from_response_path)
+                .unwrap_or_default(),
         }) {
             Some(subselection) => &subselection.selection_set,
             None => &self.operation.selection_set,

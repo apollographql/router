@@ -18,7 +18,7 @@ const DEFAULT_POOL_IDLE_TIMEOUT: Duration = Duration::from_secs(15);
 pub(crate) const DEFAULT_HTTP2_KEEP_ALIVE_TIMEOUT: Duration = Duration::from_secs(20);
 
 /// HTTP client configuration
-#[derive(PartialEq, Debug, Clone, Default, Deserialize, JsonSchema, buildstructor::Builder)]
+#[derive(PartialEq, Debug, Clone, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields, default)]
 pub(crate) struct Client {
     /// Use HTTP/2 to communicate with the coprocessor.
@@ -27,12 +27,10 @@ pub(crate) struct Client {
     /// Specify a DNS resolution strategy to use when resolving the coprocessor URL.
     pub(crate) dns_resolution_strategy: Option<DnsResolutionStrategy>,
 
-    #[serde(
-        deserialize_with = "humantime_serde::deserialize",
-        default = "default_pool_idle_timeout"
-    )]
-    #[schemars(with = "Option<String>", default = "default_pool_idle_timeout")]
-    /// Specify a timeout for idle sockets being kept-alive in the client's connection pool
+    #[serde(deserialize_with = "humantime_serde::deserialize")]
+    #[schemars(with = "Option<String>", transform = without_default)]
+    /// Specify a timeout for idle sockets being kept-alive in the client's connection pool.
+    /// Defaults to 15 seconds; `null` disables idle eviction.
     pub(crate) pool_idle_timeout: Option<Duration>,
 
     /// Configure the interval for HTTP/2 keep-alive pings. Requires HTTP/2 to be enabled. If
@@ -48,6 +46,42 @@ pub(crate) struct Client {
     #[serde(deserialize_with = "humantime_serde::deserialize", default)]
     #[schemars(with = "Option<String>", default)]
     pub(crate) experimental_http2_keep_alive_timeout: Option<Duration>,
+}
+
+#[buildstructor::buildstructor]
+impl Client {
+    /// An omitted or `None` `pool_idle_timeout` gets the 15s default, including through
+    /// `and_pool_idle_timeout(None)`. To disable idle eviction, construct `Client` directly with
+    /// `pool_idle_timeout: None`.
+    #[builder]
+    pub(crate) fn new(
+        experimental_http2: Option<Http2Config>,
+        dns_resolution_strategy: Option<DnsResolutionStrategy>,
+        pool_idle_timeout: Option<Duration>,
+        experimental_http2_keep_alive_interval: Option<Duration>,
+        experimental_http2_keep_alive_timeout: Option<Duration>,
+    ) -> Self {
+        Self {
+            experimental_http2,
+            dns_resolution_strategy,
+            pool_idle_timeout: pool_idle_timeout.or_else(default_pool_idle_timeout),
+            experimental_http2_keep_alive_interval,
+            experimental_http2_keep_alive_timeout,
+        }
+    }
+}
+
+// Also the serde default for fields missing from a `client` block.
+impl Default for Client {
+    fn default() -> Self {
+        Self::builder().build()
+    }
+}
+
+/// Removes a field's schema `default`, for `pool_idle_timeout` fields whose generated default
+/// would be misleading: a `{secs, nanos}` object, or `null`, which means "disable".
+pub(crate) fn without_default(schema: &mut schemars::Schema) {
+    schema.remove("default");
 }
 
 /// Returns the hardcoded default pool idle timeout for keep-alive sockets in a client's connection
@@ -108,10 +142,9 @@ mod tests {
     #[test]
     fn test_client_default_has_pool_idle_timeout() {
         let client = Client::default();
-        assert_eq!(client.pool_idle_timeout, None);
-
-        let client = Client::builder().build();
-        assert_eq!(client.pool_idle_timeout, None);
+        assert_eq!(client.pool_idle_timeout, Some(DEFAULT_POOL_IDLE_TIMEOUT));
+        assert_eq!(client, serde_yaml::from_str::<Client>("{}").unwrap());
+        assert_eq!(client, Client::builder().build());
     }
 
     #[test]

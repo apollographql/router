@@ -21,6 +21,7 @@ use fred::interfaces::KeysInterface;
 use fred::prelude::Config as RedisConfig;
 use fred::types::scan::Scanner;
 use futures::StreamExt;
+use futures::TryStreamExt;
 use http::header::ACCEPT;
 use http::header::CONTENT_TYPE;
 use mime::APPLICATION_JSON;
@@ -1445,11 +1446,17 @@ impl IntegrationTest {
     }
 
     /// Make a raw multipart request to the router.
+    ///
+    /// By default the form is streamed part by part. With `buffered`, it is collected first and
+    /// sent as a single body with a `Content-Length`. Use this when the router rejects the request
+    /// after reading only the first parts: if the rest of a streamed body is still arriving, the
+    /// router closes the connection and the client can hit a reset before it reads the response.
     #[allow(dead_code)]
     pub fn execute_multipart_request(
         &self,
         request: reqwest::multipart::Form,
         transform: Option<fn(reqwest::Request) -> reqwest::Request>,
+        buffered: bool,
     ) -> impl std::future::Future<Output = (String, reqwest::Response)> + use<> {
         assert!(
             self.router.is_some(),
@@ -1464,14 +1471,26 @@ impl IntegrationTest {
             let span_id = span.context().span().span_context().trace_id().to_string();
 
             async move {
-                let mut request = client
+                let builder = client
                     .post(url)
                     .header("apollographql-client-name", "custom_name")
                     .header("apollographql-client-version", "1.0")
-                    .header("apollo-require-preflight", "test")
-                    .multipart(request)
-                    .build()
-                    .unwrap();
+                    .header("apollo-require-preflight", "test");
+                let builder = if buffered {
+                    let content_type =
+                        format!("multipart/form-data; boundary={}", request.boundary());
+                    let chunks: Vec<bytes::Bytes> = request
+                        .into_stream()
+                        .try_collect()
+                        .await
+                        .expect("multipart form can be buffered");
+                    builder
+                        .header(CONTENT_TYPE, content_type)
+                        .body(chunks.concat())
+                } else {
+                    builder.multipart(request)
+                };
+                let mut request = builder.build().unwrap();
 
                 // Optionally transform the request if needed
                 let transformer = transform.unwrap_or(core::convert::identity);

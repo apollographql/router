@@ -1348,6 +1348,7 @@ mod tests {
     use apollo_compiler::name;
 
     use super::*;
+    use crate::error::CompositionError;
     use crate::link::Import;
     use crate::link::Purpose;
     use crate::link::spec::Version;
@@ -1356,16 +1357,32 @@ mod tests {
     fn errors(schema: &str) -> Vec<String> {
         // Note: we use `expand_links()` because currently it takes care of automatically adding
         // directive definitions, and we don't want to bother with adding the @link definition
-        // to every example.
-        let actual_errors: BTreeSet<_> =
+        // to every example. `validate()` is chained on because expansion is a pure transformation —
+        // shadowed-import errors are raised by the validation that follows it.
+        let expanded =
             match Subgraph::parse("A", "", schema).and_then(|subgraph| subgraph.expand_links()) {
-                Ok(_) => Default::default(),
-                Err(error) => error
-                    .errors
-                    .into_iter()
-                    .map(|e| e.error.to_string())
-                    .collect(),
+                Ok(expanded) => expanded,
+                Err(error) => {
+                    return error
+                        .errors
+                        .into_iter()
+                        .map(|e| e.error.to_string())
+                        .collect();
+                }
             };
+        let actual_errors: BTreeSet<_> = match expanded.validate() {
+            Ok(_) => Default::default(),
+            Err(failure) => failure
+                .errors
+                .into_iter()
+                // Unwrapped rather than formatted, so the message matches the one the expansion
+                // branch above produces (`CompositionError`'s `Display` prefixes the subgraph).
+                .map(|error| match error {
+                    CompositionError::SubgraphError { error, .. } => error.to_string(),
+                    other => other.to_string(),
+                })
+                .collect(),
+        };
         actual_errors.into_iter().collect()
     }
 

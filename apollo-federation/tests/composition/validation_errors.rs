@@ -778,4 +778,82 @@ mod other_validation_errors_tests {
             )],
         );
     }
+
+    /// Interface hierarchies with `@interfaceObject` and multiple implementations can
+    /// produce duplicate advancement options that share the same (tail node,
+    /// subgraph-entry source, contexts, runtime types). The tail-dedup optimization
+    /// collapses these, preventing path growth proportional to the number of
+    /// implementations.
+    ///
+    /// Without dedup the cumulative path count for this schema reaches 28, exceeding
+    /// the cap of 20 set below. With dedup the count stays at 18. The cap is chosen
+    /// in the gap so the test fails if dedup is removed.
+    #[test]
+    fn dedup_collapses_duplicate_tail_paths_across_subgraphs() {
+        // Subgraph A defines an entity interface via @interfaceObject. Subgraph B
+        // provides the concrete interface plus five implementations, each with a
+        // self-referential `related` field. Validating this field forces paths
+        // through each implementation to hop back to subgraph A, producing
+        // duplicate options that dedup collapses.
+        let subgraph_a = ServiceDefinition {
+            name: "A",
+            type_defs: r#"
+                type Query {
+                    things: [Thing]
+                }
+
+                type Thing @interfaceObject @key(fields: "id") {
+                    id: ID!
+                    label: String
+                }
+            "#,
+        };
+
+        let subgraph_b = ServiceDefinition {
+            name: "B",
+            type_defs: r#"
+                interface Thing @key(fields: "id") {
+                    id: ID!
+                    related: Thing
+                }
+
+                type Alpha implements Thing @key(fields: "id") {
+                    id: ID!
+                    related: Thing
+                }
+
+                type Bravo implements Thing @key(fields: "id") {
+                    id: ID!
+                    related: Thing
+                }
+
+                type Charlie implements Thing @key(fields: "id") {
+                    id: ID!
+                    related: Thing
+                }
+
+                type Delta implements Thing @key(fields: "id") {
+                    id: ID!
+                    related: Thing
+                }
+
+                type Echo implements Thing @key(fields: "id") {
+                    id: ID!
+                    related: Thing
+                }
+            "#,
+        };
+
+        let result = compose_as_fed2_subgraphs_with_options(
+            &[subgraph_a, subgraph_b],
+            CompositionOptions {
+                max_validation_subgraph_paths: Some(20),
+            },
+        );
+        assert!(
+            result.is_ok(),
+            "Expected composition to succeed with tail-dedup collapsing \
+             duplicate paths from interface implementations, but got: {result:?}"
+        );
+    }
 }

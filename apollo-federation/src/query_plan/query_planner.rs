@@ -416,7 +416,7 @@ impl QueryPlanner {
 
         let NormalizedDefer {
             operation: normalized_operation,
-            assigned_defer_labels,
+            client_labels,
             defer_conditions,
             has_defers,
         } = normalized_operation.with_normalized_defer()?;
@@ -459,7 +459,7 @@ impl QueryPlanner {
             normalized_operation.directives.clone(),
             operation_compression,
             operation.name.clone(),
-            assigned_defer_labels,
+            client_labels,
         );
         let mut parameters = QueryPlanningParameters {
             supergraph_schema: self.supergraph_schema.clone(),

@@ -1,0 +1,44 @@
+---
+source: apollo-federation/src/connectors/validation/mod.rs
+expression: errors
+input_file: apollo-federation/src/connectors/validation/test_data/requestless_reads_root_fields.graphql
+---
+[
+    Message {
+        code: RequestlessSelectionUsesRequestData,
+        message: "`@connect(selection:)` on `Query.groupAlias`: selection consumes `$root` (the response body) but the directive has no transport (no `http:`)\nDetails: $root { amount }",
+        locations: [
+            39:16..39:22,
+        ],
+    },
+    Message {
+        code: RequestlessSelectionUsesRequestData,
+        message: "`@connect(selection:)` on `Query.subselection`: selection consumes `$root` (the response body) but the directive has no transport (no `http:`)\nDetails: $root { price { amount } }",
+        locations: [
+            47:7..47:12,
+            47:15..47:21,
+        ],
+    },
+    Message {
+        code: RequestlessSelectionUsesRequestData,
+        message: "`@connect(selection:)` on `Query.literalAndField`: selection consumes `$root` (the response body) but the directive has no transport (no `http:`)\nDetails: $root { name }",
+        locations: [
+            55:15..55:19,
+        ],
+    },
+    Message {
+        code: RequestlessSelectionUsesRequestData,
+        message: "`@connect(selection:)` on `Query.bareDollar`: selection consumes `$root` (the response body) but the directive has no transport (no `http:`)\nDetails: $root",
+        locations: [],
+    },
+    Message {
+        code: RequestlessSelectionUsesRequestData,
+        message: "`@connect(selection:)` on `Query.bareAt`: selection consumes `$root` (the response body) but the directive has no transport (no `http:`)\nDetails: $root",
+        locations: [],
+    },
+    Message {
+        code: RequestlessSelectionUsesRequestData,
+        message: "`@connect(selection:)` on `Query.aliasedDollar`: selection consumes `$root` (the response body) but the directive has no transport (no `http:`)\nDetails: $root",
+        locations: [],
+    },
+]
