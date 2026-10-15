@@ -1,14 +1,12 @@
 //! De-duplicate subgraph requests in flight. Implemented as a tower Layer.
 //!
-<<<<<<< HEAD
 //! Identical queries in flight share one fetch. The fetch is a [`Shared`] future that each
 //! caller awaits through its own handle, so it keeps running while any caller still waits for
 //! it. Cancelling the caller that started it neither cancels nor restarts it for the others.
-=======
-//! Identical queries in flight share one fetch. Queries that differ only in their operation name
-//! count as identical, so fetch nodes that send the same query and variables to the same subgraph
-//! share a fetch even though the query planner names each one differently.
->>>>>>> origin/dev
+//!
+//! Queries that differ only in their operation name count as identical, so fetch nodes that send
+//! the same query and variables to the same subgraph share a fetch even though the query planner
+//! names each one differently.
 //!
 //! See [`Layer`] and [`tower::Service`] for more details.
 
@@ -115,21 +113,6 @@ impl Drop for OutcomeRecorder {
 
 type CacheKey = (http_ext::Request<Request>, Arc<CacheKeyMetadata>);
 
-<<<<<<< HEAD
-type Fetch = BoxFuture<'static, Result<CloneSubgraphResponse, CloneFetchError>>;
-
-/// The fetch in flight for a cache key.
-struct InFlight {
-    /// Tells this fetch apart from a later one for the same key.
-    id: u64,
-    /// A weak handle, so the map doesn't keep the fetch alive once no caller waits for it.
-    fetch: WeakShared<Fetch>,
-}
-
-type WaitMap = Arc<Mutex<HashMap<CacheKey, InFlight>>>;
-
-static NEXT_FETCH_ID: AtomicU64 = AtomicU64::new(0);
-=======
 /// The key `request` waits under for an identical fetch in flight.
 ///
 /// The operation name is left out of the key, both the `operationName` field and the name in
@@ -150,8 +133,19 @@ fn cache_key(request: &SubgraphRequest) -> CacheKey {
     (http_request, request.authorization.clone())
 }
 
-type WaitMap = Arc<Mutex<HashMap<CacheKey, Sender<Result<CloneSubgraphResponse, String>>>>>;
->>>>>>> origin/dev
+type Fetch = BoxFuture<'static, Result<CloneSubgraphResponse, CloneFetchError>>;
+
+/// The fetch in flight for a cache key.
+struct InFlight {
+    /// Tells this fetch apart from a later one for the same key.
+    id: u64,
+    /// A weak handle, so the map doesn't keep the fetch alive once no caller waits for it.
+    fetch: WeakShared<Fetch>,
+}
+
+type WaitMap = Arc<Mutex<HashMap<CacheKey, InFlight>>>;
+
+static NEXT_FETCH_ID: AtomicU64 = AtomicU64::new(0);
 
 struct CloneSubgraphResponse(SubgraphResponse);
 
@@ -253,7 +247,6 @@ where
             recorder.outcome = Some(Outcome::BypassedBatch);
             return service.call(request).await;
         }
-<<<<<<< HEAD
 
         let context = request.context.clone();
         let subgraph_name = request.subgraph_name.clone();
@@ -276,10 +269,7 @@ where
         wait_map: &WaitMap,
         request: SubgraphRequest,
     ) -> (Shared<Fetch>, Outcome) {
-        let key: CacheKey = (
-            (&request.subgraph_request).into(),
-            request.authorization.clone(),
-        );
+        let key = cache_key(&request);
         // Don't drop a handle to a fetch while holding the lock: dropping the last handle drops
         // the fetch's `RemoveFromWaitMap`, which takes the lock.
         let mut locked_wait_map = wait_map.lock();
@@ -288,90 +278,6 @@ where
             .and_then(|in_flight| in_flight.fetch.upgrade())
         {
             return (fetch, Outcome::Follower);
-=======
-        loop {
-            let mut locked_wait_map = wait_map.lock().await;
-            let key = cache_key(&request);
-
-            match locked_wait_map.get_mut(&key) {
-                Some(waiter) => {
-                    // Register interest in key
-                    let mut receiver = waiter.subscribe();
-                    drop(locked_wait_map);
-                    recorder.outcome = Some(Outcome::Follower);
-
-                    match receiver.recv().await {
-                        Ok(value) => {
-                            return value
-                                .map(|response| {
-                                    SubgraphResponse::new_from_response(
-                                        response.0.response,
-                                        request.context,
-                                        request.subgraph_name,
-                                        request.id,
-                                    )
-                                })
-                                .map_err(|e| e.into());
-                        }
-                        // there was an issue with the broadcast channel, retry fetching
-                        Err(_) => continue,
-                    }
-                }
-                None => {
-                    let (tx, _rx) = broadcast::channel(1);
-
-                    locked_wait_map.insert(key, tx.clone());
-                    drop(locked_wait_map);
-                    recorder.outcome = Some(Outcome::Leader);
-
-                    let context = request.context.clone();
-                    let id = request.id.clone();
-                    let key = cache_key(&request);
-                    let (res, handle) = {
-                        // when _drop_signal is dropped, either by getting out of the block, returning
-                        // the error from ready_oneshot or by cancellation, the drop_sentinel future will
-                        // return with Err(), then we remove the entry from the wait map
-                        let (_drop_signal, drop_sentinel) = oneshot::channel::<()>();
-                        let handle = tokio::task::spawn(async move {
-                            let _ = drop_sentinel.await;
-                            let mut locked_wait_map = wait_map.lock().await;
-                            locked_wait_map.remove(&key);
-                        });
-
-                        (
-                            service.call(request).await.map(CloneSubgraphResponse),
-                            handle,
-                        )
-                    };
-
-                    // Make sure that our spawned task has completed. Ignore the result to preserve
-                    // existing behaviour.
-                    let _ = handle.await;
-                    // At this point we have removed ourselves from the wait_map, so we won't get
-                    // any more receivers. If we have any receivers, let them know
-                    if tx.receiver_count() > 0 {
-                        // Clippy is wrong, the suggestion adds a useless clone of the error
-                        #[allow(clippy::useless_asref)]
-                        let broadcast_value = res
-                            .as_ref()
-                            .map(|response| response.clone())
-                            .map_err(|e: &BoxError| e.to_string());
-
-                        // Ignore the result of send, receivers may drop...
-                        let _ = tx.send(broadcast_value);
-                    }
-
-                    return res.map(|response| {
-                        SubgraphResponse::new_from_response(
-                            response.0.response,
-                            context,
-                            response.0.subgraph_name,
-                            id,
-                        )
-                    });
-                }
-            }
->>>>>>> origin/dev
         }
 
         let id = NEXT_FETCH_ID.fetch_add(1, Ordering::Relaxed);
@@ -438,26 +344,19 @@ mod tests {
     use std::time::Duration;
 
     use futures::FutureExt;
-<<<<<<< HEAD
     use futures::future::BoxFuture;
     use http::StatusCode;
+    use serde_json_bytes::json;
     use tokio::time::Instant;
     use tower::BoxError;
     use tower::Layer;
-=======
-    use serde_json_bytes::json;
->>>>>>> origin/dev
     use tower::Service;
     use tower::ServiceExt;
     use tower_test::mock::Handle;
 
     use super::QueryDeduplicationService;
-<<<<<<< HEAD
     use crate::batching::BatchQuery;
-=======
-    use crate::batching::Batch;
     use crate::graphql;
->>>>>>> origin/dev
     use crate::metrics::FutureMetricsExt;
     use crate::plugins::traffic_shaping::timeout::SubgraphTimeoutLayer;
     use crate::query_planner::fetch::OperationKind;

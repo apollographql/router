@@ -29,11 +29,6 @@ use opentelemetry::InstrumentationScope;
 use opentelemetry::propagation::TextMapCompositePropagator;
 use opentelemetry::trace::TracerProvider;
 use parking_lot::Mutex;
-<<<<<<< HEAD
-use prometheus::Registry;
-=======
-#[cfg(test)]
->>>>>>> origin/dev
 use tokio::task::block_in_place;
 #[cfg(not(test))]
 use tokio::task::spawn_blocking;
@@ -42,11 +37,8 @@ use tracing_subscriber::Layer;
 use crate::metrics::aggregation::MeterProviderType;
 use crate::metrics::filter::FilterMeterProvider;
 use crate::metrics::meter_provider_internal;
-<<<<<<< HEAD
 use crate::plugins::telemetry::GLOBAL_TRACER_NAME;
-=======
 use crate::plugins::telemetry::metrics::prometheus::PrometheusEndpoint;
->>>>>>> origin/dev
 use crate::plugins::telemetry::reload::otel::LayeredTracer;
 use crate::plugins::telemetry::reload::otel::OPENTELEMETRY_TRACER_HANDLE;
 use crate::plugins::telemetry::reload::otel::reload_fmt;

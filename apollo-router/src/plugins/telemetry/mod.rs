@@ -838,32 +838,7 @@ mod tests {
         }};
     }
 
-<<<<<<< HEAD
     async fn get_prometheus_metrics(plugin: &Telemetry) -> String {
-=======
-    async fn create_plugin_with_config(full_config: &str) -> Box<dyn DynPlugin> {
-        let full_config = serde_yaml::from_str::<Value>(full_config).expect("yaml must be valid");
-        let telemetry_config = full_config
-            .as_object()
-            .expect("must be an object")
-            .get("telemetry")
-            .expect("telemetry must be a root key");
-        let init = PluginInit::fake_builder()
-            .config(telemetry_config.clone())
-            .full_config(full_config)
-            .build()
-            .with_deserialized_config()
-            .expect("unable to deserialize telemetry config");
-
-        crate::plugin::plugins()
-            .find(|factory| factory.name == "apollo.telemetry")
-            .expect("Plugin not found")
-            .create_instance(init)
-            .await
-            .expect("unable to create telemetry plugin")
-    }
-
-    async fn get_prometheus_metrics(plugin: &dyn DynPlugin) -> String {
         scrape_prometheus(plugin)
             .await
             .split('\n')
@@ -872,8 +847,7 @@ mod tests {
             .join("\n")
     }
 
-    async fn scrape_prometheus(plugin: &dyn DynPlugin) -> String {
->>>>>>> origin/dev
+    async fn scrape_prometheus(plugin: &Telemetry) -> String {
         let web_endpoint = plugin
             .web_endpoints()
             .into_iter()
@@ -1320,16 +1294,19 @@ mod tests {
     async fn it_test_prometheus_metrics_cardinality_overflow_counter() {
         let _guard = TEST.lock().await;
         async {
-            let plugin = create_plugin_with_config(include_str!(
-                "testdata/prometheus_cardinality_limit.router.yaml"
-            ))
-            .await;
+            let plugin = PluginTestHarness::<Telemetry>::builder()
+                .config(include_str!(
+                    "testdata/prometheus_cardinality_limit.router.yaml"
+                ))
+                .build()
+                .await
+                .expect("test harness");
             plugin.activate();
             u64_histogram!("apollo.test.histo", "it's a test", 1u64, "k" = "a");
             u64_histogram!("apollo.test.histo", "it's a test", 1u64, "k" = "b");
             u64_histogram!("apollo.test.histo", "it's a test", 1u64, "k" = "c");
 
-            let first = scrape_prometheus(plugin.as_ref()).await;
+            let first = scrape_prometheus(&plugin).await;
             assert!(
                 first.lines().any(|l| l.starts_with("apollo_test_histo")
                     && l.contains(r#"otel_metric_overflow="true""#)),
@@ -1338,7 +1315,7 @@ mod tests {
             assert_eq!(cardinality_overflow_lines(&first), Vec::<&str>::new());
 
             for _ in 0..3 {
-                let scrape = scrape_prometheus(plugin.as_ref()).await;
+                let scrape = scrape_prometheus(&plugin).await;
                 assert_single_cardinality_overflow_series(&scrape, "apollo.test.histo", 1);
             }
         }
@@ -1350,16 +1327,19 @@ mod tests {
     async fn it_test_prometheus_metrics_no_cardinality_overflow_counter_without_overflow() {
         let _guard = TEST.lock().await;
         async {
-            let plugin = create_plugin_with_config(include_str!(
-                "testdata/prometheus_cardinality_limit.router.yaml"
-            ))
-            .await;
+            let plugin = PluginTestHarness::<Telemetry>::builder()
+                .config(include_str!(
+                    "testdata/prometheus_cardinality_limit.router.yaml"
+                ))
+                .build()
+                .await
+                .expect("test harness");
             plugin.activate();
             u64_histogram!("apollo.test.histo", "it's a test", 1u64, "k" = "a");
             u64_histogram!("apollo.test.histo", "it's a test", 1u64, "k" = "b");
 
             for _ in 0..2 {
-                let scrape = scrape_prometheus(plugin.as_ref()).await;
+                let scrape = scrape_prometheus(&plugin).await;
                 assert!(scrape.contains("apollo_test_histo"), "{scrape}");
                 assert!(!scrape.contains("otel_metric_overflow"), "{scrape}");
                 assert_eq!(cardinality_overflow_lines(&scrape), Vec::<&str>::new());
@@ -1376,25 +1356,30 @@ mod tests {
         let _guard = TEST.lock().await;
         async {
             let config = include_str!("testdata/prometheus_cardinality_limit.router.yaml");
-            let plugin = create_plugin_with_config(config).await;
+            let plugin = PluginTestHarness::<Telemetry>::builder()
+                .config(config)
+                .build()
+                .await
+                .expect("test harness");
             plugin.activate();
             u64_histogram!("apollo.test.histo", "it's a test", 1u64, "k" = "a");
             u64_histogram!("apollo.test.histo", "it's a test", 1u64, "k" = "b");
             u64_histogram!("apollo.test.histo", "it's a test", 1u64, "k" = "c");
-            scrape_prometheus(plugin.as_ref()).await;
-            let before = scrape_prometheus(plugin.as_ref()).await;
+            scrape_prometheus(&plugin).await;
+            let before = scrape_prometheus(&plugin).await;
             assert_single_cardinality_overflow_series(&before, "apollo.test.histo", 1);
 
-            let reloaded = create_plugin_with_config(
-                &config.replace("service_name: apollo-router", "service_name: reloaded"),
-            )
-            .await;
+            let reloaded = PluginTestHarness::<Telemetry>::builder()
+                .config(&config.replace("service_name: apollo-router", "service_name: reloaded"))
+                .build()
+                .await
+                .expect("test harness");
             reloaded.activate();
             u64_histogram!("apollo.test.histo", "it's a test", 1u64, "k" = "d");
             u64_histogram!("apollo.test.histo", "it's a test", 1u64, "k" = "e");
             u64_histogram!("apollo.test.histo", "it's a test", 1u64, "k" = "f");
-            scrape_prometheus(reloaded.as_ref()).await;
-            let after = scrape_prometheus(reloaded.as_ref()).await;
+            scrape_prometheus(&reloaded).await;
+            let after = scrape_prometheus(&reloaded).await;
             assert!(after.contains(r#"service_name="reloaded""#), "{after}");
             assert_single_cardinality_overflow_series(&after, "apollo.test.histo", 1);
         }
@@ -1419,14 +1404,18 @@ mod tests {
                 include_str!("testdata/prometheus_cardinality_limit.router.yaml"),
                 collector.uri()
             );
-            let plugin = create_plugin_with_config(&config).await;
+            let plugin = PluginTestHarness::<Telemetry>::builder()
+                .config(&config)
+                .build()
+                .await
+                .expect("test harness");
             plugin.activate();
             u64_histogram!("apollo.test.histo", "it's a test", 1u64, "k" = "a");
             u64_histogram!("apollo.test.histo", "it's a test", 1u64, "k" = "b");
             u64_histogram!("apollo.test.histo", "it's a test", 1u64, "k" = "c");
 
             for _ in 0..2 {
-                let scrape = scrape_prometheus(plugin.as_ref()).await;
+                let scrape = scrape_prometheus(&plugin).await;
                 assert!(
                     scrape.contains(r#"otel_metric_overflow="true""#),
                     "expected an overflow series in:\n{scrape}"

@@ -7356,7 +7356,7 @@ fn toggled_subgraph_service(
     mode: Arc<std::sync::Mutex<ToggledSubgraphResponse>>,
     calls: Arc<std::sync::atomic::AtomicUsize>,
     healthy_data: serde_json_bytes::Value,
-) -> subgraph::BoxService {
+) -> subgraph::BoxCloneService {
     tower::service_fn(move |req: subgraph::Request| {
         let mode = *mode.lock().unwrap();
         calls.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
@@ -7454,7 +7454,7 @@ fn toggled_subgraph_service(
             ))
         }
     })
-    .boxed()
+    .boxed_clone()
 }
 
 /// A supergraph with the response cache in front of one toggleable subgraph: `user` for a

@@ -99,10 +99,6 @@ impl MetricsConfigurator for Config {
     }
 }
 
-<<<<<<< HEAD
-#[derive(Clone)]
-pub(crate) struct PrometheusService {
-=======
 /// The Prometheus exporter, shared by the public meter provider, which reads from it, and the
 /// endpoint, which collects from it directly to name overflowing metrics.
 #[derive(Clone, Debug)]
@@ -141,7 +137,6 @@ impl MetricReader for SharedPrometheusExporter {
 #[derive(Clone, Debug)]
 pub(crate) struct PrometheusEndpoint {
     /// The metrics each scrape gathers.
->>>>>>> origin/dev
     pub(crate) registry: Registry,
     /// The exporter that `registry` gathers from. Collecting from it directly gives the same
     /// metrics with their OpenTelemetry names.
@@ -151,6 +146,7 @@ pub(crate) struct PrometheusEndpoint {
     pub(crate) overflow_tracker: Option<OverflowTracker>,
 }
 
+#[derive(Clone)]
 pub(crate) struct PrometheusService {
     pub(crate) endpoint: PrometheusEndpoint,
 }
