@@ -4080,6 +4080,51 @@ fn connector_unprovided_key_refetches_parent() {
     "#);
 }
 
+/// The connector returns `author` with its key, so `User` is entered
+/// directly. The entity fetch is gated on the `@skip` the field sits under.
+#[test]
+fn connector_entity_fetch_gated_by_skip() {
+    let plan_str = plan_query_with_router_specs(
+        include_str!("../fixtures/connector_nested_reference_with_key.graphql"),
+        "query($x: Boolean!) { posts { title author { name ... @skip(if: $x) { email } } } }",
+    );
+    insta::assert_snapshot!(plan_str, @r#"
+    QueryPlan {
+      Sequence {
+        Fetch(service: "blog_Query_posts_0") {
+          {
+            posts {
+              title
+              author {
+                __typename
+                name
+                id
+              }
+            }
+          }
+        },
+        Skip(if: $x) {
+          Flatten(path: "posts.@.author") {
+            Fetch(service: "blog_User_0") {
+              {
+                ... on User {
+                  __typename
+                  id
+                }
+              } =>
+              {
+                ... on User {
+                  email
+                }
+              }
+            },
+          },
+        },
+      },
+    }
+    "#);
+}
+
 /// `author: { name ... authorExtra }` spreads an unknown path, so what it adds
 /// is not known statically. The spread provides no key: `author` is re-fetched
 /// through `post(id:)` as if the spread were absent, which is how composition
@@ -4201,19 +4246,21 @@ fn connector_unprovided_key_refetches_parent_through_include() {
             }
           },
         },
-        Flatten(path: "posts.@.author") {
-          Fetch(service: "blog_User_0") {
-            {
-              ... on User {
-                __typename
-                id
+        Include(if: $x) {
+          Flatten(path: "posts.@.author") {
+            Fetch(service: "blog_User_0") {
+              {
+                ... on User {
+                  __typename
+                  id
+                }
+              } =>
+              {
+                ... on User {
+                  email
+                }
               }
-            } =>
-            {
-              ... on User {
-                email
-              }
-            }
+            },
           },
         },
       },
