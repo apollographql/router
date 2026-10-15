@@ -744,6 +744,9 @@ impl<FA: RouterServiceFactory> State<FA> {
             // bad configuration will simply fail the same way on each attempt until the
             // retry budget runs out.
             .map_err(|e| ReloadError::Transient(ServiceCreationError(e)))?;
+        // Names from the first schema and its query planner are interned. Freezing before
+        // serving traffic keeps client documents from growing the table.
+        apollo_compiler::freeze_interning();
         // used to track if there are still in flight connections when shutting down
         let (all_connections_stopped_sender, all_connections_stopped_signal) =
             mpsc::channel::<()>(1);
@@ -2051,6 +2054,69 @@ mod tests {
             Ok(())
         );
         assert_eq!(shutdown_receivers.0.lock().len(), 2);
+    }
+
+    #[test(tokio::test)]
+    async fn schema_reloads_do_not_grow_the_intern_table() {
+        let minimal_schema = include_str!("testdata/minimal_supergraph.graphql");
+        let reloaded_schema = |n: usize| {
+            let sdl = minimal_schema.replace(
+                "  me: String @join__field(graph: SUBGRAPH_A)\n}",
+                &format!(
+                    "  me: String @join__field(graph: SUBGRAPH_A)\n  \
+                     reloadOnlyField{n}: ReloadOnlyType{n} @join__field(graph: SUBGRAPH_A)\n}}\n\n\
+                     type ReloadOnlyType{n} @join__type(graph: SUBGRAPH_A) {{\n  \
+                     reloadOnlyValue{n}: String @join__field(graph: SUBGRAPH_A)\n}}"
+                ),
+            );
+            assert_ne!(sdl, minimal_schema, "reloaded schema should add a type");
+            UpdateSchema(SchemaState {
+                sdl,
+                launch_id: None,
+            })
+        };
+
+        let router_factory = create_mock_router_configurator(3);
+        let (server_factory, _) = create_mock_server_factory(3);
+        assert_matches!(
+            execute(
+                server_factory,
+                router_factory,
+                stream::iter(vec![
+                    UpdateConfiguration(Arc::new(Configuration::builder().build().unwrap())),
+                    UpdateSchema(SchemaState {
+                        sdl: minimal_schema.to_owned(),
+                        launch_id: None
+                    }),
+                    UpdateLicense(Default::default()),
+                    reloaded_schema(1),
+                    reloaded_schema(2),
+                    Shutdown
+                ])
+            )
+            .await,
+            Ok(())
+        );
+
+        let interned = |s: &str| {
+            apollo_compiler::Name::new(s)
+                .unwrap()
+                .as_static_str()
+                .is_some()
+        };
+        assert!(interned("me"), "names from the first schema are interned");
+        for n in [1, 2] {
+            for name in [
+                format!("ReloadOnlyType{n}"),
+                format!("reloadOnlyField{n}"),
+                format!("reloadOnlyValue{n}"),
+            ] {
+                assert!(
+                    !interned(&name),
+                    "{name} from a reload should not be interned"
+                );
+            }
+        }
     }
 
     #[test(tokio::test)]
