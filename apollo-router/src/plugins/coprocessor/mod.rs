@@ -55,6 +55,7 @@ use crate::services::http::HttpResponse;
 use crate::services::router;
 use crate::services::router::body::RouterBody;
 use crate::services::subgraph;
+use crate::services::subgraph::SubgraphRequestId;
 
 #[cfg(test)]
 mod test;
@@ -239,6 +240,12 @@ impl PluginPrivate for CoprocessorPlugin<HTTPClientService> {
                 tracing::warn!(
                     "Configuration `{path}: {value}` is deprecated. See https://go.apollo.dev/o/coprocessor-context"
                 );
+            }
+            if conf.uses_subgraph_request_id() && !path.starts_with("coprocessor.subgraph.") {
+                return Err(format!(
+                    "`{path}`: `append_subgraph_request_id` is only supported on subgraph stages"
+                )
+                .into());
             }
         }
 
@@ -627,11 +634,96 @@ pub(super) enum NewContextConf {
     /// Send all context keys using deprecated names (from router 1.x) to coprocessor
     Deprecated,
     /// Only send the list of context keys to coprocessor
-    Selective(Arc<HashSet<String>>),
+    Selective(#[schemars(with = "Vec<SelectiveContextKey>")] Arc<SelectiveContextKeys>),
+}
+
+/// A context key to send to the coprocessor
+#[derive(Clone, Debug, Deserialize, JsonSchema, PartialEq)]
+#[serde(untagged)]
+pub(super) enum SelectiveContextKey {
+    /// The name of a context key
+    Name(String),
+    /// A context key, optionally specific to the current subgraph request
+    Key(SelectiveContextKeyConf),
+}
+
+/// A context key, optionally specific to the current subgraph request
+#[derive(Clone, Debug, Deserialize, JsonSchema, PartialEq)]
+#[serde(deny_unknown_fields)]
+pub(super) struct SelectiveContextKeyConf {
+    /// The name of the context key, or its prefix if `append_subgraph_request_id` is set
+    name: String,
+    /// Append the current subgraph request's ID to `name`. This lets a subgraph
+    /// response stage read a context key written for its own subgraph request
+    /// (for example by the subgraph request stage), even when subgraph requests run
+    /// in parallel. Only supported on subgraph stages.
+    #[serde(default)]
+    append_subgraph_request_id: bool,
+}
+
+/// The context keys selected by a `selective` context configuration
+#[derive(Clone, Debug, Default, Deserialize, PartialEq)]
+#[serde(from = "Vec<SelectiveContextKey>")]
+pub(super) struct SelectiveContextKeys {
+    /// Keys sent by exact name
+    names: HashSet<String>,
+    /// Prefixes to which the current subgraph request ID is appended
+    subgraph_request_id_prefixes: Vec<String>,
+}
+
+impl From<Vec<SelectiveContextKey>> for SelectiveContextKeys {
+    fn from(keys: Vec<SelectiveContextKey>) -> Self {
+        let mut selected = Self::default();
+        for key in keys {
+            match key {
+                SelectiveContextKey::Name(name)
+                | SelectiveContextKey::Key(SelectiveContextKeyConf {
+                    name,
+                    append_subgraph_request_id: false,
+                }) => {
+                    selected.names.insert(name);
+                }
+                SelectiveContextKey::Key(SelectiveContextKeyConf {
+                    name,
+                    append_subgraph_request_id: true,
+                }) => selected.subgraph_request_id_prefixes.push(name),
+            }
+        }
+        selected
+    }
+}
+
+impl From<HashSet<String>> for SelectiveContextKeys {
+    fn from(names: HashSet<String>) -> Self {
+        Self {
+            names,
+            subgraph_request_id_prefixes: Vec::new(),
+        }
+    }
 }
 
 impl ContextConf {
+    /// Whether this configuration uses `append_subgraph_request_id`, which is only
+    /// supported on subgraph stages
+    fn uses_subgraph_request_id(&self) -> bool {
+        matches!(
+            self,
+            Self::NewContextConf(NewContextConf::Selective(keys))
+                if !keys.subgraph_request_id_prefixes.is_empty()
+        )
+    }
+
     pub(crate) fn get_context(&self, ctx: &Context) -> Option<(Context, HashSet<String>)> {
+        self.get_context_for(ctx, None)
+    }
+
+    /// Like `get_context`, but for a subgraph stage: selective keys configured with
+    /// `append_subgraph_request_id` are resolved for the given subgraph request.
+    pub(crate) fn get_context_for(
+        &self,
+        ctx: &Context,
+        subgraph_request_id: Option<&SubgraphRequestId>,
+    ) -> Option<(Context, HashSet<String>)> {
         match self {
             Self::NewContextConf(NewContextConf::All) => {
                 let mut keys_sent = HashSet::new();
@@ -655,9 +747,20 @@ impl ContextConf {
                 Some((new_ctx, keys_sent))
             }
             Self::NewContextConf(NewContextConf::Selective(context_keys)) => {
+                let subgraph_request_keys: Vec<String> = subgraph_request_id
+                    .map(|id| {
+                        context_keys
+                            .subgraph_request_id_prefixes
+                            .iter()
+                            .map(|prefix| format!("{prefix}{id}"))
+                            .collect()
+                    })
+                    .unwrap_or_default();
                 let mut keys_sent = HashSet::new();
                 let mut new_ctx = Context::from_iter(ctx.iter().filter_map(|elt| {
-                    if context_keys.contains(elt.key()) {
+                    if context_keys.names.contains(elt.key())
+                        || subgraph_request_keys.contains(elt.key())
+                    {
                         keys_sent.insert(elt.key().clone());
                         Some((elt.key().clone(), elt.value().clone()))
                     } else {
@@ -1565,7 +1668,7 @@ where
         .transpose()?;
     let context_to_send = request_config
         .context
-        .get_context(&request.context)
+        .get_context_for(&request.context, Some(&request.id))
         .map(|(ctx, _keys)| ctx);
     let uri = request_config.uri.then(|| parts.uri.to_string());
     let subgraph_name = service_name.clone();
@@ -1759,7 +1862,9 @@ where
     let status_to_send = response_config.status_code.then(|| parts.status.as_u16());
 
     let body_to_send = filter_graphql_response_body(&body, &response_config.body);
-    let (context_to_send, keys_sent) = match response_config.context.get_context(&response.context)
+    let (context_to_send, keys_sent) = match response_config
+        .context
+        .get_context_for(&response.context, Some(&response.id))
     {
         Some((ctx, keys)) => (Some(ctx), keys),
         None => (None, HashSet::new()),

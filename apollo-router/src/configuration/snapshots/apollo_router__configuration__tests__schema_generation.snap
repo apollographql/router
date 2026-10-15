@@ -7705,10 +7705,9 @@ expression: "&schema"
           "properties": {
             "selective": {
               "items": {
-                "type": "string"
+                "$ref": "#/definitions/SelectiveContextKey"
               },
-              "type": "array",
-              "uniqueItems": true
+              "type": "array"
             }
           },
           "required": [
@@ -9695,6 +9694,42 @@ expression: "&schema"
           "type": "boolean"
         }
       },
+      "type": "object"
+    },
+    "SelectiveContextKey": {
+      "anyOf": [
+        {
+          "description": "The name of a context key",
+          "type": "string"
+        },
+        {
+          "allOf": [
+            {
+              "$ref": "#/definitions/SelectiveContextKeyConf"
+            }
+          ],
+          "description": "A context key, optionally specific to the current subgraph request"
+        }
+      ],
+      "description": "A context key to send to the coprocessor"
+    },
+    "SelectiveContextKeyConf": {
+      "additionalProperties": false,
+      "description": "A context key, optionally specific to the current subgraph request",
+      "properties": {
+        "append_subgraph_request_id": {
+          "default": false,
+          "description": "Append the current subgraph request's ID to `name`. This lets a subgraph\nresponse stage read a context key written for its own subgraph request\n(for example by the subgraph request stage), even when subgraph requests run\nin parallel. Only supported on subgraph stages.",
+          "type": "boolean"
+        },
+        "name": {
+          "description": "The name of the context key, or its prefix if `append_subgraph_request_id` is set",
+          "type": "string"
+        }
+      },
+      "required": [
+        "name"
+      ],
       "type": "object"
     },
     "Server": {

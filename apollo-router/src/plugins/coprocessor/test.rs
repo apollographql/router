@@ -760,7 +760,7 @@ mod tests {
                 body: true,
                 subgraph_request_id: true,
                 context: ContextConf::NewContextConf(NewContextConf::Selective(Arc::new(
-                    ["this-is-a-test-context".to_string()].into(),
+                    HashSet::from(["this-is-a-test-context".to_string()]).into(),
                 ))),
                 ..Default::default()
             },
@@ -1560,7 +1560,7 @@ mod tests {
                 body: BodyConf::All(true),
                 subgraph_request_id: true,
                 context: ContextConf::NewContextConf(NewContextConf::Selective(Arc::new(
-                    ["this-is-a-test-context".to_string()].into(),
+                    HashSet::from(["this-is-a-test-context".to_string()]).into(),
                 ))),
                 ..Default::default()
             },
@@ -2081,7 +2081,7 @@ mod tests {
                 condition: Default::default(),
                 headers: false,
                 context: ContextConf::NewContextConf(NewContextConf::Selective(Arc::new(
-                    ["this-is-a-test-context".to_string()].into(),
+                    HashSet::from(["this-is-a-test-context".to_string()]).into(),
                 ))),
                 body: BodyConf::All(true),
                 status_code: false,
@@ -2443,7 +2443,7 @@ mod tests {
                 condition: Default::default(),
                 headers: true,
                 context: ContextConf::NewContextConf(NewContextConf::Selective(Arc::new(
-                    ["this-is-a-test-context".to_string()].into(),
+                    HashSet::from(["this-is-a-test-context".to_string()]).into(),
                 ))),
                 body: true,
                 sdl: true,
@@ -5752,7 +5752,7 @@ mod tests {
         // Use Selective config to only send "k1", not "key_not_sent"
         let selective_keys: HashSet<String> = ["k1".to_string()].into();
         let context_config =
-            ContextConf::NewContextConf(NewContextConf::Selective(Arc::new(selective_keys)));
+            ContextConf::NewContextConf(NewContextConf::Selective(Arc::new(selective_keys.into())));
         let keys_sent: HashSet<String> = ["k1"].into_iter().map(String::from).collect();
 
         // Update context
@@ -8939,5 +8939,126 @@ mod tests {
         // `RouterStage::as_service` with a mocked HTTP client and assert on
         // what the coprocessor actually receives. Config-shape contracts are
         // pinned by `HeaderMaskingConfig::tests` and the schema snapshot.
+    }
+
+    #[test]
+    fn selective_context_keys_accept_names_and_subgraph_request_id_prefixes() {
+        let conf: ContextConf = serde_json::from_value(serde_json::json!({
+            "selective": [
+                "exact",
+                { "name": "also_exact" },
+                { "name": "per_fetch::", "append_subgraph_request_id": true }
+            ]
+        }))
+        .unwrap();
+        let ContextConf::NewContextConf(NewContextConf::Selective(keys)) = &conf else {
+            panic!("expected selective context conf, got {conf:?}");
+        };
+        assert_eq!(
+            keys.as_ref(),
+            &SelectiveContextKeys {
+                names: ["exact".to_string(), "also_exact".to_string()].into(),
+                subgraph_request_id_prefixes: vec!["per_fetch::".to_string()],
+            }
+        );
+        assert!(conf.uses_subgraph_request_id());
+    }
+
+    #[test]
+    fn selective_context_keys_resolve_for_the_current_subgraph_request() {
+        use crate::Context;
+        use crate::plugins::coprocessor::update_context_from_coprocessor;
+        use crate::services::subgraph::SubgraphRequestId;
+
+        let conf: ContextConf = serde_json::from_value(serde_json::json!({
+            "selective": [
+                "exact",
+                { "name": "per_fetch::", "append_subgraph_request_id": true }
+            ]
+        }))
+        .unwrap();
+        let this_fetch = SubgraphRequestId("this".to_string());
+        let ctx = Context::new();
+        ctx.insert("exact", 1).unwrap();
+        ctx.insert("per_fetch::this", 2).unwrap();
+        ctx.insert("per_fetch::other", 3).unwrap();
+        ctx.insert("not_selected", 4).unwrap();
+
+        let (sent, keys_sent) = conf.get_context_for(&ctx, Some(&this_fetch)).unwrap();
+        assert_eq!(
+            keys_sent,
+            HashSet::from(["exact".to_string(), "per_fetch::this".to_string()])
+        );
+        let subgraph_keys_sent = keys_sent;
+        assert_eq!(sent.get::<_, i32>("per_fetch::this").unwrap(), Some(2));
+        assert_eq!(sent.get::<_, i32>("per_fetch::other").unwrap(), None);
+
+        // Without a subgraph request, only exact names are selected.
+        let (_, unscoped_keys_sent) = conf.get_context(&ctx).unwrap();
+        assert_eq!(unscoped_keys_sent, HashSet::from(["exact".to_string()]));
+
+        // A per-request key that was sent but not returned is deleted, like any
+        // other selected key.
+        update_context_from_coprocessor(&ctx, Context::new(), &conf, &subgraph_keys_sent).unwrap();
+        assert!(!ctx.contains_key("per_fetch::this"));
+        assert!(ctx.contains_key("per_fetch::other"));
+    }
+
+    #[tokio::test]
+    async fn append_subgraph_request_id_is_rejected_outside_subgraph_stages() {
+        let config = serde_json::json!({
+            "coprocessor": {
+                "url": "http://127.0.0.1:8081",
+                "supergraph": {
+                    "request": {
+                        "context": {
+                            "selective": [
+                                { "name": "per_fetch::", "append_subgraph_request_id": true }
+                            ]
+                        }
+                    }
+                }
+            }
+        });
+
+        let result = crate::TestHarness::builder()
+            .configuration_json(config)
+            .unwrap()
+            .build_router()
+            .await;
+
+        let err = result.expect_err("should be rejected").to_string();
+        assert!(
+            err.contains("`append_subgraph_request_id` is only supported on subgraph stages"),
+            "unexpected error: {err}"
+        );
+    }
+
+    #[tokio::test]
+    async fn append_subgraph_request_id_is_accepted_on_subgraph_stages() {
+        let config = serde_json::json!({
+            "coprocessor": {
+                "url": "http://127.0.0.1:8081",
+                "subgraph": {
+                    "all": {
+                        "response": {
+                            "subgraph_request_id": true,
+                            "context": {
+                                "selective": [
+                                    { "name": "per_fetch::", "append_subgraph_request_id": true }
+                                ]
+                            }
+                        }
+                    }
+                }
+            }
+        });
+
+        crate::TestHarness::builder()
+            .configuration_json(config)
+            .unwrap()
+            .build_router()
+            .await
+            .expect("should be accepted");
     }
 }
