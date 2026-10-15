@@ -18,6 +18,7 @@ use super::super::fetch_graph::InputRewriteInfo;
 use super::super::shared_path::SharedPath;
 use super::FieldRoutingSearchSpace;
 use super::commit::field_response_elements;
+use super::requires::trailing_condition_fragments;
 use super::requires::unconditioned_input_path;
 use super::routing::IntermediateKeyHop;
 use super::routing::RoutingChoice;
@@ -94,6 +95,18 @@ enum ConnectorOutputAt {
     /// The parent of a root connector's or field-level resolver's own field:
     /// the fetch returns only that field (and `__typename`) there.
     OwnFieldOnly(Name),
+}
+
+/// The op path of a connector entity fetch for `pending`: the entity root plus
+/// the `@skip`/`@include` fragments the pending sits under, which a key hop
+/// carries into the entity fetch so that the fetch is gated on them.
+fn with_trailing_conditions(
+    entity_root: SharedPath<Arc<OpPathElement>>,
+    pending: &PendingSelection,
+) -> SharedPath<Arc<OpPathElement>> {
+    trailing_condition_fragments(&pending.op_path)
+        .into_iter()
+        .fold(entity_root, |path, element| path.pushed(element))
 }
 
 impl FieldRoutingSearchSpace {
@@ -175,7 +188,7 @@ impl FieldRoutingSearchSpace {
                 let entity_base_path = self.entity_root_path(entity_type.type_name())?;
                 (
                     new_group,
-                    entity_base_path.pushed(field_op_element),
+                    with_trailing_conditions(entity_base_path, pending).pushed(field_op_element),
                     SharedPath::new(),
                 )
             } else if matches!(
@@ -227,7 +240,7 @@ impl FieldRoutingSearchSpace {
                 let entity_base_path = self.entity_root_path(source.type_pos.type_name())?;
                 (
                     new_group,
-                    entity_base_path.pushed(field_op_element),
+                    with_trailing_conditions(entity_base_path, pending).pushed(field_op_element),
                     SharedPath::new(),
                 )
             };
