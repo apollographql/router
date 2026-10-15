@@ -246,6 +246,9 @@ fn run_bulb_and_finalize(
         )));
     }
 
+    result
+        .graph
+        .absorb_covered_connector_fetches(&parameters.connector_index);
     result.graph.merge_sibling_entities();
 
     // Build DeferInfo from the selection set actually being planned (already

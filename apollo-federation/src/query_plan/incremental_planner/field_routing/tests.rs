@@ -3962,6 +3962,88 @@ fn connector_field_without_this_beside_this_connector() {
     "#);
 }
 
+/// Two type-level connectors where one returns a superset of the other:
+/// `{ name reviews }` is served by the superset alone.
+#[test]
+fn connector_superset_type_connector_absorbs_sibling_fetch() {
+    let plan_str = plan_query_with_router_specs(
+        include_str!("../fixtures/connector_superset_type_connector.graphql"),
+        "{ topProducts { name reviews { rating comment } } }",
+    );
+    insta::assert_snapshot!(plan_str, @r#"
+    QueryPlan {
+      Sequence {
+        Fetch(service: "catalog") {
+          {
+            topProducts {
+              __typename
+              id
+            }
+          }
+        },
+        Flatten(path: "topProducts.@") {
+          Fetch(service: "products_Product_1") {
+            {
+              ... on Product {
+                __typename
+                id
+              }
+            } =>
+            {
+              ... on Product {
+                reviews {
+                  rating
+                  comment
+                }
+                name
+              }
+            }
+          },
+        },
+      },
+    }
+    "#);
+}
+
+/// Only `name` requested: the narrower connector is enough, and nothing is
+/// absorbed.
+#[test]
+fn connector_superset_type_connector_not_used_when_unneeded() {
+    let plan_str = plan_query_with_router_specs(
+        include_str!("../fixtures/connector_superset_type_connector.graphql"),
+        "{ topProducts { name } }",
+    );
+    insta::assert_snapshot!(plan_str, @r#"
+    QueryPlan {
+      Sequence {
+        Fetch(service: "catalog") {
+          {
+            topProducts {
+              __typename
+              id
+            }
+          }
+        },
+        Flatten(path: "topProducts.@") {
+          Fetch(service: "products_Product_0") {
+            {
+              ... on Product {
+                __typename
+                id
+              }
+            } =>
+            {
+              ... on Product {
+                name
+              }
+            }
+          },
+        },
+      },
+    }
+    "#);
+}
+
 /// The connector returns `author` without its key. Re-fetch `author` from
 /// the `Post` level through `post(id:)`, which returns the key, instead of
 /// sending `User` representations with no `id`.
