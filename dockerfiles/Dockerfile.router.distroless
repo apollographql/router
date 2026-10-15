@@ -1,9 +1,10 @@
 # Distroless flavor of the Router image, published alongside the Debian-based
 # image built by `Dockerfile.router` under a `-distroless` tag suffix.
 #
-# If a future dependency reintroduces a dynamic library that `distroless/cc`
-# lacks, the binary won't get as far as main() and `verify_distroless_image.sh`
-# will fail on its first check. Re-run the `readelf` above to see what's new.
+# The router binary links only glibc and libgcc_s, both of which `distroless/cc`
+# provides; zlib is compiled in via flate2's Rust backend. If a dependency adds
+# another shared library, `verify_distroless_image.sh` fails on its first check;
+# run `readelf -d dist/router | grep NEEDED` on the release binary to see what's new.
 #
 # WHAT YOU GIVE UP
 #
@@ -12,9 +13,9 @@
 # flavor are all unavailable here. Use the Debian image for those.
 
 # Named so the downloader stage below can read the base image's /etc/passwd.
-FROM gcr.io/distroless/cc-debian12:nonroot AS base
+FROM gcr.io/distroless/cc-debian13:nonroot AS base
 
-FROM debian:bookworm-slim AS downloader
+FROM debian:trixie-slim AS downloader
 ARG ROUTER_RELEASE=latest
 ARG ARTIFACT_URL=
 ARG CIRCLE_TOKEN=

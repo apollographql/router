@@ -68,9 +68,9 @@ Every router release publishes the same router binary in three image flavors, wh
 
 | Tag | Base image | When to use it |
 | --- | --- | --- |
-| `<image version>` | `debian:bookworm-slim` | The default. Includes a shell and a package manager. |
+| `<image version>` | `debian:trixie-slim` | The default. Includes a shell and a package manager. |
 | `<image version>-distroless` | [`distroless/cc`](https://github.com/GoogleContainerTools/distroless) | For deployments that want a smaller attack surface. About half the size of the Debian image, with no shell, package manager, or other userland. |
-| `<image version>-debug` | `debian:bookworm-slim` | For investigating memory usage. Runs the router under heaptrack, as described in [Running the debug container](#running-the-debug-container-to-investigate-memory-issues). |
+| `<image version>-debug` | `debian:trixie-slim` | For investigating memory usage. Runs the router under heaptrack, as described in [Running the debug container](#running-the-debug-container-to-investigate-memory-issues). |
 
 Configuration, environment variables, command-line arguments, and the paths you mount over (`/dist/config/router.yaml` and `/dist/schema`) are the same in all three, and all three run as the `router` user (uid and gid `1000`), so switching between the images requires only changing the tag.
 
