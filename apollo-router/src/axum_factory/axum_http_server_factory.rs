@@ -36,6 +36,7 @@ use tracing::instrument::WithSubscriber;
 use super::ENDPOINT_CALLBACK;
 use super::ListenAddrAndRouter;
 use super::listeners::ListenersAndRouters;
+use super::listeners::endpoint_router;
 use super::listeners::ensure_endpoints_consistency;
 use super::listeners::ensure_listenaddrs_consistency;
 use super::listeners::extra_endpoints;
@@ -93,7 +94,7 @@ pub(crate) fn make_axum_router(
             .unwrap_or_default(),
         license,
     )?;
-    let mut extra_endpoints = extra_endpoints(endpoints);
+    let mut extra_endpoints = extra_endpoints(endpoints, configuration);
 
     // put any extra endpoint that uses the main ListenAddr into the main router
     if let Some(routers) = extra_endpoints.remove(&main_endpoint.0) {
@@ -338,12 +339,7 @@ fn main_endpoint(
     let route = endpoints_on_main_listener
         .into_iter()
         .fold(main_route, |acc, r| {
-            let mut router = r.into_router();
-            if let Some(main_endpoint_layer) = ENDPOINT_CALLBACK.get() {
-                router = main_endpoint_layer(router);
-            }
-
-            acc.merge(router)
+            acc.merge(endpoint_router(r, configuration))
         });
 
     let listener = configuration.supergraph.listen.clone();
