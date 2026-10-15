@@ -6,4 +6,4 @@ The router now rejects these requests itself. An HTTP/2 request over the limit g
 
 To make this possible, the router advertises a larger header-list size to HTTP/2 clients: the configured limit plus three times the limit, with at most 256KiB added (64KiB with the default limit). Header lists over that advertised size are still rejected by the HTTP/2 library and aren't recorded. See [Request Limits](https://www.apollographql.com/docs/graphos/routing/security/request-limits#http2_max_headers_list_bytes) for what a client gets at each size.
 
-By [@rohan-b99](https://github.com/rohan-b99)
+By [@rohan-b99](https://github.com/rohan-b99) in https://github.com/apollographql/router/pull/10479
