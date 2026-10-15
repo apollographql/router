@@ -7,8 +7,10 @@ use apollo_compiler::Node;
 use apollo_compiler::Schema;
 use apollo_compiler::ast::Argument;
 use apollo_compiler::ast::Value;
+use apollo_compiler::executable::FieldSet;
 use apollo_compiler::name;
 use apollo_compiler::schema::ExtendedType;
+use apollo_compiler::validation::Valid;
 use shape::Shape;
 use shape::ShapeCase;
 
@@ -20,6 +22,7 @@ use super::spec::ConnectSpec;
 use crate::error::FederationError;
 use crate::operation::FragmentSpreadCache;
 use crate::operation::SelectionSet;
+use crate::operation::TYPENAME_FIELD;
 use crate::schema::FederationSchema;
 use crate::schema::ValidFederationSchema;
 use crate::supergraph::extract_subgraphs_from_supergraph;
@@ -110,24 +113,18 @@ impl ConnectorIndex {
                 // synthetic @key. resolvable_key derives it from the
                 // connector's variable references per resolver kind
                 // ($args / $this / $batch).
-                if connector.entity_resolver.is_some() {
-                    let field_set = connector.resolvable_key(schema.schema()).map_err(|e| {
-                        FederationError::internal(format!(
-                            "invalid key for connector {}: {e}",
-                            entry.coordinate
-                        ))
-                    })?;
-                    if let Some(field_set) = field_set {
-                        let selection_set = SelectionSet::from_selection_set(
-                            &field_set.selection_set,
-                            &FragmentSpreadCache::default(),
-                            schema,
-                            &|| Ok(()),
-                        )?;
-                        index
-                            .key_conditions
-                            .insert(entry.coordinate.clone(), Arc::new(selection_set));
-                    }
+                if connector.entity_resolver.is_some()
+                    && let Some(field_set) = connector_entity_key(connector, schema.schema())?
+                {
+                    let selection_set = SelectionSet::from_selection_set(
+                        &field_set.selection_set,
+                        &FragmentSpreadCache::default(),
+                        schema,
+                        &|| Ok(()),
+                    )?;
+                    index
+                        .key_conditions
+                        .insert(entry.coordinate.clone(), Arc::new(selection_set));
                 }
 
                 // Entity resolvers, keyed by the entity type they resolve.
@@ -229,6 +226,48 @@ fn resolver_entity_type(connector: &Connector, schema: &Schema) -> Option<Name> 
     }
 }
 
+/// The key guarding entry into an entity-resolver connector. A field
+/// connector that references no `$this` (only `$args` or constants) gets the
+/// singleton key `__typename` (see [`has_singleton_key`]).
+fn connector_entity_key(
+    connector: &Connector,
+    schema: &Schema,
+) -> Result<Option<Valid<FieldSet>>, FederationError> {
+    let invalid_key = |e: String| {
+        FederationError::internal(format!(
+            "invalid key for connector {}: {e}",
+            connector.id.coordinate()
+        ))
+    };
+    if let Some(field_set) = connector.resolvable_key(schema).map_err(invalid_key)? {
+        return Ok(Some(field_set));
+    }
+    if !has_singleton_key(connector) {
+        return Ok(None);
+    }
+    let parent_type = connector
+        .id
+        .directive
+        .parent_type_name()
+        .ok_or_else(|| invalid_key("missing parent type".to_string()))?;
+    FieldSet::parse_and_validate(
+        Valid::assume_valid_ref(schema),
+        parent_type,
+        TYPENAME_FIELD.as_str(),
+        "",
+    )
+    .map(Some)
+    .map_err(|e| invalid_key(e.to_string()))
+}
+
+/// Whether a field connector without a resolvable key is entered through the
+/// singleton key `__typename`. Connector expansion gives that key only from
+/// connect v0.4 on; before v0.4 such a connector has no key.
+fn has_singleton_key(connector: &Connector) -> bool {
+    connector.spec >= ConnectSpec::V0_4
+        && matches!(connector.entity_resolver, Some(EntityResolver::Implicit))
+}
+
 /// Adds to the supergraph the `@key` that connector expansion synthesizes for
 /// each entity-resolver connector whose type has no key in its subgraph. The
 /// connector's subgraph then defines the `_Entity` union and `_entities` field
@@ -260,6 +299,9 @@ pub(crate) fn add_connector_entity_keys(
     }
 
     let mut keys: Vec<(Name, Name, String)> = Vec::new();
+    // Singleton `__typename` keys apply only to types no other connector
+    // gives a key.
+    let mut typename_keys: Vec<(Name, Name, String)> = Vec::new();
     for (subgraph_name, subgraph) in extract_subgraphs_from_supergraph(supergraph, Some(false))? {
         let schema = subgraph.schema.schema();
         let Some(graph) = graph_enum_values.get(subgraph_name.as_ref()) else {
@@ -269,20 +311,33 @@ pub(crate) fn add_connector_entity_keys(
             let Some(entity_type) = resolver_entity_type(&connector, schema) else {
                 continue;
             };
-            let Ok(Some(field_set)) = connector.resolvable_key(schema) else {
-                continue;
+            let field_set = match connector.resolvable_key(schema) {
+                Ok(Some(field_set)) => field_set,
+                Ok(None) if has_singleton_key(&connector) => {
+                    typename_keys.push((graph.clone(), entity_type, TYPENAME_FIELD.to_string()));
+                    continue;
+                }
+                _ => continue,
             };
+            let fields = field_set.serialize().no_indent().to_string();
             // Extraction rejects a key whose fields the subgraph doesn't define.
             let fields_defined = field_set.selection_set.selections.iter().all(|selection| {
                 selection
                     .as_field()
                     .is_some_and(|field| schema.type_field(&entity_type, &field.name).is_ok())
             });
-            let fields = field_set.serialize().no_indent().to_string();
             let known = keys.iter().any(|(g, t, _)| g == graph && *t == entity_type);
             if fields_defined && !known {
                 keys.push((graph.clone(), entity_type, fields));
             }
+        }
+    }
+    for (graph, entity_type, fields) in typename_keys {
+        if !keys
+            .iter()
+            .any(|(g, t, _)| *g == graph && *t == entity_type)
+        {
+            keys.push((graph, entity_type, fields));
         }
     }
     if keys.is_empty() {
@@ -385,6 +440,41 @@ mod tests {
         assert!(index.resolver_provides(coordinate, "__typename"));
         assert!(!index.resolver_provides(coordinate, "email"));
         assert!(index.output_shape(coordinate).is_some());
+    }
+
+    /// A field connector that references no `$this` is keyed on
+    /// `__typename`, as connector expansion keys it from connect v0.4 on.
+    #[test]
+    fn field_resolver_without_this_keyed_on_typename() {
+        let index = index_from_supergraph(include_str!(
+            "../query_plan/incremental_planner/fixtures/connector_field_without_this.graphql"
+        ))
+        .expect("index builds");
+        for coordinate in ["products:Product.banner[0]", "products:Product.related[0]"] {
+            let key = index
+                .key_conditions(coordinate)
+                .expect("singleton key indexed");
+            assert_eq!(
+                key.to_string().split_whitespace().collect::<String>(),
+                "{__typename}",
+                "{coordinate}"
+            );
+        }
+    }
+
+    /// Before connect v0.4, expansion gives a field connector that references
+    /// no `$this` no key, so the index doesn't either.
+    #[test]
+    fn field_resolver_without_this_before_v0_4_has_no_key() {
+        let index = index_from_supergraph(include_str!(
+            "../query_plan/incremental_planner/fixtures/connector_output_shape.graphql"
+        ))
+        .expect("index builds");
+        assert!(
+            index
+                .key_conditions("connectors:User.staticAvatar[0]")
+                .is_none()
+        );
     }
 
     #[test]
