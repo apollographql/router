@@ -8259,16 +8259,44 @@ async fn connector_batch_with_declared_error_stores_no_entities(
     .await;
 }
 
-/// Builds a two-subgraph harness where `orga` resolves `Organization.name` for two entities and
-/// answers with `orga_entities`/`orga_errors`. Shared by the entity error tests below, which differ
-/// only in the shape of the error path the subgraph reports.
+/// One `_entities` request the `orga` subgraph answers: the ids of the organizations it is asked
+/// for, and the entities and errors it returns.
+struct OrgaResponse {
+    ids: &'static [&'static str],
+    entities: serde_json::Value,
+    errors: serde_json::Value,
+}
+
+/// Builds a two-subgraph harness where `user` returns organizations 1 and 2 and `orga` resolves
+/// `Organization.name` with `orga_responses`. Shared by the entity error tests below, which differ
+/// in the shape of the error path the subgraph reports and in which entities are already cached.
 async fn entity_error_harness(
     storage: Storage,
     drop_tx: tokio::sync::broadcast::Sender<()>,
-    orga_entities: serde_json::Value,
-    orga_errors: serde_json::Value,
+    orga_responses: Vec<OrgaResponse>,
 ) -> supergraph::BoxCloneService {
     let valid_schema = Arc::new(Schema::parse_and_validate(SCHEMA, "test.graphql").unwrap());
+    let orga_subgraph = orga_responses
+        .into_iter()
+        .fold(MockSubgraph::builder(), |builder, response| {
+            let representations: Vec<_> = response
+                .ids
+                .iter()
+                .map(|id| serde_json::json!({"id": id, "__typename": "Organization"}))
+                .collect();
+            builder.with_json(
+                serde_json::json! {{
+                    "query": "query($representations:[_Any!]!){_entities(representations:$representations){...on Organization{name}}}",
+                    "variables": { "representations": representations }
+                }},
+                serde_json::json! {{
+                    "data": { "_entities": response.entities },
+                    "errors": response.errors
+                }},
+            )
+        })
+        .with_header(CACHE_CONTROL, HeaderValue::from_static("public, max-age=3600"))
+        .build();
     let subgraphs = MockedSubgraphs([
         ("user", MockSubgraph::builder().with_json(
             serde_json::json! {{"query":"{currentUser{allOrganizations{__typename id}}}"}},
@@ -8283,26 +8311,7 @@ async fn entity_error_harness(
                     }
                 ] }}}},
         ).with_header(CACHE_CONTROL, HeaderValue::from_static("no-store")).build()),
-        ("orga", MockSubgraph::builder().with_json(
-            serde_json::json! {{
-                "query": "query($representations:[_Any!]!){_entities(representations:$representations){...on Organization{name}}}",
-            "variables": {
-                "representations": [
-                    {
-                        "id": "1",
-                        "__typename": "Organization",
-                    },
-                    {
-                        "id": "2",
-                        "__typename": "Organization",
-                    }
-                ]
-            }}},
-            serde_json::json! {{
-                "data": { "_entities": orga_entities },
-                "errors": orga_errors
-            }},
-        ).with_header(CACHE_CONTROL, HeaderValue::from_static("public, max-age=3600")).build())
+        ("orga", orga_subgraph)
     ].into_iter().collect());
 
     let map = [
@@ -8399,13 +8408,16 @@ async fn entity_error_without_index_in_path() {
     let service = entity_error_harness(
         storage.clone(),
         drop_tx,
-        serde_json::json!([{"name": null}, {"name": "Organization 2"}]),
-        // The failure is reported without the entity index, so it cannot be attributed.
-        serde_json::json!([{
-            "message": "cannot resolve name",
-            "path": ["_entities", "name"],
-            "extensions": {"code": "NAME_FAILURE"}
-        }]),
+        vec![OrgaResponse {
+            ids: &["1", "2"],
+            entities: serde_json::json!([{"name": null}, {"name": "Organization 2"}]),
+            // The failure is reported without the entity index, so it cannot be attributed.
+            errors: serde_json::json!([{
+                "message": "cannot resolve name",
+                "path": ["_entities", "name"],
+                "extensions": {"code": "NAME_FAILURE"}
+            }]),
+        }],
     )
     .await;
 
@@ -8519,12 +8531,15 @@ async fn entity_error_with_index_in_path() {
     let service = entity_error_harness(
         storage.clone(),
         drop_tx,
-        serde_json::json!([{"name": null}, {"name": "Organization 2"}]),
-        serde_json::json!([{
-            "message": "cannot resolve name",
-            "path": ["_entities", 0, "name"],
-            "extensions": {"code": "NAME_FAILURE"}
-        }]),
+        vec![OrgaResponse {
+            ids: &["1", "2"],
+            entities: serde_json::json!([{"name": null}, {"name": "Organization 2"}]),
+            errors: serde_json::json!([{
+                "message": "cannot resolve name",
+                "path": ["_entities", 0, "name"],
+                "extensions": {"code": "NAME_FAILURE"}
+            }]),
+        }],
     )
     .await;
 
@@ -8590,4 +8605,102 @@ async fn entity_error_with_index_in_path() {
         cached.iter().all(Option::is_none),
         "the entity the error was attributed to must not be cached, got: {cached:?}"
     );
+}
+
+/// On a partial cache hit, only the cache misses go to the subgraph. With a single miss, an
+/// `_entities` error without an index can only be about that entity: it lands on that entity's
+/// position in the response, and the cached entity keeps its data. Organization 1 is cached first,
+/// so organization 2 is the one fetched, and the error's position has to be rewritten from the
+/// subgraph's index 0 to the response's index 1.
+#[tokio::test]
+async fn entity_error_without_index_in_path_on_partial_cache_hit() {
+    let (drop_tx, drop_rx) = tokio::sync::broadcast::channel(2);
+    let storage = Storage::new(&Config::test(false, &Uuid::new_v4().to_string()), drop_rx)
+        .await
+        .unwrap();
+
+    let service = entity_error_harness(
+        storage.clone(),
+        drop_tx,
+        vec![
+            // Caches organization 1 only.
+            OrgaResponse {
+                ids: &["1", "2"],
+                entities: serde_json::json!([{"name": "Organization 1"}, {"name": null}]),
+                errors: serde_json::json!([{
+                    "message": "cannot resolve name",
+                    "path": ["_entities", 1, "name"],
+                    "extensions": {"code": "NAME_FAILURE"}
+                }]),
+            },
+            OrgaResponse {
+                ids: &["2"],
+                entities: serde_json::json!([{"name": null}]),
+                errors: serde_json::json!([{
+                    "message": "cannot resolve name",
+                    "path": ["_entities", "name"],
+                    "extensions": {"code": "NAME_FAILURE"}
+                }]),
+            },
+        ],
+    )
+    .await;
+
+    let response = service
+        .clone()
+        .oneshot(entity_error_request())
+        .await
+        .unwrap();
+    let cached_key = organization_debug_entries(&response)["1"].key.clone();
+    wait_for_cache(&storage, vec![cached_key]).await;
+
+    let mut response = service.oneshot(entity_error_request()).await.unwrap();
+
+    let debug_entries = organization_debug_entries(&response);
+    let cached = debug_entries.get("1").expect("missing debug entry");
+    let fetched = debug_entries.get("2").expect("missing debug entry");
+    assert!(matches!(cached.source, CacheKeySource::Cache));
+    assert!(matches!(fetched.source, CacheKeySource::Subgraph));
+    assert!(
+        !fetched.should_store,
+        "the entity that errored is not cached"
+    );
+    assert!(has_subgraph_errors_warning(fetched));
+
+    let mut body = response.next_response().await.unwrap();
+    assert!(remove_debug_extensions_key(&mut body));
+
+    insta::assert_json_snapshot!(body, @r#"
+    {
+      "data": {
+        "currentUser": {
+          "allOrganizations": [
+            {
+              "id": "1",
+              "name": "Organization 1"
+            },
+            {
+              "id": "2",
+              "name": null
+            }
+          ]
+        }
+      },
+      "errors": [
+        {
+          "message": "cannot resolve name",
+          "path": [
+            "currentUser",
+            "allOrganizations",
+            1,
+            "name"
+          ],
+          "extensions": {
+            "code": "NAME_FAILURE",
+            "service": "orga"
+          }
+        }
+      ]
+    }
+    "#);
 }
