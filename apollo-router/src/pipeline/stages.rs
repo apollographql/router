@@ -355,7 +355,7 @@ pub(crate) fn build_connector_request_services(
 
 /// The longest type name a service may have where [`box_layer`] or [`box_clone_layer`] boxes
 /// it: well above the largest boxed type in these stacks, and far below the unboxed stack.
-const MAX_BOXED_TYPE_NAME_LEN: usize = 100_000;
+const MAX_BOXED_TYPE_NAME_LEN: usize = 20_000;
 
 /// A layer that boxes a service `S` into `Boxed`.
 type BoxingLayer<S, Boxed> = LayerFn<fn(S) -> Boxed>;
@@ -370,7 +370,7 @@ type BoxingLayer<S, Boxed> = LayerFn<fn(S) -> Boxed>;
 /// # Panics
 ///
 /// In debug builds, when the stack is built, if the boxed service's type name is longer than
-/// [`MAX_BOXED_TYPE_NAME_LEN`].
+/// [`MAX_BOXED_TYPE_NAME_LEN`], or if it wraps one optional layer's `Either` directly in another.
 fn box_layer<S, Req>() -> BoxingLayer<S, BoxService<Req, S::Response, S::Error>>
 where
     S: Service<Req> + Send + 'static,
@@ -387,7 +387,7 @@ where
 /// # Panics
 ///
 /// In debug builds, when the stack is built, if the boxed service's type name is longer than
-/// [`MAX_BOXED_TYPE_NAME_LEN`].
+/// [`MAX_BOXED_TYPE_NAME_LEN`], or if it wraps one optional layer's `Either` directly in another.
 fn box_clone_layer<S, Req>() -> BoxingLayer<S, BoxCloneService<Req, S::Response, S::Error>>
 where
     S: Service<Req> + Clone + Send + 'static,
@@ -407,6 +407,17 @@ fn debug_assert_boxed_type_name_bounded<S>() {
          see `box_layer` and box the stack again beneath this point. The type starts: {}",
         name.len(),
         name.get(..500).unwrap_or(name),
+    );
+    // `apply_plugin_layer` wraps its getter's layer in an `OptionLayer`; a getter that already
+    // returns one names the service beneath three times instead of twice.
+    let nested = name.find("tower::util::either::Either<tower::util::either::Either<");
+    debug_assert!(
+        nested.is_none(),
+        "an optional layer is wrapped in a second optional layer, usually because \
+         `apply_plugin_layer` was given a getter that already returns an `OptionLayer`. \
+         The doubled layer: {}",
+        // From the match on, so the message names the doubled layer, not the top of the box.
+        nested.map_or("", |at| name.get(at..at + 500).unwrap_or(&name[at..])),
     );
 }
 
@@ -679,9 +690,8 @@ pub(crate) fn build_warmup_service(
 
 #[cfg(test)]
 mod boxed_type_names {
-    use std::sync::Arc;
-
     use super::*;
+    use crate::pipeline::tests::stage_stack::required_stage_plugins;
 
     // Building a stack runs each box's type-name check, a debug assertion.
     #[tokio::test]
@@ -690,7 +700,7 @@ mod boxed_type_names {
         build_subgraph_service(
             "s",
             http.boxed_clone(),
-            &Arc::new(Plugins::default()),
+            &required_stage_plugins().await,
             &Configuration::default(),
         );
     }
@@ -700,7 +710,7 @@ mod boxed_type_names {
         let (http, _) = tower_test::mock::pair();
         build_connector_request_services(
             IndexMap::from([("s.a".to_string(), http.boxed_clone())]),
-            &Arc::new(Plugins::default()),
+            &required_stage_plugins().await,
         );
     }
 }

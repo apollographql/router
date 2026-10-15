@@ -79,6 +79,7 @@ use crate::schema::FederationSchema;
 use crate::schema::GRAPHQL_BUILT_IN_DIRECTIVES;
 use crate::schema::ValidFederationSchema;
 use crate::schema::directive_location::DirectiveLocationExt;
+use crate::schema::fed3_upgrader;
 use crate::schema::position::DirectiveDefinitionPosition;
 use crate::schema::position::DirectiveTargetPosition;
 use crate::schema::position::FieldDefinitionPosition;
@@ -681,6 +682,10 @@ impl Merger {
         // Remove redundant @join__field directives (after backfilling interface object fields)
         trace!("Removing redundant @join__field directives");
         self.remove_redundant_join_fields()?;
+
+        // Remove invalid @deprecated from implementing fields (after backfilling interface object fields)
+        trace!("Removing @deprecated from implementations of non-deprecated interface fields");
+        self.remove_invalid_implementation_deprecations();
 
         // Return result
         let (mut errors, hints) = self.error_reporter.into_errors_and_hints();
@@ -2225,38 +2230,74 @@ format!("Field \"{field}\" of {} type \"{}\" is defined in some but not all subg
         let mut has_incompatible = false;
 
         let mut ty: Option<Type> = None;
-        for (idx, source) in sources.iter() {
+        // Type references form a partially ordered set, and we wish to find the maximum element for
+        // output positions and minimum element for input positions, if they exist. We do this in
+        // two passes; the first pass tracks a possible candidate, and the second pass verifies the
+        // candidate (if it exists) for whichever elements it hasn't been compared against yet.
+        //
+        // To reduce code duplication, we write a closure here that takes in a type reference and
+        // an old candidate, and returns a new candidate if the old one should be replaced. (If the
+        // candidates are incompatible, has_incompatible is set instead.)
+        let mut check_candidate = |ty: &Option<Type>,
+                                   source_idx: &usize,
+                                   source: &Option<T>,
+                                   has_incompatible: &mut bool|
+         -> Result<Option<Type>, FederationError> {
             let Some(source) = source else {
-                continue;
+                return Ok(None);
             };
-            let subgraph = &self.subgraphs[*idx];
+            let subgraph = &self.subgraphs[*source_idx];
             let source_ty = source.get_type(subgraph.schema())?;
             trace!("Subgraph {} has type {}", subgraph.name, source_ty);
-            let Some(ty) = ty.as_mut() else {
-                ty = Some(source_ty.clone());
-                continue;
+            // If the previous candidate did not exist or was incompatible, keep the new one.
+            if *has_incompatible {
+                *has_incompatible = false;
+                return Ok(Some(source_ty.clone()));
+            }
+            let Some(ty) = ty else {
+                return Ok(Some(source_ty.clone()));
             };
 
             if same_type(ty, source_ty) {
                 trace!("Types are identical");
-                continue;
             } else if let Ok(true) = self.is_strict_subtype(ty, source_ty) {
                 trace!("Source {source_ty} is a strict subtype of current {ty}");
                 has_subtypes = true;
                 if is_input_position {
                     // For inputs, update to the more specific subtype
-                    *ty = source_ty.clone();
+                    return Ok(Some(source_ty.clone()));
                 }
             } else if let Ok(true) = self.is_strict_subtype(source_ty, ty) {
                 trace!("Current {ty} is a strict subtype of source {source_ty}");
                 has_subtypes = true;
                 if !is_input_position {
                     // For outputs, update to the more general supertype
-                    *ty = source_ty.clone();
+                    return Ok(Some(source_ty.clone()));
                 }
             } else {
                 trace!("Types {ty} and source {source_ty} are incompatible");
-                has_incompatible = true;
+                *has_incompatible = true;
+            }
+            Ok(None)
+        };
+
+        let mut ty_idx: Option<usize> = None;
+        for (idx, (source_idx, source)) in sources.iter().enumerate() {
+            if let Some(new_ty) = check_candidate(&ty, source_idx, source, &mut has_incompatible)? {
+                ty_idx = Some(idx);
+                ty = Some(new_ty);
+            }
+        }
+        if let Some(ty_idx) = ty_idx {
+            // A candidate was found; confirm it is still the maximum/minimum compared to elements
+            // that came before it.
+            for (source_idx, source) in sources.iter().take(ty_idx) {
+                if check_candidate(&ty, source_idx, source, &mut has_incompatible)?.is_some() {
+                    has_incompatible = true;
+                }
+                if has_incompatible {
+                    break;
+                }
             }
         }
 
@@ -2925,6 +2966,38 @@ format!("Field \"{field}\" of {} type \"{}\" is defined in some but not all subg
         }
 
         Ok(())
+    }
+
+    /// Enforces the 2025 spec rule that an implementing field may only be deprecated when every
+    /// interface field it implements is deprecated. Each subgraph can satisfy the rule on its own
+    /// while the merged schema does not, for example when the interface field is declared in a
+    /// different subgraph.
+    fn remove_invalid_implementation_deprecations(&mut self) {
+        let stripped =
+            fed3_upgrader::strip_invalid_implementation_deprecations(self.merged.schema_mut());
+        for stripped in stripped {
+            let locations = self.deprecated_locations(&stripped.type_name, &stripped.field_name);
+            self.error_reporter.add_hint(stripped.into_hint(locations));
+        }
+    }
+
+    /// Where `type_name.field_name` is deprecated in a subgraph schema.
+    fn deprecated_locations(&self, type_name: &Name, field_name: &Name) -> Vec<SubgraphLocation> {
+        self.subgraphs
+            .iter()
+            .filter_map(|subgraph| {
+                let schema = subgraph.schema().schema();
+                let directive = schema
+                    .type_field(type_name, field_name)
+                    .ok()?
+                    .directives
+                    .get("deprecated")?;
+                Some(SubgraphLocation {
+                    subgraph: subgraph.name.clone(),
+                    range: directive.line_column_range(&schema.sources)?,
+                })
+            })
+            .collect()
     }
 }
 
