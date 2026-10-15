@@ -59,7 +59,7 @@ impl CachedQueryGraph {
     }
 
     /// Slots for [`Self::subgraph_index`]: one per subgraph schema, plus one
-    /// shared by sources without a schema.
+    /// for the federated root source, the only source without one.
     pub(super) fn subgraph_count(&self) -> usize {
         self.query_graph.subgraph_schemas().len() + 1
     }
