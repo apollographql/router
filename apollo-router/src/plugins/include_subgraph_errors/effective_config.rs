@@ -146,6 +146,12 @@ pub(crate) struct SubgraphEffectiveConfig {
 }
 
 impl EffectiveConfig {
+    /// The effective configuration for one subgraph, falling back to the
+    /// global default when the subgraph is not named in the config.
+    pub(crate) fn for_subgraph(&self, subgraph_name: &str) -> &SubgraphEffectiveConfig {
+        self.subgraphs.get(subgraph_name).unwrap_or(&self.default)
+    }
+
     fn default_config(config: &Config) -> SubgraphEffectiveConfig {
         let (global_include_errors, global_redact_message, global_allow_keys, global_deny_keys) =
             match &config.all {
