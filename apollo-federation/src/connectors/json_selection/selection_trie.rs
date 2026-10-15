@@ -143,8 +143,8 @@ impl SelectionTrie {
     /// |---------------------|-------------------------------------|
     /// | `Base(name)`        | `name` (e.g. `"$root"`)             |
     /// | `Field(_, key)`     | `key`                               |
-    /// | `Item(_, idx)`      | `idx.to_string()`                   |
     /// | `AnyField(_)`       | `"**"`                              |
+    /// | `Item(_, idx)`      | (skipped — list index, RH-1415)     |
     /// | `AnyItem(_)`        | (skipped — array iteration marker)  |
     /// | `Question(_)`       | (skipped — operator)                |
     /// | `NotNone(_)`        | (skipped — operator)                |
@@ -212,9 +212,11 @@ impl SelectionTrie {
             let key = match part.case() {
                 NameCase::Base(base) => base.to_string(),
                 NameCase::Field(_, field) => field.to_string(),
-                NameCase::Item(_, idx) => idx.to_string(),
                 NameCase::AnyField(_) => "**".to_string(),
-                NameCase::AnyItem(_) | NameCase::Question(_) | NameCase::NotNone(_) => continue,
+                NameCase::Item(_, _)
+                | NameCase::AnyItem(_)
+                | NameCase::Question(_)
+                | NameCase::NotNone(_) => continue,
             };
             match current.get(key) {
                 Some(sub) => current = sub,
