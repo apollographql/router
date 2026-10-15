@@ -3936,6 +3936,103 @@ fn connector_field_without_this_beside_this_connector() {
     "#);
 }
 
+/// `/skus` returns `sku` but not `id`: resolve through the resolver keyed
+/// on `sku`, not the one keyed on `id`.
+#[test]
+fn connector_entity_resolver_key_from_connector_shape() {
+    let plan_str = plan_query_with_router_specs(
+        include_str!("../fixtures/connector_alternate_key_resolver.graphql"),
+        "{ productsBySku { sku name } }",
+    );
+    insta::assert_snapshot!(plan_str, @r#"
+    QueryPlan {
+      Sequence {
+        Fetch(service: "products_Query_productsBySku_0") {
+          {
+            productsBySku {
+              __typename
+              sku
+            }
+          }
+        },
+        Flatten(path: "productsBySku.@") {
+          Fetch(service: "products_Query_productBySku_0") {
+            {
+              ... on Product {
+                __typename
+                sku
+              }
+            } =>
+            {
+              ... on Product {
+                name
+              }
+            }
+          },
+        },
+      },
+    }
+    "#);
+}
+
+/// The GraphQL subgraph's key `upc` is in the connector subgraph's schema
+/// but not in `/products`'s selection: fetch it through `product(id:)`
+/// before the key hop.
+#[test]
+fn connector_graphql_key_hop_routes_key_missing_from_shape() {
+    let plan_str = plan_query_with_router_specs(
+        include_str!("../fixtures/connector_graphql_key_not_in_shape.graphql"),
+        "{ products { name reviews { body } } }",
+    );
+    insta::assert_snapshot!(plan_str, @r#"
+    QueryPlan {
+      Sequence {
+        Fetch(service: "products_Query_products_0") {
+          {
+            products {
+              __typename
+              name
+              id
+            }
+          }
+        },
+        Flatten(path: "products.@") {
+          Fetch(service: "products_Query_product_0") {
+            {
+              ... on Product {
+                __typename
+                id
+              }
+            } =>
+            {
+              ... on Product {
+                upc
+              }
+            }
+          },
+        },
+        Flatten(path: "products.@") {
+          Fetch(service: "reviews") {
+            {
+              ... on Product {
+                __typename
+                upc
+              }
+            } =>
+            {
+              ... on Product {
+                reviews {
+                  body
+                }
+              }
+            }
+          },
+        },
+      },
+    }
+    "#);
+}
+
 /// A `$this` field connector on an `@interfaceObject` resolves its own
 /// field under a concrete implementation's fragment.
 #[test]
