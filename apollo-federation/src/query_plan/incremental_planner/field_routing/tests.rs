@@ -4393,6 +4393,24 @@ fn connector_unprovided_key_refetches_parent() {
     "#);
 }
 
+/// `author: { name ... authorExtra }` spreads an unknown path, so what it adds
+/// is not known statically. The spread provides no key: `author` is re-fetched
+/// through `post(id:)` as if the spread were absent, which is how composition
+/// and the legacy planner read it.
+#[test]
+fn connector_spread_of_unknown_path_provides_no_key() {
+    let query = "{ posts { title author { name email } } }";
+    let plain = plan_query_with_router_specs(
+        include_str!("../fixtures/connector_nested_reference_without_key.graphql"),
+        query,
+    );
+    let spread = plan_query_with_router_specs(
+        include_str!("../fixtures/connector_nested_reference_spread.graphql"),
+        query,
+    );
+    assert_eq!(spread, plain);
+}
+
 /// A no-`$this` connector on `User` gives it a `__typename` key, but that key
 /// does not resolve `email`: the lift must still re-fetch `author` through
 /// `post(id:)` rather than treat any provided key as enough.
