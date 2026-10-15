@@ -75,7 +75,7 @@ const REMOVAL_EXPRESSION: &str = r#"const("__PLEASE_DELETE_ME")"#;
 pub(crate) enum UpgradeMode {
     /// Upgrade using migrations for major version (eg: from router 1.x to router 2.x)
     Major,
-    /// Upgrade using migrations for a given minor version (eg: from router 2.x to router 2.y)
+    /// Upgrade using the within-major migrations of the given major version (eg: from router 2.x to router 2.y)
     Minor(i64),
 }
 
