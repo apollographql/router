@@ -120,7 +120,7 @@ impl<'a> Builder<'a> {
                 Endpoint::from_router_service(
                     path,
                     PrometheusService {
-                        registry: prometheus_registry.clone(),
+                        endpoint: prometheus_registry,
                     }
                     .boxed_clone(),
                 ),

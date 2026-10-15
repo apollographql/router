@@ -124,6 +124,7 @@ mod tests {
     use crate::services::SubgraphRequest;
     use crate::services::SubgraphResponse;
     use crate::services::connector::request_service;
+    use crate::services::connector::request_service::TransportOutcome;
 
     /// The response the error-response layer gives when the service beneath it fails with `error`.
     async fn respond_to(error: BoxError) -> Result<SubgraphResponse, BoxError> {
@@ -182,7 +183,10 @@ mod tests {
     #[tokio::test]
     async fn source_overload_becomes_rate_limited() {
         let response = source_responds_to(Overloaded::new().into()).await.unwrap();
-        assert!(matches!(response.transport_result, Err(Error::RateLimited)));
+        assert!(matches!(
+            response.transport_outcome,
+            TransportOutcome::Error(Error::RateLimited)
+        ));
     }
 
     #[tokio::test]

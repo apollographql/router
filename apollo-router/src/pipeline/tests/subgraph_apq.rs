@@ -21,6 +21,7 @@ use crate::Context;
 use crate::configuration::SubgraphApq;
 use crate::graphql::Response;
 use crate::pipeline::build_subgraph_services;
+use crate::pipeline::tests::stage_stack::required_stage_plugins;
 use crate::query_planner::fetch::OperationKind;
 use crate::services::SubgraphRequest;
 use crate::services::http::test_http_client_service;
@@ -113,7 +114,7 @@ async fn respects_all_enabled_config() {
     let mut http_services = IndexMap::new();
     http_services.insert("test".to_string(), test_http_client_service("test"));
 
-    let services = build_subgraph_services(http_services, &Default::default(), &config);
+    let services = build_subgraph_services(http_services, &required_stage_plugins().await, &config);
     let url = Uri::from_str(&format!("http://{socket_addr}")).unwrap();
     let resp = services
         .get("test")
@@ -160,7 +161,7 @@ async fn respects_all_disabled_config() {
     let mut http_services = IndexMap::new();
     http_services.insert("test".to_string(), test_http_client_service("test"));
 
-    let services = build_subgraph_services(http_services, &Default::default(), &config);
+    let services = build_subgraph_services(http_services, &required_stage_plugins().await, &config);
     let url = Uri::from_str(&format!("http://{socket_addr}")).unwrap();
     services
         .get("test")
@@ -230,7 +231,7 @@ async fn per_subgraph_override_takes_precedence_over_all() {
         test_http_client_service("disabled_subgraph"),
     );
 
-    let services = build_subgraph_services(http_services, &Default::default(), &config);
+    let services = build_subgraph_services(http_services, &required_stage_plugins().await, &config);
     let url = Uri::from_str(&format!("http://{socket_addr}")).unwrap();
 
     let enabled_request = SubgraphRequest::builder()

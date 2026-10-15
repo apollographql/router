@@ -10,10 +10,8 @@ use apollo_federation::connectors::Connector;
 use apollo_federation::connectors::runtime::debug::ConnectorContext;
 use apollo_federation::connectors::runtime::errors::Error;
 use apollo_federation::connectors::runtime::errors::RuntimeError;
-#[cfg(test)]
 use apollo_federation::connectors::runtime::http_json_transport::HttpResponse;
 use apollo_federation::connectors::runtime::http_json_transport::TransportRequest;
-use apollo_federation::connectors::runtime::http_json_transport::TransportResponse;
 use apollo_federation::connectors::runtime::key::ResponseKey;
 use apollo_federation::connectors::runtime::mapping::Problem;
 use apollo_federation::connectors::runtime::responses::MappedResponse;
@@ -29,6 +27,7 @@ use tower::BoxError;
 use tower::ServiceExt;
 
 use crate::Context;
+use crate::batching::BatchQuery;
 use crate::error::FetchError;
 use crate::graphql;
 use crate::layers::unconstrained_buffer::UnconstrainedBuffer;
@@ -154,6 +153,12 @@ impl Request {
         }
     }
 
+    pub(crate) fn is_part_of_batch(&self) -> bool {
+        self.context
+            .extensions()
+            .with_lock(|lock| lock.contains_key::<BatchQuery>())
+    }
+
     /// The original request made to the router, which produced this connector request.
     ///
     /// Read-only on purpose. `ConnectorRequestService::call` and its callees read this
@@ -172,12 +177,11 @@ impl Request {
     /// from the `ConnectorRequest` stage: the connector call is not made, and `message`,
     /// `code`, and `extensions` are reported to the client as a GraphQL error at this
     /// connector's path (an entry for `code` in `extensions` is ignored). Use it to fail
-    /// a connector request deliberately, for example to circuit break on an upstream a
+    /// a connector request deliberately, for example to stop calling an upstream the
     /// plugin knows to be unhealthy.
     ///
-    /// The response carries no status, so the router's own circuit breaker counts the
-    /// failure against the connector source, like any other error from a request it has
-    /// admitted.
+    /// The connector source is never called, so the router's own circuit breaker records no
+    /// outcome for the response.
     ///
     /// The error's remaining fields are derived from the request and are not settable,
     /// for the same reason the coprocessor does not let a coprocessor set them: the
@@ -193,12 +197,28 @@ impl Request {
             self.context,
             self.connector,
             self.key,
-            None,
             message,
             code,
             extensions,
         )
     }
+}
+
+/// What happened at the transport layer for a single connector call.
+#[derive(Debug)]
+pub enum TransportOutcome {
+    /// The connector call was made over HTTP and the upstream responded. This is the only
+    /// state that carries a status and headers.
+    Response(HttpResponse),
+
+    /// The connector is mapping-only: it produced a response by applying its selection to an
+    /// empty object, without any transport at all. Like a cache hit there is no status and no
+    /// headers, but for an entirely different reason — this connector never has a transport,
+    /// whereas a cache hit skipped one it normally makes.
+    MappingOnly,
+
+    /// The connector call was attempted and failed at the transport level.
+    Error(Error),
 }
 
 /// Response type for a connector
@@ -214,7 +234,7 @@ pub struct Response {
     /// connector calls don't race when resolving per-subgraph response rules.
     pub(crate) subgraph_name: String,
 
-    /// The result of the transport request.
+    /// What happened at the transport layer for this connector call.
     ///
     /// This is the raw transport outcome: HTTP status, headers and transport-level
     /// errors. Telemetry and downstream plugins read it, but the data returned to the
@@ -222,7 +242,7 @@ pub struct Response {
     /// changes. Rewriting the status or headers here therefore makes telemetry
     /// disagree with what the client actually receives unless you make the
     /// corresponding change through the mapped-response accessors.
-    pub transport_result: Result<TransportResponse, Error>,
+    pub transport_outcome: TransportOutcome,
 
     /// The mapped response, including any mapping problems encountered when processing
     /// the response. This is what is merged into the GraphQL response returned to the
@@ -230,10 +250,10 @@ pub struct Response {
     /// are reachable; see the accessors on [`Response`].
     pub(crate) mapped_response: MappedResponse,
 
-    /// The status a coprocessor gave when it broke this request before it was sent, so the
-    /// circuit breaker can judge the break the way it judges a subgraph response's status.
-    /// `None` for every request that was not broken with a status.
-    pub(crate) break_status: Option<http::StatusCode>,
+    /// Whether the router produced this response without calling the source: a coprocessor or
+    /// plugin broke the request, or the response cache answered it. The circuit breaker records
+    /// no outcome for such a response. Without this, a break would look like a transport error.
+    pub(crate) answered_by_router: bool,
 }
 
 impl Response {
@@ -252,7 +272,7 @@ impl Response {
     /// customization cannot turn a failed connector call into a successful one, which
     /// is also true of the coprocessor `ConnectorResponse` stage.
     ///
-    /// This does not touch [`Response::transport_result`], so telemetry continues to
+    /// This does not touch [`Response::transport_outcome`], so telemetry continues to
     /// report the status and headers actually received from the upstream.
     pub fn set_data(&mut self, data: serde_json_bytes::Value) -> bool {
         match &mut self.mapped_response {
@@ -322,9 +342,9 @@ impl Response {
         Self {
             context,
             subgraph_name,
-            transport_result: Err(error),
+            transport_outcome: TransportOutcome::Error(error),
             mapped_response,
-            break_status: None,
+            answered_by_router: false,
         }
     }
 
@@ -332,7 +352,6 @@ impl Response {
         request_context: Context,
         request_connector: Arc<Connector>,
         request_key: ResponseKey,
-        break_status: Option<http::StatusCode>,
         message: impl Into<String>,
         code: impl Into<String>,
         extensions: impl IntoIterator<Item = (impl Into<ByteString>, impl Into<Value>)>,
@@ -351,13 +370,13 @@ impl Response {
         Response {
             context: request_context,
             subgraph_name,
-            transport_result: Err(Error::TransportFailure(message)),
+            transport_outcome: TransportOutcome::Error(Error::TransportFailure(message)),
             mapped_response: MappedResponse::Error {
                 error,
                 key: request_key,
                 problems: Vec::new(),
             },
-            break_status,
+            answered_by_router: true,
         }
     }
 
@@ -373,6 +392,7 @@ impl Response {
             data: data.clone(),
             problems,
             key: response_key,
+            declared_errors: vec![],
         };
 
         let mut response_builder = http::Response::builder();
@@ -387,9 +407,9 @@ impl Response {
         Self {
             context,
             subgraph_name: String::new(),
-            transport_result: Ok(http_response.into()),
+            transport_outcome: TransportOutcome::Response(http_response),
             mapped_response,
-            break_status: None,
+            answered_by_router: false,
         }
     }
 }
@@ -483,9 +503,9 @@ impl tower::Service<Request> for ConnectorRequestService {
                     Ok(Response {
                         context: request.context,
                         subgraph_name: original_subgraph_name,
-                        transport_result: Ok(TransportResponse::MappingOnly),
+                        transport_outcome: TransportOutcome::MappingOnly,
                         mapped_response: mapped,
-                        break_status: None,
+                        answered_by_router: false,
                     })
                 }
 

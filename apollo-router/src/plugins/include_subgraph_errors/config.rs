@@ -15,10 +15,12 @@ use serde::de::{self};
 #[schemars(rename = "IncludeSubgraphErrorsConfig")]
 pub(crate) struct Config {
     /// Global configuration for error redaction. Applies to all subgraphs.
+    // ErrorMode has a hand-written Deserialize, which the macro can't express.
     #[config(skip_validate)]
     pub(crate) all: ErrorMode,
 
     /// Overrides global configuration on a per-subgraph basis
+    // SubgraphConfig has a hand-written Deserialize, which the macro can't express.
     #[config(skip_validate)]
     pub(crate) subgraphs: HashMap<String, SubgraphConfig>,
 }
