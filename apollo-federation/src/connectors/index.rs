@@ -192,6 +192,16 @@ impl ConnectorIndex {
         self.key_conditions.get(coordinate)
     }
 
+    /// The shape an entity-resolver connector returns for the entity's field
+    /// `field_name`, when it returns that field.
+    pub(crate) fn resolver_field_shape(&self, coordinate: &str, field_name: &str) -> Option<Shape> {
+        let shape = self.output_shapes.get(coordinate)?;
+        if let Some(own_field) = self.implicit_fields.get(coordinate) {
+            return (own_field == field_name).then(|| shape.clone());
+        }
+        object_fields(shape)?.get(field_name).cloned()
+    }
+
     /// Whether an entity-resolver connector returns every field of the
     /// entity's `selection`.
     pub(crate) fn resolver_provides(&self, coordinate: &str, selection: &Selection) -> bool {
