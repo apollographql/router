@@ -58,18 +58,18 @@ impl ConfigurationSource {
     pub(crate) fn into_stream(
         self,
         uplink_config: Option<UplinkConfig>,
-        oci_config: Option<OciConfig>,
+        pq_oci_config: Option<OciConfig>,
     ) -> impl Stream<Item = Event> {
         match self {
             ConfigurationSource::Static(mut instance) => {
                 instance.uplink = uplink_config;
-                instance.oci = oci_config;
+                instance.pq_oci = pq_oci_config;
                 stream::iter(vec![UpdateConfiguration(instance.into())]).boxed()
             }
             ConfigurationSource::Stream(stream) => stream
                 .map(move |mut c| {
                     c.uplink = uplink_config.clone();
-                    c.oci = oci_config.clone();
+                    c.pq_oci = pq_oci_config.clone();
                     UpdateConfiguration(Arc::new(c))
                 })
                 .boxed(),
@@ -89,14 +89,14 @@ impl ConfigurationSource {
                                     .filter_map(move |_| {
                                         let path = path.clone();
                                         let uplink_config = uplink_config.clone();
-                                        let oci_config = oci_config.clone();
+                                        let pq_oci_config = pq_oci_config.clone();
                                         async move {
                                             match ConfigurationSource::read_config_async(&path)
                                                 .await
                                             {
                                                 Ok(mut configuration) => {
                                                     configuration.uplink = uplink_config.clone();
-                                                    configuration.oci = oci_config.clone();
+                                                    configuration.pq_oci = pq_oci_config.clone();
                                                     Some(UpdateConfiguration(Arc::new(
                                                         configuration,
                                                     )))
@@ -137,7 +137,7 @@ impl ConfigurationSource {
                                 }
                             } else {
                                 configuration.uplink = uplink_config.clone();
-                                configuration.oci = oci_config.clone();
+                                configuration.pq_oci = pq_oci_config.clone();
                                 stream::once(future::ready(UpdateConfiguration(Arc::new(
                                     configuration,
                                 ))))

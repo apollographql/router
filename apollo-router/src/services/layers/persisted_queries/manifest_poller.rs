@@ -255,10 +255,12 @@ impl ManifestSource {
             }
         } else if let Some(paths) = &config.persisted_queries.local_manifests {
             ManifestSource::LocalStatic(paths.clone())
-        } else if let Some(oci_config) = config.oci.as_ref() {
-            // Same precedence as the schema and license sources: a configured graph artifact
-            // reference means the OCI image is the source of truth, not Uplink.
-            ManifestSource::Oci(oci_config.clone())
+        } else if let Some(pq_oci_config) = config.pq_oci.as_ref() {
+            // A configured persisted-queries artifact reference means that standalone artifact
+            // is the source of truth, not Uplink. It is independent of the schema source: a
+            // router can fetch its schema over OCI and still take persisted queries from Uplink
+            // by leaving this reference unset.
+            ManifestSource::Oci(pq_oci_config.clone())
         } else if let Some(uplink_config) = config.uplink.as_ref() {
             ManifestSource::Uplink(uplink_config.clone())
         } else {
@@ -302,9 +304,9 @@ async fn create_manifest_stream(
     }
 }
 
-/// Parse the chunk JSON documents read off a graph artifact image (already in manifest layer
-/// order) into a [`PersistedQueryManifest`]. Each document is the same format as an Uplink /
-/// local-file chunk, so it goes through the same validation.
+/// Parse the chunk JSON documents read off the persisted-queries artifact (already in manifest
+/// layer order) into a [`PersistedQueryManifest`]. Each document is the same format as an
+/// Uplink / local-file chunk, so it goes through the same validation.
 fn manifest_from_oci_chunks(raw_chunks: Vec<String>) -> Result<PersistedQueryManifest, BoxError> {
     let mut manifest = PersistedQueryManifest::default();
     for raw_chunk in &raw_chunks {
@@ -313,7 +315,7 @@ fn manifest_from_oci_chunks(raw_chunks: Vec<String>) -> Result<PersistedQueryMan
     }
 
     tracing::info!(
-        "Loaded {} persisted queries from the graph artifact image.",
+        "Loaded {} persisted queries from the persisted-queries artifact.",
         manifest.len()
     );
 
@@ -472,8 +474,8 @@ mod tests {
     use crate::test_harness::mocks::persisted_queries::*;
     use crate::uplink::Endpoints;
 
-    /// An OciConfig for the hot-reloading tag flow, which is how a real graph artifact reference
-    /// is consumed.
+    /// An OciConfig for the hot-reloading tag flow, which is how a real persisted-queries
+    /// artifact reference is consumed.
     fn oci_config_for(reference: String) -> OciConfig {
         OciConfig {
             hot_reload: true,
@@ -534,7 +536,7 @@ mod tests {
     }
 
     #[tokio::test(flavor = "multi_thread")]
-    async fn oci_source_serves_operations_from_graph_artifact_image() {
+    async fn oci_source_serves_operations_from_the_pq_artifact() {
         let mock_server = MockServer::start().await;
         let image_reference =
             setup_mocks(&mock_server, vec![pq_chunk_layer(OCI_CHUNK_JSON)], None).await;
@@ -543,7 +545,7 @@ mod tests {
             Configuration::fake_builder()
                 .apq(Apq::fake_new(Some(false)))
                 .persisted_query(PersistedQueries::builder().enabled(true).build())
-                .oci(oci_config_for(image_reference.to_string()))
+                .pq_oci(oci_config_for(image_reference.to_string()))
                 .build()
                 .unwrap(),
         )
@@ -570,7 +572,7 @@ mod tests {
             Configuration::fake_builder()
                 .apq(Apq::fake_new(Some(false)))
                 .persisted_query(PersistedQueries::builder().enabled(true).build())
-                .oci(oci_config_for(image_reference.to_string()))
+                .pq_oci(oci_config_for(image_reference.to_string()))
                 .uplink(unreachable_uplink)
                 .build()
                 .unwrap(),
@@ -600,7 +602,7 @@ mod tests {
                         ])
                         .build(),
                 )
-                .oci(oci_config_for("localhost:1/unreachable:latest".to_string()))
+                .pq_oci(oci_config_for("localhost:1/unreachable:latest".to_string()))
                 .build()
                 .unwrap(),
         )

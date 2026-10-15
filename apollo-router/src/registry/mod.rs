@@ -579,10 +579,10 @@ pub(crate) type OciPersistedQueryChunks = Vec<String>;
 pub(crate) type OciPersistedQueryChunkStream =
     Pin<Box<dyn Stream<Item = Result<OciPersistedQueryChunks, OciError>> + Send>>;
 
-/// Create a persisted query chunk stream from OCI config, gated on reference type and
-/// hot-reload the same way as the schema stream: this stream polls the same graph manifest the
-/// schema stream does, so the two are only ever configured together. That pairing is
-/// load-bearing for [`stream_pq_chunks_from_oci`]'s schema gate.
+/// Create a persisted query chunk stream from the persisted-queries artifact's OCI config,
+/// gated on reference type and hot-reload the same way as the schema stream. The artifact is
+/// standalone: it lives in its own repository and is fetched and polled independently of the
+/// schema image, so a persisted query publish and a schema publish never wait on each other.
 pub(crate) fn create_oci_pq_chunk_stream(
     oci_config: OciConfig,
 ) -> Result<OciPersistedQueryChunkStream, anyhow::Error> {
@@ -598,46 +598,30 @@ pub(crate) fn create_oci_pq_chunk_stream(
         )),
         (OciReferenceType::Digest, false) => {
             let stream = stream::once(async move {
-                fetch_pq_chunks(&oci_config, &mut HashMap::new(), None)
+                fetch_pq_chunks(&oci_config, &mut HashMap::new())
                     .await
-                    .map(|fetched| match fetched {
-                        // No pinned schema digest was passed, so a fetch always yields chunks.
-                        PqChunkFetch::Chunks { chunks, .. } => chunks,
-                        PqChunkFetch::SchemaChanged => {
-                            unreachable!("schema gate is disabled for one-shot fetches")
-                        }
-                    })
+                    .map(|fetched| fetched.chunks)
             });
             Ok(Box::pin(stream))
         }
     }
 }
 
-/// The outcome of examining the tagged image for persisted query chunks.
-enum PqChunkFetch {
-    /// The image carries the schema this poller is pinned to (or no pin was requested):
-    /// its chunk documents, in manifest layer order, with their layer digests and the image's
-    /// schema layer digest.
-    Chunks {
-        chunks: OciPersistedQueryChunks,
-        chunk_digests: Vec<String>,
-        schema_digest: Option<String>,
-    },
-    /// The image's schema layer differs from the pinned digest; no blobs were fetched.
-    SchemaChanged,
+/// The persisted-queries artifact's chunk documents, in manifest layer order, with their layer
+/// digests (for change detection across polls).
+struct FetchedPqChunks {
+    chunks: OciPersistedQueryChunks,
+    chunk_digests: Vec<String>,
 }
 
-/// Regularly poll the graph manifest for persisted query chunk changes at the configured
-/// interval. HEADs the manifest digest each tick and only GETs the manifest when it moved;
-/// chunk blobs are cached by digest across polls, so a persisted query publish fetches only new
-/// or changed chunks.
+/// Regularly poll the persisted-queries artifact for chunk changes at the configured interval.
+/// HEADs the manifest digest each tick and only GETs the manifest when it moved; chunk blobs
+/// are cached by digest across polls, so a persisted query publish fetches only new or changed
+/// chunks.
 ///
-/// The stream pins the schema layer digest of the first image it emits: this poller belongs to
-/// a router pipeline serving exactly that schema, and hot-swapping in chunks built against a
-/// *different* schema could run persisted queries that are only valid against the new one. So a
-/// publish that moves the schema layer emits nothing here. The schema stream watches the same
-/// tag, and the resulting router reload constructs a fresh poller that picks up the new schema
-/// and its chunks together, activating both in the reload's single atomic pipeline swap.
+/// A zero-layer artifact is an emptied list and emits an empty manifest (which, in enforcing
+/// mode, blocks all traffic); an absent tag means no list is linked to this variant and
+/// surfaces as a fetch error rather than an empty manifest, so the two stay distinguishable.
 pub(crate) fn stream_pq_chunks_from_oci(
     oci_config: OciConfig,
 ) -> impl Stream<Item = Result<OciPersistedQueryChunks, OciError>> {
@@ -646,9 +630,6 @@ pub(crate) fn stream_pq_chunks_from_oci(
     let task = async move {
         let mut last_digest: Option<String> = None;
         let mut last_chunk_digests: Option<Vec<String>> = None;
-        // The schema layer digest of the first emitted image: the schema this poller's pipeline
-        // serves. Outer None until the first emission.
-        let mut pinned_schema_digest: Option<Option<String>> = None;
         let mut chunk_cache: HashMap<String, String> = HashMap::new();
         let mut polling_time = oci_config.poll_interval;
         loop {
@@ -659,26 +640,10 @@ pub(crate) fn stream_pq_chunks_from_oci(
                             "oci manifest digest unchanged, skipping persisted query chunk fetch"
                         );
                     } else {
-                        match fetch_pq_chunks(
-                            &oci_config,
-                            &mut chunk_cache,
-                            pinned_schema_digest.as_ref(),
-                        )
-                        .await
-                        {
-                            Ok(PqChunkFetch::SchemaChanged) => {
-                                // Remember the digest so the manifest isn't refetched every tick
-                                // while the reload is in flight. If the tag later returns to the
-                                // pinned schema, hot-swapping resumes.
-                                tracing::debug!(
-                                    "oci image schema layer changed; deferring persisted query update to the schema reload"
-                                );
-                                last_digest = Some(current_digest);
-                            }
-                            Ok(PqChunkFetch::Chunks {
+                        match fetch_pq_chunks(&oci_config, &mut chunk_cache).await {
+                            Ok(FetchedPqChunks {
                                 chunks,
                                 chunk_digests,
-                                schema_digest,
                             }) => {
                                 if last_chunk_digests.as_ref() == Some(&chunk_digests) {
                                     // The manifest moved but carries the same persisted query
@@ -698,7 +663,6 @@ pub(crate) fn stream_pq_chunks_from_oci(
                                     // Only advance on a successful send so a failed fetch retries
                                     last_digest = Some(current_digest);
                                     last_chunk_digests = Some(chunk_digests);
-                                    pinned_schema_digest.get_or_insert(schema_digest);
                                 }
                             }
                             Err(err) => {
@@ -739,19 +703,14 @@ pub(crate) fn stream_pq_chunks_from_oci(
     ReceiverStream::new(receiver).boxed()
 }
 
-/// Fetch the graph manifest and materialize its persisted query chunk layers, reusing
+/// Fetch the persisted-queries artifact's manifest and materialize its chunk layers, reusing
 /// `chunk_cache` (digest -> decompressed JSON) for layers already fetched on a previous poll.
 /// Returns the chunks in manifest layer order together with their layer digests. The cache is
-/// replaced with exactly the surviving layers, so chunks dropped from the image are evicted.
-///
-/// When `pinned_schema_digest` is given and the image's schema layer digest differs, returns
-/// [`PqChunkFetch::SchemaChanged`] before fetching any blobs: those chunks belong to a schema
-/// this poller's pipeline is not serving.
+/// replaced with exactly the surviving layers, so chunks dropped from the artifact are evicted.
 async fn fetch_pq_chunks(
     oci_config: &OciConfig,
     chunk_cache: &mut HashMap<String, String>,
-    pinned_schema_digest: Option<&Option<String>>,
-) -> Result<PqChunkFetch, OciError> {
+) -> Result<FetchedPqChunks, OciError> {
     let reference: Reference = oci_config.reference.as_str().parse()?;
     let auth = build_auth(&reference, &oci_config.apollo_key);
     let mut client = Client::new(ClientConfig {
@@ -761,17 +720,6 @@ async fn fetch_pq_chunks(
 
     let (manifest, _) =
         fetch_oci_manifest(&mut client, &auth, &reference, Some(oci_config)).await?;
-
-    let schema_digest = manifest
-        .layers
-        .iter()
-        .find(|layer| layer.media_type == APOLLO_SCHEMA_MEDIA_TYPE)
-        .map(|layer| layer.digest.clone());
-    if let Some(pinned) = pinned_schema_digest
-        && *pinned != schema_digest
-    {
-        return Ok(PqChunkFetch::SchemaChanged);
-    }
 
     let chunk_layers: Vec<_> = manifest
         .layers
@@ -797,10 +745,9 @@ async fn fetch_pq_chunks(
     }
     *chunk_cache = new_cache;
 
-    Ok(PqChunkFetch::Chunks {
+    Ok(FetchedPqChunks {
         chunks,
         chunk_digests,
-        schema_digest,
     })
 }
 
@@ -2028,14 +1975,6 @@ mod tests {
     const CHUNK_ONE_JSON: &str = r#"{"format":"apollo-persisted-query-manifest","version":1,"operations":[{"id":"op-1","body":"query { one }"}]}"#;
     const CHUNK_TWO_JSON: &str = r#"{"format":"apollo-persisted-query-manifest","version":1,"operations":[{"id":"op-2","body":"query { two }"}]}"#;
 
-    fn schema_layer(sdl: &str) -> ImageLayer {
-        ImageLayer {
-            data: sdl.to_string().into_bytes(),
-            media_type: APOLLO_SCHEMA_MEDIA_TYPE.to_string(),
-            annotations: None,
-        }
-    }
-
     fn image_manifest_for_layers(
         layers: &[&ImageLayer],
         annotations: Option<BTreeMap<String, String>>,
@@ -2092,7 +2031,6 @@ mod tests {
         let image_reference = setup_mocks(
             mock_server,
             vec![
-                schema_layer("test schema"),
                 pq_chunk_layer(CHUNK_ONE_JSON),
                 pq_chunk_layer(CHUNK_TWO_JSON),
             ],
@@ -2108,7 +2046,7 @@ mod tests {
 
         assert_eq!(results.len(), 1);
         match &results[0] {
-            // Chunks arrive in manifest layer order; the schema layer is not among them.
+            // Chunks arrive in manifest layer order.
             Ok(chunks) => assert_eq!(
                 chunks,
                 &vec![CHUNK_ONE_JSON.to_string(), CHUNK_TWO_JSON.to_string()]
@@ -2121,10 +2059,11 @@ mod tests {
     async fn stream_pq_chunks_from_oci_emits_empty_set_without_chunk_layers() {
         let mock_server = &MockServer::start().await;
 
-        // A graph that has never published persisted queries still emits (an empty set), because
-        // the manifest poller blocks startup on the first emission.
-        let image_reference =
-            setup_mocks(mock_server, vec![schema_layer("test schema")], None).await;
+        // A zero-layer artifact is the build of an emptied list: it still emits (an empty set),
+        // because the manifest poller blocks startup on the first emission, and in enforcing
+        // mode that empty manifest deliberately blocks all traffic. An absent tag (no list
+        // linked) is a fetch error instead, so the two stay distinguishable.
+        let image_reference = setup_mocks(mock_server, vec![], None).await;
         let oci_config = mock_oci_config_with_reference(image_reference.to_string());
 
         let results = stream_pq_chunks_from_oci(oci_config)
@@ -2183,25 +2122,22 @@ mod tests {
 
         let chunk_one = pq_chunk_layer(CHUNK_ONE_JSON);
         let chunk_two = pq_chunk_layer(CHUNK_TWO_JSON);
-        let schema = schema_layer("test schema");
 
-        let v1 = image_manifest_for_layers(&[&schema, &chunk_one], None);
-        // The manifest digest moves (annotation-only change) but schema and chunk layers are
-        // identical.
+        let v1 = image_manifest_for_layers(&[&chunk_one], None);
+        // The manifest digest moves (annotation-only change, like a pointer re-tag carrying a
+        // new ordering ID) but the chunk layers are identical.
         let v2 = image_manifest_for_layers(
-            &[&schema, &chunk_one],
+            &[&chunk_one],
             Some(BTreeMap::from([(
                 "com.example.note".to_string(),
                 "annotation only".to_string(),
             )])),
         );
-        // A persisted query publish adds a chunk (same schema).
-        let v3 = image_manifest_for_layers(&[&schema, &chunk_one, &chunk_two], None);
+        // A persisted query publish adds a chunk.
+        let v3 = image_manifest_for_layers(&[&chunk_one, &chunk_two], None);
 
         let chunk_one_fetches = mount_counting_blob(mock_server, &chunk_one).await;
         let chunk_two_fetches = mount_counting_blob(mock_server, &chunk_two).await;
-        // Deliberately no blob mock for the schema layer: the persisted query stream must never
-        // fetch it, and an attempt would 404 and surface as an error item.
 
         let current_manifest = mount_switchable_manifest(mock_server, v1).await;
 
@@ -2243,73 +2179,6 @@ mod tests {
         );
         assert_eq!(chunk_one_fetches.load(Ordering::SeqCst), 1);
         assert_eq!(chunk_two_fetches.load(Ordering::SeqCst), 1);
-    }
-
-    #[tokio::test(flavor = "multi_thread")]
-    async fn stream_pq_chunks_defers_to_the_schema_reload_when_the_schema_layer_changes() {
-        let mock_server = &MockServer::start().await;
-
-        let chunk_one = pq_chunk_layer(CHUNK_ONE_JSON);
-        let chunk_two = pq_chunk_layer(CHUNK_TWO_JSON);
-        let schema_v1 = schema_layer("schema v1");
-        let schema_v2 = schema_layer("schema v2");
-
-        let v1 = image_manifest_for_layers(&[&schema_v1, &chunk_one], None);
-        // A combined publish: new schema AND new chunk set on one image. The running poller is
-        // pinned to schema v1, so it must not hot-swap these chunks; the schema reload's fresh
-        // poller applies both atomically.
-        let v2 = image_manifest_for_layers(&[&schema_v2, &chunk_one, &chunk_two], None);
-
-        let chunk_one_fetches = mount_counting_blob(mock_server, &chunk_one).await;
-        let chunk_two_fetches = mount_counting_blob(mock_server, &chunk_two).await;
-
-        let current_manifest = mount_switchable_manifest(mock_server, v1.clone()).await;
-
-        let oci_config = mock_oci_config_with_reference(format!(
-            "{}/test-graph-id:latest",
-            mock_server.address()
-        ));
-        let mut stream = Box::pin(stream_pq_chunks_from_oci(oci_config));
-
-        let first = timeout(Duration::from_secs(30), stream.next())
-            .await
-            .expect("first emission should arrive")
-            .expect("stream should not end")
-            .expect("first emission should succeed");
-        assert_eq!(first, vec![CHUNK_ONE_JSON.to_string()]);
-
-        // Move the tag to the combined publish: the pinned-schema gate defers, emitting nothing
-        // and fetching no blobs (the gate fires before blob fetches).
-        *current_manifest.lock() = v2;
-        let nothing = timeout(Duration::from_millis(200), stream.next()).await;
-        assert!(
-            nothing.is_err(),
-            "a publish that changes the schema layer must not hot-swap persisted queries"
-        );
-        assert_eq!(chunk_one_fetches.load(Ordering::SeqCst), 1);
-        assert_eq!(
-            chunk_two_fetches.load(Ordering::SeqCst),
-            0,
-            "the deferred image's new chunk must not be fetched"
-        );
-
-        // A fresh poller (what the schema reload constructs) picks up schema v2 and its chunks
-        // together.
-        let reloaded = timeout(
-            Duration::from_secs(30),
-            Box::pin(stream_pq_chunks_from_oci(mock_oci_config_with_reference(
-                format!("{}/test-graph-id:latest", mock_server.address()),
-            )))
-            .next(),
-        )
-        .await
-        .expect("reload emission should arrive")
-        .expect("stream should not end")
-        .expect("reload emission should succeed");
-        assert_eq!(
-            reloaded,
-            vec![CHUNK_ONE_JSON.to_string(), CHUNK_TWO_JSON.to_string()]
-        );
     }
 
     #[tokio::test(flavor = "multi_thread")]
