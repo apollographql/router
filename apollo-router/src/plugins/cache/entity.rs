@@ -1759,13 +1759,9 @@ async fn insert_entities_in_result(
     let mut to_insert: Vec<_> = Vec::new();
     // Only the entities this reassembly consumes, one per cache miss, can have errors attributed
     // to them.
-    let attributable_entity_count = result
-        .iter()
-        .filter(|r| r.cache_entry.is_none())
-        .count()
-        .min(entities.len());
+    let entity_miss_count = result.iter().filter(|r| r.cache_entry.is_none()).count();
     let (mut errors_by_entity_idx, unattributed_errors) =
-        attribute_errors_to_entities(errors, attributable_entity_count);
+        attribute_errors_to_entities(errors, entity_miss_count);
     // An unattributed error pointing into `_entities` may describe any entity of this fetch, so
     // none of them is cached. Errors with no path or a path elsewhere don't affect caching.
     let has_unattributable_entity_errors = unattributed_errors

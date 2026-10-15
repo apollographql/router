@@ -3396,14 +3396,15 @@ fn filter_representations(
     Ok((new_representations, result, cache_control))
 }
 
-/// The errors from a connector response that are **not** scoped to a specific `_entities[i]` slot.
+/// The errors from a connector response whose path does not point into `_entities`.
 ///
 /// The connector entity-merge loop (`ConnectorRequestCacheService::merge_cached_entities` in
 /// `connectors.rs`) rebuilds the error list from the errors it can reindex — see
 /// [`reindex_entity_errors`], which keeps only errors whose path starts `_entities[i]`. Anything
 /// else (a top-level error, an error on a non-entity field) has no slot to be reindexed into and
-/// would be dropped by that rebuild, so it is carried across unchanged instead. The subgraph loop
-/// handles these through `attribute_errors_to_entities`.
+/// would be dropped by that rebuild, so it is carried across unchanged instead. An `_entities`
+/// error without an index is dropped; the connector runtime always writes the index. The subgraph
+/// loop handles these through `attribute_errors_to_entities`.
 pub(super) fn non_entity_errors(errors: &[Error]) -> Vec<Error> {
     errors
         .iter()
@@ -3569,9 +3570,8 @@ async fn insert_entities_in_result(
     // Only the entities this reassembly consumes, one per cache miss, can have errors attributed
     // to them.
     let entity_miss_count = result.iter().filter(|r| r.cache_entry.is_none()).count();
-    let attributable_entity_count = entity_miss_count.min(entities.len());
     let (mut errors_by_entity_idx, unattributed_errors) =
-        attribute_errors_to_entities(errors, attributable_entity_count);
+        attribute_errors_to_entities(errors, entity_miss_count);
     // An unattributed error pointing into `_entities` may describe any entity of this fetch, so
     // none of them is cached. Errors with no path or a path elsewhere don't affect caching.
     let has_unattributable_entity_errors = unattributed_errors

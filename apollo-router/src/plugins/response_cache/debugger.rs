@@ -169,7 +169,7 @@ impl CacheKeyContext {
             self.warnings.push(Warning {
                 code: "SUBGRAPH_ERRORS".to_string(),
                 links: vec![Link { url: String::from("https://www.apollographql.com/docs/graphos/routing/performance/caching/response-caching"), title: "Response caching in the Router".to_string() }],
-                message: "The response contained an error that affects this entry, or an error that could not be tied to a single entity of the same fetch, so the data was not cached.".to_string(),
+                message: "The subgraph returned an error for this entry, or an error the router could not match to a single entity, so the data was not cached.".to_string(),
             });
         }
         // Not cached because private in cache-control header and no private_id found in the context
