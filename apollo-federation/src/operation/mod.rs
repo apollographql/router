@@ -1948,8 +1948,6 @@ impl SelectionSet {
         })
     }
 
-    /// # Preconditions
-    /// The selection set must not contain named fragment spreads.
     pub(crate) fn validate(
         &self,
         _variable_definitions: &[Node<executable::VariableDefinition>],
