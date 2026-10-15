@@ -3772,25 +3772,82 @@ fn connector_entity_shape_drills_into_committed_field() {
     "###);
 }
 
-/// A field connector on a non-root type with no key variables has no way
-/// to attach its result to parent entities; planning must surface an error
-/// rather than emit a fetch with no representation inputs.
+/// A field connector on a non-root type that references no `$this`
+/// (User.staticAvatar) is entered through the singleton `__typename` key,
+/// as connector expansion keys it.
 #[test]
-fn connector_direct_field_without_key_errors() {
-    let supergraph =
-        Supergraph::new_with_router_specs(CONNECTOR_OUTPUT_SHAPE_SCHEMA).expect("supergraph parse");
-    let planner = QueryPlanner::new(&supergraph, default_config()).expect("planner creation");
-    let document = apollo_compiler::ExecutableDocument::parse_and_validate(
-        planner.api_schema().schema(),
+fn connector_field_without_this_keys_on_typename() {
+    let plan_str = plan_query_with_router_specs(
+        CONNECTOR_OUTPUT_SHAPE_SCHEMA,
         "{ users { name staticAvatar } }",
-        "test.graphql",
-    )
-    .expect("query parse");
-    let result = planner.build_query_plan(&document, None, Default::default());
-    assert!(
-        result.is_err(),
-        "keyless non-root connector must not plan silently: {result:?}"
     );
+    insta::assert_snapshot!(plan_str, @r#"
+    QueryPlan {
+      Sequence {
+        Fetch(service: "connectors_Query_users_0") {
+          {
+            users {
+              __typename
+              name
+            }
+          }
+        },
+        Flatten(path: "users.@") {
+          Fetch(service: "connectors_User_staticAvatar_0") {
+            {
+              ... on User {
+                __typename
+              }
+            } =>
+            {
+              ... on User {
+                staticAvatar
+              }
+            }
+          },
+        },
+      },
+    }
+    "#);
+}
+
+/// Without any `$this` connector on the type, its subgraph defines no
+/// `_Entity`; the `__typename` key must still route the field to its
+/// connector instead of folding it into the parent connector's fetch.
+#[test]
+fn connector_field_without_this_in_subgraph_without_entities() {
+    let plan_str = plan_query_with_router_specs(
+        include_str!("../fixtures/connector_field_without_this.graphql"),
+        "{ products { name banner } }",
+    );
+    insta::assert_snapshot!(plan_str, @r#"
+    QueryPlan {
+      Sequence {
+        Fetch(service: "products_Query_products_0") {
+          {
+            products {
+              __typename
+              name
+            }
+          }
+        },
+        Flatten(path: "products.@") {
+          Fetch(service: "products_Product_banner_0") {
+            {
+              ... on Product {
+                __typename
+              }
+            } =>
+            {
+              ... on Product {
+                banner
+              }
+            }
+          },
+        },
+      },
+    }
+    "#);
 }
 
 /// A connector selection that names an object field without sub-selections

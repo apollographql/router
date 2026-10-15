@@ -7,8 +7,10 @@ use apollo_compiler::Node;
 use apollo_compiler::Schema;
 use apollo_compiler::ast::Argument;
 use apollo_compiler::ast::Value;
+use apollo_compiler::executable::FieldSet;
 use apollo_compiler::name;
 use apollo_compiler::schema::ExtendedType;
+use apollo_compiler::validation::Valid;
 use shape::Shape;
 use shape::ShapeCase;
 
@@ -111,12 +113,13 @@ impl ConnectorIndex {
                 // connector's variable references per resolver kind
                 // ($args / $this / $batch).
                 if connector.entity_resolver.is_some() {
-                    let field_set = connector.resolvable_key(schema.schema()).map_err(|e| {
-                        FederationError::internal(format!(
-                            "invalid key for connector {}: {e}",
-                            entry.coordinate
-                        ))
-                    })?;
+                    let field_set =
+                        connector_entity_key(connector, schema.schema()).map_err(|e| {
+                            FederationError::internal(format!(
+                                "invalid key for connector {}: {e}",
+                                entry.coordinate
+                            ))
+                        })?;
                     if let Some(field_set) = field_set {
                         let selection_set = SelectionSet::from_selection_set(
                             &field_set.selection_set,
@@ -229,6 +232,36 @@ fn resolver_entity_type(connector: &Connector, schema: &Schema) -> Option<Name> 
     }
 }
 
+/// The key guarding entry into an entity-resolver connector. A field
+/// connector that references no `$this` (only `$args` or constants) gets the
+/// singleton key `__typename`, as connector expansion gives it.
+fn connector_entity_key(
+    connector: &Connector,
+    schema: &Schema,
+) -> Result<Option<Valid<FieldSet>>, String> {
+    if let Some(field_set) = connector.resolvable_key(schema)? {
+        return Ok(Some(field_set));
+    }
+    if !matches!(connector.entity_resolver, Some(EntityResolver::Implicit)) {
+        return Ok(None);
+    }
+    let parent_type = connector
+        .id
+        .directive
+        .parent_type_name()
+        .ok_or_else(|| format!("Missing type {}", connector.id.coordinate()))?;
+    FieldSet::parse_and_validate(
+        Valid::assume_valid_ref(schema),
+        parent_type,
+        TYPENAME_KEY,
+        "",
+    )
+    .map(Some)
+    .map_err(|e| e.to_string())
+}
+
+const TYPENAME_KEY: &str = "__typename";
+
 /// Adds to the supergraph the `@key` that connector expansion synthesizes for
 /// each entity-resolver connector whose type has no key in its subgraph. The
 /// connector's subgraph then defines the `_Entity` union and `_entities` field
@@ -260,6 +293,9 @@ pub(crate) fn add_connector_entity_keys(
     }
 
     let mut keys: Vec<(Name, Name, String)> = Vec::new();
+    // Singleton `__typename` keys apply only to types no other connector
+    // gives a key.
+    let mut typename_keys: Vec<(Name, Name, String)> = Vec::new();
     for (subgraph_name, subgraph) in extract_subgraphs_from_supergraph(supergraph, Some(false))? {
         let schema = subgraph.schema.schema();
         let Some(graph) = graph_enum_values.get(subgraph_name.as_ref()) else {
@@ -269,20 +305,32 @@ pub(crate) fn add_connector_entity_keys(
             let Some(entity_type) = resolver_entity_type(&connector, schema) else {
                 continue;
             };
-            let Ok(Some(field_set)) = connector.resolvable_key(schema) else {
+            let Ok(Some(field_set)) = connector_entity_key(&connector, schema) else {
                 continue;
             };
+            let fields = field_set.serialize().no_indent().to_string();
+            if fields == TYPENAME_KEY {
+                typename_keys.push((graph.clone(), entity_type, fields));
+                continue;
+            }
             // Extraction rejects a key whose fields the subgraph doesn't define.
             let fields_defined = field_set.selection_set.selections.iter().all(|selection| {
                 selection
                     .as_field()
                     .is_some_and(|field| schema.type_field(&entity_type, &field.name).is_ok())
             });
-            let fields = field_set.serialize().no_indent().to_string();
             let known = keys.iter().any(|(g, t, _)| g == graph && *t == entity_type);
             if fields_defined && !known {
                 keys.push((graph.clone(), entity_type, fields));
             }
+        }
+    }
+    for (graph, entity_type, fields) in typename_keys {
+        if !keys
+            .iter()
+            .any(|(g, t, _)| *g == graph && *t == entity_type)
+        {
+            keys.push((graph, entity_type, fields));
         }
     }
     if keys.is_empty() {
@@ -385,6 +433,23 @@ mod tests {
         assert!(index.resolver_provides(coordinate, "__typename"));
         assert!(!index.resolver_provides(coordinate, "email"));
         assert!(index.output_shape(coordinate).is_some());
+    }
+
+    /// A field connector that references no `$this` is keyed on
+    /// `__typename`, as connector expansion keys it.
+    #[test]
+    fn field_resolver_without_this_keyed_on_typename() {
+        let index = index_from_supergraph(include_str!(
+            "../query_plan/incremental_planner/fixtures/connector_output_shape.graphql"
+        ))
+        .expect("index builds");
+        let key = index
+            .key_conditions("connectors:User.staticAvatar[0]")
+            .expect("singleton key indexed");
+        assert_eq!(
+            key.to_string().split_whitespace().collect::<String>(),
+            "{__typename}"
+        );
     }
 
     #[test]
