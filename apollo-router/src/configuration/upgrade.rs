@@ -454,11 +454,20 @@ mod test {
     }
 
     #[test]
-    fn current_minor_keeps_server_section() {
+    fn nightly_keeps_server_section() {
         let config = json!({ "server": { "http": { "header_read_timeout": "30s" } } });
-        let upgraded = upgrade_configuration(&config, false, UpgradeMode::current_minor())
-            .expect("expected successful migration");
+
+        let nightly = UpgradeMode::Minor(
+            migration_major("0", "nightly-2.17.0.20260924").expect("nightly should parse"),
+        );
+        let upgraded =
+            upgrade_configuration(&config, false, nightly).expect("expected successful migration");
         assert_eq!(upgraded, config);
+
+        // What nightlies used before: the 1.x migrations, which delete `server`.
+        let upgraded = upgrade_configuration(&config, false, UpgradeMode::Minor(0))
+            .expect("expected successful migration");
+        assert_eq!(upgraded, json!({}));
     }
 
     #[test]
