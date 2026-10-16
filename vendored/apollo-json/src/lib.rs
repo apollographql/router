@@ -177,4 +177,5 @@ pub use parse::ParseBuffers;
 pub use peek::BuilderRef;
 pub use pending::{PendingId, PendingTree};
 pub use ser::to_value;
+pub use simd::string_scanner;
 pub use stream::Chunks;

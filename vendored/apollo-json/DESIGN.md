@@ -579,7 +579,7 @@ sequenceDiagram
             P->>P: depth check, push Frame
             Note over P: Err(DepthLimitExceeded) past max_depth
         else string
-            P->>V: scan_string_content (NEON, memchr elsewhere)
+            P->>V: scan_string_content (NEON, SSE2/AVX2, memchr elsewhere)
             V-->>P: first quote / escape / control offset
             P->>A: push_node(String{span, escaped})
         else number or literal
@@ -606,8 +606,16 @@ sequenceDiagram
 - **String scanning is the hot loop** and the larger of the crate's two
   `unsafe` surfaces
   (`simd.rs`): on aarch64 a NEON classifier finds the first quote, escape,
-  or control byte 16–64 bytes at a time; everywhere else (and under Miri) a
-  portable `memchr`-based scanner is used. Whitespace and digit runs skip
+  or control byte 16–64 bytes at a time. On x86_64 SSE2, which every x86_64
+  CPU has, checks the first 16 bytes inline; a string that runs on continues
+  in an AVX2 loop when the CPU reports AVX2, and in SSE2 otherwise. AVX2 is
+  detected once per process and the choice cached in an atomic, so the hot
+  path reads one byte instead of re-detecting; `APOLLO_JSON_SCANNER`
+  (`portable`, `sse2`, `avx2`) overrides it for comparisons, and can never
+  select AVX2 on a CPU without it. `string_scanner()` reports the choice.
+  AVX-512 is not used. Everywhere else (and under Miri) a portable
+  `memchr`-based scanner is used; it is also the reference every vector
+  path is differentially tested against. Whitespace and digit runs skip
   word-at-a-time (SWAR).
 - **Duplicate keys** collapse with `serde_json` `preserve_order` semantics:
   first position, first spelling, last value. Narrow objects use a linear
