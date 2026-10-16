@@ -15,6 +15,7 @@ pub(crate) mod service;
 mod tests;
 
 pub(crate) use service::HttpClientService;
+pub(crate) use service::TraceContextPreservation; // BEGIN/END ROUTER-2060
 
 pub(crate) type BoxService = tower::util::BoxService<HttpRequest, HttpResponse, BoxError>;
 pub(crate) type BoxCloneService = tower::util::BoxCloneService<HttpRequest, HttpResponse, BoxError>;
@@ -56,6 +57,7 @@ impl HttpClientServiceFactory {
             configuration,
             &rustls::RootCertStore::empty(),
             client_config,
+            TraceContextPreservation::default(), // BEGIN/END ROUTER-2060
         )
         .unwrap();
 
