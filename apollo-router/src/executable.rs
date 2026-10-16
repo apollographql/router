@@ -184,6 +184,11 @@ pub struct Opt {
     #[clap(long, env = "APOLLO_GRAPH_ARTIFACT_REFERENCE", action = ArgAction::Append)]
     graph_artifact_reference: Option<String>,
 
+    /// An OCI reference to the persisted-queries artifact for the router to serve its persisted
+    /// query manifest from. Fetched and polled independently of the graph artifact schema image.
+    #[clap(long, env = "APOLLO_PQ_ARTIFACT_REFERENCE", action = ArgAction::Append)]
+    pq_artifact_reference: Option<String>,
+
     /// Disable the router's fully anonymous usage ping. Doesn't affect usage reporting to Apollo
     /// Studio for graphs configured with APOLLO_KEY and APOLLO_GRAPH_REF.
     #[clap(long, env = "APOLLO_TELEMETRY_DISABLED", value_parser = FalseyValueParser::new())]
@@ -250,7 +255,21 @@ impl Opt {
             .graph_artifact_reference
             .clone()
             .ok_or(Self::err_require_opt("APOLLO_GRAPH_ARTIFACT_REFERENCE"))?;
-        let (validated_reference, _) = validate_oci_reference(&graph_artifact_reference)?;
+        self.oci_config_for_reference(&graph_artifact_reference)
+    }
+
+    /// The persisted-queries artifact: its own reference, polled independently of the schema
+    /// image. Same key, poll interval, and TLS handling as the schema's OCI config.
+    pub(crate) fn pq_oci_config(&self) -> Result<OciConfig, anyhow::Error> {
+        let pq_artifact_reference = self
+            .pq_artifact_reference
+            .clone()
+            .ok_or(Self::err_require_opt("APOLLO_PQ_ARTIFACT_REFERENCE"))?;
+        self.oci_config_for_reference(&pq_artifact_reference)
+    }
+
+    fn oci_config_for_reference(&self, reference: &str) -> Result<OciConfig, anyhow::Error> {
+        let (validated_reference, _) = validate_oci_reference(reference)?;
 
         // Allow test-only override of poll interval via TEST_APOLLO_OCI_POLL_INTERVAL environment variable
         let poll_interval = std::env::var("TEST_APOLLO_OCI_POLL_INTERVAL")
@@ -743,6 +762,7 @@ impl Executable {
             .is_telemetry_disabled(opt.anonymous_telemetry_disabled)
             .configuration(configuration)
             .and_uplink(uplink_config)
+            .and_pq_oci(opt.pq_oci_config().ok())
             .schema(schema_source)
             .license(license)
             .shutdown(shutdown.unwrap_or(ShutdownSource::CtrlC))
@@ -912,6 +932,7 @@ mod tests {
                 graph_artifact_reference: Some(
                     "registry.apollographql.com/my-graph@sha256:1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef".to_string(),
                 ),
+                pq_artifact_reference: None,
                 anonymous_telemetry_disabled: true,
                 apollo_uplink_timeout: Duration::from_secs(30),
                 listen_address: None,
@@ -941,6 +962,7 @@ mod tests {
                 apollo_plugins: Default::default(),
                 notify: Default::default(),
                 uplink: None,
+                pq_oci: None,
                 validated_yaml: None,
                 raw_yaml: None,
             }));
@@ -995,6 +1017,7 @@ mod tests {
                 graph_artifact_reference: Some(
                     "registry.apollographql.com/my-graph@sha256:1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef".to_string(),
                 ),
+                pq_artifact_reference: None,
                 anonymous_telemetry_disabled: true,
                 apollo_uplink_timeout: Duration::from_secs(30),
                 listen_address: None,
@@ -1024,6 +1047,7 @@ mod tests {
                 apollo_plugins: Default::default(),
                 notify: Default::default(),
                 uplink: None,
+                pq_oci: None,
                 validated_yaml: None,
                 raw_yaml: None,
             }));
