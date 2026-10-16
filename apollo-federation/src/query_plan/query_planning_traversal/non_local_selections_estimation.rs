@@ -630,8 +630,9 @@ pub(crate) fn precompute_non_local_selection_metadata(
                 let target = edge_ref
                     .weight()
                     .override_condition
-                    .clone()
-                    .map(|condition| FieldTarget::Override(edge_ref.target(), *condition))
+                    .as_deref()
+                    .cloned()
+                    .map(|condition| FieldTarget::Override(edge_ref.target(), condition))
                     .unwrap_or_else(|| FieldTarget::NonOverride(edge_ref.target()));
                 metadata
                     .fields_to_endpoints

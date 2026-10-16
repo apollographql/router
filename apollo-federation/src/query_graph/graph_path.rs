@@ -1021,7 +1021,7 @@ where
                 self.graph.non_trivial_followup_edges.get(last_edge.index())
             else {
                 return Err(FederationError::internal(format!(
-                    "Unexpectedly missing entry for {last_edge} in non-trivial followup edges map",
+                    "Unexpectedly missing entry for {last_edge} in non-trivial followup edges",
                     last_edge = EdgeIndexDisplay::new(last_edge, &self.graph)
                 )));
             };
