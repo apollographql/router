@@ -11,6 +11,7 @@ use crate::error::CompositionError;
 use crate::error::FederationError;
 use crate::error::HasLocations;
 use crate::error::SubgraphLocation;
+use crate::link::inaccessible_spec_definition::IsInaccessibleExt;
 use crate::merger::hints::HintCode;
 use crate::merger::merge::Merger;
 use crate::merger::merge::Sources;
@@ -51,16 +52,15 @@ impl Merger {
             }
             self.validate_one_of_field_nullability(sources, &dest_field, &subgraph_fields)?;
 
-            let is_inaccessible = self
-                .inaccessible_directive_name_in_supergraph
-                .as_ref()
-                .map(|directive_name| {
-                    dest_field.has_applied_directive(&self.merged, directive_name)
-                })
-                .unwrap_or(false);
+            // A field of an @inaccessible input type is itself inaccessible (same as for enum values).
+            let is_inaccessible = match &self.inaccessible_directive_name_in_supergraph {
+                Some(directive_name) => dest_field.is_inaccessible(&self.merged, directive_name)?,
+                None => false,
+            };
 
-            // Note: if the field is marked @inaccessible, we can always accept it to be inconsistent between subgraphs since
-            // it won't be exposed in the API, and we don't hint about it because we're just doing what the user is explicitly asking.
+            // Note: if the field is @inaccessible (directly or through its type), we can always accept it to be inconsistent between
+            // subgraphs since it won't be exposed in the API, and we don't hint about it because we're just doing what the user is
+            // explicitly asking.
             if !is_inaccessible
                 && Self::some_sources(&subgraph_fields, |field, _idx| field.is_none())
             {

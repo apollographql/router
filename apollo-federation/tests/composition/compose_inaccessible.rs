@@ -547,3 +547,132 @@ fn namespaced_inaccessible_composes_correctly() {
         "Expected @federation__inaccessible directive on InternalType"
     );
 }
+
+// =============================================================================
+// @inaccessible INPUT OBJECT MERGING - a field of an @inaccessible input type is itself
+// inaccessible, so (like an explicitly @inaccessible field) it may be inconsistent between
+// subgraphs: it's kept in the supergraph instead of being dropped by the intersection rule.
+// =============================================================================
+
+#[test]
+fn inaccessible_input_type_keeps_inconsistent_field() {
+    let result = compose_as_fed2_subgraphs(&[
+        ServiceDefinition {
+            name: "subgraphA",
+            type_defs: r#"
+            type Query {
+              q: Int
+              f(i: I @inaccessible): Int
+            }
+
+            input I @inaccessible {
+              x: Int
+              y: Int
+            }
+            "#,
+        },
+        ServiceDefinition {
+            name: "subgraphB",
+            type_defs: r#"
+            type Query {
+              g(i: I @inaccessible): Int
+            }
+
+            input I {
+              x: Int
+            }
+            "#,
+        },
+    ]);
+    let supergraph = result.expect("Expected composition to succeed");
+    assert!(
+        supergraph.hints().is_empty(),
+        "Expected no hints but got: {:?}",
+        supergraph.hints()
+    );
+    assert!(
+        coord!(I.y)
+            .lookup_input_field(supergraph.schema().schema())
+            .is_ok()
+    );
+}
+
+#[test]
+fn inaccessible_input_type_keeps_inconsistent_required_field() {
+    // Without @inaccessible on the type this is a REQUIRED_INPUT_FIELD_MISSING_IN_SOME_SUBGRAPH
+    // error.
+    let result = compose_as_fed2_subgraphs(&[
+        ServiceDefinition {
+            name: "subgraphA",
+            type_defs: r#"
+            type Query {
+              q: Int
+              f(i: I @inaccessible): Int
+            }
+
+            input I @inaccessible {
+              x: Int
+              y: Int!
+            }
+            "#,
+        },
+        ServiceDefinition {
+            name: "subgraphB",
+            type_defs: r#"
+            type Query {
+              g(i: I @inaccessible): Int
+            }
+
+            input I {
+              x: Int
+            }
+            "#,
+        },
+    ]);
+    let supergraph = result.expect("Expected composition to succeed");
+    assert!(
+        coord!(I.y)
+            .lookup_input_field(supergraph.schema().schema())
+            .is_ok()
+    );
+}
+
+#[test]
+fn inaccessible_input_type_keeps_inconsistent_field_used_in_default_value() {
+    // If the field were dropped, the default value would reference a field that isn't in the
+    // supergraph and composition would fail with INVALID_GRAPHQL.
+    let result = compose_as_fed2_subgraphs(&[
+        ServiceDefinition {
+            name: "subgraphA",
+            type_defs: r#"
+            type Query {
+              q: Int
+              f(i: I = { x: 1, y: 2 } @inaccessible): Int
+            }
+
+            input I @inaccessible {
+              x: Int
+              y: Int
+            }
+            "#,
+        },
+        ServiceDefinition {
+            name: "subgraphB",
+            type_defs: r#"
+            type Query {
+              g(i: I @inaccessible): Int
+            }
+
+            input I {
+              x: Int
+            }
+            "#,
+        },
+    ]);
+    let supergraph = result.expect("Expected composition to succeed");
+    assert!(
+        coord!(I.y)
+            .lookup_input_field(supergraph.schema().schema())
+            .is_ok()
+    );
+}
