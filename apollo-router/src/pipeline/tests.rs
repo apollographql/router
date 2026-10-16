@@ -145,7 +145,7 @@ async fn create_plugins_instantiates_mandatory_plugins() {
 
 #[tokio::test]
 async fn build_query_plan_cache_without_redis_uses_the_configured_capacity() {
-    let configuration: Configuration = serde_yaml::from_str(
+    let configuration: Configuration = yaml_serde::from_str(
         r#"
         supergraph:
           query_planning:

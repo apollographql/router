@@ -417,7 +417,7 @@ async fn dont_duplicate_redis_connections() {
     }
 
     let mut router = IntegrationTest::builder()
-        .config(serde_yaml::to_string(&config_with_subgraph_prometheus()).unwrap())
+        .config(yaml_serde::to_string(&config_with_subgraph_prometheus()).unwrap())
         .build()
         .await;
 

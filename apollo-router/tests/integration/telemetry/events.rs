@@ -311,7 +311,7 @@ impl EventTest {
             }
         });
         let mut router = IntegrationTest::builder()
-            .config(serde_yaml::to_string(&config).expect("valid yaml"))
+            .config(yaml_serde::to_string(&config).expect("valid yaml"))
             .build()
             .await;
         router.start().await;

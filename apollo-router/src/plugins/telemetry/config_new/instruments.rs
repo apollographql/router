@@ -2985,7 +2985,7 @@ mod tests {
                         .expect("fixture name");
                     let test_definition_file = Asset::get(&fixture).expect("failed to get fixture");
                     let test_definition: TestDefinition =
-                        serde_yaml::from_slice(&test_definition_file.data)
+                        yaml_serde::from_slice(&test_definition_file.data)
                             .expect("failed to parse fixture");
 
                     let router_config_file =
@@ -3434,7 +3434,7 @@ mod tests {
                     path.iter().for_each(|p| snapshot_path.push(p));
                     snapshot_path.pop();
                     let description = test_definition.description;
-                    let info: serde_yaml::Value = serde_yaml::from_slice(&router_config_file.data)
+                    let info: yaml_serde::Value = yaml_serde::from_slice(&router_config_file.data)
                         .expect("failed to parse fixture");
 
                     insta::with_settings!({sort_maps => true,
@@ -3477,7 +3477,7 @@ mod tests {
     }
 
     fn load_config(config: &[u8]) -> InstrumentsConfig {
-        let val: serde_json::Value = serde_yaml::from_slice(config).unwrap();
+        let val: serde_json::Value = yaml_serde::from_slice(config).unwrap();
         let instruments = val
             .as_object()
             .unwrap()
@@ -3495,7 +3495,7 @@ mod tests {
     }
 
     fn load_apollo_config(config: &[u8]) -> Config {
-        let val: serde_json::Value = serde_yaml::from_slice(config).unwrap();
+        let val: serde_json::Value = yaml_serde::from_slice(config).unwrap();
         let apollo_config = &val["telemetry"]["apollo"];
         serde_json::from_value(apollo_config.clone()).unwrap_or_default()
     }

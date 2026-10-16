@@ -885,7 +885,7 @@ mod test {
 
     #[test]
     fn test_subgraph_config() {
-        serde_yaml::from_str::<Config>(
+        yaml_serde::from_str::<Config>(
             r#"
         subgraphs:
           products:
@@ -901,7 +901,7 @@ mod test {
 
     #[test]
     fn test_insert_config() {
-        serde_yaml::from_str::<Config>(
+        yaml_serde::from_str::<Config>(
             r#"
         all:
             request:
@@ -916,7 +916,7 @@ mod test {
 
     #[test]
     fn test_config_debug_redacts_header_values() {
-        let config = serde_yaml::from_str::<Config>(
+        let config = yaml_serde::from_str::<Config>(
             r#"
         all:
             request:
@@ -948,7 +948,7 @@ mod test {
 
     #[test]
     fn test_remove_config() {
-        serde_yaml::from_str::<Config>(
+        yaml_serde::from_str::<Config>(
             r#"
         all:
             request:
@@ -959,7 +959,7 @@ mod test {
         )
         .unwrap();
 
-        serde_yaml::from_str::<Config>(
+        yaml_serde::from_str::<Config>(
             r#"
         all:
             request:
@@ -971,7 +971,7 @@ mod test {
         .unwrap();
 
         assert!(
-            serde_yaml::from_str::<Config>(
+            yaml_serde::from_str::<Config>(
                 r#"
         all:
             request:
@@ -986,7 +986,7 @@ mod test {
 
     #[test]
     fn test_propagate_config() {
-        serde_yaml::from_str::<Config>(
+        yaml_serde::from_str::<Config>(
             r#"
         all:
             request:
@@ -997,7 +997,7 @@ mod test {
         )
         .unwrap();
 
-        serde_yaml::from_str::<Config>(
+        yaml_serde::from_str::<Config>(
             r#"
         all:
             request:
@@ -1009,7 +1009,7 @@ mod test {
         )
         .unwrap();
 
-        serde_yaml::from_str::<Config>(
+        yaml_serde::from_str::<Config>(
             r#"
         all:
             request:
@@ -1022,7 +1022,7 @@ mod test {
         )
         .unwrap();
 
-        serde_yaml::from_str::<Config>(
+        yaml_serde::from_str::<Config>(
             r#"
         all:
             request:
@@ -1036,7 +1036,7 @@ mod test {
 
     #[test]
     fn test_masking_config_global() {
-        serde_yaml::from_str::<Config>(
+        yaml_serde::from_str::<Config>(
             r#"
         all:
             request:
@@ -1052,7 +1052,7 @@ mod test {
 
     #[test]
     fn test_masking_config_per_subgraph() {
-        serde_yaml::from_str::<Config>(
+        yaml_serde::from_str::<Config>(
             r#"
         subgraphs:
           products:
@@ -1068,7 +1068,7 @@ mod test {
 
     #[test]
     fn test_masking_config_combined_with_operations() {
-        serde_yaml::from_str::<Config>(
+        yaml_serde::from_str::<Config>(
             r#"
         all:
             request:
@@ -1087,7 +1087,7 @@ mod test {
 
     #[test]
     fn test_masking_config_response_global() {
-        let config = serde_yaml::from_str::<Config>(
+        let config = yaml_serde::from_str::<Config>(
             r#"
         all:
             response:
@@ -1112,7 +1112,7 @@ mod test {
 
     #[test]
     fn test_masking_config_response_per_subgraph_differs_from_request() {
-        let config = serde_yaml::from_str::<Config>(
+        let config = yaml_serde::from_str::<Config>(
             r#"
         subgraphs:
           products:
@@ -1233,7 +1233,7 @@ mod test {
 
     #[test]
     fn test_masking_config_disabled() {
-        let config = serde_yaml::from_str::<Config>(
+        let config = yaml_serde::from_str::<Config>(
             r#"
         all:
             request:

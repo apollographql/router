@@ -351,8 +351,8 @@ dependencies = [
  "insta",
  "serde",
  "serde_json",
- "serde_yaml",
  "tracing-subscriber",
+ "yaml_serde",
 ]
 
 [[package]]

@@ -345,7 +345,7 @@ impl Configuration {
         let defaulted_raw = self
             .validated_yaml
             .as_ref()
-            .map(|s| serde_yaml::to_string(s).expect("config was not serializable"))
+            .map(|s| yaml_serde::to_string(s).expect("config was not serializable"))
             .unwrap_or_default();
         hasher.update(defaulted_raw);
         let hash: String = format!("{:x}", hasher.finalize());

@@ -761,7 +761,7 @@ mod test {
                 let input = std::str::from_utf8(&source.data)
                     .expect("expected utf8")
                     .to_string();
-                let yaml = &serde_yaml::from_str::<serde_json::Value>(&input)
+                let yaml = &yaml_serde::from_str::<serde_json::Value>(&input)
                     .expect("config must be valid yaml");
 
                 let mut data = InstrumentData::default();
@@ -784,7 +784,7 @@ mod test {
             let source = Asset::get(&file_name).expect("test file must exist");
             let input = std::str::from_utf8(&source.data).expect("expected utf8");
             let migrated = crate::configuration::upgrade::upgrade_configuration(
-                &serde_yaml::from_str(input).expect("config must be valid yaml"),
+                &yaml_serde::from_str(input).expect("config must be valid yaml"),
                 false,
                 crate::configuration::upgrade::UpgradeMode::current_minor(),
             )

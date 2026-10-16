@@ -835,13 +835,13 @@ fn upgrade_old_configuration() {
                 .expect("expected utf8")
                 .to_string();
             let new_config = crate::configuration::upgrade::upgrade_configuration(
-                &serde_yaml::from_str(&input).expect("config must be valid yaml"),
+                &yaml_serde::from_str(&input).expect("config must be valid yaml"),
                 true,
                 upgrade::UpgradeMode::Major,
             )
             .expect("configuration could not be updated");
             let new_config =
-                serde_yaml::to_string(&new_config).expect("must be able to serialize config");
+                yaml_serde::to_string(&new_config).expect("must be able to serialize config");
 
             let result = parse_without_inputs(&new_config, Migration::None);
 
@@ -907,13 +907,13 @@ fn upgrade_old_minor_configuration() {
                 .expect("expected utf8")
                 .to_string();
             let new_config = crate::configuration::upgrade::upgrade_configuration(
-                &serde_yaml::from_str(&input).expect("config must be valid yaml"),
+                &yaml_serde::from_str(&input).expect("config must be valid yaml"),
                 true,
                 upgrade::UpgradeMode::Minor(2),
             )
             .expect("configuration could not be updated");
             let new_config =
-                serde_yaml::to_string(&new_config).expect("must be able to serialize config");
+                yaml_serde::to_string(&new_config).expect("must be able to serialize config");
 
             let result = parse_without_inputs(&new_config, Migration::None);
 

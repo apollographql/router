@@ -149,9 +149,9 @@ fn load(case: &Case) -> Result<Configuration, ConfigurationError> {
     match case.upgrade {
         Upgrade::Startup => parse(case.text),
         Upgrade::Command => {
-            let original: Value = serde_yaml::from_str(case.text).expect("fixtures are YAML");
+            let original: Value = yaml_serde::from_str(case.text).expect("fixtures are YAML");
             let upgraded = upgrade_configuration(&original, false, UpgradeMode::Major)?;
-            let upgraded = serde_yaml::to_string(&upgraded).expect("migrations serialize");
+            let upgraded = yaml_serde::to_string(&upgraded).expect("migrations serialize");
             parse_without_inputs(&upgraded, Migration::None)
         }
     }
@@ -722,7 +722,7 @@ fn schema_declared_top_level_defaults_match_the_default_configuration() {
         checked += 1;
 
         // A JSON scalar is valid YAML flow-scalar syntax, so `default`'s `Display` (JSON text)
-        // can be written directly after the key without a round trip through `serde_yaml`.
+        // can be written directly after the key without a round trip through `yaml_serde`.
         let config = parse(&format!("{key}: {default}\n")).unwrap_or_else(|error| {
             panic!("[{key}] loading rejected its own schema-declared default: {error}")
         });

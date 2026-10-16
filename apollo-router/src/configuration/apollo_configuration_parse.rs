@@ -388,7 +388,7 @@ impl ConfigurationParser {
         let file: Value = if text.trim().is_empty() {
             Value::Object(Default::default())
         } else {
-            serde_yaml::from_str(text).map_err(|error| {
+            yaml_serde::from_str(text).map_err(|error| {
                 ConfigurationError::InvalidConfiguration {
                     message: "failed to parse yaml",
                     error: error.to_string(),
@@ -438,7 +438,7 @@ fn migrate(file: &Value, migration: Migration) -> Result<Option<String>, Configu
     if migrated == *file {
         return Ok(None);
     }
-    serde_yaml::to_string(&migrated).map(Some).map_err(|error| {
+    yaml_serde::to_string(&migrated).map(Some).map_err(|error| {
         ConfigurationError::MigrationFailure {
             error: error.to_string(),
         }
@@ -951,7 +951,7 @@ mod tests {
             STARTUP_MIGRATED_PLUGIN,
             include_str!("testdata/compat/plugin_config_error_after_migration.yaml"),
         ] {
-            let file: Value = serde_yaml::from_str(text).expect("test inputs are YAML");
+            let file: Value = yaml_serde::from_str(text).expect("test inputs are YAML");
             let migrated = upgrade_configuration_silently(&file, UpgradeMode::current_minor())
                 .expect("test inputs migrate");
             assert_ne!(migrated, file, "startup no longer migrates:\n{text}");
@@ -1288,7 +1288,7 @@ mod tests {
     /// Configurations built with serde or the test builders go through the same rules.
     #[test]
     fn serde_and_builder_configurations_run_plugin_rules() {
-        let error = serde_yaml::from_str::<Configuration>(
+        let error = yaml_serde::from_str::<Configuration>(
             "plugins:\n  test.validated:\n    name: reserved\n",
         )
         .expect_err("the plugin's rule rejects the name")
