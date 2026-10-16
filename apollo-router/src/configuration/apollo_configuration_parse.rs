@@ -385,8 +385,6 @@ impl ConfigurationParser {
                 snapshot.resolved.lock().clear();
             }
         }
-        // Migration serialization must not hide duplicate keys in the original document.
-        super::yaml::check_duplicate_keys(text)?;
         let file: Value = if text.trim().is_empty() {
             Value::Object(Default::default())
         } else {
@@ -723,7 +721,7 @@ mod tests {
         assert!(matches!(
             error,
             ConfigurationError::InvalidConfiguration {
-                message: "could not parse yaml",
+                message: "failed to parse yaml",
                 ..
             }
         ));

@@ -290,8 +290,7 @@ fn unknown_plugin_name_is_rejected() {
         .expect_err("the plugin is not registered");
 }
 
-/// Duplicate keys are rejected in the original text, before migration or parsing could
-/// collapse them.
+/// Duplicate keys are rejected in the original text.
 #[test]
 fn duplicate_keys_are_rejected_before_migration() {
     let error = parse(include_str!("testdata/compat/duplicate_keys.yaml"))

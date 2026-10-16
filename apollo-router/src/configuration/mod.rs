@@ -93,7 +93,6 @@ mod test_discovery;
 #[cfg(test)]
 mod tests;
 mod upgrade;
-mod yaml;
 
 // TODO: Talk it through with the teams
 static HEARTBEAT_TIMEOUT_DURATION_SECONDS: u64 = 15;
