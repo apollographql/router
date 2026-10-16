@@ -2033,7 +2033,17 @@ fn compute_aliases_for_non_merging_fields(
         })
     }
 
-    for FieldInPath { mut path, field } in selections.iter().flat_map(rebased_fields_in_set) {
+    let fields: Vec<FieldInPath> = selections.iter().flat_map(rebased_fields_in_set).collect();
+    // Every response name the fields at this level already use, including ones that only appear
+    // after a field we end up aliasing. A generated alias must avoid all of them: reusing a later
+    // client response name would merge the two fields in the fetch, and the rewrite renaming the
+    // alias back would then remove the client's own key from the response.
+    let reserved_response_names: IndexSet<Name> = fields
+        .iter()
+        .map(|field| field.field.field.response_name().clone())
+        .collect();
+
+    for FieldInPath { mut path, field } in fields {
         let field_schema = field.field.schema().schema();
         let field_name = field.field.name();
         let response_name = field.field.response_name();
@@ -2082,11 +2092,14 @@ fn compute_aliases_for_non_merging_fields(
                     }
                 } else {
                     // We need to alias the new occurrence.
-                    let alias = gen_alias_name(response_name, &seen_response_names);
+                    let alias = gen_alias_name(
+                        response_name,
+                        &reserved_response_names,
+                        &seen_response_names,
+                    );
 
-                    // Given how we generate aliases, it's is very unlikely that the generated alias will conflict with any of the other response name
-                    // at the level, but it's theoretically possible. By adding the alias to the seen names, we ensure that in the remote change that
-                    // this ever happen, we'll avoid the conflict by giving another alias to the followup occurrence.
+                    // Record the alias as seen so that later conflicting occurrences get distinct aliases, and so that
+                    // sub-selections under the alias are processed at the right path.
                     let selections = match field.selection_set.as_ref() {
                         Some(s) => {
                             let mut p = path.clone();
@@ -2152,11 +2165,16 @@ fn compute_aliases_for_non_merging_fields(
         })
 }
 
-fn gen_alias_name(base_name: &Name, unavailable_names: &IndexMap<Name, SeenResponseName>) -> Name {
+fn gen_alias_name(
+    base_name: &Name,
+    reserved_names: &IndexSet<Name>,
+    seen_names: &IndexMap<Name, SeenResponseName>,
+) -> Name {
     let mut counter = 0usize;
     loop {
         if let Ok(name) = Name::try_from(format!("{base_name}__alias_{counter}"))
-            && !unavailable_names.contains_key(&name)
+            && !reserved_names.contains(&name)
+            && !seen_names.contains_key(&name)
         {
             return name;
         }
