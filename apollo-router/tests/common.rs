@@ -422,7 +422,7 @@ pub struct IntegrationTest {
     logs: Vec<String>,
     port_replacements: HashMap<String, u16>,
     jwt: Option<String>,
-    env: Option<HashMap<String, OsString>>,
+    env: HashMap<String, OsString>,
     hot_reload: bool,
     reqwest_client: reqwest::Client,
     /// When `true`, the harness forwards the host's `TEST_APOLLO_KEY`
@@ -515,7 +515,7 @@ impl IntegrationTest {
     /// Set environment variables for the router subprocess
     #[allow(dead_code)]
     pub fn set_env(&mut self, env: HashMap<String, OsString>) {
-        self.env.get_or_insert_with(HashMap::new).extend(env);
+        self.env.extend(env);
     }
 
     /// Path to the temp file holding this test's supergraph schema. Tests
@@ -806,7 +806,7 @@ impl IntegrationTest {
         subgraph_callback: Option<Box<dyn Fn() + Send + Sync>>,
         http_method: Option<String>,
         jwt: Option<String>,
-        env: Option<HashMap<String, OsString>>,
+        env: HashMap<String, OsString>,
         redis_namespace: Option<String>,
         hot_reload: Option<bool>,
         reqwest_client: Option<reqwest::Client>,
@@ -1130,15 +1130,13 @@ impl IntegrationTest {
         // explicit `.env(...)` builder call wins over the defaults
         // (eg. for a test that wants to override `APOLLO_UPLINK_ENDPOINTS`
         // to its own custom mock).
-        if let Some(env) = &self.env {
-            for (key, val) in env {
-                // If env vars are used to configure which schema to load, do not
-                // override later with the --supergraph cli arg
-                if non_file_startup_env.iter().any(|x| x == key) {
-                    needs_supergraph_cli_arg = false;
-                }
-                router.env(key, val);
+        for (key, val) in &self.env {
+            // If env vars are used to configure which schema to load, do not
+            // override later with the --supergraph cli arg
+            if non_file_startup_env.iter().any(|x| x == key) {
+                needs_supergraph_cli_arg = false;
             }
+            router.env(key, val);
         }
 
         // Opt-in real Studio credentials. Reads `TEST_APOLLO_KEY` and
