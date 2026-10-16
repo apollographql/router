@@ -16,7 +16,7 @@ telemetry:
         path: /metrics
       otlp:
         enabled: true
-        endpoint: ${env.TEST_CONFIG_COLLECTOR_ENDPOINT}/metrics
+        endpoint: <otel-collector-endpoint>/metrics
         protocol: http
         batch_processor:
           scheduled_delay: 100ms
