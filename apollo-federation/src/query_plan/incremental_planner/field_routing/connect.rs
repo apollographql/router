@@ -7,20 +7,27 @@ use std::sync::Arc;
 use apollo_compiler::Name;
 use petgraph::graph::NodeIndex;
 use shape::Shape;
-use shape::ShapeCase;
 use tracing::trace;
 
 use super::super::defer::extract_defer_label;
 use super::super::defer::strip_defer_directive;
+use super::super::fetch_graph::FetchGroupKind;
 use super::super::fetch_graph::InputContribution;
 use super::super::fetch_graph::InputRewriteInfo;
 use super::super::shared_path::SharedPath;
 use super::FieldRoutingSearchSpace;
 use super::commit::field_response_elements;
+use super::requires::unconditioned_input_path;
+use super::routing::IntermediateKeyHop;
 use super::routing::RoutingChoice;
 use super::state::PendingSelection;
 use super::state::PlanState;
+use crate::connectors::ConnectorPosition;
+use crate::connectors::EntityResolver;
 use crate::connectors::index::IndexedConnector;
+use crate::connectors::index::object_fields;
+use crate::connectors::index::shape_provides;
+use crate::connectors::index::split_selections;
 use crate::error::FederationError;
 use crate::operation::FieldSelection;
 use crate::operation::InlineFragmentSelection;
@@ -28,6 +35,7 @@ use crate::operation::Selection;
 use crate::operation::SelectionMap;
 use crate::operation::SelectionSet;
 use crate::operation::TYPENAME_FIELD;
+use crate::query_graph::QueryGraphEdgeTransition;
 use crate::query_graph::QueryGraphNodeType;
 use crate::query_graph::graph_path::operation::OpPathElement;
 use crate::query_plan::FetchDataPathElement;
@@ -50,14 +58,41 @@ struct DeferredConnectorSelection {
     defer_ref: Option<String>,
 }
 
-/// Strip array wrappers off a shape: a selection set on a list-typed field
-/// is checked against the element shape.
-fn unwrap_list_shape(shape: &Shape) -> &Shape {
-    let mut shape = shape;
-    while let ShapeCase::Array { tail, .. } = shape.case() {
-        shape = tail;
+/// The `deferred` selections, each `op_path_len` elements or more below the
+/// connector fetch's root, as one selection set shaped like `selections`.
+fn deferred_below(
+    selections: &SelectionSet,
+    op_path_len: usize,
+    deferred: &[DeferredConnectorSelection],
+) -> Result<SelectionSet, FederationError> {
+    let mut below =
+        SelectionSet::empty(selections.schema.clone(), selections.type_position.clone());
+    for child in deferred {
+        let mut path: Vec<_> = child.op_path.iter().skip(op_path_len).cloned().collect();
+        let sub_selections = match &child.selection {
+            Selection::Field(field_sel) => {
+                path.push(Arc::new(OpPathElement::Field(field_sel.field.clone())));
+                field_sel.selection_set.clone().map(Arc::new)
+            }
+            Selection::InlineFragment(fragment_sel) => {
+                path.push(Arc::new(OpPathElement::InlineFragment(
+                    fragment_sel.inline_fragment.clone(),
+                )));
+                Some(Arc::new(fragment_sel.selection_set.clone()))
+            }
+        };
+        below.add_at_path_for_incremental_planner(&path, sub_selections.as_ref())?;
     }
-    shape
+    Ok(below)
+}
+
+/// What a connector fetch returns at a path within it.
+enum ConnectorOutputAt {
+    /// The connector's `selection` output at the path.
+    Shape(Shape),
+    /// The parent of a root connector's or field-level resolver's own field:
+    /// the fetch returns only that field (and `__typename`) there.
+    OwnFieldOnly(Name),
 }
 
 impl FieldRoutingSearchSpace {
@@ -98,14 +133,13 @@ impl FieldRoutingSearchSpace {
                 let source = self.node_source(pending.query_graph_node)?;
                 let key_locally_resolvable =
                     self.can_resolve_in_place(pending.query_graph_node, key_conditions, &source)?;
-                let local_key = key_locally_resolvable
-                    .then_some(Some(key_conditions))
-                    .flatten();
+                let (local_key, routed_key) =
+                    self.split_anchor_key(state, pending, key_conditions, key_locally_resolvable)?;
                 self.append_entity_inputs(
                     state,
                     pending.fetch_node,
                     &pending.op_path,
-                    local_key,
+                    local_key.as_ref(),
                     &source,
                 );
 
@@ -133,8 +167,8 @@ impl FieldRoutingSearchSpace {
                     .graph
                     .add_dependency(pending.fetch_node, new_group, inputs);
 
-                if !key_locally_resolvable {
-                    self.push_condition_pendings(state, pending, key_conditions, new_group)?;
+                if let Some(routed_key) = &routed_key {
+                    self.push_condition_pendings(state, pending, routed_key, new_group)?;
                 }
 
                 let entity_base_path = self.entity_root_path(entity_type.type_name())?;
@@ -218,30 +252,21 @@ impl FieldRoutingSearchSpace {
                 .inner_named_type()
                 .clone();
             let mut deferred = Vec::new();
-            let kept = match self.connector_index.output_shape(&entry.coordinate) {
-                Some(shape) if matches!(shape.case(), ShapeCase::Object { .. }) => {
+            let output = self
+                .connector_index
+                .output_shape(&entry.coordinate)
+                .and_then(|shape| Some((shape, object_fields(shape)?)));
+            let kept = match &output {
+                Some((shape, fields)) => {
                     // Entity-resolver connectors describe the entity-level
                     // output (e.g. User), but we are partitioning the
                     // sub-selections of the committed field (e.g.
                     // newsletterSubscriptions). Drill into the field's
                     // sub-shape so the partition checks the right level.
-                    let effective_shape = match shape.case() {
-                        ShapeCase::Object { fields, .. } => {
-                            let field_name = field_sel.field.name();
-                            match fields.get(field_name.as_str()) {
-                                Some(child_shape) => {
-                                    let unwrapped = unwrap_list_shape(child_shape);
-                                    if matches!(unwrapped.case(), ShapeCase::Object { .. }) {
-                                        unwrapped
-                                    } else {
-                                        shape
-                                    }
-                                }
-                                None => shape,
-                            }
-                        }
-                        _ => shape,
-                    };
+                    let effective_shape = fields
+                        .get(field_sel.field.name().as_str())
+                        .filter(|child_shape| object_fields(child_shape).is_some())
+                        .unwrap_or(shape);
                     self.partition_connector_selections(
                         &restored,
                         effective_shape,
@@ -317,7 +342,7 @@ impl FieldRoutingSearchSpace {
         defer_ref: &Option<String>,
         deferred: &mut Vec<DeferredConnectorSelection>,
     ) -> Result<Option<SelectionSet>, FederationError> {
-        let ShapeCase::Object { fields, .. } = shape.case() else {
+        let Some(fields) = object_fields(shape) else {
             return Ok(Some(sub_ss.clone()));
         };
         let mut kept = SelectionMap::new();
@@ -347,8 +372,7 @@ impl FieldRoutingSearchSpace {
                     };
                     match &field_sel.selection_set {
                         Some(child_ss) if !child_ss.is_empty() => {
-                            let child_shape = unwrap_list_shape(child_shape);
-                            if !matches!(child_shape.case(), ShapeCase::Object { .. }) {
+                            if object_fields(child_shape).is_none() {
                                 kept.insert(selection.clone());
                                 continue;
                             }
@@ -363,6 +387,7 @@ impl FieldRoutingSearchSpace {
                             for element in field_response_elements(&field_sel.field)? {
                                 child_response = child_response.pushed(element);
                             }
+                            let mut child_deferred = Vec::new();
                             let child_kept = self.partition_connector_selections(
                                 child_ss,
                                 child_shape,
@@ -371,8 +396,36 @@ impl FieldRoutingSearchSpace {
                                 &child_op,
                                 &child_response,
                                 defer_ref,
-                                deferred,
+                                &mut child_deferred,
                             )?;
+                            // Nothing routes a selection on a value type the
+                            // connector subgraph can't re-enter, so the
+                            // field's missing part is fetched from its parent.
+                            let lift_anchor = (!child_deferred.is_empty()
+                                && child_deferred
+                                    .iter()
+                                    .all(|child| child.defer_ref == *defer_ref)
+                                && !self.connector_reenters(source_subgraph, &child_type))
+                            .then(|| self.connector_landing_node(source_subgraph, parent_type))
+                            .flatten();
+                            match lift_anchor {
+                                Some(anchor_node) => {
+                                    let missing =
+                                        deferred_below(child_ss, child_op.len(), &child_deferred)?;
+                                    deferred.push(DeferredConnectorSelection {
+                                        selection: Selection::Field(Arc::new(FieldSelection {
+                                            field: field_sel.field.clone(),
+                                            selection_set: Some(missing),
+                                        })),
+                                        parent_type: parent_type.clone(),
+                                        anchor_node,
+                                        op_path: op_path.clone(),
+                                        response_path: response_path.clone(),
+                                        defer_ref: defer_ref.clone(),
+                                    });
+                                }
+                                None => deferred.extend(child_deferred),
+                            }
                             match child_kept {
                                 Some(child_kept) if !child_kept.is_empty() => {
                                     kept.insert(Selection::Field(Arc::new(FieldSelection {
@@ -455,6 +508,146 @@ impl FieldRoutingSearchSpace {
                 selections: Arc::new(kept),
             }))
         }
+    }
+
+    /// What the connector backing `fetch_node` returns at `op_path` (relative
+    /// to the fetch). `None` when the fetch is not a connector fetch, or the
+    /// path leaves the indexed shape.
+    fn connector_output_at(
+        &self,
+        state: &PlanState,
+        fetch_node: NodeIndex,
+        op_path: &SharedPath<Arc<OpPathElement>>,
+    ) -> Option<ConnectorOutputAt> {
+        let node = state.graph.node(fetch_node);
+        let connector = node.connector.as_ref()?;
+        let mut shape = self
+            .connector_index
+            .output_shape(&connector.id.coordinate())?
+            .clone();
+        let mut path_fields = op_path.iter().filter_map(|element| match element.as_ref() {
+            OpPathElement::Field(field) => Some(field),
+            OpPathElement::InlineFragment(_) => None,
+        });
+        // A root connector, or a field-level entity resolver, describes the
+        // value of its own field, which is the first field on the path.
+        // Type-level and `entity: true` resolvers describe the entity.
+        let describes_own_field =
+            matches!(
+                node.kind,
+                FetchGroupKind::Root { .. } | FetchGroupKind::RootHop { .. }
+            ) || matches!(connector.entity_resolver, Some(EntityResolver::Implicit));
+        if describes_own_field && path_fields.next().is_none() {
+            // The path stops at the own field's parent.
+            let ConnectorPosition::Field(pos) = &connector.id.directive else {
+                return None;
+            };
+            return Some(ConnectorOutputAt::OwnFieldOnly(
+                pos.field.field_name().clone(),
+            ));
+        }
+        for field in path_fields {
+            let child = object_fields(&shape)?.get(field.name().as_str())?.clone();
+            shape = child;
+        }
+        Some(ConnectorOutputAt::Shape(shape))
+    }
+
+    /// The top-level fields of `conditions` the fetch at `fetch_node` does not
+    /// return at `op_path`, paired with the ones it does (`None` when that part
+    /// is empty). A connector fetch returns only what its `selection` maps,
+    /// whatever the subgraph schema declares. `None` when the fetch returns
+    /// every field, which a GraphQL fetch always does.
+    pub(super) fn connector_unprovided(
+        &self,
+        state: &PlanState,
+        fetch_node: NodeIndex,
+        op_path: &SharedPath<Arc<OpPathElement>>,
+        conditions: &SelectionSet,
+    ) -> Option<(Option<Arc<SelectionSet>>, Arc<SelectionSet>)> {
+        let output =
+            self.connector_output_at(state, fetch_node, &unconditioned_input_path(op_path))?;
+        let (provided, missing) = match output {
+            ConnectorOutputAt::Shape(shape) => {
+                split_selections(conditions, |selection| shape_provides(&shape, selection))
+            }
+            ConnectorOutputAt::OwnFieldOnly(own_field) => {
+                split_selections(conditions, |selection| {
+                    selection.is_typename_field()
+                        || matches!(selection, Selection::Field(field_sel)
+                            if *field_sel.field.name() == own_field)
+                })
+            }
+        };
+        Some((provided.map(Arc::new), Arc::new(missing?)))
+    }
+
+    /// The entity-resolver connector a chain enters `hop`'s connector subgraph
+    /// through: one keyed on the hop's entry key, preferring one whose output
+    /// returns the key leaving the hop.
+    pub(super) fn chain_hop_resolver(
+        &self,
+        hop: &IntermediateKeyHop,
+        exit_key: Option<&Arc<SelectionSet>>,
+    ) -> Result<Arc<IndexedConnector>, FederationError> {
+        let node = self.qg().node_weight(hop.target_node)?;
+        let type_pos: CompositeTypeDefinitionPosition = node.type_.clone().try_into()?;
+        let keyed: Vec<&Arc<IndexedConnector>> = self
+            .connector_index
+            .entity_resolvers(type_pos.type_name())
+            .into_iter()
+            .flatten()
+            .filter(|entry| {
+                entry.source_subgraph == node.source
+                    && hop.entry_key.as_ref().is_some_and(|entry_key| {
+                        self.connector_index
+                            .key_conditions(&entry.coordinate)
+                            .is_some_and(|key| key == entry_key)
+                    })
+            })
+            .collect();
+        let returns_exit_key = |entry: &&Arc<IndexedConnector>| {
+            exit_key.is_none_or(|exit_key| {
+                exit_key.selections.values().all(|selection| {
+                    self.connector_index
+                        .resolver_provides(&entry.coordinate, selection)
+                })
+            })
+        };
+        keyed
+            .iter()
+            .find(|entry| returns_exit_key(entry))
+            .or_else(|| keyed.first())
+            .map(|entry| (*entry).clone())
+            .ok_or_else(|| {
+                FederationError::internal(format!(
+                    "no entity-resolver connector enters {} at {}",
+                    node.source,
+                    type_pos.type_name(),
+                ))
+            })
+    }
+
+    /// Whether a selection on `type_name` within `source` can be routed on
+    /// its own: through an entity-resolver connector for the type, or a key
+    /// leaving its node.
+    fn connector_reenters(&self, source: &str, type_name: &Name) -> bool {
+        if self
+            .connector_index
+            .entity_resolvers(type_name)
+            .is_some_and(|resolvers| !resolvers.is_empty())
+        {
+            return true;
+        }
+        self.connector_landing_node(source, type_name)
+            .is_some_and(|node| {
+                self.qg().out_edges(node).into_iter().any(|edge| {
+                    matches!(
+                        edge.weight().transition,
+                        QueryGraphEdgeTransition::KeyResolution
+                    )
+                })
+            })
     }
 
     /// The canonical query graph node for `type_name` within `source`,

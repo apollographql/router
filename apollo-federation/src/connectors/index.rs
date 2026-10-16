@@ -1,3 +1,4 @@
+use std::borrow::Cow;
 use std::collections::HashMap;
 use std::collections::HashSet;
 use std::sync::Arc;
@@ -11,6 +12,7 @@ use apollo_compiler::executable::FieldSet;
 use apollo_compiler::name;
 use apollo_compiler::schema::ExtendedType;
 use apollo_compiler::validation::Valid;
+use indexmap::IndexMap;
 use shape::Shape;
 use shape::ShapeCase;
 
@@ -21,6 +23,8 @@ use super::models::EntityResolver;
 use super::spec::ConnectSpec;
 use crate::error::FederationError;
 use crate::operation::FragmentSpreadCache;
+use crate::operation::Selection;
+use crate::operation::SelectionMap;
 use crate::operation::SelectionSet;
 use crate::operation::TYPENAME_FIELD;
 use crate::schema::FederationSchema;
@@ -188,21 +192,42 @@ impl ConnectorIndex {
         self.key_conditions.get(coordinate)
     }
 
-    /// Whether an entity-resolver connector provides `field` of the entity.
+    /// Whether an entity-resolver connector returns every field of the
+    /// entity's `selection`.
+    pub(crate) fn resolver_provides(&self, coordinate: &str, selection: &Selection) -> bool {
+        self.resolver_returns(coordinate, selection, shape_provides)
+    }
+
+    /// Whether an entity-resolver connector returns some field of the
+    /// entity's `selection`; see [`shape_provides_any`].
+    pub(crate) fn resolver_provides_any(&self, coordinate: &str, selection: &Selection) -> bool {
+        self.resolver_returns(coordinate, selection, shape_provides_any)
+    }
+
     /// `__typename` is always available. A field-level (`Implicit`) resolver
-    /// provides only its own field. Otherwise, whether the `selection`
-    /// returns `field` at the top level of its (object-shaped) output.
-    pub(crate) fn resolver_provides(&self, coordinate: &str, field: &str) -> bool {
-        if field == "__typename" {
+    /// returns only its own field, whose value its `selection` describes.
+    /// Otherwise the `selection` describes the entity. A resolver whose
+    /// output isn't an object returns nothing of it.
+    fn resolver_returns(
+        &self,
+        coordinate: &str,
+        selection: &Selection,
+        returns: fn(&Shape, &Selection) -> bool,
+    ) -> bool {
+        if selection.is_typename_field() {
             return true;
         }
+        let Some(shape) = self.output_shapes.get(coordinate) else {
+            return false;
+        };
         if let Some(own_field) = self.implicit_fields.get(coordinate) {
-            return own_field == field;
+            let entity = Shape::closed_record(
+                IndexMap::from_iter([(own_field.to_string(), shape.clone())]),
+                [],
+            );
+            return returns(&entity, selection);
         }
-        match self.output_shapes.get(coordinate).map(|s| s.case()) {
-            Some(ShapeCase::Object { fields, .. }) => fields.contains_key(field),
-            _ => false,
-        }
+        object_fields(shape).is_some() && returns(shape, selection)
     }
 
     /// Whether `subgraph` is backed by connectors (and therefore has no
@@ -221,6 +246,133 @@ impl ConnectorIndex {
         self.service_subgraphs
             .iter()
             .map(|(service, subgraph)| (service.as_str(), subgraph.as_ref()))
+    }
+}
+
+/// Strip array wrappers off a shape: a selection set on a list-typed field
+/// is checked against the element shape.
+pub(crate) fn unwrap_list_shape(shape: &Shape) -> &Shape {
+    let mut shape = shape;
+    while let ShapeCase::Array { tail, .. } = shape.case() {
+        shape = tail;
+    }
+    shape
+}
+
+/// Split `selections` into the top-level selections `provides` accepts and
+/// the rest; `None` stands for an empty part.
+pub(crate) fn split_selections(
+    selections: &SelectionSet,
+    provides: impl Fn(&Selection) -> bool,
+) -> (Option<SelectionSet>, Option<SelectionSet>) {
+    let mut provided = SelectionMap::new();
+    let mut missing = SelectionMap::new();
+    for selection in selections.selections.values() {
+        if provides(selection) {
+            provided.insert(selection.clone());
+        } else {
+            missing.insert(selection.clone());
+        }
+    }
+    let part = |map: SelectionMap| {
+        (!map.is_empty()).then(|| SelectionSet {
+            schema: selections.schema.clone(),
+            type_position: selections.type_position.clone(),
+            selections: Arc::new(map),
+        })
+    };
+    (part(provided), part(missing))
+}
+
+/// The fields `shape` returns as an object, list wrappers stripped. A union
+/// of shapes (e.g. a `->match`) returns the fields every object member
+/// returns, each shaped as the union of the members' shapes for it; null
+/// and non-object members don't constrain it. `None` for shapes the planner
+/// can't inspect (scalars, unknown JSON), which count as returning
+/// everything.
+pub(crate) fn object_fields(shape: &Shape) -> Option<Cow<'_, IndexMap<String, Shape>>> {
+    match unwrap_list_shape(shape).case() {
+        ShapeCase::Object { fields, .. } => Some(Cow::Borrowed(fields)),
+        ShapeCase::One(members) => {
+            let mut objects = members.iter().filter_map(object_fields);
+            let first = objects.next()?;
+            let others: Vec<_> = objects.collect();
+            let fields = first
+                .iter()
+                .filter_map(|(name, shape)| {
+                    let mut shapes = vec![shape.clone()];
+                    for other in &others {
+                        shapes.push(other.get(name)?.clone());
+                    }
+                    Some((name.clone(), Shape::one(shapes, [])))
+                })
+                .collect();
+            Some(Cow::Owned(fields))
+        }
+        _ => None,
+    }
+}
+
+/// Whether `shape` returns every field of `selection`.
+pub(crate) fn shape_provides(shape: &Shape, selection: &Selection) -> bool {
+    let Some(fields) = object_fields(shape) else {
+        return true;
+    };
+    let provides_all = |shape: &Shape, selections: &SelectionSet| {
+        selections
+            .selections
+            .values()
+            .all(|selection| shape_provides(shape, selection))
+    };
+    match selection {
+        Selection::Field(field_sel) => {
+            let name = field_sel.field.name();
+            if *name == TYPENAME_FIELD {
+                return true;
+            }
+            let Some(child) = fields.get(name.as_str()) else {
+                return false;
+            };
+            field_sel
+                .selection_set
+                .as_ref()
+                .is_none_or(|child_ss| provides_all(child, child_ss))
+        }
+        Selection::InlineFragment(fragment_sel) => provides_all(shape, &fragment_sel.selection_set),
+    }
+}
+
+/// Whether `shape` returns some field of `selection` other than
+/// `__typename`: a leaf field itself, or some field below a composite one.
+/// A sub-selection of only `__typename` counts as returned with its field.
+pub(crate) fn shape_provides_any(shape: &Shape, selection: &Selection) -> bool {
+    let Some(fields) = object_fields(shape) else {
+        return true;
+    };
+    let provides_any = |shape: &Shape, selections: &SelectionSet| {
+        let mut selections = selections
+            .selections
+            .values()
+            .filter(|selection| !selection.is_typename_field())
+            .peekable();
+        selections.peek().is_none()
+            || selections.any(|selection| shape_provides_any(shape, selection))
+    };
+    match selection {
+        Selection::Field(field_sel) => {
+            let name = field_sel.field.name();
+            if *name == TYPENAME_FIELD {
+                return true;
+            }
+            let Some(child) = fields.get(name.as_str()) else {
+                return false;
+            };
+            field_sel
+                .selection_set
+                .as_ref()
+                .is_none_or(|child_ss| provides_any(child, child_ss))
+        }
+        Selection::InlineFragment(fragment_sel) => provides_any(shape, &fragment_sel.selection_set),
     }
 }
 
@@ -443,14 +595,44 @@ mod tests {
         );
     }
 
+    /// `field_set` on `type_name`, parsed against `subgraph`'s schema.
+    fn subgraph_selection(
+        sdl: &str,
+        subgraph: &str,
+        type_name: &str,
+        field_set: &str,
+    ) -> Selection {
+        let supergraph = Supergraph::new_with_router_specs(sdl).expect("supergraph parses");
+        let subgraphs = supergraph.extract_subgraphs().expect("subgraphs extract");
+        let subgraph = subgraphs.get(subgraph).expect("subgraph exists");
+        crate::schema::field_set::parse_field_set(
+            &subgraph.schema,
+            Name::new(type_name).expect("valid type name"),
+            field_set,
+            true,
+        )
+        .expect("field set parses")
+        .selections
+        .values()
+        .next()
+        .expect("one selection")
+        .clone()
+    }
+
     #[test]
     fn resolver_provides_selected_fields_and_typename() {
         let index = index_from_supergraph(ENTITY_RESOLVER_SCHEMA).expect("index builds");
         let coordinate = "connectors:Query.user[0]";
-        assert!(index.resolver_provides(coordinate, "name"));
-        assert!(index.resolver_provides(coordinate, "id"));
-        assert!(index.resolver_provides(coordinate, "__typename"));
-        assert!(!index.resolver_provides(coordinate, "email"));
+        let provides = |subgraph, field| {
+            index.resolver_provides(
+                coordinate,
+                &subgraph_selection(ENTITY_RESOLVER_SCHEMA, subgraph, "User", field),
+            )
+        };
+        assert!(provides("connectors", "name"));
+        assert!(provides("connectors", "id"));
+        assert!(provides("connectors", "__typename"));
+        assert!(!provides("graphql", "email"));
         assert!(index.output_shape(coordinate).is_some());
     }
 
@@ -464,10 +646,23 @@ mod tests {
         ))
         .expect("index builds");
         let coordinate = "connectors:User.posts[0]";
-        assert!(index.resolver_provides(coordinate, "posts"));
-        assert!(index.resolver_provides(coordinate, "__typename"));
-        assert!(!index.resolver_provides(coordinate, "id"));
-        assert!(!index.resolver_provides(coordinate, "title"));
+        let provides = |field| {
+            index.resolver_provides(
+                coordinate,
+                &subgraph_selection(
+                    include_str!(
+                        "../query_plan/incremental_planner/fixtures/connector_join_directive_link.graphql"
+                    ),
+                    "connectors",
+                    "User",
+                    field,
+                ),
+            )
+        };
+        assert!(provides("posts { id title }"));
+        assert!(!provides("posts { author { id } }"));
+        assert!(provides("__typename"));
+        assert!(!provides("id"));
     }
 
     /// A field connector that references no `$this` is keyed on
