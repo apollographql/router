@@ -34,8 +34,7 @@ use crate::plugins::telemetry::config_new::supergraph::selectors::SupergraphSele
 use crate::plugins::telemetry::dynamic_attribute::EventDynAttribute;
 
 /// Events are
-#[derive(Deserialize, JsonSchema, Clone, Default, Debug)]
-#[serde(deny_unknown_fields, default)]
+#[apollo_configuration::configuration]
 pub(crate) struct Events {
     /// Router service events
     router: Extendable<RouterEventsConfig, Event<RouterAttributes, RouterSelector>>,
@@ -100,56 +99,56 @@ impl Events {
         super::connector::events::new_connector_events(&self.connector)
     }
 
-    pub(crate) fn validate(&self) -> Result<(), String> {
+    pub(crate) fn validate_selectors(&self) -> Result<(), String> {
         self.router
             .attributes
             .request
-            .validate(Some(Stage::Request))?;
+            .validate_selectors(Some(Stage::Request))?;
         self.router
             .attributes
             .response
-            .validate(Some(Stage::Response))?;
+            .validate_selectors(Some(Stage::Response))?;
         self.supergraph
             .attributes
             .request
-            .validate(Some(Stage::Request))?;
+            .validate_selectors(Some(Stage::Request))?;
         self.supergraph
             .attributes
             .response
-            .validate(Some(Stage::Response))?;
+            .validate_selectors(Some(Stage::Response))?;
         self.subgraph
             .attributes
             .request
-            .validate(Some(Stage::Request))?;
+            .validate_selectors(Some(Stage::Request))?;
         self.subgraph
             .attributes
             .response
-            .validate(Some(Stage::Response))?;
+            .validate_selectors(Some(Stage::Response))?;
         self.connector
             .attributes
             .request
-            .validate(Some(Stage::Request))?;
+            .validate_selectors(Some(Stage::Request))?;
         self.connector
             .attributes
             .response
-            .validate(Some(Stage::Response))?;
+            .validate_selectors(Some(Stage::Response))?;
         for (name, custom_event) in &self.router.custom {
-            custom_event.validate().map_err(|err| {
+            custom_event.validate_selectors().map_err(|err| {
                 format!("configuration error for router custom event {name:?}: {err}")
             })?;
         }
         for (name, custom_event) in &self.supergraph.custom {
-            custom_event.validate().map_err(|err| {
+            custom_event.validate_selectors().map_err(|err| {
                 format!("configuration error for supergraph custom event {name:?}: {err}")
             })?;
         }
         for (name, custom_event) in &self.subgraph.custom {
-            custom_event.validate().map_err(|err| {
+            custom_event.validate_selectors().map_err(|err| {
                 format!("configuration error for subgraph custom event {name:?}: {err}")
             })?;
         }
         for (name, custom_event) in &self.connector.custom {
-            custom_event.validate().map_err(|err| {
+            custom_event.validate_selectors().map_err(|err| {
                 format!("configuration error for connector HTTP custom event {name:?}: {err}")
             })?;
         }
@@ -171,7 +170,7 @@ where
 
 #[derive(Deserialize, JsonSchema, Clone, Debug)]
 #[schemars(rename = "StandardEventConfig{T}")]
-#[serde(untagged)]
+#[serde(untagged, deny_unknown_fields)]
 pub(crate) enum StandardEventConfig<T> {
     Level(EventLevelConfig),
     Conditional {
@@ -180,10 +179,23 @@ pub(crate) enum StandardEventConfig<T> {
     },
 }
 
-impl<T: Selector> StandardEventConfig<T> {
-    fn validate(&self, restricted_stage: Option<Stage>) -> Result<(), String> {
+// The configuration attribute doesn't support generic types, so this forwards validation to the
+// condition. The enum is untagged, so the condition sits directly under the event's key.
+impl<T> apollo_configuration::Validate for StandardEventConfig<T>
+where
+    T: apollo_configuration::Validate,
+{
+    fn validate(&self, mut errors: apollo_configuration::ErrorCollector<'_>) {
         if let Self::Conditional { condition, .. } = self {
-            condition.validate(restricted_stage)
+            condition.validate(errors.nest("condition"));
+        }
+    }
+}
+
+impl<T: Selector> StandardEventConfig<T> {
+    fn validate_selectors(&self, restricted_stage: Option<Stage>) -> Result<(), String> {
+        if let Self::Conditional { condition, .. } = self {
+            condition.validate_selectors(restricted_stage)
         } else {
             Ok(())
         }
@@ -220,13 +232,13 @@ impl<T: Clone> StandardEvent<T> {
 
 /// Log level configuration for events. Use "off" to not log the event, or a level name to log the
 /// event at that level and above.
-#[derive(Deserialize, JsonSchema, Clone, Debug, Default, PartialEq, Copy)]
-#[serde(rename_all = "snake_case")]
+#[apollo_configuration::configuration]
+#[derive(PartialEq, Copy)]
 pub(crate) enum EventLevelConfig {
     Info,
     Warn,
     Error,
-    #[default]
+    #[config(default)]
     Off,
 }
 
@@ -252,6 +264,7 @@ impl EventLevel {
 /// The event has an implicit `type` attribute that matches the name of the event in the yaml
 /// and a message that can be used to provide additional information.
 #[derive(Deserialize, JsonSchema, Clone, Debug)]
+#[serde(deny_unknown_fields)]
 pub(crate) struct Event<A, E>
 where
     A: Default + Debug,
@@ -275,22 +288,35 @@ where
     pub(super) condition: Condition<E>,
 }
 
+// The configuration attribute doesn't support generic types, so this forwards validation to the
+// event's attributes and condition. Its other fields are scalars.
+impl<A, E> apollo_configuration::Validate for Event<A, E>
+where
+    A: Default + Debug + apollo_configuration::Validate,
+    E: Debug + apollo_configuration::Validate,
+{
+    fn validate(&self, mut errors: apollo_configuration::ErrorCollector<'_>) {
+        self.attributes.validate(errors.nest("attributes"));
+        self.condition.validate(errors.nest("condition"));
+    }
+}
+
 impl<A, E, Request, Response, EventResponse> Event<A, E>
 where
     A: Selectors<Request, Response, EventResponse> + Default + Debug,
     E: Selector<Request = Request, Response = Response, EventResponse = EventResponse> + Debug,
 {
-    pub(crate) fn validate(&self) -> Result<(), String> {
+    pub(crate) fn validate_selectors(&self) -> Result<(), String> {
         let stage = Some(self.on.into());
-        self.attributes.validate(stage)?;
-        self.condition.validate(stage)?;
+        self.attributes.validate_selectors(stage)?;
+        self.condition.validate_selectors(stage)?;
         Ok(())
     }
 }
 
 /// When to trigger the event.
-#[derive(Deserialize, JsonSchema, Clone, Debug, Copy, PartialEq)]
-#[serde(rename_all = "snake_case")]
+#[apollo_configuration::configuration]
+#[derive(Copy, PartialEq)]
 pub(crate) enum EventOn {
     /// Log the event on request
     Request,

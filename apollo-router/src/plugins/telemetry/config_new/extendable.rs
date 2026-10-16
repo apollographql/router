@@ -188,6 +188,20 @@ where
     }
 }
 
+// The configuration attribute doesn't support generic types, and Extendable's hand-written
+// Deserialize splits one map between the standard attributes and custom entries. This forwards
+// validation to both, at the map's own path.
+impl<A, E> apollo_configuration::Validate for Extendable<A, E>
+where
+    A: Default + apollo_configuration::Validate,
+    E: apollo_configuration::Validate,
+{
+    fn validate(&self, mut errors: apollo_configuration::ErrorCollector<'_>) {
+        self.attributes.validate(errors.inner());
+        self.custom.validate(errors.inner());
+    }
+}
+
 impl<A, E> Default for Extendable<A, E>
 where
     A: Default,
@@ -277,7 +291,7 @@ where
     A: Default + Selectors<Request, Response, EventResponse>,
     E: Selector<Request = Request, Response = Response, EventResponse = EventResponse>,
 {
-    pub(crate) fn validate(&self, restricted_stage: Option<Stage>) -> Result<(), String> {
+    pub(crate) fn validate_selectors(&self, restricted_stage: Option<Stage>) -> Result<(), String> {
         if let Some(Stage::Request) = &restricted_stage {
             for (name, custom) in &self.custom {
                 if !custom.is_active(Stage::Request) {

@@ -6,8 +6,6 @@ use opentelemetry::Key;
 use opentelemetry::KeyValue;
 use opentelemetry::metrics::MeterProvider;
 use parking_lot::Mutex;
-use schemars::JsonSchema;
-use serde::Deserialize;
 use tower::BoxError;
 
 use super::attributes::StandardAttribute;
@@ -45,8 +43,8 @@ const COST_ESTIMATED_KEY: &str = "cost.estimated";
 const COST_RESULT_KEY: &str = "cost.result";
 
 /// Attributes for Cost
-#[derive(Deserialize, JsonSchema, Clone, Default, Debug, PartialEq)]
-#[serde(deny_unknown_fields, default)]
+#[apollo_configuration::configuration]
+#[derive(PartialEq)]
 pub(crate) struct SupergraphCostAttributes {
     /// The estimated cost of the operation using the currently configured cost model
     #[serde(rename = "cost.estimated")]
@@ -137,8 +135,7 @@ impl SupergraphCostAttributes {
     }
 }
 
-#[derive(Deserialize, JsonSchema, Clone, Default, Debug)]
-#[serde(deny_unknown_fields, default)]
+#[apollo_configuration::configuration]
 pub(crate) struct CostInstrumentsConfig {
     /// A histogram of the estimated cost of the operation using the currently configured cost model
     #[serde(rename = "cost.estimated")]
@@ -348,8 +345,8 @@ impl Instrumented for CostInstruments {
     }
 }
 
-#[derive(Deserialize, JsonSchema, Clone, Debug, PartialEq)]
-#[serde(deny_unknown_fields, rename_all = "snake_case")]
+#[apollo_configuration::configuration]
+#[derive(PartialEq)]
 pub(crate) enum CostValue {
     /// The estimated cost of the operation using the currently configured cost model
     Estimated,
