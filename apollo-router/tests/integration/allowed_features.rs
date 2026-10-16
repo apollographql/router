@@ -1,4 +1,5 @@
 use std::collections::HashMap;
+use std::ffi::OsString;
 use std::path::PathBuf;
 use std::sync::LazyLock;
 
@@ -107,6 +108,16 @@ const SUBSCRIPTION_COPROCESSOR_CONFIG: &str =
 const FILE_UPLOADS_CONFIG: &str =
     include_str!("../../tests/fixtures/file_upload/default.router.yaml");
 
+fn with_service_urls(mut env: HashMap<String, OsString>) -> HashMap<String, OsString> {
+    env.insert("PRODUCTS_URL".to_string(), "http://localhost:5000".into());
+    env.insert("ACCOUNTS_URL".to_string(), "http://localhost:5001".into());
+    env.insert(
+        "COPROCESSOR_URL".to_string(),
+        "http://localhost:5002".into(),
+    );
+    env
+}
+
 /*
  * GIVEN
  *  - a valid license whose `allowed_features` claim contains the feature
@@ -168,13 +179,10 @@ async fn subscription_coprocessors_enabled_when_allowed_features_contains_both_f
             "supergraph.graphql",
         ]))
         .config(SUBSCRIPTION_COPROCESSOR_CONFIG)
-        .env(env)
+        .env(with_service_urls(env))
         .jwt(JWT_WITH_COPROCESSORS_SUBSCRIPTION_IN_ALLOWED_FEATURES.to_string())
         .build()
         .await;
-    router.replace_config_string("http://localhost:{{PRODUCTS_PORT}}", "5000");
-    router.replace_config_string("http://localhost:{{ACCOUNTS_PORT}}", "5001");
-    router.replace_config_string("http://localhost:{{COPROCESSOR_PORT}}", "5002");
 
     router.start().await;
     router.assert_started().await;
@@ -287,13 +295,10 @@ async fn subscription_coprocessors_enabled_when_allowed_features_none() {
             "supergraph.graphql",
         ]))
         .config(SUBSCRIPTION_COPROCESSOR_CONFIG)
-        .env(env)
+        .env(with_service_urls(env))
         .jwt(JWT_WITH_ALLOWED_FEATURES_NONE.to_string())
         .build()
         .await;
-    router.replace_config_string("http://localhost:{{PRODUCTS_PORT}}", "5000");
-    router.replace_config_string("http://localhost:{{ACCOUNTS_PORT}}", "5001");
-    router.replace_config_string("http://localhost:{{COPROCESSOR_PORT}}", "5002");
 
     router.start().await;
     router.assert_started().await;
@@ -432,7 +437,7 @@ async fn feature_violation_when_allowed_features_with_coprocessor_only_with_subs
     let mut router = IntegrationTest::builder()
         .supergraph("tests/integration/subscriptions/fixtures/supergraph.graphql")
         .config(SUBSCRIPTION_COPROCESSOR_CONFIG)
-        .env(env)
+        .env(with_service_urls(env))
         .jwt(JWT_WITH_COPROCESSORS_IN_ALLOWED_FEATURES.to_string())
         .build()
         .await;
@@ -460,14 +465,10 @@ async fn canned_response_when_license_halted_with_valid_config_and_schema() {
     let mut router = IntegrationTest::builder()
         .supergraph("tests/integration/subscriptions/fixtures/supergraph.graphql")
         .config(SUBSCRIPTION_COPROCESSOR_CONFIG)
-        .env(env)
+        .env(with_service_urls(env))
         .jwt(JWT_PAST_EXPIRY_WITH_COPROCESSORS_ENTITY_CACHING_TRAFFIC_SHAPING_SUBSCRIPTIONS_IN_ALLOWED_FEATURES.to_string())
         .build()
         .await;
-
-    router.replace_config_string("http://localhost:{{PRODUCTS_PORT}}", "localhost:4001");
-    router.replace_config_string("http://localhost:{{ACCOUNTS_PORT}}", "localhost:4002");
-    router.replace_config_string("http://localhost:{{COPROCESSOR_PORT}}", "5002");
 
     /*
      * THEN
@@ -502,7 +503,7 @@ async fn canned_response_when_license_halted_with_restricted_config_and_valid_sc
     let mut router = IntegrationTest::builder()
         .supergraph("tests/integration/subscriptions/fixtures/supergraph.graphql")
         .config(SUBSCRIPTION_COPROCESSOR_CONFIG)
-        .env(env)
+        .env(with_service_urls(env))
         // jwt's allowed features does not contain subscriptions
         .jwt(
             JWT_PAST_EXPIRY_WITH_COPROCESSORS_ENTITY_CACHING_TRAFFIC_SHAPING_IN_ALLOWED_FEATURES
@@ -510,10 +511,6 @@ async fn canned_response_when_license_halted_with_restricted_config_and_valid_sc
         )
         .build()
         .await;
-
-    router.replace_config_string("http://localhost:{{PRODUCTS_PORT}}", "localhost:4001");
-    router.replace_config_string("http://localhost:{{ACCOUNTS_PORT}}", "localhost:4002");
-    router.replace_config_string("http://localhost:{{COPROCESSOR_PORT}}", "5002");
 
     /*
      * THEN
@@ -554,10 +551,6 @@ async fn canned_response_when_license_halted_with_valid_config_and_invalid_schem
         .build()
         .await;
 
-    router.replace_config_string("http://localhost:{{PRODUCTS_PORT}}", "localhost:4001");
-    router.replace_config_string("http://localhost:{{ACCOUNTS_PORT}}", "localhost:4002");
-    router.replace_config_string("http://localhost:{{COPROCESSOR_PORT}}", "5002");
-
     /*
      * THEN
      *  - since the license is expired and using restricted features the router should start but
@@ -594,17 +587,13 @@ async fn router_starts_when_license_past_warn_at_but_not_expired_allowed_feature
     let mut router = IntegrationTest::builder()
         .supergraph("tests/integration/subscriptions/fixtures/supergraph.graphql")
         .config(SUBSCRIPTION_COPROCESSOR_CONFIG)
-        .env(env)
+        .env(with_service_urls(env))
         .jwt(
             JWT_PAST_WARN_AT_BUT_NOT_EXPIRED_WITH_COPROCESSORS_SUBSCRIPTIONS_IN_ALLOWED_FEATURES
                 .to_string(),
         )
         .build()
         .await;
-
-    router.replace_config_string("http://localhost:{{PRODUCTS_PORT}}", "localhost:4001");
-    router.replace_config_string("http://localhost:{{ACCOUNTS_PORT}}", "localhost:4002");
-    router.replace_config_string("http://localhost:{{COPROCESSOR_PORT}}", "5002");
 
     router.start().await;
     router.assert_started().await;
@@ -621,7 +610,7 @@ async fn feature_violation_when_license_past_warn_at_but_not_expired_allowed_fea
     let mut router = IntegrationTest::builder()
         .supergraph("tests/integration/subscriptions/fixtures/supergraph.graphql")
         .config(SUBSCRIPTION_COPROCESSOR_CONFIG)
-        .env(env)
+        .env(with_service_urls(env))
         // jwt's allowed features does not contain subscriptions
         .jwt(
             JWT_PAST_WARN_AT_BUT_NOT_EXPIRED_WITH_COPROCESSORS_ENTITY_CACHING_TRAFFIC_SHAPING_IN_ALLOWED_FEATURES
@@ -629,12 +618,6 @@ async fn feature_violation_when_license_past_warn_at_but_not_expired_allowed_fea
         )
         .build()
         .await;
-    router.replace_config_string("http://localhost:{{PRODUCTS_PORT}}", "5000");
-    router.replace_config_string("http://localhost:{{ACCOUNTS_PORT}}", "5001");
-    router.replace_config_string("http://localhost:{{COPROCESSOR_PORT}}", "5002");
-
-    router.replace_config_string("http://localhost:{{PRODUCTS_PORT}}", "localhost:4001");
-    router.replace_config_string("http://localhost:{{ACCOUNTS_PORT}}", "localhost:4002");
 
     router.start().await;
     router

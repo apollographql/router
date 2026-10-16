@@ -74,9 +74,9 @@ async fn test_metrics_reloading() {
     // increments, and the assertion times out. Apollo-protocol metrics
     // (counter `report_type="metrics"`) use plain HTTP irrespective of
     // this setting.
-    let mut config_value: serde_yaml::Value =
-        serde_yaml::from_str(PROMETHEUS_CONFIG).expect("fixture is valid YAML");
-    let apollo_block: serde_yaml::Value = serde_yaml::from_str(
+    let mut config_value: yaml_serde::Value =
+        yaml_serde::from_str(PROMETHEUS_CONFIG).expect("fixture is valid YAML");
+    let apollo_block: yaml_serde::Value = yaml_serde::from_str(
         r#"
         field_level_instrumentation_sampler: always_on
         otlp_tracing_protocol: http
@@ -93,11 +93,11 @@ async fn test_metrics_reloading() {
     .unwrap();
     config_value
         .as_mapping_mut()
-        .and_then(|m| m.get_mut(&serde_yaml::Value::String("telemetry".into())))
+        .and_then(|m| m.get_mut("telemetry"))
         .and_then(|t| t.as_mapping_mut())
         .expect("PROMETHEUS_CONFIG has a telemetry block")
-        .insert(serde_yaml::Value::String("apollo".into()), apollo_block);
-    let config = serde_yaml::to_string(&config_value).unwrap();
+        .insert(yaml_serde::Value::String("apollo".into()), apollo_block);
+    let config = yaml_serde::to_string(&config_value).unwrap();
 
     // No explicit env / no real-creds opt-in. The harness now provides:
     //   * Fake `APOLLO_KEY` / `APOLLO_GRAPH_REF` so the executable picks

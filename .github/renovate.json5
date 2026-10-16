@@ -113,17 +113,6 @@
       automerge: false,
     },
 
-    // Keep serde_yaml at 0.8.x - version 0.9.x has breaking changes and the
-    // underlying package is deprecated. The package works as-is and we can
-    // consider replacing it in the future. We'll allow 0.8.x just in case
-    // there HAPPEN to be any security updates that we need to be aware of.
-    // See: https://github.com/dtolnay/serde-yaml/releases/tag/0.9.34
-    {
-      matchManagers: ['cargo'],
-      matchPackageNames: ['serde_yaml'],
-      allowedVersions: '0.8.x',
-    },
-
     // We're currently constrained in our ability to update the `tracing`
     // packages to the latest versions because of our usage.  As an extension
     // of the same concern, we cannot update our `opentelemetry` packages since

@@ -72,7 +72,7 @@ use serde::de::Visitor;
 // but this ends up with a configuration schema that does not contain the default values.
 //
 // This `SubgraphConfiguration` type handles overrides through a custom deserializer that works in three steps:
-// - deserialize `all` and `subgraphs` fields to `serde_yaml::Mapping`
+// - deserialize `all` and `subgraphs` fields to `yaml_serde::Mapping`
 // - for each specific subgraph configuration, start from the `all` configuration (or default implementation),
 // and replace the overridden fields
 // - deserialize to the plugin configuration
@@ -243,8 +243,8 @@ where
     where
         V: MapAccess<'de>,
     {
-        let mut all: Option<serde_yaml::Mapping> = None;
-        let mut parsed_subgraphs: Option<HashMap<String, serde_yaml::Mapping>> = None;
+        let mut all: Option<yaml_serde::Mapping> = None;
+        let mut parsed_subgraphs: Option<HashMap<String, yaml_serde::Mapping>> = None;
         while let Some(key) = map.next_key()? {
             match key {
                 Field::All => {
@@ -277,13 +277,13 @@ where
                     parsed_value
                 };
 
-                let config = serde_yaml::from_value(serde_yaml::Value::Mapping(value))
+                let config = yaml_serde::from_value(yaml_serde::Value::Mapping(value))
                     .map_err(de::Error::custom)?;
                 subgraphs.insert(subgraph_name, config);
             }
         }
 
-        let all = serde_yaml::from_value(serde_yaml::Value::Mapping(all.unwrap_or_default()))
+        let all = yaml_serde::from_value(yaml_serde::Value::Mapping(all.unwrap_or_default()))
             .map_err(de::Error::custom)?;
 
         Ok(SubgraphConfiguration { all, subgraphs })
