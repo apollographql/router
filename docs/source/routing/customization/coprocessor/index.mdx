@@ -80,6 +80,12 @@ If your coprocessor hooks into your router's `SubgraphService`, the router sends
 
 If your coprocessor hooks into your router's `ConnectorRequestService`, the router sends a separate coprocessor request _for each connector HTTP request_. If your router makes multiple REST API calls via [connectors](/graphos/schema-design/connectors/) to resolve a client operation, it sends a separate coprocessor request for each call. Each coprocessor request includes the connector source [name](#servicename) and the target [URL](#uri).
 
+<Tip>
+
+If your customization needs the same reach without a per-request round trip to a coprocessor, a native Rust plugin can intercept connector requests in process with the [`connector_request_service` hook](/graphos/routing/customization/native-plugins#customizing-connector-requests).
+
+</Tip>
+
 ## Setup
 
 First, make sure your router is [connected to a GraphOS Enterprise organization](/router/enterprise-features/#enabling-enterprise-features).
