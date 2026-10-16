@@ -148,7 +148,7 @@ mod test {
             .expect_err("expected error");
         assert_eq!(
             error.to_string(),
-            "invalid endpoint: example.com:2000/path. Expected a valid uri or 'default' at line 1 column 1"
+            "invalid endpoint: example.com:2000/path. Expected a valid uri or 'default'"
         );
     }
 
