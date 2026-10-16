@@ -862,6 +862,9 @@ mod test {
     use std::sync::Arc;
 
     use apollo_compiler::name;
+    use apollo_configuration::ConfigError;
+    use apollo_configuration::ConfigParser;
+    use apollo_configuration::Configuration;
     use apollo_federation::connectors::ConnectId;
     use apollo_federation::connectors::ConnectSpec;
     use apollo_federation::connectors::Connector;
@@ -883,9 +886,13 @@ mod test {
     use crate::services::SubgraphResponse;
     use crate::services::subgraph;
 
+    fn parse_yaml<T: Configuration>(text: &str) -> Result<T, ConfigError> {
+        ConfigParser::builder().build()?.parse_yaml(text)
+    }
+
     #[test]
     fn test_subgraph_config() {
-        yaml_serde::from_str::<Config>(
+        parse_yaml::<Config>(
             r#"
         subgraphs:
           products:
@@ -901,7 +908,7 @@ mod test {
 
     #[test]
     fn test_insert_config() {
-        yaml_serde::from_str::<Config>(
+        parse_yaml::<Config>(
             r#"
         all:
             request:
@@ -916,7 +923,7 @@ mod test {
 
     #[test]
     fn test_config_debug_redacts_header_values() {
-        let config = yaml_serde::from_str::<Config>(
+        let config = parse_yaml::<Config>(
             r#"
         all:
             request:
@@ -948,7 +955,7 @@ mod test {
 
     #[test]
     fn test_remove_config() {
-        yaml_serde::from_str::<Config>(
+        parse_yaml::<Config>(
             r#"
         all:
             request:
@@ -959,7 +966,7 @@ mod test {
         )
         .unwrap();
 
-        yaml_serde::from_str::<Config>(
+        parse_yaml::<Config>(
             r#"
         all:
             request:
@@ -971,7 +978,7 @@ mod test {
         .unwrap();
 
         assert!(
-            yaml_serde::from_str::<Config>(
+            parse_yaml::<Config>(
                 r#"
         all:
             request:
@@ -986,7 +993,7 @@ mod test {
 
     #[test]
     fn test_propagate_config() {
-        yaml_serde::from_str::<Config>(
+        parse_yaml::<Config>(
             r#"
         all:
             request:
@@ -997,7 +1004,7 @@ mod test {
         )
         .unwrap();
 
-        yaml_serde::from_str::<Config>(
+        parse_yaml::<Config>(
             r#"
         all:
             request:
@@ -1009,7 +1016,7 @@ mod test {
         )
         .unwrap();
 
-        yaml_serde::from_str::<Config>(
+        parse_yaml::<Config>(
             r#"
         all:
             request:
@@ -1022,7 +1029,7 @@ mod test {
         )
         .unwrap();
 
-        yaml_serde::from_str::<Config>(
+        parse_yaml::<Config>(
             r#"
         all:
             request:
@@ -1036,7 +1043,7 @@ mod test {
 
     #[test]
     fn test_masking_config_global() {
-        yaml_serde::from_str::<Config>(
+        parse_yaml::<Config>(
             r#"
         all:
             request:
@@ -1052,7 +1059,7 @@ mod test {
 
     #[test]
     fn test_masking_config_per_subgraph() {
-        yaml_serde::from_str::<Config>(
+        parse_yaml::<Config>(
             r#"
         subgraphs:
           products:
@@ -1068,7 +1075,7 @@ mod test {
 
     #[test]
     fn test_masking_config_combined_with_operations() {
-        yaml_serde::from_str::<Config>(
+        parse_yaml::<Config>(
             r#"
         all:
             request:
@@ -1087,7 +1094,7 @@ mod test {
 
     #[test]
     fn test_masking_config_response_global() {
-        let config = yaml_serde::from_str::<Config>(
+        let config = parse_yaml::<Config>(
             r#"
         all:
             response:
@@ -1112,7 +1119,7 @@ mod test {
 
     #[test]
     fn test_masking_config_response_per_subgraph_differs_from_request() {
-        let config = yaml_serde::from_str::<Config>(
+        let config = parse_yaml::<Config>(
             r#"
         subgraphs:
           products:
@@ -1233,7 +1240,7 @@ mod test {
 
     #[test]
     fn test_masking_config_disabled() {
-        let config = yaml_serde::from_str::<Config>(
+        let config = parse_yaml::<Config>(
             r#"
         all:
             request:
