@@ -3,11 +3,11 @@ use std::hash::BuildHasher;
 use std::hash::Hash;
 use std::hash::Hasher;
 use std::sync::Arc;
+use std::sync::OnceLock;
 
 use apollo_compiler::Name;
 use hashbrown::DefaultHashBuilder;
 use hashbrown::HashTable;
-use itertools::Itertools;
 use serde::Serialize;
 use serde::ser::SerializeSeq;
 
@@ -199,10 +199,20 @@ impl PartialEq for SelectionMap {
 impl Eq for SelectionMap {}
 
 impl Hash for SelectionMap {
+    /// Hash the selection map consistently with its order-independent equality.
+    ///
+    /// Each selection is hashed on its own, using a hasher state shared by all selection maps, and
+    /// the per-selection hashes are combined with a commutative operation. The keys of a map are
+    /// unique, so no selection can cancel out another.
     fn hash<H: Hasher>(&self, state: &mut H) {
-        self.values()
-            .sorted()
-            .for_each(|hash_key| hash_key.hash(state));
+        static SHARED_RANDOM: OnceLock<std::hash::RandomState> = OnceLock::new();
+
+        let hash_builder = SHARED_RANDOM.get_or_init(Default::default);
+        let combined = self.values().fold(0u64, |combined, selection| {
+            combined.wrapping_add(hash_builder.hash_one(selection))
+        });
+        state.write_usize(self.len());
+        state.write_u64(combined);
     }
 }
 
