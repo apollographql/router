@@ -261,12 +261,20 @@ pub(crate) fn split_selections(
     (part(provided), part(missing))
 }
 
-/// Whether `shape` returns every field of `selection`. Shapes the planner can't
-/// inspect (scalars, unions, unknown JSON) count as providing everything, as
+/// Whether `shape` returns every field of `selection`. A union of shapes
+/// provides a field only if each non-null member does. Shapes the planner
+/// can't inspect (scalars, unknown JSON) count as providing everything, as
 /// they do when partitioning.
 pub(crate) fn shape_provides(shape: &Shape, selection: &Selection) -> bool {
-    let ShapeCase::Object { fields, .. } = unwrap_list_shape(shape).case() else {
-        return true;
+    let fields = match unwrap_list_shape(shape).case() {
+        ShapeCase::Object { fields, .. } => fields,
+        ShapeCase::One(members) => {
+            return members
+                .iter()
+                .filter(|member| !matches!(member.case(), ShapeCase::None | ShapeCase::Null))
+                .all(|member| shape_provides(member, selection));
+        }
+        _ => return true,
     };
     let provides_all = |shape: &Shape, selections: &SelectionSet| {
         selections

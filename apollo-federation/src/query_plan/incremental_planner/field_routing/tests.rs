@@ -4897,3 +4897,65 @@ fn defer_on_value_type_stays_in_enclosing_fetch() {
     }
     "###);
 }
+
+/// `/products` maps `details` through `->match`, and neither branch returns
+/// `upc`: fetch `details { upc }` through `productById` instead of selecting
+/// it from a fetch that returns it as null.
+#[test]
+fn connector_key_under_match_shape_routes_missing_field() {
+    let plan_str = plan_query_with_router_specs(
+        include_str!("../fixtures/connector_key_in_match_shape.graphql"),
+        "{ products { reviews { body } } }",
+    );
+    insta::assert_snapshot!(plan_str, @r#"
+    QueryPlan {
+      Sequence {
+        Fetch(service: "products_Query_products_0") {
+          {
+            products {
+              __typename
+              id
+            }
+          }
+        },
+        Flatten(path: "products.@") {
+          Fetch(service: "products_Query_productById_0") {
+            {
+              ... on Product {
+                __typename
+                id
+              }
+            } =>
+            {
+              ... on Product {
+                details {
+                  upc
+                }
+              }
+            }
+          },
+        },
+        Flatten(path: "products.@") {
+          Fetch(service: "reviews") {
+            {
+              ... on Product {
+                __typename
+                id
+                details {
+                  upc
+                }
+              }
+            } =>
+            {
+              ... on Product {
+                reviews {
+                  body
+                }
+              }
+            }
+          },
+        },
+      },
+    }
+    "#);
+}
