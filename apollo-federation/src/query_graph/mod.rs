@@ -486,7 +486,7 @@ pub struct QueryGraph {
     /// Maps an edge to the possible edges that can follow it "productively", that is without
     /// creating a trivially inefficient path.
     ///
-    /// More precisely, this map is equivalent to looking at the out edges of a given edge's tail
+    /// More precisely, the entry for an edge is equivalent to looking at the out edges of its tail
     /// node and filtering those edges that "never make sense" after the given edge, which mainly
     /// amounts to avoiding chaining @key edges when we know there is guaranteed to be a better
     /// option. As an example, suppose we have 3 subgraphs A, B and C which all defined an

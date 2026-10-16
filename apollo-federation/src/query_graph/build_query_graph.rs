@@ -360,7 +360,7 @@ impl BaseQueryGraphBuilder {
                     // A 'RootTypeResolution' means that a query reached the query type (or
                     // another root type) in some subgraph A and we're looking at jumping to
                     // another subgraph B. But like for keys, there is no point in trying to
-                    // jump directly to yet another subpraph C from B, since we can always jump
+                    // jump directly to yet another subgraph C from B, since we can always jump
                     // directly from A to C and it's better.
                     //
                     // 'SubgraphEnteringTransition' is somewhat similar except that we're
