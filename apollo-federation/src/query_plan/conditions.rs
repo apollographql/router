@@ -13,7 +13,6 @@ use crate::bail;
 use crate::error::FederationError;
 use crate::operation::DirectiveList;
 use crate::operation::Selection;
-use crate::operation::SelectionMap;
 use crate::operation::SelectionMapperReturn;
 use crate::operation::SelectionSet;
 use crate::query_graph::graph_path::operation::OpPathElement;
@@ -333,18 +332,24 @@ pub(crate) fn remove_unneeded_top_level_fragment_directives(
     selection_set: &SelectionSet,
     unneeded_directives: &DirectiveList,
 ) -> Result<SelectionSet, FederationError> {
-    let mut selection_map = SelectionMap::new();
+    // Removing directives can make two selections' keys equal (e.g. `... on A @include(if: $x)`
+    // and `... on A`), so the result is built with `add_local_selection`, which merges selections
+    // whose keys collide instead of keeping duplicate keys.
+    let mut result = SelectionSet::empty(
+        selection_set.schema.clone(),
+        selection_set.type_position.clone(),
+    );
 
     for selection in selection_set.selections.values() {
         match selection {
             Selection::Field(_) => {
-                selection_map.insert(selection.clone());
+                result.add_local_selection(selection)?;
             }
             Selection::InlineFragment(inline_fragment) => {
                 let fragment = &inline_fragment.inline_fragment;
                 if fragment.type_condition_position.is_none() {
                     // if there is no type condition we should preserve the directive info
-                    selection_map.insert(selection.clone());
+                    result.add_local_selection(selection)?;
                 } else {
                     let needed_directives: Vec<Node<Directive>> = fragment
                         .directives
@@ -363,7 +368,9 @@ pub(crate) fn remove_unneeded_top_level_fragment_directives(
                         // We need all the directives that the fragment has. Return it unchanged.
                         let final_selection =
                             inline_fragment.with_updated_selection_set(updated_selections);
-                        selection_map.insert(Selection::InlineFragment(Arc::new(final_selection)));
+                        result.add_local_selection(&Selection::InlineFragment(Arc::new(
+                            final_selection,
+                        )))?;
                     } else {
                         // We can skip some of the fragment directives directive.
                         let final_selection = inline_fragment
@@ -371,18 +378,16 @@ pub(crate) fn remove_unneeded_top_level_fragment_directives(
                                 DirectiveList::from_iter(needed_directives),
                                 updated_selections,
                             );
-                        selection_map.insert(Selection::InlineFragment(Arc::new(final_selection)));
+                        result.add_local_selection(&Selection::InlineFragment(Arc::new(
+                            final_selection,
+                        )))?;
                     }
                 }
             }
         }
     }
 
-    Ok(SelectionSet {
-        schema: selection_set.schema.clone(),
-        type_position: selection_set.type_position.clone(),
-        selections: Arc::new(selection_map),
-    })
+    Ok(result)
 }
 
 fn remove_conditions_of_element(
@@ -516,6 +521,82 @@ mod tests {
             Conditions::never(),
             "@include with hardcoded if: false can never evaluate to true"
         );
+    }
+
+    mod fragment_directive_stripping {
+        use super::*;
+        use crate::operation::HasSelectionKey;
+        use crate::operation::Operation;
+        use crate::schema::ValidFederationSchema;
+
+        fn parse_operation(schema: &str, query: &str) -> Operation {
+            let schema = Schema::parse_and_validate(schema, "schema.graphql").unwrap();
+            let schema = ValidFederationSchema::new(schema).unwrap();
+            Operation::parse(schema, query, "query.graphql").unwrap()
+        }
+
+        fn only_child(set: &SelectionSet) -> &Selection {
+            let mut selections = set.selections.values();
+            let child = selections.next().unwrap();
+            assert!(selections.next().is_none(), "expected one selection: {set}");
+            child
+        }
+
+        /// Asserts that no selection set, at any depth, holds two selections with the same key.
+        fn assert_unique_keys(set: &SelectionSet) {
+            let keys: Vec<_> = set
+                .selections
+                .values()
+                .map(|s| s.key().to_owned_key())
+                .collect();
+            for (i, key) in keys.iter().enumerate() {
+                assert!(
+                    !keys[..i].contains(key),
+                    "duplicate selection key {key:?} in {set}"
+                );
+            }
+            for selection in set.selections.values() {
+                if let Some(sub) = selection.selection_set() {
+                    assert_unique_keys(sub);
+                }
+            }
+        }
+
+        #[test]
+        fn stripping_fragment_directives_merges_newly_equal_keys() {
+            let schema = "interface I { id: ID! } type A implements I { id: ID! value: Int other: Int } type Query { node: I }";
+            let cases = [
+                (
+                    "query($x: Boolean!) { node @include(if: $x) { ... on A @include(if: $x) { id } ... on A { value } } }",
+                    "{ ... on A { id value } }",
+                ),
+                (
+                    "query($x: Boolean!) { node @include(if: $x) { ... on A { value } ... on A @include(if: $x) { id } } }",
+                    "{ ... on A { value id } }",
+                ),
+                (
+                    "query($x: Boolean!, $y: Boolean!) { node @include(if: $x) @skip(if: $y) { ... on A @include(if: $x) { id } ... on A @skip(if: $y) { value } ... on A { other } } }",
+                    "{ ... on A { id value other } }",
+                ),
+                // Collisions created inside a nested top-level fragment must be merged too.
+                (
+                    "query($x: Boolean!) { node @include(if: $x) { ... on I @include(if: $x) { ... on A @include(if: $x) { id } ... on A { value } } } }",
+                    "{ ... on I { ... on A { id value } } }",
+                ),
+            ];
+            for (query, expected) in cases {
+                let op = parse_operation(schema, query);
+                let node = only_child(&op.selection_set);
+                assert_unique_keys(&op.selection_set);
+                let result = remove_unneeded_top_level_fragment_directives(
+                    node.selection_set().unwrap(),
+                    node.element().directives(),
+                )
+                .unwrap();
+                assert_unique_keys(&result);
+                assert_eq!(result.to_string(), expected, "{query}");
+            }
+        }
     }
 
     #[test]
