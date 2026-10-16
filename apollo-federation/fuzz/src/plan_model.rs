@@ -25,6 +25,9 @@ use apollo_compiler::ExecutableDocument;
 use apollo_compiler::Name;
 use apollo_federation::query_plan::requires_selection;
 use apollo_federation::query_plan::serializable_document::SerializableDocument;
+use apollo_federation::query_plan::DeferNode;
+use apollo_federation::query_plan::DeferredDeferBlock;
+use apollo_federation::query_plan::DeferredDependency;
 use apollo_federation::query_plan::FetchDataKeyRenamer;
 use apollo_federation::query_plan::FetchDataPathElement;
 use apollo_federation::query_plan::FetchDataRewrite;
@@ -32,6 +35,7 @@ use apollo_federation::query_plan::FetchNode;
 use apollo_federation::query_plan::FlattenNode;
 use apollo_federation::query_plan::ParallelNode;
 use apollo_federation::query_plan::PlanNode;
+use apollo_federation::query_plan::PrimaryDeferBlock;
 use apollo_federation::query_plan::QueryPlan;
 use apollo_federation::query_plan::SequenceNode;
 use apollo_federation::query_plan::TopLevelPlanNode;
@@ -206,9 +210,18 @@ pub enum Perturbation {
     /// The alias is inside the list instead, and the renamer's path reaches it through `@`. The
     /// router renames in every element of the array.
     AliasInsideTheList,
+    /// The entity fetch runs in a deferred block that depends on every input fetch.
+    DeferOnEveryInput,
+    /// The same block naming no dependency, so it waits for the whole primary block.
+    DeferOnTheWholePrimary,
+    /// The block depends only on the base fetch, which sends it no entity input.
+    DeferOnTheBaseFetchOnly,
+    /// The block depends only on the first entity type's input fetch. Enough when the case has one
+    /// entity type; with two, the second type's representations cannot be built.
+    DeferOnTheFirstEntityInput,
 }
 
-pub const PERTURBATIONS: [Perturbation; 18] = [
+pub const PERTURBATIONS: [Perturbation; 22] = [
     Perturbation::None,
     Perturbation::DropRequiredField,
     Perturbation::DropRequiresEntry,
@@ -227,6 +240,10 @@ pub const PERTURBATIONS: [Perturbation; 18] = [
     Perturbation::OneFieldSentUnderTwoKeys,
     Perturbation::AliasCompositeInput,
     Perturbation::AliasInsideTheList,
+    Perturbation::DeferOnEveryInput,
+    Perturbation::DeferOnTheWholePrimary,
+    Perturbation::DeferOnTheBaseFetchOnly,
+    Perturbation::DeferOnTheFirstEntityInput,
 ];
 
 /// The alias a planner gives a `@requires` input it has to fetch apart from the client's own
@@ -480,6 +497,22 @@ fn flatten_path(case: &Case) -> Vec<FetchDataPathElement> {
     ]
 }
 
+/// The base fetch's id. The entity input fetches follow it, one per entity type in case order.
+const BASE_FETCH_ID: u64 = 0;
+
+/// The ids a deferred block depends on, when the case puts the entity fetch in one; `None` when it
+/// does not.
+fn deferred_dependencies(case: &Case) -> Option<Vec<u64>> {
+    let entity_inputs = case.entity_types().count() as u64;
+    match case.perturbation {
+        Perturbation::DeferOnEveryInput => Some((BASE_FETCH_ID..=entity_inputs).collect()),
+        Perturbation::DeferOnTheWholePrimary => Some(Vec::new()),
+        Perturbation::DeferOnTheBaseFetchOnly => Some(vec![BASE_FETCH_ID]),
+        Perturbation::DeferOnTheFirstEntityInput => Some(vec![BASE_FETCH_ID + 1]),
+        _ => None,
+    }
+}
+
 /// The entity fetch's input rewrites: the key renamers applied to each representation before it is
 /// sent. Only an entity fetch has them, a root fetch sending no representation.
 fn input_rewrites(case: &Case) -> Vec<Arc<FetchDataRewrite>> {
@@ -549,6 +582,7 @@ fn input_rewrites(case: &Case) -> Vec<Arc<FetchDataRewrite>> {
 fn fetch_node(
     schema: &ValidFederationSchema,
     subgraph_name: &str,
+    id: Option<u64>,
     operation: &str,
     requires: Vec<requires_selection::Selection>,
     input_rewrites: Vec<Arc<FetchDataRewrite>>,
@@ -558,7 +592,7 @@ fn fetch_node(
             .unwrap_or_else(|error| panic!("fetch operation must be valid:\n{operation}\n{error}"));
     FetchNode {
         subgraph_name: subgraph_name.into(),
-        id: None,
+        id,
         variable_usages: Vec::new(),
         requires,
         operation_document: SerializableDocument::from_parsed(Arc::new(document)),
@@ -583,14 +617,18 @@ pub fn build_plan(
     let mut inputs = vec![PlanNode::Fetch(Box::new(fetch_node(
         subgraph1,
         "Subgraph1",
+        Some(BASE_FETCH_ID),
         &format!("{{ is {{ {} }} }}", base_fetch_body(case)),
         Vec::new(),
         Vec::new(),
     )))];
-    for entity_type in &cases {
+    // One input fetch per entity type the case needs, whether or not the entity fetch keeps a
+    // case for it: `DropEntityCase` drops a case from the entity fetch, not the input.
+    for (entity_type, id) in case.entity_types().zip(BASE_FETCH_ID + 1..) {
         inputs.push(PlanNode::Fetch(Box::new(fetch_node(
             subgraph1,
             "Subgraph1",
+            Some(id),
             &format!("{{ is {{ {} }} }}", entity_input_body(case, entity_type)),
             Vec::new(),
             Vec::new(),
@@ -612,6 +650,7 @@ pub fn build_plan(
     let entity_fetch = fetch_node(
         subgraph2,
         "Subgraph2",
+        None,
         &format!("query($representations: [_Any!]!) {{ _entities(representations: $representations) {{ {body}}} }}"),
         requires_entries(case),
         input_rewrites(case),
@@ -634,6 +673,30 @@ pub fn build_plan(
             if_clause: Some(Box::new(mounted)),
             else_clause: None,
         }));
+    }
+
+    if let Some(depends) = deferred_dependencies(case) {
+        // The inputs are the primary block and the entity fetch is deferred: it reads what its
+        // dependencies send, or the whole primary block when it names none.
+        return QueryPlan {
+            node: Some(TopLevelPlanNode::Defer(DeferNode {
+                primary: PrimaryDeferBlock {
+                    sub_selection: None,
+                    node: Some(Box::new(PlanNode::Parallel(ParallelNode { nodes: inputs }))),
+                },
+                deferred: vec![DeferredDeferBlock {
+                    depends: depends
+                        .into_iter()
+                        .map(|id| DeferredDependency { id: id.to_string() })
+                        .collect(),
+                    label: None,
+                    query_path: Vec::new(),
+                    sub_selection: None,
+                    node: Some(Box::new(mounted)),
+                }],
+            })),
+            statistics: Default::default(),
+        };
     }
 
     QueryPlan {

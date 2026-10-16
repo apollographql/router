@@ -188,6 +188,10 @@ inductive Perturbation where
   | oneFieldSentUnderTwoKeys
   | aliasCompositeInput
   | aliasInsideTheList
+  | deferOnEveryInput
+  | deferOnTheWholePrimary
+  | deferOnTheBaseFetchOnly
+  | deferOnTheFirstEntityInput
 deriving Repr, DecidableEq
 
 def perturbations : List Perturbation :=
@@ -209,7 +213,11 @@ def perturbations : List Perturbation :=
     .renamersForDisjointTypes,
     .oneFieldSentUnderTwoKeys,
     .aliasCompositeInput,
-    .aliasInsideTheList
+    .aliasInsideTheList,
+    .deferOnEveryInput,
+    .deferOnTheWholePrimary,
+    .deferOnTheBaseFetchOnly,
+    .deferOnTheFirstEntityInput
   ]
 
 /-- The aliases, if any, the composite half of the demand is read under: on the list itself, and
@@ -342,15 +350,34 @@ end Case
 -- The miniature planner (mirrors `plan_model::build_plan`)
 -----------------------------------------------------------------------------------------
 
+/-! The grammar builds no `defer` node, so every fetch it places can read everything placed
+before it: the diagnostics below pass the same state as `available` and `readable`. -/
+
 def fetchOf (subgraphName : Name) (requiresItems : List RequiresSelection)
     (selectionSet : SelectionSet) (inputRewrites : List FetchDataRewrite := [])
+    (id : Option FetchId := Option.none)
     : FetchNode :=
   {
     subgraphName := subgraphName
+    id := id
     requires := requiresItems
     operationDocument := { selectionSet := selectionSet }
     inputRewrites := inputRewrites
   }
+
+/-- The base fetch's id. The entity input fetches follow it, one per entity type in case
+order. -/
+def baseFetchId : FetchId := 0
+
+/-- The ids a deferred block depends on, when the case puts the entity fetch in one. -/
+def deferredDependencies (case : Case) : Option (List FetchId) :=
+  let entityInputs := (Case.entityCasesOf case).length
+  match case.perturbation with
+  | .deferOnEveryInput => Option.some (List.range (entityInputs + 1))
+  | .deferOnTheWholePrimary => Option.some []
+  | .deferOnTheBaseFetchOnly => Option.some [baseFetchId]
+  | .deferOnTheFirstEntityInput => Option.some [baseFetchId + 1]
+  | _perturbation => Option.none
 
 /-- What the base fetch selects under `is`: everything Subgraph1 resolves without an entity
 fetch. -/
@@ -407,12 +434,15 @@ def flattenPath (case : Case) : FetchDataPath :=
 
 def buildPlan (case : Case) : QueryPlan :=
   let inputs :=
-    PlanNode.fetch (fetchOf "Subgraph1" [] [.field "is" "is" [] [] (baseFetchBody case)])
-    :: (Case.entityCasesOf case).map
-        fun entityType =>
+    PlanNode.fetch
+      (fetchOf "Subgraph1" [] [.field "is" "is" [] [] (baseFetchBody case)]
+        (id := Option.some baseFetchId))
+    :: (Case.entityCasesOf case).mapIdx
+        fun index entityType =>
           PlanNode.fetch
             (fetchOf "Subgraph1" []
-              [.field "is" "is" [] [] (entityInputBody case entityType)])
+              [.field "is" "is" [] [] (entityInputBody case entityType)]
+              (id := Option.some (baseFetchId + 1 + index)))
   let cases := entityCaseTypes case
   if cases.isEmpty then
     { node := Option.some (.plan (.parallel inputs)) }
@@ -432,7 +462,18 @@ def buildPlan (case : Case) : QueryPlan :=
       match condition with
       | Option.none => mounted
       | Option.some variableName => PlanNode.condition variableName (Option.some mounted) Option.none
-    { node := Option.some (.plan (.sequence [.parallel inputs, guarded])) }
+    match deferredDependencies case with
+    -- The inputs are the primary block and the entity fetch is deferred: it reads what its
+    -- dependencies send, or the whole primary block when it names none.
+    | Option.some depends =>
+        {
+          node :=
+            Option.some
+              (.plan
+                (.defer (.mk Option.none (Option.some (.parallel inputs)))
+                  [.mk depends Option.none [] Option.none (Option.some guarded)]))
+        }
+    | Option.none => { node := Option.some (.plan (.sequence [.parallel inputs, guarded])) }
 
 -----------------------------------------------------------------------------------------
 -- The digest
@@ -575,7 +616,7 @@ partial def loop : IO Unit := do
                   PlanNode.fetch
                     (fetchOf "Subgraph1" []
                       [.field "is" "is" [] [] (entityInputBody testCase entityType)]))
-        let available := (inputs.check schema subgraphs operation [] [] []).1
+        let available := (inputs.check schema subgraphs operation [] [] [] []).1
         let cases := entityCaseTypes testCase
         let entityFetch :=
           fetchOf "Subgraph2" (requiresEntries testCase)
@@ -587,9 +628,9 @@ partial def loop : IO Unit := do
           | Option.none => []
           | Option.some variableName => [.positive variableName]
         let withCondition :=
-          checkFetch schema subgraphs operation path guarded available entityFetch
+          checkFetch schema subgraphs operation path guarded available available entityFetch
         let withoutCondition :=
-          checkFetch schema subgraphs operation path [] available entityFetch
+          checkFetch schema subgraphs operation path [] available available entityFetch
         IO.println s!"ok={flag withCondition},{flag withoutCondition}"
     (<- IO.getStdout).flush
     loop
@@ -629,7 +670,7 @@ partial def loop : IO Unit := do
                   PlanNode.fetch
                     (fetchOf "Subgraph1" []
                       [.field "is" "is" [] [] (entityInputBody testCase entityType)]))
-        let available := (inputs.check schema subgraphs operation [] [] []).1
+        let available := (inputs.check schema subgraphs operation [] [] [] []).1
         let guarded : BooleanCondition :=
           match testCase.guard with
           | Option.none => []

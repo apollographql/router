@@ -307,6 +307,25 @@ one key and sends another.
 `UnscopedRenamerAcrossTypes` is the one whose verdict depends on the operation rather than the
 perturbation alone, which is the point of leaving that judgement to the model.
 
+### Deferred blocks
+
+Four perturbations put the entity fetch in a deferred block whose primary block is the input
+fetches, and vary what it `depends` on. A deferred block reads what its `defer` node could read
+plus the responses of the fetches it names, or the whole primary block when it names none; every
+fetch the planner places carries an id, the base fetch `0` and the entity inputs after it.
+
+| perturbation | `depends` | correct |
+| --- | --- | --- |
+| `DeferOnEveryInput` | every input fetch | yes |
+| `DeferOnTheWholePrimary` | nothing | yes |
+| `DeferOnTheBaseFetchOnly` | the base fetch, which sends no entity input | no |
+| `DeferOnTheFirstEntityInput` | the first entity type's input | yes with one entity type, no with two |
+
+The two that are wrong are FED-1007's class: a block naming too few of the fetches whose data its
+representations need. The `legacy` lane accepts both — `interpret_defer_node` gives every
+deferred block the state after the whole primary block — so they are among its advisory
+divergences.
+
 ### Not reached yet
 
 Two shapes the model has tests for and this lane still cannot build.
