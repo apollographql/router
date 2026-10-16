@@ -7,6 +7,7 @@
 
 use itertools::Itertools;
 
+use super::helpers::quote_string_literal;
 use super::lit_expr::LitExpr;
 use super::lit_expr::LitOp;
 use super::location::WithRange;
@@ -254,8 +255,7 @@ impl PrettyPrintable for LitExpr {
 
         match self {
             Self::String(s) => {
-                let safely_quoted = serde_json_bytes::Value::String(s.clone().into()).to_string();
-                result.push_str(safely_quoted.as_str());
+                result.push_str(&quote_string_literal(s));
             }
             Self::Number(n) => result.push_str(n.to_string().as_str()),
             Self::Bool(b) => result.push_str(b.to_string().as_str()),
@@ -464,7 +464,7 @@ impl PrettyPrintable for Key {
     fn pretty_print_with_indentation(&self, _inline: bool, _indentation: usize) -> String {
         match self {
             Self::Field(name) => name.clone(),
-            Self::Quoted(name) => serde_json_bytes::Value::String(name.as_str().into()).to_string(),
+            Self::Quoted(name) => quote_string_literal(name),
         }
     }
 }
@@ -781,5 +781,61 @@ upc
         crate::assert_debug_snapshot!(&sel);
 
         test_permutations(sel, expected);
+    }
+
+    /// Quotes `text` using only the escapes the documented `LitString` grammar
+    /// defines (a backslash before the delimiting quote, and before a
+    /// backslash), leaving every other character, including control
+    /// characters, raw.
+    fn quote_with_documented_escapes(text: &str) -> String {
+        format!("\"{}\"", text.replace('\\', "\\\\").replace('"', "\\\""))
+    }
+
+    /// Printing a selection and parsing the printed text must evaluate to the
+    /// same result as the original selection, and printing must be stable.
+    fn assert_print_parse_roundtrip(source: &str, data: &serde_json_bytes::Value) {
+        for spec in [
+            ConnectSpec::V0_2,
+            ConnectSpec::V0_3,
+            ConnectSpec::V0_4,
+            ConnectSpec::V0_5,
+        ] {
+            let selection = JSONSelection::parse_with_spec(source, spec).unwrap();
+            let expected = selection.apply_to(data);
+            assert!(expected.1.is_empty(), "{source:?}: {:?}", expected.1);
+            let printed = selection.to_string();
+            let reparsed = JSONSelection::parse_with_spec(&printed, spec)
+                .unwrap_or_else(|e| panic!("printed {printed:?} failed to parse: {e:?}"));
+            assert_eq!(reparsed.apply_to(data), expected, "printed: {printed:?}");
+            assert_eq!(reparsed.to_string(), printed, "printing is not stable");
+        }
+    }
+
+    #[test]
+    fn print_parse_preserves_control_characters_in_literals_keys_and_aliases() {
+        use serde_json_bytes::json;
+
+        for text in [
+            "\t",
+            "\r",
+            "\0",
+            "\n",
+            "\u{8}",
+            "\u{c}",
+            "\u{1f}",
+            "a\\b",
+            "say \"hi\"",
+            "it's",
+            "\\n",
+            "tab\there\r\n",
+        ] {
+            let quoted = quote_with_documented_escapes(text);
+            // String literal value.
+            assert_print_parse_roundtrip(&format!("$({quoted})"), &json!(null));
+            // Quoted key in a path.
+            assert_print_parse_roundtrip(&format!("$.{quoted}"), &json!({ text: 1 }));
+            // Quoted output alias.
+            assert_print_parse_roundtrip(&format!("{quoted}: $.v"), &json!({ "v": 1 }));
+        }
     }
 }

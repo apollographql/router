@@ -21,6 +21,7 @@ use nom::sequence::preceded;
 use nom::sequence::terminated;
 use serde_json_bytes::Value as JSON;
 
+use super::helpers::quote_string_literal;
 use super::helpers::spaces_or_comments;
 use super::helpers::vec_push;
 use super::known_var::KnownVariable;
@@ -2007,13 +2008,7 @@ impl Key {
     pub fn dotted(&self) -> String {
         match self {
             Key::Field(field) => format!(".{field}"),
-            Key::Quoted(field) => {
-                // JSON encoding is a reliable way to ensure a string that may
-                // contain special characters (such as '"' characters) is
-                // properly escaped and double-quoted.
-                let quoted = serde_json_bytes::Value::String(field.clone().into()).to_string();
-                format!(".{quoted}")
-            }
+            Key::Quoted(field) => format!(".{}", quote_string_literal(field)),
         }
     }
 }
