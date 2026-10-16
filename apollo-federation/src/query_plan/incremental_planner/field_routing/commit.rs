@@ -371,7 +371,16 @@ impl FieldRoutingSearchSpace {
         // their conditions would recurse without progress, so the anchor
         // must resolve the whole key itself or the commit fails.
         if let Some(routed_key) = &routed_key {
-            if !key_locally_resolvable && matches!(choice, RoutingChoice::CircularKeyHop { .. }) {
+            if matches!(choice, RoutingChoice::CircularKeyHop { .. }) {
+                // A routed part of a locally resolvable key is what a
+                // connector anchor's selection doesn't map.
+                if key_locally_resolvable {
+                    return Err(FederationError::internal(format!(
+                        "circular key conditions missing from the connector output at {}: {}",
+                        source.type_pos.type_name(),
+                        routed_key,
+                    )));
+                }
                 self.commit_circular_key_conditions(
                     state,
                     pending,
