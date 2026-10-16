@@ -326,7 +326,7 @@ impl FieldRoutingSearchSpace {
             first_key
         };
         if let Some(routed_key) = routed_key
-            && key_contains_selected_field(&pending.selection, routed_key)
+            && key_contains_selection(&pending.selection, routed_key)
         {
             return Err(FederationError::internal(
                 "entity hop needs the field it fetches as its key",
@@ -1583,17 +1583,28 @@ pub(super) fn field_response_elements(
     Ok(elements)
 }
 
-/// Whether `selection` is a leaf field that `key` itself contains. Entering
-/// an entity to fetch a field of its own key is circular when that field
-/// isn't already available: routing the key would need the same hop again.
-pub(super) fn key_contains_selected_field(selection: &Selection, key: &SelectionSet) -> bool {
+/// Whether `key` contains everything the field `selection` selects (matched by
+/// field name, `__typename` aside). Entering an entity to fetch part of its own
+/// key is circular when that part isn't already available: routing the key
+/// would need the same hop again.
+pub(super) fn key_contains_selection(selection: &Selection, key: &SelectionSet) -> bool {
     let Selection::Field(field_sel) = selection else {
         return false;
     };
-    if field_sel.selection_set.is_some() {
-        return false;
-    }
     key.selections.values().any(|key_selection| {
-        matches!(key_selection, Selection::Field(key_field) if key_field.field.name() == field_sel.field.name())
+        let Selection::Field(key_field) = key_selection else {
+            return false;
+        };
+        if key_field.field.name() != field_sel.field.name() {
+            return false;
+        }
+        match (&field_sel.selection_set, &key_field.selection_set) {
+            (None, _) => true,
+            (Some(sub_ss), Some(key_sub_ss)) => sub_ss
+                .selections
+                .values()
+                .all(|sub| sub.is_typename_field() || key_contains_selection(sub, key_sub_ss)),
+            (Some(_), None) => false,
+        }
     })
 }

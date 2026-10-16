@@ -4149,6 +4149,126 @@ fn connector_composite_key_partly_in_shape_routes_only_missing_fields() {
     "#);
 }
 
+/// `Product.reviews` is keyed on `id sku`; `/products` returns `sku` but not
+/// `id`: `sku` rides the root fetch and only `id` is fetched through
+/// `productBySku` before the field connector.
+#[test]
+fn connector_resolver_composite_key_partly_in_shape_routes_only_missing_fields() {
+    let plan_str = plan_query_with_router_specs(
+        include_str!("../fixtures/connector_resolver_composite_key_partly_in_shape.graphql"),
+        "{ products { reviews { body } } }",
+    );
+    insta::assert_snapshot!(plan_str, @r#"
+    QueryPlan {
+      Sequence {
+        Fetch(service: "products_Query_products_0") {
+          {
+            products {
+              __typename
+              sku
+            }
+          }
+        },
+        Flatten(path: "products.@") {
+          Fetch(service: "products_Query_productBySku_0") {
+            {
+              ... on Product {
+                __typename
+                sku
+              }
+            } =>
+            {
+              ... on Product {
+                id
+              }
+            }
+          },
+        },
+        Flatten(path: "products.@") {
+          Fetch(service: "products_Product_reviews_0") {
+            {
+              ... on Product {
+                __typename
+                id
+                sku
+              }
+            } =>
+            {
+              ... on Product {
+                reviews {
+                  body
+                }
+              }
+            }
+          },
+        },
+      },
+    }
+    "#);
+}
+
+/// `/products` returns `org { name }` but not the `org { id }` of the
+/// `reviews` key: fetch it through `productById`, not through `reviews`,
+/// whose own key needs it.
+#[test]
+fn connector_nested_key_partly_in_shape_skips_circular_hop() {
+    let plan_str = plan_query_with_router_specs(
+        include_str!("../fixtures/connector_nested_key_partly_in_shape.graphql"),
+        "{ products { reviews { body } } }",
+    );
+    insta::assert_snapshot!(plan_str, @r#"
+    QueryPlan {
+      Sequence {
+        Fetch(service: "products_Query_products_0") {
+          {
+            products {
+              __typename
+              id
+            }
+          }
+        },
+        Flatten(path: "products.@") {
+          Fetch(service: "products_Query_productById_0") {
+            {
+              ... on Product {
+                __typename
+                id
+              }
+            } =>
+            {
+              ... on Product {
+                org {
+                  id
+                }
+              }
+            }
+          },
+        },
+        Flatten(path: "products.@") {
+          Fetch(service: "reviews") {
+            {
+              ... on Product {
+                __typename
+                id
+                org {
+                  id
+                }
+              }
+            } =>
+            {
+              ... on Product {
+                reviews {
+                  body
+                }
+              }
+            }
+          },
+        },
+      },
+    }
+    "#);
+}
+
 /// A `$this` field connector on an `@interfaceObject` resolves its own
 /// field under a concrete implementation's fragment.
 #[test]

@@ -18,7 +18,7 @@ use super::super::fetch_graph::InputRewriteInfo;
 use super::super::shared_path::SharedPath;
 use super::FieldRoutingSearchSpace;
 use super::commit::field_response_elements;
-use super::commit::key_contains_selected_field;
+use super::commit::key_contains_selection;
 use super::requires::unconditioned_input_path;
 use super::routing::RoutingChoice;
 use super::state::PendingSelection;
@@ -108,7 +108,7 @@ impl FieldRoutingSearchSpace {
                     }
                 };
                 if let Some(routed_key) = &routed_key
-                    && key_contains_selected_field(&pending.selection, routed_key)
+                    && key_contains_selection(&pending.selection, routed_key)
                 {
                     return Err(FederationError::internal(
                         "connector entity hop needs the field it fetches as its key",
