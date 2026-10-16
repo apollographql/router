@@ -306,6 +306,8 @@ impl From<FederationErrorBridge> for QueryPlannerError {
     }
 }
 
+const QUERY_PLAN_COMPLEXITY_EXCEEDED: &str = "QUERY_PLAN_COMPLEXITY_EXCEEDED";
+
 /// A temporary error type used to extract a few variants from `apollo-federation`'s
 /// `FederationError`. For backwards compatibility, these other variant need to be extracted so
 /// that the correct status code (GRAPHQL_VALIDATION_ERROR) can be added to the response. For
@@ -366,7 +368,7 @@ impl IntoGraphQLErrors for FederationErrorBridge {
             FederationErrorBridge::QueryPlanComplexityExceeded(msg) => Ok(vec![
                 Error::builder()
                     .message(msg)
-                    .extension_code("QUERY_PLAN_COMPLEXITY_EXCEEDED")
+                    .extension_code(QUERY_PLAN_COMPLEXITY_EXCEEDED)
                     .build(),
             ]),
             // All other errors will be pushed on and be treated as internal server errors
@@ -702,7 +704,7 @@ mod tests {
 
         let expected_gql_error = graphql::Error::builder()
             .message("Number of non-local selections exceeds limit of 100000")
-            .extension_code("QUERY_PLAN_COMPLEXITY_EXCEEDED")
+            .extension_code(QUERY_PLAN_COMPLEXITY_EXCEEDED)
             .build();
 
         assert_eq!(errors.len(), 1);
