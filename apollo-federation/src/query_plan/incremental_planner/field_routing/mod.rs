@@ -162,6 +162,9 @@ pub(super) struct PlannerCaches {
     /// set is part of the routing-options cache key by pointer, so it must
     /// be built once per (type, subgraph) for that cache to hit.
     inconsistent_members: InconsistentMembersCache,
+    /// Whether a field resolves in more than one subgraph, by (parent
+    /// type, field). Asked on every dispatch along a shareable path.
+    pub(super) fields_in_multiple_subgraphs: RefCell<HashMap<(Name, Name), bool>>,
 }
 
 impl PlannerCaches {
@@ -176,6 +179,7 @@ impl PlannerCaches {
             earliest_cycle_cut: std::cell::Cell::new(None),
             possible_type_names: RefCell::new(HashMap::new()),
             inconsistent_members: RefCell::new(HashMap::new()),
+            fields_in_multiple_subgraphs: RefCell::new(HashMap::new()),
         }
     }
 }
