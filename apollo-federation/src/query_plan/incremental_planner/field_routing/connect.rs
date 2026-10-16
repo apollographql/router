@@ -19,6 +19,7 @@ use super::super::shared_path::SharedPath;
 use super::FieldRoutingSearchSpace;
 use super::commit::field_response_elements;
 use super::requires::unconditioned_input_path;
+use super::routing::IntermediateKeyHop;
 use super::routing::RoutingChoice;
 use super::state::PendingSelection;
 use super::state::PlanState;
@@ -533,6 +534,57 @@ impl FieldRoutingSearchSpace {
             }
         };
         Some((provided.map(Arc::new), Arc::new(missing?)))
+    }
+
+    /// The entity-resolver connector a chain enters `hop`'s connector subgraph
+    /// through: one keyed on the hop's entry key, preferring one whose output
+    /// returns the key leaving the hop.
+    pub(super) fn chain_hop_resolver(
+        &self,
+        hop: &IntermediateKeyHop,
+        exit_key: Option<&Arc<SelectionSet>>,
+    ) -> Result<Arc<IndexedConnector>, FederationError> {
+        let node = self.qg().node_weight(hop.target_node)?;
+        let type_pos: CompositeTypeDefinitionPosition = node.type_.clone().try_into()?;
+        let keyed: Vec<&Arc<IndexedConnector>> = self
+            .connector_index
+            .entity_resolvers(type_pos.type_name())
+            .into_iter()
+            .flatten()
+            .filter(|entry| {
+                entry.source_subgraph == node.source
+                    && hop.entry_key.as_ref().is_some_and(|entry_key| {
+                        self.connector_index
+                            .key_conditions(&entry.coordinate)
+                            .is_some_and(|key| key == entry_key)
+                    })
+            })
+            .collect();
+        let returns_exit_key = |entry: &&Arc<IndexedConnector>| {
+            exit_key.is_none_or(|exit_key| {
+                exit_key
+                    .selections
+                    .values()
+                    .all(|selection| match selection {
+                        Selection::Field(field_sel) => self
+                            .connector_index
+                            .resolver_provides(&entry.coordinate, field_sel.field.name()),
+                        Selection::InlineFragment(_) => false,
+                    })
+            })
+        };
+        keyed
+            .iter()
+            .find(|entry| returns_exit_key(entry))
+            .or_else(|| keyed.first())
+            .map(|entry| (*entry).clone())
+            .ok_or_else(|| {
+                FederationError::internal(format!(
+                    "no entity-resolver connector enters {} at {}",
+                    node.source,
+                    type_pos.type_name(),
+                ))
+            })
     }
 
     /// The canonical query graph node for `type_name` within `source`,

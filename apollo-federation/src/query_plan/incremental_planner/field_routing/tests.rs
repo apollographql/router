@@ -5049,6 +5049,75 @@ fn key_hop_info(
     }
 }
 
+/// A chain from `a` through the connector subgraph `products` into
+/// `reviews`. The subgraph has no GraphQL endpoint, so the chain enters it
+/// through the entity-resolver connector that returns the `upc` key leaving
+/// it, `productUpc`, rather than `product`, which doesn't.
+#[test]
+fn chained_hop_through_connector_subgraph_uses_connector_fetch() {
+    let space = test_support::connector_search_space(include_str!(
+        "../fixtures/connector_chained_key_hop.graphql"
+    ));
+    let mut state = PlanState::new(vec![]);
+    let root = state.graph.get_or_create_root_group(
+        &Arc::from("a"),
+        CompositeTypeDefinitionPosition::Object(
+            crate::schema::position::ObjectTypeDefinitionPosition {
+                type_name: name!("Query"),
+            },
+        ),
+    );
+    let pending = connector_reviews_pending(&space, "topProducts", "a", root);
+    let (products_node, entry_key) = product_key_edge(&space, "a", "products");
+    let (_, exit_key) = product_key_edge(&space, "products", "reviews");
+    let choice = RoutingChoice::ChainedKeyHop {
+        edge: reviews_edge(&space, &pending),
+        key: key_hop_info(exit_key, false),
+        intermediate_hops: vec![routing::IntermediateKeyHop {
+            target_node: products_node,
+            entry_key: Some(entry_key),
+        }],
+    };
+    let pending_before = state.pending.len();
+
+    space
+        .commit_key_hop(&mut state, &pending, &choice)
+        .expect("chained hop commits");
+
+    let products_fetches: Vec<_> = state
+        .graph
+        .node_indices()
+        .map(|idx| state.graph.node(idx))
+        .filter(|node| node.subgraph.as_ref() == "products")
+        .map(|node| {
+            let selections: Vec<_> = node
+                .selection_builder
+                .entries()
+                .iter()
+                .filter_map(|entry| entry.selections().map(|selections| selections.to_string()))
+                .collect();
+            (
+                node.connector
+                    .as_ref()
+                    .map(|connector| connector.id.coordinate()),
+                selections,
+            )
+        })
+        .collect();
+    assert_eq!(
+        products_fetches,
+        vec![(
+            Some("products:Query.productUpc[0]".to_string()),
+            vec!["{ upc }".to_string()],
+        )],
+    );
+    assert_eq!(
+        state.pending.len(),
+        pending_before,
+        "upc is selected in place"
+    );
+}
+
 /// A circular key hop from the `/products` root connector into `reviews`,
 /// keyed on `upc`. The products schema has `upc`, so the key passes
 /// `can_resolve_in_place`, but `/products` doesn't map it. A circular key

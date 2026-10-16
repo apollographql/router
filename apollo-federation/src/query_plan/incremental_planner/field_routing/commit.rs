@@ -331,14 +331,25 @@ impl FieldRoutingSearchSpace {
             None => (choice.target_subgraph(), None),
         };
 
-        let new_group = self.entity_group_avoiding_cycles(
-            state,
-            first_subgraph,
-            merge_at.clone(),
-            pending.fetch_node,
-            pending.ordering_dependent(),
-            pending.defer_ref.clone(),
-        );
+        let new_group = if intermediate_hops.is_empty() {
+            self.entity_group_avoiding_cycles(
+                state,
+                first_subgraph,
+                merge_at.clone(),
+                pending.fetch_node,
+                pending.ordering_dependent(),
+                pending.defer_ref.clone(),
+            )
+        } else {
+            self.chain_hop_group(
+                state,
+                pending,
+                choice,
+                0,
+                merge_at.clone(),
+                pending.fetch_node,
+            )?
+        };
 
         let key_input = if let Some(key_conditions) = first_key {
             let dest_node = match first_dest_node {
@@ -512,35 +523,41 @@ impl FieldRoutingSearchSpace {
             };
             let next_subgraph = &qg.node_weight(next_dest_node)?.source;
 
-            let next_group = self.entity_group_avoiding_cycles(
-                state,
-                next_subgraph,
-                merge_at.clone(),
-                prev_group,
-                pending.ordering_dependent(),
-                pending.defer_ref.clone(),
-            );
+            let next_group = if i + 1 < intermediate_hops.len() {
+                self.chain_hop_group(state, pending, choice, i + 1, merge_at.clone(), prev_group)?
+            } else {
+                self.entity_group_avoiding_cycles(
+                    state,
+                    next_subgraph,
+                    merge_at.clone(),
+                    prev_group,
+                    pending.ordering_dependent(),
+                    pending.defer_ref.clone(),
+                )
+            };
 
             if let Some(key_conds) = exit_key {
                 let hop_source = self.node_source(hop.target_node)?;
                 let hop_path = self.entity_root_path(hop_type_pos.type_name())?;
-                if self.can_resolve_in_place(hop.target_node, key_conds, &hop_source)? {
-                    self.append_entity_inputs(
-                        state,
-                        prev_group,
-                        &hop_path,
-                        Some(key_conds),
-                        &hop_source,
-                    );
-                } else {
-                    self.append_entity_inputs(state, prev_group, &hop_path, None, &hop_source);
-                    let hop_anchor = pending
-                        .fork(pending.selection.clone())
-                        .at(hop.target_node, prev_group)
-                        .with_op_path(hop_path.clone())
-                        .with_response_path(SharedPath::new())
-                        .with_provides_anchor(None);
-                    self.push_condition_pendings(state, &hop_anchor, key_conds, next_group)?;
+                let hop_anchor = pending
+                    .fork(pending.selection.clone())
+                    .at(hop.target_node, prev_group)
+                    .with_op_path(hop_path.clone())
+                    .with_response_path(SharedPath::new())
+                    .with_provides_anchor(None);
+                let resolvable_in_place =
+                    self.can_resolve_in_place(hop.target_node, key_conds, &hop_source)?;
+                let (in_place, routed) =
+                    self.split_in_place(state, &hop_anchor, key_conds, resolvable_in_place);
+                self.append_entity_inputs(
+                    state,
+                    prev_group,
+                    &hop_path,
+                    in_place.as_ref(),
+                    &hop_source,
+                );
+                if let Some(routed) = &routed {
+                    self.push_condition_pendings(state, &hop_anchor, routed, next_group)?;
                 }
             }
 
@@ -566,6 +583,44 @@ impl FieldRoutingSearchSpace {
         }
 
         last.ok_or_else(|| FederationError::internal("intermediate_key_hops is empty"))
+    }
+
+    /// The group a chain enters at its `index`th intermediate hop. A connector
+    /// subgraph has no GraphQL endpoint, so a chain enters it through one of
+    /// its entity-resolver connectors.
+    fn chain_hop_group(
+        &self,
+        state: &mut PlanState,
+        pending: &PendingSelection,
+        choice: &RoutingChoice,
+        index: usize,
+        merge_at: Vec<FetchDataPathElement>,
+        anchor_fetch: NodeIndex,
+    ) -> Result<NodeIndex, FederationError> {
+        let hops = choice.intermediate_hops();
+        let hop = &hops[index];
+        let subgraph = &self.qg().node_weight(hop.target_node)?.source;
+        if !self.connector_index.is_connector_subgraph(subgraph) {
+            return Ok(self.entity_group_avoiding_cycles(
+                state,
+                subgraph,
+                merge_at,
+                anchor_fetch,
+                pending.ordering_dependent(),
+                pending.defer_ref.clone(),
+            ));
+        }
+        let exit_key = match hops.get(index + 1) {
+            Some(next) => next.entry_key.as_ref(),
+            None => Some(&choice.key()?.key_conditions),
+        };
+        let resolver = self.chain_hop_resolver(hop, exit_key)?;
+        Ok(state.graph.add_connector_entity_group(
+            subgraph,
+            merge_at,
+            resolver.connector.clone(),
+            pending.defer_ref.clone(),
+        ))
     }
 
     /// Get or create the entity group for (subgraph, merge_at), falling
