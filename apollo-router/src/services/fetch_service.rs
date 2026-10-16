@@ -26,6 +26,7 @@ use crate::query_planner::FETCH_SPAN_NAME;
 use crate::query_planner::SubgraphSchemas;
 use crate::query_planner::build_operation_with_aliasing;
 use crate::query_planner::fetch::FetchNode;
+use crate::query_planner::log::SubfetchTrace;
 use crate::services::FetchResponse;
 use crate::services::SubgraphServices;
 use crate::services::fetch::ErrorMapping;
@@ -265,7 +266,7 @@ impl FetchService {
             operation.as_serialized()
         };
 
-        let aqs = aliased_operation.to_string(); // TODO
+        let subfetch_trace = SubfetchTrace::capture(aliased_operation, &variables.variables);
         let current_dir = current_dir.clone();
         let service = subgraph_services
             .get(&service_name.clone())
@@ -281,7 +282,7 @@ impl FetchService {
                         GraphQLRequest::builder()
                             .query(aliased_operation)
                             .and_operation_name(operation_name.as_ref().map(|n| n.to_string()))
-                            .variables(variables.variables.clone())
+                            .variables(variables.variables)
                             .build(),
                     )
                     .build()
@@ -306,8 +307,7 @@ impl FetchService {
                     &current_dir,
                     &schema,
                     variables.inverted_paths,
-                    &aqs,
-                    variables.variables,
+                    subfetch_trace,
                     hoist_orphan_errors,
                 )
                 .await)
