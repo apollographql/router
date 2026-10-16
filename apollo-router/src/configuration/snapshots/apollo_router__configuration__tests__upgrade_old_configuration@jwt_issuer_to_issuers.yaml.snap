@@ -2,22 +2,21 @@
 source: apollo-router/src/configuration/tests.rs
 expression: new_config
 ---
----
 authentication:
   router:
     jwt:
       jwks:
-        - url: "https://dev-zzp5enui.us.auth0.com/.well-known/jwks.json"
-          poll_interval: 60s
-          headers:
-            - name: User-Agent
-              value: router
-          issuers:
-            - "https://issuer.one"
-        - url: "https://dev-zzp5enui.us.auth0.com/.well-known/jwks.json"
-          poll_interval: 60s
-          headers:
-            - name: User-Agent
-              value: router
-          issuers:
-            - "https://issuer.two"
+      - url: https://dev-zzp5enui.us.auth0.com/.well-known/jwks.json
+        poll_interval: 60s
+        headers:
+        - name: User-Agent
+          value: router
+        issuers:
+        - https://issuer.one
+      - url: https://dev-zzp5enui.us.auth0.com/.well-known/jwks.json
+        poll_interval: 60s
+        headers:
+        - name: User-Agent
+          value: router
+        issuers:
+        - https://issuer.two

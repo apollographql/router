@@ -1357,8 +1357,8 @@ mod tests {
             error.contains("this_key_does_not_exist_anywhere"),
             "{error}"
         );
-        // The key is on line 4 of the migrated copy and on line 5 of the file.
-        assert!(error.contains("[4:1]"), "{error}");
+        // The key is on line 3 of the migrated copy and on line 5 of the file.
+        assert!(error.contains("[3:1]"), "{error}");
         assert!(!error.contains("[5:1]"), "{error}");
     }
 
