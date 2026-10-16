@@ -2986,7 +2986,7 @@ mod tests {
                     let test_definition_file = Asset::get(&fixture).expect("failed to get fixture");
                     let test_definition: TestDefinition =
                         yaml_serde::from_slice(&test_definition_file.data)
-                            .expect("failed to parse fixture");
+                            .expect(&format!("failed to parse fixture {fixture}"));
 
                     let router_config_file =
                         Asset::get(&fixture.replace("test.yaml", "router.yaml"))
