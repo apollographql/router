@@ -4033,6 +4033,122 @@ fn connector_graphql_key_hop_routes_key_missing_from_shape() {
     "#);
 }
 
+/// `/products` returns `name` but not `weight`, and `product(id:)` returns
+/// `weight` but not `name`: `name` rides the root fetch and only `weight`
+/// is fetched through `product(id:)`.
+#[test]
+fn connector_requires_partly_in_shape_routes_only_missing_fields() {
+    let plan_str = plan_query_with_router_specs(
+        include_str!("../fixtures/connector_requires_partly_in_shape.graphql"),
+        "{ products { shippingEstimate } }",
+    );
+    insta::assert_snapshot!(plan_str, @r#"
+    QueryPlan {
+      Sequence {
+        Fetch(service: "products_Query_products_0") {
+          {
+            products {
+              __typename
+              id
+              __require_1_name: name
+            }
+          }
+        },
+        Flatten(path: "products.@") {
+          Fetch(service: "products_Query_product_0") {
+            {
+              ... on Product {
+                __typename
+                id
+              }
+            } =>
+            {
+              ... on Product {
+                __require_0_weight: weight
+              }
+            }
+          },
+        },
+        Flatten(path: "products.@") {
+          Fetch(service: "shipping") {
+            {
+              ... on Product {
+                __typename
+                id
+                __require_0_weight: weight
+                __require_1_name: name
+              }
+            } =>
+            {
+              ... on Product {
+                shippingEstimate
+              }
+            }
+          },
+        },
+      },
+    }
+    "#);
+}
+
+/// `/products` returns `sku` but not `id` of the `id sku` key, and
+/// `productBySku` returns `id` but not `sku`: `sku` rides the root fetch and
+/// only `id` is fetched through `productBySku`.
+#[test]
+fn connector_composite_key_partly_in_shape_routes_only_missing_fields() {
+    let plan_str = plan_query_with_router_specs(
+        include_str!("../fixtures/connector_composite_key_partly_in_shape.graphql"),
+        "{ products { reviews { body } } }",
+    );
+    insta::assert_snapshot!(plan_str, @r#"
+    QueryPlan {
+      Sequence {
+        Fetch(service: "products_Query_products_0") {
+          {
+            products {
+              __typename
+              sku
+            }
+          }
+        },
+        Flatten(path: "products.@") {
+          Fetch(service: "products_Query_productBySku_0") {
+            {
+              ... on Product {
+                __typename
+                sku
+              }
+            } =>
+            {
+              ... on Product {
+                id
+              }
+            }
+          },
+        },
+        Flatten(path: "products.@") {
+          Fetch(service: "reviews") {
+            {
+              ... on Product {
+                __typename
+                id
+                sku
+              }
+            } =>
+            {
+              ... on Product {
+                reviews {
+                  body
+                }
+              }
+            }
+          },
+        },
+      },
+    }
+    "#);
+}
+
 /// A `$this` field connector on an `@interfaceObject` resolves its own
 /// field under a concrete implementation's fragment.
 #[test]

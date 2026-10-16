@@ -296,25 +296,37 @@ impl FieldRoutingSearchSpace {
         // `can_resolve_in_place` cannot see.
         let key_locally_resolvable = match first_key {
             Some(key_conditions) => {
-                (matches!(choice, RoutingChoice::KeyHopWithProvidedKey { .. })
+                matches!(choice, RoutingChoice::KeyHopWithProvidedKey { .. })
                     || self.can_resolve_in_place(
                         pending.query_graph_node,
                         key_conditions,
                         &source,
-                    )?)
-                    && self.connector_fetch_provides(
-                        state,
-                        pending.fetch_node,
-                        &pending.op_path,
-                        key_conditions,
-                    )
+                    )?
             }
             None => true,
         };
+        // A connector anchor returns only the key fields its selection maps;
+        // the rest are routed like an external key's.
+        let (anchor_key, unprovided_key) = match first_key {
+            Some(key_conditions) if key_locally_resolvable => match self.connector_unprovided(
+                state,
+                pending.fetch_node,
+                &pending.op_path,
+                key_conditions,
+            ) {
+                Some((provided, missing)) => (provided, Some(missing)),
+                None => (Some(key_conditions.clone()), None),
+            },
+            _ => (None, None),
+        };
 
-        if !key_locally_resolvable
-            && let Some(key_conditions) = first_key
-            && key_contains_selected_field(&pending.selection, key_conditions)
+        let routed_key = if key_locally_resolvable {
+            unprovided_key.as_ref()
+        } else {
+            first_key
+        };
+        if let Some(routed_key) = routed_key
+            && key_contains_selected_field(&pending.selection, routed_key)
         {
             return Err(FederationError::internal(
                 "entity hop needs the field it fetches as its key",
@@ -322,12 +334,11 @@ impl FieldRoutingSearchSpace {
         }
 
         // Key fields plus __typename, which identifies the entity type.
-        let anchor_key = key_locally_resolvable.then_some(first_key).flatten();
         self.append_entity_inputs(
             state,
             pending.fetch_node,
             &pending.op_path,
-            anchor_key,
+            anchor_key.as_ref(),
             &source,
         );
 
@@ -396,6 +407,8 @@ impl FieldRoutingSearchSpace {
             } else {
                 self.push_condition_pendings(state, pending, &key_conditions, new_group)?;
             }
+        } else if let Some(unprovided_key) = &unprovided_key {
+            self.push_condition_pendings(state, pending, unprovided_key, new_group)?;
         }
 
         // Multi-hop key chain: walk through intermediate subgraphs,

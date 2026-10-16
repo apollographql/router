@@ -22,6 +22,7 @@ use super::spec::ConnectSpec;
 use crate::error::FederationError;
 use crate::operation::FragmentSpreadCache;
 use crate::operation::Selection;
+use crate::operation::SelectionMap;
 use crate::operation::SelectionSet;
 use crate::operation::TYPENAME_FIELD;
 use crate::schema::FederationSchema;
@@ -235,34 +236,60 @@ pub(crate) fn unwrap_list_shape(shape: &Shape) -> &Shape {
     shape
 }
 
-/// Whether `shape` returns every field of `selections`. Shapes the planner
+/// Split `selections` into the top-level selections `shape` returns and the
+/// ones it does not; `None` stands for an empty part. Shapes the planner
 /// can't inspect (scalars, unions, unknown JSON) count as providing
 /// everything, as they do when partitioning.
-pub(crate) fn shape_provides(shape: &Shape, selections: &SelectionSet) -> bool {
+pub(crate) fn split_by_shape(
+    shape: &Shape,
+    selections: &SelectionSet,
+) -> (Option<SelectionSet>, Option<SelectionSet>) {
+    let mut provided = SelectionMap::new();
+    let mut missing = SelectionMap::new();
+    for selection in selections.selections.values() {
+        if shape_provides(shape, selection) {
+            provided.insert(selection.clone());
+        } else {
+            missing.insert(selection.clone());
+        }
+    }
+    let part = |map: SelectionMap| {
+        (!map.is_empty()).then(|| SelectionSet {
+            schema: selections.schema.clone(),
+            type_position: selections.type_position.clone(),
+            selections: Arc::new(map),
+        })
+    };
+    (part(provided), part(missing))
+}
+
+/// Whether `shape` returns every field of `selection`.
+fn shape_provides(shape: &Shape, selection: &Selection) -> bool {
     let ShapeCase::Object { fields, .. } = unwrap_list_shape(shape).case() else {
         return true;
     };
-    selections
-        .selections
-        .values()
-        .all(|selection| match selection {
-            Selection::Field(field_sel) => {
-                let name = field_sel.field.name();
-                if *name == TYPENAME_FIELD {
-                    return true;
-                }
-                let Some(child) = fields.get(name.as_str()) else {
-                    return false;
-                };
-                field_sel
-                    .selection_set
-                    .as_ref()
-                    .is_none_or(|child_ss| shape_provides(child, child_ss))
+    let provides_all = |shape: &Shape, selections: &SelectionSet| {
+        selections
+            .selections
+            .values()
+            .all(|selection| shape_provides(shape, selection))
+    };
+    match selection {
+        Selection::Field(field_sel) => {
+            let name = field_sel.field.name();
+            if *name == TYPENAME_FIELD {
+                return true;
             }
-            Selection::InlineFragment(fragment_sel) => {
-                shape_provides(shape, &fragment_sel.selection_set)
-            }
-        })
+            let Some(child) = fields.get(name.as_str()) else {
+                return false;
+            };
+            field_sel
+                .selection_set
+                .as_ref()
+                .is_none_or(|child_ss| provides_all(child, child_ss))
+        }
+        Selection::InlineFragment(fragment_sel) => provides_all(shape, &fragment_sel.selection_set),
+    }
 }
 
 /// The entity type an entity-resolver connector produces: the type itself for

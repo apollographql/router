@@ -25,7 +25,7 @@ use super::state::PendingSelection;
 use super::state::PlanState;
 use crate::connectors::EntityResolver;
 use crate::connectors::index::IndexedConnector;
-use crate::connectors::index::shape_provides;
+use crate::connectors::index::split_by_shape;
 use crate::connectors::index::unwrap_list_shape;
 use crate::error::FederationError;
 use crate::operation::FieldSelection;
@@ -93,23 +93,28 @@ impl FieldRoutingSearchSpace {
                 // the connector group merges at the pending's response path.
                 let source = self.node_source(pending.query_graph_node)?;
                 let key_locally_resolvable =
-                    self.can_resolve_in_place(pending.query_graph_node, key_conditions, &source)?
-                        && self.connector_fetch_provides(
-                            state,
-                            pending.fetch_node,
-                            &pending.op_path,
-                            key_conditions,
-                        );
-                if !key_locally_resolvable
-                    && key_contains_selected_field(&pending.selection, key_conditions)
+                    self.can_resolve_in_place(pending.query_graph_node, key_conditions, &source)?;
+                let (local_key, routed_key) = if !key_locally_resolvable {
+                    (None, Some(key_conditions.clone()))
+                } else {
+                    match self.connector_unprovided(
+                        state,
+                        pending.fetch_node,
+                        &pending.op_path,
+                        key_conditions,
+                    ) {
+                        Some((provided, missing)) => (provided, Some(missing)),
+                        None => (Some(key_conditions.clone()), None),
+                    }
+                };
+                if let Some(routed_key) = &routed_key
+                    && key_contains_selected_field(&pending.selection, routed_key)
                 {
                     return Err(FederationError::internal(
                         "connector entity hop needs the field it fetches as its key",
                     ));
                 }
-                let local_key = key_locally_resolvable
-                    .then_some(Some(key_conditions))
-                    .flatten();
+                let local_key = local_key.as_ref();
                 self.append_entity_inputs(
                     state,
                     pending.fetch_node,
@@ -142,8 +147,8 @@ impl FieldRoutingSearchSpace {
                     .graph
                     .add_dependency(pending.fetch_node, new_group, inputs);
 
-                if !key_locally_resolvable {
-                    self.push_condition_pendings(state, pending, key_conditions, new_group)?;
+                if let Some(routed_key) = &routed_key {
+                    self.push_condition_pendings(state, pending, routed_key, new_group)?;
                 }
 
                 let entity_base_path = self.entity_root_path(entity_type.type_name())?;
@@ -504,23 +509,22 @@ impl FieldRoutingSearchSpace {
         Some(unwrap_list_shape(shape))
     }
 
-    /// Whether the fetch at `fetch_node` returns every field of `conditions`
-    /// at `op_path`. Always true for GraphQL fetches. A connector fetch returns
-    /// only what its `selection` maps, whatever the subgraph schema declares.
-    pub(super) fn connector_fetch_provides(
+    /// The top-level fields of `conditions` the fetch at `fetch_node` does not
+    /// return at `op_path`, paired with the ones it does (`None` when that part
+    /// is empty). A connector fetch returns only what its `selection` maps,
+    /// whatever the subgraph schema declares. `None` when the fetch returns
+    /// every field, which a GraphQL fetch always does.
+    pub(super) fn connector_unprovided(
         &self,
         state: &PlanState,
         fetch_node: NodeIndex,
         op_path: &SharedPath<Arc<OpPathElement>>,
         conditions: &SelectionSet,
-    ) -> bool {
-        if state.graph.node(fetch_node).connector.is_none() {
-            return true;
-        }
-        match self.connector_shape_at(state, fetch_node, &unconditioned_input_path(op_path)) {
-            Some(shape) => shape_provides(shape, conditions),
-            None => true,
-        }
+    ) -> Option<(Option<Arc<SelectionSet>>, Arc<SelectionSet>)> {
+        let shape =
+            self.connector_shape_at(state, fetch_node, &unconditioned_input_path(op_path))?;
+        let (provided, missing) = split_by_shape(shape, conditions);
+        Some((provided.map(Arc::new), Arc::new(missing?)))
     }
 
     /// The canonical query graph node for `type_name` within `source`,

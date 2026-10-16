@@ -499,13 +499,18 @@ impl FieldRoutingSearchSpace {
 
         if choice.is_key_hop() {
             let source = self.node_source(pending.query_graph_node)?;
-            let resolvable_in_place = choice.requires_resolvable_in_place()
-                && self.connector_fetch_provides(
-                    state,
-                    pending.fetch_node,
-                    &pending.op_path,
-                    requires_conditions,
-                );
+            // A connector anchor returns only the conditions its selection
+            // maps; the rest are routed.
+            let partially_in_place = choice.requires_resolvable_in_place()
+                && self
+                    .connector_unprovided(
+                        state,
+                        pending.fetch_node,
+                        &pending.op_path,
+                        requires_conditions,
+                    )
+                    .is_some();
+            let resolvable_in_place = choice.requires_resolvable_in_place() && !partially_in_place;
 
             let has_input_conflict = resolvable_in_place
                 && key_hop_edge.is_some_and(|e| {
@@ -569,6 +574,27 @@ impl FieldRoutingSearchSpace {
                 state
                     .graph
                     .add_ordering_dependency(pending.fetch_node, dest)?;
+            } else if partially_in_place
+                // Split the staged conditions: aliasing keeps field names, so
+                // the split matches the one that set `partially_in_place`.
+                && let Some((provided, missing)) = self.connector_unprovided(
+                    state,
+                    pending.fetch_node,
+                    &pending.op_path,
+                    &conditions,
+                )
+            {
+                if let Some(provided) = provided {
+                    state.graph.append_selection(
+                        pending.fetch_node,
+                        &unconditioned_input_path(&pending.op_path),
+                        Some(&provided),
+                    );
+                    state
+                        .graph
+                        .add_ordering_dependency(pending.fetch_node, dest)?;
+                }
+                self.push_condition_pendings(state, pending, &missing, dest)?;
             } else {
                 self.push_condition_pendings(state, pending, &conditions, dest)?;
             }
