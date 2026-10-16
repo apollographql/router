@@ -93,7 +93,7 @@ async fn test_metrics_reloading() {
     .unwrap();
     config_value
         .as_mapping_mut()
-        .and_then(|m| m.get_mut(&yaml_serde::Value::String("telemetry".into())))
+        .and_then(|m| m.get_mut("telemetry"))
         .and_then(|t| t.as_mapping_mut())
         .expect("PROMETHEUS_CONFIG has a telemetry block")
         .insert(yaml_serde::Value::String("apollo".into()), apollo_block);
