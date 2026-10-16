@@ -899,6 +899,7 @@ pub(crate) async fn call_single_http(
                 .status_code(StatusCode::INTERNAL_SERVER_ERROR)
                 .context(context)
                 .extensions(Object::default())
+                .id(subgraph_request_id)
                 .build());
         }
     };
@@ -4468,6 +4469,44 @@ mod tests {
         }
         .with_metrics()
         .await;
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn test_failed_fetch_response_keeps_subgraph_request_id() {
+        // Nothing listens on this port once the listener is dropped, so the fetch fails.
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let socket_addr = listener.local_addr().unwrap();
+        drop(listener);
+        let subgraph_service = SubgraphService::new(
+            "test",
+            true,
+            HttpClientServiceFactory::from_config(
+                "test",
+                &Configuration::default(),
+                crate::configuration::shared::Client::default(),
+            ),
+        )
+        .expect("can create a SubgraphService");
+
+        let url = Uri::from_str(&format!("http://{socket_addr}")).unwrap();
+        let request = SubgraphRequest::builder()
+            .supergraph_request(supergraph_request("query"))
+            .subgraph_request(subgraph_http_request(url, "query"))
+            .operation_kind(OperationKind::Query)
+            .subgraph_name(String::from("test"))
+            .context(Context::new())
+            .build();
+        let request_id = request.id.clone();
+        let response = subgraph_service.oneshot(request).await.unwrap();
+
+        assert!(
+            response.response.body().errors[0]
+                .message
+                .starts_with("HTTP fetch failed from 'test'"),
+            "unexpected error: {:?}",
+            response.response.body().errors
+        );
+        assert_eq!(response.id, request_id);
     }
 
     #[tokio::test(flavor = "multi_thread")]
