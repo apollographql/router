@@ -499,7 +499,13 @@ impl FieldRoutingSearchSpace {
 
         if choice.is_key_hop() {
             let source = self.node_source(pending.query_graph_node)?;
-            let resolvable_in_place = choice.requires_resolvable_in_place();
+            let resolvable_in_place = choice.requires_resolvable_in_place()
+                && self.connector_fetch_provides(
+                    state,
+                    pending.fetch_node,
+                    &pending.op_path,
+                    requires_conditions,
+                );
 
             let has_input_conflict = resolvable_in_place
                 && key_hop_edge.is_some_and(|e| {

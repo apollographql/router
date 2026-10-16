@@ -21,10 +21,18 @@ use petgraph::visit::EdgeRef;
 use petgraph::visit::NodeIndexable;
 use selection_builder::SelectionBuilder;
 use selection_builder::SelectionCheckpoint;
+use selection_builder::SelectionEntry;
+use shape::Shape;
+use shape::ShapeCase;
 
 use super::shared_path::SharedPath;
+use crate::connectors::EntityResolver;
+use crate::connectors::index::ConnectorIndex;
+use crate::connectors::index::shape_provides;
+use crate::connectors::index::unwrap_list_shape;
 use crate::error::FederationError;
 use crate::operation::SelectionSet;
+use crate::operation::TYPENAME_FIELD;
 use crate::query_graph::graph_path::operation::OpPathElement;
 use crate::query_plan::FetchDataKeyRenamer;
 use crate::query_plan::FetchDataPathElement;
@@ -269,6 +277,31 @@ enum GroupKey {
         Vec<FetchDataPathElement>,
         Option<String>,
     ),
+}
+
+/// Whether an entity-level connector `shape` returns everything a fetch
+/// selection entry selects. An intermediate shape the planner can't inspect
+/// counts as not covering it.
+fn shape_covers_entry(shape: &Shape, entry: &SelectionEntry) -> bool {
+    let mut shape = shape;
+    for element in entry.path().iter() {
+        let OpPathElement::Field(field) = element.as_ref() else {
+            continue;
+        };
+        if *field.name() == TYPENAME_FIELD {
+            return true;
+        }
+        let ShapeCase::Object { fields, .. } = unwrap_list_shape(shape).case() else {
+            return false;
+        };
+        let Some(child) = fields.get(field.name().as_str()) else {
+            return false;
+        };
+        shape = child;
+    }
+    entry
+        .selections()
+        .is_none_or(|selections| shape_provides(shape, selections))
 }
 
 /// The reuse-slot key for a node. Connector-backed nodes have no key:
@@ -831,6 +864,108 @@ impl FetchGraph {
         #[cfg(test)]
         tests::REACHABILITY_CHECKS.with(|checks| checks.set(checks.get() + 1));
         petgraph::algo::has_path_connecting(&self.graph, from, to, None)
+    }
+
+    /// Move sibling connector entity fetches onto one connector when its
+    /// output covers what each of them fetches, so `merge_sibling_entities`
+    /// combines them into a single fetch. Routing picks a resolver per field,
+    /// so with a superset connector (say `/products/{id}?include=reviews`)
+    /// beside a narrower one, `{ name reviews }` would otherwise call both.
+    /// Called once post-search, before `merge_sibling_entities`.
+    ///
+    /// Only entity-level resolvers (type-level and `entity: true`) with the
+    /// same key and the same parents qualify: the representations each fetch
+    /// receives must carry what the connector it moves to reads.
+    pub(crate) fn absorb_covered_connector_fetches(&mut self, index: &ConnectorIndex) {
+        type Siblings = (
+            Arc<str>,
+            Option<String>,
+            Vec<FetchDataPathElement>,
+            Vec<NodeIndex>,
+            String,
+        );
+        let mut groups: IndexMap<Siblings, Vec<(NodeIndex, Arc<crate::connectors::Connector>)>> =
+            IndexMap::new();
+        for node_idx in self.graph.node_indices() {
+            let node = &self.graph[node_idx];
+            let (FetchGroupKind::Entity { merge_at }, Some(connector)) =
+                (&node.kind, &node.connector)
+            else {
+                continue;
+            };
+            if !matches!(
+                connector.entity_resolver,
+                Some(
+                    EntityResolver::Explicit
+                        | EntityResolver::TypeSingle
+                        | EntityResolver::TypeBatch
+                )
+            ) {
+                continue;
+            }
+            let Some(key) = index.key_conditions(&connector.id.coordinate()) else {
+                continue;
+            };
+            let mut parents: Vec<NodeIndex> = self
+                .graph
+                .neighbors_directed(node_idx, Direction::Incoming)
+                .collect();
+            parents.sort();
+            parents.dedup();
+            let siblings = (
+                node.subgraph.clone(),
+                node.defer_ref.clone(),
+                strip_merge_at_conditions(merge_at),
+                parents,
+                key.to_string(),
+            );
+            groups
+                .entry(siblings)
+                .or_default()
+                .push((node_idx, connector.clone()));
+        }
+
+        for members in groups.into_values() {
+            if members.len() < 2 {
+                continue;
+            }
+            let covers = |connector: &crate::connectors::Connector, member: NodeIndex| {
+                index
+                    .output_shape(&connector.id.coordinate())
+                    .is_some_and(|shape| {
+                        self.graph[member]
+                            .selection_builder
+                            .entries()
+                            .iter()
+                            .all(|entry| shape_covers_entry(shape, entry))
+                    })
+            };
+            // The connector covering the most members absorbs them; on a tie
+            // the first one does.
+            let mut best: Option<(Arc<crate::connectors::Connector>, Vec<NodeIndex>)> = None;
+            for (_, connector) in &members {
+                let covered: Vec<NodeIndex> = members
+                    .iter()
+                    .filter(|(member, _)| covers(connector, *member))
+                    .map(|(member, _)| *member)
+                    .collect();
+                if best
+                    .as_ref()
+                    .is_none_or(|(_, best_covered)| covered.len() > best_covered.len())
+                {
+                    best = Some((connector.clone(), covered));
+                }
+            }
+            let Some((absorber, covered)) = best else {
+                continue;
+            };
+            if covered.len() < 2 {
+                continue;
+            }
+            for member in covered {
+                self.graph[member].connector = Some(absorber.clone());
+            }
+        }
     }
 
     /// Merge entity nodes sharing the same (subgraph, merge_at) into one
