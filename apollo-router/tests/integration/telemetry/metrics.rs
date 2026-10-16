@@ -1,5 +1,6 @@
 use std::collections::BTreeSet;
 use std::collections::HashMap;
+use std::ffi::OsString;
 use std::path::PathBuf;
 use std::time::Duration;
 
@@ -1296,12 +1297,24 @@ async fn assert_counted_once_by_otlp(collector: &MockServer) {
     assert_eq!(exported_overflow_count(collector).await, Some(1));
 }
 
+/// Points the OTLP exporter of the cardinality overflow fixtures at `collector`.
+fn otlp_collector_env(collector: &MockServer) -> HashMap<String, OsString> {
+    HashMap::from([(
+        String::from("TEST_CONFIG_COLLECTOR_ENDPOINT"),
+        collector.uri().into(),
+    )])
+}
+
 #[tokio::test(flavor = "multi_thread")]
 async fn test_otlp_cardinality_overflow_counted_once() {
     let collector = mock_otlp_server(0..).await;
-    let config = include_str!("fixtures/otlp_cardinality_overflow.router.yaml")
-        .replace("<otel-collector-endpoint>", &collector.uri());
-    let mut router = IntegrationTest::builder().config(&config).build().await;
+    let mut router = IntegrationTest::builder()
+        .config(include_str!(
+            "fixtures/otlp_cardinality_overflow.router.yaml"
+        ))
+        .env(otlp_collector_env(&collector))
+        .build()
+        .await;
 
     router.start().await;
     router.assert_started().await;
@@ -1314,9 +1327,13 @@ async fn test_otlp_cardinality_overflow_counted_once() {
 #[tokio::test(flavor = "multi_thread")]
 async fn test_prometheus_and_otlp_cardinality_overflow_counted_once() {
     let collector = mock_otlp_server(0..).await;
-    let config = include_str!("fixtures/prometheus_otlp_cardinality_overflow.router.yaml")
-        .replace("<otel-collector-endpoint>", &collector.uri());
-    let mut router = IntegrationTest::builder().config(&config).build().await;
+    let mut router = IntegrationTest::builder()
+        .config(include_str!(
+            "fixtures/prometheus_otlp_cardinality_overflow.router.yaml"
+        ))
+        .env(otlp_collector_env(&collector))
+        .build()
+        .await;
 
     router.start().await;
     router.assert_started().await;
