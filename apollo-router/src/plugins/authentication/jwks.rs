@@ -849,7 +849,8 @@ pub(crate) fn convert_key_algorithm(algorithm: KeyAlgorithm) -> Option<Algorithm
         KeyAlgorithm::RSA1_5
         | KeyAlgorithm::RSA_OAEP
         | KeyAlgorithm::RSA_OAEP_256
-        | KeyAlgorithm::UNKNOWN_ALGORITHM => return None,
+        | KeyAlgorithm::UNKNOWN_ALGORITHM
+        | _ => return None,
     })
 }
 
@@ -867,6 +868,7 @@ fn convert_algorithm(algorithm: Algorithm) -> KeyAlgorithm {
         Algorithm::PS384 => KeyAlgorithm::PS384,
         Algorithm::PS512 => KeyAlgorithm::PS512,
         Algorithm::EdDSA => KeyAlgorithm::EdDSA,
+        _ => KeyAlgorithm::UNKNOWN_ALGORITHM,
     }
 }
 
