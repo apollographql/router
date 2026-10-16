@@ -667,9 +667,9 @@ fn file_expansion_resolves_a_root_level_field() {
     assert!(config.experimental_type_conditioned_fetching);
 }
 
-/// File expansion coerces a nested boolean through the schema's `allOf` reference wrapper.
+/// File expansion coerces a nested boolean to the type its field's schema reference declares.
 #[test]
-fn file_expansion_boolean_coercion_resolves_through_a_nested_allof_ref() {
+fn file_expansion_boolean_coercion_resolves_through_a_nested_ref() {
     let mut file = tempfile::NamedTempFile::new().expect("can create a temp file");
     std::io::Write::write_all(&mut file, b"true").expect("can write the temp file");
     let text = format!(

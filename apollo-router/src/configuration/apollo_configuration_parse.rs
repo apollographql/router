@@ -679,8 +679,43 @@ mod tests {
         );
     }
 
+    /// The router's parser validates with the dialect its schema declares. Draft 2020-12 applies
+    /// a keyword beside `$ref`, where draft 7 ignores it, so a constraint placed there rejects the
+    /// document unless the parser is told to read the schema as draft 7.
     #[test]
-    fn diagnostics_redact_typed_secrets_reached_through_draft_7_references() {
+    fn validation_uses_the_dialect_the_schema_declares() {
+        let mut schema = router_config_schema().clone();
+        let supergraph = &mut schema["properties"]["supergraph"];
+        assert!(supergraph.get("$ref").is_some(), "{supergraph}");
+        supergraph["not"] = json!({ "required": ["listen"] });
+        let text = "supergraph:\n  listen: 127.0.0.1:4000\n";
+
+        let declared = parser_builder::<ExpandedDocument>(&[], &None)
+            .schema(schema.clone())
+            .build()
+            .expect("the schema compiles");
+        let error = declared
+            .parse_yaml(text)
+            .err()
+            .expect("draft 2020-12 applies the keyword beside `$ref`");
+        let rendered = ConfigurationError::from(error).to_string();
+        assert!(
+            rendered.contains(r#"{"required":["listen"]} is not allowed"#),
+            "the error should come from the keyword beside `$ref`: {rendered}"
+        );
+
+        let draft_7 = parser_builder::<ExpandedDocument>(&[], &None)
+            .schema(schema)
+            .draft(apollo_configuration::Draft::Draft7)
+            .build()
+            .expect("the schema compiles");
+        draft_7
+            .parse_yaml(text)
+            .expect("draft 7 ignores the keyword beside `$ref`");
+    }
+
+    #[test]
+    fn diagnostics_redact_typed_secrets_reached_through_references() {
         let secret = "redis-password-must-not-leak"; // gitleaks:allow
         let text = format!(
             "apq:\n  router:\n    cache:\n      redis:\n        urls: [redis://localhost]\n        password: {secret}\n        unexpected: true\n"
