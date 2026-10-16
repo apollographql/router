@@ -103,6 +103,12 @@ const CASES: &[Case] = &[
         upgrade: Upgrade::Startup,
     },
     Case {
+        name: "telemetry standard attributes, enabled by a boolean or renamed with an alias",
+        snapshot: "current_telemetry_standard_attributes",
+        text: include_str!("testdata/compat/current_telemetry_standard_attributes.yaml"),
+        upgrade: Upgrade::Startup,
+    },
+    Case {
         name: "cors.origins migrates into cors.policies",
         snapshot: "needs_minor_migration_cors_origins",
         text: include_str!("testdata/compat/needs_minor_migration_cors_origins.yaml"),
@@ -286,8 +292,10 @@ fn unknown_top_level_key_is_rejected() {
 /// `additionalProperties: false`.
 #[test]
 fn unknown_plugin_name_is_rejected() {
-    parse(include_str!("testdata/compat/unknown_plugin_name.yaml"))
-        .expect_err("the plugin is not registered");
+    let error = parse(include_str!("testdata/compat/unknown_plugin_name.yaml"))
+        .expect_err("the plugin is not registered")
+        .to_string();
+    assert!(error.contains("this_plugin_is_not_registered"), "{error}");
 }
 
 /// Duplicate keys are rejected in the original text, before migration or parsing could
@@ -677,6 +685,30 @@ fn file_expansion_boolean_coercion_resolves_through_a_nested_allof_ref() {
     .expect("the nested field's declared type resolves the coercion");
 
     assert!(config.supergraph.introspection);
+}
+
+/// A whole-value expansion takes the scalar type the schema declares for its field, however
+/// deeply the field is nested.
+#[test]
+fn whole_value_expansion_takes_the_nested_fields_declared_type() {
+    let expansion = Expansion::builder()
+        .supported_mode("env")
+        .mocked_env_var("COMPAT_ENABLED", "true")
+        .mocked_env_var("COMPAT_LIMIT", "7")
+        .build();
+    let config = parse_configuration(
+        "apq:\n  router:\n    cache:\n      in_memory:\n        limit: ${env.COMPAT_LIMIT}\ninclude_subgraph_errors:\n  all: ${env.COMPAT_ENABLED}\n",
+        expansion,
+        Migration::None,
+    )
+    .expect("each expanded value has its field's declared type");
+
+    let document = config.validated_yaml.as_ref().unwrap();
+    assert_eq!(
+        document["apq"]["router"]["cache"]["in_memory"]["limit"],
+        json!(7)
+    );
+    assert_eq!(document["include_subgraph_errors"]["all"], json!(true));
 }
 
 /// File expansion removes one trailing newline, so values written with `echo` expand to the
