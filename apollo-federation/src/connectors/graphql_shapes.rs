@@ -244,11 +244,24 @@ impl<'a> GraphQLSchemaWalker<'a> {
     /// The shape of the named type `name`, or `Unknown` if the schema does not
     /// define it. A schema that fails validation can name a type it never
     /// declares, and a shape that admits anything is the honest answer.
+    ///
+    /// A composite type becomes a [`Shape::name`] reference to its own entry
+    /// rather than being inlined. Inlining expands each entry into everything
+    /// reachable from it, which is exponential in depth whenever a type is
+    /// reachable through more than one field per level (`billingAddress` and
+    /// `shippingAddress: Address` repeated down a hierarchy). Callers that walk
+    /// into a field resolve the reference through the returned map, as
+    /// `validation::expression` does.
     fn shape_from_named_type(&mut self, name: &Name) -> Shape {
-        if let Some(extended) = self.locator.schema.types.get(name) {
-            self.shape_from_extended_type(extended)
-        } else {
-            Shape::unknown(self.locations(name.location()))
+        match self.locator.schema.types.get(name) {
+            Some(
+                extended @ (ExtendedType::Object(_)
+                | ExtendedType::Interface(_)
+                | ExtendedType::Union(_)
+                | ExtendedType::InputObject(_)),
+            ) => Shape::name(extended.name().as_str(), self.locations(name.location())),
+            Some(extended) => self.shape_from_extended_type(extended),
+            None => Shape::unknown(self.locations(name.location())),
         }
     }
 
@@ -398,16 +411,18 @@ impl<'a> GraphQLSchemaWalker<'a> {
 /// Locations are set automatically from the schema's sources; see the module
 /// documentation.
 ///
-/// A cyclic type reference becomes a [`Shape::name`] reference rather than an
-/// infinite expansion, and this function drops the [`Namespace`] those names
-/// were bound in, so `shape` itself cannot resolve them. Callers resolve a
-/// name by looking it up in the returned map; see `validation::expression`,
-/// which does that and breaks cycles with a `resolving` set of its own.
+/// A field of composite type becomes a [`Shape::name`] reference to that
+/// type's entry rather than an inline expansion, and this function drops the
+/// [`Namespace`] those names were bound in, so `shape` itself cannot resolve
+/// them. Callers resolve a name by looking it up in the returned map; see
+/// `validation::expression`, which does that and breaks cycles with a
+/// `resolving` set of its own.
 ///
-/// That is verbatim what `shape::graphql::shapes_for_schema` did in 0.8.3, the
-/// version this replaces, down to this line: the namespace is finalized as a
-/// temporary and only its entries are kept. Nothing about the behavior is new
-/// here.
+/// The body is verbatim what `shape::graphql::shapes_for_schema` did in 0.8.3,
+/// the version this replaces: the namespace is finalized as a temporary and
+/// only its entries are kept. 0.8.3's walker inlined nested composite types and
+/// named only cycles; see `GraphQLSchemaWalker::shape_from_named_type` for
+/// why this one does not.
 #[must_use]
 pub(crate) fn shapes_for_schema(schema: &Schema) -> IndexMap<String, Shape> {
     namespace_from_schema(schema).finalize().iter().collect()
