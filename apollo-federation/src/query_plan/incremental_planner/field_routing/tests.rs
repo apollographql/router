@@ -3772,11 +3772,12 @@ fn connector_entity_shape_drills_into_committed_field() {
     "###);
 }
 
-/// A field connector on a non-root type with no key variables has no way
-/// to attach its result to parent entities; planning must surface an error
-/// rather than emit a fetch with no representation inputs.
+/// Before connect v0.4, a field connector on a non-root type that references
+/// no `$this` (User.staticAvatar) has no key, as connector expansion gives
+/// it none; planning must surface an error rather than emit a fetch with no
+/// representation inputs.
 #[test]
-fn connector_direct_field_without_key_errors() {
+fn connector_field_without_this_before_v0_4_errors() {
     let supergraph =
         Supergraph::new_with_router_specs(CONNECTOR_OUTPUT_SHAPE_SCHEMA).expect("supergraph parse");
     let planner = QueryPlanner::new(&supergraph, default_config()).expect("planner creation");
@@ -3791,6 +3792,247 @@ fn connector_direct_field_without_key_errors() {
         result.is_err(),
         "keyless non-root connector must not plan silently: {result:?}"
     );
+}
+
+/// From connect v0.4, a field connector on a non-root type that references
+/// no `$this` (Product.banner) is entered through the singleton `__typename`
+/// key, as connector expansion keys it. Without any `$this` connector on the
+/// type, its subgraph defines no `_Entity`; the key must still route the
+/// field to its connector instead of folding it into the parent connector's
+/// fetch.
+#[test]
+fn connector_field_without_this_keys_on_typename() {
+    let plan_str = plan_query_with_router_specs(
+        include_str!("../fixtures/connector_field_without_this.graphql"),
+        "{ products { name banner } }",
+    );
+    insta::assert_snapshot!(plan_str, @r#"
+    QueryPlan {
+      Sequence {
+        Fetch(service: "products_Query_products_0") {
+          {
+            products {
+              __typename
+              name
+            }
+          }
+        },
+        Flatten(path: "products.@") {
+          Fetch(service: "products_Product_banner_0") {
+            {
+              ... on Product {
+                __typename
+              }
+            } =>
+            {
+              ... on Product {
+                banner
+              }
+            }
+          },
+        },
+      },
+    }
+    "#);
+}
+
+/// A field connector that references only `$args` (Product.related) is
+/// keyed on `__typename` too; aliases with different arguments share the
+/// fetch.
+#[test]
+fn connector_field_with_only_args_keys_on_typename() {
+    let plan_str = plan_query_with_router_specs(
+        include_str!("../fixtures/connector_field_without_this.graphql"),
+        "{ products { a: related(limit: 1) { id } b: related(limit: 2) { label } } }",
+    );
+    insta::assert_snapshot!(plan_str, @r#"
+    QueryPlan {
+      Sequence {
+        Fetch(service: "products_Query_products_0") {
+          {
+            products {
+              __typename
+            }
+          }
+        },
+        Flatten(path: "products.@") {
+          Fetch(service: "products_Product_related_0") {
+            {
+              ... on Product {
+                __typename
+              }
+            } =>
+            {
+              ... on Product {
+                b: related(limit: 2) {
+                  label
+                }
+                a: related(limit: 1) {
+                  id
+                }
+              }
+            }
+          },
+        },
+      },
+    }
+    "#);
+}
+
+/// When another connector on the type references `$this`, the type's key
+/// in the supergraph comes from that connector, but the field connector that
+/// references no `$this` is still entered through `__typename` alone.
+#[test]
+fn connector_field_without_this_beside_this_connector() {
+    let schema = include_str!("../fixtures/connector_field_without_this.graphql").replace(
+        "  name: String\n",
+        "  name: String\n  details: String @join__directive(graphs: [PRODUCTS], name: \"connect\", args: {source: \"api\", http: {GET: \"/products/{$this.id}\"}, selection: \"$.details\"})\n",
+    );
+    let plan_str = plan_query_with_router_specs(&schema, "{ products { banner details } }");
+    insta::assert_snapshot!(plan_str, @r#"
+    QueryPlan {
+      Sequence {
+        Fetch(service: "products_Query_products_0") {
+          {
+            products {
+              __typename
+              id
+            }
+          }
+        },
+        Parallel {
+          Flatten(path: "products.@") {
+            Fetch(service: "products_Product_banner_0") {
+              {
+                ... on Product {
+                  __typename
+                }
+              } =>
+              {
+                ... on Product {
+                  banner
+                }
+              }
+            },
+          },
+          Flatten(path: "products.@") {
+            Fetch(service: "products_Product_details_0") {
+              {
+                ... on Product {
+                  __typename
+                  id
+                }
+              } =>
+              {
+                ... on Product {
+                  details
+                }
+              }
+            },
+          },
+        },
+      },
+    }
+    "#);
+}
+
+/// A `$this` field connector on an `@interfaceObject` resolves its own
+/// field under a concrete implementation's fragment.
+#[test]
+fn connector_interface_object_field_connector_under_implementation() {
+    let plan_str = plan_query_with_router_specs(
+        include_str!("../fixtures/connector_interface_object_field_connector.graphql"),
+        "{ allMedia { title ... on Book { author rating } } }",
+    );
+    insta::assert_snapshot!(plan_str, @r#"
+    QueryPlan {
+      Sequence {
+        Fetch(service: "media") {
+          {
+            allMedia {
+              __typename
+              ... on Book {
+                __typename
+                author
+                id
+              }
+              title
+            }
+          }
+        },
+        Flatten(path: "allMedia.@|[Book]") {
+          Fetch(service: "ratings_Media_rating_0") {
+            {
+              ... on Book {
+                __typename
+                id
+              }
+            } =>
+            {
+              ... on Media {
+                rating
+              }
+            }
+          },
+        },
+      },
+    }
+    "#);
+}
+
+/// A field connector's selection describes its field's value: `User.posts`
+/// selecting `name` does not make it a source for `User.name`, which takes
+/// the two-hop route through `d` to `b`.
+#[test]
+fn connector_field_selection_does_not_provide_entity_fields() {
+    let plan_str = plan_query_with_router_specs(
+        include_str!("../fixtures/connector_field_selection_not_entity_fields.graphql"),
+        "{ users { name } }",
+    );
+    insta::assert_snapshot!(plan_str, @r#"
+    QueryPlan {
+      Sequence {
+        Fetch(service: "a") {
+          {
+            users {
+              __typename
+              id
+            }
+          }
+        },
+        Flatten(path: "users.@") {
+          Fetch(service: "d") {
+            {
+              ... on User {
+                __typename
+                id
+              }
+            } =>
+            {
+              ... on User {
+                email
+              }
+            }
+          },
+        },
+        Flatten(path: "users.@") {
+          Fetch(service: "b") {
+            {
+              ... on User {
+                __typename
+                email
+              }
+            } =>
+            {
+              ... on User {
+                name
+              }
+            }
+          },
+        },
+      },
+    }
+    "#);
 }
 
 /// A connector selection that names an object field without sub-selections
