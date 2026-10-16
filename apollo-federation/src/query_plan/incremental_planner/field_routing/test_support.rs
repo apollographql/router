@@ -38,6 +38,38 @@ pub(super) fn search_space_from_supergraph(sdl: &str) -> FieldRoutingSearchSpace
     space_for(supergraph.schema.clone(), api)
 }
 
+/// Build a search space over a supergraph with connectors, indexed the way
+/// `QueryPlanner::new` indexes them for the incremental planner.
+pub(super) fn connector_search_space(sdl: &str) -> FieldRoutingSearchSpace {
+    let supergraph = crate::Supergraph::new_with_router_specs(sdl).expect("supergraph parses");
+    let schema = crate::connectors::index::add_connector_entity_keys(&supergraph.schema)
+        .expect("connector entity keys");
+    let api = supergraph
+        .to_api_schema(Default::default())
+        .expect("api schema");
+    let query_graph = build_federated_query_graph(schema.clone(), api, Some(true), Some(true))
+        .expect("query graph");
+    let mut connectors_by_subgraph = Vec::new();
+    for (name, subgraph_schema) in query_graph.subgraph_schemas() {
+        let connectors = crate::connectors::Connector::from_schema(subgraph_schema.schema(), name)
+            .expect("connectors parse");
+        if !connectors.is_empty() {
+            connectors_by_subgraph.push((subgraph_schema, connectors));
+        }
+    }
+    let connector_index =
+        crate::connectors::index::ConnectorIndex::from_subgraphs(connectors_by_subgraph)
+            .expect("connector index");
+    FieldRoutingSearchSpace {
+        cached_query_graph: CachedQueryGraph::new(Arc::new(query_graph), Default::default()),
+        supergraph_schema: schema,
+        inconsistent_abstract_types: Default::default(),
+        connector_index: Arc::new(connector_index),
+        caches: super::PlannerCaches::new(),
+        disabled_subgraphs: Default::default(),
+    }
+}
+
 fn space_for(schema: ValidFederationSchema, api: ValidFederationSchema) -> FieldRoutingSearchSpace {
     let query_graph =
         build_federated_query_graph(schema.clone(), api, None, None).expect("query graph");

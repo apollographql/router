@@ -4897,3 +4897,271 @@ fn defer_on_value_type_stays_in_enclosing_fetch() {
     }
     "###);
 }
+
+/// `/products` maps `details` through `->match`, and neither branch returns
+/// `upc`: fetch `details { upc }` through `productById` instead of selecting
+/// it from a fetch that returns it as null.
+#[test]
+fn connector_key_under_match_shape_routes_missing_field() {
+    let plan_str = plan_query_with_router_specs(
+        include_str!("../fixtures/connector_key_in_match_shape.graphql"),
+        "{ products { reviews { body } } }",
+    );
+    insta::assert_snapshot!(plan_str, @r#"
+    QueryPlan {
+      Sequence {
+        Fetch(service: "products_Query_products_0") {
+          {
+            products {
+              __typename
+              id
+            }
+          }
+        },
+        Flatten(path: "products.@") {
+          Fetch(service: "products_Query_productById_0") {
+            {
+              ... on Product {
+                __typename
+                id
+              }
+            } =>
+            {
+              ... on Product {
+                details {
+                  upc
+                }
+              }
+            }
+          },
+        },
+        Flatten(path: "products.@") {
+          Fetch(service: "reviews") {
+            {
+              ... on Product {
+                __typename
+                id
+                details {
+                  upc
+                }
+              }
+            } =>
+            {
+              ... on Product {
+                reviews {
+                  body
+                }
+              }
+            }
+          },
+        },
+      },
+    }
+    "#);
+}
+
+/// A pending for `Product.reviews` under the list field `list_field`,
+/// positioned at `subgraph`'s Product node in fetch `fetch_node`.
+fn connector_reviews_pending(
+    space: &FieldRoutingSearchSpace,
+    list_field: &str,
+    subgraph: &str,
+    fetch_node: NodeIndex,
+) -> PendingSelection {
+    let op = crate::operation::Operation::parse(
+        space.supergraph_schema.clone(),
+        &format!("{{ {list_field} {{ reviews {{ body }} }} }}"),
+        "op.graphql",
+    )
+    .expect("valid operation");
+    let outer = match op.selection_set.selections.values().next() {
+        Some(Selection::Field(outer)) => outer.clone(),
+        _ => panic!("expected {list_field} field"),
+    };
+    let reviews = outer
+        .selection_set
+        .as_ref()
+        .expect("list field has sub-selections")
+        .selections
+        .values()
+        .next()
+        .expect("reviews selection")
+        .clone();
+    let op_path = SharedPath::from_vec(vec![Arc::new(OpPathElement::Field(outer.field.clone()))]);
+    let response_path =
+        SharedPath::from_vec(commit::field_response_elements(&outer.field).expect("response path"));
+    PendingSelection::root(
+        reviews,
+        test_support::node_for(space, subgraph, "Product"),
+        fetch_node,
+    )
+    .with_op_path(op_path)
+    .with_response_path(response_path)
+}
+
+/// The key edge from `from`'s Product node into `to`'s, with its conditions.
+fn product_key_edge(
+    space: &FieldRoutingSearchSpace,
+    from: &str,
+    to: &str,
+) -> (NodeIndex, Arc<SelectionSet>) {
+    let qg = &space.cached_query_graph.query_graph;
+    let from_node = test_support::node_for(space, from, "Product");
+    let to_node = test_support::node_for(space, to, "Product");
+    let edge = qg
+        .out_edges(from_node)
+        .into_iter()
+        .find(|edge| {
+            matches!(
+                edge.weight().transition,
+                crate::query_graph::QueryGraphEdgeTransition::KeyResolution
+            ) && petgraph::visit::EdgeRef::target(edge) == to_node
+        })
+        .expect("key edge between the subgraphs");
+    let conditions = edge.weight().conditions.clone().expect("key conditions");
+    (to_node, conditions)
+}
+
+/// The `reviews` field edge at the reviews subgraph's Product node.
+fn reviews_edge(space: &FieldRoutingSearchSpace, pending: &PendingSelection) -> routing::EdgeInfo {
+    let Selection::Field(reviews) = &pending.selection else {
+        panic!("reviews is a field");
+    };
+    let node = test_support::node_for(space, "reviews", "Product");
+    routing::EdgeInfo {
+        edge_index: space
+            .cached_query_graph
+            .edge_for_field(node, &reviews.field)
+            .expect("reviews edge"),
+        target_subgraph: Arc::from("reviews"),
+    }
+}
+
+fn key_hop_info(
+    key_conditions: Arc<SelectionSet>,
+    conditions_unroutable: bool,
+) -> routing::KeyHopInfo {
+    routing::KeyHopInfo {
+        key_conditions,
+        requires_resolvable_in_place: true,
+        conditions_unroutable,
+        self_entity_reentry: false,
+    }
+}
+
+/// A chain from `a` through the connector subgraph `products` into
+/// `reviews`. The subgraph has no GraphQL endpoint, so the chain enters it
+/// through the entity-resolver connector that returns the `upc` key leaving
+/// it, `productUpc`, rather than `product`, which doesn't.
+#[test]
+fn chained_hop_through_connector_subgraph_uses_connector_fetch() {
+    let space = test_support::connector_search_space(include_str!(
+        "../fixtures/connector_chained_key_hop.graphql"
+    ));
+    let mut state = PlanState::new(vec![]);
+    let root = state.graph.get_or_create_root_group(
+        &Arc::from("a"),
+        CompositeTypeDefinitionPosition::Object(
+            crate::schema::position::ObjectTypeDefinitionPosition {
+                type_name: name!("Query"),
+            },
+        ),
+    );
+    let pending = connector_reviews_pending(&space, "topProducts", "a", root);
+    let (products_node, entry_key) = product_key_edge(&space, "a", "products");
+    let (_, exit_key) = product_key_edge(&space, "products", "reviews");
+    let choice = RoutingChoice::ChainedKeyHop {
+        edge: reviews_edge(&space, &pending),
+        key: key_hop_info(exit_key, false),
+        intermediate_hops: vec![routing::IntermediateKeyHop {
+            target_node: products_node,
+            entry_key: Some(entry_key),
+        }],
+    };
+    let pending_before = state.pending.len();
+
+    space
+        .commit_key_hop(&mut state, &pending, &choice)
+        .expect("chained hop commits");
+
+    let products_fetches: Vec<_> = state
+        .graph
+        .node_indices()
+        .map(|idx| state.graph.node(idx))
+        .filter(|node| node.subgraph.as_ref() == "products")
+        .map(|node| {
+            let selections: Vec<_> = node
+                .selection_builder
+                .entries()
+                .iter()
+                .filter_map(|entry| entry.selections().map(|selections| selections.to_string()))
+                .collect();
+            (
+                node.connector
+                    .as_ref()
+                    .map(|connector| connector.id.coordinate()),
+                selections,
+            )
+        })
+        .collect();
+    assert_eq!(
+        products_fetches,
+        vec![(
+            Some("products:Query.productUpc[0]".to_string()),
+            vec!["{ upc }".to_string()],
+        )],
+    );
+    assert_eq!(
+        state.pending.len(),
+        pending_before,
+        "upc is selected in place"
+    );
+}
+
+/// A circular key hop from the `/products` root connector into `reviews`,
+/// keyed on `upc`. The products schema has `upc`, so the key passes
+/// `can_resolve_in_place`, but `/products` doesn't map it. A circular key
+/// must resolve wholly at the anchor, so the commit should fail instead of
+/// routing `upc` as a condition pending.
+#[test]
+fn circular_key_hop_from_connector_missing_key_fails_commit() {
+    let space = test_support::connector_search_space(include_str!(
+        "../fixtures/connector_graphql_key_not_in_shape.graphql"
+    ));
+    let products = space
+        .connector_index
+        .by_field(&name!("Query"), &name!("products"))
+        .and_then(|entries| entries.first())
+        .expect("products connector")
+        .clone();
+    let mut state = PlanState::new(vec![]);
+    let root = state.graph.add_connector_root_group(
+        &Arc::from("products"),
+        CompositeTypeDefinitionPosition::Object(
+            crate::schema::position::ObjectTypeDefinitionPosition {
+                type_name: name!("Query"),
+            },
+        ),
+        products.connector.clone(),
+        None,
+    );
+    let pending = connector_reviews_pending(&space, "products", "products", root);
+    let (_, key) = product_key_edge(&space, "products", "reviews");
+    let choice = RoutingChoice::CircularKeyHop {
+        edge: reviews_edge(&space, &pending),
+        key: key_hop_info(key, true),
+        intermediate_hops: vec![],
+    };
+    let pending_before = state.pending.len();
+
+    let result = space.commit_key_hop(&mut state, &pending, &choice);
+
+    let pushed: Vec<_> = state.pending[pending_before..]
+        .iter()
+        .map(|pending| selection_label(&pending.selection))
+        .collect();
+    assert!(
+        result.is_err(),
+        "circular key commit routed conditions instead of failing: {pushed:?}",
+    );
+}
