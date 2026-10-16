@@ -1295,27 +1295,31 @@ impl FieldRoutingSearchSpace {
         });
     }
 
-    /// Runs `evaluate` and reports whether its result is independent of the
-    /// key-hop enumerations opened before `depth`. A guard hit at `depth` or
-    /// deeper closed a cycle inside the evaluation, which a fresh evaluation
-    /// would close the same way. Shallower hits pass up to the enclosing one.
-    pub(super) fn with_guard_floor<T>(
+    /// Runs `evaluate` and reports whether a cycle guard inside it cut back
+    /// to an enumeration opened before it, below stack `position`. If not,
+    /// every cycle closed inside the evaluation and a fresh evaluation would
+    /// close them the same way, so its result can be cached. This is the
+    /// lowlink test from Tarjan's strongly connected components algorithm.
+    /// Cuts below `position` pass up to the enclosing evaluation.
+    pub(super) fn cuts_outside<T>(
         &self,
-        depth: usize,
+        position: usize,
         evaluate: impl FnOnce() -> T,
     ) -> (T, bool) {
-        let outer = self.caches.guard_floor.replace(usize::MAX);
+        let outer = self.caches.earliest_cycle_cut.take();
         let result = evaluate();
-        let inner = self.caches.guard_floor.get();
-        self.caches.guard_floor.set(outer.min(inner));
-        (result, inner >= depth)
+        let inner = self.caches.earliest_cycle_cut.get();
+        self.caches
+            .earliest_cycle_cut
+            .set(outer.into_iter().chain(inner).min());
+        (result, inner.is_some_and(|cut| cut < position))
     }
 
     /// Cached key hop enumeration with integrated cycle guard. The guard
     /// breaks mutual recursion with `conditions_routable`: re-entering a
     /// (node, key) already on the call stack returns empty (circular).
-    /// Results are cached when every guard hit inside the enumeration
-    /// closed a cycle within it (see [`Self::with_guard_floor`]). The
+    /// Results are cached unless a guard inside the enumeration cut back to
+    /// one opened before it (see [`Self::cuts_outside`]). The
     /// provides_anchor path bypasses the cache because the same (node,
     /// key) pair yields different hops under different ancestors.
     pub(super) fn cached_key_hops(
@@ -1330,16 +1334,18 @@ impl FieldRoutingSearchSpace {
         {
             return Ok(cached.clone());
         }
-        let depth = self.caches.key_hops_in_flight.borrow().len();
+        let position = self.caches.key_hops_in_flight.borrow().len();
         let in_flight_at = self
             .caches
             .key_hops_in_flight
             .borrow()
             .get(&(node, key.clone()))
             .copied();
-        if let Some(cycle_depth) = in_flight_at {
-            let floor = self.caches.guard_floor.get().min(cycle_depth);
-            self.caches.guard_floor.set(floor);
+        if let Some(cut) = in_flight_at {
+            let earliest = self.caches.earliest_cycle_cut.get();
+            self.caches
+                .earliest_cycle_cut
+                .set(earliest.into_iter().chain([cut]).min());
             trace!(
                 ?node,
                 ?key,
@@ -1350,9 +1356,9 @@ impl FieldRoutingSearchSpace {
         self.caches
             .key_hops_in_flight
             .borrow_mut()
-            .insert((node, key.clone()), depth);
+            .insert((node, key.clone()), position);
         let mut hops = Vec::new();
-        let (result, self_contained) = self.with_guard_floor(depth, || {
+        let (result, cuts_outside) = self.cuts_outside(position, || {
             self.append_key_hop_options_inner(node, provides_anchor, &mut hops, &edge_finder)
         });
         self.caches
@@ -1361,7 +1367,7 @@ impl FieldRoutingSearchSpace {
             .remove(&(node, key.clone()));
         result?;
         let hops = Arc::new(hops);
-        if provides_anchor.is_none() && self_contained {
+        if provides_anchor.is_none() && !cuts_outside {
             self.caches
                 .key_hops
                 .borrow_mut()
@@ -1402,8 +1408,8 @@ impl FieldRoutingSearchSpace {
         if let Some(&cached) = self.caches.conditions_routable.borrow().get(&cache_key) {
             return Ok(cached);
         }
-        let depth = self.caches.key_hops_in_flight.borrow().len();
-        let (result, self_contained) = self.with_guard_floor(depth, || {
+        let position = self.caches.key_hops_in_flight.borrow().len();
+        let (result, cuts_outside) = self.cuts_outside(position, || {
             for sel in conditions.selections.values() {
                 let routable = match sel {
                     Selection::Field(field_sel) => {
@@ -1421,9 +1427,8 @@ impl FieldRoutingSearchSpace {
         });
         let result = result?;
         // The guard only removes routes, so a routable result holds in any
-        // context. An unroutable one holds wherever the evaluation was
-        // self-contained.
-        if result || self_contained {
+        // context. An unroutable one holds unless a cut reached outside it.
+        if result || !cuts_outside {
             self.caches
                 .conditions_routable
                 .borrow_mut()

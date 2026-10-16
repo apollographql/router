@@ -144,13 +144,13 @@ pub(super) struct PlannerCaches {
     /// subtrees, and every level of a deep subtree asks about the levels
     /// below it.
     pub(super) stranded: StrandedCache,
-    /// Key-hop enumerations in progress, with the in-flight depth each
-    /// was entered at.
+    /// Key-hop enumerations in progress, with each one's position on the
+    /// enumeration stack.
     pub(super) key_hops_in_flight: RefCell<HashMap<(NodeIndex, RoutingSiteKey), usize>>,
-    /// The shallowest in-flight depth a cycle guard hit referred back to
-    /// since the innermost open evaluation began; `usize::MAX` when none.
-    /// See [`FieldRoutingSearchSpace::with_guard_floor`].
-    pub(super) guard_floor: std::cell::Cell<usize>,
+    /// Stack position of the earliest open enumeration a cycle guard cut
+    /// back to since the innermost open evaluation began, or `None` if no
+    /// cut happened. See [`FieldRoutingSearchSpace::cuts_outside`].
+    pub(super) earliest_cycle_cut: std::cell::Cell<Option<usize>>,
     /// Sorted possible runtime type names per composite type in the
     /// supergraph schema, for narrowing. Computed on demand, immutable per
     /// session; `child_possible_types` runs on every dispatch, so building
@@ -167,7 +167,7 @@ impl PlannerCaches {
             conditions_routable: RefCell::new(HashMap::new()),
             stranded: RefCell::new(HashMap::new()),
             key_hops_in_flight: RefCell::new(HashMap::new()),
-            guard_floor: std::cell::Cell::new(usize::MAX),
+            earliest_cycle_cut: std::cell::Cell::new(None),
             possible_type_names: RefCell::new(HashMap::new()),
         }
     }
