@@ -4,4 +4,4 @@ Composition lets an `@inaccessible` input field be defined in only some subgraph
 
 The `REQUIRED_INACCESSIBLE` error for a required `@inaccessible` input field now names the field (for example ``Input field `I.y` ``) instead of only its type.
 
-By [@dariuszkuc](https://github.com/dariuszkuc) in https://github.com/apollographql/router/pull/PULL_NUMBER
+By [@dariuszkuc](https://github.com/dariuszkuc) in https://github.com/apollographql/router/pull/10524
