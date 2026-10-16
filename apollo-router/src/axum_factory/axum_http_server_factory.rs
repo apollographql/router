@@ -22,6 +22,7 @@ use http::Request;
 use http::header::ACCEPT_ENCODING;
 use http::header::CONTENT_ENCODING;
 use http_body::Body;
+use http_body_util::BodyExt;
 use itertools::Itertools;
 use multimap::MultiMap;
 use once_cell::sync::Lazy;
@@ -56,6 +57,8 @@ use crate::http_server_factory::HttpServerHandle;
 use crate::http_server_factory::Listener;
 use crate::metrics::FutureMetricsExt;
 use crate::plugins::telemetry::SpanMode;
+use crate::plugins::telemetry::config_new::router::instruments::RequestDurationBody;
+use crate::plugins::telemetry::config_new::router::instruments::RequestDurationRecording;
 use crate::plugins::telemetry::config_new::router::instruments::ResponseBodySizeRecording;
 use crate::plugins::telemetry::config_new::router::instruments::ResponseBodySizeRecordingStream;
 use crate::router::ApolloRouterError;
@@ -587,6 +590,18 @@ async fn handle_graphql<RF: RouterFactory>(
                         None => router::body::from_result_stream(stream),
                     }
                 }
+            };
+
+            // Wrap the final, client-facing body so `http.server.request.duration` is recorded
+            // when the body stream closes (covering the `@defer` / subscription tail) or, via
+            // the guard's `Drop`, if the client hangs mid-stream. Must wrap after body-size
+            // handling so the inner body's exact size hint stays readable above.
+            let request_duration_recording = context
+                .extensions()
+                .with_lock(|lock| lock.remove::<RequestDurationRecording>());
+            let body = match request_duration_recording {
+                Some(recording) => RequestDurationBody::new(body, recording).boxed_unsync(),
+                None => body,
             };
 
             http::Response::from_parts(parts, body).into_response()
