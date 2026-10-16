@@ -492,13 +492,22 @@ fn bulb_probe<S: BulbSearchSpace>(
                     let checkpoint = space.checkpoint(candidate);
                     let options = space.options(&decision);
 
-                    let mut scored = score_options(
+                    // Without a discrepancy budget only the best
+                    // `beam_width` options are explored, and none can beat
+                    // an option that adds no cost, so scoring can stop after
+                    // `beam_width` of those.
+                    let stop_after_free = (disc_budget == 0).then_some(beam_width);
+                    let Scored {
+                        options: mut scored,
+                        skipped_any,
+                    } = score_options(
                         space,
                         candidate,
                         &decision,
                         &options,
                         &checkpoint,
                         progress.best_cost,
+                        stop_after_free,
                     );
 
                     if progress.exhausted(space.effort(candidate)).is_some() || scored.is_empty() {
@@ -510,7 +519,7 @@ fn bulb_probe<S: BulbSearchSpace>(
                     // disc > 0 the alt slices are visited in this probe,
                     // and anything unexplored beneath them gets flagged by
                     // a descendant at disc == 0.
-                    result_alts |= disc_budget == 0 && scored.len() > beam_width;
+                    result_alts |= disc_budget == 0 && (skipped_any || scored.len() > beam_width);
                     let mut frame = BulbFrame::new(
                         decision,
                         options,
@@ -559,9 +568,21 @@ fn bulb_probe<S: BulbSearchSpace>(
     }
 }
 
-/// Score all options at a decision point: apply -> cost -> rollback per option.
-/// Returns (option_index, cost) pairs for viable options that survive the
-/// incumbent prune.
+/// Options scored at one decision point.
+struct Scored {
+    /// (option_index, cost) for viable options that survive the incumbent
+    /// prune.
+    options: Vec<(usize, f64)>,
+    /// Whether scoring stopped before reaching every option.
+    skipped_any: bool,
+}
+
+/// Score options at a decision point: apply -> cost -> rollback per option.
+///
+/// Applying an option never lowers cost, so an option that adds no cost
+/// can't be beaten. With `stop_after_free: Some(n)`, scoring stops once `n`
+/// viable options add no cost. The stable sort that follows would rank them
+/// first anyway.
 fn score_options<S: BulbSearchSpace>(
     space: &S,
     candidate: &mut S::Candidate,
@@ -569,12 +590,19 @@ fn score_options<S: BulbSearchSpace>(
     options: &[S::Choice],
     checkpoint: &S::Checkpoint,
     best_cost: f64,
-) -> Vec<(usize, f64)> {
+    stop_after_free: Option<usize>,
+) -> Scored {
     let mut scored: Vec<(usize, f64)> = Vec::with_capacity(options.len());
+    let starting_cost = space.cost(candidate);
+    let mut free_options = 0;
 
     for (i, choice) in options.iter().enumerate() {
         space.apply(candidate, decision, choice);
         let cost = space.cost(candidate);
+        debug_assert!(
+            cost >= starting_cost,
+            "option {i} lowers cost from {starting_cost} to {cost}",
+        );
         // Dropping a non-viable option here keeps it out of the alt slice,
         // which is explored first, and out of the beam-width count that
         // decides whether another discrepancy iteration runs.
@@ -582,6 +610,9 @@ fn score_options<S: BulbSearchSpace>(
             trace!(option_index = i, cost, "scored option, pruned (not viable)");
         } else if cost < best_cost {
             scored.push((i, cost));
+            if cost <= starting_cost {
+                free_options += 1;
+            }
             trace!(
                 option_index = i,
                 cost,
@@ -595,9 +626,18 @@ fn score_options<S: BulbSearchSpace>(
             );
         }
         space.rollback(candidate, checkpoint.clone());
+        if stop_after_free.is_some_and(|n| free_options >= n) {
+            return Scored {
+                options: scored,
+                skipped_any: i + 1 < options.len(),
+            };
+        }
     }
 
-    scored
+    Scored {
+        options: scored,
+        skipped_any: false,
+    }
 }
 
 /// Record a terminal candidate. Only complete candidates are saved and
@@ -948,6 +988,70 @@ mod tests {
         let (result, stats) = bulb_search(&space, initial(), config, None);
         assert_eq!(result.expect("complete plan").path, vec![1, 1]);
         assert_eq!(stats.expansions, 2, "only the greedy pass should expand");
+    }
+
+    /// Applying an option never lowers cost, so once an option adds no cost
+    /// no later option can beat it. Without a discrepancy budget the rest
+    /// are never explored, so they aren't scored either.
+    #[test]
+    fn greedy_stops_scoring_after_a_free_option() {
+        let space = sum_space(vec![vec![0, 5, 6], vec![0]]);
+        let config = BulbConfig {
+            beam_width: 1,
+            fuel: 0,
+            timeout: default_timeout(),
+        };
+        let (result, _) = bulb_search(&space, initial(), config, None);
+        assert_eq!(result.expect("complete plan").path, vec![0, 0]);
+        // One scoring apply and one committing apply per level.
+        assert_eq!(space.effort.get(), 4);
+    }
+
+    /// Stopping after free options is only sound for spaces whose cost
+    /// never decreases.
+    #[test]
+    #[should_panic(expected = "lowers cost")]
+    fn scoring_rejects_an_option_that_lowers_cost() {
+        let space = LevelSpace {
+            options_per_level: vec![vec![0, 1]],
+            cost_fn: Box::new(|_, level| 10.0 - level as f64),
+            effort: std::cell::Cell::new(0),
+        };
+        let config = BulbConfig {
+            beam_width: 1,
+            fuel: 0,
+            timeout: default_timeout(),
+        };
+        let _ = bulb_search(&space, initial(), config, None);
+    }
+
+    /// Options left unscored after free ones are still alternatives, so a
+    /// later discrepancy iteration explores them.
+    #[test]
+    fn options_skipped_after_free_ones_still_get_a_discrepancy_iteration() {
+        let space = LevelSpace {
+            options_per_level: vec![vec![0, 1], vec![0]],
+            // Picking 0 first is free now and expensive at the next level.
+            cost_fn: Box::new(|path, level| {
+                let first = path.first().copied().unwrap_or(0) as f64;
+                let penalty = if level >= 2 && path[0] == 0 {
+                    10.0
+                } else {
+                    0.0
+                };
+                first + penalty
+            }),
+            effort: std::cell::Cell::new(0),
+        };
+        let config = BulbConfig {
+            beam_width: 1,
+            fuel: 100,
+            timeout: default_timeout(),
+        };
+        let (result, _) = bulb_search(&space, initial(), config, None);
+        let result = result.expect("complete plan");
+        assert_eq!(result.path, vec![1, 0]);
+        assert_eq!(space.cost(&result), 1.0);
     }
 
     #[test]

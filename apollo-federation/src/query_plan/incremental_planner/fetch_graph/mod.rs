@@ -318,6 +318,9 @@ pub(crate) struct FetchGraph {
     /// Sum of FETCH_COST * pipelining_factor(depth) over all nodes,
     /// maintained incrementally as nodes and edges are added or rolled back.
     running_cost: QueryPlanCost,
+    /// Whether every edge still points from a shallower node to a deeper
+    /// one. `add_dependency` keeps this true, post-search merging breaks it.
+    depths_follow_edges: bool,
 }
 
 impl FetchGraph {
@@ -327,6 +330,7 @@ impl FetchGraph {
             groups: HashMap::new(),
             undo_log: Vec::new(),
             running_cost: 0.0,
+            depths_follow_edges: true,
         }
     }
 
@@ -830,6 +834,16 @@ impl FetchGraph {
     pub(crate) fn is_reachable(&self, from: NodeIndex, to: NodeIndex) -> bool {
         #[cfg(test)]
         tests::REACHABILITY_CHECKS.with(|checks| checks.set(checks.get() + 1));
+        // Every edge raises its child below its parent, so a node no deeper
+        // than `from` can't be downstream of it.
+        if self.depths_follow_edges
+            && from != to
+            && self.graph[to].pipeline_depth <= self.graph[from].pipeline_depth
+        {
+            return false;
+        }
+        #[cfg(test)]
+        tests::REACHABILITY_SEARCHES.with(|searches| searches.set(searches.get() + 1));
         petgraph::algo::has_path_connecting(&self.graph, from, to, None)
     }
 
@@ -1122,7 +1136,8 @@ impl FetchGraph {
     /// Merge nodes into a survivor, relocating edges and absorbing selections.
     fn merge_nodes_into(&mut self, survivor: NodeIndex, to_merge: &[NodeIndex]) {
         // Merging runs once, post-search, so removals and edge relocations
-        // bypass the undo log.
+        // bypass the undo log. Relocated edges don't update depths.
+        self.depths_follow_edges = false;
         for &merged in to_merge {
             // Absorb selections from the merged node.
             let merged_builder = self.graph[merged].selection_builder.clone();
@@ -1194,6 +1209,7 @@ mod tests {
 
     thread_local! {
         pub(super) static REACHABILITY_CHECKS: Cell<usize> = const { Cell::new(0) };
+        pub(super) static REACHABILITY_SEARCHES: Cell<usize> = const { Cell::new(0) };
     }
 
     fn dummy_root_type() -> CompositeTypeDefinitionPosition {
@@ -1913,6 +1929,82 @@ mod tests {
         assert!(g.is_reachable(root, mid));
         assert!(!g.is_reachable(leaf, root));
         assert!(!g.is_reachable(mid, root));
+    }
+
+    #[test]
+    fn is_reachable_answers_upstream_queries_without_searching() {
+        let mut g = FetchGraph::new();
+        let sg: Arc<str> = Arc::from("sg");
+        let root = g.get_or_create_root_group(&sg, dummy_root_type());
+        let mid = g.add_entity_group(&sg, vec![]);
+        let leaf = g.add_entity_group(&sg, user_path(None));
+        let sibling =
+            g.add_entity_group(&sg, user_path(Some(vec![apollo_compiler::name!("Admin")])));
+        g.add_dependency(root, mid, vec![]);
+        g.add_dependency(mid, leaf, vec![]);
+        g.add_dependency(root, sibling, vec![]);
+
+        REACHABILITY_SEARCHES.with(|searches| searches.set(0));
+        assert!(!g.is_reachable(leaf, root));
+        assert!(!g.is_reachable(mid, root));
+        assert!(!g.is_reachable(sibling, mid));
+        assert!(!g.is_reachable(mid, sibling));
+        assert_eq!(REACHABILITY_SEARCHES.with(|searches| searches.get()), 0);
+
+        assert!(g.is_reachable(root, leaf));
+        assert!(!g.is_reachable(sibling, leaf));
+    }
+
+    #[test]
+    fn is_reachable_stays_exact_after_merging_rewires_edges() {
+        let mut g = FetchGraph::new();
+        let sg: Arc<str> = Arc::from("sg");
+        let root = g.get_or_create_root_group(&sg, dummy_root_type());
+        let a = g.add_entity_group(&sg, vec![]);
+        let b = g.add_entity_group(&sg, user_path(None));
+        let c = g.add_entity_group(&sg, user_path(Some(vec![apollo_compiler::name!("Admin")])));
+        g.add_dependency(root, a, vec![]);
+        g.add_dependency(root, b, vec![]);
+        g.add_dependency(b, c, vec![]);
+
+        // Merging moves b -> c onto a, at the same depth as b.
+        g.merge_nodes_into(a, &[c]);
+
+        assert!(g.is_reachable(b, a));
+    }
+
+    #[test]
+    fn is_reachable_matches_graph_search_on_random_dags() {
+        let sg: Arc<str> = Arc::from("sg");
+        let mut seed: u64 = 0x9e37_79b9_7f4a_7c15;
+        let mut next = move || {
+            seed ^= seed << 13;
+            seed ^= seed >> 7;
+            seed ^= seed << 17;
+            seed
+        };
+        for _ in 0..50 {
+            let mut g = FetchGraph::new();
+            let mut nodes = vec![g.get_or_create_root_group(&sg, dummy_root_type())];
+            for _ in 0..12 {
+                nodes.push(g.add_entity_group(&sg, vec![]));
+            }
+            for _ in 0..30 {
+                let from = nodes[(next() % nodes.len() as u64) as usize];
+                let to = nodes[(next() % nodes.len() as u64) as usize];
+                if from != to && !g.has_edge(from, to) && !g.is_reachable(to, from) {
+                    g.add_dependency(from, to, vec![]);
+                }
+            }
+            for &from in &nodes {
+                for &to in &nodes {
+                    assert_eq!(
+                        g.is_reachable(from, to),
+                        petgraph::algo::has_path_connecting(&g.graph, from, to, None),
+                    );
+                }
+            }
+        }
     }
 
     #[test]

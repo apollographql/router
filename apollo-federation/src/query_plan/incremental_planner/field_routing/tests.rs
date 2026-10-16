@@ -2124,6 +2124,24 @@ fn entity_shareable_field_filters_inconsistent_union_members() {
     "###);
 }
 
+/// The member filter is part of the routing-options cache key, compared by
+/// pointer, so repeated lookups must return the same allocation or every
+/// child of an inconsistent abstract field misses the cache.
+#[test]
+fn inconsistent_member_filter_is_shared_across_lookups() {
+    let mut space = test_support::search_space_from_supergraph(&entity_inconsistent_union_schema());
+    space.inconsistent_abstract_types = Arc::new([name!("U")].into_iter().collect());
+    let subgraph: Arc<str> = Arc::from("b");
+    let first = space
+        .allowed_inconsistent_members(&name!("U"), &subgraph)
+        .expect("U is inconsistent");
+    let second = space
+        .allowed_inconsistent_members(&name!("U"), &subgraph)
+        .expect("U is inconsistent");
+    assert!(Arc::ptr_eq(&first, &second));
+    assert_eq!(first.len(), 1);
+}
+
 /// A field with locally-unresolvable @requires reached through an
 /// @include-gated fragment: the same-subgraph entity re-fetch must carry the
 /// gating fragment into its op path (or the hopped selection loses its
