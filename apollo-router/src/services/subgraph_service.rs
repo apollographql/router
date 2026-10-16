@@ -1330,7 +1330,6 @@ mod tests {
         serve(listener, handle).await.unwrap();
     }
 
-    // starts a local server emulating a subgraph returning status code 401
     // Closes every connection without responding, so fetches fail at the transport level.
     async fn emulate_subgraph_closing_connections(listener: TcpListener) {
         while let Ok((stream, _)) = listener.accept().await {
@@ -1338,6 +1337,7 @@ mod tests {
         }
     }
 
+    // starts a local server emulating a subgraph returning status code 401
     async fn emulate_subgraph_unauthorized(listener: TcpListener) {
         async fn handle(_request: http::Request<Body>) -> Result<http::Response<Body>, Infallible> {
             Ok(http::Response::builder()
