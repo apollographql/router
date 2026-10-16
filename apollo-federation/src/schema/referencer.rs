@@ -216,6 +216,11 @@ impl Referencers {
         }
 
         for (_interface_name, interface_refs) in self.interface_types.iter_mut() {
+            Self::update_object_type_positions(
+                &mut interface_refs.object_types,
+                old_name,
+                new_name,
+            );
             Self::update_object_field_positions(
                 &mut interface_refs.object_fields,
                 old_name,
