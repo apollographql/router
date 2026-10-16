@@ -236,16 +236,6 @@ pub(crate) fn unwrap_list_shape(shape: &Shape) -> &Shape {
     shape
 }
 
-/// [`split_selections`] by whether `shape` returns each selection. Shapes the
-/// planner can't inspect (scalars, unions, unknown JSON) count as providing
-/// everything, as they do when partitioning.
-pub(crate) fn split_by_shape(
-    shape: &Shape,
-    selections: &SelectionSet,
-) -> (Option<SelectionSet>, Option<SelectionSet>) {
-    split_selections(selections, |selection| shape_provides(shape, selection))
-}
-
 /// Split `selections` into the top-level selections `provides` accepts and
 /// the rest; `None` stands for an empty part.
 pub(crate) fn split_selections(
@@ -271,8 +261,10 @@ pub(crate) fn split_selections(
     (part(provided), part(missing))
 }
 
-/// Whether `shape` returns every field of `selection`.
-fn shape_provides(shape: &Shape, selection: &Selection) -> bool {
+/// Whether `shape` returns every field of `selection`. Shapes the planner can't
+/// inspect (scalars, unions, unknown JSON) count as providing everything, as
+/// they do when partitioning.
+pub(crate) fn shape_provides(shape: &Shape, selection: &Selection) -> bool {
     let ShapeCase::Object { fields, .. } = unwrap_list_shape(shape).case() else {
         return true;
     };

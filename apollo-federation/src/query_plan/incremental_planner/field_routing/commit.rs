@@ -294,22 +294,20 @@ impl FieldRoutingSearchSpace {
         // field available here (the subgraph echoes provided fields),
         // including through downcasts out of the provides-copy layer that
         // `can_resolve_in_place` cannot see.
-        let key_locally_resolvable = match first_key {
+        let (key_locally_resolvable, (anchor_key, routed_key)) = match first_key {
             Some(key_conditions) => {
-                matches!(choice, RoutingChoice::KeyHopWithProvidedKey { .. })
-                    || self.can_resolve_in_place(
-                        pending.query_graph_node,
-                        key_conditions,
-                        &source,
-                    )?
+                let locally_resolvable =
+                    matches!(choice, RoutingChoice::KeyHopWithProvidedKey { .. })
+                        || self.can_resolve_in_place(
+                            pending.query_graph_node,
+                            key_conditions,
+                            &source,
+                        )?;
+                let split =
+                    self.split_anchor_key(state, pending, key_conditions, locally_resolvable)?;
+                (locally_resolvable, split)
             }
-            None => true,
-        };
-        let (anchor_key, routed_key) = match first_key {
-            Some(key_conditions) => {
-                self.split_anchor_key(state, pending, key_conditions, key_locally_resolvable)?
-            }
-            None => (None, None),
+            None => (true, (None, None)),
         };
 
         // Key fields plus __typename, which identifies the entity type.
@@ -397,35 +395,39 @@ impl FieldRoutingSearchSpace {
         Ok((new_group, edge))
     }
 
-    /// Split an entity hop's key into the part the anchor fetch selects and
-    /// the part routed as conditions (`None` for an empty part). A key the
-    /// anchor can't resolve in place is routed whole; a connector anchor
-    /// returns only the key fields its selection maps, and the rest are routed
-    /// like an external key's.
-    ///
-    /// Fails when the routed part contains everything the hop fetches: any
-    /// route for that part is also a route for the fetched selection, so the
-    /// hop is circular or redundant.
+    /// Split `conditions` into the part the anchor fetch selects and the part
+    /// routed as condition pendings. Conditions the anchor can't resolve in
+    /// place are routed whole; a connector anchor returns only the fields its
+    /// selection maps, and the rest are routed like external fields.
+    pub(super) fn split_in_place(
+        &self,
+        state: &PlanState,
+        pending: &PendingSelection,
+        conditions: &Arc<SelectionSet>,
+        resolvable_in_place: bool,
+    ) -> ConditionSplit {
+        if !resolvable_in_place {
+            return (None, Some(conditions.clone()));
+        }
+        match self.connector_unprovided(state, pending.fetch_node, &pending.op_path, conditions) {
+            Some((provided, missing)) => (provided, Some(missing)),
+            None => (Some(conditions.clone()), None),
+        }
+    }
+
+    /// [`Self::split_in_place`] for an entity hop's key. Fails when the routed
+    /// part contains everything the hop fetches: any route for that part is
+    /// also a route for the fetched selection, so the hop is circular or
+    /// redundant.
     pub(super) fn split_anchor_key(
         &self,
         state: &PlanState,
         pending: &PendingSelection,
         key_conditions: &Arc<SelectionSet>,
         key_locally_resolvable: bool,
-    ) -> Result<AnchorKeySplit, FederationError> {
-        let (anchor_key, routed_key) = if !key_locally_resolvable {
-            (None, Some(key_conditions.clone()))
-        } else {
-            match self.connector_unprovided(
-                state,
-                pending.fetch_node,
-                &pending.op_path,
-                key_conditions,
-            ) {
-                Some((provided, missing)) => (provided, Some(missing)),
-                None => (Some(key_conditions.clone()), None),
-            }
-        };
+    ) -> Result<ConditionSplit, FederationError> {
+        let (anchor_key, routed_key) =
+            self.split_in_place(state, pending, key_conditions, key_locally_resolvable);
         if let Some(routed_key) = &routed_key
             && key_contains_selection(&pending.selection, routed_key)
         {
@@ -1599,9 +1601,9 @@ pub(super) fn field_response_elements(
     Ok(elements)
 }
 
-/// An entity hop's key split into the part the anchor selects and the part
-/// routed as conditions; `None` stands for an empty part.
-type AnchorKeySplit = (Option<Arc<SelectionSet>>, Option<Arc<SelectionSet>>);
+/// Conditions split into the part the anchor fetch selects and the part routed
+/// as condition pendings; `None` stands for an empty part.
+type ConditionSplit = (Option<Arc<SelectionSet>>, Option<Arc<SelectionSet>>);
 
 /// Whether `key` contains everything the field `selection` selects (matched by
 /// field name, `__typename` aside). Entering an entity to fetch part of its own

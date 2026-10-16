@@ -501,7 +501,7 @@ impl FieldRoutingSearchSpace {
             let source = self.node_source(pending.query_graph_node)?;
             // A connector anchor returns only the conditions its selection
             // maps; the rest are routed.
-            let shape_misses_conditions = choice.requires_resolvable_in_place()
+            let resolvable_in_place = choice.requires_resolvable_in_place()
                 && self
                     .connector_unprovided(
                         state,
@@ -509,9 +509,7 @@ impl FieldRoutingSearchSpace {
                         &pending.op_path,
                         requires_conditions,
                     )
-                    .is_some();
-            let resolvable_in_place =
-                choice.requires_resolvable_in_place() && !shape_misses_conditions;
+                    .is_none();
 
             let has_input_conflict = resolvable_in_place
                 && key_hop_edge.is_some_and(|e| {
@@ -566,38 +564,27 @@ impl FieldRoutingSearchSpace {
                 target.fetch_node
             };
 
-            if resolvable_in_place {
+            // Split the staged conditions: aliasing keeps field names, so a
+            // connector anchor's split matches the one that cleared
+            // `resolvable_in_place`.
+            let (in_place, routed) = self.split_in_place(
+                state,
+                pending,
+                &conditions,
+                choice.requires_resolvable_in_place(),
+            );
+            if let Some(in_place) = &in_place {
                 state.graph.append_selection(
                     pending.fetch_node,
                     &unconditioned_input_path(&pending.op_path),
-                    Some(&conditions),
+                    Some(in_place),
                 );
                 state
                     .graph
                     .add_ordering_dependency(pending.fetch_node, dest)?;
-            } else if shape_misses_conditions
-                // Split the staged conditions: aliasing keeps field names, so
-                // the split matches the one that set `shape_misses_conditions`.
-                && let Some((provided, missing)) = self.connector_unprovided(
-                    state,
-                    pending.fetch_node,
-                    &pending.op_path,
-                    &conditions,
-                )
-            {
-                if let Some(provided) = provided {
-                    state.graph.append_selection(
-                        pending.fetch_node,
-                        &unconditioned_input_path(&pending.op_path),
-                        Some(&provided),
-                    );
-                    state
-                        .graph
-                        .add_ordering_dependency(pending.fetch_node, dest)?;
-                }
-                self.push_condition_pendings(state, pending, &missing, dest)?;
-            } else {
-                self.push_condition_pendings(state, pending, &conditions, dest)?;
+            }
+            if let Some(routed) = &routed {
+                self.push_condition_pendings(state, pending, routed, dest)?;
             }
             return Ok(CommitTarget {
                 fetch_node: dest,

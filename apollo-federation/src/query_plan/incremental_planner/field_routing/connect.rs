@@ -25,7 +25,7 @@ use super::state::PlanState;
 use crate::connectors::ConnectorPosition;
 use crate::connectors::EntityResolver;
 use crate::connectors::index::IndexedConnector;
-use crate::connectors::index::split_by_shape;
+use crate::connectors::index::shape_provides;
 use crate::connectors::index::split_selections;
 use crate::connectors::index::unwrap_list_shape;
 use crate::error::FederationError;
@@ -476,27 +476,19 @@ impl FieldRoutingSearchSpace {
         let mut shape = self
             .connector_index
             .output_shape(&connector.id.coordinate())?;
+        let mut path_fields = op_path.iter().filter_map(|element| match element.as_ref() {
+            OpPathElement::Field(field) => Some(field),
+            OpPathElement::InlineFragment(_) => None,
+        });
         // A root connector, or a field-level entity resolver, describes the
         // value of its own field, which is the first field on the path.
         // Type-level and `entity: true` resolvers describe the entity.
-        let mut skip_own_field =
+        let describes_own_field =
             matches!(
                 node.kind,
                 FetchGroupKind::Root { .. } | FetchGroupKind::RootHop { .. }
             ) || matches!(connector.entity_resolver, Some(EntityResolver::Implicit));
-        for element in op_path.iter() {
-            let OpPathElement::Field(field) = element.as_ref() else {
-                continue;
-            };
-            if std::mem::take(&mut skip_own_field) {
-                continue;
-            }
-            let ShapeCase::Object { fields, .. } = unwrap_list_shape(shape).case() else {
-                return None;
-            };
-            shape = fields.get(field.name().as_str())?;
-        }
-        if skip_own_field {
+        if describes_own_field && path_fields.next().is_none() {
             // The path stops at the own field's parent.
             let ConnectorPosition::Field(pos) = &connector.id.directive else {
                 return None;
@@ -504,6 +496,12 @@ impl FieldRoutingSearchSpace {
             return Some(ConnectorOutputAt::OwnFieldOnly(
                 pos.field.field_name().clone(),
             ));
+        }
+        for field in path_fields {
+            let ShapeCase::Object { fields, .. } = unwrap_list_shape(shape).case() else {
+                return None;
+            };
+            shape = fields.get(field.name().as_str())?;
         }
         Some(ConnectorOutputAt::Shape(unwrap_list_shape(shape)))
     }
@@ -523,7 +521,9 @@ impl FieldRoutingSearchSpace {
         let output =
             self.connector_output_at(state, fetch_node, &unconditioned_input_path(op_path))?;
         let (provided, missing) = match output {
-            ConnectorOutputAt::Shape(shape) => split_by_shape(shape, conditions),
+            ConnectorOutputAt::Shape(shape) => {
+                split_selections(conditions, |selection| shape_provides(shape, selection))
+            }
             ConnectorOutputAt::OwnFieldOnly(own_field) => {
                 split_selections(conditions, |selection| {
                     selection.is_typename_field()
