@@ -173,7 +173,7 @@ impl FetchService {
                     ConnectRequest::builder()
                         .service_name(fetch_node.service_name.clone())
                         .context(context)
-                        .operation(operation?.clone())
+                        .operation(operation?)
                         .supergraph_request(supergraph_request)
                         .variables(variables)
                         .and_keys(keys)
@@ -267,9 +267,8 @@ impl FetchService {
         };
 
         let subfetch_trace = SubfetchTrace::capture(aliased_operation, &variables.variables);
-        let current_dir = current_dir.clone();
         let service = subgraph_services
-            .get(&service_name.clone())
+            .get(service_name)
             .expect("we already checked that the service exists during planning; qed");
 
         let mut subgraph_request = SubgraphRequest::builder()
@@ -292,7 +291,7 @@ impl FetchService {
             .subgraph_name(service_name.to_string())
             .operation_kind(*operation_kind)
             .and_executable_document(operation.as_parsed().ok().cloned())
-            .context(context.clone())
+            .context(context)
             .build();
         subgraph_request.query_hash = fetch_node.schema_aware_hash.clone();
         subgraph_request.authorization = fetch_node.authorization.clone();
