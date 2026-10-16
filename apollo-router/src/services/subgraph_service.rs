@@ -1331,6 +1331,13 @@ mod tests {
     }
 
     // starts a local server emulating a subgraph returning status code 401
+    // Closes every connection without responding, so fetches fail at the transport level.
+    async fn emulate_subgraph_closing_connections(listener: TcpListener) {
+        while let Ok((stream, _)) = listener.accept().await {
+            drop(stream);
+        }
+    }
+
     async fn emulate_subgraph_unauthorized(listener: TcpListener) {
         async fn handle(_request: http::Request<Body>) -> Result<http::Response<Body>, Infallible> {
             Ok(http::Response::builder()
@@ -4473,10 +4480,9 @@ mod tests {
 
     #[tokio::test(flavor = "multi_thread")]
     async fn test_failed_fetch_response_keeps_subgraph_request_id() {
-        // Nothing listens on this port once the listener is dropped, so the fetch fails.
         let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
         let socket_addr = listener.local_addr().unwrap();
-        drop(listener);
+        tokio::task::spawn(emulate_subgraph_closing_connections(listener));
         let subgraph_service = SubgraphService::new(
             "test",
             true,
