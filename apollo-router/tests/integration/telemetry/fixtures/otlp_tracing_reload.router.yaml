@@ -11,7 +11,7 @@ telemetry:
       otlp:
         enabled: true
         protocol: http
-        endpoint: <otel-collector-endpoint>
+        endpoint: ${env.TEST_CONFIG_COLLECTOR_ENDPOINT}
         batch_processor:
           scheduled_delay: 10ms
           max_export_batch_size: 1024
