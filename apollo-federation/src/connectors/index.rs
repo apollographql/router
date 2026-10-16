@@ -236,18 +236,26 @@ pub(crate) fn unwrap_list_shape(shape: &Shape) -> &Shape {
     shape
 }
 
-/// Split `selections` into the top-level selections `shape` returns and the
-/// ones it does not; `None` stands for an empty part. Shapes the planner
-/// can't inspect (scalars, unions, unknown JSON) count as providing
+/// [`split_selections`] by whether `shape` returns each selection. Shapes the
+/// planner can't inspect (scalars, unions, unknown JSON) count as providing
 /// everything, as they do when partitioning.
 pub(crate) fn split_by_shape(
     shape: &Shape,
     selections: &SelectionSet,
 ) -> (Option<SelectionSet>, Option<SelectionSet>) {
+    split_selections(selections, |selection| shape_provides(shape, selection))
+}
+
+/// Split `selections` into the top-level selections `provides` accepts and
+/// the rest; `None` stands for an empty part.
+pub(crate) fn split_selections(
+    selections: &SelectionSet,
+    provides: impl Fn(&Selection) -> bool,
+) -> (Option<SelectionSet>, Option<SelectionSet>) {
     let mut provided = SelectionMap::new();
     let mut missing = SelectionMap::new();
     for selection in selections.selections.values() {
-        if shape_provides(shape, selection) {
+        if provides(selection) {
             provided.insert(selection.clone());
         } else {
             missing.insert(selection.clone());

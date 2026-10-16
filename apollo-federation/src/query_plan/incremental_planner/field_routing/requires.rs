@@ -501,7 +501,7 @@ impl FieldRoutingSearchSpace {
             let source = self.node_source(pending.query_graph_node)?;
             // A connector anchor returns only the conditions its selection
             // maps; the rest are routed.
-            let partially_in_place = choice.requires_resolvable_in_place()
+            let shape_misses_conditions = choice.requires_resolvable_in_place()
                 && self
                     .connector_unprovided(
                         state,
@@ -510,7 +510,8 @@ impl FieldRoutingSearchSpace {
                         requires_conditions,
                     )
                     .is_some();
-            let resolvable_in_place = choice.requires_resolvable_in_place() && !partially_in_place;
+            let resolvable_in_place =
+                choice.requires_resolvable_in_place() && !shape_misses_conditions;
 
             let has_input_conflict = resolvable_in_place
                 && key_hop_edge.is_some_and(|e| {
@@ -574,9 +575,9 @@ impl FieldRoutingSearchSpace {
                 state
                     .graph
                     .add_ordering_dependency(pending.fetch_node, dest)?;
-            } else if partially_in_place
+            } else if shape_misses_conditions
                 // Split the staged conditions: aliasing keeps field names, so
-                // the split matches the one that set `partially_in_place`.
+                // the split matches the one that set `shape_misses_conditions`.
                 && let Some((provided, missing)) = self.connector_unprovided(
                     state,
                     pending.fetch_node,

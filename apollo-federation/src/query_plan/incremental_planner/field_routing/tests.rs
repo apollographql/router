@@ -4269,6 +4269,70 @@ fn connector_nested_key_partly_in_shape_skips_circular_hop() {
     "#);
 }
 
+/// The GraphQL counterpart of the test above: `a` returns only `id`, and the
+/// hop into `r` to fetch `org { id }` would need `org { id }` as its own key.
+/// Fetch it through `p` instead. The plan is the same without the circularity
+/// check (the `CircularKeyHop` commit fails the same hop), so this pins the
+/// result, not which check rejects the hop.
+#[test]
+fn graphql_nested_key_skips_circular_hop() {
+    let plan_str = plan_query(
+        include_str!("../fixtures/graphql_nested_key_circular_hop.graphql"),
+        "{ products { reviews { body } } }",
+    );
+    insta::assert_snapshot!(plan_str, @r#"
+    QueryPlan {
+      Sequence {
+        Fetch(service: "a") {
+          {
+            products {
+              __typename
+              id
+            }
+          }
+        },
+        Flatten(path: "products.@") {
+          Fetch(service: "p") {
+            {
+              ... on Product {
+                __typename
+                id
+              }
+            } =>
+            {
+              ... on Product {
+                org {
+                  id
+                }
+              }
+            }
+          },
+        },
+        Flatten(path: "products.@") {
+          Fetch(service: "r") {
+            {
+              ... on Product {
+                __typename
+                id
+                org {
+                  id
+                }
+              }
+            } =>
+            {
+              ... on Product {
+                reviews {
+                  body
+                }
+              }
+            }
+          },
+        },
+      },
+    }
+    "#);
+}
+
 /// A `$this` field connector on an `@interfaceObject` resolves its own
 /// field under a concrete implementation's fragment.
 #[test]

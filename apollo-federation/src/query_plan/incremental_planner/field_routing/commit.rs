@@ -305,33 +305,12 @@ impl FieldRoutingSearchSpace {
             }
             None => true,
         };
-        // A connector anchor returns only the key fields its selection maps;
-        // the rest are routed like an external key's.
-        let (anchor_key, unprovided_key) = match first_key {
-            Some(key_conditions) if key_locally_resolvable => match self.connector_unprovided(
-                state,
-                pending.fetch_node,
-                &pending.op_path,
-                key_conditions,
-            ) {
-                Some((provided, missing)) => (provided, Some(missing)),
-                None => (Some(key_conditions.clone()), None),
-            },
-            _ => (None, None),
+        let (anchor_key, routed_key) = match first_key {
+            Some(key_conditions) => {
+                self.split_anchor_key(state, pending, key_conditions, key_locally_resolvable)?
+            }
+            None => (None, None),
         };
-
-        let routed_key = if key_locally_resolvable {
-            unprovided_key.as_ref()
-        } else {
-            first_key
-        };
-        if let Some(routed_key) = routed_key
-            && key_contains_selection(&pending.selection, routed_key)
-        {
-            return Err(FederationError::internal(
-                "entity hop needs the field it fetches as its key",
-            ));
-        }
 
         // Key fields plus __typename, which identifies the entity type.
         self.append_entity_inputs(
@@ -393,22 +372,20 @@ impl FieldRoutingSearchSpace {
         // they commit. Statically circular keys are the exception: routing
         // their conditions would recurse without progress, so the anchor
         // must resolve the whole key itself or the commit fails.
-        if !key_locally_resolvable && let Some(key_conditions) = first_key.cloned() {
-            if matches!(choice, RoutingChoice::CircularKeyHop { .. }) {
+        if let Some(routed_key) = &routed_key {
+            if !key_locally_resolvable && matches!(choice, RoutingChoice::CircularKeyHop { .. }) {
                 self.commit_circular_key_conditions(
                     state,
                     pending,
-                    &key_conditions,
+                    routed_key,
                     &source,
                     pending.fetch_node,
                     &pending.op_path,
                     new_group,
                 )?;
             } else {
-                self.push_condition_pendings(state, pending, &key_conditions, new_group)?;
+                self.push_condition_pendings(state, pending, routed_key, new_group)?;
             }
-        } else if let Some(unprovided_key) = &unprovided_key {
-            self.push_condition_pendings(state, pending, unprovided_key, new_group)?;
         }
 
         // Multi-hop key chain: walk through intermediate subgraphs,
@@ -418,6 +395,45 @@ impl FieldRoutingSearchSpace {
         }
 
         Ok((new_group, edge))
+    }
+
+    /// Split an entity hop's key into the part the anchor fetch selects and
+    /// the part routed as conditions (`None` for an empty part). A key the
+    /// anchor can't resolve in place is routed whole; a connector anchor
+    /// returns only the key fields its selection maps, and the rest are routed
+    /// like an external key's.
+    ///
+    /// Fails when the routed part contains everything the hop fetches: any
+    /// route for that part is also a route for the fetched selection, so the
+    /// hop is circular or redundant.
+    pub(super) fn split_anchor_key(
+        &self,
+        state: &PlanState,
+        pending: &PendingSelection,
+        key_conditions: &Arc<SelectionSet>,
+        key_locally_resolvable: bool,
+    ) -> Result<AnchorKeySplit, FederationError> {
+        let (anchor_key, routed_key) = if !key_locally_resolvable {
+            (None, Some(key_conditions.clone()))
+        } else {
+            match self.connector_unprovided(
+                state,
+                pending.fetch_node,
+                &pending.op_path,
+                key_conditions,
+            ) {
+                Some((provided, missing)) => (provided, Some(missing)),
+                None => (Some(key_conditions.clone()), None),
+            }
+        };
+        if let Some(routed_key) = &routed_key
+            && key_contains_selection(&pending.selection, routed_key)
+        {
+            return Err(FederationError::internal(
+                "entity hop needs the field it fetches as its key",
+            ));
+        }
+        Ok((anchor_key, routed_key))
     }
 
     /// Handle a circular key at commit time: its conditions can't be
@@ -1583,11 +1599,15 @@ pub(super) fn field_response_elements(
     Ok(elements)
 }
 
+/// An entity hop's key split into the part the anchor selects and the part
+/// routed as conditions; `None` stands for an empty part.
+type AnchorKeySplit = (Option<Arc<SelectionSet>>, Option<Arc<SelectionSet>>);
+
 /// Whether `key` contains everything the field `selection` selects (matched by
 /// field name, `__typename` aside). Entering an entity to fetch part of its own
 /// key is circular when that part isn't already available: routing the key
 /// would need the same hop again.
-pub(super) fn key_contains_selection(selection: &Selection, key: &SelectionSet) -> bool {
+fn key_contains_selection(selection: &Selection, key: &SelectionSet) -> bool {
     let Selection::Field(field_sel) = selection else {
         return false;
     };

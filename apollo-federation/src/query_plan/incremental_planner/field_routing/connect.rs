@@ -18,14 +18,15 @@ use super::super::fetch_graph::InputRewriteInfo;
 use super::super::shared_path::SharedPath;
 use super::FieldRoutingSearchSpace;
 use super::commit::field_response_elements;
-use super::commit::key_contains_selection;
 use super::requires::unconditioned_input_path;
 use super::routing::RoutingChoice;
 use super::state::PendingSelection;
 use super::state::PlanState;
+use crate::connectors::ConnectorPosition;
 use crate::connectors::EntityResolver;
 use crate::connectors::index::IndexedConnector;
 use crate::connectors::index::split_by_shape;
+use crate::connectors::index::split_selections;
 use crate::connectors::index::unwrap_list_shape;
 use crate::error::FederationError;
 use crate::operation::FieldSelection;
@@ -54,6 +55,15 @@ struct DeferredConnectorSelection {
     /// The defer label the selection is under, including any @defer fragment
     /// crossed during partitioning.
     defer_ref: Option<String>,
+}
+
+/// What a connector fetch returns at a path within it.
+enum ConnectorOutputAt<'a> {
+    /// The connector's `selection` output at the path, list wrappers stripped.
+    Shape(&'a Shape),
+    /// The parent of a root connector's or field-level resolver's own field:
+    /// the fetch returns only that field (and `__typename`) there.
+    OwnFieldOnly(Name),
 }
 
 impl FieldRoutingSearchSpace {
@@ -94,32 +104,13 @@ impl FieldRoutingSearchSpace {
                 let source = self.node_source(pending.query_graph_node)?;
                 let key_locally_resolvable =
                     self.can_resolve_in_place(pending.query_graph_node, key_conditions, &source)?;
-                let (local_key, routed_key) = if !key_locally_resolvable {
-                    (None, Some(key_conditions.clone()))
-                } else {
-                    match self.connector_unprovided(
-                        state,
-                        pending.fetch_node,
-                        &pending.op_path,
-                        key_conditions,
-                    ) {
-                        Some((provided, missing)) => (provided, Some(missing)),
-                        None => (Some(key_conditions.clone()), None),
-                    }
-                };
-                if let Some(routed_key) = &routed_key
-                    && key_contains_selection(&pending.selection, routed_key)
-                {
-                    return Err(FederationError::internal(
-                        "connector entity hop needs the field it fetches as its key",
-                    ));
-                }
-                let local_key = local_key.as_ref();
+                let (local_key, routed_key) =
+                    self.split_anchor_key(state, pending, key_conditions, key_locally_resolvable)?;
                 self.append_entity_inputs(
                     state,
                     pending.fetch_node,
                     &pending.op_path,
-                    local_key,
+                    local_key.as_ref(),
                     &source,
                 );
 
@@ -471,16 +462,15 @@ impl FieldRoutingSearchSpace {
         }
     }
 
-    /// The static output shape of the connector backing `fetch_node` at
-    /// `op_path` (relative to the fetch), list wrappers stripped. `None` when
-    /// the fetch is not a connector fetch, or the path leaves the indexed
-    /// shape.
-    fn connector_shape_at(
+    /// What the connector backing `fetch_node` returns at `op_path` (relative
+    /// to the fetch). `None` when the fetch is not a connector fetch, or the
+    /// path leaves the indexed shape.
+    fn connector_output_at(
         &self,
         state: &PlanState,
         fetch_node: NodeIndex,
         op_path: &SharedPath<Arc<OpPathElement>>,
-    ) -> Option<&Shape> {
+    ) -> Option<ConnectorOutputAt<'_>> {
         let node = state.graph.node(fetch_node);
         let connector = node.connector.as_ref()?;
         let mut shape = self
@@ -506,7 +496,16 @@ impl FieldRoutingSearchSpace {
             };
             shape = fields.get(field.name().as_str())?;
         }
-        Some(unwrap_list_shape(shape))
+        if skip_own_field {
+            // The path stops at the own field's parent.
+            let ConnectorPosition::Field(pos) = &connector.id.directive else {
+                return None;
+            };
+            return Some(ConnectorOutputAt::OwnFieldOnly(
+                pos.field.field_name().clone(),
+            ));
+        }
+        Some(ConnectorOutputAt::Shape(unwrap_list_shape(shape)))
     }
 
     /// The top-level fields of `conditions` the fetch at `fetch_node` does not
@@ -521,9 +520,18 @@ impl FieldRoutingSearchSpace {
         op_path: &SharedPath<Arc<OpPathElement>>,
         conditions: &SelectionSet,
     ) -> Option<(Option<Arc<SelectionSet>>, Arc<SelectionSet>)> {
-        let shape =
-            self.connector_shape_at(state, fetch_node, &unconditioned_input_path(op_path))?;
-        let (provided, missing) = split_by_shape(shape, conditions);
+        let output =
+            self.connector_output_at(state, fetch_node, &unconditioned_input_path(op_path))?;
+        let (provided, missing) = match output {
+            ConnectorOutputAt::Shape(shape) => split_by_shape(shape, conditions),
+            ConnectorOutputAt::OwnFieldOnly(own_field) => {
+                split_selections(conditions, |selection| {
+                    selection.is_typename_field()
+                        || matches!(selection, Selection::Field(field_sel)
+                            if *field_sel.field.name() == own_field)
+                })
+            }
+        };
         Some((provided.map(Arc::new), Arc::new(missing?)))
     }
 
