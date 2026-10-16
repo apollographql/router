@@ -296,7 +296,7 @@ async fn service_call(
                     .call(
                         ExecutionRequest::internal_builder()
                             .supergraph_request(req.supergraph_request)
-                            .query_plan(plan.clone())
+                            .query_plan(plan)
                             .context(context)
                             .build()
                             .await,
@@ -410,7 +410,7 @@ async fn plan_query(
             query_planner::CachingRequest::builder()
                 .query(query_str)
                 .and_operation_name(operation_name)
-                .context(context.clone())
+                .context(context)
                 .build(),
         )
         .instrument(query_planning_span())
