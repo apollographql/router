@@ -323,7 +323,7 @@ fred = { version = "10.1.0", features = [
 ] }
 futures-test = "0.3.30"
 insta.workspace = true
-jsonschema = { version = "0.56.0", default-features = false }
+jsonschema = { version = "0.58.0", default-features = false }
 maplit = "1.0.2"
 brotli = "8.0.0"
 memchr = { version = "2.7.4", default-features = false }
