@@ -199,10 +199,10 @@ pub(crate) struct QueryGraphEdge {
     /// @override, where (at least) 2 subgraphs can resolve the same field, but
     /// one of them has an @override with a label. If the override condition
     /// matches the query plan parameters, this edge can be taken.
-    pub(crate) override_condition: Option<OverrideCondition>,
+    pub(crate) override_condition: Option<Box<OverrideCondition>>,
     /// All arguments with `@fromContext` that need to be matched to an upstream graph path field
     /// whose parent type has the corresponding `@context`.
-    pub(crate) required_contexts: Vec<ContextCondition>,
+    pub(crate) required_contexts: Box<[ContextCondition]>,
 }
 
 impl QueryGraphEdge {
@@ -214,8 +214,8 @@ impl QueryGraphEdge {
         Self {
             transition,
             conditions,
-            override_condition,
-            required_contexts: Vec::new(),
+            override_condition: override_condition.map(Box::new),
+            required_contexts: Box::default(),
         }
     }
 
@@ -486,7 +486,7 @@ pub struct QueryGraph {
     /// Maps an edge to the possible edges that can follow it "productively", that is without
     /// creating a trivially inefficient path.
     ///
-    /// More precisely, this map is equivalent to looking at the out edges of a given edge's tail
+    /// More precisely, the entry for an edge is equivalent to looking at the out edges of its tail
     /// node and filtering those edges that "never make sense" after the given edge, which mainly
     /// amounts to avoiding chaining @key edges when we know there is guaranteed to be a better
     /// option. As an example, suppose we have 3 subgraphs A, B and C which all defined an
@@ -505,7 +505,7 @@ pub struct QueryGraph {
     /// significantly faster (and pretty easy). FWIW, when originally introduced, this optimization
     /// lowered composition validation on a big composition (100+ subgraphs) from ~4 minutes to
     /// ~10 seconds.
-    non_trivial_followup_edges: IndexMap<EdgeIndex, Vec<EdgeIndex>>,
+    non_trivial_followup_edges: Vec<Arc<[EdgeIndex]>>,
     // PORT_NOTE: This field was renamed from the JS name (`subgraphToArgIndices`) to better
     // align with downstream code.
     /// Maps subgraph names to another map, for any subgraph with usages of `@fromContext`. This
@@ -717,7 +717,7 @@ impl QueryGraph {
 
     /// The outward edges from the given node, minus self-key and self-root-type-resolution edges,
     /// in petgraph's unspecified iteration order. The sole definition of which edges
-    /// [`Self::out_edges`] and [`Self::out_edge_ids`] consider, so that the two cannot drift apart.
+    /// [`Self::out_edges`] considers.
     fn out_edges_unsorted(
         &self,
         node: NodeIndex,
@@ -738,15 +738,6 @@ impl QueryGraph {
     /// as they're rarely useful (currently only used by `@defer`).
     pub(crate) fn out_edges(&self, node: NodeIndex) -> Vec<EdgeReference<'_, QueryGraphEdge>> {
         Self::sorted_edges(self.out_edges_unsorted(node))
-    }
-
-    /// The same edges as [`Self::out_edges`], in the same order, as owned [`EdgeIndex`] values
-    /// rather than references borrowed from the graph. For callers that need to hold the list
-    /// across a mutation of the query graph, which an `EdgeReference` would forbid.
-    pub(crate) fn out_edge_ids(&self, node: NodeIndex) -> Vec<EdgeIndex> {
-        let mut edge_ids: Vec<EdgeIndex> = self.out_edges_unsorted(node).map(|e| e.id()).collect();
-        edge_ids.sort();
-        edge_ids
     }
 
     /// Edge iteration order is unspecified in petgraph, but appears to be
