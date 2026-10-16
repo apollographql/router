@@ -2184,8 +2184,15 @@ fn compute_aliases_for_non_merging_fields(
                     // this ever happen, we'll avoid the conflict by giving another alias to the followup occurrence.
                     let selections = match field.selection_set.as_ref() {
                         Some(s) => {
+                            // Nested aliases are keyed by the original response name, not by
+                            // `alias`: `with_field_aliased` matches paths against the selections'
+                            // response names before aliasing, and the output rewrites rename this
+                            // field back to `response_name` before the nested renames run.
                             let mut p = path.clone();
-                            p.push(FetchDataPathElement::Key(alias.clone(), Default::default()));
+                            p.push(FetchDataPathElement::Key(
+                                response_name.clone(),
+                                Default::default(),
+                            ));
                             Some(vec![SelectionSetAtPath {
                                 path: p,
                                 selections: Some(s.clone()),
