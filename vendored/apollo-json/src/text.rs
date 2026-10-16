@@ -3,6 +3,7 @@
 //! Escape syntax, surrogate pairing, and UTF-8 are validated during parse, so
 //! unescaping a stored span cannot fail.
 
+use crate::simd::{StringScan, scan_string_content};
 use crate::utf8::ValidatedUtf8;
 
 /// Unescapes validated string content (the bytes between the quotes).
@@ -60,32 +61,44 @@ fn hex4(digits: &[u8]) -> u32 {
 /// `serde_json` does: `"`, `\`, and control characters; everything else
 /// passes through. `bytes` must be UTF-8 — arena-owned text always is,
 /// having been written from `str` — so no re-validation happens here.
+///
+/// The bytes that need escaping are exactly the ones the parser's string
+/// scanner stops at, so the vector scanner finds each escape-free run.
 pub(crate) fn escape_into(bytes: &[u8], out: &mut Vec<u8>) {
-    let mut start = 0;
-    for (i, &b) in bytes.iter().enumerate() {
-        let escape: &[u8] = match b {
-            b'"' => b"\\\"",
-            b'\\' => b"\\\\",
-            0x08 => b"\\b",
-            0x0C => b"\\f",
-            b'\n' => b"\\n",
-            b'\r' => b"\\r",
-            b'\t' => b"\\t",
-            0x00..=0x1F => b"",
-            _ => continue,
+    let mut rest = bytes;
+    loop {
+        let i = match scan_string_content(rest) {
+            StringScan::Quote(i) | StringScan::Escape(i) | StringScan::Control(i) => i,
+            StringScan::End => {
+                out.extend_from_slice(rest);
+                return;
+            }
         };
-        out.extend_from_slice(&bytes[start..i]);
-        if escape.is_empty() {
+        out.extend_from_slice(&rest[..i]);
+        push_escape(rest[i], out);
+        rest = &rest[i + 1..];
+    }
+}
+
+/// Appends the JSON escape for `byte`, which is `"`, `\`, or below 0x20.
+fn push_escape(byte: u8, out: &mut Vec<u8>) {
+    let escape: &[u8] = match byte {
+        b'"' => b"\\\"",
+        b'\\' => b"\\\\",
+        0x08 => b"\\b",
+        0x0C => b"\\f",
+        b'\n' => b"\\n",
+        b'\r' => b"\\r",
+        b'\t' => b"\\t",
+        _ => {
             const HEX: &[u8; 16] = b"0123456789abcdef";
             out.extend_from_slice(b"\\u00");
-            out.push(HEX[(b >> 4) as usize]);
-            out.push(HEX[(b & 0xF) as usize]);
-        } else {
-            out.extend_from_slice(escape);
+            out.push(HEX[(byte >> 4) as usize]);
+            out.push(HEX[(byte & 0xF) as usize]);
+            return;
         }
-        start = i + 1;
-    }
-    out.extend_from_slice(&bytes[start..]);
+    };
+    out.extend_from_slice(escape);
 }
 
 #[cfg(test)]
@@ -119,5 +132,51 @@ mod tests {
                 expected[1..expected.len() - 1],
             );
         }
+    }
+
+    fn serde_escaped(text: &str) -> String {
+        let quoted = serde_json::to_string(text).unwrap();
+        quoted[1..quoted.len() - 1].to_string()
+    }
+
+    fn escaped(text: &str) -> String {
+        let mut out = Vec::new();
+        escape_into(text.as_bytes(), &mut out);
+        String::from_utf8(out).unwrap()
+    }
+
+    /// Every byte that needs escaping, at every position of strings long
+    /// enough to reach each vector block size and the scalar tail, written
+    /// once and as a run of three.
+    #[test]
+    fn escapes_found_at_every_position() {
+        for special in [
+            '"', '\\', '\u{0}', '\u{8}', '\u{c}', '\n', '\r', '\t', '\u{1f}',
+        ] {
+            for len in [1usize, 15, 16, 17, 31, 32, 33, 63, 64, 65, 97, 130] {
+                for pos in 0..len {
+                    for run in [1, 3] {
+                        let mut text = "x".repeat(len);
+                        text.replace_range(pos..pos + 1, &special.to_string().repeat(run));
+                        assert_eq!(escaped(&text), serde_escaped(&text), "{special:?} at {pos}");
+                    }
+                }
+            }
+        }
+    }
+
+    /// Multibyte UTF-8 passes through unchanged next to escapes, across
+    /// block boundaries.
+    #[test]
+    fn multibyte_text_passes_through() {
+        for prefix in 0..40 {
+            let text = format!(
+                "{}héllo\"中文\\😀\n{}",
+                "a".repeat(prefix),
+                "é".repeat(prefix)
+            );
+            assert_eq!(escaped(&text), serde_escaped(&text), "prefix {prefix}");
+        }
+        assert_eq!(escaped(""), "");
     }
 }

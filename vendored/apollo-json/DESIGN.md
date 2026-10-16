@@ -494,7 +494,10 @@ Numbers keep their exact literal (`1e2`, `1.50`), strings keep their
 original escape spelling (`A` stays `A`), key order is insertion
 order — an unmodified document round-trips byte-identically. Values
 introduced by mutation live as owned text and are escaped with
-`serde_json`-compatible rules on the way out. All walks are iterative.
+`serde_json`-compatible rules on the way out. The bytes that need escaping
+are exactly the ones the parser's string scanner stops at, so the writer
+reuses that vector scanner to copy escape-free runs whole. All walks are
+iterative.
 
 Four forms, all producing identical bytes:
 
