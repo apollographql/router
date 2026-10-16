@@ -42,6 +42,10 @@ pub(super) struct CacheKeyContext {
     pub(super) subgraph_request: graphql::Request,
     pub(super) source: CacheKeySource,
     pub(super) cache_control: CacheControl,
+    /// For data fetched by this request, the cache's decision to store it; this is not
+    /// confirmation that the storage write succeeded. For a cache hit, whether its
+    /// `Cache-Control` allows storing. Callers set what the router's own rules allow, and
+    /// `update_metadata` applies the `Cache-Control` rules on top.
     pub(super) should_store: bool,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub(super) hashed_private_id: Option<String>,
@@ -87,6 +91,8 @@ pub(crate) enum CacheKeySource {
     Subgraph,
     /// Data fetched from cache
     Cache,
+    /// Data fetched from connector
+    Connector,
 }
 
 /// Debug info for the CDN `Cache-Tag` header, once per response — the piece the per-entry
@@ -203,7 +209,13 @@ impl CacheKeyContext {
             // consume per-tag values for this subgraph — the Redis cache_tag index or CDN
             // invalidation; otherwise the operator has intentionally opted out of both and
             // missing @cacheTag directives are the expected, configured state.
-            if !self.has_tags && (self.indexes.cache_tag || self.cdn_invalidation_enabled) {
+            // `root_fields` is empty on placeholder entries recorded for requests that bypass
+            // the cache entirely (a known-private query with no `private_id`, for instance):
+            // no root field was identified, so there is nothing to say about its cache tags.
+            if !self.has_tags
+                && !root_fields.is_empty()
+                && (self.indexes.cache_tag || self.cdn_invalidation_enabled)
+            {
                 self.warnings.push(Warning {
                     code: "NO_CACHE_TAG_ON_ROOT_FIELD".to_string(),
                     links: vec![Link { url: String::from("https://www.apollographql.com/docs/graphos/routing/performance/caching/response-caching/invalidation#invalidation-methods"), title: "Add '@cacheTag' in your schema".to_string() }],
@@ -225,8 +237,11 @@ impl CacheKeyContext {
         self
     }
 
+    /// Narrows the caller's `should_store` with the `Cache-Control` rules, so an entry the router
+    /// skipped for its own reasons (the request bypassed the cache, or the response had errors)
+    /// is never reported as stored.
     fn compute_should_store(mut self) -> Self {
-        self.should_store = self.cache_control.should_store();
+        self.should_store &= self.cache_control.should_store();
         // If it's private data but we don't have a private id to add into the primary cache key we won't cache it
         if self.cache_control.private() && self.hashed_private_id.is_none() {
             self.should_store = false;

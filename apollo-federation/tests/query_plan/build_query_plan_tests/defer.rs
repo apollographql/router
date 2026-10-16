@@ -1,6 +1,4 @@
 use apollo_compiler::ExecutableDocument;
-use apollo_federation::error::FederationError;
-use apollo_federation::error::SingleFederationError;
 use apollo_federation::query_plan::query_planner::QueryPlannerConfig;
 
 fn config_with_defer() -> QueryPlannerConfig {
@@ -4084,85 +4082,12 @@ fn defer_deferred_depends_on_source_with_shared_merge_at_prefix() {
     );
 }
 
-#[track_caller]
-fn assert_duplicate_defer_label<T: std::fmt::Debug>(
-    result: Result<T, FederationError>,
-    expected_label: &str,
-) {
-    match result {
-        Err(FederationError::SingleFederationError(
-            SingleFederationError::DuplicateDeferLabel { label },
-        )) if label == expected_label => {}
-        Err(e) => panic!("expected DuplicateDeferLabel({expected_label:?}), got: {e}"),
-        Ok(plan) => panic!("expected DuplicateDeferLabel({expected_label:?}), got plan: {plan:?}"),
-    }
-}
-
-/// Regression guard for a stack overflow in
-/// `FetchDependencyGraph::process_root_nodes`. An operation with two nested
-/// `@defer` inline fragments sharing the same `label` used to make the outer
-/// defer its own descendant in the deferred-info graph, and the recursive
-/// processing then never terminated.
-///
-/// Minimum repro:
-/// ```graphql
-/// { t { ... @defer(label: "dup") { ... @defer(label: "dup") { id } } } }
-/// ```
+/// Duplicated `@defer` labels are invalid (rejected by document validation since
+/// apollo-compiler 1.33.0), but the planner must not crash on them if validation is bypassed:
+/// nested duplicates used to stack-overflow (GHSA-gr6h-4wpf-xp52) and sibling duplicates were
+/// silently merged into one deferred block.
 #[test]
-fn defer_test_nested_duplicate_label_must_not_stack_overflow() {
-    let planner = planner!(
-        config = config_with_defer(),
-        Subgraph1: r#"
-        type Query {
-            t: T
-        }
-
-        type T @key(fields: "id") {
-            id: ID!
-        }
-        "#,
-        Subgraph2: r#"
-        type T @key(fields: "id") {
-            id: ID!
-            v: Int
-        }
-        "#,
-    );
-
-    let operation = r#"
-        {
-          t {
-            ... @defer(label: "dup") {
-              ... @defer(label: "dup") {
-                id
-              }
-            }
-          }
-        }
-    "#;
-
-    let api_schema = planner.api_schema();
-    let document =
-        ExecutableDocument::parse_and_validate(api_schema.schema(), operation, "operation.graphql")
-            .expect("operation parses+validates against the api schema");
-
-    assert_duplicate_defer_label(
-        planner.build_query_plan(&document, None, Default::default()),
-        "dup",
-    );
-}
-
-/// Companion to `defer_test_nested_duplicate_label_must_not_stack_overflow`:
-/// when two `@defer` inline fragments are *siblings* (same parent) and share a
-/// `label`, the planner used to silently deduplicate them into a single
-/// deferred block — a spec violation (GraphQL Defer & Stream §3.2) that would
-/// produce ambiguous data for any client demultiplexing the streaming
-/// response by label.
-///
-/// The same `DeferNormalizer::new` check that fixes the nested-defer crash
-/// also rejects sibling duplicates.
-#[test]
-fn defer_test_sibling_duplicate_label_must_be_rejected() {
+fn defer_test_duplicate_labels_are_invalid_but_must_not_crash_planning() {
     let planner = planner!(
         config = config_with_defer(),
         Subgraph1: r#"
@@ -4183,11 +4108,58 @@ fn defer_test_sibling_duplicate_label_must_be_rejected() {
         "#,
     );
 
+    let nested = r#"{ t { ... @defer(label: "dup") { ... @defer(label: "dup") { id } } } }"#;
+    let sibling = r#"{ t { ... @defer(label: "dup") { v } ... @defer(label: "dup") { w } } }"#;
+
+    let api_schema = planner.api_schema();
+    for operation in [nested, sibling] {
+        ExecutableDocument::parse_and_validate(api_schema.schema(), operation, "op.graphql")
+            .expect_err("duplicated @defer labels must fail document validation");
+
+        let document = apollo_compiler::validation::Valid::assume_valid(
+            ExecutableDocument::parse(api_schema.schema(), operation, "op.graphql")
+                .expect("operation parses"),
+        );
+        planner
+            .build_query_plan(&document, None, Default::default())
+            .expect("planner must not crash on duplicate labels");
+    }
+}
+
+/// A labeled `@defer` in a fragment spread multiple times is valid (label uniqueness is defined
+/// over the document as written) and must be plannable: one deferred block per spread position,
+/// each carrying the user's label, distinguished by path. Relay generates this pattern.
+#[test]
+fn defer_test_labeled_fragment_spread_multiple_times() {
+    let planner = planner!(
+        config = config_with_defer(),
+        Subgraph1: r#"
+        type Query {
+            a: T
+            b: T
+        }
+
+        type T @key(fields: "id") {
+            id: ID!
+        }
+        "#,
+        Subgraph2: r#"
+        type T @key(fields: "id") {
+            id: ID!
+            v: Int
+        }
+        "#,
+    );
+
     let operation = r#"
         {
-          t {
-            ... @defer(label: "dup") { v }
-            ... @defer(label: "dup") { w }
+          a { ...ItemFragment }
+          b { ...ItemFragment }
+        }
+
+        fragment ItemFragment on T {
+          ... @defer(label: "ItemFragment") {
+            v
           }
         }
     "#;
@@ -4195,10 +4167,44 @@ fn defer_test_sibling_duplicate_label_must_be_rejected() {
     let api_schema = planner.api_schema();
     let document =
         ExecutableDocument::parse_and_validate(api_schema.schema(), operation, "operation.graphql")
-            .expect("operation parses+validates against the api schema");
+            .expect("fragment reuse is valid");
 
-    assert_duplicate_defer_label(
-        planner.build_query_plan(&document, None, Default::default()),
-        "dup",
+    let plan = planner
+        .build_query_plan(&document, None, Default::default())
+        .expect("fragment reuse is plannable");
+    insta::assert_snapshot!(plan);
+}
+
+/// A user label shaped like a generated planning label must not collide with one: user labels
+/// never become planning labels, they are only restored onto the emitted plan.
+#[test]
+fn defer_test_user_label_shaped_like_generated_label() {
+    let planner = planner!(
+        config = config_with_defer(),
+        Subgraph1: r#"
+        type Query { a: T b: T }
+        type T @key(fields: "id") { id: ID! }
+        "#,
+        Subgraph2: r#"
+        type T @key(fields: "id") { id: ID! v: Int w: Int }
+        "#,
     );
+    // User label deliberately shaped like a generated one, next to an unlabeled defer.
+    let operation = r#"
+        {
+          a { ... @defer(label: "qp__0") { v } }
+          b { ... @defer { w } }
+        }
+    "#;
+    let api_schema = planner.api_schema();
+    let document =
+        ExecutableDocument::parse_and_validate(api_schema.schema(), operation, "op.graphql")
+            .unwrap();
+    let plan = planner
+        .build_query_plan(&document, None, Default::default())
+        .unwrap();
+    let plan = plan.to_string();
+    // The user's label survives; the unlabeled defer stays unlabeled.
+    assert!(plan.contains(r#"label: "qp__0""#));
+    assert_eq!(plan.matches("label:").count(), 1);
 }

@@ -495,6 +495,23 @@ where
         &self.runtime_types_of_tail
     }
 
+    /// Returns the head node (previous subgraph) of the last subgraph-entering edge, if any.
+    /// This determines which subgraph the path was in before its most recent cross-subgraph hop,
+    /// which affects indirect-path pruning during advancement.
+    pub(crate) fn last_subgraph_entering_edge_head(
+        &self,
+    ) -> Result<Option<NodeIndex>, FederationError> {
+        let Some(info) = &self.last_subgraph_entering_edge_info else {
+            return Ok(None);
+        };
+        let Some(edge) = self.edges[info.index].into() else {
+            return Err(FederationError::internal(
+                "Subgraph-entering edge is unexpectedly absent",
+            ));
+        };
+        Ok(Some(self.graph.edge_endpoints(edge)?.0))
+    }
+
     /// Creates a new (empty) path starting at the provided `head` node.
     pub(crate) fn new(graph: Arc<QueryGraph>, head: NodeIndex) -> Result<Self, FederationError> {
         let mut path = Self {

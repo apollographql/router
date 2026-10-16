@@ -1,19 +1,16 @@
 mod satisfiability;
 
-use std::sync::Arc;
 use std::vec;
 
 use tracing::instrument;
 
 pub use crate::composition::satisfiability::validate_satisfiability;
-use crate::connectors::Connector;
-use crate::connectors::expand::Connectors;
-use crate::connectors::expand::ExpansionResult;
-use crate::connectors::expand::expand_connectors;
 use crate::error::CompositionError;
 use crate::merger::merge::Merger;
 pub use crate::schema::schema_upgrader::upgrade_subgraphs_if_necessary;
+use crate::schema::validators::connectors::validate_override_on_connector;
 use crate::schema::validators::root_fields::validate_consistent_root_fields;
+use crate::subgraph::SubgraphError;
 use crate::subgraph::typestate::Expanded;
 use crate::subgraph::typestate::Initial;
 use crate::subgraph::typestate::Subgraph;
@@ -35,6 +32,12 @@ impl CompositionFailure {
             errors,
             hints: Vec::new(),
         }
+    }
+}
+
+impl From<SubgraphError> for CompositionFailure {
+    fn from(error: SubgraphError) -> Self {
+        Self::from_errors(error.to_composition_errors().collect())
     }
 }
 
@@ -64,53 +67,67 @@ pub fn compose(
     let mut subgraphs = subgraphs;
     subgraphs.sort_by(|s1, s2| s1.name.cmp(&s2.name));
 
-    tracing::debug!("Expanding subgraphs...");
-    let expanded_subgraphs = expand_subgraphs(subgraphs)?;
-    tracing::debug!("Upgrading subgraphs...");
-    let validated_subgraphs = upgrade_subgraphs_if_necessary(expanded_subgraphs)
-        .map_err(CompositionFailure::from_errors)?;
+    // Hints raised before merging have nowhere to live yet — a `Supergraph` only exists from the
+    // merge onwards, and a `CompositionFailure` is only built at the point of failure. So they are
+    // gathered here and attached once there is something to attach them to.
+    //
+    // This is why `compose_subgraphs` is a separate function: it uses `?`, and every one of those
+    // early returns would otherwise drop whatever had been gathered so far.
+    let mut early_hints: Vec<CompositionHint> = vec![];
 
-    tracing::debug!("Pre-merge validations...");
-    pre_merge_validations(&validated_subgraphs)?;
-    tracing::debug!("Merging subgraphs...");
-    let supergraph = merge_subgraphs(validated_subgraphs, &options)?;
-    tracing::debug!("Post-merge validations...");
-    post_merge_validations(&supergraph)?;
-    tracing::debug!("Validating satisfiability...");
-    validate_satisfiability(supergraph, &options)
+    let mut result = compose_subgraphs(subgraphs, options, &mut early_hints);
+    match &mut result {
+        Ok(supergraph) => prepend_hints(supergraph.hints_mut(), early_hints),
+        Err(failure) => prepend_hints(&mut failure.hints, early_hints),
+    }
+    result
 }
 
-/// Mirrors the `HybridComposition::compose` from the apollo-composition crate.
-pub fn compose_with_connectors(
+/// Puts `hints` in front of `target`, so hints stay in the order they were raised: everything from
+/// the subgraph stages before anything from merging and satisfiability.
+fn prepend_hints(target: &mut Vec<CompositionHint>, mut hints: Vec<CompositionHint>) {
+    if hints.is_empty() {
+        return;
+    }
+    hints.append(target);
+    *target = hints;
+}
+
+/// Runs the composition pipeline, collecting any pre-merge hints into `hints`.
+///
+/// Split out from [`compose`] so that the `?`s below cannot drop those hints — see the note there.
+fn compose_subgraphs(
     subgraphs: Vec<Subgraph<Initial>>,
     options: CompositionOptions,
+    hints: &mut Vec<CompositionHint>,
 ) -> Result<Supergraph<Satisfiable>, CompositionFailure> {
-    // Pre-expand validation
-    // - These were supposed to be pre-merge validations, but historically FBP performed these
-    //   Rust-based validation, before JS composition.
-    // - Once JS-to-Rust migration is done, we can move these to pre-merge validations.
-    // TODO: (FED-855) Call `connectors::validation`, which may change the subgraphs before upgrading.
-
     tracing::debug!("Expanding subgraphs...");
     let expanded_subgraphs = expand_subgraphs(subgraphs)?;
 
-    tracing::debug!("Upgrading subgraphs...");
-    let validated_subgraphs = upgrade_subgraphs_if_necessary(expanded_subgraphs)
-        .map_err(CompositionFailure::from_errors)?;
+    tracing::debug!("Upgrading and validating subgraphs...");
+    let mut validated_subgraphs = upgrade_subgraphs_if_necessary(expanded_subgraphs)?;
+    // Drained, not cloned: these hints are reported from here, and taking them keeps a later stage
+    // from reporting the same hint a second time.
+    for subgraph in &mut validated_subgraphs {
+        hints.extend(subgraph.take_hints());
+    }
 
     tracing::debug!("Pre-merge validations...");
     pre_merge_validations(&validated_subgraphs)?;
 
+    // Reads the subgraphs, but is only reported if merging succeeds — see
+    // `validate_override_on_connector`. Merging consumes the subgraphs, hence running it here and
+    // holding on to the result rather than doing both after the merge.
+    let override_on_connector = validate_override_on_connector(&validated_subgraphs);
+
     tracing::debug!("Merging subgraphs...");
     let supergraph = merge_subgraphs(validated_subgraphs, &options)?;
-
     tracing::debug!("Post-merge validations...");
     post_merge_validations(&supergraph)?;
-    // TODO: (FED-855) Call `validate_overrides`, which validates the original subgraphs for connectors after merging.
-    // - Once JS-to-Rust migration is done, we may consider to move that to the pre-merge validation step.
+    override_on_connector.map_err(CompositionFailure::from_errors)?;
 
     tracing::debug!("Validating satisfiability...");
-    validate_satisfiability_with_connectors(supergraph, &options)
+    validate_satisfiability(supergraph, &options)
 }
 
 /// Apollo Federation allow subgraphs to specify partial schemas (i.e. "import" directives through
@@ -183,92 +200,4 @@ pub fn post_merge_validations(_supergraph: &Supergraph<Merged>) -> Result<(), Co
     // TODO: (FED-714) Implement any post-merge validations other than satisfiability, which is
     // checked separately.
     Ok(())
-}
-
-/// Mirroring HybridComposition in the apollo-composition crate.
-/// - Expand connectors as needed.
-pub fn validate_satisfiability_with_connectors(
-    supergraph: Supergraph<Merged>,
-    options: &CompositionOptions,
-) -> Result<Supergraph<Satisfiable>, CompositionFailure> {
-    let merge_hints = supergraph.hints().to_vec();
-    let supergraph_str = supergraph.schema().schema().to_string();
-    let expansion_result = match expand_connectors(&supergraph_str, &Default::default()) {
-        Ok(result) => result,
-        Err(e) => {
-            return Err(CompositionFailure {
-                errors: vec![CompositionError::InternalError {
-                    message: format!(
-                        "Composition failed due to an internal error when expanding connectors, please report this: {e}"
-                    ),
-                }],
-                hints: merge_hints,
-            });
-        }
-    };
-
-    match expansion_result {
-        ExpansionResult::Expanded {
-            raw_sdl,
-            connectors: Connectors {
-                by_service_name, ..
-            },
-            ..
-        } => {
-            let expanded_supergraph = match Supergraph::parse(&raw_sdl) {
-                Ok(s) => s,
-                Err(e) => {
-                    return Err(CompositionFailure {
-                        errors: vec![CompositionError::InternalError {
-                            message: e.to_string(),
-                        }],
-                        hints: merge_hints,
-                    });
-                }
-            };
-            match validate_satisfiability(expanded_supergraph, options) {
-                Ok(mut supergraph) => {
-                    for hint in supergraph.hints_mut() {
-                        sanitize_connectors_message(&mut hint.message, by_service_name.iter());
-                    }
-                    Ok(supergraph)
-                }
-                Err(mut failure) => {
-                    failure.hints.extend(merge_hints);
-                    for error in failure.errors.iter_mut() {
-                        sanitize_connectors_error(error, by_service_name.iter());
-                    }
-                    for hint in failure.hints.iter_mut() {
-                        sanitize_connectors_message(&mut hint.message, by_service_name.iter());
-                    }
-                    Err(failure)
-                }
-            }
-        }
-        ExpansionResult::Unchanged => validate_satisfiability(supergraph, options),
-    }
-}
-
-fn sanitize_connectors_error<'a>(
-    issue: &mut CompositionError,
-    connector_subgraphs: impl Iterator<Item = (&'a Arc<str>, &'a Connector)>,
-) {
-    match issue {
-        CompositionError::SatisfiabilityError { message } => {
-            sanitize_connectors_message(message, connector_subgraphs);
-        }
-        CompositionError::ShareableHasMismatchedRuntimeTypes { message } => {
-            sanitize_connectors_message(message, connector_subgraphs);
-        }
-        _ => {}
-    }
-}
-
-fn sanitize_connectors_message<'a>(
-    message: &mut String,
-    connector_subgraphs: impl Iterator<Item = (&'a Arc<str>, &'a Connector)>,
-) {
-    for (service_name, connector) in connector_subgraphs {
-        *message = message.replace(&**service_name, connector.id.subgraph_name.as_str());
-    }
 }

@@ -108,21 +108,21 @@ fragment bookDetails on Book {
 
 #### `max_height`
 
-Limits the number of unique fields included in an operation, including fields of fragments. If a particular field is included _multiple_ times via aliases, it's counted only _once_.
+Limits the number of fields included in an operation, including fields of fragments. Within each selection set, fields with the same name or alias count once. Distinct aliases count separately.
 
-The `GetUser` operation below has height three:
+The `GetUser` operation below has height four:
 
 ```graphql
 query GetUser {
   user { # 1
     id   # 2
     name # 3
-    username: name # Aliased duplicate (not counted)
+    username: name # 4
   }
 }
 ```
 
-Each unique field increments an operation's height by one, regardless of that field's return type (scalar, object, or list). 
+Each counted field increments an operation's height by one, regardless of that field's return type (scalar, object, or list).
 
 #### `max_aliases`
 

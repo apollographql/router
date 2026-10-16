@@ -25,7 +25,7 @@ use crate::error::SchemaError;
 fn schema_generation() {
     let schema = generate_config_schema();
     insta::with_settings!({sort_maps => true}, {
-        assert_json_snapshot!(&schema)
+        assert_json_snapshot!(&schema);
     });
     let json_schema =
         serde_json::to_string_pretty(&schema).expect("must be able to deserialize schema");
@@ -724,6 +724,7 @@ headers:
         .expect_err("old headers config should be rejected when migration is not applied");
 }
 
+/// Sample YAML files that have minor migrations from the 2.x release cycle
 #[derive(RustEmbed)]
 #[folder = "src/configuration/testdata/migrations/minor"]
 struct AssetMinor;
@@ -739,7 +740,7 @@ fn upgrade_old_minor_configuration() {
             let new_config = crate::configuration::upgrade::upgrade_configuration(
                 &serde_yaml::from_str(&input).expect("config must be valid yaml"),
                 true,
-                upgrade::UpgradeMode::Minor,
+                upgrade::UpgradeMode::Minor(2),
             )
             .expect("configuration could not be updated");
             let new_config =

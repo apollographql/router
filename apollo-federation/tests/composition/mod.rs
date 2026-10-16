@@ -71,6 +71,19 @@ pub(crate) mod test_helpers {
         apollo_federation::composition::compose(fed2_subgraphs, options)
     }
 
+    /// Composes a set of connectors subgraphs as if they had the latest federation 2 spec link in
+    /// them, importing only the directives fed v2.4 auto-expanded.
+    ///
+    /// [`compose_as_fed2_subgraphs`] imports every federation directive, including `@context` and
+    /// `@fromContext`, which the connectors validations reject outright — so connectors tests
+    /// can't use it.
+    pub(crate) fn compose_as_fed2_connectors_subgraphs(
+        service_list: &[ServiceDefinition<'_>],
+    ) -> Result<Supergraph<Satisfiable>, CompositionFailure> {
+        let fed2_subgraphs = as_fed2_subgraphs_with_imports(service_list, false)?;
+        apollo_federation::composition::compose(fed2_subgraphs, CompositionOptions::default())
+    }
+
     /// Parses the given service definitions and converts them into fed2-ready subgraphs, ready to
     /// be fed into [`compose`]. Mirrors the `asFed2Service` conversion from the JS implementation.
     ///
@@ -78,32 +91,29 @@ pub(crate) mod test_helpers {
     pub(crate) fn as_fed2_subgraphs(
         service_list: &[ServiceDefinition<'_>],
     ) -> Result<Vec<Subgraph<Initial>>, Vec<CompositionError>> {
-        let mut subgraphs = Vec::new();
+        as_fed2_subgraphs_with_imports(service_list, true)
+    }
+
+    fn as_fed2_subgraphs_with_imports(
+        service_list: &[ServiceDefinition<'_>],
+        include_all_imports: bool,
+    ) -> Result<Vec<Subgraph<Initial>>, Vec<CompositionError>> {
+        let mut fed2_subgraphs = Vec::new();
         let mut errors = Vec::new();
         for service in service_list {
             let result = Subgraph::parse(
                 service.name,
                 &format!("http://{}", service.name),
                 service.type_defs,
-            );
+            )
+            .and_then(|subgraph| subgraph.into_fed2_test_subgraph(include_all_imports));
             match result {
                 Ok(subgraph) => {
-                    subgraphs.push(subgraph);
+                    fed2_subgraphs.push(subgraph);
                 }
                 Err(err) => {
                     errors.extend(err.to_composition_errors());
                 }
-            }
-        }
-        if !errors.is_empty() {
-            return Err(errors);
-        }
-
-        let mut fed2_subgraphs = Vec::new();
-        for subgraph in subgraphs {
-            match subgraph.into_fed2_test_subgraph(true) {
-                Ok(subgraph) => fed2_subgraphs.push(subgraph),
-                Err(err) => errors.extend(err.to_composition_errors()),
             }
         }
         if !errors.is_empty() {
@@ -210,6 +220,7 @@ pub(crate) use test_helpers::ServiceDefinition;
 pub(crate) use test_helpers::assert_composition_errors;
 pub(crate) use test_helpers::assert_hints_equal;
 pub(crate) use test_helpers::compose;
+pub(crate) use test_helpers::compose_as_fed2_connectors_subgraphs;
 pub(crate) use test_helpers::compose_as_fed2_subgraphs;
 pub(crate) use test_helpers::compose_as_fed2_subgraphs_with_options;
 pub(crate) use test_helpers::extract_subgraphs_from_supergraph_result;

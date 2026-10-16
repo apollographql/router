@@ -1,0 +1,73 @@
+extend schema
+  @link(
+    url: "https://specs.apollo.dev/connect/v0.4"
+    import: ["@connect", "@source"]
+  )
+
+# Requestless `@connect` directives whose selections reference request-phase
+# data only inside the argument of a short-circuited `->and`/`->or` call. Even
+# though the argument is never evaluated at runtime (the receiver is a literal
+# `false`/`true`), computing its shape must still record the variable
+# consumption, so both fields below should trigger
+# `RequestlessSelectionUsesRequestData`:
+#
+# - `Query.ok`    — `$status` inside `$(false)->and(...)`.
+# - `Query.trace` — `$response.headers.trace` inside `$(true)->or(...)`.
+# - `Query.both`  — one argument records `$status` consumption while a later
+#                   argument carries a type error; the consumption must be
+#                   recorded, but the error must stay silent because no
+#                   argument is ever evaluated at runtime.
+# - `Query.multi` — three arguments, two request-phase namespaces.
+# - `Query.lit`   — short-circuit inside an object-literal value.
+# - `Query.exact_or` — the exact `or.rs` review repro, `$response` path with
+#                      a trailing `->eq(...)` inside the argument.
+type Query {
+  ok: Boolean
+    @connect(
+      selection: """
+        $(false)->and($status->eq(200))
+      """
+    )
+
+  trace: Boolean
+    @connect(
+      selection: """
+        $(true)->or($response.headers.trace)
+      """
+    )
+
+  both: Boolean
+    @connect(
+      selection: """
+        $(false)->and($status, $(1)->gt("x"))
+      """
+    )
+
+  # Multi-argument short-circuit (v0.4+ bare literals, no `$()` wrapper):
+  # consumption of every argument is recorded, and the `->gt` type error
+  # stays silent.
+  multi: Boolean
+    @connect(
+      selection: """
+        false->and($status, $response.headers.trace, 1->gt("x"))
+      """
+    )
+
+  # Short-circuit inside an object-literal value (v0.4+), reached through a
+  # path into the literal object.
+  lit: Boolean
+    @connect(
+      selection: """
+        { foo: false->and($status) }.foo
+      """
+    )
+
+  # The exact `or.rs` repro from review: a method call on the `$response`
+  # path inside the short-circuited argument.
+  exact_or: Boolean
+    @connect(
+      selection: """
+        $(true)->or($response.headers.trace->eq("x"))
+      """
+    )
+}
