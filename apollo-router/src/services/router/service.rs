@@ -323,16 +323,15 @@ where
                         .extensions()
                         .with_lock(|ext| ext.get::<DisplayRouterResponse>().is_some());
 
+                    let (body, body_to_stash) = if display_router_response {
+                        (body.clone(), Some(body))
+                    } else {
+                        (body, None)
+                    };
+
                     router::Response::http_response_builder()
-                        .response(Response::from_parts(
-                            parts,
-                            router::body::from_bytes(body.clone()),
-                        ))
-                        .and_body_to_stash(if display_router_response {
-                            Some(body)
-                        } else {
-                            None
-                        })
+                        .response(Response::from_parts(parts, router::body::from_bytes(body)))
+                        .and_body_to_stash(body_to_stash)
                         .context(context)
                         .errors_for_context(errors)
                         .build()
