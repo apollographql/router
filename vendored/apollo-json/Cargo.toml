@@ -53,3 +53,8 @@ proptest = "1.11"
 # model; without `float_roundtrip` serde_json's float parsing is off by up
 # to 1 ulp and the comparison reports phantom divergences.
 serde_json = { version = "1.0", features = ["float_roundtrip"] }
+
+# Scanner microbenchmark; see benches/scanner.rs for how to compare scanners.
+[[bench]]
+name = "scanner"
+harness = false
