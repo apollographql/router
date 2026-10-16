@@ -158,6 +158,7 @@ input_file: apollo-federation/src/connectors/expand/tests/schemas/expand/cache_t
                 ),
             ),
         ),
+        methods: None,
         label: Label(
             "connectors.example http: GET /users",
         ),
@@ -316,6 +317,7 @@ input_file: apollo-federation/src/connectors/expand/tests/schemas/expand/cache_t
                 ),
             ),
         ),
+        methods: None,
         label: Label(
             "connectors.example http: GET /products",
         ),
