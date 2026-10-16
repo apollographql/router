@@ -5165,3 +5165,283 @@ fn circular_key_hop_from_connector_missing_key_fails_commit() {
         "circular key commit routed conditions instead of failing: {pushed:?}",
     );
 }
+
+/// `/products` maps `details` through `->match`, and neither branch returns
+/// `upc`: fetch `details { upc }` through `productById` instead of selecting
+/// it from a fetch that returns it as null.
+#[test]
+fn connector_field_under_match_shape_routes_missing_field() {
+    let plan_str = plan_query_with_router_specs(
+        include_str!("../fixtures/connector_key_in_match_shape.graphql"),
+        "{ products { id details { upc color } } }",
+    );
+    insta::assert_snapshot!(plan_str, @r#"
+    QueryPlan {
+      Sequence {
+        Fetch(service: "products_Query_products_0") {
+          {
+            products {
+              __typename
+              id
+              details {
+                color
+              }
+            }
+          }
+        },
+        Flatten(path: "products.@") {
+          Fetch(service: "products_Query_productById_0") {
+            {
+              ... on Product {
+                __typename
+                id
+              }
+            } =>
+            {
+              ... on Product {
+                details {
+                  upc
+                }
+              }
+            }
+          },
+        },
+      },
+    }
+    "#);
+}
+
+/// `/products` maps `details { color }` but not `upc`. Nothing re-enters the
+/// `Details` value type on its own, so `details { upc }` is fetched from the
+/// nearest entity, `Product`, through `productById`.
+#[test]
+fn connector_field_under_value_type_routes_through_parent_entity() {
+    let plan_str = plan_query_with_router_specs(
+        include_str!("../fixtures/connector_value_type_partial_shape.graphql"),
+        "{ products { id details { upc color } } }",
+    );
+    insta::assert_snapshot!(plan_str, @r#"
+    QueryPlan {
+      Sequence {
+        Fetch(service: "products_Query_products_0") {
+          {
+            products {
+              __typename
+              id
+              details {
+                color
+              }
+            }
+          }
+        },
+        Flatten(path: "products.@") {
+          Fetch(service: "products_Query_productById_0") {
+            {
+              ... on Product {
+                __typename
+                id
+              }
+            } =>
+            {
+              ... on Product {
+                details {
+                  upc
+                }
+              }
+            }
+          },
+        },
+      },
+    }
+    "#);
+}
+
+/// No connector returns `details.upc`: planning fails instead of re-routing
+/// the missing field through a connector that doesn't return it either.
+#[test]
+fn connector_field_no_connector_returns_fails_planning() {
+    let supergraph = Supergraph::new_with_router_specs(include_str!(
+        "../fixtures/connector_value_type_unprovided.graphql"
+    ))
+    .expect("supergraph parse");
+    let planner = QueryPlanner::new(&supergraph, default_config()).expect("planner creation");
+    let document = apollo_compiler::ExecutableDocument::parse_and_validate(
+        planner.api_schema().schema(),
+        "{ products { id details { upc color } } }",
+        "test.graphql",
+    )
+    .expect("query parse");
+    let result = planner.build_query_plan(&document, None, Default::default());
+    assert!(
+        result.is_err(),
+        "no connector returns upc, planning must fail: {}",
+        result.map(|plan| plan.to_string()).unwrap_or_default(),
+    );
+}
+
+/// `/products` maps `details` through `->match`, and the conditions sit
+/// below it, at `products.details.spec`. Neither branch returns
+/// `spec.upc`, so it is reported missing rather than provided.
+#[test]
+fn connector_unprovided_through_match_shape() {
+    let space = test_support::connector_search_space(include_str!(
+        "../fixtures/connector_path_through_match_shape.graphql"
+    ));
+    let products = space
+        .connector_index
+        .by_field(&name!("Query"), &name!("products"))
+        .and_then(|entries| entries.first())
+        .expect("products connector")
+        .clone();
+    let mut state = PlanState::new(vec![]);
+    let root = state.graph.add_connector_root_group(
+        &Arc::from("products"),
+        CompositeTypeDefinitionPosition::Object(
+            crate::schema::position::ObjectTypeDefinitionPosition {
+                type_name: name!("Query"),
+            },
+        ),
+        products.connector.clone(),
+        None,
+    );
+    let op = crate::operation::Operation::parse(
+        space.supergraph_schema.clone(),
+        "{ products { details { spec { upc } } } }",
+        "op.graphql",
+    )
+    .expect("valid operation");
+    let mut op_path = Vec::new();
+    let mut selection_set = &op.selection_set;
+    for _ in 0..3 {
+        let Some(Selection::Field(field)) = selection_set.selections.values().next() else {
+            panic!("expected a field");
+        };
+        op_path.push(Arc::new(OpPathElement::Field(field.field.clone())));
+        selection_set = field.selection_set.as_ref().expect("sub-selections");
+    }
+
+    let unprovided =
+        space.connector_unprovided(&state, root, &SharedPath::from_vec(op_path), selection_set);
+
+    let (provided, missing) = unprovided.expect("the connector output is inspected");
+    assert!(provided.is_none());
+    assert_eq!(missing.to_string(), "{ upc }");
+}
+
+/// A chain from `a` through the connector subgraph `products` into
+/// `reviews`, keyed on `details { upc }`. Both `product` and `productUpc`
+/// return `details`, but only `productUpc` returns `details.upc`, so the
+/// chain enters through it and selects the whole key in place.
+#[test]
+fn chained_hop_through_connector_subgraph_checks_nested_exit_key() {
+    let space = test_support::connector_search_space(include_str!(
+        "../fixtures/connector_chained_nested_key_hop.graphql"
+    ));
+    let mut state = PlanState::new(vec![]);
+    let root = state.graph.get_or_create_root_group(
+        &Arc::from("a"),
+        CompositeTypeDefinitionPosition::Object(
+            crate::schema::position::ObjectTypeDefinitionPosition {
+                type_name: name!("Query"),
+            },
+        ),
+    );
+    let pending = connector_reviews_pending(&space, "topProducts", "a", root);
+    let (products_node, entry_key) = product_key_edge(&space, "a", "products");
+    let (_, exit_key) = product_key_edge(&space, "products", "reviews");
+    let choice = RoutingChoice::ChainedKeyHop {
+        edge: reviews_edge(&space, &pending),
+        key: key_hop_info(exit_key, false),
+        intermediate_hops: vec![routing::IntermediateKeyHop {
+            target_node: products_node,
+            entry_key: Some(entry_key),
+        }],
+    };
+    let pending_before = state.pending.len();
+
+    space
+        .commit_key_hop(&mut state, &pending, &choice)
+        .expect("chained hop commits");
+
+    let products_fetches: Vec<_> = state
+        .graph
+        .node_indices()
+        .map(|idx| state.graph.node(idx))
+        .filter(|node| node.subgraph.as_ref() == "products")
+        .map(|node| {
+            let selections: Vec<_> = node
+                .selection_builder
+                .entries()
+                .iter()
+                .filter_map(|entry| entry.selections().map(|selections| selections.to_string()))
+                .collect();
+            (
+                node.connector
+                    .as_ref()
+                    .map(|connector| connector.id.coordinate()),
+                selections,
+            )
+        })
+        .collect();
+    assert_eq!(
+        products_fetches,
+        vec![(
+            Some("products:Query.productUpc[0]".to_string()),
+            vec!["{ details { upc } }".to_string()],
+        )],
+    );
+    assert_eq!(
+        state.pending.len(),
+        pending_before,
+        "details.upc is selected in place"
+    );
+}
+
+/// `spec.upc` is missing two value types below `Product`: `details { spec {
+/// upc } }` is fetched through `productById`, and `/products` keeps the rest.
+#[test]
+fn connector_field_two_value_types_deep_routes_through_parent_entity() {
+    let plan_str = plan_query_with_router_specs(
+        include_str!("../fixtures/connector_path_through_match_shape.graphql"),
+        "{ products { id details { color spec { sku upc } } } }",
+    );
+    insta::assert_snapshot!(plan_str, @r#"
+    QueryPlan {
+      Sequence {
+        Fetch(service: "products_Query_products_0") {
+          {
+            products {
+              __typename
+              id
+              details {
+                color
+                spec {
+                  sku
+                }
+              }
+            }
+          }
+        },
+        Flatten(path: "products.@") {
+          Fetch(service: "products_Query_productById_0") {
+            {
+              ... on Product {
+                __typename
+                id
+              }
+            } =>
+            {
+              ... on Product {
+                details {
+                  spec {
+                    upc
+                  }
+                }
+              }
+            }
+          },
+        },
+      },
+    }
+    "#);
+}
