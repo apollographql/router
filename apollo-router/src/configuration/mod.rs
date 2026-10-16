@@ -36,7 +36,6 @@ use serde::Deserializer;
 use serde::Serialize;
 #[cfg(test)]
 use serde_json::Map;
-use serde_json::Value;
 use sha2::Digest;
 use thiserror::Error;
 
@@ -176,7 +175,7 @@ impl From<proteus::parser::Error> for ConfigurationError {
 pub struct Configuration {
     /// The raw configuration value.
     #[serde(skip)]
-    pub(crate) validated_yaml: Option<Value>,
+    pub(crate) validated_yaml: Option<serde_json::Value>,
 
     /// The full router yaml before it was parsed and env variables expanded
     #[serde(skip)]
@@ -273,7 +272,7 @@ impl<'de> serde::Deserialize<'de> for Configuration {
     where
         D: serde::Deserializer<'de>,
     {
-        let document = Value::deserialize(deserializer)?;
+        let document = serde_json::Value::deserialize(deserializer)?;
         let text = serde_json::to_string(&document).map_err(serde::de::Error::custom)?;
         apollo_configuration_parse::parse_as_written(&text).map_err(serde::de::Error::custom)
     }
@@ -295,8 +294,8 @@ impl Configuration {
         sandbox: Option<Sandbox>,
         homepage: Option<Homepage>,
         cors: Option<Cors>,
-        plugins: Map<String, Value>,
-        apollo_plugins: Map<String, Value>,
+        plugins: Map<String, serde_json::Value>,
+        apollo_plugins: Map<String, serde_json::Value>,
         tls: Option<Tls>,
         apq: Option<Apq>,
         persisted_query: Option<PersistedQueries>,
@@ -406,7 +405,7 @@ impl Configuration {
 
     /// The section `name` of the document the configuration was parsed from, after expansion and
     /// overrides, for code that inspects its shape rather than a plugin's typed config.
-    pub(crate) fn document_section(&self, name: &str) -> Option<&Value> {
+    pub(crate) fn document_section(&self, name: &str) -> Option<&serde_json::Value> {
         self.validated_yaml.as_ref()?.get(name)
     }
 
@@ -423,7 +422,7 @@ impl Configuration {
     pub(crate) fn add_apollo_plugin_if_absent(
         &mut self,
         name: &str,
-        config: impl FnOnce() -> Value,
+        config: impl FnOnce() -> serde_json::Value,
     ) -> Result<(), ConfigurationError> {
         if self.apollo_plugins.contains(name) {
             return Ok(());
@@ -557,8 +556,8 @@ impl Configuration {
         sandbox: Option<Sandbox>,
         homepage: Option<Homepage>,
         cors: Option<Cors>,
-        plugins: Map<String, Value>,
-        apollo_plugins: Map<String, Value>,
+        plugins: Map<String, serde_json::Value>,
+        apollo_plugins: Map<String, serde_json::Value>,
         tls: Option<Tls>,
         notify: Option<Notify<String, graphql::Response>>,
         apq: Option<Apq>,
@@ -603,16 +602,17 @@ impl Configuration {
 impl Configuration {
     /// Deserializes the test builders' plugin sections as parsing does.
     fn plugin_sections(
-        apollo_plugins: Map<String, Value>,
-        plugins: Map<String, Value>,
+        apollo_plugins: Map<String, serde_json::Value>,
+        plugins: Map<String, serde_json::Value>,
     ) -> Result<(ApolloPlugins, UserPlugins), ConfigurationError> {
         let invalid = |error: serde_json::Error| ConfigurationError::InvalidConfiguration {
             message: "invalid plugin configuration",
             error: error.to_string(),
         };
         Ok((
-            ApolloPlugins::deserialize(Value::Object(apollo_plugins)).map_err(invalid)?,
-            UserPlugins::deserialize(Value::Object(plugins)).map_err(invalid)?,
+            ApolloPlugins::deserialize(serde_json::Value::Object(apollo_plugins))
+                .map_err(invalid)?,
+            UserPlugins::deserialize(serde_json::Value::Object(plugins)).map_err(invalid)?,
         ))
     }
 

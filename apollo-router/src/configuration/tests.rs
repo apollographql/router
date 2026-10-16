@@ -997,14 +997,14 @@ fn unusual_configs_validate(#[case] input: &str) {
     parse_without_inputs(input, Migration::None).expect("should be valid configuration");
 }
 
-fn visit_schema(path: &str, schema: &Value, errors: &mut Vec<String>) {
+fn visit_schema(path: &str, schema: &serde_json::Value, errors: &mut Vec<String>) {
     match schema {
-        Value::Array(arr) => {
+        serde_json::Value::Array(arr) => {
             for element in arr {
                 visit_schema(path, element, errors)
             }
         }
-        Value::Object(o) => {
+        serde_json::Value::Object(o) => {
             for (k, v) in o {
                 if k.as_str() == "properties" {
                     let properties = v.as_object().expect("properties must be an object");
