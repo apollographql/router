@@ -988,10 +988,11 @@ fn validate_inaccessible(
                         has_accessible_field |= !field_inaccessible;
 
                         if field_inaccessible && field.is_required() {
+                            let field_position = input_object_position.field(field.name.clone());
                             errors.push(SingleFederationError::RequiredInaccessible{
-                                message: format!("Input field `{position}` is @inaccessible but is a required input field of its type."),
+                                message: format!("Input field `{field_position}` is @inaccessible but is a required input field of its type."),
                                 links: InaccessibleCompositionLinks {
-                                    elements: vec![input_object_position.field(field.name.clone()).to_string()],
+                                    elements: vec![field_position.to_string()],
                                     referencers: vec![],
                                 },
                             }.into());

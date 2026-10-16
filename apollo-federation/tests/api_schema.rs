@@ -1600,7 +1600,7 @@ fn inaccessible_input_object_fields_with_accessible_references() {
       - Input field `InputObject.privateField` is @inaccessible but is used in the default value of `Referencer2.someField(someArg:)`, which is in the API schema.
       - Input field `InputObject.privateField` is @inaccessible but is used in the default value of `Referencer3.someField`, which is in the API schema.
       - Type `Referencer5` is in the API schema but all of its input fields are @inaccessible.
-      - Input field `InputObjectRequired` is @inaccessible but is a required input field of its type.
+      - Input field `InputObjectRequired.privateField` is @inaccessible but is a required input field of its type.
       - Input field `InputObject.privateField` is @inaccessible but is used in the default value of `@referencer4(someArg:)`, which is in the API schema.
     "###);
 }
