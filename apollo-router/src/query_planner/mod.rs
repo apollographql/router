@@ -121,7 +121,7 @@ impl HashedSubgraphSchema {
 // The code resides in a separate submodule to allow writing a log filter activating it
 // separately from the query planner logs, as follows:
 // `router -s supergraph.graphql --log info,crate::query_planner::log=trace`
-mod log {
+pub(crate) mod log {
     use crate::json_ext::Value;
     use crate::query_planner::PlanNode;
 
@@ -129,17 +129,35 @@ mod log {
         tracing::trace!("query plan\n{:?}", plan);
     }
 
+    /// The operation and variables of a subgraph fetch, as [`trace_subfetch`] logs them.
+    pub(crate) struct SubfetchTrace {
+        operation: String,
+        variables: Value,
+    }
+
+    impl SubfetchTrace {
+        /// Copies the operation and variables if `apollo_router::query_planner::log` is enabled
+        /// at TRACE.
+        ///
+        /// Returns `None` otherwise, so fetches skip the copy when trace logging is off.
+        pub(crate) fn capture(operation: &str, variables: &Value) -> Option<Self> {
+            tracing::enabled!(tracing::Level::TRACE).then(|| Self {
+                operation: operation.to_string(),
+                variables: variables.clone(),
+            })
+        }
+    }
+
     pub(crate) fn trace_subfetch(
         service_name: &str,
-        operation: &str,
-        variables: &Value,
+        request: &SubfetchTrace,
         response: &crate::graphql::Response,
     ) {
         tracing::trace!(
             "subgraph fetch to {}: operation = '{}', variables = {:?}, response:\n{}",
             service_name,
-            operation,
-            variables,
+            request.operation,
+            request.variables,
             serde_json::to_string_pretty(&response).unwrap()
         );
     }

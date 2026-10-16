@@ -17,6 +17,7 @@ use tower::ServiceExt;
 use tracing::Instrument;
 use tracing::instrument;
 
+use super::log::SubfetchTrace;
 use super::rewrites;
 use super::selection::select;
 use super::subgraph_context::ContextualArguments;
@@ -383,8 +384,7 @@ impl FetchNode {
         current_dir: &Path,
         schema: &Schema,
         paths: Arc<InvertedPaths>,
-        operation_str: &str,
-        variables: Value,
+        subfetch_trace: Option<SubfetchTrace>,
         hoist_orphan_errors: bool,
     ) -> (Value, Vec<Error>) {
         let (_parts, response) = match service
@@ -399,7 +399,9 @@ impl FetchNode {
             Ok(res) => res.response.into_parts(),
         };
 
-        super::log::trace_subfetch(&self.service_name, operation_str, &variables, &response);
+        if let Some(subfetch_trace) = &subfetch_trace {
+            super::log::trace_subfetch(&self.service_name, subfetch_trace, &response);
+        }
 
         if !response.is_primary() {
             return (
