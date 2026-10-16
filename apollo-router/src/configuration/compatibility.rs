@@ -295,7 +295,7 @@ fn unknown_plugin_name_is_rejected() {
 fn duplicate_keys_are_rejected_before_migration() {
     let error = parse(include_str!("testdata/compat/duplicate_keys.yaml"))
         .expect_err("migration must not erase duplicate keys");
-    assert!(error.to_string().contains("duplicated keys"), "{error}");
+    assert!(error.to_string().contains(r#"duplicate entry with key "supergraph""#), "{error}");
 }
 
 /// Configuration-usage selectors and licence checks read `validated_yaml`, which holds the
