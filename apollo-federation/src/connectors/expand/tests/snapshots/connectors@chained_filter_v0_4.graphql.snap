@@ -214,6 +214,7 @@ input_file: apollo-federation/src/connectors/expand/tests/schemas/expand/chained
             connect_extensions: None,
             connect_is_success: None,
         },
+        requires: [],
         output_type: Some(
             Named(
                 "ThingConnection",
@@ -623,6 +624,7 @@ input_file: apollo-federation/src/connectors/expand/tests/schemas/expand/chained
             connect_extensions: None,
             connect_is_success: None,
         },
+        requires: [],
         output_type: Some(
             Named(
                 "ThingConnection",
