@@ -1,5 +1,6 @@
 use std::cell::Cell;
 use std::num::NonZeroU32;
+use std::num::NonZeroU64;
 use std::ops::ControlFlow;
 use std::sync::Arc;
 
@@ -158,6 +159,15 @@ pub struct QueryPlannerDebugConfig {
     ///
     /// The default value is None, which specifies no limit.
     pub paths_limit: Option<u32>,
+
+    /// As the planner traverses the query, it estimates an upper bound on the
+    /// number of "non-local" selection sets it would need to consider as
+    /// possibilities. The process is aborted if the estimate exceeds this upper
+    /// bound to prevent unbounded planning time.
+    ///
+    /// This value currently defaults to 100_000. And is intentionally not part
+    /// of configuration which can be set by users.
+    pub max_non_local_selections: NonZeroU64,
 }
 
 impl Default for QueryPlannerDebugConfig {
@@ -165,6 +175,7 @@ impl Default for QueryPlannerDebugConfig {
         Self {
             max_evaluated_plans: NonZeroU32::new(10_000).unwrap(),
             paths_limit: None,
+            max_non_local_selections: NonZeroU64::new(100_000).unwrap(),
         }
     }
 }
@@ -177,6 +188,9 @@ pub struct QueryPlanningStatistics {
     /// `best_plan_cost` can be NaN, if the cost is not computed or irrelevant.
     #[serde(deserialize_with = "deserialize_f64_nullable")]
     pub best_plan_cost: f64,
+    /// `non_local_selections_count` can be `None`, if
+    /// `QueryPlanOptions::non_local_selections_limit_enabled` is `false`
+    pub non_local_selections_count: Option<u64>,
 }
 
 /// Deserialize helper for f64 that treats null as NaN.
@@ -563,6 +577,7 @@ impl QueryPlanner {
             node: root_node,
             statistics: QueryPlanningStatistics {
                 best_plan_cost: cost,
+                non_local_selections_count: non_local_selection_state.as_ref().map(|s| s.count),
                 ..statistics
             },
         };
@@ -1458,13 +1473,15 @@ type User
             evaluated_plan_count: Cell::new(10),
             evaluated_plan_paths: Cell::new(20),
             best_plan_cost: f64::NAN,
+            non_local_selections_count: Some(30),
         };
         let serialized = serde_json::to_string_pretty(&stats).expect("Serializing");
         insta::assert_snapshot!(serialized, @r###"
         {
           "evaluated_plan_count": 10,
           "evaluated_plan_paths": 20,
-          "best_plan_cost": null
+          "best_plan_cost": null,
+          "non_local_selections_count": 30
         }
         "###);
 

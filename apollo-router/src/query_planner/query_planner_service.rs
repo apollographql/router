@@ -208,6 +208,7 @@ impl QueryPlannerService {
             query_plan_root_node: root_node.map(Arc::new),
             evaluated_plan_count: plan.statistics.evaluated_plan_count.clone().into_inner() as u64,
             evaluated_plan_paths: plan.statistics.evaluated_plan_paths.clone().into_inner() as u64,
+            non_local_selections_count: plan.statistics.non_local_selections_count,
         })
     }
 
@@ -331,6 +332,7 @@ impl QueryPlannerService {
             formatted_query_plan,
             evaluated_plan_count,
             evaluated_plan_paths,
+            non_local_selections_count,
         } = plan_result;
 
         // If the query is filtered, we want to generate the signature using the original query and generate the
@@ -366,6 +368,9 @@ impl QueryPlannerService {
                 "Number of paths (including intermediate ones) considered to plan a query before starting to generate a plan",
                 evaluated_plan_paths
             );
+            if let Some(non_local_selections_count) = non_local_selections_count {
+                metric_query_planning_non_local_selections(non_local_selections_count);
+            }
 
             Ok(QueryPlannerContent::Plan {
                 plan: Arc::new(super::QueryPlan {
@@ -614,6 +619,7 @@ pub(crate) struct QueryPlanResult {
     pub(super) query_plan_root_node: Option<Arc<PlanNode>>,
     pub(super) evaluated_plan_count: u64,
     pub(super) evaluated_plan_paths: u64,
+    pub(super) non_local_selections_count: Option<u64>,
 }
 
 /// The outcome of a query-planning attempt. Shared across query-planning metrics (e.g.
@@ -670,6 +676,15 @@ pub(crate) fn metric_query_planning_plan_duration(
         "planner" = planner,
         "outcome" = outcome,
         "job.type" = compute_job_type
+    );
+}
+
+pub(crate) fn metric_query_planning_non_local_selections(count: u64) {
+    u64_histogram_with_unit!(
+        "apollo.router.query_planning.plan.non_local_selections",
+        "Number of non-local selections estimated during query planning traversal, used for optimizing plan option exploration",
+        "{selection}",
+        count
     );
 }
 
@@ -1335,6 +1350,30 @@ mod tests {
             .unwrap();
 
             assert_histogram_exists!("apollo.router.query_planning.plan.evaluated_plans", u64);
+        }
+        .with_metrics()
+        .await;
+    }
+
+    #[test(tokio::test)]
+    async fn test_non_local_selections_histogram() {
+        async {
+            let _ = plan(
+                EXAMPLE_SCHEMA,
+                include_str!("testdata/query.graphql"),
+                include_str!("testdata/query.graphql"),
+                None,
+                PlanOptions::default(),
+            )
+            .await
+            .unwrap();
+
+            assert_histogram_exists!(
+                "apollo.router.query_planning.plan.non_local_selections",
+                u64
+            );
+            assert_histogram_count!("apollo.router.query_planning.plan.non_local_selections", 1);
+            assert_histogram_sum!("apollo.router.query_planning.plan.non_local_selections", 7);
         }
         .with_metrics()
         .await;
