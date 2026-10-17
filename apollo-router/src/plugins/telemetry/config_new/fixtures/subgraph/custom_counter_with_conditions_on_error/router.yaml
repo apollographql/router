@@ -1,0 +1,67 @@
+telemetry:
+  instrumentation:
+    instruments:
+      default_requirement_level: none
+      subgraph:
+        # Response-stage condition: a failed subgraph request has no response
+        # header, so it must not be counted.
+        "with_response_header":
+          description: "count of responses with x-outcome"
+          type: counter
+          unit: "unit"
+          value: unit
+          attributes:
+            subgraph.name: true
+            outcome:
+              subgraph_response_header: "x-outcome"
+          condition:
+            exists:
+              subgraph_response_header: "x-outcome"
+        # Request-stage condition: resolved on the request, so errors still count.
+        "products_only":
+          description: "count of requests to products"
+          type: counter
+          unit: "unit"
+          value: unit
+          attributes:
+            subgraph.name: true
+          condition:
+            eq:
+              - subgraph_name: true
+              - "products"
+        # The subgraph example from the instruments docs. A subgraph timeout is a
+        # 504 response, not an error.
+        "requests.timeout":
+          value: unit
+          type: counter
+          unit: request
+          description: "subgraph requests containing subgraph timeout"
+          attributes:
+            subgraph.name: true
+          condition:
+            eq:
+              - 504
+              - subgraph_response_status: code
+        # Error-stage condition on the error's message: a coprocessor timeout.
+        "coprocessor_timeouts":
+          description: "count of requests whose coprocessor call timed out"
+          type: counter
+          unit: "unit"
+          value: unit
+          attributes:
+            subgraph.name: true
+          condition:
+            eq:
+              - "request timed out"
+              - error: reason
+        # Error-stage condition: every error counts.
+        "errors_only":
+          description: "count of failed requests"
+          type: counter
+          unit: "unit"
+          value: unit
+          attributes:
+            subgraph.name: true
+          condition:
+            exists:
+              error: reason

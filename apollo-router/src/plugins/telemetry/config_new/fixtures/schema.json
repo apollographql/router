@@ -341,6 +341,27 @@
         {
           "type": "object",
           "properties": {
+            "subgraph_error": {
+              "type": "object",
+              "properties": {
+                "error": {
+                  "type": "string"
+                }
+              },
+              "additionalProperties": false,
+              "required": [
+                "error"
+              ]
+            }
+          },
+          "required": [
+            "subgraph_error"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
             "subgraph_response": {
               "type": "object",
               "properties": {

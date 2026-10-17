@@ -1,0 +1,24 @@
+description: Custom counter conditions are evaluated when a coprocessor call fails at the supergraph stage
+events:
+  - - supergraph_request:
+        uri: "/hello"
+        method: POST
+        query: "query { hello }"
+    - supergraph_response:
+        status: 200
+        data:
+          hello: "world"
+        headers:
+          x-outcome: match
+  - - supergraph_request:
+        uri: "/hello"
+        method: POST
+        query: "query { hello }"
+    - supergraph_error:
+        error: "HTTP fetch failed: tcp connect error"
+  - - supergraph_request:
+        uri: "/hello"
+        method: POST
+        query: "query { hello }"
+    - supergraph_error:
+        error: request timed out
