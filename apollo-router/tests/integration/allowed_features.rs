@@ -247,10 +247,8 @@ async fn router_starts_when_allowed_features_contains_feature_undefined_in_route
     let coprocessor_address = mock_server.uri();
 
     let mut router = IntegrationTest::builder()
-        .config(
-            include_str!("fixtures/coprocessor.router.yaml")
-                .replace("<replace>", &coprocessor_address),
-        )
+        .config(include_str!("fixtures/coprocessor.router.yaml"))
+        .env_entry("TEST_CONFIG_COPROCESSOR_URL", &coprocessor_address)
         .env(env)
         .jwt(JWT_WITH_ALLOWED_FEATURES_COPROCESSOR_WITH_FEATURE_UNDEFINED_IN_ROUTER.to_string())
         .build()
@@ -311,10 +309,10 @@ async fn demand_control_enabledwhen_allowed_features_none() {
     let coprocessor_address = mock_server.uri();
 
     let mut router = IntegrationTest::builder()
-        .config(
-            include_str!("fixtures/coprocessor_demand_control.router.yaml")
-                .replace("<replace>", &coprocessor_address),
-        )
+        .config(include_str!(
+            "fixtures/coprocessor_demand_control.router.yaml"
+        ))
+        .env_entry("TEST_CONFIG_COPROCESSOR_URL", &coprocessor_address)
         .env(env)
         .jwt(JWT_WITH_ALLOWED_FEATURES_NONE.to_string())
         .build()
@@ -347,10 +345,8 @@ async fn feature_violation_when_allowed_features_empty_with_coprocessor_in_confi
     );
 
     let mut router = IntegrationTest::builder()
-        .config(
-            include_str!("fixtures/coprocessor.router.yaml")
-                .replace("<replace>", &coprocessor_address),
-        )
+        .config(include_str!("fixtures/coprocessor.router.yaml"))
+        .env_entry("TEST_CONFIG_COPROCESSOR_URL", &coprocessor_address)
         .env(env)
         .jwt(JWT_WITH_EMPTY_ALLOWED_FEATURES.to_string())
         .build()
@@ -406,10 +402,10 @@ async fn feature_violation_when_allowed_features_does_not_contain_feature_demand
     );
 
     let mut router = IntegrationTest::builder()
-        .config(
-            include_str!("fixtures/coprocessor_demand_control.router.yaml")
-                .replace("<replace>", &coprocessor_address),
-        )
+        .config(include_str!(
+            "fixtures/coprocessor_demand_control.router.yaml"
+        ))
+        .env_entry("TEST_CONFIG_COPROCESSOR_URL", &coprocessor_address)
         .env(env)
         .jwt(JWT_WITH_COPROCESSORS_IN_ALLOWED_FEATURES.to_string())
         .build()
