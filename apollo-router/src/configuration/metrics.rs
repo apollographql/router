@@ -181,6 +181,16 @@ impl InstrumentData {
             "$.supergraph[?(@.defer_support == true)]"
         );
         populate_config_instrument!(
+            apollo.router.config.incremental_planner,
+            "$.supergraph.query_planning.incremental_planner[?(@.enabled == true)]",
+            opt.beam_width,
+            "$[?(@.beam_width)]",
+            opt.fuel,
+            "$[?(@.fuel)]",
+            opt.timeout,
+            "$[?(@.timeout)]"
+        );
+        populate_config_instrument!(
             apollo.router.config.authentication.jwt,
             "$.authentication[?(@..jwt)]",
             opt.on_error,
@@ -309,6 +319,21 @@ impl InstrumentData {
             opt.subgraph.deduplicate_query,
             "$[?(@.all.deduplicate_query == true || @.subgraphs..deduplicate_query == true)]"
         );
+        // Presence of the block is the whole of the feature switch: every subgraph and connector
+        // source is protected as soon as `circuit_breaker` is configured at all, with the
+        // apollo-qos defaults where nothing overrides them. So `circuit_breaker: {}` counts.
+        populate_config_instrument!(
+            apollo.router.config.circuit_breaker,
+            "$.circuit_breaker",
+            opt.subgraph.all,
+            "$[?(@.all)]",
+            opt.subgraph.subgraphs,
+            "$[?(@.subgraphs)]",
+            opt.connector.all,
+            "$[?(@.connector.all)]",
+            opt.connector.sources,
+            "$[?(@.connector.sources)]"
+        );
 
         populate_config_instrument!(
             apollo.router.config.response_cache,
@@ -326,7 +351,26 @@ impl InstrumentData {
             opt.subgraph.ttl,
             "$[?(@.subgraph.all.ttl || @.subgraph.subgraphs..ttl)]",
             opt.subgraph.invalidation.enabled,
-            "$[?(@.subgraph.all.invalidation.enabled || @.subgraph.subgraphs..invalidation.enabled)]"
+            "$[?(@.subgraph.all.invalidation.enabled || @.subgraph.subgraphs..invalidation.enabled)]",
+            opt.connector.enabled,
+            // Connector caching is "on" for a deployment when storage is configured AND at least
+            // one source is not disabled. `enabled` defaults to on (a missing flag means enabled,
+            // see `ConnectorCacheConfiguration::is_source_enabled`), so we can't key on `enabled`
+            // alone the way subgraph does — a redis-only config with `enabled` omitted still
+            // caches. `enabled != false` matches both the omitted and `true` cases while excluding
+            // an explicit `enabled: false`; the `sources..enabled == true` arm then re-includes a
+            // source that overrides a disabled `all` block, which `is_source_enabled` honors.
+            "$[?((@.connector.all.redis || @.connector.sources..redis) && (@.connector.all.enabled != false || @.connector.sources..enabled == true))]",
+            opt.connector.ttl,
+            "$[?(@.connector.all.ttl || @.connector.sources..ttl)]",
+            opt.connector.cache_key_headers,
+            // `cache_key_headers` is required wherever connector caching applies, so presence is
+            // not the interesting signal — non-emptiness is. An empty list is the documented
+            // "no header partitions the cache key" opt-out, so indexing `[0]` records whether a
+            // deployment actually partitions on headers or deliberately opted out.
+            "$[?(@.connector.all.cache_key_headers[0] || @.connector.sources..cache_key_headers[0])]",
+            opt.connector.invalidation.enabled,
+            "$[?(@.connector.all.invalidation.enabled || @.connector.sources..invalidation.enabled)]"
         );
         populate_config_instrument!(
             apollo.router.config.telemetry,
@@ -576,6 +620,13 @@ impl InstrumentData {
                 atomic.load(Ordering::Relaxed).into()
             }
         }
+        fn mutex_string(mutex: &Mutex<Option<String>>) -> opentelemetry::Value {
+            if cfg!(test) {
+                "test".into()
+            } else {
+                mutex.lock().clone().unwrap_or_default().into()
+            }
+        }
         let mut attributes = HashMap::new();
         attributes.insert(
             "opt.apollo.key".to_string(),
@@ -596,6 +647,10 @@ impl InstrumentData {
         attributes.insert(
             "opt.apollo.graph_artifact_reference".to_string(),
             mutex_is_some(&crate::executable::APOLLO_ROUTER_GRAPH_ARTIFACT_REFERENCE),
+        );
+        attributes.insert(
+            "opt.apollo.license.source".to_string(),
+            mutex_string(&crate::executable::APOLLO_ROUTER_LICENSE_SOURCE),
         );
         attributes.insert(
             "opt.apollo.supergraph.urls".to_string(),
@@ -642,11 +697,10 @@ impl InstrumentData {
             "apollo.router.config.custom_plugins".to_string(),
             (
                 configuration
-                    .plugins
-                    .plugins
-                    .as_ref()
-                    .map(|configuration| {
-                        configuration
+                    .document_section("plugins")
+                    .and_then(|plugins| plugins.as_object())
+                    .map(|plugins| {
+                        plugins
                             .keys()
                             .filter(|k| !k.starts_with("cloud_router."))
                             .count()
@@ -720,6 +774,40 @@ mod test {
         }
     }
 
+    /// Production reads usage gauges from the document that parsing retains. For every fixture,
+    /// that document must drive the same gauges as the document startup migrates the file to.
+    /// Parsing uses no environment overrides, such as `APOLLO_USAGE_REPORTING_INGRESS_URL`, so the
+    /// shell running the test cannot change either side.
+    #[test]
+    fn parsed_configuration_keeps_usage_telemetry_meaning() {
+        for file_name in Asset::iter() {
+            let source = Asset::get(&file_name).expect("test file must exist");
+            let input = std::str::from_utf8(&source.data).expect("expected utf8");
+            let migrated = crate::configuration::upgrade::upgrade_configuration(
+                &serde_yaml::from_str(input).expect("config must be valid yaml"),
+                false,
+                crate::configuration::upgrade::UpgradeMode::current_minor(),
+            )
+            .expect("the fixture migrates");
+            let parsed = crate::configuration::parse_without_inputs(
+                input,
+                crate::configuration::Migration::WithinMajor,
+            )
+            .unwrap_or_else(|error| panic!("{file_name}: {error}"));
+
+            let mut from_document = InstrumentData::default();
+            from_document.populate_config_instruments(&migrated);
+            let mut from_parsed = InstrumentData::default();
+            from_parsed.populate_config_instruments(
+                parsed
+                    .validated_yaml
+                    .as_ref()
+                    .expect("parsing retains the document"),
+            );
+            assert_eq!(from_parsed.data, from_document.data, "{file_name}");
+        }
+    }
+
     #[test]
     fn test_env_metrics() {
         let mut data = InstrumentData::default();
@@ -750,10 +838,10 @@ mod test {
 
     #[test]
     fn test_custom_plugin() {
-        let mut configuration = crate::Configuration::default();
-        let mut custom_plugins = serde_json::Map::new();
-        custom_plugins.insert("name".to_string(), json!("test"));
-        configuration.plugins.plugins = Some(custom_plugins);
+        let configuration = crate::Configuration {
+            validated_yaml: Some(json!({ "plugins": { "name": "test" } })),
+            ..Default::default()
+        };
         let mut data = InstrumentData::default();
         data.populate_user_plugins_instrument(&configuration);
         let _metrics: Metrics = data.into();
@@ -762,11 +850,12 @@ mod test {
 
     #[test]
     fn test_ignore_cloud_router_plugins() {
-        let mut configuration = crate::Configuration::default();
-        let mut custom_plugins = serde_json::Map::new();
-        custom_plugins.insert("name".to_string(), json!("test"));
-        custom_plugins.insert("cloud_router.".to_string(), json!("test"));
-        configuration.plugins.plugins = Some(custom_plugins);
+        let configuration = crate::Configuration {
+            validated_yaml: Some(json!({
+                "plugins": { "name": "test", "cloud_router.": "test" }
+            })),
+            ..Default::default()
+        };
         let mut data = InstrumentData::default();
         data.populate_user_plugins_instrument(&configuration);
         let _metrics: Metrics = data.into();

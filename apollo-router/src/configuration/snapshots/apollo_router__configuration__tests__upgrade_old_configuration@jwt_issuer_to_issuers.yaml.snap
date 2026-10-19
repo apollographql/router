@@ -8,14 +8,14 @@ authentication:
     jwt:
       jwks:
         - url: "https://dev-zzp5enui.us.auth0.com/.well-known/jwks.json"
-          poll_interval: "<optional poll interval>"
+          poll_interval: 60s
           headers:
             - name: User-Agent
               value: router
           issuers:
             - "https://issuer.one"
         - url: "https://dev-zzp5enui.us.auth0.com/.well-known/jwks.json"
-          poll_interval: "<optional poll interval>"
+          poll_interval: 60s
           headers:
             - name: User-Agent
               value: router

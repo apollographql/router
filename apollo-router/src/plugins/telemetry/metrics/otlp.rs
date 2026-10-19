@@ -7,10 +7,10 @@ use crate::metrics::aggregation::MeterProviderType;
 use crate::plugins::telemetry::config::Conf;
 use crate::plugins::telemetry::metrics::BlockingSafeTokioRuntime;
 use crate::plugins::telemetry::metrics::NamedMetricExporter;
-use crate::plugins::telemetry::metrics::OverflowMetricExporter;
 use crate::plugins::telemetry::metrics::RetryMetricExporter;
 use crate::plugins::telemetry::otlp::Protocol;
 use crate::plugins::telemetry::otlp::TelemetryDataKind;
+use crate::plugins::telemetry::otlp::no_retries;
 use crate::plugins::telemetry::otlp::process_endpoint;
 use crate::plugins::telemetry::reload::metrics::MetricsBuilder;
 use crate::plugins::telemetry::reload::metrics::MetricsConfigurator;
@@ -32,13 +32,13 @@ impl MetricsConfigurator for super::super::otlp::Config {
 
         // // Wrap with retry, then overflow detection, then error prefixing
         let named_exporter = NamedMetricExporter::new(
-            OverflowMetricExporter::new_push(RetryMetricExporter::new(exporter)),
+            builder.public_overflow_exporter(RetryMetricExporter::new(exporter)),
             "otlp",
         );
         builder.with_reader(
             MeterProviderType::Public,
             PeriodicReader::builder(named_exporter, BlockingSafeTokioRuntime::new_for_metrics())
-                .with_interval(config.batch_processor.scheduled_delay)
+                .with_interval(*config.batch_processor.scheduled_delay)
                 .build(),
         );
 
@@ -74,8 +74,9 @@ impl super::super::otlp::Config {
 
         let mut exporter_builder = MetricExporter::builder()
             .with_tonic()
+            .with_retry_policy(no_retries())
             .with_temporality(self.temporality.into())
-            .with_timeout(self.batch_processor.max_export_timeout)
+            .with_timeout(*self.batch_processor.max_export_timeout)
             .with_metadata(MetadataMap::from_headers(self.grpc.metadata.clone()));
 
         if let Some(endpoint) = endpoint_opt {
@@ -96,8 +97,9 @@ impl super::super::otlp::Config {
 
         let mut exporter_builder = MetricExporter::builder()
             .with_http()
+            .with_retry_policy(no_retries())
             .with_temporality(self.temporality.into())
-            .with_timeout(self.batch_processor.max_export_timeout)
+            .with_timeout(*self.batch_processor.max_export_timeout)
             .with_headers(self.http.headers.clone());
 
         if let Some(endpoint) = endpoint_opt {

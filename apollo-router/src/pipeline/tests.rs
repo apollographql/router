@@ -13,7 +13,9 @@ use crate::spec::Schema;
 use crate::uplink::license_enforcement::LicenseState;
 
 mod plugin_instantiation;
+pub(crate) mod stage_stack;
 mod subgraph_apq;
+mod traffic_shaping;
 
 /// Subgraph names in `testdata/supergraph.graphql`, sorted.
 const FIXTURE_SUBGRAPHS: [&str; 4] = ["accounts", "inventory", "products", "reviews"];

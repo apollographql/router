@@ -244,8 +244,9 @@ async fn source_max_requests() {
     );
 }
 
-#[tokio::test]
-async fn test_root_field_plus_entity() {
+async fn test_root_field_plus_entity_impl(
+    config: Option<serde_json_bytes::Value>,
+) -> (serde_json::Value, Vec<wiremock::Request>) {
     let mock_server = MockServer::start().await;
     mock_api::users().mount(&mock_server).await;
     mock_api::user_1().mount(&mock_server).await;
@@ -256,11 +257,18 @@ async fn test_root_field_plus_entity() {
         &mock_server.uri(),
         "query { users { __typename id name username } }",
         Default::default(),
-        None,
+        config,
         |_| {},
         None,
     )
     .await;
+    let received = mock_server.received_requests().await.unwrap();
+    (response, received)
+}
+
+#[tokio::test]
+async fn test_root_field_plus_entity() {
+    let (response, received) = test_root_field_plus_entity_impl(None).await;
 
     insta::assert_json_snapshot!(response, @r###"
     {
@@ -293,11 +301,12 @@ async fn test_root_field_plus_entity() {
             Matcher::new().method("GET").path("/users/2"),
         ]),
     ]);
-    plan.assert_matches(&mock_server.received_requests().await.unwrap());
+    plan.assert_matches(&received);
 }
 
-#[tokio::test]
-async fn test_root_field_plus_entity_plus_requires() {
+async fn test_root_field_plus_entity_plus_requires_impl(
+    config: Option<serde_json_bytes::Value>,
+) -> (serde_json::Value, Vec<wiremock::Request>) {
     let mock_server = MockServer::start().await;
     mock_api::users().mount(&mock_server).await;
     mock_api::user_1().mount(&mock_server).await;
@@ -329,11 +338,18 @@ async fn test_root_field_plus_entity_plus_requires() {
         &mock_server.uri(),
         "query { users { __typename id name username d } }",
         Default::default(),
-        None,
+        config,
         |_| {},
         None,
     )
     .await;
+    let received = mock_server.received_requests().await.unwrap();
+    (response, received)
+}
+
+#[tokio::test]
+async fn test_root_field_plus_entity_plus_requires() {
+    let (response, received) = test_root_field_plus_entity_plus_requires_impl(None).await;
 
     insta::assert_json_snapshot!(response, @r###"
     {
@@ -371,7 +387,7 @@ async fn test_root_field_plus_entity_plus_requires() {
         ]),
     ]);
 
-    plan.assert_matches(&mock_server.received_requests().await.unwrap())
+    plan.assert_matches(&received)
 }
 
 /// Tests that a connector can vend an entity reference like `user: { id: userId }`
@@ -2350,14 +2366,11 @@ async fn execute(
     query: &str,
     variables: JsonMap,
     config: Option<serde_json_bytes::Value>,
-    mut request_mutator: impl FnMut(&mut Request),
+    request_mutator: impl FnMut(&mut Request),
     license: Option<LicenseState>,
 ) -> serde_json::Value {
     let connector_uri = format!("{uri}/");
     let subgraph_uri = format!("{uri}/graphql");
-
-    // we cannot use Testharness because the subgraph connectors are actually extracted in PipelineFactory
-    let mut factory = PipelineFactory;
 
     let common_config = json!({
         "include_subgraph_errors": { "all": true },
@@ -2377,6 +2390,22 @@ async fn execute(
         common_config
     };
     let config: Configuration = serde_json_bytes::from_value(config).unwrap();
+
+    execute_with_configuration(schema, query, variables, config, request_mutator, license).await
+}
+
+/// Runs `query` against `schema` with a configuration the caller has already parsed, such as one
+/// whose values come from `${env.*}` substitutions.
+async fn execute_with_configuration(
+    schema: &str,
+    query: &str,
+    variables: JsonMap,
+    config: Configuration,
+    mut request_mutator: impl FnMut(&mut Request),
+    license: Option<LicenseState>,
+) -> serde_json::Value {
+    // we cannot use Testharness because the subgraph connectors are actually extracted in PipelineFactory
+    let mut factory = PipelineFactory;
 
     let pipeline = factory
         .create_pipeline(
@@ -2412,4 +2441,140 @@ async fn execute(
         .unwrap();
 
     serde_json::from_slice(&response).unwrap()
+}
+
+mod native_connectors {
+    use super::*;
+
+    /// Enabling the incremental planner switches connector handling to
+    /// native mode: no virtual-subgraph expansion, fetches dispatched by
+    /// the connectors' synthetic service names.
+    fn native_config() -> Option<serde_json_bytes::Value> {
+        Some(json!({
+            "supergraph": { "query_planning": { "incremental_planner": { "enabled": true } } }
+        }))
+    }
+
+    /// Native twin of test_root_field_plus_entity: same response and same
+    /// wire traffic as expanded mode.
+    #[tokio::test]
+    async fn root_field_plus_entity() {
+        let (response, received) = test_root_field_plus_entity_impl(native_config()).await;
+
+        insta::assert_json_snapshot!(response, @r###"
+        {
+          "data": {
+            "users": [
+              {
+                "__typename": "User",
+                "id": 1,
+                "name": "Leanne Graham",
+                "username": "Bret"
+              },
+              {
+                "__typename": "User",
+                "id": 2,
+                "name": "Ervin Howell",
+                "username": "Antonette"
+              }
+            ]
+          }
+        }
+        "###);
+
+        let plan = Plan::Sequence(vec![
+            Plan::Fetch(Matcher::new().method("GET").path("/users")),
+            Plan::Parallel(vec![
+                Matcher::new().method("GET").path("/users/1"),
+                Matcher::new().method("GET").path("/users/2"),
+            ]),
+        ]);
+        plan.assert_matches(&received);
+    }
+
+    /// Type-conditioned fetching must not route native connector schemas to
+    /// the legacy planner, which cannot dispatch unexpanded connector fetches.
+    #[tokio::test]
+    async fn root_field_plus_entity_with_type_conditioned_fetching() {
+        let config = json!({
+            "supergraph": { "query_planning": { "incremental_planner": { "enabled": true } } },
+            "experimental_type_conditioned_fetching": true
+        });
+        let (response, received) = test_root_field_plus_entity_impl(Some(config)).await;
+
+        insta::assert_json_snapshot!(response, @r###"
+        {
+          "data": {
+            "users": [
+              {
+                "__typename": "User",
+                "id": 1,
+                "name": "Leanne Graham",
+                "username": "Bret"
+              },
+              {
+                "__typename": "User",
+                "id": 2,
+                "name": "Ervin Howell",
+                "username": "Antonette"
+              }
+            ]
+          }
+        }
+        "###);
+
+        let plan = Plan::Sequence(vec![
+            Plan::Fetch(Matcher::new().method("GET").path("/users")),
+            Plan::Parallel(vec![
+                Matcher::new().method("GET").path("/users/1"),
+                Matcher::new().method("GET").path("/users/2"),
+            ]),
+        ]);
+        plan.assert_matches(&received);
+    }
+
+    /// Native twin of test_root_field_plus_entity_plus_requires: @requires
+    /// through a connector plus a GraphQL subgraph hop.
+    #[tokio::test]
+    async fn root_field_plus_entity_plus_requires() {
+        let (response, received) =
+            test_root_field_plus_entity_plus_requires_impl(native_config()).await;
+
+        insta::assert_json_snapshot!(response, @r###"
+        {
+          "data": {
+            "users": [
+              {
+                "__typename": "User",
+                "id": 1,
+                "name": "Leanne Graham",
+                "username": "Bret",
+                "d": "1-770-736-8031 x56442"
+              },
+              {
+                "__typename": "User",
+                "id": 2,
+                "name": "Ervin Howell",
+                "username": "Antonette",
+                "d": "1-770-736-8031 x56442"
+              }
+            ]
+          }
+        }
+        "###);
+
+        let plan = Plan::Sequence(vec![
+            Plan::Fetch(Matcher::new().method("GET").path("/users")),
+            Plan::Parallel(vec![
+                Matcher::new().method("GET").path("/users/1"),
+                Matcher::new().method("GET").path("/users/2"),
+                Matcher::new().method("POST").path("/graphql"),
+            ]),
+            Plan::Parallel(vec![
+                Matcher::new().method("GET").path("/users/1"),
+                Matcher::new().method("GET").path("/users/2"),
+            ]),
+        ]);
+        plan.assert_matches(&received);
+    }
 }

@@ -26,6 +26,8 @@
             "58bca0271d5a2046dfa7705a5418781bc456c787",
             # Synthetic Redis, response-cache and OTLP credentials in the redaction tests
             "ba0b7f734eab8c1230fa29d5b70cebf40d632e46",
+            # Cache keys, not secret keys
+            "165156910be987f1d28b0c0013fe45ce2ccd23c6",
         ]
 
         paths = [
@@ -132,6 +134,7 @@
     [ rules.allowlist ]
         paths = [
             '''^docs/source/routing/performance/caching/response-caching/invalidation.mdx$''',
+            '''^docs/source/routing/performance/caching/response-caching/customization.mdx$''',
         ]
 
 [[ rules ]]

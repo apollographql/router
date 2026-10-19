@@ -11,9 +11,7 @@ pub(super) struct UrlOverrideIncompatPlugin {
 impl UrlOverrideIncompatPlugin {
     pub(super) fn from_config(config: &Configuration) -> Option<Self> {
         config
-            .apollo_plugins
-            .plugins
-            .get("override_subgraph_url")
+            .document_section("override_subgraph_url")
             .and_then(serde_json::Value::as_object)
             .map(|configured| UrlOverrideIncompatPlugin {
                 configured: configured.keys().cloned().collect(),

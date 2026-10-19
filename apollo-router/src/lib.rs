@@ -72,6 +72,10 @@ mod uplink;
 pub(crate) mod allocator;
 mod registry;
 
+// Re-exports for plugins.
+pub use apollo_configuration;
+pub use apollo_redaction;
+
 pub use crate::axum_factory::Endpoint;
 pub use crate::configuration::Configuration;
 pub use crate::configuration::ListenAddr;
@@ -119,5 +123,7 @@ pub mod _private {
     pub mod telemetry {
         pub use crate::plugins::telemetry::config::AttributeValue;
         pub use crate::plugins::telemetry::resource::ConfigResource;
+        pub use crate::plugins::telemetry::tracing::datadog_exporter::DatadogPropagator;
+        pub use crate::plugins::telemetry::tracing::datadog_exporter::new_pipeline as datadog_pipeline;
     }
 }

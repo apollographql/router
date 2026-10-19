@@ -165,6 +165,14 @@ be examined using standard DHAT tooling, e.g. [DHAT html viewer](https://nnether
 
 For more details on interpreting these files and running tests, see the [dhat-rs](https://docs.rs/dhat/latest/dhat/#running) crate documentation.
 
+### Debugging
+
+Dev and test builds include only line-table debug info. Backtraces show file and line numbers, but frames name only the function (`fail` rather than `apollo_router::plugins::example::fail`) and a debugger can't inspect local variables. To build with full debug info, set `CARGO_PROFILE_DEV_DEBUG=true`, e.g.:
+
+```shell
+CARGO_PROFILE_DEV_DEBUG=true cargo build
+```
+
 ### Troubleshoot
 
 * If you have an issue with rust-analyzer reporting an unresolved import about `derivative::Derivative` [check this solution](https://github.com/rust-analyzer/rust-analyzer/issues/7459#issuecomment-876796459) found in a rust-analyzer issue.

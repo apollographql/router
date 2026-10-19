@@ -440,6 +440,18 @@ impl Response {
     pub(crate) fn get_from_extensions(&self, key: &str) -> Option<&Value> {
         self.response.body().extensions.get(key)
     }
+
+    /// Marks this response as the router's own answer to a request it never sent to the
+    /// subgraph, so the circuit breaker records no outcome for it.
+    ///
+    /// A plugin that breaks a subgraph request calls this on the response it breaks with. See
+    /// [`AnsweredByRouter`](crate::services::http::AnsweredByRouter).
+    pub(crate) fn answered_by_router(mut self) -> Self {
+        self.response
+            .extensions_mut()
+            .insert(crate::services::http::AnsweredByRouter);
+        self
+    }
 }
 
 impl Request {

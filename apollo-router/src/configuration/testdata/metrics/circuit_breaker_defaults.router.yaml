@@ -1,0 +1,4 @@
+# Circuit breaking switched on and left entirely at the apollo-qos defaults: every subgraph and
+# connector source is protected, so `apollo.router.config.circuit_breaker` must still report the
+# feature as used, with every `opt.*` attribute false.
+circuit_breaker: {}

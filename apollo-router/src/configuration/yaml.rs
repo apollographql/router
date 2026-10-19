@@ -1,10 +1,10 @@
+//! Reads configuration YAML structure that the parsers themselves discard: duplicate keys, which
+//! they collapse, and the configuration path at a position in the text.
+
 use std::collections::HashMap;
 use std::collections::HashSet;
 
-use derivative::Derivative;
 use indexmap::IndexMap;
-use jsonschema::paths::Location;
-use jsonschema::paths::LocationSegment;
 use yaml_rust::Event;
 use yaml_rust::parser::MarkedEventReceiver;
 use yaml_rust::parser::Parser;
@@ -12,134 +12,66 @@ use yaml_rust::scanner::Marker;
 
 use crate::configuration::ConfigurationError;
 
-#[derive(Derivative, Clone, Debug, Eq)]
-#[derivative(Hash, PartialEq)]
-pub(crate) struct Label {
-    pub(crate) name: String,
-    #[derivative(Hash = "ignore", PartialEq = "ignore")]
-    pub(crate) marker: Option<Marker>,
-}
-
-impl From<String> for Label {
-    fn from(name: String) -> Self {
-        Label { name, marker: None }
-    }
-}
+type Label = String;
 
 #[derive(Clone, Debug)]
-pub(crate) enum Value {
-    // These types are not currently used.
-    // In theory if we want to parse the YAML properly then we need them, but we're only interested
-    // in the markers, so maybe we don't need them?
-    // Null(Marker),
-    // Bool(bool, Marker),
-    // Number(Number, Marker),
-    String(String, Marker),
-    Sequence(Vec<Value>, Marker),
-    Mapping(Option<Label>, IndexMap<Label, Value>, Marker),
+enum Value {
+    Scalar,
+    Sequence(Vec<Value>),
+    Mapping(Option<Label>, IndexMap<Label, Value>),
 }
 
-impl Value {
-    pub(crate) fn end_marker(&self) -> &Marker {
-        match self {
-            Value::String(_, m) => m,
-            Value::Sequence(v, m) => v.last().map(|l| l.end_marker()).unwrap_or_else(|| m),
-            Value::Mapping(_, v, m) => v
-                .last()
-                .map(|(_, val)| val.end_marker())
-                .unwrap_or_else(|| m),
-        }
-    }
-}
-
-/// A basic yaml parser that retains marker information.
-/// This is an incomplete parser that is useful for config validation.
-/// First the yaml is loaded via serde_yaml. This ensures valid yaml.
-/// Then it is validated against a json schema.
-/// The output from json schema validation is a set of errors with json paths.
-/// The json path doesn't contain line number info, so we reparse so that we can convert the
-/// paths into nice error messages.
+/// The document's structure, enough to notice a key that appears twice in one mapping.
 #[derive(Default, Debug)]
-pub(crate) struct MarkedYaml {
+struct DuplicateKeys {
     anchors: HashMap<usize, Value>,
     current_label: Option<Label>,
     object_stack: Vec<(Option<Label>, Value, usize)>,
-    root: Option<Value>,
     duplicated_fields: HashSet<(Option<Label>, Label)>,
 }
 
-impl MarkedYaml {
-    pub(crate) fn get_element(&self, pointer: &Location) -> Option<&Value> {
-        let mut current = self.root();
-        for item in pointer {
-            current = match (current, item) {
-                (
-                    Some(Value::Mapping(_current_label, mapping, _)),
-                    LocationSegment::Property(value),
-                ) => mapping.get(&Label::from(value.to_string())),
-                (Some(Value::Sequence(sequence, _)), LocationSegment::Index(idx)) => {
-                    sequence.get(idx)
-                }
-                _ => None,
-            }
-        }
-        current
-    }
-
-    fn root(&self) -> Option<&Value> {
-        self.root.as_ref()
-    }
-
-    fn end_container(&mut self) -> Option<Value> {
+impl DuplicateKeys {
+    fn end_container(&mut self) {
         let (label, v, id) = self.object_stack.pop().expect("imbalanced parse events");
         self.anchors.insert(id, v.clone());
         match (label, self.object_stack.last_mut()) {
-            (Some(label), Some((_, Value::Mapping(current_label, mapping, _), _))) => {
+            (Some(label), Some((_, Value::Mapping(current_label, mapping), _))) => {
                 if let Some(_previous) = mapping.insert(label.clone(), v) {
                     self.duplicated_fields
                         .insert((current_label.clone(), label));
                 }
-                None
             }
-            (None, Some((_, Value::Sequence(sequence, _), _))) => {
+            (None, Some((_, Value::Sequence(sequence), _))) => {
                 sequence.push(v);
-                None
             }
-            _ => Some(v),
+            _ => {}
         }
     }
 
-    fn add_value(&mut self, marker: Marker, v: String, id: usize) {
+    fn add_value(&mut self, v: String, id: usize) {
         match (self.current_label.take(), self.object_stack.last_mut()) {
-            (Some(label), Some((_, Value::Mapping(current_label, mapping, _), _))) => {
-                let v = Value::String(v, marker);
-                self.anchors.insert(id, v.clone());
-                if let Some(_previous) = mapping.insert(label.clone(), v) {
+            (Some(label), Some((_, Value::Mapping(current_label, mapping), _))) => {
+                self.anchors.insert(id, Value::Scalar);
+                if let Some(_previous) = mapping.insert(label.clone(), Value::Scalar) {
                     self.duplicated_fields
                         .insert((current_label.clone(), label));
                 }
             }
-            (None, Some((_, Value::Sequence(sequence, _), _))) => {
-                let v = Value::String(v, marker);
-                self.anchors.insert(id, v.clone());
-                sequence.push(v);
+            (None, Some((_, Value::Sequence(sequence), _))) => {
+                self.anchors.insert(id, Value::Scalar);
+                sequence.push(Value::Scalar);
             }
-            (None, _) => {
-                self.current_label = Some(Label {
-                    name: v,
-                    marker: Some(marker),
-                })
-            }
+            (None, _) => self.current_label = Some(v),
             _ => tracing::warn!("labeled scalar without container in yaml"),
         }
     }
 
     fn add_alias_value(&mut self, v: Value) {
         match (self.current_label.take(), self.object_stack.last_mut()) {
-            (Some(label), Some((_, Value::Mapping(_current_label, mapping, _), _))) => {
+            (Some(label), Some((_, Value::Mapping(_current_label, mapping), _))) => {
                 mapping.insert(label, v);
             }
-            (None, Some((_, Value::Sequence(sequence, _), _))) => {
+            (None, Some((_, Value::Sequence(sequence), _))) => {
                 sequence.push(v);
             }
             _ => tracing::warn!("scalar without container in yaml"),
@@ -147,12 +79,13 @@ impl MarkedYaml {
     }
 }
 
-pub(crate) fn parse(source: &str) -> Result<MarkedYaml, ConfigurationError> {
+/// Rejects YAML that is malformed or repeats a key within one mapping.
+pub(crate) fn check_duplicate_keys(source: &str) -> Result<(), ConfigurationError> {
     // Yaml parser doesn't support CRLF. Remove CRs.
     // https://github.com/chyh1990/yaml-rust/issues/165
     let source = source.replace('\r', "");
     let mut parser = Parser::new(source.chars());
-    let mut loader = MarkedYaml::default();
+    let mut loader = DuplicateKeys::default();
     parser
         .load(&mut loader, true)
         .map_err(|e| ConfigurationError::InvalidConfiguration {
@@ -168,9 +101,9 @@ pub(crate) fn parse(source: &str) -> Result<MarkedYaml, ConfigurationError> {
             .map(|(parent_label, dup_label)| {
                 let prefix = parent_label
                     .as_ref()
-                    .map(|l| format!("{}.", l.name))
+                    .map(|label| format!("{label}."))
                     .unwrap_or_default();
-                format!("'{prefix}{}'", dup_label.name)
+                format!("'{prefix}{dup_label}'")
             })
             .collect::<Vec<String>>()
             .join(", ");
@@ -180,34 +113,30 @@ pub(crate) fn parse(source: &str) -> Result<MarkedYaml, ConfigurationError> {
         });
     }
 
-    Ok(loader)
+    Ok(())
 }
 
-impl MarkedEventReceiver for MarkedYaml {
-    fn on_event(&mut self, ev: Event, marker: Marker) {
+impl MarkedEventReceiver for DuplicateKeys {
+    fn on_event(&mut self, ev: Event, _marker: Marker) {
         match ev {
-            Event::Scalar(v, _style, id, _tag) => self.add_value(marker, v, id),
+            Event::Scalar(v, _style, id, _tag) => self.add_value(v, id),
             Event::SequenceStart(id) => {
                 self.object_stack.push((
                     self.current_label.take(),
-                    Value::Sequence(Vec::new(), marker),
+                    Value::Sequence(Vec::new()),
                     id,
                 ));
             }
-            Event::SequenceEnd => {
-                self.root = self.end_container();
-            }
+            Event::SequenceEnd => self.end_container(),
             Event::MappingStart(id) => {
                 let current_label = self.current_label.take();
                 self.object_stack.push((
                     current_label.clone(),
-                    Value::Mapping(current_label, IndexMap::default(), marker),
+                    Value::Mapping(current_label, IndexMap::default()),
                     id,
                 ));
             }
-            Event::MappingEnd => {
-                self.root = self.end_container();
-            }
+            Event::MappingEnd => self.end_container(),
             Event::Alias(id) => {
                 if let Some(v) = self.anchors.get(&id) {
                     let cloned = v.clone();
@@ -225,30 +154,7 @@ impl MarkedEventReceiver for MarkedYaml {
 
 #[cfg(test)]
 mod test {
-    use insta::assert_snapshot;
-
-    use crate::configuration::yaml::parse;
-
-    #[test]
-    fn test() {
-        // DON'T reformat this. It'll change the test results
-        let yaml = r#"test:
-  a: 4
-  b: 3       
-  c: &id001
-  - d
-  - e
-  - f:
-     - g
-     - h:
-         i: k 
-  l: *id001
-      
-"#;
-        let parsed = parse(yaml).unwrap();
-        let root = parsed.root().unwrap();
-        assert_snapshot!(format!("{root:#?}"));
-    }
+    use crate::configuration::yaml::check_duplicate_keys;
 
     #[test]
     fn test_duplicate_keys() {
@@ -264,7 +170,7 @@ mod test {
 test:
   foo: bar
 "#;
-        let err = parse(yaml).unwrap_err();
+        let err = check_duplicate_keys(yaml).unwrap_err();
         match err {
             crate::configuration::ConfigurationError::InvalidConfiguration { message, error } => {
                 assert_eq!(

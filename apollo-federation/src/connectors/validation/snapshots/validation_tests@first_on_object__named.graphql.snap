@@ -6,7 +6,7 @@ input_file: apollo-federation/src/connectors/validation/test_data/first_on_objec
 [
     Message {
         code: InvalidSelection,
-        message: "Method ->first requires an array or string input",
+        message: "`@connect(selection:)` on `Query.widget` contains an invalid mapping for field `a`: Method ->first requires an array or string input",
         locations: [
             14:37..14:41,
             14:45..14:50,

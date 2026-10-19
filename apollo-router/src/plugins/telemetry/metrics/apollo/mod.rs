@@ -33,10 +33,12 @@ use crate::plugins::telemetry::config::ApolloMetricsReferenceMode;
 use crate::plugins::telemetry::config::Conf;
 use crate::plugins::telemetry::metrics::BlockingSafeTokioRuntime;
 use crate::plugins::telemetry::metrics::NamedMetricExporter;
+use crate::plugins::telemetry::metrics::OverflowCounting;
 use crate::plugins::telemetry::metrics::OverflowMetricExporter;
 use crate::plugins::telemetry::metrics::RetryMetricExporter;
 use crate::plugins::telemetry::otlp::Protocol;
 use crate::plugins::telemetry::otlp::TelemetryDataKind;
+use crate::plugins::telemetry::otlp::no_retries;
 use crate::plugins::telemetry::otlp::process_endpoint;
 use crate::plugins::telemetry::reload::metrics::MetricsBuilder;
 use crate::plugins::telemetry::reload::metrics::MetricsConfigurator;
@@ -139,9 +141,10 @@ impl Config {
 
                 let exporter = MetricExporter::builder()
                     .with_tonic()
+                    .with_retry_policy(no_retries())
                     .with_tls_config(ClientTlsConfig::new().with_native_roots())
                     .with_endpoint(endpoint.as_str())
-                    .with_timeout(batch_config.max_export_timeout)
+                    .with_timeout(*batch_config.max_export_timeout)
                     .with_metadata(metadata.clone())
                     .with_compression(opentelemetry_otlp::Compression::Gzip)
                     .with_temporality(Temporality::Delta)
@@ -150,9 +153,10 @@ impl Config {
                 // MetricExporter builder does not implement Clone, so we need to create a new builder for the realtime exporter
                 let realtime_exporter = MetricExporter::builder()
                     .with_tonic()
+                    .with_retry_policy(no_retries())
                     .with_tls_config(ClientTlsConfig::new().with_native_roots())
                     .with_endpoint(endpoint.as_str())
-                    .with_timeout(batch_config.max_export_timeout)
+                    .with_timeout(*batch_config.max_export_timeout)
                     .with_metadata(metadata.clone())
                     .with_compression(opentelemetry_otlp::Compression::Gzip)
                     .with_temporality(Temporality::Delta)
@@ -170,7 +174,8 @@ impl Config {
 
                 let exporter = MetricExporter::builder()
                     .with_http()
-                    .with_timeout(batch_config.max_export_timeout)
+                    .with_retry_policy(no_retries())
+                    .with_timeout(*batch_config.max_export_timeout)
                     .with_temporality(Temporality::Delta)
                     .with_compression(opentelemetry_otlp::Compression::Gzip)
                     .with_headers(headers.clone())
@@ -180,7 +185,8 @@ impl Config {
                 // MetricExporter builder does not implement Clone, so we need to create a new builder for the realtime exporter
                 let realtime_exporter = MetricExporter::builder()
                     .with_http()
-                    .with_timeout(batch_config.max_export_timeout)
+                    .with_retry_policy(no_retries())
+                    .with_timeout(*batch_config.max_export_timeout)
                     .with_temporality(Temporality::Delta)
                     .with_compression(opentelemetry_otlp::Compression::Gzip)
                     .with_headers(headers)
@@ -192,11 +198,17 @@ impl Config {
 
         // Wrap with retry, then overflow detection, then error prefixing
         let named_exporter = NamedMetricExporter::new(
-            OverflowMetricExporter::new_push(RetryMetricExporter::new(exporter)),
+            OverflowMetricExporter::new(
+                RetryMetricExporter::new(exporter),
+                OverflowCounting::EveryExport,
+            ),
             "apollo",
         );
         let named_realtime_exporter = NamedMetricExporter::new(
-            OverflowMetricExporter::new_push(RetryMetricExporter::new(realtime_exporter)),
+            OverflowMetricExporter::new(
+                RetryMetricExporter::new(realtime_exporter),
+                OverflowCounting::EveryExport,
+            ),
             "apollo",
         );
 
@@ -209,7 +221,7 @@ impl Config {
             named_realtime_exporter,
             BlockingSafeTokioRuntime::new_for_metrics(),
         )
-        .with_interval(batch_config.scheduled_delay)
+        .with_interval(*batch_config.scheduled_delay)
         .build();
 
         let resource = Resource::builder_empty()
@@ -466,7 +478,9 @@ mod test {
         let mut settings = insta::Settings::clone_current();
         settings.set_sort_maps(true);
         settings.add_redaction("[].request_id", "[REDACTED]");
-        settings.bind(|| insta::assert_json_snapshot!(results));
+        settings.bind(|| {
+            insta::assert_json_snapshot!(results);
+        });
         Ok(())
     }
 

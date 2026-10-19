@@ -1,5 +1,5 @@
 coprocessor:
-  url: "<coprocessor-address>"
+  url: "${env.TEST_CONFIG_COPROCESSOR_URL}"
   router:
     request:
       body: true
@@ -17,6 +17,6 @@ telemetry:
       otlp:
         enabled: true
         protocol: http
-        endpoint: <otel-collector-endpoint>
+        endpoint: ${env.TEST_CONFIG_COLLECTOR_ENDPOINT}
         batch_processor:
           scheduled_delay: 10ms

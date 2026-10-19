@@ -1,5 +1,12 @@
 //! Condition satisfiability: can a set of @requires / @key fields be resolved
 //! at a given query graph node?
+//!
+//! Three flavors of check, each deeper than the last:
+//! - `can_satisfy_conditions`: pure schema lookup (field exists, not external).
+//! - `conditions_resolvable_at_node`: graph-based, path-sensitive variant.
+//! - `conditions_have_requires`: detects @requires on condition edges.
+
+use std::sync::Arc;
 
 use petgraph::graph::NodeIndex;
 
@@ -7,6 +14,7 @@ use super::FieldRoutingSearchSpace;
 use crate::error::FederationError;
 use crate::link::federation_spec_definition::get_federation_spec_definition_from_subgraph;
 use crate::operation::SelectionSet;
+use crate::operation::TYPENAME_FIELD;
 use crate::schema::ValidFederationSchema;
 use crate::schema::position::CompositeTypeDefinitionPosition;
 
@@ -21,43 +29,111 @@ impl FieldRoutingSearchSpace {
         can_satisfy_conditions(conditions, type_pos, schema)
     }
 
+    /// Cached wrapper around `can_satisfy`: keyed by (Arc pointer of
+    /// conditions, type name, subgraph name) so repeated checks for the
+    /// same condition set at the same position short-circuit.
+    pub(super) fn cached_can_satisfy(
+        &self,
+        conditions: &Arc<SelectionSet>,
+        type_pos: &CompositeTypeDefinitionPosition,
+        subgraph: &Arc<str>,
+        schema: &ValidFederationSchema,
+    ) -> bool {
+        let key = (
+            super::ConditionsKey::new(conditions),
+            type_pos.type_name().clone(),
+            subgraph.clone(),
+        );
+        if let Some(&cached) = self.caches.can_satisfy.borrow().get(&key) {
+            return cached;
+        }
+        let result = self.can_satisfy(conditions, type_pos, schema);
+        self.caches.can_satisfy.borrow_mut().insert(key, result);
+        result
+    }
+
     /// Can every field in `conditions` be resolved at `node` via outgoing edges?
     pub(super) fn conditions_resolvable_at_node(
         &self,
         node: NodeIndex,
         conditions: &SelectionSet,
     ) -> Result<bool, FederationError> {
+        self.walk_conditions_graph(node, conditions, true)
+    }
+
+    /// Walk condition fields via graph edges. When `fail_on_unreachable` is
+    /// true, returns false if any field or typed fragment lacks an edge
+    /// (resolvability check); untyped fragments are transparent. When false,
+    /// skips missing fields, walks edgeless typed fragments at this node
+    /// (supertype spreads collect here), and returns true if any edge
+    /// carries conditions (requires detection).
+    fn walk_conditions_graph(
+        &self,
+        node: NodeIndex,
+        conditions: &SelectionSet,
+        fail_on_unreachable: bool,
+    ) -> Result<bool, FederationError> {
         for selection in conditions.selections.values() {
             match selection {
                 crate::operation::Selection::Field(field_sel) => {
-                    let Some(edge) = self.edge_for_field(node, &field_sel.field) else {
-                        return Ok(false);
-                    };
-                    if let Some(sub) = &field_sel.selection_set {
-                        let (_, tail) = self.query_graph.edge_endpoints(edge)?;
-                        if !self.conditions_resolvable_at_node(tail, sub)? {
+                    if *field_sel.field.name() == TYPENAME_FIELD {
+                        continue;
+                    }
+                    let Some(edge_idx) = self
+                        .cached_query_graph
+                        .edge_for_field(node, &field_sel.field)
+                    else {
+                        if fail_on_unreachable {
                             return Ok(false);
+                        }
+                        continue;
+                    };
+                    // A field carrying @requires draws data from the entity
+                    // representation; it cannot be selected in place.
+                    if self.qg().edge_weight(edge_idx)?.conditions.is_some() {
+                        return Ok(!fail_on_unreachable);
+                    }
+                    if let Some(sub) = &field_sel.selection_set {
+                        let (_, tail) = self.qg().edge_endpoints(edge_idx)?;
+                        let sub_result =
+                            self.walk_conditions_graph(tail, sub, fail_on_unreachable)?;
+                        if sub_result != fail_on_unreachable {
+                            return Ok(sub_result);
                         }
                     }
                 }
                 crate::operation::Selection::InlineFragment(frag_sel) => {
+                    // A type-conditioned fragment without a downcast edge
+                    // (same-type or supertype spread) collects at this node:
+                    // unresolvable for the resolvability check, walked here
+                    // for requires detection (over-approximating safely).
                     let target = if frag_sel.inline_fragment.type_condition_position.is_some() {
-                        let Some(edge) =
-                            self.edge_for_inline_fragment(node, &frag_sel.inline_fragment)
-                        else {
-                            return Ok(false);
-                        };
-                        self.query_graph.edge_endpoints(edge)?.1
+                        match self
+                            .cached_query_graph
+                            .edge_for_inline_fragment(node, &frag_sel.inline_fragment)
+                        {
+                            Some(edge) => self.qg().edge_endpoints(edge)?.1,
+                            None if fail_on_unreachable => return Ok(false),
+                            // FIXME: falling back to `node` when no downcast
+                            // edge exists can miss @requires behind the type
+                            // condition. Type explosion addresses this.
+                            None => node,
+                        }
                     } else {
                         node
                     };
-                    if !self.conditions_resolvable_at_node(target, &frag_sel.selection_set)? {
-                        return Ok(false);
+                    let sub_result = self.walk_conditions_graph(
+                        target,
+                        &frag_sel.selection_set,
+                        fail_on_unreachable,
+                    )?;
+                    if sub_result != fail_on_unreachable {
+                        return Ok(sub_result);
                     }
                 }
             }
         }
-        Ok(true)
+        Ok(fail_on_unreachable)
     }
 
     /// Do any fields in `conditions` carry @requires at `node`? If so, the conditions cannot be resolved in-place
@@ -67,45 +143,12 @@ impl FieldRoutingSearchSpace {
         node: NodeIndex,
         conditions: &SelectionSet,
     ) -> Result<bool, FederationError> {
-        for selection in conditions.selections.values() {
-            match selection {
-                crate::operation::Selection::Field(field_sel) => {
-                    if let Some(edge_idx) = self.edge_for_field(node, &field_sel.field) {
-                        if self.query_graph.edge_weight(edge_idx)?.conditions.is_some() {
-                            return Ok(true);
-                        }
-                        if let Some(sub) = &field_sel.selection_set {
-                            let (_, tail) = self.query_graph.edge_endpoints(edge_idx)?;
-                            if self.conditions_have_requires(tail, sub)? {
-                                return Ok(true);
-                            }
-                        }
-                    }
-                }
-                crate::operation::Selection::InlineFragment(frag_sel) => {
-                    // FIXME: falling back to `node` when no downcast edge
-                    // exists can miss a @requires behind the type condition.
-                    // Type explosion addresses this.
-                    let target = if frag_sel.inline_fragment.type_condition_position.is_some() {
-                        match self.edge_for_inline_fragment(node, &frag_sel.inline_fragment) {
-                            Some(edge) => self.query_graph.edge_endpoints(edge)?.1,
-                            None => node,
-                        }
-                    } else {
-                        node
-                    };
-                    if self.conditions_have_requires(target, &frag_sel.selection_set)? {
-                        return Ok(true);
-                    }
-                }
-            }
-        }
-        Ok(false)
+        self.walk_conditions_graph(node, conditions, false)
     }
 }
 
 /// Can this `schema` resolve every field in `conditions` at `type_pos`?
-fn can_satisfy_conditions(
+pub(super) fn can_satisfy_conditions(
     conditions: &SelectionSet,
     type_pos: &CompositeTypeDefinitionPosition,
     schema: &ValidFederationSchema,
@@ -248,12 +291,12 @@ mod tests {
     ) {
         let space = test_support::search_space(&[("S1", S1), ("S2", S2)]);
         let s1 = space
-            .query_graph
+            .qg()
             .schema_by_source("S1")
             .expect("S1 schema")
             .clone();
         let s2 = space
-            .query_graph
+            .qg()
             .schema_by_source("S2")
             .expect("S2 schema")
             .clone();
@@ -318,6 +361,21 @@ mod tests {
                 .conditions_resolvable_at_node(s2_t, &cond)
                 .expect("check runs"),
             "S2 has an edge for a but none for A.c",
+        );
+    }
+
+    /// A condition field that itself carries @requires cannot be resolved
+    /// in place; the graph check must reject it.
+    #[test]
+    fn requires_fields_are_not_resolvable_in_place() {
+        let (space, _, s2_schema) = space_and_schemas();
+        let cond = conditions(&s2_schema, "y");
+        let s2_t = t_node(&space, "S2");
+        assert!(
+            !space
+                .conditions_resolvable_at_node(s2_t, &cond)
+                .expect("check runs"),
+            "y carries @requires and must not count as resolvable in place",
         );
     }
 
@@ -415,7 +473,7 @@ mod tests {
         "#;
         let space = test_support::search_space(&[("R1", R1), ("R2", R2)]);
         let r2 = space
-            .query_graph
+            .qg()
             .schema_by_source("R2")
             .expect("R2 schema")
             .clone();
@@ -469,7 +527,7 @@ mod tests {
         "#;
         let space = test_support::search_space(&[("P1", P1), ("P2", P2)]);
         let p2 = space
-            .query_graph
+            .qg()
             .schema_by_source("P2")
             .expect("P2 schema")
             .clone();
@@ -522,7 +580,7 @@ mod tests {
         "#;
         let space = test_support::search_space(&[("Q1", Q1), ("Q2", Q2)]);
         let q2 = space
-            .query_graph
+            .qg()
             .schema_by_source("Q2")
             .expect("Q2 schema")
             .clone();
@@ -532,7 +590,7 @@ mod tests {
 
         // Parse against Q1's schema where J has both A and B.
         let q1 = space
-            .query_graph
+            .qg()
             .schema_by_source("Q1")
             .expect("Q1 schema")
             .clone();

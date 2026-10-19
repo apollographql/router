@@ -40,6 +40,15 @@ async fn build_harness(
     PluginTestHarness::builder().config(&config).build().await
 }
 
+/// `error` as one line, without the line wrapping and margins of a rendered diagnostic.
+fn unwrapped(error: &str) -> String {
+    error
+        .split_whitespace()
+        .filter(|word| *word != "│")
+        .collect::<Vec<_>>()
+        .join(" ")
+}
+
 async fn run_test_case(
     config: &Value,
     mock_responses: &[&str], // The array of responses
@@ -209,10 +218,16 @@ async fn it_does_not_allow_both_allow_and_deny_list_in_global_config() {
             "deny_extensions_keys": []
         }
     });
-    let result = build_harness(&config_json).await;
-    assert_eq!(
-        result.expect_err("expected error").to_string(),
-        "Global config cannot have both allow_extensions_keys and deny_extensions_keys"
+    // Config that fails the plugin's own validation is rejected when it is parsed.
+    let error = build_harness(&config_json)
+        .await
+        .expect_err("expected error")
+        .to_string();
+    assert!(
+        unwrapped(&error).contains(
+            "Global config cannot have both allow_extensions_keys and deny_extensions_keys"
+        ),
+        "{error}"
     );
 }
 
@@ -231,10 +246,16 @@ async fn it_does_not_allow_both_allow_and_deny_list_in_a_subgraph_config() {
             }
         }
     });
-    let result = build_harness(&config_json).await;
-    assert_eq!(
-        result.expect_err("expected error").to_string(),
-        "A subgraph config cannot have both allow_extensions_keys and deny_extensions_keys"
+    // Config that fails the plugin's own validation is rejected when it is parsed.
+    let error = build_harness(&config_json)
+        .await
+        .expect_err("expected error")
+        .to_string();
+    assert!(
+        unwrapped(&error).contains(
+            "A subgraph config cannot have both allow_extensions_keys and deny_extensions_keys"
+        ),
+        "{error}"
     );
 }
 

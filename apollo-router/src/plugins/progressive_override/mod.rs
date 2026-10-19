@@ -9,8 +9,6 @@ use apollo_compiler::schema::ExtendedType;
 use apollo_compiler::validation::Valid;
 use apollo_federation::link::spec::Identity;
 use dashmap::DashMap;
-use schemars::JsonSchema;
-use serde::Deserialize;
 use sha2::Digest;
 use sha2::Sha256;
 use tower::BoxError;
@@ -34,7 +32,7 @@ pub(crate) const JOIN_SPEC_VERSION_RANGE: &str = ">=0.4";
 pub(crate) const OVERRIDE_LABEL_ARG_NAME: &str = "overrideLabel";
 
 /// Configuration for the progressive override plugin
-#[derive(Debug, Default, Deserialize, JsonSchema)]
+#[apollo_configuration::configuration]
 pub(crate) struct Config {}
 
 pub(crate) struct ProgressiveOverridePlugin {

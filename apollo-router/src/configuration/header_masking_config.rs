@@ -1,11 +1,11 @@
-use serde::Deserialize;
 use serde::Serialize;
 
 /// Configuration for header masking in logs and telemetry
-#[derive(Clone, Debug, Deserialize, Serialize, schemars::JsonSchema)]
-#[serde(default, deny_unknown_fields)]
+#[apollo_configuration::configuration]
+#[derive(Serialize)]
 pub(crate) struct HeaderMaskingConfig {
     /// Enable header masking globally (default: true for fail-secure behavior)
+    #[config(default = default_enabled())]
     pub(crate) enabled: bool,
 
     /// Additional header names to mask (case-insensitive). By default these are
@@ -17,16 +17,6 @@ pub(crate) struct HeaderMaskingConfig {
     /// When true, `sensitive_headers` replaces the built-in default list
     /// instead of extending it. Default: false (additive, fail-secure).
     pub(crate) replace_defaults: bool,
-}
-
-impl Default for HeaderMaskingConfig {
-    fn default() -> Self {
-        Self {
-            enabled: default_enabled(),
-            sensitive_headers: Vec::new(),
-            replace_defaults: false,
-        }
-    }
 }
 
 impl HeaderMaskingConfig {

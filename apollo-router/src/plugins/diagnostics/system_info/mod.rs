@@ -63,6 +63,14 @@ use sysinfo::System;
 
 use crate::plugins::diagnostics::DiagnosticsResult;
 
+/// How long to wait between the two CPU usage samples.
+#[cfg(not(test))]
+const CPU_USAGE_SAMPLE_INTERVAL: Duration = Duration::from_millis(1000);
+
+/// Tests only check that CPU usage is reported, so use the shortest interval sysinfo supports.
+#[cfg(test)]
+const CPU_USAGE_SAMPLE_INTERVAL: Duration = sysinfo::MINIMUM_CPU_UPDATE_INTERVAL;
+
 /// Complete system diagnostic information
 struct SystemDiagnostics {
     basic_system: BasicSystemInfo,
@@ -840,7 +848,7 @@ impl SystemLoadInfo {
         system.refresh_cpu_usage();
 
         // Wait for CPU usage calculation
-        tokio::time::sleep(Duration::from_millis(1000)).await;
+        tokio::time::sleep(CPU_USAGE_SAMPLE_INTERVAL).await;
 
         // Take second measurement
         system.refresh_cpu_usage();

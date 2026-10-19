@@ -28,6 +28,37 @@ pub(crate) struct HttpResponse {
     pub(crate) context: Context,
 }
 
+/// Marks a response whose headers arrived but whose body did not: the connection failed while
+/// the body was being read.
+///
+/// The subgraph and connector services keep the status the headers carried, so without this a
+/// `200` whose body was cut off is indistinguishable from one that was answered in full. They
+/// insert it into the response's `http` extensions, where the circuit breaker reads it to count
+/// the transport failure against the target. A body the router cut short itself, at a
+/// configured response size limit, is not marked: that is the router's decision, not a failure
+/// of the target.
+#[derive(Clone, Copy, Debug)]
+pub(crate) struct IncompleteResponseBody;
+
+/// Marks a subgraph response the router produced without calling the subgraph: a coprocessor, a
+/// rhai script or one of the router's own plugins broke the request, or the response cache
+/// answered it. Each of them inserts it on the response it builds, through
+/// [`subgraph::Response::answered_by_router`](crate::services::subgraph::Response::answered_by_router).
+///
+/// Such a response says nothing about the subgraph's health, so the circuit breaker records no
+/// outcome for it. It lives in the response's `http` extensions, like [`IncompleteResponseBody`].
+/// A connector response carries the same fact as its `answered_by_router` field.
+#[derive(Clone, Copy, Debug)]
+pub(crate) struct AnsweredByRouter;
+
+/// Marks a subgraph response to a request whose file upload, which the router was streaming from
+/// the client to the subgraph, failed part way through. The file uploads plugin inserts it.
+///
+/// The failure is the client's, not the subgraph's, so the circuit breaker records no outcome for
+/// it, whatever status the response carries.
+#[derive(Clone, Copy, Debug)]
+pub(crate) struct UploadStreamFailed;
+
 /// Test-only wrapper around the `build_http_client_service` pipeline function: a
 /// subgraph client for `name` built from default configuration with no plugins.
 #[cfg(test)]

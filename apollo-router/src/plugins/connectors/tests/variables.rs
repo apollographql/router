@@ -45,3 +45,48 @@ async fn test_env_var() {
 
     unsafe { std::env::remove_var("CONNECTORS_TESTS_VARIABLES_TEST_ENV_VAR") };
 }
+
+/// `$config` values substituted from `${env.*}` reach a connector's request body with the type
+/// YAML gives their text, and an empty variable arrives as `null`.
+#[tokio::test]
+async fn expanded_config_values_keep_their_yaml_type_in_the_request_body() {
+    let mock_server = MockServer::start().await;
+    super::mock_api::create_user().mount(&mock_server).await;
+
+    let expansion = crate::configuration::expansion::Expansion::builder()
+        .supported_mode("env")
+        .mocked_env_var("TIMEOUT", "50")
+        .mocked_env_var("ENABLED", "false")
+        .mocked_env_var("API_KEY", "")
+        .build();
+    let config = crate::configuration::parse_configuration(
+        &format!(
+            "connectors:\n  sources:\n    connectors.json:\n      override_url: {}/\n      $config:\n        timeout: ${{env.TIMEOUT}}\n        enabled: ${{env.ENABLED}}\n        apiKey: ${{env.API_KEY}}\n",
+            mock_server.uri()
+        ),
+        expansion,
+        crate::configuration::Migration::None,
+    )
+    .expect("the connector config is valid");
+    let schema = super::MUTATION_SCHEMA.replace(
+        r#"body: "username: $args.name""#,
+        r#"body: "timeout: $config.timeout\nenabled: $config.enabled\napiKey: $config.apiKey""#,
+    );
+
+    super::execute_with_configuration(
+        &schema,
+        "mutation { createUser(name: \"New User\") { success } }",
+        Default::default(),
+        config,
+        |_| {},
+        None,
+    )
+    .await;
+
+    let requests = mock_server.received_requests().await.unwrap();
+    let body: serde_json::Value = requests[0].body_json().unwrap();
+    assert_eq!(
+        body,
+        serde_json::json!({ "timeout": 50, "enabled": false, "apiKey": null })
+    );
+}

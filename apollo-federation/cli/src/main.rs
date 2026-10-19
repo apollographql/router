@@ -18,6 +18,8 @@ use apollo_federation::composition::compose;
 use apollo_federation::composition::validate_satisfiability;
 use apollo_federation::connectors::expand::ExpansionResult;
 use apollo_federation::connectors::expand::expand_connectors;
+use apollo_federation::contract::ContractFilters;
+use apollo_federation::contract::filter_schema;
 use apollo_federation::error::CompositionError;
 use apollo_federation::error::FederationError;
 use apollo_federation::error::SingleFederationError;
@@ -76,6 +78,15 @@ struct QueryPlannerArgs {
     /// Set the `debug.paths_limit` option.
     #[arg(long)]
     paths_limit: Option<u32>,
+    /// Use the incremental (BULB) planner.
+    #[arg(long, default_value_t = false)]
+    incremental: bool,
+    /// BULB search fuel budget (implies --incremental).
+    #[arg(long)]
+    fuel: Option<u64>,
+    /// BULB search timeout in milliseconds (implies --incremental).
+    #[arg(long)]
+    timeout_ms: Option<u64>,
 }
 
 /// CLI arguments. See <https://docs.rs/clap/latest/clap/_derive/index.html>
@@ -138,6 +149,21 @@ enum Command {
         /// The path to the supergraph schema file, or `-` for stdin
         supergraph_schema: PathBuf,
     },
+    /// Filter a supergraph schema into a contract variant, marking elements `@inaccessible`
+    /// based on their `@tag`s, and print the filtered supergraph
+    Filter {
+        /// The path to the supergraph schema file, or `-` for stdin
+        supergraph_schema: PathBuf,
+        /// Tag to include; repeat for multiple. Without any, every element is included.
+        #[arg(long, value_name = "TAG")]
+        include: Vec<String>,
+        /// Tag to exclude; repeat for multiple. Exclusion wins over inclusion.
+        #[arg(long, value_name = "TAG")]
+        exclude: Vec<String>,
+        /// Also mask types that are unreachable from the root operation types
+        #[arg(long)]
+        hide_unreachable_types: bool,
+    },
     /// Extract subgraph schemas from a supergraph schema to stdout (or in a directory if specified)
     Extract {
         /// The path to the supergraph schema file, or `-` for stdin
@@ -178,6 +204,15 @@ impl QueryPlannerArgs {
             config.debug.max_evaluated_plans = max_evaluated_plans;
         }
         config.debug.paths_limit = self.paths_limit;
+        if self.incremental || self.fuel.is_some() || self.timeout_ms.is_some() {
+            config.incremental_planner.enabled = true;
+        }
+        if let Some(fuel) = self.fuel {
+            config.incremental_planner.fuel = fuel;
+        }
+        if let Some(timeout_ms) = self.timeout_ms {
+            config.incremental_planner.timeout = Some(std::time::Duration::from_millis(timeout_ms));
+        }
     }
 }
 
@@ -221,6 +256,12 @@ fn main() -> ExitCode {
         Command::Subgraph { subgraph_schema } => cmd_subgraph(&subgraph_schema),
         Command::Satisfiability { supergraph_schema } => cmd_satisfiability(&supergraph_schema),
         Command::Compose { schemas, config } => cmd_compose(&schemas, config.as_ref()),
+        Command::Filter {
+            supergraph_schema,
+            include,
+            exclude,
+            hide_unreachable_types,
+        } => cmd_filter(&supergraph_schema, include, exclude, hide_unreachable_types),
         Command::Extract {
             supergraph_schema,
             destination_dir,
@@ -597,6 +638,20 @@ fn cmd_compose(file_paths: &[PathBuf], config_path: Option<&PathBuf>) -> Result<
             print_subgraph_locations(&hint.locations);
         }
     }
+    Ok(())
+}
+
+fn cmd_filter(
+    file_path: &Path,
+    include: Vec<String>,
+    exclude: Vec<String>,
+    hide_unreachable_types: bool,
+) -> Result<(), AnyError> {
+    let sdl = read_input(file_path);
+    let supergraph = ContractFilters::new(include, exclude, hide_unreachable_types)
+        .and_then(|filters| filter_schema(&sdl, &filters))
+        .map_err(|error| anyhow!("Error [{}]: {error}", error.code()))?;
+    println!("{}", supergraph.schema().schema());
     Ok(())
 }
 

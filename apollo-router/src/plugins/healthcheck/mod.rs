@@ -16,8 +16,6 @@ use std::time::Duration;
 
 use http::StatusCode;
 use multimap::MultiMap;
-use schemars::JsonSchema;
-use serde::Deserialize;
 use serde::Serialize;
 use tower::BoxError;
 use tower::ServiceBuilder;
@@ -44,69 +42,50 @@ struct Health {
 }
 
 /// Configuration options pertaining to the readiness health interval sub-component.
-#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
-#[serde(deny_unknown_fields)]
-#[serde(default)]
+#[apollo_configuration::configuration]
+#[derive(Serialize)]
 pub(crate) struct ReadinessIntervalConfig {
-    #[serde(deserialize_with = "humantime_serde::deserialize", default)]
-    #[serde(serialize_with = "humantime_serde::serialize")]
-    #[schemars(with = "Option<String>", default)]
+    #[config(default = Duration::from_secs(5).into())]
+    #[schemars(with = "Option<String>")]
     /// The sampling interval (default: 5s)
-    pub(crate) sampling: Duration,
+    pub(crate) sampling: apollo_configuration::types::Duration,
 
-    #[serde(deserialize_with = "humantime_serde::deserialize")]
-    #[serde(serialize_with = "humantime_serde::serialize")]
     #[schemars(with = "Option<String>")]
     /// The unready interval (default: 2 * sampling interval)
-    pub(crate) unready: Option<Duration>,
+    pub(crate) unready: Option<apollo_configuration::types::Duration>,
 }
 
 /// Configuration options pertaining to the readiness health sub-component.
-#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
-#[serde(deny_unknown_fields)]
-#[serde(default)]
+#[apollo_configuration::configuration]
+#[derive(Serialize)]
 pub(crate) struct ReadinessConfig {
     /// The readiness interval configuration
     pub(crate) interval: ReadinessIntervalConfig,
 
     /// How many rejections are allowed in an interval (default: 100)
     /// If this number is exceeded, the router will start to report unready.
+    #[config(default = 100)]
     pub(crate) allowed: usize,
 }
 
-impl Default for ReadinessIntervalConfig {
-    fn default() -> Self {
-        Self {
-            sampling: Duration::from_secs(5),
-            unready: None,
-        }
-    }
-}
-
-impl Default for ReadinessConfig {
-    fn default() -> Self {
-        Self {
-            interval: Default::default(),
-            allowed: 100,
-        }
-    }
-}
-
 /// Configuration options pertaining to the health component.
-#[derive(Debug, Clone, Deserialize, Serialize, JsonSchema)]
-#[serde(deny_unknown_fields)]
-#[serde(default)]
+#[apollo_configuration::configuration]
+#[derive(Serialize)]
 #[schemars(rename = "HealthCheckConfig")]
 pub(crate) struct Config {
     /// The socket address and port to listen on
     /// Defaults to 127.0.0.1:8088
+    // ListenAddr's UnixSocket variant holds a PathBuf, which has no Validate impl.
+    #[config(default = default_health_check_listen(), skip_validate)]
     pub(crate) listen: ListenAddr,
 
     /// Set to false to disable the health check
+    #[config(default = default_health_check_enabled())]
     pub(crate) enabled: bool,
 
     /// Optionally set a custom healthcheck path
     /// Defaults to /health
+    #[config(default = default_health_check_path())]
     pub(crate) path: String,
 
     /// Optionally specify readiness configuration
@@ -130,6 +109,16 @@ fn default_health_check_path() -> String {
     "/health".to_string()
 }
 
+/// Web endpoint paths must start with `/`, but users may write `path: health`.
+fn normalize_path(path: String) -> String {
+    if path.starts_with('/') {
+        path
+    } else {
+        format!("/{path}")
+    }
+}
+
+#[cfg(test)]
 #[buildstructor::buildstructor]
 impl Config {
     #[builder]
@@ -139,23 +128,12 @@ impl Config {
         path: Option<String>,
         readiness: Option<ReadinessConfig>,
     ) -> Self {
-        let mut path = path.unwrap_or_else(default_health_check_path);
-        if !path.starts_with('/') {
-            path = format!("/{path}");
-        }
-
         Self {
             listen: listen.unwrap_or_else(default_health_check_listen),
             enabled: enabled.unwrap_or_else(default_health_check_enabled),
-            path,
+            path: normalize_path(path.unwrap_or_else(default_health_check_path)),
             readiness: readiness.unwrap_or_default(),
         }
-    }
-}
-
-impl Default for Config {
-    fn default() -> Self {
-        Self::builder().build()
     }
 }
 
@@ -171,7 +149,9 @@ struct HealthCheck {
 impl PluginPrivate for HealthCheck {
     type Config = Config;
 
-    async fn new(init: PluginInit<Self::Config>) -> Result<Self, BoxError> {
+    async fn new(mut init: PluginInit<Self::Config>) -> Result<Self, BoxError> {
+        init.config.path = normalize_path(init.config.path);
+
         // We always do the work to track readiness and liveness because we
         // need that data to implement our `router_service`. We only log out
         // our health tracing message if our health check is enabled.
@@ -187,13 +167,13 @@ impl PluginPrivate for HealthCheck {
         let rejected = Arc::new(AtomicUsize::new(0));
 
         let allowed = init.config.readiness.allowed;
-        let my_sampling_interval = init.config.readiness.interval.sampling;
+        let my_sampling_interval = *init.config.readiness.interval.sampling;
         let my_recovery_interval = init
             .config
             .readiness
             .interval
             .unready
-            .unwrap_or(2 * my_sampling_interval);
+            .map_or(2 * my_sampling_interval, |unready| *unready);
         let my_rejected = rejected.clone();
         let my_ready = ready.clone();
 
@@ -334,6 +314,23 @@ mod test {
     use super::*;
     use crate::plugins::test::PluginTestHarness;
     use crate::plugins::test::ServiceHandle;
+
+    /// An interval that omits `sampling` still samples every 5s, rather than every 0s, which
+    /// panicked the readiness ticker.
+    #[test]
+    fn omitted_sampling_interval_defaults_to_five_seconds() {
+        let config: ReadinessConfig =
+            serde_json::from_value(json!({ "interval": { "unready": "10s" } })).unwrap();
+
+        assert_eq!(*config.interval.sampling, Duration::from_secs(5));
+        assert_eq!(
+            config.interval.unready.map(|unready| *unready),
+            Some(Duration::from_secs(10))
+        );
+
+        let config: ReadinessConfig = serde_json::from_value(json!({ "interval": {} })).unwrap();
+        assert_eq!(*config.interval.sampling, Duration::from_secs(5));
+    }
 
     // Create a base for testing. Even though we don't use the test_harness once this function
     // completes, we return it because we need to keep it alive to prevent the ticker from being
@@ -538,6 +535,33 @@ mod test {
             false,
         )
         .await;
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn test_health_check_adds_missing_leading_slash_to_path() {
+        let listen_addr: ListenAddr = SocketAddr::from_str("127.0.0.1:8088").unwrap().into();
+        let (endpoint, _pipeline_svc, _test_harness) = get_axum_router(
+            listen_addr,
+            "health_check:\n  path: healthz\n",
+            StatusCode::OK,
+        )
+        .await;
+
+        // Routing a path without a leading `/` would panic in axum.
+        let mut axum_router = endpoint.expect("endpoint must exist").into_router();
+        let request = http::Request::builder()
+            .uri("http://127.0.0.1:8088/healthz")
+            .body(http_body_util::Empty::new())
+            .expect("valid request");
+        let response = axum_router
+            .as_service()
+            .ready()
+            .await
+            .expect("readied")
+            .call(request)
+            .await
+            .expect("called");
+        assert_health_response(response, StatusCode::OK, r#"{"status":"UP"}"#).await;
     }
 
     // Helper to build a fresh health?ready= request

@@ -60,8 +60,7 @@ pub(crate) const COST_BY_SUBGRAPH_ESTIMATED_KEY: &str =
 pub(crate) const COST_BY_SUBGRAPH_RESULT_KEY: &str = "apollo::demand_control::result_by_subgraph";
 
 /// Algorithm for calculating the cost of an incoming query.
-#[derive(Clone, Debug, Deserialize, JsonSchema)]
-#[serde(deny_unknown_fields, rename_all = "snake_case")]
+#[apollo_configuration::configuration]
 pub(crate) enum StrategyConfig {
     /// A simple, statically-defined cost mapping for operations and types.
     ///
@@ -78,34 +77,39 @@ pub(crate) enum StrategyConfig {
     /// - Enum: 0
     StaticEstimated {
         /// The assumed length of lists returned by the operation.
+        #[config(required)]
         list_size: u32,
         /// The maximum cost of a query
+        // f64 has no Validate impl.
+        #[config(required, skip_validate)]
         max: f64,
 
         /// The strategy used to calculate the actual cost incurred by an operation.
         ///
         /// * `by_subgraph` (default) computes the cost of each subgraph response and sums them
         ///   to get the total query cost.
-        #[serde(default)]
         actual_cost_mode: ActualCostMode,
 
         /// Cost control by subgraph
-        #[serde(default)]
+        // Generic with a hand-written merging Deserialize, which the macro can't express.
+        #[config(skip_validate)]
         subgraph: SubgraphConfiguration<SubgraphStrategyConfig>,
     },
 
     #[cfg(test)]
     Test {
+        #[config(required)]
         stage: test::TestStage,
+        #[config(required)]
         error: test::TestError,
     },
 }
 
-#[derive(Copy, Clone, Debug, Default, Deserialize, JsonSchema)]
-#[serde(rename_all = "snake_case")]
+#[apollo_configuration::configuration]
+#[derive(Copy)]
 pub(crate) enum ActualCostMode {
     /// Computes the cost of each subgraph response and sums them to get the total query cost.
-    #[default]
+    #[config(default)]
     BySubgraph,
 }
 
@@ -119,7 +123,7 @@ pub(crate) struct SubgraphStrategyConfig {
 }
 
 impl StrategyConfig {
-    fn validate(&self, subgraph_names: HashSet<&String>) -> Result<(), BoxError> {
+    fn validate_subgraphs(&self, subgraph_names: HashSet<&String>) -> Result<(), BoxError> {
         let subgraphs = match self {
             StrategyConfig::StaticEstimated { subgraph, .. } => subgraph,
             #[cfg(test)]
@@ -150,24 +154,26 @@ impl StrategyConfig {
     }
 }
 
-#[derive(Copy, Clone, Debug, Serialize, Deserialize, JsonSchema, Eq, PartialEq)]
-#[serde(deny_unknown_fields, rename_all = "snake_case")]
+#[apollo_configuration::configuration]
+#[derive(Copy, Serialize, Eq, PartialEq)]
 pub(crate) enum Mode {
     Measure,
     Enforce,
 }
 
 /// Demand control configuration
-#[derive(Clone, Debug, Deserialize, JsonSchema)]
-#[serde(deny_unknown_fields)]
+#[apollo_configuration::configuration]
 pub(crate) struct DemandControlConfig {
     /// Enable demand control
+    #[config(required)]
     enabled: bool,
     /// The mode that the demand control plugin should operate in.
     /// - Measure: The plugin will measure the cost of incoming requests but not reject them.
     /// - Enforce: The plugin will enforce the cost of incoming requests and reject them if the algorithm indicates that they should be rejected.
+    #[config(required)]
     mode: Mode,
     /// The strategy used to reject requests.
+    #[config(required)]
     strategy: StrategyConfig,
 }
 
@@ -519,7 +525,7 @@ impl Plugin for DemandControl {
         }
 
         let subgraph_names = init.subgraph_schemas.keys().collect();
-        init.config.strategy.validate(subgraph_names)?;
+        init.config.strategy.validate_subgraphs(subgraph_names)?;
 
         Ok(DemandControl {
             strategy_factory: StrategyFactory::new(
@@ -665,7 +671,8 @@ impl Plugin for DemandControl {
                                     .context(req.context.clone())
                                     .extensions(crate::json_ext::Object::new())
                                     .subgraph_name(subgraph_name.clone())
-                                    .build(),
+                                    .build()
+                                    .answered_by_router(),
                             ),
                         })
                     }
@@ -715,8 +722,6 @@ mod test {
     use apollo_compiler::ast;
     use apollo_compiler::validation::Valid;
     use futures::StreamExt;
-    use schemars::JsonSchema;
-    use serde::Deserialize;
     use tokio::task::JoinSet;
 
     use crate::Context;
@@ -913,8 +918,7 @@ mod test {
         ctx
     }
 
-    #[derive(Clone, Debug, Deserialize, JsonSchema)]
-    #[serde(deny_unknown_fields, rename_all = "snake_case")]
+    #[apollo_configuration::configuration]
     pub(crate) enum TestStage {
         ExecutionRequest,
         ExecutionResponse,
@@ -922,8 +926,7 @@ mod test {
         SubgraphResponse,
     }
 
-    #[derive(Clone, Debug, Deserialize, JsonSchema)]
-    #[serde(deny_unknown_fields, rename_all = "snake_case")]
+    #[apollo_configuration::configuration]
     pub(crate) enum TestError {
         EstimatedCostTooExpensive,
         ActualCostTooExpensive,
@@ -1036,5 +1039,47 @@ mod test {
             total, expected_total,
             "Expected total cost {expected_total}, got {total}"
         );
+    }
+
+    /// A subgraph request demand control rejects as too expensive is never sent, so the
+    /// subgraph's circuit records nothing for it.
+    #[tokio::test]
+    async fn a_subgraph_request_rejected_as_too_expensive_records_no_circuit_outcome() {
+        use crate::plugins::circuit_breaker::test_support::assert_router_answers_record_nothing;
+        use crate::plugins::circuit_breaker::test_support::subgraph_request;
+
+        let rejecting = PluginTestHarness::<DemandControl>::builder()
+            .config(include_str!(
+                "fixtures/enforce_on_subgraph_request.router.yaml"
+            ))
+            .build()
+            .await
+            .expect("test harness");
+        let accepting = PluginTestHarness::<DemandControl>::builder()
+            .config(include_str!(
+                "fixtures/enforce_on_execution_request.router.yaml"
+            ))
+            .build()
+            .await
+            .expect("test harness");
+        let measured_by = |plugin: &DemandControl| {
+            let request = subgraph_request("Products");
+            request
+                .context
+                .insert_demand_control_context(DemandControlContext {
+                    strategy: plugin.strategy_factory.create(),
+                    variables: Default::default(),
+                });
+            request
+        };
+
+        assert_router_answers_record_nothing(
+            async |subgraph| {
+                crate::plugin::Plugin::subgraph_service(&*rejecting, "products", subgraph)
+            },
+            || measured_by(&accepting),
+            || measured_by(&rejecting),
+        )
+        .await;
     }
 }

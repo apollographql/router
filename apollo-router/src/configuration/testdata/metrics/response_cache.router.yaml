@@ -21,3 +21,12 @@ response_cache:
         invalidation:
           enabled: true
           shared_key: "invalidate"
+  # Redis configured but `enabled` omitted: connector caching defaults on (a missing flag means
+  # enabled), so the usage metric reads true here — it keys on storage being present AND the
+  # feature not being explicitly disabled (`enabled != false`), which covers the omitted case.
+  connector:
+    all:
+      redis:
+        urls: ["redis://test"]
+      ttl: 60s
+      cache_key_headers: []

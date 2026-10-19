@@ -79,7 +79,7 @@ expression: response
               "inputRewrites": null,
               "outputRewrites": null,
               "contextRewrites": null,
-              "schemaAwareHash": "6e6617f8d32d15eceef7369d98392dd0892ca13ce3b66791f6d5f320c805cb49",
+              "schemaAwareHash": "a341824eb8c29629fc8c85dade94dabe7a535e3709177a9272964b874276feeb",
               "authorization": {
                 "is_authenticated": false,
                 "scopes": [],
@@ -137,7 +137,7 @@ expression: response
                 "inputRewrites": null,
                 "outputRewrites": null,
                 "contextRewrites": null,
-                "schemaAwareHash": "8876a022945f8dd6cbadaa54b8389fbae54c3a23c80f55d5a256c5443187b5fd",
+                "schemaAwareHash": "5fad137df3334f568f8cd8f00838a9a852f4876b43bd063e5f49f87b9e9e8edf",
                 "authorization": {
                   "is_authenticated": false,
                   "scopes": [],

@@ -6,7 +6,6 @@ use std::sync::atomic::AtomicU64;
 use std::sync::atomic::Ordering;
 use std::task::Poll;
 
-use ::serde::Deserialize;
 use bytes::Buf;
 use futures::future::BoxFuture;
 use http::HeaderValue;
@@ -26,7 +25,6 @@ use opentelemetry_semantic_conventions::attribute::HTTP_RESPONSE_STATUS_CODE;
 use pin_project_lite::pin_project;
 use rustls::ClientConfig;
 use rustls::RootCertStore;
-use schemars::JsonSchema;
 use tower::BoxError;
 use tower::Layer;
 use tower::Service;
@@ -179,8 +177,8 @@ type MixedClient = HTTPClient;
 #[allow(clippy::declare_interior_mutable_const)]
 static ACCEPTED_ENCODINGS: HeaderValue = HeaderValue::from_static("gzip, br, deflate");
 
-#[derive(PartialEq, Debug, Clone, Deserialize, JsonSchema, Copy)]
-#[serde(rename_all = "lowercase")]
+#[apollo_configuration::configuration]
+#[derive(PartialEq, Copy)]
 pub(crate) enum Compression {
     /// gzip
     Gzip,
@@ -546,6 +544,22 @@ impl HttpClientService {
     ///
     /// WARN: if no CA certificates are found, this function will panic
     pub(crate) fn native_roots_store() -> RootCertStore {
+        // Reading the OS trust store is slow on some platforms (over 100ms on macOS), and a single
+        // test can read it many times: every pipeline build reads it, and some plugins (such as the
+        // coprocessor) read it again. Test builds cache it for the process. Under nextest (one
+        // process per test) that removes repeat reads within a test; under `cargo test` the copy is
+        // also shared across tests. The router itself re-reads it on every call so that a reload
+        // picks up newly installed certificates.
+        if cfg!(test) {
+            static NATIVE_ROOTS: std::sync::OnceLock<RootCertStore> = std::sync::OnceLock::new();
+            return NATIVE_ROOTS
+                .get_or_init(Self::load_native_roots_store)
+                .clone();
+        }
+        Self::load_native_roots_store()
+    }
+
+    fn load_native_roots_store() -> RootCertStore {
         let mut roots = rustls::RootCertStore::empty();
 
         roots.add_parsable_certificates(

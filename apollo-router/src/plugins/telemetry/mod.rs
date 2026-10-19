@@ -66,6 +66,8 @@ use crate::plugins::telemetry::metrics::apollo::studio::SingleStatsReport;
 use crate::plugins::telemetry::otel::OpenTelemetrySpanExt;
 use crate::plugins::telemetry::tracing::apollo_telemetry::decode_ftv1_trace;
 use crate::query_planner::OperationKind;
+use crate::services::apollo_graph_reference;
+use crate::services::apollo_key;
 use crate::services::layers::apq::PERSISTED_QUERY_CACHE_HIT;
 use crate::services::layers::persisted_queries::RequestPersistedQueryId;
 
@@ -186,6 +188,15 @@ struct BuiltinInstruments {
     cache_custom_instruments: Arc<HashMap<String, StaticInstrument>>,
 }
 
+/// Whether Apollo reporting is on, through a `telemetry.apollo` section or an Apollo key and graph
+/// ref (`has_credentials`).
+fn reports_to_apollo(full_config: &serde_json::Value, has_credentials: bool) -> bool {
+    has_credentials
+        || full_config
+            .pointer("/telemetry/apollo")
+            .is_some_and(serde_json::Value::is_object)
+}
+
 fn create_builtin_instruments(config: &InstrumentsConfig) -> BuiltinInstruments {
     BuiltinInstruments {
         graphql_custom_instruments: Arc::new(config.new_builtin_graphql_instruments()),
@@ -238,7 +249,20 @@ impl PluginPrivate for Telemetry {
             }
         }
 
+        // Set up feature usage list
+        let full_config = init
+            .full_config
+            .as_ref()
+            .expect("Required full router configuration not found in telemetry plugin");
+
         let mut config = init.config;
+        // Apollo reporting identifies the schema it reports against.
+        if reports_to_apollo(
+            full_config,
+            apollo_key().is_some() && apollo_graph_reference().is_some(),
+        ) {
+            config.apollo.schema_id = init.supergraph_schema_id.to_string();
+        }
         config.instrumentation.spans.update_defaults();
         config.instrumentation.instruments.update_defaults();
         if let Err(err) = config.instrumentation.validate() {
@@ -254,11 +278,6 @@ impl PluginPrivate for Telemetry {
         let (activation, custom_endpoints, apollo_metrics_sender) =
             reload::prepare(&init.previous_config, &config)?;
 
-        // Set up feature usage list
-        let full_config = init
-            .full_config
-            .as_ref()
-            .expect("Required full router configuration not found in telemetry plugin");
         let enabled_features = Self::extract_enabled_features(full_config);
         ::tracing::debug!("Enabled scale features: {:?}", enabled_features);
 
@@ -820,6 +839,15 @@ mod tests {
     }
 
     async fn get_prometheus_metrics(plugin: &Telemetry) -> String {
+        scrape_prometheus(plugin)
+            .await
+            .split('\n')
+            .filter(|l| l.contains("bucket"))
+            .sorted()
+            .join("\n")
+    }
+
+    async fn scrape_prometheus(plugin: &Telemetry) -> String {
         let web_endpoint = plugin
             .web_endpoints()
             .into_iter()
@@ -837,11 +865,14 @@ mod tests {
         let mut resp = web_endpoint.oneshot(http_req_prom).await.unwrap();
         assert_eq!(resp.status(), StatusCode::OK);
         let body = router::body::into_bytes(resp.body_mut()).await.unwrap();
-        String::from_utf8_lossy(&body)
-            .split('\n')
-            .filter(|l| l.contains("bucket"))
-            .sorted()
-            .join("\n")
+        String::from_utf8_lossy(&body).into_owned()
+    }
+
+    fn cardinality_overflow_lines(scrape: &str) -> Vec<&str> {
+        scrape
+            .lines()
+            .filter(|l| l.starts_with("apollo_router_telemetry_metrics_cardinality_overflow"))
+            .collect()
     }
 
     async fn make_supergraph_request(plugin: &Telemetry) {
@@ -1235,6 +1266,162 @@ mod tests {
 
             make_supergraph_request(&plugin).await;
             assert_prometheus_metrics!(plugin);
+        }
+        .with_metrics()
+        .await;
+    }
+
+    fn assert_single_cardinality_overflow_series(scrape: &str, metric_name: &str, value: u64) {
+        let counter = cardinality_overflow_lines(scrape);
+        assert_eq!(
+            counter.len(),
+            1,
+            "expected one counter series in:\n{scrape}"
+        );
+        assert!(
+            counter[0].contains(&format!(r#"metric_name="{metric_name}""#)),
+            "{counter:?}"
+        );
+        assert!(counter[0].ends_with(&format!(" {value}")), "{counter:?}");
+    }
+
+    /// With Prometheus as the only exporter, a scrape of an instrument past its cardinality limit
+    /// reports `apollo.router.telemetry.metrics.cardinality_overflow`, labelled with the
+    /// instrument's OpenTelemetry name. The counter is recorded after the scrape is gathered, so
+    /// it first appears on the following scrape. It counts the start of the overflow once, however
+    /// many scrapes follow.
+    #[tokio::test(flavor = "multi_thread")]
+    async fn it_test_prometheus_metrics_cardinality_overflow_counter() {
+        let _guard = TEST.lock().await;
+        async {
+            let plugin = PluginTestHarness::<Telemetry>::builder()
+                .config(include_str!(
+                    "testdata/prometheus_cardinality_limit.router.yaml"
+                ))
+                .build()
+                .await
+                .expect("test harness");
+            plugin.activate();
+            u64_histogram!("apollo.test.histo", "it's a test", 1u64, "k" = "a");
+            u64_histogram!("apollo.test.histo", "it's a test", 1u64, "k" = "b");
+            u64_histogram!("apollo.test.histo", "it's a test", 1u64, "k" = "c");
+
+            let first = scrape_prometheus(&plugin).await;
+            assert!(
+                first.lines().any(|l| l.starts_with("apollo_test_histo")
+                    && l.contains(r#"otel_metric_overflow="true""#)),
+                "expected an overflow series in:\n{first}"
+            );
+            assert_eq!(cardinality_overflow_lines(&first), Vec::<&str>::new());
+
+            for _ in 0..3 {
+                let scrape = scrape_prometheus(&plugin).await;
+                assert_single_cardinality_overflow_series(&scrape, "apollo.test.histo", 1);
+            }
+        }
+        .with_metrics()
+        .await;
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn it_test_prometheus_metrics_no_cardinality_overflow_counter_without_overflow() {
+        let _guard = TEST.lock().await;
+        async {
+            let plugin = PluginTestHarness::<Telemetry>::builder()
+                .config(include_str!(
+                    "testdata/prometheus_cardinality_limit.router.yaml"
+                ))
+                .build()
+                .await
+                .expect("test harness");
+            plugin.activate();
+            u64_histogram!("apollo.test.histo", "it's a test", 1u64, "k" = "a");
+            u64_histogram!("apollo.test.histo", "it's a test", 1u64, "k" = "b");
+
+            for _ in 0..2 {
+                let scrape = scrape_prometheus(&plugin).await;
+                assert!(scrape.contains("apollo_test_histo"), "{scrape}");
+                assert!(!scrape.contains("otel_metric_overflow"), "{scrape}");
+                assert_eq!(cardinality_overflow_lines(&scrape), Vec::<&str>::new());
+            }
+        }
+        .with_metrics()
+        .await;
+    }
+
+    /// A reload that changes the metrics configuration builds a new Prometheus registry and meter
+    /// provider; the counter must still be reported through the new endpoint.
+    #[tokio::test(flavor = "multi_thread")]
+    async fn it_test_prometheus_metrics_cardinality_overflow_counter_after_reload() {
+        let _guard = TEST.lock().await;
+        async {
+            let config = include_str!("testdata/prometheus_cardinality_limit.router.yaml");
+            let plugin = PluginTestHarness::<Telemetry>::builder()
+                .config(config)
+                .build()
+                .await
+                .expect("test harness");
+            plugin.activate();
+            u64_histogram!("apollo.test.histo", "it's a test", 1u64, "k" = "a");
+            u64_histogram!("apollo.test.histo", "it's a test", 1u64, "k" = "b");
+            u64_histogram!("apollo.test.histo", "it's a test", 1u64, "k" = "c");
+            scrape_prometheus(&plugin).await;
+            let before = scrape_prometheus(&plugin).await;
+            assert_single_cardinality_overflow_series(&before, "apollo.test.histo", 1);
+
+            let reloaded = PluginTestHarness::<Telemetry>::builder()
+                .config(&config.replace("service_name: apollo-router", "service_name: reloaded"))
+                .build()
+                .await
+                .expect("test harness");
+            reloaded.activate();
+            u64_histogram!("apollo.test.histo", "it's a test", 1u64, "k" = "d");
+            u64_histogram!("apollo.test.histo", "it's a test", 1u64, "k" = "e");
+            u64_histogram!("apollo.test.histo", "it's a test", 1u64, "k" = "f");
+            scrape_prometheus(&reloaded).await;
+            let after = scrape_prometheus(&reloaded).await;
+            assert!(after.contains(r#"service_name="reloaded""#), "{after}");
+            assert_single_cardinality_overflow_series(&after, "apollo.test.histo", 1);
+        }
+        .with_metrics()
+        .await;
+    }
+
+    /// When OTLP is also configured, its exporter counts overflow on the public meter provider, so
+    /// Prometheus scrapes don't. OTLP's count is checked by value in the integration tests, since
+    /// its exports run outside this test's task-local meter provider.
+    #[tokio::test(flavor = "multi_thread")]
+    async fn it_test_prometheus_metrics_cardinality_overflow_not_counted_by_scrape_with_otlp() {
+        let _guard = TEST.lock().await;
+        async {
+            let collector = wiremock::MockServer::start().await;
+            wiremock::Mock::given(wiremock::matchers::method("POST"))
+                .respond_with(wiremock::ResponseTemplate::new(200))
+                .mount(&collector)
+                .await;
+            let config = format!(
+                "{}      otlp:\n        enabled: true\n        protocol: http\n        endpoint: {}/v1/metrics\n        batch_processor:\n          scheduled_delay: 1h\n",
+                include_str!("testdata/prometheus_cardinality_limit.router.yaml"),
+                collector.uri()
+            );
+            let plugin = PluginTestHarness::<Telemetry>::builder()
+                .config(&config)
+                .build()
+                .await
+                .expect("test harness");
+            plugin.activate();
+            u64_histogram!("apollo.test.histo", "it's a test", 1u64, "k" = "a");
+            u64_histogram!("apollo.test.histo", "it's a test", 1u64, "k" = "b");
+            u64_histogram!("apollo.test.histo", "it's a test", 1u64, "k" = "c");
+
+            for _ in 0..2 {
+                let scrape = scrape_prometheus(&plugin).await;
+                assert!(
+                    scrape.contains(r#"otel_metric_overflow="true""#),
+                    "expected an overflow series in:\n{scrape}"
+                );
+                assert_eq!(cardinality_overflow_lines(&scrape), Vec::<&str>::new());
+            }
         }
         .with_metrics()
         .await;
@@ -1637,5 +1824,33 @@ mod licensed_operation_count_tests {
         }
         .with_metrics()
         .await;
+    }
+}
+
+#[cfg(test)]
+mod reports_to_apollo_tests {
+    use serde_json::json;
+
+    use super::reports_to_apollo;
+
+    #[test]
+    fn a_telemetry_apollo_section_turns_reporting_on() {
+        assert!(reports_to_apollo(
+            &json!({ "telemetry": { "apollo": {} } }),
+            false
+        ));
+    }
+
+    #[test]
+    fn an_apollo_key_and_graph_ref_turn_reporting_on() {
+        assert!(reports_to_apollo(&json!({}), true));
+    }
+
+    #[test]
+    fn reporting_is_off_without_a_section_or_credentials() {
+        assert!(!reports_to_apollo(
+            &json!({ "telemetry": { "exporters": {} } }),
+            false
+        ));
     }
 }

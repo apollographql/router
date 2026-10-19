@@ -1,7 +1,6 @@
 ---
 source: apollo-router/src/configuration/metrics.rs
 expression: "& metrics.non_zero()"
-snapshot_kind: text
 ---
 - name: apollo.router.config.env
   data:
@@ -14,6 +13,7 @@ snapshot_kind: text
           opt.apollo.key: true
           opt.apollo.license: true
           opt.apollo.license.path: true
+          opt.apollo.license.source: test
           opt.apollo.supergraph.path: true
           opt.apollo.supergraph.urls: true
           opt.security.non_local_selections: true

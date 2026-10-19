@@ -33,6 +33,7 @@ use crate::plugins::telemetry::consts::SUBGRAPH_REQUEST_SPAN_NAME;
 use crate::services::SubgraphRequest;
 use crate::services::SubgraphResponse;
 use crate::services::http::HttpRequest;
+use crate::services::http::IncompleteResponseBody;
 use crate::services::http::service::WireByteCount;
 use crate::services::router;
 use crate::services::subgraph;
@@ -191,7 +192,7 @@ async fn call_http(
                 }
             })?;
 
-        let (parts, response_body) = response.http_response.into_parts();
+        let (mut parts, response_body) = response.http_response.into_parts();
         let body = router::body::into_bytes(response_body)
             .instrument(tracing::debug_span!("aggregate_response_data"))
             .await
@@ -206,6 +207,8 @@ async fn call_http(
                 {
                     tracing::Span::current()
                         .record("apollo.subgraph.response.aborted", "response_size_limit");
+                } else {
+                    parts.extensions.insert(IncompleteResponseBody);
                 }
                 FetchError::SubrequestHttpError {
                     status_code: Some(parts.status.as_u16()),
@@ -228,6 +231,7 @@ async fn call_http(
                 .status_code(StatusCode::INTERNAL_SERVER_ERROR)
                 .context(context)
                 .extensions(Object::default())
+                .id(subgraph_request_id)
                 .build());
         }
     };
@@ -461,6 +465,13 @@ mod tests {
         serve(listener, handle).await.unwrap();
     }
 
+    // Closes every connection without responding, so fetches fail at the transport level.
+    async fn emulate_subgraph_closing_connections(listener: TcpListener) {
+        while let Ok((stream, _)) = listener.accept().await {
+            drop(stream);
+        }
+    }
+
     // starts a local server emulating a subgraph returning status code 401
     async fn emulate_subgraph_unauthorized(listener: TcpListener) {
         async fn handle(_request: http::Request<Body>) -> Result<http::Response<Body>, Infallible> {
@@ -557,6 +568,26 @@ mod tests {
         }
 
         serve(listener, handle).await.unwrap();
+    }
+
+    // starts a local server emulating a subgraph whose connection drops after the headers,
+    // part of the way through the body they promised
+    async fn emulate_subgraph_truncated_body(listener: TcpListener) {
+        use tokio::io::AsyncReadExt as _;
+        use tokio::io::AsyncWriteExt as _;
+
+        loop {
+            let (mut stream, _) = listener.accept().await.unwrap();
+            let mut request = [0; 4096];
+            let _ = stream.read(&mut request).await;
+            stream
+                .write_all(
+                    b"HTTP/1.1 200 OK\r\ncontent-type: application/json\r\ncontent-length: 100\r\n\r\n{\"data\":",
+                )
+                .await
+                .unwrap();
+            // Dropping the stream closes the connection 92 bytes short.
+        }
     }
 
     // starts a local server emulating a subgraph returning bad response format
@@ -793,7 +824,9 @@ mod tests {
             enabled: true,
             mode: SubscriptionModeConfig {
                 callback: Some(CallbackMode {
-                    public_url: Url::parse("http://localhost:4000/testcallback").unwrap(),
+                    public_url: Url::parse("http://localhost:4000/testcallback")
+                        .unwrap()
+                        .into(),
                     listen: None,
                     path: Some("/testcallback".to_string()),
                     subgraphs: vec![String::from("testbis")].into_iter().collect(),
@@ -1057,6 +1090,58 @@ mod tests {
         assert_eq!(
             errors[0].extensions.get("code").and_then(|v| v.as_str()),
             Some("SUBREQUEST_HTTP_ERROR")
+        );
+        // The router cut this body off itself, so it must not be counted against the subgraph.
+        assert!(
+            response
+                .response
+                .extensions()
+                .get::<IncompleteResponseBody>()
+                .is_none()
+        );
+    }
+
+    /// A connection that drops part of the way through the body keeps the status the headers
+    /// carried, so the response is marked for the circuit breaker to tell it apart from an
+    /// answer.
+    #[tokio::test(flavor = "multi_thread")]
+    async fn test_subgraph_service_marks_a_body_that_did_not_arrive_in_full() {
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let socket_addr = listener.local_addr().unwrap();
+        tokio::task::spawn(emulate_subgraph_truncated_body(listener));
+        let subgraph_service = with_content_negotiation_layer(SubgraphService::new(
+            "test",
+            test_http_client_service("test"),
+        ));
+
+        let url = Uri::from_str(&format!("http://{socket_addr}")).unwrap();
+        let response = subgraph_service
+            .oneshot(
+                SubgraphRequest::builder()
+                    .supergraph_request(supergraph_request("query"))
+                    .subgraph_request(subgraph_http_request(url, "query"))
+                    .operation_kind(OperationKind::Query)
+                    .subgraph_name(String::from("test"))
+                    .context(Context::new())
+                    .build(),
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(response.response.status(), StatusCode::OK);
+        assert_eq!(
+            response.response.body().errors[0]
+                .extensions
+                .get("code")
+                .and_then(|v| v.as_str()),
+            Some("SUBREQUEST_HTTP_ERROR")
+        );
+        assert!(
+            response
+                .response
+                .extensions()
+                .get::<IncompleteResponseBody>()
+                .is_some()
         );
     }
 
@@ -2166,7 +2251,7 @@ mod tests {
             && let Some(ws) = passthrough.subgraphs.get_mut("test")
         {
             ws.max_reconnect_attempts = max_reconnect_attempts;
-            ws.reconnect_delay = Some(reconnect_delay);
+            ws.reconnect_delay = Some(reconnect_delay.into());
         }
         config
     }
@@ -3106,6 +3191,37 @@ mod tests {
         }
         .with_metrics()
         .await;
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn test_failed_fetch_response_keeps_subgraph_request_id() {
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let socket_addr = listener.local_addr().unwrap();
+        tokio::task::spawn(emulate_subgraph_closing_connections(listener));
+        let subgraph_service = with_content_negotiation_layer(SubgraphService::new(
+            "test",
+            test_http_client_service("test"),
+        ));
+
+        let url = Uri::from_str(&format!("http://{socket_addr}")).unwrap();
+        let request = SubgraphRequest::builder()
+            .supergraph_request(supergraph_request("query"))
+            .subgraph_request(subgraph_http_request(url, "query"))
+            .operation_kind(OperationKind::Query)
+            .subgraph_name(String::from("test"))
+            .context(Context::new())
+            .build();
+        let request_id = request.id.clone();
+        let response = subgraph_service.oneshot(request).await.unwrap();
+
+        assert!(
+            response.response.body().errors[0]
+                .message
+                .starts_with("HTTP fetch failed:"),
+            "unexpected error: {:?}",
+            response.response.body().errors
+        );
+        assert_eq!(response.id, request_id);
     }
 
     #[tokio::test(flavor = "multi_thread")]

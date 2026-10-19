@@ -11,7 +11,13 @@ use crate::connectors::json_selection::VarsWithPathsMap;
 use crate::connectors::json_selection::immutable::InputPath;
 use crate::connectors::json_selection::location::Ranged;
 use crate::connectors::json_selection::location::WithRange;
+use crate::connectors::json_selection::methods::common::compared_element;
+use crate::connectors::json_selection::methods::common::could_satisfy;
+use crate::connectors::json_selection::methods::common::is_same_type_comparison;
+use crate::connectors::json_selection::methods::common::may_be_missing;
 use crate::connectors::json_selection::methods::common::number_value_as_float;
+use crate::connectors::json_selection::methods::common::or_missing;
+use crate::connectors::json_selection::methods::common::present_arg;
 use crate::impl_arrow_method;
 
 impl_arrow_method!(InMethod, in_method, in_shape);
@@ -125,7 +131,13 @@ fn in_shape(
 
     let arg_shape = first_arg.compute_output_shape(context, input_shape.clone(), dollar_shape);
 
-    if !arg_shape.is_array() && !arg_shape.accepts(&Shape::unknown([])) {
+    let maybe_missing = may_be_missing(&arg_shape);
+    let Some(arg_shape) = present_arg(context, &arg_shape) else {
+        // The method produces no value when its argument has none.
+        return Shape::none();
+    };
+
+    if !could_satisfy(&Shape::any_array([]), &arg_shape) {
         return Shape::error(
             format!(
                 "Method ->{} requires an array argument, but got: {arg_shape}",
@@ -136,14 +148,17 @@ fn in_shape(
     }
 
     let ShapeCase::Array { prefix, tail } = arg_shape.case() else {
-        return Shape::bool(method_name.shape_location(context.source_id()));
+        return or_missing(
+            context,
+            Shape::bool(method_name.shape_location(context.source_id())),
+            maybe_missing,
+        );
     };
 
     // Ensures that the input is of the same type as all the array elements... this includes covering cases like int/float and unknown/name
-    if let Some(item) = prefix
-        .iter()
-        .find(|item| !(input_shape.accepts(item) || item.accepts(&input_shape)))
-    {
+    if let Some(item) = prefix.iter().find(|item| {
+        compared_element(item).is_some_and(|item| !is_same_type_comparison(&input_shape, &item))
+    }) {
         return Shape::error_with_partial(
             format!(
                 "Method ->{} can only compare values of the same type. Got {input_shape} == {item}.",
@@ -155,7 +170,7 @@ fn in_shape(
     }
 
     // Also check the tail for type mismatch
-    if !(tail.is_none() || input_shape.accepts(tail) || tail.accepts(&input_shape)) {
+    if !compared_element(tail).is_none_or(|tail| is_same_type_comparison(&input_shape, &tail)) {
         return Shape::error_with_partial(
             format!(
                 "Method ->{} can only compare values of the same type. Got {input_shape} == {tail}.",
@@ -166,7 +181,11 @@ fn in_shape(
         );
     }
 
-    Shape::bool(method_name.shape_location(context.source_id()))
+    or_missing(
+        context,
+        Shape::bool(method_name.shape_location(context.source_id())),
+        maybe_missing,
+    )
 }
 
 #[cfg(test)]

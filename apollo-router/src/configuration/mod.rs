@@ -34,29 +34,41 @@ use schemars::SchemaGenerator;
 use serde::Deserialize;
 use serde::Deserializer;
 use serde::Serialize;
+#[cfg(test)]
 use serde_json::Map;
 use serde_json::Value;
 use sha2::Digest;
 use thiserror::Error;
 
+pub(crate) use self::apollo_configuration_parse::ConfigurationParser;
+pub(crate) use self::apollo_configuration_parse::Migration;
+#[cfg(test)]
+pub(crate) use self::apollo_configuration_parse::parse_configuration;
+#[cfg(test)]
+pub(crate) use self::apollo_configuration_parse::parse_without_inputs;
 use self::cors::Cors;
+#[cfg(test)]
 use self::expansion::Expansion;
+pub(crate) use self::plugin_configs::ApolloPlugins;
+pub(crate) use self::plugin_configs::ParsedPlugin;
+pub(crate) use self::plugin_configs::UserPlugins;
 pub(crate) use self::schema::generate_config_schema;
 pub(crate) use self::schema::generate_upgrade;
-pub(crate) use self::schema::validate_yaml_configuration;
 use self::server::Server;
 use self::subgraph::SubgraphConfiguration;
+pub(crate) use self::upgrade::uses_migrated_settings;
 use crate::ApolloRouterError;
 use crate::cache::DEFAULT_CACHE_CAPACITY;
 use crate::configuration::cooperative_cancellation::CooperativeCancellation;
 use crate::configuration::mode::Mode;
-use crate::plugin::plugins;
+use crate::plugin::PluginConfig;
 use crate::plugins::healthcheck::Config as HealthCheck;
 #[cfg(test)]
 use crate::plugins::healthcheck::test_listen;
 use crate::plugins::limits;
 use crate::uplink::UplinkConfig;
 
+mod apollo_configuration_parse;
 #[cfg(test)]
 mod compatibility;
 pub(crate) mod connector;
@@ -67,6 +79,7 @@ pub(crate) mod header_masking_config;
 pub(crate) mod metrics;
 pub(crate) mod mode;
 mod persisted_queries;
+pub(crate) mod plugin_configs;
 pub(crate) mod schema;
 pub(crate) mod server;
 pub(crate) mod shared;
@@ -117,6 +130,16 @@ pub enum ConfigurationError {
 
     /// could not load certificate authorities: {error}
     CertificateAuthorities { error: String },
+
+    /// {0}
+    ApolloConfiguration(String),
+}
+
+impl From<apollo_configuration::ConfigError> for ConfigurationError {
+    fn from(error: apollo_configuration::ConfigError) -> Self {
+        // Render source labels as well as the error summary.
+        Self::ApolloConfiguration(format!("{:?}", miette::Report::new(error)))
+    }
 }
 
 impl From<proteus::Error> for ConfigurationError {
@@ -139,9 +162,11 @@ impl From<proteus::parser::Error> for ConfigurationError {
 ///
 /// Can be created through `serde::Deserialize` from various formats,
 /// or inline in Rust code with `serde_json::json!` and `serde_json::from_value`.
-#[derive(Clone, Derivative, Serialize, JsonSchema)]
+// Every way in goes through `ConfigurationParser`, so the configuration is checked against
+// Router's schema and every plugin's validation rules.
+#[derive(Clone, Derivative, JsonSchema)]
 #[derivative(Debug)]
-// We can't put a global #[serde(default)] here because of the Default implementation using `from_str` which use deserialize
+// We can't put a global #[serde(default)] here because the Default implementation deserializes an empty document
 pub struct Configuration {
     /// The raw configuration value.
     #[serde(skip)]
@@ -196,6 +221,7 @@ pub struct Configuration {
 
     /// Plugin configuration
     #[serde(default)]
+    #[schemars(extend("default" = null))]
     pub(crate) plugins: UserPlugins,
 
     /// Built-in plugin configuration. Built in plugins are pushed to the top level of config.
@@ -229,72 +255,16 @@ impl PartialEq for Configuration {
     }
 }
 
+/// Deserialize a configuration with serde. Verified against the schema and validation rules.
+/// The document is taken as written, without migrations, overrides or `--dev`.
 impl<'de> serde::Deserialize<'de> for Configuration {
     fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
     where
         D: serde::Deserializer<'de>,
     {
-        // This intermediate structure will allow us to deserialize a Configuration
-        // yet still exercise the Configuration validation function
-        #[derive(Deserialize, Default)]
-        #[serde(default)]
-        struct AdHocConfiguration {
-            reload: Reload,
-            health_check: HealthCheck,
-            sandbox: Sandbox,
-            homepage: Homepage,
-            server: Server,
-            supergraph: Supergraph,
-            cors: Cors,
-            plugins: UserPlugins,
-            #[serde(flatten)]
-            apollo_plugins: ApolloPlugins,
-            tls: Tls,
-            apq: Apq,
-            persisted_queries: PersistedQueries,
-            limits: limits::Config,
-            batching: Batching,
-            experimental_type_conditioned_fetching: bool,
-            experimental_hoist_orphan_errors: SubgraphConfiguration<HoistOrphanErrors>,
-        }
-        let mut ad_hoc: AdHocConfiguration = serde::Deserialize::deserialize(deserializer)?;
-
-        // Allow the limits plugin to use the configuration from the configuration struct.
-        // This means that the limits plugin will get the regular configuration via plugin init.
-        ad_hoc.apollo_plugins.plugins.insert(
-            "limits".to_string(),
-            serde_json::to_value(&ad_hoc.limits).unwrap(),
-        );
-        ad_hoc.apollo_plugins.plugins.insert(
-            "health_check".to_string(),
-            serde_json::to_value(&ad_hoc.health_check).unwrap(),
-        );
-
-        // Use a struct literal instead of a builder to ensure this is exhaustive
-        Configuration {
-            reload: ad_hoc.reload,
-            health_check: ad_hoc.health_check,
-            sandbox: ad_hoc.sandbox,
-            homepage: ad_hoc.homepage,
-            server: ad_hoc.server,
-            supergraph: ad_hoc.supergraph,
-            cors: ad_hoc.cors,
-            tls: ad_hoc.tls,
-            apq: ad_hoc.apq,
-            persisted_queries: ad_hoc.persisted_queries,
-            limits: ad_hoc.limits,
-            experimental_type_conditioned_fetching: ad_hoc.experimental_type_conditioned_fetching,
-            experimental_hoist_orphan_errors: ad_hoc.experimental_hoist_orphan_errors,
-            plugins: ad_hoc.plugins,
-            apollo_plugins: ad_hoc.apollo_plugins,
-            batching: ad_hoc.batching,
-
-            uplink: None,
-            validated_yaml: None,
-            raw_yaml: None,
-        }
-        .validate()
-        .map_err(|e| serde::de::Error::custom(e.to_string()))
+        let document = Value::deserialize(deserializer)?;
+        let text = serde_json::to_string(&document).map_err(serde::de::Error::custom)?;
+        apollo_configuration_parse::parse_as_written(&text).map_err(serde::de::Error::custom)
     }
 }
 
@@ -326,6 +296,7 @@ impl Configuration {
         batching: Option<Batching>,
         server: Option<Server>,
     ) -> Result<Self, ConfigurationError> {
+        let (apollo_plugins, plugins) = Self::plugin_sections(apollo_plugins, plugins)?;
         let conf = Self {
             validated_yaml: Default::default(),
             raw_yaml: None,
@@ -339,12 +310,8 @@ impl Configuration {
             apq: apq.unwrap_or_default(),
             persisted_queries: persisted_query.unwrap_or_default(),
             limits: operation_limits.unwrap_or_default(),
-            plugins: UserPlugins {
-                plugins: Some(plugins),
-            },
-            apollo_plugins: ApolloPlugins {
-                plugins: apollo_plugins,
-            },
+            plugins,
+            apollo_plugins,
             tls: tls.unwrap_or_default(),
             uplink,
             batching: batching.unwrap_or_default(),
@@ -353,7 +320,8 @@ impl Configuration {
             experimental_hoist_orphan_errors: experimental_hoist_orphan_errors.unwrap_or_default(),
         };
 
-        conf.validate()
+        conf.validate_sandbox_settings()?;
+        conf.validate()?.with_plugin_rules_checked()
     }
 }
 
@@ -366,8 +334,118 @@ impl Configuration {
             .map(|s| serde_yaml::to_string(s).expect("config was not serializable"))
             .unwrap_or_default();
         hasher.update(defaulted_raw);
-        let hash: String = format!("{:x}", hasher.finalize());
+        let hash: String = hex::encode(hasher.finalize());
         hash
+    }
+
+    /// The config of the built-in plugin named `full_name`, such as `apollo.telemetry`, when
+    /// the configuration has a section for it.
+    pub(crate) fn plugin_config(&self, full_name: &str) -> Option<&PluginConfig> {
+        self.apollo_plugins
+            .get(full_name)
+            .map(|parsed| &parsed.config)
+    }
+
+    /// Configuration with every setting at its default and no plugin sections, before any
+    /// document is read.
+    pub(crate) fn with_defaults() -> Self {
+        Self {
+            validated_yaml: None,
+            raw_yaml: None,
+            reload: Default::default(),
+            health_check: Default::default(),
+            sandbox: Default::default(),
+            homepage: Default::default(),
+            server: Default::default(),
+            supergraph: Default::default(),
+            cors: Default::default(),
+            tls: Default::default(),
+            apq: Default::default(),
+            persisted_queries: Default::default(),
+            limits: Default::default(),
+            plugins: Default::default(),
+            apollo_plugins: Default::default(),
+            uplink: None,
+            batching: Default::default(),
+            experimental_type_conditioned_fetching: Default::default(),
+            experimental_hoist_orphan_errors: Default::default(),
+        }
+    }
+
+    /// Sets the `limits` and `health_check` plugin sections from the typed top-level settings
+    /// they share, so those plugins run with the values the rest of the router reads.
+    pub(crate) fn insert_typed_plugin_sections(&mut self) {
+        let sections = [
+            ("limits", PluginConfig::new(self.limits.clone())),
+            ("health_check", PluginConfig::new(self.health_check.clone())),
+        ];
+        for (name, config) in sections {
+            let factory = plugin_configs::find_factory(&format!("{APOLLO_PLUGIN_PREFIX}{name}"))
+                .expect("the limits and health_check plugins are registered");
+            self.apollo_plugins
+                .insert(name, ParsedPlugin { factory, config });
+        }
+    }
+
+    /// The section `name` of the document the configuration was parsed from, after expansion and
+    /// overrides, for code that inspects its shape rather than a plugin's typed config.
+    pub(crate) fn document_section(&self, name: &str) -> Option<&Value> {
+        self.validated_yaml.as_ref()?.get(name)
+    }
+
+    /// The config of the built-in plugin named `full_name` as its plugin's `Config` type, when
+    /// the configuration has a section for it.
+    pub(crate) fn typed_plugin_config<C: 'static>(&self, full_name: &str) -> Option<&C> {
+        self.plugin_config(full_name)?.downcast_ref()
+    }
+
+    /// Adds a section for the built-in plugin `name`, such as `experimental_mock_subgraphs`,
+    /// when the configuration has none. The section is deserialized and its plugin's rules
+    /// checked as parsing would have; no other section is touched.
+    #[cfg(any(test, feature = "mock_subgraphs_testing"))]
+    pub(crate) fn add_apollo_plugin_if_absent(
+        &mut self,
+        name: &str,
+        config: impl FnOnce() -> Value,
+    ) -> Result<(), ConfigurationError> {
+        if self.apollo_plugins.contains(name) {
+            return Ok(());
+        }
+        let section =
+            ApolloPlugins::deserialize(serde_json::json!({ name: config() })).map_err(|error| {
+                ConfigurationError::InvalidConfiguration {
+                    message: "invalid plugin configuration",
+                    error: error.to_string(),
+                }
+            })?;
+        let (_, parsed) = section
+            .iter()
+            .next()
+            .expect("the section was just deserialized");
+        let parsed = parsed.clone();
+        apollo_configuration_parse::check_plugin_rules(&parsed.config)?;
+        self.apollo_plugins.insert(name, parsed);
+        Ok(())
+    }
+
+    /// Checks the sandbox, homepage and introspection settings together. `--dev` sets all three,
+    /// so parsing runs this once `--dev` is applied, not while deserializing.
+    pub(crate) fn validate_sandbox_settings(&self) -> Result<(), ConfigurationError> {
+        // Sandbox and Homepage cannot be both enabled
+        if self.sandbox.enabled && self.homepage.enabled {
+            return Err(ConfigurationError::InvalidConfiguration {
+                message: "sandbox and homepage cannot be enabled at the same time",
+                error: "disable the homepage if you want to enable sandbox".to_string(),
+            });
+        }
+        // Sandbox needs Introspection to be enabled
+        if self.sandbox.enabled && !self.supergraph.introspection {
+            return Err(ConfigurationError::InvalidConfiguration {
+                message: "sandbox requires introspection",
+                error: "sandbox needs introspection to be enabled".to_string(),
+            });
+        }
+        Ok(())
     }
 
     pub(crate) fn rust_query_planner_config(
@@ -396,14 +474,26 @@ impl Configuration {
                 max_evaluated_plans,
                 paths_limit: self.supergraph.query_planning.experimental_paths_limit,
             },
+            incremental_planner:
+                apollo_federation::query_plan::query_planner::IncrementalPlannerConfig {
+                    enabled: self.supergraph.query_planning.incremental_planner.enabled,
+                    beam_width: self
+                        .supergraph
+                        .query_planning
+                        .incremental_planner
+                        .beam_width,
+                    fuel: self.supergraph.query_planning.incremental_planner.fuel,
+                    timeout: self.supergraph.query_planning.incremental_planner.timeout,
+                },
         }
     }
 }
 
 impl Default for Configuration {
     fn default() -> Self {
-        // We want to trigger all defaulting logic so don't use the raw builder.
-        Configuration::from_str("").expect("default configuration must be valid")
+        // Parsing an empty document applies every default. Only startup parsing applies `--dev`.
+        apollo_configuration_parse::parse_as_written("")
+            .expect("default configuration must be valid")
     }
 }
 
@@ -428,6 +518,7 @@ impl Configuration {
         experimental_type_conditioned_fetching: Option<bool>,
         server: Option<Server>,
     ) -> Result<Self, ConfigurationError> {
+        let (apollo_plugins, plugins) = Self::plugin_sections(apollo_plugins, plugins)?;
         let configuration = Self {
             validated_yaml: Default::default(),
             reload: Default::default(),
@@ -438,12 +529,8 @@ impl Configuration {
             homepage: homepage.unwrap_or_else(|| Homepage::fake_builder().build()),
             cors: cors.unwrap_or_default(),
             limits: operation_limits.unwrap_or_default(),
-            plugins: UserPlugins {
-                plugins: Some(plugins),
-            },
-            apollo_plugins: ApolloPlugins {
-                plugins: apollo_plugins,
-            },
+            plugins,
+            apollo_plugins,
             tls: tls.unwrap_or_default(),
             apq: apq.unwrap_or_default(),
             persisted_queries: persisted_query.unwrap_or_default(),
@@ -455,26 +542,40 @@ impl Configuration {
             raw_yaml: None,
         };
 
-        configuration.validate()
+        configuration.validate_sandbox_settings()?;
+        configuration.validate()?.with_plugin_rules_checked()
+    }
+}
+
+#[cfg(test)]
+impl Configuration {
+    /// Deserializes the test builders' plugin sections as parsing does.
+    fn plugin_sections(
+        apollo_plugins: Map<String, Value>,
+        plugins: Map<String, Value>,
+    ) -> Result<(ApolloPlugins, UserPlugins), ConfigurationError> {
+        let invalid = |error: serde_json::Error| ConfigurationError::InvalidConfiguration {
+            message: "invalid plugin configuration",
+            error: error.to_string(),
+        };
+        Ok((
+            ApolloPlugins::deserialize(Value::Object(apollo_plugins)).map_err(invalid)?,
+            UserPlugins::deserialize(Value::Object(plugins)).map_err(invalid)?,
+        ))
+    }
+
+    /// Runs every plugin's validation rules, for configurations the test builders assemble from
+    /// typed values rather than a document. Errors have no location.
+    fn with_plugin_rules_checked(mut self) -> Result<Self, ConfigurationError> {
+        // Built-in sections the builders do not take as a section read the typed field.
+        self.insert_typed_plugin_sections();
+        apollo_configuration_parse::check_plugin_rules(&self)?;
+        Ok(self)
     }
 }
 
 impl Configuration {
     pub(crate) fn validate(self) -> Result<Self, ConfigurationError> {
-        // Sandbox and Homepage cannot be both enabled
-        if self.sandbox.enabled && self.homepage.enabled {
-            return Err(ConfigurationError::InvalidConfiguration {
-                message: "sandbox and homepage cannot be enabled at the same time",
-                error: "disable the homepage if you want to enable sandbox".to_string(),
-            });
-        }
-        // Sandbox needs Introspection to be enabled
-        if self.sandbox.enabled && !self.supergraph.introspection {
-            return Err(ConfigurationError::InvalidConfiguration {
-                message: "sandbox requires introspection",
-                error: "sandbox needs introspection to be enabled".to_string(),
-            });
-        }
         if !self.supergraph.path.starts_with('/') {
             return Err(ConfigurationError::InvalidConfiguration {
                 message: "invalid 'server.graphql_path' configuration",
@@ -540,13 +641,17 @@ impl Configuration {
     }
 }
 
-/// Parse configuration from a string in YAML syntax
+/// Parse router configuration from YAML.
+///
+/// Settings from the command line and environment are read once on the first call and reused when
+/// parsing multiple configurations.
+/// Substitutions (including environment substitutions like `${env.NAME}`) are still read on every
+/// call.
 impl FromStr for Configuration {
     type Err = ConfigurationError;
 
     fn from_str(s: &str) -> Result<Self, Self::Err> {
-        schema::validate_yaml_configuration(s, Expansion::default()?, schema::Mode::Upgrade)?
-            .validate()
+        apollo_configuration_parse::parse_with_process_inputs(s)
     }
 }
 
@@ -572,12 +677,6 @@ fn gen_schema(
 /// These plugins are processed prior to user plugins. Also, their configuration
 /// is "hoisted" to the top level of the config rather than being processed
 /// under "plugins" as for user plugins.
-#[derive(Clone, Debug, Default, Deserialize, Serialize)]
-#[serde(transparent)]
-pub(crate) struct ApolloPlugins {
-    pub(crate) plugins: Map<String, Value>,
-}
-
 impl JsonSchema for ApolloPlugins {
     fn schema_name() -> std::borrow::Cow<'static, str> {
         stringify!(Plugins).into()
@@ -611,12 +710,6 @@ impl JsonSchema for ApolloPlugins {
 ///
 /// These plugins are compiled into a router by and their configuration is performed
 /// under the "plugins" section.
-#[derive(Clone, Debug, Default, Deserialize, Serialize)]
-#[serde(transparent)]
-pub(crate) struct UserPlugins {
-    pub(crate) plugins: Option<Map<String, Value>>,
-}
-
 impl JsonSchema for UserPlugins {
     fn schema_name() -> std::borrow::Cow<'static, str> {
         stringify!(Plugins).into()
@@ -631,7 +724,10 @@ impl JsonSchema for UserPlugins {
             .filter(|factory| !factory.name.starts_with(APOLLO_PLUGIN_PREFIX))
             .map(|factory| (factory.name.to_string(), factory.create_schema(generator)))
             .collect();
-        gen_schema(plugins, None)
+        let mut schema = gen_schema(plugins, None);
+        // `plugins: null` means no user plugins, as in earlier releases.
+        schema.insert("type".to_string(), serde_json::json!(["object", "null"]));
+        schema
     }
 }
 
@@ -914,6 +1010,11 @@ pub(crate) struct QueryPlanning {
     ///
     /// See [`CooperativeCancellation`] for more details.
     pub(crate) experimental_cooperative_cancellation: CooperativeCancellation,
+
+    /// Configuration for the incremental (BULB) query planner, which
+    /// builds plans field-by-field with bounded backtracking instead of
+    /// exhaustively enumerating plan candidates.
+    pub(crate) incremental_planner: IncrementalPlanner,
 }
 
 #[buildstructor::buildstructor]
@@ -926,6 +1027,7 @@ impl QueryPlanning {
         experimental_plans_limit: Option<u32>,
         experimental_paths_limit: Option<u32>,
         experimental_cooperative_cancellation: Option<CooperativeCancellation>,
+        incremental_planner: Option<IncrementalPlanner>,
     ) -> Self {
         Self {
             cache: cache.unwrap_or_default(),
@@ -934,6 +1036,40 @@ impl QueryPlanning {
             experimental_paths_limit,
             experimental_cooperative_cancellation: experimental_cooperative_cancellation
                 .unwrap_or_default(),
+            incremental_planner: incremental_planner.unwrap_or_default(),
+        }
+    }
+}
+
+/// Configuration for the incremental (BULB) query planner.
+#[derive(Debug, Clone, Deserialize, Serialize, JsonSchema)]
+#[serde(deny_unknown_fields, default)]
+pub(crate) struct IncrementalPlanner {
+    /// Whether the incremental planner is enabled.
+    pub(crate) enabled: bool,
+
+    /// Beam width: how many states advance together per depth in the beam.
+    /// Wider beams capture more diversity, reducing expensive backtracking.
+    pub(crate) beam_width: usize,
+
+    /// Cap on optimization effort beyond the first draft of the plan, measured in
+    /// pending-selection visits. `fuel: 0` returns the first complete plan found.
+    pub(crate) fuel: u64,
+
+    /// Optional wall-clock time limit for the search. When set, the search
+    /// returns the best complete plan found so far once the limit is reached.
+    #[serde(deserialize_with = "humantime_serde::deserialize", default)]
+    #[schemars(with = "Option<String>", default)]
+    pub(crate) timeout: Option<Duration>,
+}
+
+impl Default for IncrementalPlanner {
+    fn default() -> Self {
+        Self {
+            enabled: false,
+            beam_width: 16,
+            fuel: 5_000,
+            timeout: None,
         }
     }
 }

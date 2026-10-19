@@ -51,7 +51,17 @@ const SUBGRAPH_CALL_COUNT_KEY: &str = "apollo::experimental_mock_subgraphs::subg
 /// ```
 //
 // If changing this, also update `dev-docs/mock_subgraphs_plugin.md`
-type Config = HashMap<String, Arc<SubgraphConfig>>;
+#[derive(Clone, Default, serde::Deserialize, schemars::JsonSchema)]
+#[serde(transparent)]
+#[schemars(inline)]
+struct Config(SubgraphConfigs);
+
+type SubgraphConfigs = HashMap<String, Arc<SubgraphConfig>>;
+
+// `#[configuration]` does not support tuple structs yet, and a named struct would change the YAML:
+// subgraph names are the section's own keys. So this implements the traits by hand.
+impl apollo_configuration::Validate for Config {}
+impl apollo_configuration::Configuration for Config {}
 
 /// Configuration for one subgraph for the `mock_subgraphs` plugin
 #[derive(serde::Deserialize, schemars::JsonSchema)]
@@ -120,7 +130,7 @@ impl PluginPrivate for MockSubgraphsPlugin {
         name: &str,
         _: subgraph::BoxCloneService,
     ) -> subgraph::BoxCloneService {
-        let config = self.per_subgraph_config.get(name).cloned();
+        let config = self.per_subgraph_config.0.get(name).cloned();
         let subgraph_schema = self.subgraph_schemas[name].clone();
         tower::service_fn(move |request: subgraph::Request| {
             let config = config.clone();

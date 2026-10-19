@@ -121,9 +121,17 @@ impl Service<SupergraphRequest> for SupergraphService {
             self.strict_variable_validation,
         )
         .or_else(|error: BoxError| async move {
+            // Any error reaching this catch-all is an unhandled internal failure: every
+            // client-actionable error is already returned as an `Ok` response upstream in
+            // `service_call`. Log the detail for operators, but do not put it in the response
+            // as it could leak internal information (e.g. query planner internals) to the
+            // caller. This mirrors `internal_server_error` in the axum factory, but we don't
+            // just return Err to trigger that because it would skip plugins/coprocessors
+            // (including telemetry), and that would break backwards compatibility.
+            tracing::error!(code = "INTERNAL_SERVER_ERROR", err = %error);
             let errors = vec![
                 crate::error::Error::builder()
-                    .message(error.to_string())
+                    .message("internal server error")
                     .extension_code("INTERNAL_SERVER_ERROR")
                     .build(),
             ];
@@ -414,11 +422,19 @@ async fn plan_query(
                 .context(context.clone())
                 .build(),
         )
-        .instrument(tracing::info_span!(
-            QUERY_PLANNING_SPAN_NAME,
-            "otel.kind" = "INTERNAL"
-        ))
+        .instrument(query_planning_span())
         .await?;
 
     Ok(qpr)
+}
+
+/// Fields recorded during planning must be declared here, because `tracing`
+/// drops records for fields a span didn't declare.
+pub(crate) fn query_planning_span() -> tracing::Span {
+    tracing::info_span!(
+        QUERY_PLANNING_SPAN_NAME,
+        "otel.kind" = "INTERNAL",
+        "query_planning.fuel_consumed" = tracing::field::Empty,
+        "query_planning.fuel_remaining" = tracing::field::Empty,
+    )
 }

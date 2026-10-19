@@ -338,14 +338,14 @@ impl Create {
 
                 let default_context = TemplateContext {
                     title: String::from("Brief but complete sentence that stands on its own"),
-                    issues: vec!(TemplateResource {
+                    issues: vec![TemplateResource {
                         url: format!("https://github.com/{}/issues/ISSUE_NUMBER", REPO_WITH_OWNER),
                         number: String::from("ISSUE_NUMBER"),
-                    }),
-                    pulls: vec!(TemplateResource {
+                    }],
+                    pulls: vec![TemplateResource {
                         url: format!("https://github.com/{}/pull/PULL_NUMBER", REPO_WITH_OWNER),
                         number: String::from("PULL_NUMBER"),
-                    }),
+                    }],
                     author: String::from("AUTHOR"),
                     body: String::from("A description of the fix which stands on its own separate from the title.  It should embrace the use of Markdown to stylize the commentary so it looks great on the GitHub Releases, when shared on social cards, etc."),
                 };
@@ -404,10 +404,10 @@ impl Create {
                                     TemplateContext {
                                         title: pr_info.title.clone(),
                                         issues: issues.collect_vec(),
-                                        pulls: vec!(TemplateResource {
+                                        pulls: vec![TemplateResource {
                                             number: pr_info.number.to_string(),
                                             url: pr_info.url.to_string(),
-                                        }),
+                                        }],
                                         body: clean_pr_body,
                                         author: pr_info.author.as_ref().unwrap().login.to_string(),
                                     }

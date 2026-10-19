@@ -6,10 +6,25 @@ use std::fmt::Formatter;
 use std::sync::Arc;
 use std::sync::atomic::AtomicUsize;
 use std::sync::atomic::Ordering;
+use std::task::Context;
+use std::task::Poll;
 
 use apollo_federation::connectors::Connector;
 use apollo_federation::connectors::SourceName;
+use apollo_federation::connectors::runtime::debug::ConnectorContext;
+use apollo_federation::connectors::runtime::errors::Error;
+use apollo_federation::connectors::runtime::http_json_transport::TransportRequest;
+use futures::future::BoxFuture;
+use futures::future::Either;
 use parking_lot::Mutex;
+use tower::BoxError;
+use tower::Layer;
+use tower::Service;
+
+use crate::plugins::connectors::handle_responses::process_response;
+use crate::services::connector::request_service::Request;
+use crate::services::connector::request_service::Response;
+use crate::services::router::body::RouterBody;
 
 /// Key to access request limits for a connector
 #[derive(Eq, Hash, PartialEq)]
@@ -112,5 +127,79 @@ impl RequestLimits {
                 );
             }
         });
+    }
+}
+
+/// Rejects a connector request once its operation has used up the connector's `max_requests`,
+/// without sending it.
+///
+/// Placed with traffic shaping's admission, above every plugin hook: a request over the limit is
+/// the router declining to send it, so nothing beneath this layer sees it.
+#[derive(Clone, Copy, Default)]
+pub(crate) struct RequestLimitLayer;
+
+impl<S> Layer<S> for RequestLimitLayer {
+    type Service = RequestLimitService<S>;
+
+    fn layer(&self, inner: S) -> Self::Service {
+        RequestLimitService { inner }
+    }
+}
+
+/// Service type for [`RequestLimitLayer`].
+#[derive(Clone)]
+pub(crate) struct RequestLimitService<S> {
+    inner: S,
+}
+
+impl<S> Service<Request> for RequestLimitService<S>
+where
+    S: Service<Request, Response = Response, Error = BoxError>,
+{
+    type Response = Response;
+    type Error = BoxError;
+    type Future = Either<S::Future, BoxFuture<'static, Result<Response, BoxError>>>;
+
+    fn poll_ready(&mut self, cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
+        self.inner.poll_ready(cx)
+    }
+
+    fn call(&mut self, request: Request) -> Self::Future {
+        // Mapping-only connectors make no request, so they are never limited.
+        let limit = match request.transport_request {
+            TransportRequest::Http(_) => request.context.extensions().with_lock(|lock| {
+                lock.get::<Arc<RequestLimits>>().and_then(|limits| {
+                    limits.get(
+                        request.connector.as_ref().into(),
+                        request.connector.max_requests,
+                    )
+                })
+            }),
+            TransportRequest::MappingOnly => None,
+        };
+
+        if limit.is_none_or(|limit| limit.allow()) {
+            return Either::Left(self.inner.call(request));
+        }
+
+        // Recorded for connector debugging like any other request, with no request sent.
+        let debug = request
+            .context
+            .extensions()
+            .with_lock(|lock| lock.get::<Arc<Mutex<ConnectorContext>>>().cloned());
+
+        Either::Right(Box::pin(async move {
+            Ok(process_response::<RouterBody>(
+                Err(Error::RequestLimitExceeded),
+                request.key,
+                request.connector,
+                &request.context,
+                (None, Default::default()),
+                debug.as_ref(),
+                request.supergraph_request,
+                request.operation,
+            )
+            .await)
+        }))
     }
 }

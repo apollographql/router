@@ -560,7 +560,7 @@ mod tests {
     #[tokio::test]
     async fn poller_waits_to_start() {
         let (_id, _body, manifest) = fake_manifest();
-        let delay = Duration::from_secs(2);
+        let delay = Duration::from_millis(200);
         let (_mock_guard, uplink_config) = mock_pq_uplink_with_delay(&manifest, delay).await;
         let now = tokio::time::Instant::now();
 

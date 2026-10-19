@@ -1,4 +1,7 @@
 use apollo_compiler::coord;
+use apollo_federation::composition::CompositionFailure;
+use apollo_federation::supergraph::Satisfiable;
+use apollo_federation::supergraph::Supergraph;
 use insta::assert_snapshot;
 use test_log::test;
 
@@ -505,4 +508,492 @@ fn union_types_merges_inconsistent_unions() {
         .lookup(api_schema.schema())
         .expect("Union U should exist");
     assert_snapshot!(union_u, @"union U = A | B | C");
+}
+
+// =============================================================================
+// @oneOf INPUT OBJECTS - Tests for @oneOf directive merging behavior
+// =============================================================================
+
+#[test]
+fn one_of_input_object_merges_when_all_subgraphs_agree() {
+    let subgraph_a = ServiceDefinition {
+        name: "subgraphA",
+        type_defs: r#"
+        type Query {
+          find(input: FindInput!): String @shareable
+        }
+
+        input FindInput @oneOf {
+          id: ID
+          name: String
+        }
+        "#,
+    };
+
+    let subgraph_b = ServiceDefinition {
+        name: "subgraphB",
+        type_defs: r#"
+        type Query {
+          find(input: FindInput!): String @shareable
+        }
+
+        input FindInput @oneOf {
+          id: ID
+          name: String
+        }
+        "#,
+    };
+
+    let result = compose_as_fed2_subgraphs(&[subgraph_a, subgraph_b]);
+    let supergraph = result.expect("Expected composition to succeed");
+    let api_schema = supergraph
+        .to_api_schema(Default::default())
+        .expect("Expected API schema generation to succeed");
+    let find_input = coord!(FindInput)
+        .lookup(api_schema.schema())
+        .expect("FindInput should exist");
+    assert_snapshot!(find_input, @r"
+    input FindInput @oneOf {
+      id: ID
+      name: String
+    }
+    ");
+}
+
+#[test]
+fn one_of_input_object_merges_when_only_some_subgraphs_have_one_of() {
+    let subgraph_a = ServiceDefinition {
+        name: "subgraphA",
+        type_defs: r#"
+        type Query {
+          find(input: FindInput!): String @shareable
+        }
+
+        input FindInput @oneOf {
+          id: ID
+          name: String
+        }
+        "#,
+    };
+
+    let subgraph_b = ServiceDefinition {
+        name: "subgraphB",
+        type_defs: r#"
+        type Query {
+          find(input: FindInput!): String @shareable
+        }
+
+        input FindInput {
+          id: ID
+          name: String
+        }
+        "#,
+    };
+
+    let result = compose_as_fed2_subgraphs(&[subgraph_a, subgraph_b]);
+    let supergraph = result.expect("Expected composition to succeed");
+    let api_schema = supergraph
+        .to_api_schema(Default::default())
+        .expect("Expected API schema generation to succeed");
+    let find_input = coord!(FindInput)
+        .lookup(api_schema.schema())
+        .expect("FindInput should exist");
+    assert_snapshot!(find_input, @r"
+    input FindInput @oneOf {
+      id: ID
+      name: String
+    }
+    ");
+}
+
+#[test]
+fn one_of_input_object_merges_single_subgraph() {
+    let subgraph_a = ServiceDefinition {
+        name: "subgraphA",
+        type_defs: r#"
+        type Query {
+          find(input: FindInput!): String
+        }
+
+        input FindInput @oneOf {
+          id: ID
+          name: String
+        }
+        "#,
+    };
+
+    let result = compose_as_fed2_subgraphs(&[subgraph_a]);
+    let supergraph = result.expect("Expected composition to succeed");
+    let api_schema = supergraph
+        .to_api_schema(Default::default())
+        .expect("Expected API schema generation to succeed");
+    let find_input = coord!(FindInput)
+        .lookup(api_schema.schema())
+        .expect("FindInput should exist");
+    assert_snapshot!(find_input, @r"
+    input FindInput @oneOf {
+      id: ID
+      name: String
+    }
+    ");
+}
+
+#[test]
+fn one_of_input_object_with_different_fields_across_subgraphs() {
+    let subgraph_a = ServiceDefinition {
+        name: "subgraphA",
+        type_defs: r#"
+        type Query {
+          find(input: FindInput!): String @shareable
+        }
+
+        input FindInput @oneOf {
+          id: ID
+          name: String
+        }
+        "#,
+    };
+
+    let subgraph_b = ServiceDefinition {
+        name: "subgraphB",
+        type_defs: r#"
+        type Query {
+          find(input: FindInput!): String @shareable
+        }
+
+        input FindInput @oneOf {
+          id: ID
+          email: String
+        }
+        "#,
+    };
+
+    let result = compose_as_fed2_subgraphs(&[subgraph_a, subgraph_b]);
+    let supergraph = result.expect("Expected composition to succeed");
+    let api_schema = supergraph
+        .to_api_schema(Default::default())
+        .expect("Expected API schema generation to succeed");
+    let find_input = coord!(FindInput)
+        .lookup(api_schema.schema())
+        .expect("FindInput should exist");
+    assert_snapshot!(find_input, @r"
+    input FindInput @oneOf {
+      id: ID
+    }
+    ");
+}
+
+#[test]
+fn one_of_input_object_drops_default_value_from_other_subgraph() {
+    let subgraph_a = ServiceDefinition {
+        name: "subgraphA",
+        type_defs: r#"
+        type Query {
+          find(input: FindInput!): String @shareable
+        }
+
+        input FindInput @oneOf {
+          id: ID
+          name: String
+        }
+        "#,
+    };
+
+    let subgraph_b = ServiceDefinition {
+        name: "subgraphB",
+        type_defs: r#"
+        type Query {
+          find(input: FindInput!): String @shareable
+        }
+
+        input FindInput {
+          id: ID
+          name: String = "default"
+        }
+        "#,
+    };
+
+    let result = compose_as_fed2_subgraphs(&[subgraph_a, subgraph_b]);
+    let supergraph = result.expect("Expected composition to succeed");
+    let find_input = coord!(FindInput)
+        .lookup(supergraph.schema().schema())
+        .expect("FindInput should exist");
+    assert!(
+        supergraph
+            .hints()
+            .iter()
+            .any(|hint| hint.code() == "INCONSISTENT_DEFAULT_VALUE_PRESENCE"),
+        "Expected a hint about the dropped default value, got: {:?}",
+        supergraph.hints()
+    );
+    assert_snapshot!(find_input, @r"
+    input FindInput @join__type(graph: SUBGRAPHA) @join__type(graph: SUBGRAPHB) @oneOf {
+      id: ID
+      name: String
+    }
+    ");
+}
+
+fn compose_with_one_of_find_input(
+    subgraph_b_type_defs: &str,
+) -> Result<Supergraph<Satisfiable>, CompositionFailure> {
+    let subgraph_a = ServiceDefinition {
+        name: "subgraphA",
+        type_defs: r#"
+        type Query {
+          find(input: FindInput!): String
+        }
+
+        input FindInput @oneOf {
+          id: ID
+          name: String
+        }
+        "#,
+    };
+    let subgraph_b = ServiceDefinition {
+        name: "subgraphB",
+        type_defs: subgraph_b_type_defs,
+    };
+    compose_as_fed2_subgraphs(&[subgraph_a, subgraph_b])
+}
+
+fn error_subgraphs(result: &Result<Supergraph<Satisfiable>, CompositionFailure>) -> Vec<String> {
+    let failure = result.as_ref().expect_err("Expected composition to fail");
+    failure
+        .errors
+        .iter()
+        .flat_map(|e| e.locations().iter().map(|l| l.subgraph.clone()))
+        .collect()
+}
+
+#[test]
+fn one_of_input_object_errors_on_argument_default_with_multiple_keys() {
+    let result = compose_with_one_of_find_input(
+        r#"
+        type Query {
+          search(input: FindInput = { id: "1", name: "x" }): String
+        }
+
+        input FindInput {
+          id: ID
+          name: String
+        }
+        "#,
+    );
+    assert_composition_errors(
+        &result,
+        &[(
+            "FIELD_ARGUMENT_DEFAULT_MISMATCH",
+            r#"The default value of "Query.search(input:)" in subgraph "subgraphB" is invalid because "FindInput" is marked @oneOf in subgraph "subgraphA": @oneOf input object "FindInput" must specify exactly one key, but 2 were given."#,
+        )],
+    );
+    assert_eq!(error_subgraphs(&result), vec!["subgraphB"]);
+}
+
+#[test]
+fn one_of_input_object_errors_on_empty_argument_default() {
+    let result = compose_with_one_of_find_input(
+        r#"
+        type Query {
+          search(input: FindInput = {}): String
+        }
+
+        input FindInput {
+          id: ID
+          name: String
+        }
+        "#,
+    );
+    assert_composition_errors(
+        &result,
+        &[(
+            "FIELD_ARGUMENT_DEFAULT_MISMATCH",
+            r#"The default value of "Query.search(input:)" in subgraph "subgraphB" is invalid because "FindInput" is marked @oneOf in subgraph "subgraphA": @oneOf input object "FindInput" must specify exactly one key, but 0 were given."#,
+        )],
+    );
+}
+
+#[test]
+fn one_of_input_object_errors_on_argument_default_with_null_key() {
+    let result = compose_with_one_of_find_input(
+        r#"
+        type Query {
+          search(input: FindInput = { id: null }): String
+        }
+
+        input FindInput {
+          id: ID
+          name: String
+        }
+        "#,
+    );
+    assert_composition_errors(
+        &result,
+        &[(
+            "FIELD_ARGUMENT_DEFAULT_MISMATCH",
+            r#"The default value of "Query.search(input:)" in subgraph "subgraphB" is invalid because "FindInput" is marked @oneOf in subgraph "subgraphA": @oneOf input object "FindInput" field "id" must be non-null."#,
+        )],
+    );
+}
+
+#[test]
+fn one_of_input_object_errors_on_nested_input_field_default() {
+    let result = compose_with_one_of_find_input(
+        r#"
+        type Query {
+          search(outer: Outer): String
+        }
+
+        input Outer {
+          f: FindInput = { id: "1", name: "x" }
+        }
+
+        input FindInput {
+          id: ID
+          name: String
+        }
+        "#,
+    );
+    assert_composition_errors(
+        &result,
+        &[(
+            "INPUT_FIELD_DEFAULT_MISMATCH",
+            r#"The default value of "Outer.f" in subgraph "subgraphB" is invalid because "FindInput" is marked @oneOf in subgraph "subgraphA": @oneOf input object "FindInput" must specify exactly one key, but 2 were given."#,
+        )],
+    );
+}
+
+#[test]
+fn one_of_input_object_errors_on_list_element_default() {
+    let result = compose_with_one_of_find_input(
+        r#"
+        type Query {
+          search(inputs: [FindInput] = [{ id: "1" }, { id: "2", name: "x" }]): String
+        }
+
+        input FindInput {
+          id: ID
+          name: String
+        }
+        "#,
+    );
+    assert_composition_errors(
+        &result,
+        &[(
+            "FIELD_ARGUMENT_DEFAULT_MISMATCH",
+            r#"The default value of "Query.search(inputs:)" in subgraph "subgraphB" is invalid because "FindInput" is marked @oneOf in subgraph "subgraphA": @oneOf input object "FindInput" must specify exactly one key, but 2 were given."#,
+        )],
+    );
+}
+
+#[test]
+fn one_of_input_object_accepts_valid_default_from_other_subgraph() {
+    let result = compose_with_one_of_find_input(
+        r#"
+        type Query {
+          search(input: FindInput = { id: "1" }): String
+        }
+
+        input FindInput {
+          id: ID
+          name: String
+        }
+        "#,
+    );
+    result.expect("Expected composition to succeed");
+}
+
+#[test]
+fn one_of_input_object_errors_when_non_null_field_in_other_subgraph() {
+    let result = compose_with_one_of_find_input(
+        r#"
+        type Query {
+          search(input: FindInput): String
+        }
+
+        input FindInput {
+          id: ID!
+          name: String
+        }
+        "#,
+    );
+    assert_composition_errors(
+        &result,
+        &[(
+            "INPUT_FIELD_MERGE_FAILED",
+            r#"Failed to merge input field "FindInput.id": it is non-nullable in subgraph "subgraphB", but "FindInput" is marked @oneOf in subgraph "subgraphA" and fields of a @oneOf input object must be nullable."#,
+        )],
+    );
+    assert_eq!(error_subgraphs(&result), vec!["subgraphB"]);
+}
+
+#[test]
+fn one_of_input_object_errors_when_no_fields_are_shared() {
+    let subgraph_a = ServiceDefinition {
+        name: "subgraphA",
+        type_defs: r#"
+        type Query {
+          find(input: FindInput!): String @shareable
+        }
+
+        input FindInput @oneOf {
+          id: ID
+        }
+        "#,
+    };
+
+    let subgraph_b = ServiceDefinition {
+        name: "subgraphB",
+        type_defs: r#"
+        type Query {
+          find(input: FindInput!): String @shareable
+        }
+
+        input FindInput @oneOf {
+          email: String
+        }
+        "#,
+    };
+
+    let result = compose_as_fed2_subgraphs(&[subgraph_a, subgraph_b]);
+    assert_composition_errors(
+        &result,
+        &[(
+            "EMPTY_MERGED_INPUT_TYPE",
+            r#"None of the fields of input object type "FindInput" are consistently defined in all the subgraphs defining that type. As only fields common to all subgraphs are merged, this would result in an empty type."#,
+        )],
+    );
+}
+
+#[test]
+fn one_of_input_object_is_extracted_to_every_subgraph_defining_it() {
+    let result = compose_with_one_of_find_input(
+        r#"
+        type Query {
+          search(input: FindInput): String
+        }
+
+        input FindInput {
+          id: ID
+          name: String
+        }
+        "#,
+    );
+    let supergraph = result.expect("Expected composition to succeed");
+    let subgraphs = apollo_federation::Supergraph::new(&supergraph.schema().schema().to_string())
+        .expect("supergraph should parse")
+        .extract_subgraphs()
+        .expect("subgraphs should extract");
+    for name in ["subgraphA", "subgraphB"] {
+        let subgraph = subgraphs.get(name).expect("subgraph should be extracted");
+        let find_input = subgraph
+            .schema
+            .schema()
+            .get_input_object("FindInput")
+            .expect("FindInput should exist");
+        assert!(
+            find_input.is_one_of(),
+            "FindInput should be @oneOf in {name}"
+        );
+    }
 }

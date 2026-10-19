@@ -27,10 +27,10 @@ use crate::context::OPERATION_NAME;
 use crate::graphql;
 use crate::graphql::Response;
 use crate::plugins::authentication::APOLLO_AUTHENTICATION_JWT_CLAIMS;
+use crate::plugins::subscription::Notify;
 use crate::plugins::subscription::SUBSCRIPTION_ERROR_EXTENSION_KEY;
 use crate::plugins::subscription::Subscription;
 use crate::plugins::subscription::SubscriptionConfig;
-use crate::plugins::subscription::notification::Notify;
 use crate::plugins::telemetry::tracing::apollo_telemetry::APOLLO_PRIVATE_DURATION_NS;
 use crate::query_planner::subscription::OPENED_SUBSCRIPTIONS;
 use crate::query_planner::subscription::SUBSCRIPTION_EVENT_SPAN_NAME;
@@ -265,7 +265,7 @@ async fn subscription_task(
     };
 
     let mut max_lifetime_timeout = if let Some(max_lifetime) = subscription_config.max_lifetime {
-        tokio::time::sleep(max_lifetime).boxed()
+        tokio::time::sleep(*max_lifetime).boxed()
     } else {
         futures::future::pending().boxed()
     };
