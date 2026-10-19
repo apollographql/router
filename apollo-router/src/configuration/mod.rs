@@ -349,7 +349,7 @@ impl Configuration {
             .map(|s| serde_yaml::to_string(s).expect("config was not serializable"))
             .unwrap_or_default();
         hasher.update(defaulted_raw);
-        let hash: String = format!("{:x}", hasher.finalize());
+        let hash: String = hex::encode(hasher.finalize());
         hash
     }
 

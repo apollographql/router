@@ -231,8 +231,9 @@ impl std::fmt::Display for IntrospectionCacheKey {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(
             f,
-            "introspect:{}:variables:{:x}",
-            self.operation, self.variables
+            "introspect:{}:variables:{}",
+            self.operation,
+            hex::encode(self.variables)
         )
     }
 }

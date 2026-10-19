@@ -618,14 +618,16 @@ async fn it_handles_cancelled_by_coprocessor() -> Result<(), BoxError> {
         .named("coprocessor POST /");
     coprocessor.register(subgraph_a_canceller).await;
 
-    // Make sure to patch the config with the coprocessor's port
-    let config = COPROCESSOR_CONFIG.replace("REPLACEME", &coprocessor.address().port().to_string());
-
     // Interleave requests so that we can verify that they get properly separated
     // Have the A subgraph get all of its requests cancelled by a coprocessor
     let requests: Vec<_> = requests_a.interleave(requests_b).collect();
-    let responses = helper::run_test(
-        config.as_str(),
+    let responses = helper::run_test_with_env(
+        COPROCESSOR_CONFIG,
+        [(
+            "TEST_CONFIG_COPROCESSOR_URL".into(),
+            coprocessor.uri().into(),
+        )]
+        .into(),
         &requests,
         None::<helper::Handler>,
         Some(helper::expect_batch),
@@ -765,14 +767,16 @@ async fn it_handles_single_request_cancelled_by_coprocessor() -> Result<(), BoxE
         )
     }
 
-    // Make sure to patch the config with the coprocessor's port
-    let config = COPROCESSOR_CONFIG.replace("REPLACEME", &coprocessor.address().port().to_string());
-
     // Interleave requests so that we can verify that they get properly separated
     // Have the A subgraph get all of its requests cancelled by a coprocessor
     let requests: Vec<_> = requests_a.interleave(requests_b).collect();
-    let responses = helper::run_test(
-        config.as_str(),
+    let responses = helper::run_test_with_env(
+        COPROCESSOR_CONFIG,
+        [(
+            "TEST_CONFIG_COPROCESSOR_URL".into(),
+            coprocessor.uri().into(),
+        )]
+        .into(),
         &requests,
         Some(handle_a),
         Some(helper::expect_batch),
@@ -906,6 +910,8 @@ async fn it_handles_single_invalid_graphql() -> Result<(), BoxError> {
 
 /// Utility methods for these tests
 mod helper {
+    use std::collections::HashMap;
+    use std::ffi::OsString;
     use std::time::Duration;
 
     use apollo_router::graphql::Request;
@@ -951,6 +957,17 @@ mod helper {
         handler_a: Option<A>,
         handler_b: Option<B>,
     ) -> Result<Vec<Response>, BoxError> {
+        run_test_with_env(config, HashMap::new(), requests, handler_a, handler_b).await
+    }
+
+    /// Set up the integration test stack, passing `env` to the router for `${env.…}` expansion
+    pub async fn run_test_with_env<A: Respond + 'static, B: Respond + 'static>(
+        config: &str,
+        env: HashMap<String, OsString>,
+        requests: &[Request],
+        handler_a: Option<A>,
+        handler_b: Option<B>,
+    ) -> Result<Vec<Response>, BoxError> {
         // Ensure that we have the test keys before running
         // Note: The [IntegrationTest] ensures that these test credentials get
         // set before running the router.
@@ -970,6 +987,7 @@ mod helper {
             .supergraph("tests/fixtures/batching/schema.graphql")
             .subgraph_override("a", format!("{}/a", mock_server_a.uri()))
             .subgraph_override("b", format!("{}/b", mock_server_b.uri()))
+            .env(env)
             .build()
             .await;
 

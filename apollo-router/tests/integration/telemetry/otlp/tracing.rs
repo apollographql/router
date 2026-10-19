@@ -23,14 +23,14 @@ async fn test_trace_error() -> Result<(), BoxError> {
         return Ok(());
     }
     let mock_server = mock_otlp_server_delayed().await;
-    let config = include_str!("../fixtures/otlp_invalid_endpoint.router.yaml")
-        .replace("<otel-collector-endpoint>", &mock_server.uri());
+    let config = include_str!("../fixtures/otlp_invalid_endpoint.router.yaml");
 
     let mut router = IntegrationTest::builder()
         .telemetry(Telemetry::Otlp {
             endpoint: Some(format!("{}/v1/traces", mock_server.uri())),
         })
         .config(config)
+        .env_entry("TEST_CONFIG_COLLECTOR_ENDPOINT", mock_server.uri())
         .build()
         .await;
 
@@ -49,13 +49,13 @@ async fn test_basic() -> Result<(), BoxError> {
         return Ok(());
     }
     let mock_server = mock_otlp_server(1..).await;
-    let config = include_str!("../fixtures/otlp.router.yaml")
-        .replace("<otel-collector-endpoint>", &mock_server.uri());
+    let config = include_str!("../fixtures/otlp.router.yaml");
     let mut router = IntegrationTest::builder()
         .telemetry(Telemetry::Otlp {
             endpoint: Some(format!("{}/v1/traces", mock_server.uri())),
         })
-        .config(&config)
+        .config(config)
+        .env_entry("TEST_CONFIG_COLLECTOR_ENDPOINT", mock_server.uri())
         .build()
         .await;
 
@@ -122,12 +122,15 @@ async fn test_graceful_shutdown_exits_cleanly() -> Result<(), BoxError> {
         return Ok(());
     }
     let mock_server = mock_otlp_server(1..).await;
-    let config = include_str!("../fixtures/otlp_shutdown_flush.router.yaml")
-        .replace("<otel-collector-endpoint>", &mock_server.uri());
+    let config = include_str!("../fixtures/otlp_shutdown_flush.router.yaml");
     // Deliberately no `.telemetry(Telemetry::Otlp { .. })`: that would point the *harness's* own
     // tracer at the same collector on a 10ms schedule, and its exports would satisfy the
     // post-shutdown assertion below without the router having flushed anything.
-    let mut router = IntegrationTest::builder().config(&config).build().await;
+    let mut router = IntegrationTest::builder()
+        .config(config)
+        .env_entry("TEST_CONFIG_COLLECTOR_ENDPOINT", mock_server.uri())
+        .build()
+        .await;
 
     router.start().await;
     router.assert_started().await;
@@ -174,13 +177,13 @@ async fn test_resources() -> Result<(), BoxError> {
         return Ok(());
     }
     let mock_server = mock_otlp_server(1..).await;
-    let config = include_str!("../fixtures/otlp.router.yaml")
-        .replace("<otel-collector-endpoint>", &mock_server.uri());
+    let config = include_str!("../fixtures/otlp.router.yaml");
     let mut router = IntegrationTest::builder()
         .telemetry(Telemetry::Otlp {
             endpoint: Some(format!("{}/v1/traces", mock_server.uri())),
         })
-        .config(&config)
+        .config(config)
+        .env_entry("TEST_CONFIG_COLLECTOR_ENDPOINT", mock_server.uri())
         .build()
         .await;
 
@@ -205,14 +208,14 @@ async fn test_otlp_tracing_reload() -> Result<(), BoxError> {
         return Ok(());
     }
     let mock_server = mock_otlp_server(0..).await;
-    let config_initial = include_str!("../fixtures/otlp_tracing.router.yaml")
-        .replace("<otel-collector-endpoint>", &mock_server.uri());
+    let config_initial = include_str!("../fixtures/otlp_tracing.router.yaml");
 
     let mut router = IntegrationTest::builder()
         .telemetry(Telemetry::Otlp {
             endpoint: Some(format!("{}/v1/traces", mock_server.uri())),
         })
-        .config(&config_initial)
+        .config(config_initial)
+        .env_entry("TEST_CONFIG_COLLECTOR_ENDPOINT", mock_server.uri())
         .build()
         .await;
 
@@ -228,7 +231,7 @@ async fn test_otlp_tracing_reload() -> Result<(), BoxError> {
         .await?;
 
     // This config will NOT reload tracing as the config did not change
-    router.update_config(&config_initial).await;
+    router.update_config(config_initial).await;
     router.touch_config().await;
     router.assert_reloaded().await;
     router.assert_log_not_contained("OpenTelemetry trace error occurred");
@@ -242,9 +245,8 @@ async fn test_otlp_tracing_reload() -> Result<(), BoxError> {
         .await?;
 
     // This config will force a reload as it changes the resource env value
-    let config_reload = include_str!("../fixtures/otlp_tracing_reload.router.yaml")
-        .replace("<otel-collector-endpoint>", &mock_server.uri());
-    router.update_config(&config_reload).await;
+    let config_reload = include_str!("../fixtures/otlp_tracing_reload.router.yaml");
+    router.update_config(config_reload).await;
     router.assert_reloaded().await;
 
     // Execute query and verify resource changed to local2
@@ -265,14 +267,14 @@ async fn test_otlp_request_with_datadog_propagator() -> Result<(), BoxError> {
         return Ok(());
     }
     let mock_server = mock_otlp_server(1..).await;
-    let config = include_str!("../fixtures/otlp_datadog_propagation.router.yaml")
-        .replace("<otel-collector-endpoint>", &mock_server.uri());
+    let config = include_str!("../fixtures/otlp_datadog_propagation.router.yaml");
     let mut router = IntegrationTest::builder()
         .telemetry(Telemetry::Otlp {
             endpoint: Some(format!("{}/v1/traces", mock_server.uri())),
         })
         .extra_propagator(Telemetry::Datadog)
-        .config(&config)
+        .config(config)
+        .env_entry("TEST_CONFIG_COLLECTOR_ENDPOINT", mock_server.uri())
         .build()
         .await;
 
@@ -296,13 +298,13 @@ async fn test_otlp_request_with_datadog_propagator_no_agent() -> Result<(), BoxE
         return Ok(());
     }
     let mock_server = mock_otlp_server(1..).await;
-    let config = include_str!("../fixtures/otlp_datadog_propagation_no_agent.router.yaml")
-        .replace("<otel-collector-endpoint>", &mock_server.uri());
+    let config = include_str!("../fixtures/otlp_datadog_propagation_no_agent.router.yaml");
     let mut router = IntegrationTest::builder()
         .telemetry(Telemetry::Otlp {
             endpoint: Some(format!("{}/v1/traces", mock_server.uri())),
         })
-        .config(&config)
+        .config(config)
+        .env_entry("TEST_CONFIG_COLLECTOR_ENDPOINT", mock_server.uri())
         .build()
         .await;
 
@@ -330,14 +332,14 @@ async fn test_otlp_request_with_trace_context_propagator_with_datadog() -> Resul
     }
     let mock_server = mock_otlp_server(1..).await;
     let config =
-        include_str!("../fixtures/otlp_datadog_request_with_trace_context_propagator.router.yaml")
-            .replace("<otel-collector-endpoint>", &mock_server.uri());
+        include_str!("../fixtures/otlp_datadog_request_with_trace_context_propagator.router.yaml");
     let mut router = IntegrationTest::builder()
         .telemetry(Telemetry::Otlp {
             endpoint: Some(format!("{}/v1/traces", mock_server.uri())),
         })
         .extra_propagator(Telemetry::Datadog)
-        .config(&config)
+        .config(config)
+        .env_entry("TEST_CONFIG_COLLECTOR_ENDPOINT", mock_server.uri())
         .build()
         .await;
 
@@ -429,10 +431,10 @@ async fn test_untraced_request_no_sample_datadog_agent() -> Result<(), BoxError>
         return Ok(());
     }
     let mock_server = mock_otlp_server(1..).await;
-    let config = include_str!("../fixtures/otlp_datadog_agent_no_sample.router.yaml")
-        .replace("<otel-collector-endpoint>", &mock_server.uri());
+    let config = include_str!("../fixtures/otlp_datadog_agent_no_sample.router.yaml");
     let mut router = IntegrationTest::builder()
-        .config(&config)
+        .config(config)
+        .env_entry("TEST_CONFIG_COLLECTOR_ENDPOINT", mock_server.uri())
         .telemetry(Telemetry::Otlp {
             endpoint: Some(format!("{}/v1/traces", mock_server.uri())),
         })
@@ -464,10 +466,10 @@ async fn test_untraced_request_sample_datadog_agent() -> Result<(), BoxError> {
         return Ok(());
     }
     let mock_server = mock_otlp_server(1..).await;
-    let config = include_str!("../fixtures/otlp_datadog_agent_sample.router.yaml")
-        .replace("<otel-collector-endpoint>", &mock_server.uri());
+    let config = include_str!("../fixtures/otlp_datadog_agent_sample.router.yaml");
     let mut router = IntegrationTest::builder()
-        .config(&config)
+        .config(config)
+        .env_entry("TEST_CONFIG_COLLECTOR_ENDPOINT", mock_server.uri())
         .telemetry(Telemetry::Otlp {
             endpoint: Some(format!("{}/v1/traces", mock_server.uri())),
         })
@@ -499,14 +501,14 @@ async fn test_untraced_request_sample_datadog_agent_unsampled() -> Result<(), Bo
         return Ok(());
     }
     let mock_server = mock_otlp_server(1..).await;
-    let config = include_str!("../fixtures/otlp_datadog_agent_sample_no_sample.router.yaml")
-        .replace("<otel-collector-endpoint>", &mock_server.uri());
+    let config = include_str!("../fixtures/otlp_datadog_agent_sample_no_sample.router.yaml");
     let mut router = IntegrationTest::builder()
         .telemetry(Telemetry::Otlp {
             endpoint: Some(format!("{}/v1/traces", mock_server.uri())),
         })
         .extra_propagator(Telemetry::Datadog)
-        .config(&config)
+        .config(config)
+        .env_entry("TEST_CONFIG_COLLECTOR_ENDPOINT", mock_server.uri())
         .build()
         .await;
 
@@ -534,8 +536,7 @@ async fn test_priority_sampling_propagated() -> Result<(), BoxError> {
         return Ok(());
     }
     let mock_server = mock_otlp_server(1..).await;
-    let config = include_str!("../fixtures/otlp_datadog_propagation.router.yaml")
-        .replace("<otel-collector-endpoint>", &mock_server.uri());
+    let config = include_str!("../fixtures/otlp_datadog_propagation.router.yaml");
     let mut router = IntegrationTest::builder()
         // We're using datadog propagation as this is what we are trying to test.
         .telemetry(Telemetry::Otlp {
@@ -543,6 +544,7 @@ async fn test_priority_sampling_propagated() -> Result<(), BoxError> {
         })
         .extra_propagator(Telemetry::Datadog)
         .config(config)
+        .env_entry("TEST_CONFIG_COLLECTOR_ENDPOINT", mock_server.uri())
         .build()
         .await;
 
@@ -624,13 +626,13 @@ async fn test_priority_sampling_parent_sampler_very_small_no_parent_no_agent_sam
     }
     let config = include_str!(
         "../fixtures/otlp_parent_sampler_very_small_no_parent_no_agent_sampling.router.yaml"
-    )
-    .replace("<otel-collector-endpoint>", &mock_server.uri());
+    );
     let mut router = IntegrationTest::builder()
         .telemetry(Telemetry::Otlp {
             endpoint: Some(format!("{}/v1/traces", mock_server.uri())),
         })
         .config(config)
+        .env_entry("TEST_CONFIG_COLLECTOR_ENDPOINT", mock_server.uri())
         .build()
         .await;
 
@@ -715,14 +717,14 @@ async fn test_priority_sampling_no_parent_propagated() -> Result<(), BoxError> {
         return Ok(());
     }
     let mock_server = mock_otlp_server(1..).await;
-    let config = include_str!("../fixtures/otlp_datadog_propagation_no_parent_sampler.router.yaml")
-        .replace("<otel-collector-endpoint>", &mock_server.uri());
+    let config = include_str!("../fixtures/otlp_datadog_propagation_no_parent_sampler.router.yaml");
     let mut router = IntegrationTest::builder()
         .telemetry(Telemetry::Otlp {
             endpoint: Some(format!("{}/v1/traces", mock_server.uri())),
         })
         .extra_propagator(Telemetry::Datadog)
         .config(config)
+        .env_entry("TEST_CONFIG_COLLECTOR_ENDPOINT", mock_server.uri())
         .build()
         .await;
 
@@ -799,13 +801,13 @@ async fn test_attributes() -> Result<(), BoxError> {
         return Ok(());
     }
     let mock_server = mock_otlp_server(1..).await;
-    let config = include_str!("../fixtures/otlp.router.yaml")
-        .replace("<otel-collector-endpoint>", &mock_server.uri());
+    let config = include_str!("../fixtures/otlp.router.yaml");
     let mut router = IntegrationTest::builder()
         .telemetry(Telemetry::Otlp {
             endpoint: Some(format!("{}/v1/traces", mock_server.uri())),
         })
         .config(config)
+        .env_entry("TEST_CONFIG_COLLECTOR_ENDPOINT", mock_server.uri())
         .build()
         .await;
 
@@ -835,8 +837,7 @@ async fn test_plugin_overridden_client_name_is_included_in_telemetry() -> Result
         return Ok(());
     }
     let mock_server = mock_otlp_server(1..).await;
-    let config = include_str!("../fixtures/otlp_override_client_name.router.yaml")
-        .replace("<otel-collector-endpoint>", &mock_server.uri());
+    let config = include_str!("../fixtures/otlp_override_client_name.router.yaml");
     // Each iteration validates the resulting trace via `find_valid_trace`,
     // which can poll for up to 10 s while the harness's reqwest client
     // holds an idle keep-alive socket to the router. Under CI load the
@@ -853,6 +854,7 @@ async fn test_plugin_overridden_client_name_is_included_in_telemetry() -> Result
             endpoint: Some(format!("{}/v1/traces", mock_server.uri())),
         })
         .config(config)
+        .env_entry("TEST_CONFIG_COLLECTOR_ENDPOINT", mock_server.uri())
         .reqwest_client(reqwest_client)
         .build()
         .await;
@@ -918,14 +920,14 @@ async fn test_otlp_ipv6() -> Result<(), BoxError> {
         .mount(&mock_server)
         .await;
 
-    let config = include_str!("../fixtures/otlp.router.yaml")
-        .replace("<otel-collector-endpoint>", &ipv6_endpoint);
+    let config = include_str!("../fixtures/otlp.router.yaml");
 
     let mut router = IntegrationTest::builder()
         .telemetry(Telemetry::Otlp {
             endpoint: Some(format!("{}/v1/traces", ipv6_endpoint)),
         })
-        .config(&config)
+        .config(config)
+        .env_entry("TEST_CONFIG_COLLECTOR_ENDPOINT", &ipv6_endpoint)
         .build()
         .await;
 

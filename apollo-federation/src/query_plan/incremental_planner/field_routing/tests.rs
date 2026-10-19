@@ -3790,11 +3790,12 @@ fn connector_entity_shape_drills_into_committed_field() {
     "###);
 }
 
-/// A field connector on a non-root type with no key variables has no way
-/// to attach its result to parent entities; planning must surface an error
-/// rather than emit a fetch with no representation inputs.
+/// Before connect v0.4, a field connector on a non-root type that references
+/// no `$this` (User.staticAvatar) has no key, as connector expansion gives
+/// it none; planning must surface an error rather than emit a fetch with no
+/// representation inputs.
 #[test]
-fn connector_direct_field_without_key_errors() {
+fn connector_field_without_this_before_v0_4_errors() {
     let supergraph =
         Supergraph::new_with_router_specs(CONNECTOR_OUTPUT_SHAPE_SCHEMA).expect("supergraph parse");
     let planner = QueryPlanner::new(&supergraph, default_config()).expect("planner creation");
@@ -3809,6 +3810,644 @@ fn connector_direct_field_without_key_errors() {
         result.is_err(),
         "keyless non-root connector must not plan silently: {result:?}"
     );
+}
+
+/// From connect v0.4, a field connector on a non-root type that references
+/// no `$this` (Product.banner) is entered through the singleton `__typename`
+/// key, as connector expansion keys it. Without any `$this` connector on the
+/// type, its subgraph defines no `_Entity`; the key must still route the
+/// field to its connector instead of folding it into the parent connector's
+/// fetch.
+#[test]
+fn connector_field_without_this_keys_on_typename() {
+    let plan_str = plan_query_with_router_specs(
+        include_str!("../fixtures/connector_field_without_this.graphql"),
+        "{ products { name banner } }",
+    );
+    insta::assert_snapshot!(plan_str, @r#"
+    QueryPlan {
+      Sequence {
+        Fetch(service: "products_Query_products_0") {
+          {
+            products {
+              __typename
+              name
+            }
+          }
+        },
+        Flatten(path: "products.@") {
+          Fetch(service: "products_Product_banner_0") {
+            {
+              ... on Product {
+                __typename
+              }
+            } =>
+            {
+              ... on Product {
+                banner
+              }
+            }
+          },
+        },
+      },
+    }
+    "#);
+}
+
+/// A field connector that references only `$args` (Product.related) is
+/// keyed on `__typename` too; aliases with different arguments share the
+/// fetch.
+#[test]
+fn connector_field_with_only_args_keys_on_typename() {
+    let plan_str = plan_query_with_router_specs(
+        include_str!("../fixtures/connector_field_without_this.graphql"),
+        "{ products { a: related(limit: 1) { id } b: related(limit: 2) { label } } }",
+    );
+    insta::assert_snapshot!(plan_str, @r#"
+    QueryPlan {
+      Sequence {
+        Fetch(service: "products_Query_products_0") {
+          {
+            products {
+              __typename
+            }
+          }
+        },
+        Flatten(path: "products.@") {
+          Fetch(service: "products_Product_related_0") {
+            {
+              ... on Product {
+                __typename
+              }
+            } =>
+            {
+              ... on Product {
+                b: related(limit: 2) {
+                  label
+                }
+                a: related(limit: 1) {
+                  id
+                }
+              }
+            }
+          },
+        },
+      },
+    }
+    "#);
+}
+
+/// When another connector on the type references `$this`, the type's key
+/// in the supergraph comes from that connector, but the field connector that
+/// references no `$this` is still entered through `__typename` alone.
+#[test]
+fn connector_field_without_this_beside_this_connector() {
+    let schema = include_str!("../fixtures/connector_field_without_this.graphql").replace(
+        "  name: String\n",
+        "  name: String\n  details: String @join__directive(graphs: [PRODUCTS], name: \"connect\", args: {source: \"api\", http: {GET: \"/products/{$this.id}\"}, selection: \"$.details\"})\n",
+    );
+    let plan_str = plan_query_with_router_specs(&schema, "{ products { banner details } }");
+    insta::assert_snapshot!(plan_str, @r#"
+    QueryPlan {
+      Sequence {
+        Fetch(service: "products_Query_products_0") {
+          {
+            products {
+              __typename
+              id
+            }
+          }
+        },
+        Parallel {
+          Flatten(path: "products.@") {
+            Fetch(service: "products_Product_banner_0") {
+              {
+                ... on Product {
+                  __typename
+                }
+              } =>
+              {
+                ... on Product {
+                  banner
+                }
+              }
+            },
+          },
+          Flatten(path: "products.@") {
+            Fetch(service: "products_Product_details_0") {
+              {
+                ... on Product {
+                  __typename
+                  id
+                }
+              } =>
+              {
+                ... on Product {
+                  details
+                }
+              }
+            },
+          },
+        },
+      },
+    }
+    "#);
+}
+
+/// `/skus` returns `sku` but not `id`: resolve through the resolver keyed
+/// on `sku`, not the one keyed on `id`.
+#[test]
+fn connector_entity_resolver_key_from_connector_shape() {
+    let plan_str = plan_query_with_router_specs(
+        include_str!("../fixtures/connector_alternate_key_resolver.graphql"),
+        "{ productsBySku { sku name } }",
+    );
+    insta::assert_snapshot!(plan_str, @r#"
+    QueryPlan {
+      Sequence {
+        Fetch(service: "products_Query_productsBySku_0") {
+          {
+            productsBySku {
+              __typename
+              sku
+            }
+          }
+        },
+        Flatten(path: "productsBySku.@") {
+          Fetch(service: "products_Query_productBySku_0") {
+            {
+              ... on Product {
+                __typename
+                sku
+              }
+            } =>
+            {
+              ... on Product {
+                name
+              }
+            }
+          },
+        },
+      },
+    }
+    "#);
+}
+
+/// The GraphQL subgraph's key `upc` is in the connector subgraph's schema
+/// but not in `/products`'s selection: fetch it through `product(id:)`
+/// before the key hop.
+#[test]
+fn connector_graphql_key_hop_routes_key_missing_from_shape() {
+    let plan_str = plan_query_with_router_specs(
+        include_str!("../fixtures/connector_graphql_key_not_in_shape.graphql"),
+        "{ products { name reviews { body } } }",
+    );
+    insta::assert_snapshot!(plan_str, @r#"
+    QueryPlan {
+      Sequence {
+        Fetch(service: "products_Query_products_0") {
+          {
+            products {
+              __typename
+              name
+              id
+            }
+          }
+        },
+        Flatten(path: "products.@") {
+          Fetch(service: "products_Query_product_0") {
+            {
+              ... on Product {
+                __typename
+                id
+              }
+            } =>
+            {
+              ... on Product {
+                upc
+              }
+            }
+          },
+        },
+        Flatten(path: "products.@") {
+          Fetch(service: "reviews") {
+            {
+              ... on Product {
+                __typename
+                upc
+              }
+            } =>
+            {
+              ... on Product {
+                reviews {
+                  body
+                }
+              }
+            }
+          },
+        },
+      },
+    }
+    "#);
+}
+
+/// `/products` returns `name` but not `weight`, and `product(id:)` returns
+/// `weight` but not `name`: `name` rides the root fetch and only `weight`
+/// is fetched through `product(id:)`.
+#[test]
+fn connector_requires_partly_in_shape_routes_only_missing_fields() {
+    let plan_str = plan_query_with_router_specs(
+        include_str!("../fixtures/connector_requires_partly_in_shape.graphql"),
+        "{ products { shippingEstimate } }",
+    );
+    insta::assert_snapshot!(plan_str, @r#"
+    QueryPlan {
+      Sequence {
+        Fetch(service: "products_Query_products_0") {
+          {
+            products {
+              __typename
+              id
+              __require_1_name: name
+            }
+          }
+        },
+        Flatten(path: "products.@") {
+          Fetch(service: "products_Query_product_0") {
+            {
+              ... on Product {
+                __typename
+                id
+              }
+            } =>
+            {
+              ... on Product {
+                __require_0_weight: weight
+              }
+            }
+          },
+        },
+        Flatten(path: "products.@") {
+          Fetch(service: "shipping") {
+            {
+              ... on Product {
+                __typename
+                id
+                __require_0_weight: weight
+                __require_1_name: name
+              }
+            } =>
+            {
+              ... on Product {
+                shippingEstimate
+              }
+            }
+          },
+        },
+      },
+    }
+    "#);
+}
+
+/// `/products` returns `sku` but not `id` of the `id sku` key, and
+/// `productBySku` returns `id` but not `sku`: `sku` rides the root fetch and
+/// only `id` is fetched through `productBySku`.
+#[test]
+fn connector_composite_key_partly_in_shape_routes_only_missing_fields() {
+    let plan_str = plan_query_with_router_specs(
+        include_str!("../fixtures/connector_composite_key_partly_in_shape.graphql"),
+        "{ products { reviews { body } } }",
+    );
+    insta::assert_snapshot!(plan_str, @r#"
+    QueryPlan {
+      Sequence {
+        Fetch(service: "products_Query_products_0") {
+          {
+            products {
+              __typename
+              sku
+            }
+          }
+        },
+        Flatten(path: "products.@") {
+          Fetch(service: "products_Query_productBySku_0") {
+            {
+              ... on Product {
+                __typename
+                sku
+              }
+            } =>
+            {
+              ... on Product {
+                id
+              }
+            }
+          },
+        },
+        Flatten(path: "products.@") {
+          Fetch(service: "reviews") {
+            {
+              ... on Product {
+                __typename
+                id
+                sku
+              }
+            } =>
+            {
+              ... on Product {
+                reviews {
+                  body
+                }
+              }
+            }
+          },
+        },
+      },
+    }
+    "#);
+}
+
+/// `Product.reviews` is keyed on `id sku`; `/products` returns `sku` but not
+/// `id`: `sku` rides the root fetch and only `id` is fetched through
+/// `productBySku` before the field connector.
+#[test]
+fn connector_resolver_composite_key_partly_in_shape_routes_only_missing_fields() {
+    let plan_str = plan_query_with_router_specs(
+        include_str!("../fixtures/connector_resolver_composite_key_partly_in_shape.graphql"),
+        "{ products { reviews { body } } }",
+    );
+    insta::assert_snapshot!(plan_str, @r#"
+    QueryPlan {
+      Sequence {
+        Fetch(service: "products_Query_products_0") {
+          {
+            products {
+              __typename
+              sku
+            }
+          }
+        },
+        Flatten(path: "products.@") {
+          Fetch(service: "products_Query_productBySku_0") {
+            {
+              ... on Product {
+                __typename
+                sku
+              }
+            } =>
+            {
+              ... on Product {
+                id
+              }
+            }
+          },
+        },
+        Flatten(path: "products.@") {
+          Fetch(service: "products_Product_reviews_0") {
+            {
+              ... on Product {
+                __typename
+                id
+                sku
+              }
+            } =>
+            {
+              ... on Product {
+                reviews {
+                  body
+                }
+              }
+            }
+          },
+        },
+      },
+    }
+    "#);
+}
+
+/// `/products` returns `org { name }` but not the `org { id }` of the
+/// `reviews` key: fetch it through `productById`, not through `reviews`,
+/// whose own key needs it.
+#[test]
+fn connector_nested_key_partly_in_shape_skips_circular_hop() {
+    let plan_str = plan_query_with_router_specs(
+        include_str!("../fixtures/connector_nested_key_partly_in_shape.graphql"),
+        "{ products { reviews { body } } }",
+    );
+    insta::assert_snapshot!(plan_str, @r#"
+    QueryPlan {
+      Sequence {
+        Fetch(service: "products_Query_products_0") {
+          {
+            products {
+              __typename
+              id
+            }
+          }
+        },
+        Flatten(path: "products.@") {
+          Fetch(service: "products_Query_productById_0") {
+            {
+              ... on Product {
+                __typename
+                id
+              }
+            } =>
+            {
+              ... on Product {
+                org {
+                  id
+                }
+              }
+            }
+          },
+        },
+        Flatten(path: "products.@") {
+          Fetch(service: "reviews") {
+            {
+              ... on Product {
+                __typename
+                id
+                org {
+                  id
+                }
+              }
+            } =>
+            {
+              ... on Product {
+                reviews {
+                  body
+                }
+              }
+            }
+          },
+        },
+      },
+    }
+    "#);
+}
+
+/// The GraphQL counterpart of the test above: `a` returns only `id`, and the
+/// hop into `r` to fetch `org { id }` would need `org { id }` as its own key.
+/// Fetch it through `p` instead. The plan is the same without the circularity
+/// check (the `CircularKeyHop` commit fails the same hop), so this pins the
+/// result, not which check rejects the hop.
+#[test]
+fn graphql_nested_key_skips_circular_hop() {
+    let plan_str = plan_query(
+        include_str!("../fixtures/graphql_nested_key_circular_hop.graphql"),
+        "{ products { reviews { body } } }",
+    );
+    insta::assert_snapshot!(plan_str, @r#"
+    QueryPlan {
+      Sequence {
+        Fetch(service: "a") {
+          {
+            products {
+              __typename
+              id
+            }
+          }
+        },
+        Flatten(path: "products.@") {
+          Fetch(service: "p") {
+            {
+              ... on Product {
+                __typename
+                id
+              }
+            } =>
+            {
+              ... on Product {
+                org {
+                  id
+                }
+              }
+            }
+          },
+        },
+        Flatten(path: "products.@") {
+          Fetch(service: "r") {
+            {
+              ... on Product {
+                __typename
+                id
+                org {
+                  id
+                }
+              }
+            } =>
+            {
+              ... on Product {
+                reviews {
+                  body
+                }
+              }
+            }
+          },
+        },
+      },
+    }
+    "#);
+}
+
+/// A `$this` field connector on an `@interfaceObject` resolves its own
+/// field under a concrete implementation's fragment.
+#[test]
+fn connector_interface_object_field_connector_under_implementation() {
+    let plan_str = plan_query_with_router_specs(
+        include_str!("../fixtures/connector_interface_object_field_connector.graphql"),
+        "{ allMedia { title ... on Book { author rating } } }",
+    );
+    insta::assert_snapshot!(plan_str, @r#"
+    QueryPlan {
+      Sequence {
+        Fetch(service: "media") {
+          {
+            allMedia {
+              __typename
+              ... on Book {
+                __typename
+                author
+                id
+              }
+              title
+            }
+          }
+        },
+        Flatten(path: "allMedia.@|[Book]") {
+          Fetch(service: "ratings_Media_rating_0") {
+            {
+              ... on Book {
+                __typename
+                id
+              }
+            } =>
+            {
+              ... on Media {
+                rating
+              }
+            }
+          },
+        },
+      },
+    }
+    "#);
+}
+
+/// A field connector's selection describes its field's value: `User.posts`
+/// selecting `name` does not make it a source for `User.name`, which takes
+/// the two-hop route through `d` to `b`.
+#[test]
+fn connector_field_selection_does_not_provide_entity_fields() {
+    let plan_str = plan_query_with_router_specs(
+        include_str!("../fixtures/connector_field_selection_not_entity_fields.graphql"),
+        "{ users { name } }",
+    );
+    insta::assert_snapshot!(plan_str, @r#"
+    QueryPlan {
+      Sequence {
+        Fetch(service: "a") {
+          {
+            users {
+              __typename
+              id
+            }
+          }
+        },
+        Flatten(path: "users.@") {
+          Fetch(service: "d") {
+            {
+              ... on User {
+                __typename
+                id
+              }
+            } =>
+            {
+              ... on User {
+                email
+              }
+            }
+          },
+        },
+        Flatten(path: "users.@") {
+          Fetch(service: "b") {
+            {
+              ... on User {
+                __typename
+                email
+              }
+            } =>
+            {
+              ... on User {
+                name
+              }
+            }
+          },
+        },
+      },
+    }
+    "#);
 }
 
 /// A connector selection that names an object field without sub-selections
@@ -4275,4 +4914,552 @@ fn defer_on_value_type_stays_in_enclosing_fetch() {
       },
     }
     "###);
+}
+
+/// `/products` maps `details` through `->match`, and neither branch returns
+/// `upc`: fetch `details { upc }` through `productById` instead of selecting
+/// it from a fetch that returns it as null.
+#[test]
+fn connector_key_under_match_shape_routes_missing_field() {
+    let plan_str = plan_query_with_router_specs(
+        include_str!("../fixtures/connector_key_in_match_shape.graphql"),
+        "{ products { reviews { body } } }",
+    );
+    insta::assert_snapshot!(plan_str, @r#"
+    QueryPlan {
+      Sequence {
+        Fetch(service: "products_Query_products_0") {
+          {
+            products {
+              __typename
+              id
+            }
+          }
+        },
+        Flatten(path: "products.@") {
+          Fetch(service: "products_Query_productById_0") {
+            {
+              ... on Product {
+                __typename
+                id
+              }
+            } =>
+            {
+              ... on Product {
+                details {
+                  upc
+                }
+              }
+            }
+          },
+        },
+        Flatten(path: "products.@") {
+          Fetch(service: "reviews") {
+            {
+              ... on Product {
+                __typename
+                id
+                details {
+                  upc
+                }
+              }
+            } =>
+            {
+              ... on Product {
+                reviews {
+                  body
+                }
+              }
+            }
+          },
+        },
+      },
+    }
+    "#);
+}
+
+/// A pending for `Product.reviews` under the list field `list_field`,
+/// positioned at `subgraph`'s Product node in fetch `fetch_node`.
+fn connector_reviews_pending(
+    space: &FieldRoutingSearchSpace,
+    list_field: &str,
+    subgraph: &str,
+    fetch_node: NodeIndex,
+) -> PendingSelection {
+    let op = crate::operation::Operation::parse(
+        space.supergraph_schema.clone(),
+        &format!("{{ {list_field} {{ reviews {{ body }} }} }}"),
+        "op.graphql",
+    )
+    .expect("valid operation");
+    let outer = match op.selection_set.selections.values().next() {
+        Some(Selection::Field(outer)) => outer.clone(),
+        _ => panic!("expected {list_field} field"),
+    };
+    let reviews = outer
+        .selection_set
+        .as_ref()
+        .expect("list field has sub-selections")
+        .selections
+        .values()
+        .next()
+        .expect("reviews selection")
+        .clone();
+    let op_path = SharedPath::from_vec(vec![Arc::new(OpPathElement::Field(outer.field.clone()))]);
+    let response_path =
+        SharedPath::from_vec(commit::field_response_elements(&outer.field).expect("response path"));
+    PendingSelection::root(
+        reviews,
+        test_support::node_for(space, subgraph, "Product"),
+        fetch_node,
+    )
+    .with_op_path(op_path)
+    .with_response_path(response_path)
+}
+
+/// The key edge from `from`'s Product node into `to`'s, with its conditions.
+fn product_key_edge(
+    space: &FieldRoutingSearchSpace,
+    from: &str,
+    to: &str,
+) -> (NodeIndex, Arc<SelectionSet>) {
+    let qg = &space.cached_query_graph.query_graph;
+    let from_node = test_support::node_for(space, from, "Product");
+    let to_node = test_support::node_for(space, to, "Product");
+    let edge = qg
+        .out_edges(from_node)
+        .into_iter()
+        .find(|edge| {
+            matches!(
+                edge.weight().transition,
+                crate::query_graph::QueryGraphEdgeTransition::KeyResolution
+            ) && petgraph::visit::EdgeRef::target(edge) == to_node
+        })
+        .expect("key edge between the subgraphs");
+    let conditions = edge.weight().conditions.clone().expect("key conditions");
+    (to_node, conditions)
+}
+
+/// The `reviews` field edge at the reviews subgraph's Product node.
+fn reviews_edge(space: &FieldRoutingSearchSpace, pending: &PendingSelection) -> routing::EdgeInfo {
+    let Selection::Field(reviews) = &pending.selection else {
+        panic!("reviews is a field");
+    };
+    let node = test_support::node_for(space, "reviews", "Product");
+    routing::EdgeInfo {
+        edge_index: space
+            .cached_query_graph
+            .edge_for_field(node, &reviews.field)
+            .expect("reviews edge"),
+        target_subgraph: Arc::from("reviews"),
+    }
+}
+
+fn key_hop_info(
+    key_conditions: Arc<SelectionSet>,
+    conditions_unroutable: bool,
+) -> routing::KeyHopInfo {
+    routing::KeyHopInfo {
+        key_conditions,
+        requires_resolvable_in_place: true,
+        conditions_unroutable,
+        self_entity_reentry: false,
+    }
+}
+
+/// A chain from `a` through the connector subgraph `products` into
+/// `reviews`. The subgraph has no GraphQL endpoint, so the chain enters it
+/// through the entity-resolver connector that returns the `upc` key leaving
+/// it, `productUpc`, rather than `product`, which doesn't.
+#[test]
+fn chained_hop_through_connector_subgraph_uses_connector_fetch() {
+    let space = test_support::connector_search_space(include_str!(
+        "../fixtures/connector_chained_key_hop.graphql"
+    ));
+    let mut state = PlanState::new(vec![]);
+    let root = state.graph.get_or_create_root_group(
+        &Arc::from("a"),
+        CompositeTypeDefinitionPosition::Object(
+            crate::schema::position::ObjectTypeDefinitionPosition {
+                type_name: name!("Query"),
+            },
+        ),
+    );
+    let pending = connector_reviews_pending(&space, "topProducts", "a", root);
+    let (products_node, entry_key) = product_key_edge(&space, "a", "products");
+    let (_, exit_key) = product_key_edge(&space, "products", "reviews");
+    let choice = RoutingChoice::ChainedKeyHop {
+        edge: reviews_edge(&space, &pending),
+        key: key_hop_info(exit_key, false),
+        intermediate_hops: vec![routing::IntermediateKeyHop {
+            target_node: products_node,
+            entry_key: Some(entry_key),
+        }],
+    };
+    let pending_before = state.pending.len();
+
+    space
+        .commit_key_hop(&mut state, &pending, &choice)
+        .expect("chained hop commits");
+
+    let products_fetches: Vec<_> = state
+        .graph
+        .node_indices()
+        .map(|idx| state.graph.node(idx))
+        .filter(|node| node.subgraph.as_ref() == "products")
+        .map(|node| {
+            let selections: Vec<_> = node
+                .selection_builder
+                .entries()
+                .iter()
+                .filter_map(|entry| entry.selections().map(|selections| selections.to_string()))
+                .collect();
+            (
+                node.connector
+                    .as_ref()
+                    .map(|connector| connector.id.coordinate()),
+                selections,
+            )
+        })
+        .collect();
+    assert_eq!(
+        products_fetches,
+        vec![(
+            Some("products:Query.productUpc[0]".to_string()),
+            vec!["{ upc }".to_string()],
+        )],
+    );
+    assert_eq!(
+        state.pending.len(),
+        pending_before,
+        "upc is selected in place"
+    );
+}
+
+/// A circular key hop from the `/products` root connector into `reviews`,
+/// keyed on `upc`. The products schema has `upc`, so the key passes
+/// `can_resolve_in_place`, but `/products` doesn't map it. A circular key
+/// must resolve wholly at the anchor, so the commit should fail instead of
+/// routing `upc` as a condition pending.
+#[test]
+fn circular_key_hop_from_connector_missing_key_fails_commit() {
+    let space = test_support::connector_search_space(include_str!(
+        "../fixtures/connector_graphql_key_not_in_shape.graphql"
+    ));
+    let products = space
+        .connector_index
+        .by_field(&name!("Query"), &name!("products"))
+        .and_then(|entries| entries.first())
+        .expect("products connector")
+        .clone();
+    let mut state = PlanState::new(vec![]);
+    let root = state.graph.add_connector_root_group(
+        &Arc::from("products"),
+        CompositeTypeDefinitionPosition::Object(
+            crate::schema::position::ObjectTypeDefinitionPosition {
+                type_name: name!("Query"),
+            },
+        ),
+        products.connector.clone(),
+        None,
+    );
+    let pending = connector_reviews_pending(&space, "products", "products", root);
+    let (_, key) = product_key_edge(&space, "products", "reviews");
+    let choice = RoutingChoice::CircularKeyHop {
+        edge: reviews_edge(&space, &pending),
+        key: key_hop_info(key, true),
+        intermediate_hops: vec![],
+    };
+    let pending_before = state.pending.len();
+
+    let result = space.commit_key_hop(&mut state, &pending, &choice);
+
+    let pushed: Vec<_> = state.pending[pending_before..]
+        .iter()
+        .map(|pending| selection_label(&pending.selection))
+        .collect();
+    assert!(
+        result.is_err(),
+        "circular key commit routed conditions instead of failing: {pushed:?}",
+    );
+}
+
+/// `/products` maps `details` through `->match`, and neither branch returns
+/// `upc`: fetch `details { upc }` through `productById` instead of selecting
+/// it from a fetch that returns it as null.
+#[test]
+fn connector_field_under_match_shape_routes_missing_field() {
+    let plan_str = plan_query_with_router_specs(
+        include_str!("../fixtures/connector_key_in_match_shape.graphql"),
+        "{ products { id details { upc color } } }",
+    );
+    insta::assert_snapshot!(plan_str, @r#"
+    QueryPlan {
+      Sequence {
+        Fetch(service: "products_Query_products_0") {
+          {
+            products {
+              __typename
+              id
+              details {
+                color
+              }
+            }
+          }
+        },
+        Flatten(path: "products.@") {
+          Fetch(service: "products_Query_productById_0") {
+            {
+              ... on Product {
+                __typename
+                id
+              }
+            } =>
+            {
+              ... on Product {
+                details {
+                  upc
+                }
+              }
+            }
+          },
+        },
+      },
+    }
+    "#);
+}
+
+/// `/products` maps `details { color }` but not `upc`. Nothing re-enters the
+/// `Details` value type on its own, so `details { upc }` is fetched from the
+/// nearest entity, `Product`, through `productById`.
+#[test]
+fn connector_field_under_value_type_routes_through_parent_entity() {
+    let plan_str = plan_query_with_router_specs(
+        include_str!("../fixtures/connector_value_type_partial_shape.graphql"),
+        "{ products { id details { upc color } } }",
+    );
+    insta::assert_snapshot!(plan_str, @r#"
+    QueryPlan {
+      Sequence {
+        Fetch(service: "products_Query_products_0") {
+          {
+            products {
+              __typename
+              id
+              details {
+                color
+              }
+            }
+          }
+        },
+        Flatten(path: "products.@") {
+          Fetch(service: "products_Query_productById_0") {
+            {
+              ... on Product {
+                __typename
+                id
+              }
+            } =>
+            {
+              ... on Product {
+                details {
+                  upc
+                }
+              }
+            }
+          },
+        },
+      },
+    }
+    "#);
+}
+
+/// No connector returns `details.upc`: planning fails instead of re-routing
+/// the missing field through a connector that doesn't return it either.
+#[test]
+fn connector_field_no_connector_returns_fails_planning() {
+    let supergraph = Supergraph::new_with_router_specs(include_str!(
+        "../fixtures/connector_value_type_unprovided.graphql"
+    ))
+    .expect("supergraph parse");
+    let planner = QueryPlanner::new(&supergraph, default_config()).expect("planner creation");
+    let document = apollo_compiler::ExecutableDocument::parse_and_validate(
+        planner.api_schema().schema(),
+        "{ products { id details { upc color } } }",
+        "test.graphql",
+    )
+    .expect("query parse");
+    let result = planner.build_query_plan(&document, None, Default::default());
+    assert!(
+        result.is_err(),
+        "no connector returns upc, planning must fail: {}",
+        result.map(|plan| plan.to_string()).unwrap_or_default(),
+    );
+}
+
+/// `/products` maps `details` through `->match`, and the conditions sit
+/// below it, at `products.details.spec`. Neither branch returns
+/// `spec.upc`, so it is reported missing rather than provided.
+#[test]
+fn connector_unprovided_through_match_shape() {
+    let space = test_support::connector_search_space(include_str!(
+        "../fixtures/connector_path_through_match_shape.graphql"
+    ));
+    let products = space
+        .connector_index
+        .by_field(&name!("Query"), &name!("products"))
+        .and_then(|entries| entries.first())
+        .expect("products connector")
+        .clone();
+    let mut state = PlanState::new(vec![]);
+    let root = state.graph.add_connector_root_group(
+        &Arc::from("products"),
+        CompositeTypeDefinitionPosition::Object(
+            crate::schema::position::ObjectTypeDefinitionPosition {
+                type_name: name!("Query"),
+            },
+        ),
+        products.connector.clone(),
+        None,
+    );
+    let op = crate::operation::Operation::parse(
+        space.supergraph_schema.clone(),
+        "{ products { details { spec { upc } } } }",
+        "op.graphql",
+    )
+    .expect("valid operation");
+    let mut op_path = Vec::new();
+    let mut selection_set = &op.selection_set;
+    for _ in 0..3 {
+        let Some(Selection::Field(field)) = selection_set.selections.values().next() else {
+            panic!("expected a field");
+        };
+        op_path.push(Arc::new(OpPathElement::Field(field.field.clone())));
+        selection_set = field.selection_set.as_ref().expect("sub-selections");
+    }
+
+    let unprovided =
+        space.connector_unprovided(&state, root, &SharedPath::from_vec(op_path), selection_set);
+
+    let (provided, missing) = unprovided.expect("the connector output is inspected");
+    assert!(provided.is_none());
+    assert_eq!(missing.to_string(), "{ upc }");
+}
+
+/// A chain from `a` through the connector subgraph `products` into
+/// `reviews`, keyed on `details { upc }`. Both `product` and `productUpc`
+/// return `details`, but only `productUpc` returns `details.upc`, so the
+/// chain enters through it and selects the whole key in place.
+#[test]
+fn chained_hop_through_connector_subgraph_checks_nested_exit_key() {
+    let space = test_support::connector_search_space(include_str!(
+        "../fixtures/connector_chained_nested_key_hop.graphql"
+    ));
+    let mut state = PlanState::new(vec![]);
+    let root = state.graph.get_or_create_root_group(
+        &Arc::from("a"),
+        CompositeTypeDefinitionPosition::Object(
+            crate::schema::position::ObjectTypeDefinitionPosition {
+                type_name: name!("Query"),
+            },
+        ),
+    );
+    let pending = connector_reviews_pending(&space, "topProducts", "a", root);
+    let (products_node, entry_key) = product_key_edge(&space, "a", "products");
+    let (_, exit_key) = product_key_edge(&space, "products", "reviews");
+    let choice = RoutingChoice::ChainedKeyHop {
+        edge: reviews_edge(&space, &pending),
+        key: key_hop_info(exit_key, false),
+        intermediate_hops: vec![routing::IntermediateKeyHop {
+            target_node: products_node,
+            entry_key: Some(entry_key),
+        }],
+    };
+    let pending_before = state.pending.len();
+
+    space
+        .commit_key_hop(&mut state, &pending, &choice)
+        .expect("chained hop commits");
+
+    let products_fetches: Vec<_> = state
+        .graph
+        .node_indices()
+        .map(|idx| state.graph.node(idx))
+        .filter(|node| node.subgraph.as_ref() == "products")
+        .map(|node| {
+            let selections: Vec<_> = node
+                .selection_builder
+                .entries()
+                .iter()
+                .filter_map(|entry| entry.selections().map(|selections| selections.to_string()))
+                .collect();
+            (
+                node.connector
+                    .as_ref()
+                    .map(|connector| connector.id.coordinate()),
+                selections,
+            )
+        })
+        .collect();
+    assert_eq!(
+        products_fetches,
+        vec![(
+            Some("products:Query.productUpc[0]".to_string()),
+            vec!["{ details { upc } }".to_string()],
+        )],
+    );
+    assert_eq!(
+        state.pending.len(),
+        pending_before,
+        "details.upc is selected in place"
+    );
+}
+
+/// `spec.upc` is missing two value types below `Product`: `details { spec {
+/// upc } }` is fetched through `productById`, and `/products` keeps the rest.
+#[test]
+fn connector_field_two_value_types_deep_routes_through_parent_entity() {
+    let plan_str = plan_query_with_router_specs(
+        include_str!("../fixtures/connector_path_through_match_shape.graphql"),
+        "{ products { id details { color spec { sku upc } } } }",
+    );
+    insta::assert_snapshot!(plan_str, @r#"
+    QueryPlan {
+      Sequence {
+        Fetch(service: "products_Query_products_0") {
+          {
+            products {
+              __typename
+              id
+              details {
+                color
+                spec {
+                  sku
+                }
+              }
+            }
+          }
+        },
+        Flatten(path: "products.@") {
+          Fetch(service: "products_Query_productById_0") {
+            {
+              ... on Product {
+                __typename
+                id
+              }
+            } =>
+            {
+              ... on Product {
+                details {
+                  spec {
+                    upc
+                  }
+                }
+              }
+            }
+          },
+        },
+      },
+    }
+    "#);
 }

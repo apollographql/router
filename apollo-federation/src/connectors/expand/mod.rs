@@ -662,7 +662,9 @@ mod helpers {
         ) -> Result<(), FederationError> {
             let resolvable_key = connector
                 .resolvable_key(self.original_schema.schema())
-                .map_err(|_| FederationError::internal("error creating resolvable key"))?;
+                .map_err(|err| {
+                    FederationError::internal(format!("error creating resolvable key: {err}"))
+                })?;
 
             let Some(resolvable_key) = resolvable_key else {
                 // When an implicit entity resolver has no $this variables (e.g., the
@@ -1309,7 +1311,9 @@ mod helpers {
         ) -> Result<(), FederationError> {
             let resolvable_key = connector
                 .resolvable_key(self.original_schema.schema())
-                .map_err(|_| FederationError::internal("error creating resolvable key"))?;
+                .map_err(|err| {
+                    FederationError::internal(format!("error creating resolvable key: {err}"))
+                })?;
 
             let Some(resolvable_key) = resolvable_key else {
                 return self.copy_interface_object_keys(output_type_name, to_schema);

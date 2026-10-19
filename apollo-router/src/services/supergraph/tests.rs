@@ -4304,3 +4304,40 @@ async fn defer_labeled_fragment_spread_multiple_times() {
     insta::assert_json_snapshot!(stream.next_response().await.unwrap());
     assert!(stream.next_response().await.is_none());
 }
+
+#[tokio::test]
+async fn query_plan_complexity_exceeded_returns_bad_request() {
+    // A paths limit of 0 makes the planner reject any operation through its option-count guard,
+    // which raises the same QueryPlanComplexityExceeded error as the other complexity limits.
+    let service = TestHarness::builder()
+        .configuration_json(serde_json::json!({
+            "supergraph": {
+                "query_planning": {
+                    "experimental_paths_limit": 0
+                }
+            }
+        }))
+        .unwrap()
+        .schema(SCHEMA)
+        .build_supergraph()
+        .await
+        .unwrap();
+
+    let request = supergraph::Request::fake_builder()
+        .query("query { currentUser { activeOrganization { id } } }")
+        .build()
+        .unwrap();
+
+    let mut response = service.oneshot(request).await.unwrap();
+    assert_eq!(response.response.status(), http::StatusCode::BAD_REQUEST);
+
+    let body = response.next_response().await.unwrap();
+    assert_eq!(body.errors.len(), 1);
+    assert_eq!(
+        body.errors[0]
+            .extensions
+            .get("code")
+            .and_then(|c| c.as_str()),
+        Some("QUERY_PLAN_COMPLEXITY_EXCEEDED")
+    );
+}

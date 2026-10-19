@@ -340,7 +340,6 @@ async fn test_sigv4_does_not_leak_to_unconfigured_subgraph() {
               exporters:
                 metrics:
                   prometheus:
-                    listen: 127.0.0.1:4000
                     enabled: true
                     path: /metrics
             include_subgraph_errors:
@@ -1314,15 +1313,13 @@ async fn assert_counted_once_by_otlp(collector: &MockServer) {
 #[tokio::test(flavor = "multi_thread")]
 async fn test_otlp_cardinality_overflow_counted_once() {
     let collector = mock_otlp_server(0..).await;
-    let config = include_str!("fixtures/prometheus_otlp_cardinality_overflow.router.yaml")
-        .replace("<otel-collector-endpoint>", &collector.uri())
-        .replace(
-            "      prometheus:\n        enabled: true\n        path: /metrics\n",
-            "",
-        );
-    // If the fixture changes so the replacement misses, this would silently test both exporters.
-    assert!(!config.contains("prometheus:"), "{config}");
-    let mut router = IntegrationTest::builder().config(&config).build().await;
+    let mut router = IntegrationTest::builder()
+        .config(include_str!(
+            "fixtures/otlp_cardinality_overflow.router.yaml"
+        ))
+        .env_entry("TEST_CONFIG_COLLECTOR_ENDPOINT", collector.uri())
+        .build()
+        .await;
 
     router.start().await;
     router.assert_started().await;
@@ -1335,9 +1332,13 @@ async fn test_otlp_cardinality_overflow_counted_once() {
 #[tokio::test(flavor = "multi_thread")]
 async fn test_prometheus_and_otlp_cardinality_overflow_counted_once() {
     let collector = mock_otlp_server(0..).await;
-    let config = include_str!("fixtures/prometheus_otlp_cardinality_overflow.router.yaml")
-        .replace("<otel-collector-endpoint>", &collector.uri());
-    let mut router = IntegrationTest::builder().config(&config).build().await;
+    let mut router = IntegrationTest::builder()
+        .config(include_str!(
+            "fixtures/prometheus_otlp_cardinality_overflow.router.yaml"
+        ))
+        .env_entry("TEST_CONFIG_COLLECTOR_ENDPOINT", collector.uri())
+        .build()
+        .await;
 
     router.start().await;
     router.assert_started().await;
