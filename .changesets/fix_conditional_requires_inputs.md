@@ -6,4 +6,4 @@ The inline fragments of a fetch node's `requires` can now carry `@skip`/`@includ
 
 The same mechanism also preserves conditions on the entity fetch following a `@requires` when two sibling selections carry opposite conditions on the same variable (for example `... @include(if: $v)` and `... @skip(if: $v)`): those conditions were previously dropped from that fetch, so the subgraph was asked for fields the client had excluded, with the union of both `@requires` field sets as inputs. And when every selection leading to a `@requires` field is conditional, the entity fetch following it is now wrapped in the corresponding `Skip`/`Include` node instead of being executed unconditionally.
 
-By [@sachindshinde](https://github.com/sachindshinde) in https://github.com/apollographql/router/pull/TODO
+By [@sachindshinde](https://github.com/sachindshinde) in https://github.com/apollographql/router/pull/10566
