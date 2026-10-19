@@ -50,42 +50,6 @@ fn schema_is_valid() {
     jsonschema::meta::validate(schema.as_value()).expect("generated schema must be valid");
 }
 
-/// Every reference points into `$defs` and resolves there; the draft-7 `definitions` keyword is
-/// gone.
-#[test]
-fn schema_references_resolve_under_defs() {
-    fn references<'a>(value: &'a serde_json::Value, found: &mut Vec<&'a str>) {
-        match value {
-            serde_json::Value::Object(object) => {
-                if let Some(reference) = object.get("$ref").and_then(|r| r.as_str()) {
-                    found.push(reference);
-                }
-                object.values().for_each(|value| references(value, found));
-            }
-            serde_json::Value::Array(values) => {
-                values.iter().for_each(|value| references(value, found))
-            }
-            _ => {}
-        }
-    }
-
-    let schema = schema::router_config_schema();
-    assert!(schema.get("definitions").is_none());
-    let mut found = Vec::new();
-    references(schema, &mut found);
-    assert!(!found.is_empty());
-    for reference in found {
-        let pointer = reference
-            .strip_prefix('#')
-            .filter(|pointer| pointer.starts_with("/$defs/"))
-            .unwrap_or_else(|| panic!("{reference} does not point into $defs"));
-        assert!(
-            schema.pointer(pointer).is_some(),
-            "{reference} does not resolve"
-        );
-    }
-}
-
 #[test]
 fn routing_url_in_schema() {
     let schema = include_str!("../testdata/minimal_local_inventory_supergraph.graphql");

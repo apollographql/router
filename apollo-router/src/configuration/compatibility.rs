@@ -697,7 +697,15 @@ fn whole_value_expansion_takes_the_nested_fields_declared_type() {
         .mocked_env_var("COMPAT_LIMIT", "7")
         .build();
     let config = parse_configuration(
-        "apq:\n  router:\n    cache:\n      in_memory:\n        limit: ${env.COMPAT_LIMIT}\ninclude_subgraph_errors:\n  all: ${env.COMPAT_ENABLED}\n",
+        indoc::indoc! {"
+            apq:
+              router:
+                cache:
+                  in_memory:
+                    limit: ${env.COMPAT_LIMIT}
+            include_subgraph_errors:
+              all: ${env.COMPAT_ENABLED}
+        "},
         expansion,
         Migration::None,
     )

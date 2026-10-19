@@ -679,16 +679,22 @@ mod tests {
         );
     }
 
-    /// The router's parser validates with the dialect its schema declares. Draft 2020-12 applies
-    /// a keyword beside `$ref`, where draft 7 ignores it, so a constraint placed there rejects the
-    /// document unless the parser is told to read the schema as draft 7.
+    /// `parser_builder` must not pin a JSON Schema draft, so startup validation reads the
+    /// generated schema in the dialect its `$schema` declares, as editors do.
+    ///
+    /// The probe is a keyword beside `$ref`: draft 2020-12 applies it and draft 7 ignores it. The
+    /// router's parser must reject the document; the same parser forced to draft 7 accepts it,
+    /// which shows the probe tells the two dialects apart.
     #[test]
     fn validation_uses_the_dialect_the_schema_declares() {
         let mut schema = router_config_schema().clone();
         let supergraph = &mut schema["properties"]["supergraph"];
         assert!(supergraph.get("$ref").is_some(), "{supergraph}");
         supergraph["not"] = json!({ "required": ["listen"] });
-        let text = "supergraph:\n  listen: 127.0.0.1:4000\n";
+        let text = indoc::indoc! {"
+            supergraph:
+              listen: 127.0.0.1:4000
+        "};
 
         let declared = parser_builder::<ExpandedDocument>(&[], &None)
             .schema(schema.clone())
