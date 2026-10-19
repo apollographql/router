@@ -1,5 +1,5 @@
 supergraph:
-  listen: /tmp/apollo_router_test_{{RANDOM}}.sock
+  listen: ${env.TEST_CONFIG_UNIX_SOCKET_PATH}
 
 limits:
   router:

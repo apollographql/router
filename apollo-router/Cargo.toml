@@ -97,7 +97,7 @@ derive_more = { version = "2.0.0", default-features = false, features = [
 dhat = { version = "0.3.3", optional = true }
 diff = "0.1.13"
 displaydoc = "0.2"
-erased-serde = "0.3.31"
+erased-serde = "0.4.0"
 flate2 = "1.0.30"
 fred = { version = "10.1.0", features = [
     "enable-rustls",
@@ -144,10 +144,10 @@ indexmap = { version = "2.2.6", features = ["serde"] }
 itertools = "0.15.0"
 jsonpath_lib = "0.3.0"
 jsonpath-rust = "0.3.5"
-jsonwebtoken = { version = "10.0.0", features = ["rust_crypto"] }
+jsonwebtoken = { version = "11.0.0", features = ["rust_crypto"] }
 libc = "0.2.155"
 linkme = "0.3.30"
-lru = "0.18.0"
+lru = "0.19.0"
 mediatype = "0.23.0"
 miette = "7"
 mockall = "0.15.0"
@@ -221,7 +221,7 @@ rustls-native-certs = "0.8.1"
 rustls-pemfile = "2.2.0"
 schemars.workspace = true
 shellexpand = "3.1.0"
-sha2 = "0.10.8"
+sha2 = "0.11.0"
 semver = "1.0.23"
 serde.workspace = true
 serde_derive_default = "0.1"
@@ -267,7 +267,7 @@ tokio-tungstenite = { version = "0.30.0", features = [
 tokio-rustls = { version = "0.26.0", default-features = false }
 hickory-resolver = "0.26.2"
 http-serde = "2.1.1"
-hmac = "0.12.1"
+hmac = "0.13.0"
 parking_lot = { version = "0.12.3", features = ["serde"] }
 # note: AWS dependencies should always use the same version
 # note: hyper 1.0 update seems to mean this isn't true...
@@ -370,7 +370,7 @@ tracing-mock = "0.1.0-beta.1"
 walkdir = "2.5.0"
 wiremock = "0.6"
 libtest-mimic = "0.8.0"
-rstest = "0.27.0"
+rstest = "0.28.0"
 indoc = "2.0.7"
 
 [target.'cfg(tracing_unstable)'.dev-dependencies]

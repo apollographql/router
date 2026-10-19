@@ -287,6 +287,8 @@ impl From<FederationErrorBridge> for QueryPlannerError {
     }
 }
 
+const QUERY_PLAN_COMPLEXITY_EXCEEDED: &str = "QUERY_PLAN_COMPLEXITY_EXCEEDED";
+
 /// A temporary error type used to extract a few variants from `apollo-federation`'s
 /// `FederationError`. For backwards compatibility, these other variant need to be extracted so
 /// that the correct status code (GRAPHQL_VALIDATION_ERROR) can be added to the response. For
@@ -303,6 +305,8 @@ pub(crate) enum FederationErrorBridge {
     Other(String),
     /// {0}
     Cancellation(String),
+    /// {0}
+    QueryPlanComplexityExceeded(String),
 }
 
 impl From<FederationError> for FederationErrorBridge {
@@ -317,6 +321,11 @@ impl From<FederationError> for FederationErrorBridge {
             err @ FederationError::SingleFederationError(
                 apollo_federation::error::SingleFederationError::PlanningCancelled,
             ) => Self::Cancellation(err.to_string()),
+            err @ FederationError::SingleFederationError(
+                apollo_federation::error::SingleFederationError::QueryPlanComplexityExceeded {
+                    ..
+                },
+            ) => Self::QueryPlanComplexityExceeded(err.to_string()),
             err => Self::Other(err.to_string()),
         }
     }
@@ -335,6 +344,12 @@ impl IntoGraphQLErrors for FederationErrorBridge {
                 Error::builder()
                     .message(msg)
                     .extension_code("GRAPHQL_VALIDATION_FAILED")
+                    .build(),
+            ]),
+            FederationErrorBridge::QueryPlanComplexityExceeded(msg) => Ok(vec![
+                Error::builder()
+                    .message(msg)
+                    .extension_code(QUERY_PLAN_COMPLEXITY_EXCEEDED)
                     .build(),
             ]),
             // All other errors will be pushed on and be treated as internal server errors
@@ -609,5 +624,26 @@ mod tests {
             .build();
 
         assert_error_eq_ignoring_id!(expected_gql_error, error.to_graphql_error(None));
+    }
+
+    #[test]
+    fn test_query_plan_complexity_exceeded_keeps_its_error_code() {
+        let federation_error: apollo_federation::error::FederationError =
+            apollo_federation::error::SingleFederationError::QueryPlanComplexityExceeded {
+                message: "Number of non-local selections exceeds limit of 100000".to_string(),
+            }
+            .into();
+
+        let errors = FederationErrorBridge::from(federation_error)
+            .into_graphql_errors()
+            .expect("complexity errors must convert to a GraphQL error, not an internal error");
+
+        let expected_gql_error = graphql::Error::builder()
+            .message("Number of non-local selections exceeds limit of 100000")
+            .extension_code(QUERY_PLAN_COMPLEXITY_EXCEEDED)
+            .build();
+
+        assert_eq!(errors.len(), 1);
+        assert_error_eq_ignoring_id!(expected_gql_error, errors[0].clone());
     }
 }

@@ -35,7 +35,6 @@ use thiserror::Error;
 use super::parsed_link_spec::ParsedLinkSpec;
 use crate::ApolloRouterError;
 use crate::Configuration;
-use crate::plugins::authentication::jwks::convert_key_algorithm;
 use crate::spec::LINK_DIRECTIVE_NAME;
 use crate::spec::Schema;
 
@@ -873,12 +872,11 @@ impl FromStr for License {
                 // Set up the validation for the JWT.
                 // We don't require exp as we are only interested in haltAt and warnAt
                 let mut validation = Validation::new(
-                    convert_key_algorithm(
-                        jwk.common
-                            .key_algorithm
-                            .expect("alg is required on all keys in router.jwks.json"),
-                    )
-                    .expect("only signing algorithms are used"),
+                    jwk.common
+                        .key_algorithm
+                        .expect("alg is required on all keys in router.jwks.json")
+                        .try_into()
+                        .expect("only signing algorithms are used"),
                 );
                 validation.validate_exp = false;
                 validation.set_required_spec_claims(&["iss", "sub", "aud", "warnAt", "haltAt"]);
