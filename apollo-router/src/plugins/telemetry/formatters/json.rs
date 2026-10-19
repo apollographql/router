@@ -356,7 +356,7 @@ impl field::Visit for EventFieldCollector {
         ));
     }
 
-    /// ROUTER-2100: without this, the trait's default implementation forwards to
+    /// Without this, the trait's default implementation forwards to
     /// `record_debug`, which renders the field as a flat Debug string instead of a
     /// nested JSON object.
     ///
