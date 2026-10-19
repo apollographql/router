@@ -1826,9 +1826,51 @@ mod tests {
 
         assert!(routable, "vx is reachable through m's kx");
         let nested = (s0_t, RoutingSiteKey::Field(name!("kx")));
-        assert!(
-            space.caches.key_hops.borrow().contains_key(&nested),
-            "the nested enumeration for kx at s0 should be cached"
+        let cached = space
+            .caches
+            .key_hops
+            .borrow()
+            .get(&nested)
+            .cloned()
+            .expect("the nested enumeration for kx at s0 should be cached");
+
+        // The cached entry must match what a fresh evaluation produces.
+        let fresh = test_support::search_space(&[("s0", &s0), ("m", &m), ("y", &y), ("x", &x)]);
+        let m_schema = fresh.qg().schema_by_source("m").expect("m schema").clone();
+        let m_t: CompositeTypeDefinitionPosition = m_schema
+            .get_type(&name!("T"))
+            .expect("T exists")
+            .try_into()
+            .expect("T is composite");
+        let kx_selection = SelectionSet::parse(m_schema, m_t, "kx").expect("kx parses");
+        let Some(Selection::Field(kx)) = kx_selection.selections.values().next() else {
+            panic!("expected the kx field");
+        };
+        let fresh_hops = fresh
+            .cached_key_hops(
+                test_support::node_for(&fresh, "s0", "T"),
+                None,
+                RoutingSiteKey::Field(name!("kx")),
+                |target| fresh.cached_query_graph.edge_for_field(target, &kx.field),
+            )
+            .expect("key hops enumerate");
+        // Schemas print their address, which differs between the two spaces.
+        let without_addresses = |debug: String| {
+            debug
+                .split(" @ 0x")
+                .enumerate()
+                .map(|(i, part)| {
+                    if i == 0 {
+                        part
+                    } else {
+                        part.trim_start_matches(|c: char| c.is_ascii_hexdigit())
+                    }
+                })
+                .collect::<String>()
+        };
+        assert_eq!(
+            without_addresses(format!("{cached:?}")),
+            without_addresses(format!("{fresh_hops:?}")),
         );
     }
 
