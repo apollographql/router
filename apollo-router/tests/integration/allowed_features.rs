@@ -132,7 +132,6 @@ async fn traffic_shaping_when_allowed_features_contains_feature() {
                 exporters:
                     metrics:
                         prometheus:
-                            listen: 127.0.0.1:4000
                             enabled: true
                             path: /metrics
             include_subgraph_errors:
