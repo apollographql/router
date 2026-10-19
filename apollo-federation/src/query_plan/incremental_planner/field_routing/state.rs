@@ -22,7 +22,7 @@ pub(super) const CONDITION_DEPTH_LIMIT: usize = 32;
 
 /// Condition bookkeeping for a pending selection that carries a
 /// @requires / @key field set.
-#[derive(Clone, Copy, Debug)]
+#[derive(Clone, Debug)]
 pub(crate) struct ConditionScope {
     /// The fetch group consuming the condition data through its entity
     /// representation. Every group the condition selection (or its children)
@@ -31,6 +31,17 @@ pub(crate) struct ConditionScope {
     /// Condition-resolution nesting level. Bounds requires-of-requires
     /// chains: mutually recursive @requires would otherwise spiral forever.
     pub(crate) depth: usize,
+    /// This condition and the conditions it is nested in, innermost first.
+    ancestry: Arc<ConditionSite>,
+}
+
+/// A condition selection and the query graph node it resolves at, linked to
+/// the condition it is nested in.
+#[derive(Debug)]
+struct ConditionSite {
+    query_graph_node: NodeIndex,
+    selection: Selection,
+    parent: Option<Arc<ConditionSite>>,
 }
 
 /// Anchor information for @fromContext across entity boundaries.
@@ -233,9 +244,15 @@ impl PendingSelection {
     /// Mark this selection as condition data feeding `dependent`'s entity
     /// representation, one nesting level deeper than its anchor.
     pub(super) fn into_condition_for(mut self, dependent: NodeIndex) -> Self {
+        let ancestry = Arc::new(ConditionSite {
+            query_graph_node: self.query_graph_node,
+            selection: self.selection.clone(),
+            parent: self.condition.as_ref().map(|c| c.ancestry.clone()),
+        });
         self.condition = Some(ConditionScope {
             dependent,
             depth: self.condition_depth() + 1,
+            ancestry,
         });
         self
     }
@@ -243,12 +260,30 @@ impl PendingSelection {
     /// The fetch group consuming this selection's condition data, if it is
     /// a condition.
     pub(crate) fn ordering_dependent(&self) -> Option<NodeIndex> {
-        self.condition.map(|c| c.dependent)
+        self.condition.as_ref().map(|c| c.dependent)
     }
 
     /// Condition nesting level; 0 for ordinary query selections.
     pub(super) fn condition_depth(&self) -> usize {
-        self.condition.map_or(0, |c| c.depth)
+        self.condition.as_ref().map_or(0, |c| c.depth)
+    }
+
+    /// Whether resolving this selection is already, directly or through a
+    /// condition it is nested in, resolving `selection` as a condition at
+    /// `query_graph_node`.
+    pub(super) fn is_resolving_condition(
+        &self,
+        query_graph_node: NodeIndex,
+        selection: &Selection,
+    ) -> bool {
+        let mut site = self.condition.as_ref().map(|c| &c.ancestry);
+        while let Some(current) = site {
+            if current.query_graph_node == query_graph_node && current.selection == *selection {
+                return true;
+            }
+            site = current.parent.as_ref();
+        }
+        false
     }
 }
 
