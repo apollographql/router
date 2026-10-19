@@ -312,7 +312,7 @@ dependencies = [
  "serde",
  "serde_json",
  "serde_json_bytes",
- "sha1 0.10.6",
+ "sha1 0.11.0",
  "shape",
  "similar 3.2.0",
  "strum 0.28.0",
@@ -501,7 +501,7 @@ dependencies = [
  "heck",
  "hex",
  "hickory-resolver",
- "hmac 0.12.1",
+ "hmac 0.13.0",
  "http 1.5.0",
  "http-body 1.1.0",
  "http-body-util",
@@ -579,8 +579,8 @@ dependencies = [
  "serde_regex",
  "serde_urlencoded",
  "serde_yaml 0.8.26",
- "sha1 0.10.6",
- "sha2 0.10.9",
+ "sha1 0.11.0",
+ "sha2 0.11.0",
  "shellexpand",
  "similar 3.2.0",
  "socket2 0.5.10",
@@ -4389,9 +4389,9 @@ dependencies = [
 
 [[package]]
 name = "jsonwebtoken"
-version = "10.4.0"
+version = "11.1.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "eba32bfb4ffdeaca3e34431072faf01745c9b26d25504aa7a6cf5684334fc4fc"
+checksum = "e75fe14a82d81e5f5af639997db37d8b96045938a7ac6ab18cdbe1c7467e05e1"
 dependencies = [
  "base64 0.22.1",
  "ed25519-dalek",
