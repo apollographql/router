@@ -349,6 +349,7 @@ async fn defer() {
                             service_name: "Y".into(),
                             requires: vec![requires_selection::Selection::InlineFragment(
                                 requires_selection::InlineFragment {
+    conditions: vec![],
                                     type_condition: Some(name!("T")),
                                     selections: vec![
                                         requires_selection::Selection::Field(
@@ -1976,6 +1977,7 @@ async fn defer_depends_skips_fetch_when_typename_missing() {
                                 requires: vec![
                                     requires_selection::Selection::InlineFragment(
                                         requires_selection::InlineFragment {
+    conditions: vec![],
                                             type_condition: Some(name!("Sub")),
                                             selections: vec![
                                                 requires_selection::Selection::Field(
@@ -2038,6 +2040,7 @@ async fn defer_depends_skips_fetch_when_typename_missing() {
                         requires: vec![
                             requires_selection::Selection::InlineFragment(
                                 requires_selection::InlineFragment {
+    conditions: vec![],
                                     type_condition: Some(name!("Inner")),
                                     selections: vec![
                                         requires_selection::Selection::Field(
@@ -2699,5 +2702,108 @@ async fn response_formatting_missing_vs_null_nonnull_field_asymmetry() {
         serde_json::json!([
             { "message": "Null value found for non-nullable type String", "path": ["entity", "name"] },
         ]),
+    );
+}
+
+/// A field with `@requires` is under `@include`, and shares its entity fetch with an unconditional
+/// sibling (FED-707). The required field is only fetched when the condition holds, so the
+/// `requires` inputs carry that condition, and the router must evaluate it when building the
+/// representations: the sibling must be fetched whether or not the condition holds.
+#[tokio::test]
+async fn conditional_requires_next_to_unconditional_sibling() {
+    let schema = supergraph_schema(
+        r#"
+        enum join__Graph {
+            A @join__graph(name: "a", url: "http://localhost/a")
+            B @join__graph(name: "b", url: "http://localhost/b")
+        }
+
+        type Query @join__type(graph: A) @join__type(graph: B) {
+            start: T! @join__field(graph: B)
+        }
+
+        type T @join__type(graph: A, key: "id") @join__type(graph: B, key: "id") {
+            id: ID!
+            onlyInA: Int! @join__field(graph: A)
+            demanding: Int! @join__field(graph: A, requires: "onlyInB")
+            onlyInB: Int! @join__field(graph: A, external: true) @join__field(graph: B)
+        }
+        "#,
+    );
+    let query = "query Q($c: Boolean = false) { start { id onlyInA demanding @include(if: $c) } }";
+
+    async fn run(
+        schema: &str,
+        query: &str,
+        variables: serde_json_bytes::Map<serde_json_bytes::ByteString, serde_json_bytes::Value>,
+        subgraphs: MockedSubgraphs,
+    ) -> serde_json::Value {
+        let service = TestHarness::builder()
+            .configuration_json(default_config())
+            .unwrap()
+            .schema(schema)
+            .extra_plugin(subgraphs)
+            .build_supergraph()
+            .await
+            .unwrap();
+        let request = supergraph::Request::fake_builder()
+            .context(Context::new())
+            .query(query)
+            .variables(variables)
+            .build()
+            .unwrap();
+        let mut stream = service.oneshot(request).await.unwrap();
+        let response = stream.next_response().await.unwrap();
+        serde_json::to_value(&response).unwrap()
+    }
+
+    // Condition false (through the variable's default value): `onlyInB` is not fetched from B, and
+    // must not be part of the representation sent to A, so that `onlyInA` is still fetched.
+    let subgraphs = MockedSubgraphs([
+        ("b", MockSubgraph::builder().with_json(
+            serde_json::json!({"query": "query Q__b__0($c:Boolean=false){start{__typename id ...on T@include(if:$c){onlyInB}}}"}),
+            serde_json::json!({"data": {"start": {"__typename": "T", "id": "1"}}}),
+        ).build()),
+        ("a", MockSubgraph::builder().with_json(
+            serde_json::json!({
+                "query": "query Q__a__1($representations:[_Any!]!$c:Boolean=false){_entities(representations:$representations){...on T{onlyInA demanding@include(if:$c)}}}",
+                "variables": {"representations": [{"__typename": "T", "id": "1"}]},
+            }),
+            serde_json::json!({"data": {"_entities": [{"onlyInA": 1}]}}),
+        ).build()),
+    ].into_iter().collect());
+    let response = run(&schema, query, Default::default(), subgraphs).await;
+    assert_eq!(
+        response,
+        serde_json::json!({"data": {"start": {"id": "1", "onlyInA": 1}}}),
+    );
+
+    // Condition true: `onlyInB` is fetched from B and is part of the representation sent to A.
+    let subgraphs = MockedSubgraphs([
+        ("b", MockSubgraph::builder().with_json(
+            serde_json::json!({
+                "query": "query Q__b__0($c:Boolean=false){start{__typename id ...on T@include(if:$c){onlyInB}}}",
+                "variables": {"c": true},
+            }),
+            serde_json::json!({"data": {"start": {"__typename": "T", "id": "1", "onlyInB": 2}}}),
+        ).build()),
+        ("a", MockSubgraph::builder().with_json(
+            serde_json::json!({
+                "query": "query Q__a__1($representations:[_Any!]!$c:Boolean=false){_entities(representations:$representations){...on T{onlyInA demanding@include(if:$c)}}}",
+                "variables": {"c": true, "representations": [{"__typename": "T", "id": "1", "onlyInB": 2}]},
+            }),
+            serde_json::json!({"data": {"_entities": [{"onlyInA": 1, "demanding": 3}]}}),
+        ).build()),
+    ].into_iter().collect());
+    let response = run(
+        &schema,
+        query,
+        json!({"c": true}).as_object().unwrap().clone(),
+        subgraphs,
+    )
+    .await;
+    assert_eq!(
+        response,
+        serde_json::json!({"data": {"start": {"id": "1", "onlyInA": 1, "demanding": 3}}}),
     );
 }
