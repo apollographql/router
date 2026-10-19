@@ -143,8 +143,8 @@ impl SelectionTrie {
     /// |---------------------|-------------------------------------|
     /// | `Base(name)`        | `name` (e.g. `"$root"`)             |
     /// | `Field(_, key)`     | `key`                               |
-    /// | `Item(_, idx)`      | `idx.to_string()`                   |
     /// | `AnyField(_)`       | `"**"`                              |
+    /// | `Item(_, idx)`      | (skipped — list index, RH-1415)     |
     /// | `AnyItem(_)`        | (skipped — array iteration marker)  |
     /// | `Question(_)`       | (skipped — operator)                |
     /// | `NotNone(_)`        | (skipped — operator)                |
@@ -178,15 +178,19 @@ impl SelectionTrie {
                 NameCase::Field(_, field) => {
                     current = current.add_str_with_ranges(field, ranges);
                 }
-                NameCase::Item(_, idx) => {
-                    current = current.add_str_with_ranges(&idx.to_string(), ranges);
-                }
                 NameCase::AnyField(_) => current = current.add_str_with_ranges("**", ranges),
-                NameCase::AnyItem(_) | NameCase::Question(_) | NameCase::NotNone(_) => {
-                    // `*` is an iteration marker, not a path component; `?`
-                    // and `!` are presence operators that constrain the shape
-                    // of the value at the current trie position. None of them
-                    // introduce a new trie key.
+                NameCase::Item(_, _)
+                | NameCase::AnyItem(_)
+                | NameCase::Question(_)
+                | NameCase::NotNone(_) => {
+                    // `*` and `[i]` select list elements, not fields: a
+                    // consumer of `list->first` still needs all of `list`,
+                    // and a GraphQL field set cannot index into a list (an
+                    // index key here once produced `tagIds { "0" }` and broke
+                    // @key synthesis, RH-1415). `?` and `!` are presence
+                    // operators that constrain the shape of the value at the
+                    // current trie position. None of them introduce a new
+                    // trie key.
                 }
             }
         }
@@ -208,9 +212,11 @@ impl SelectionTrie {
             let key = match part.case() {
                 NameCase::Base(base) => base.to_string(),
                 NameCase::Field(_, field) => field.to_string(),
-                NameCase::Item(_, idx) => idx.to_string(),
                 NameCase::AnyField(_) => "**".to_string(),
-                NameCase::AnyItem(_) | NameCase::Question(_) | NameCase::NotNone(_) => continue,
+                NameCase::Item(_, _)
+                | NameCase::AnyItem(_)
+                | NameCase::Question(_)
+                | NameCase::NotNone(_) => continue,
             };
             match current.get(key) {
                 Some(sub) => current = sub,
