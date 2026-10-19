@@ -58,36 +58,21 @@ pub(crate) const ERROR_CODE_RESPONSE_VALIDATION: &str = "RESPONSE_VALIDATION_FAI
 pub(crate) const EXTENSIONS_VALUE_COMPLETION_KEY: &str = "valueCompletion";
 
 /// A GraphQL query.
-#[derive(Debug, derive_more::PartialEq, derive_more::Eq, Serialize, Deserialize)]
+#[derive(Debug, Serialize, Deserialize)]
 pub(crate) struct Query {
     pub(crate) string: String,
-    #[eq(skip)]
     pub(crate) fragments: Fragments,
-    #[eq(skip)]
     pub(crate) operation: Operation,
-    #[eq(skip)]
     pub(crate) subselections: HashMap<SubSelectionKey, SubSelectionValue>,
-    #[eq(skip)]
     pub(crate) unauthorized: UnauthorizedPaths,
-    #[eq(skip)]
     pub(crate) filtered_query: Option<Arc<Query>>,
-    #[eq(skip)]
     pub(crate) defer_stats: DeferStats,
-    #[eq(skip)]
     pub(crate) is_original: bool,
 
     /// This is a hash that depends on:
     /// - the query itself
     /// - the schema
-    #[eq(skip)]
     pub(crate) schema_aware_hash: QueryHash,
-}
-
-// Only `string` participates in equality, so only it may participate in hashing.
-impl std::hash::Hash for Query {
-    fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
-        self.string.hash(state);
-    }
 }
 
 #[derive(Debug, Serialize, Deserialize)]
