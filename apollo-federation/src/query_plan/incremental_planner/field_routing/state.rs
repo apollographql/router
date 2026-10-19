@@ -1,0 +1,473 @@
+//! Mutable BULB search state: the pending-selection stack, the fetch graph
+//! under construction, and O(1) checkpoint/rollback over both.
+
+use std::collections::HashSet;
+use std::sync::Arc;
+
+use apollo_compiler::Name;
+use petgraph::graph::NodeIndex;
+
+use super::super::fetch_graph::FetchGraph;
+use super::super::fetch_graph::FetchGraphCheckpoint;
+use super::super::shared_path::SharedPath;
+use super::routing::RoutingChoice;
+use crate::operation::Selection;
+use crate::query_graph::graph_path::operation::OpPathElement;
+use crate::query_plan::FetchDataPathElement;
+use crate::schema::position::CompositeTypeDefinitionPosition;
+
+/// Cap on condition-resolution nesting, checked before each increment of
+/// [`ConditionScope::depth`].
+pub(super) const CONDITION_DEPTH_LIMIT: usize = 32;
+
+/// Condition bookkeeping for a pending selection that carries a
+/// @requires / @key field set.
+#[derive(Clone, Copy, Debug)]
+pub(crate) struct ConditionScope {
+    /// The fetch group consuming the condition data through its entity
+    /// representation. Every group the condition selection (or its children)
+    /// commits into gets an ordering edge to this dependent.
+    pub(crate) dependent: NodeIndex,
+    /// Condition-resolution nesting level. Bounds requires-of-requires
+    /// chains: mutually recursive @requires would otherwise spiral forever.
+    pub(crate) depth: usize,
+}
+
+/// Anchor information for @fromContext across entity boundaries.
+#[derive(Clone, Debug, Default)]
+pub(crate) struct ContextAnchor {
+    /// The *parent* fetch feeding this selection's entity fetch, when the
+    /// selection lives inside one. When the ancestor with @context is at or
+    /// above the entity boundary, the context selection must be added here,
+    /// not to the entity fetch.
+    pub(crate) fetch: Option<NodeIndex>,
+    /// Op path at the entity boundary in the parent fetch.
+    pub(crate) op_path: SharedPath<Arc<OpPathElement>>,
+}
+
+#[derive(Clone, Debug)]
+pub(crate) struct PendingSelection {
+    /// The field or inline fragment to resolve.
+    pub(crate) selection: Selection,
+    /// Current position in the QueryGraph (determines which subgraph we're in).
+    pub(crate) query_graph_node: NodeIndex,
+    /// Which fetch graph node to add this field to.
+    pub(crate) fetch_node: NodeIndex,
+    /// Operation path from the fetch node's root to this selection's parent.
+    pub(crate) op_path: SharedPath<Arc<OpPathElement>>,
+    /// Response path within the fetch node, for result merging.
+    pub(crate) path_in_fetch: SharedPath<FetchDataPathElement>,
+    /// Set when this selection is a condition (@requires / @key field set);
+    /// `None` for ordinary query selections.
+    pub(crate) condition: Option<ConditionScope>,
+    /// @provides provenance across downcasts: the provides-copy query graph
+    /// node this position descended from via inline fragments, when the
+    /// current node itself is not a copy. An ancestor's `@provides` on an
+    /// interface-typed field applies to every runtime type, but the query
+    /// graph only copies the nodes named in the provides field set. A
+    /// downcast out of the copy layer lands on the original node, where the
+    /// provided fields have no edges. The anchor keeps the copy node (whose
+    /// edges are the provided fields) visible to key-hop enumeration, so
+    /// "are these key conditions provided here?" stays an exact graph check
+    /// instead of a schema-level guess. `None` whenever the current node's
+    /// own edges carry the provenance (inside a copy layer) or no @provides
+    /// is in scope.
+    pub(crate) provides_anchor: Option<NodeIndex>,
+    /// Cross-subgraph type-narrowing state (see [`TypeNarrowing`]).
+    pub(crate) narrowing: TypeNarrowing,
+    /// The @defer label this selection is inside, if any. Propagated to
+    /// fetch nodes so they can be partitioned into primary vs deferred.
+    pub(crate) defer_ref: Option<String>,
+    /// Type spine from the operation root through parents of this selection,
+    /// for @fromContext ancestor resolution.
+    pub(crate) parent_types: SharedPath<CompositeTypeDefinitionPosition>,
+    /// @fromContext anchor: the parent fetch feeding this selection's
+    /// entity fetch, when the selection lives inside one.
+    pub(crate) context_anchor: ContextAnchor,
+    /// Best-effort selection: dropping it (zero routing options, or a failed
+    /// commit) is tolerated silently instead of counting toward
+    /// `dropped_fields` and failing the plan. Inherited by forks, so
+    /// condition data pushed on a best-effort selection's behalf is equally
+    /// tolerant. The only producer is the @interfaceObject
+    /// concrete-`__typename` recovery, where no subgraph may be able to
+    /// supply the concrete typename.
+    pub(crate) best_effort: bool,
+    /// Set on fork remainders: the subgraph chosen to serve this part of a
+    /// forked field. Routing options into any other subgraph are filtered
+    /// out, so the remainder commits as a forced hop instead of reopening
+    /// the decision the fork already made.
+    pub(crate) restrict_to: Option<Arc<str>>,
+    /// Lazily computed routing options for this exact pending (see
+    /// `cached_routing_options`). Options are a pure function of the pending
+    /// and the immutable query graph, and pendings are only queried once
+    /// frozen behind an `Arc`, so first-query-wins memoization is sound.
+    /// Reset by `fork` since forks change the selection or position.
+    pub(crate) routing_options_memo: std::sync::OnceLock<Arc<Vec<RoutingChoice>>>,
+}
+
+/// Type-narrowing state a pending selection carries down the operation,
+/// propagated as a unit from parent to child in `dispatch_sub_selections`.
+#[derive(Clone, Debug, Default)]
+pub(crate) struct TypeNarrowing {
+    /// True when some ancestor field had routing options in multiple
+    /// subgraphs (a shareable fork); inconsistent abstract types downstream
+    /// must then restrict fragment conditions to the cross-subgraph
+    /// intersection.
+    pub(crate) shareable_path: bool,
+    /// When the parent field returns an inconsistent abstract type reachable
+    /// from multiple subgraphs, fragment conditions are restricted to the
+    /// cross-subgraph intersection (matching the exhaustive planner's
+    /// simultaneous-paths behavior). `None` means no restriction.
+    pub(crate) intersection_filter: Option<Arc<HashSet<Name>>>,
+    /// Sorted possible runtime type names at this selection's position,
+    /// narrowed by the inline fragments crossed since the nearest enclosing
+    /// field. `None` when the position is not under a composite-typed field.
+    pub(crate) possible_types: Option<Arc<Vec<Name>>>,
+    /// The possible runtime types of the nearest enclosing field's output
+    /// type, before fragment narrowing. When `possible_types` is a proper
+    /// subset, the enclosing response-path element carries the narrowed set
+    /// as type conditions.
+    pub(crate) possible_types_after_last_field: Option<Arc<Vec<Name>>>,
+}
+
+impl PendingSelection {
+    /// A selection at the same routing position as `self`; chain `with_*`
+    /// builders to move any part of it.
+    pub(super) fn fork(&self, selection: Selection) -> Self {
+        Self {
+            selection,
+            routing_options_memo: std::sync::OnceLock::new(),
+            // The restriction belongs to one fork remainder only; a fork is
+            // a different selection (a child, a condition, a restructured
+            // shape) that may legitimately need another subgraph.
+            // `commit_fork` sets it explicitly on the remainders it pushes.
+            restrict_to: None,
+            ..self.clone()
+        }
+    }
+
+    /// A selection at the operation root: no path, no conditions, no
+    /// narrowing. Everything else derives from it through `fork`.
+    pub(crate) fn root(
+        selection: Selection,
+        query_graph_node: NodeIndex,
+        fetch_node: NodeIndex,
+    ) -> Self {
+        Self {
+            selection,
+            query_graph_node,
+            fetch_node,
+            op_path: SharedPath::new(),
+            path_in_fetch: SharedPath::new(),
+            condition: None,
+            provides_anchor: None,
+            narrowing: TypeNarrowing::default(),
+            defer_ref: None,
+            parent_types: SharedPath::new(),
+            context_anchor: ContextAnchor::default(),
+            best_effort: false,
+            restrict_to: None,
+            routing_options_memo: std::sync::OnceLock::new(),
+        }
+    }
+
+    pub(super) fn at(mut self, query_graph_node: NodeIndex, fetch_node: NodeIndex) -> Self {
+        self.query_graph_node = query_graph_node;
+        self.fetch_node = fetch_node;
+        self
+    }
+
+    pub(super) fn with_op_path(mut self, op_path: SharedPath<Arc<OpPathElement>>) -> Self {
+        self.op_path = op_path;
+        self
+    }
+
+    pub(super) fn with_response_path(
+        mut self,
+        path_in_fetch: SharedPath<FetchDataPathElement>,
+    ) -> Self {
+        self.path_in_fetch = path_in_fetch;
+        self
+    }
+
+    pub(super) fn with_provides_anchor(mut self, provides_anchor: Option<NodeIndex>) -> Self {
+        self.provides_anchor = provides_anchor;
+        self
+    }
+
+    pub(super) fn with_narrowing(mut self, narrowing: TypeNarrowing) -> Self {
+        self.narrowing = narrowing;
+        self
+    }
+
+    pub(super) fn with_defer(mut self, defer_ref: Option<String>) -> Self {
+        self.defer_ref = defer_ref;
+        self
+    }
+
+    pub(super) fn with_parent_types(
+        mut self,
+        parent_types: SharedPath<CompositeTypeDefinitionPosition>,
+    ) -> Self {
+        self.parent_types = parent_types;
+        self
+    }
+
+    pub(super) fn with_context_anchor(mut self, context_anchor: ContextAnchor) -> Self {
+        self.context_anchor = context_anchor;
+        self
+    }
+
+    pub(super) fn with_restrict_to(mut self, restrict_to: Option<Arc<str>>) -> Self {
+        self.restrict_to = restrict_to;
+        self
+    }
+
+    /// Mark this selection best-effort: a drop is tolerated silently (see
+    /// [`Self::best_effort`]).
+    pub(super) fn into_best_effort(mut self) -> Self {
+        self.best_effort = true;
+        self
+    }
+
+    /// Mark this selection as condition data feeding `dependent`'s entity
+    /// representation, one nesting level deeper than its anchor.
+    pub(super) fn into_condition_for(mut self, dependent: NodeIndex) -> Self {
+        self.condition = Some(ConditionScope {
+            dependent,
+            depth: self.condition_depth() + 1,
+        });
+        self
+    }
+
+    /// The fetch group consuming this selection's condition data, if it is
+    /// a condition.
+    pub(crate) fn ordering_dependent(&self) -> Option<NodeIndex> {
+        self.condition.map(|c| c.dependent)
+    }
+
+    /// Condition nesting level; 0 for ordinary query selections.
+    pub(super) fn condition_depth(&self) -> usize {
+        self.condition.map_or(0, |c| c.depth)
+    }
+}
+
+/// Undo-log entry for one pending-stack mutation.
+#[derive(Clone)]
+enum PendingOp {
+    /// An entry was pushed. Undo: pop and drop it.
+    Pushed,
+    /// An entry was popped. Undo: push it back. Holding the `Arc` keeps
+    /// this O(1) (no deep clone of the selection).
+    Popped(Arc<PendingSelection>),
+    /// A mid-stack entry was lifted to the top (most-constrained-first
+    /// ordering). Undo: pop the top and reinsert at its original index.
+    Lifted(usize),
+}
+
+/// BULB state: a partially-built query plan.
+///
+/// A single `PlanState` is mutated during search; trial branches are
+/// applied, scored, and undone via `checkpoint()` / `rollback()` without
+/// cloning. `snapshot()` saves the best complete candidate.
+#[derive(Clone)]
+pub(crate) struct PlanState {
+    /// Lightweight fetch graph tracking groups, dependencies, and selections.
+    pub(crate) graph: FetchGraph,
+    /// Fields/fragments not yet routed to a subgraph. Mutate only through
+    /// `push_pending` / `pop_pending` so the undo log stays consistent.
+    pub(crate) pending: Vec<Arc<PendingSelection>>,
+    /// Undo log for `pending`. Checkpoints record its length; rollback
+    /// replays entries in reverse.
+    pending_undo: Vec<PendingOp>,
+    /// Fields dropped for lack of routing options. Heavily penalized in
+    /// `cost()` so BULB backtracks to explore alternatives.
+    pub(crate) dropped_fields: usize,
+    /// Type-explosion or fragment-restructuring commits applied. These
+    /// decompose abstract types into per-concrete-type fragments, deferring
+    /// real fetch cost to later decisions. The probe (apply → cost →
+    /// rollback) sees them as free, so without a penalty BULB chases them
+    /// eagerly, creating combinatorial blowup on wide interfaces. Penalized
+    /// in `cost()` above any structural cost but below drops.
+    pub(crate) type_explosions: usize,
+    /// Monotonic count of pending-stack pushes over the whole search,
+    /// including rolled-back work. Every unit of planning effort flows
+    /// through `push_pending`, so this tracks wall time far more tightly
+    /// than decision counts. Used by the search's effort budget;
+    /// deliberately not restored by `rollback`.
+    pub(crate) effort: u64,
+    /// Monotonic count of forced-backtracking attempts across the whole
+    /// search. Capped by `FORCED_BACKTRACK_CAP` so unplannable operations
+    /// with no BULB alternatives stop retrying within the budget-free
+    /// greedy pass. Not restored by `rollback`.
+    ///
+    /// FIXME: like the condition depth limit, a fixed cap can fail an
+    /// operation the legacy planner handles. Loop detection in the condition
+    /// resolution rework should replace it.
+    pub(crate) forced_backtracks: u64,
+    /// Interned @requires condition-field aliases: index is the alias id,
+    /// the entry is the widest (unaliased) selection interned so far under
+    /// that alias. A condition shares an alias with any entry it contains
+    /// or is contained by, so overlapping conditions stage their shared
+    /// prefix once instead of duplicating the fetch chain per alias.
+    /// Sharing stays correct because every consumer routes its own
+    /// conditions under the alias path and the fetch graph dedupes them.
+    /// Append-only; not restored on rollback (aliases only need to be
+    /// stable, not predictable).
+    pub(crate) condition_alias_ids: Vec<Selection>,
+}
+
+#[derive(Clone, Debug)]
+pub(crate) struct PlanCheckpoint {
+    graph_cp: FetchGraphCheckpoint,
+    pending_cp: usize,
+    dropped_fields: usize,
+    type_explosions: usize,
+}
+
+impl PlanState {
+    pub(crate) fn new(pending: Vec<PendingSelection>) -> Self {
+        Self::with_graph(FetchGraph::new(), pending)
+    }
+
+    pub(crate) fn with_graph(graph: FetchGraph, pending: Vec<PendingSelection>) -> Self {
+        Self {
+            graph,
+            pending: pending.into_iter().map(Arc::new).collect(),
+            pending_undo: Vec::new(),
+            dropped_fields: 0,
+            type_explosions: 0,
+            effort: 0,
+            forced_backtracks: 0,
+            condition_alias_ids: Vec::new(),
+        }
+    }
+
+    /// Push a selection onto the pending stack, logging the mutation.
+    pub(super) fn push_pending(&mut self, selection: PendingSelection) {
+        self.effort += 1;
+        self.pending.push(Arc::new(selection));
+        self.pending_undo.push(PendingOp::Pushed);
+    }
+
+    /// Move the pending at `index` to the top of the stack (logged for
+    /// rollback). Used to commit forced selections before open decisions,
+    /// so their fetch groups inform the decision's scoring.
+    pub(super) fn lift_pending(&mut self, index: usize) {
+        let entry = self.pending.remove(index);
+        self.pending.push(entry);
+        self.pending_undo.push(PendingOp::Lifted(index));
+    }
+
+    /// Pop the top pending selection, logging the mutation. The returned
+    /// `Arc` is shared with the undo log entry, so undo is O(1).
+    pub(super) fn pop_pending(&mut self) -> Option<Arc<PendingSelection>> {
+        let popped = self.pending.pop()?;
+        self.pending_undo.push(PendingOp::Popped(popped.clone()));
+        Some(popped)
+    }
+
+    /// Clone for saving a completed candidate; drops both undo logs, which
+    /// snapshots never roll back.
+    pub(crate) fn snapshot(&self) -> Self {
+        Self {
+            graph: self.graph.snapshot(),
+            pending: self.pending.clone(),
+            pending_undo: Vec::new(),
+            dropped_fields: self.dropped_fields,
+            condition_alias_ids: self.condition_alias_ids.clone(),
+            effort: self.effort,
+            forced_backtracks: self.forced_backtracks,
+            type_explosions: self.type_explosions,
+        }
+    }
+
+    /// Save the current state for later rollback. O(1).
+    pub(crate) fn checkpoint(&self) -> PlanCheckpoint {
+        PlanCheckpoint {
+            graph_cp: self.graph.checkpoint(),
+            pending_cp: self.pending_undo.len(),
+            dropped_fields: self.dropped_fields,
+            type_explosions: self.type_explosions,
+        }
+    }
+
+    /// Restore to a previously saved checkpoint, undoing all mutations since.
+    pub(crate) fn rollback(&mut self, cp: PlanCheckpoint) {
+        self.graph.rollback(cp.graph_cp);
+        while self.pending_undo.len() > cp.pending_cp {
+            match self.pending_undo.pop().unwrap() {
+                PendingOp::Pushed => {
+                    self.pending.pop();
+                }
+                PendingOp::Popped(entry) => {
+                    self.pending.push(entry);
+                }
+                PendingOp::Lifted(index) => {
+                    let entry = self.pending.pop().unwrap();
+                    self.pending.insert(index, entry);
+                }
+            }
+        }
+        self.dropped_fields = cp.dropped_fields;
+        self.type_explosions = cp.type_explosions;
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn any_selection() -> Selection {
+        let schema = apollo_compiler::schema::Schema::parse_and_validate(
+            "type Query { x: Int }",
+            "schema.graphql",
+        )
+        .expect("valid schema");
+        let schema =
+            crate::schema::ValidFederationSchema::new(schema).expect("valid federation schema");
+        let op = crate::operation::Operation::parse(schema, "{ x }", "op.graphql")
+            .expect("valid operation");
+        op.selection_set
+            .selections
+            .values()
+            .next()
+            .expect("one selection")
+            .clone()
+    }
+
+    /// Push/pop/lift interleavings across nested checkpoints must restore
+    /// the stack exactly.
+    #[test]
+    fn pending_log_rolls_back_interleaved_mutations() {
+        let entry = |n: u32| {
+            PendingSelection::root(
+                any_selection(),
+                NodeIndex::new(n as usize),
+                NodeIndex::new(0),
+            )
+        };
+        let ids = |state: &PlanState| -> Vec<usize> {
+            state
+                .pending
+                .iter()
+                .map(|p| p.query_graph_node.index())
+                .collect()
+        };
+
+        let mut state = PlanState::new(vec![entry(0), entry(1), entry(2)]);
+        let outer = state.checkpoint();
+        state.push_pending(entry(3));
+        state.lift_pending(1);
+        let inner = state.checkpoint();
+        state.pop_pending().expect("pops the lifted entry");
+        state.lift_pending(0);
+        state.push_pending(entry(4));
+        assert_eq!(ids(&state), vec![2, 3, 0, 4]);
+
+        state.rollback(inner);
+        assert_eq!(ids(&state), vec![0, 2, 3, 1]);
+        state.rollback(outer);
+        assert_eq!(ids(&state), vec![0, 1, 2]);
+    }
+}

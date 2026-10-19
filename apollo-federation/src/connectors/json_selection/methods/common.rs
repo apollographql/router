@@ -2,6 +2,7 @@ use serde_json::Number;
 use serde_json_bytes::Value as JSON;
 use shape::Shape;
 use shape::ShapeCase;
+use shape::location::Location;
 
 use crate::connectors::ApplyToError;
 use crate::connectors::json_selection::ShapeContext;
@@ -58,10 +59,6 @@ pub(crate) fn could_satisfy(contract: &Shape, shape: &Shape) -> bool {
         ShapeCase::All(members) => {
             return members.iter().any(|member| could_satisfy(contract, member));
         }
-        ShapeCase::Error(shape::Error {
-            partial: Some(partial),
-            ..
-        }) => return could_satisfy(contract, partial),
         _ => {}
     }
 
@@ -173,17 +170,18 @@ pub(crate) fn present_arg(context: &ShapeContext, shape: &Shape) -> Option<Shape
 /// Carries the errors anywhere in `arg_shapes` over to `result`, for the
 /// arguments of a `->` method call (see `ShapeContext::compute_method_shape`).
 ///
-/// [`could_satisfy`] looks through an error to its `partial` shape, so an
-/// argument like `$(1)->gt("x")` (an error with a `Bool` partial) passes a
+/// Shape errors are metadata on the shape they describe, so an argument like
+/// `$(1)->gt("x")` (a `Bool` carrying an error) passes [`could_satisfy`] in a
 /// method's argument check, and a method that builds its result without the
 /// argument's shape would otherwise drop the error. Errors are collected from
-/// error chains, union and intersection members, array elements and object
-/// fields, like `$(true)->match([true, $(1)->gt("x")])`, which has the shape
-/// `One<Error<Bool>, None>`, or `[$(1)->gt("x")]`.
+/// the argument itself, union and intersection members, array elements and
+/// object fields, like `$(true)->match([true, $(1)->gt("x")])`, which has the
+/// shape `One<Bool (err ...), None>`, or `[$(1)->gt("x")]`.
 ///
-/// Each error becomes a layer around `result`, first error outermost, and
-/// errors `result` already contains (from methods like `->echo`, whose result
-/// includes the argument's shape) are skipped.
+/// Each error is attached to `result` in order, together with the locations of
+/// the shape that carried it, and errors `result` already contains (from
+/// methods like `->echo`, whose result includes the argument's shape) are
+/// skipped.
 pub(crate) fn with_arg_errors<'a>(
     arg_shapes: impl IntoIterator<Item = &'a Shape>,
     result: Shape,
@@ -196,35 +194,26 @@ pub(crate) fn with_arg_errors<'a>(
         return result;
     }
 
-    let mut existing = Vec::new();
-    collect_errors(&result, &mut existing);
+    let existing: Vec<shape::Error> = result.errors().cloned().collect();
     errors
         .into_iter()
-        .rev()
-        .filter(|error| !existing.contains(error))
-        .fold(result, |result, error| match error.case() {
-            ShapeCase::Error(shape::Error { message, .. }) => {
-                Shape::error_with_partial(message.clone(), result, error.locations().cloned())
-            }
-            _ => result,
+        .filter(|(error, _)| !existing.contains(error))
+        .fold(result, |result, (error, locations)| {
+            result.with_error(error).with_locations(&locations)
         })
 }
 
-/// Adds each distinct error anywhere in `shape` to `errors`, as an error shape
-/// with no partial. Errors are compared by message, since shapes compare
-/// equal regardless of their locations. `Name` references are not followed,
-/// so an error only reachable through one is not collected.
-fn collect_errors(shape: &Shape, errors: &mut Vec<Shape>) {
-    match shape.case() {
-        ShapeCase::Error(shape::Error { message, partial }) => {
-            let error = Shape::error(message.clone(), shape.locations().cloned());
-            if !errors.contains(&error) {
-                errors.push(error);
-            }
-            if let Some(partial) = partial {
-                collect_errors(partial, errors);
-            }
+/// Adds each distinct error anywhere in `shape` to `errors`, with the
+/// locations of the shape that carries it. Errors are compared by message.
+/// `Name` references are not followed, so an error only reachable through one
+/// is not collected.
+fn collect_errors(shape: &Shape, errors: &mut Vec<(shape::Error, Vec<Location>)>) {
+    for error in shape.own_errors() {
+        if !errors.iter().any(|(collected, _)| collected == error) {
+            errors.push((error.clone(), shape.locations().cloned().collect()));
         }
+    }
+    match shape.case() {
         ShapeCase::One(members) => members
             .iter()
             .for_each(|member| collect_errors(member, errors)),
@@ -452,7 +441,7 @@ mod tests {
     }
 
     fn record(field: &str, shape: Shape) -> Shape {
-        Shape::record([(field.to_string(), shape)].into_iter().collect(), [])
+        Shape::closed_record([(field.to_string(), shape)].into_iter().collect(), [])
     }
 
     #[rstest::rstest]
@@ -467,7 +456,7 @@ mod tests {
     #[case::list_of_unknown(scalar_list(), Shape::list(Shape::unknown([]), []))]
     #[case::tuple_with_named(
         scalar_list(),
-        Shape::tuple([Shape::string([]), Shape::name("$args.id", [])], [])
+        Shape::closed_tuple([Shape::string([]), Shape::name("$args.id", [])], [])
     )]
     #[case::union_contract(
         Shape::one([Shape::string([]), scalar_list()], []),
@@ -509,7 +498,7 @@ mod tests {
     // An array element with no value is `null` at runtime.
     #[case::tuple_with_missing_element(
         scalar_list(),
-        Shape::tuple([Shape::none(), Shape::string([])], [])
+        Shape::closed_tuple([Shape::none(), Shape::string([])], [])
     )]
     #[case::list_of_maybe_missing(
         scalar_list(),
@@ -538,7 +527,7 @@ mod tests {
     )]
     #[case::tuple_with_object(
         scalar_list(),
-        Shape::tuple([Shape::name("$args.id", []), Shape::empty_object([])], [])
+        Shape::closed_tuple([Shape::name("$args.id", []), Shape::empty_object([])], [])
     )]
     #[case::union_contract(
         Shape::one([Shape::string([]), scalar_list()], []),
@@ -564,8 +553,8 @@ mod tests {
         Shape::string_value("z", [])
     )]
     #[case::nested_literals(
-        Shape::tuple([Shape::string_value("a", [])], []),
-        Shape::tuple([Shape::string_value("b", [])], [])
+        Shape::closed_tuple([Shape::string_value("a", [])], []),
+        Shape::closed_tuple([Shape::string_value("b", [])], [])
     )]
     #[case::named(Shape::string_value("a", []), Shape::name("$args.s", []))]
     fn test_is_same_type_comparison_positive_cases(#[case] a: Shape, #[case] b: Shape) {
@@ -578,8 +567,8 @@ mod tests {
     #[case::bool_and_string(Shape::bool_value(true, []), Shape::string([]))]
     #[case::string_and_null(Shape::string_value("a", []), Shape::null([]))]
     #[case::nested_mismatch(
-        Shape::tuple([Shape::string_value("a", [])], []),
-        Shape::tuple([Shape::int_value(1, [])], [])
+        Shape::closed_tuple([Shape::string_value("a", [])], []),
+        Shape::closed_tuple([Shape::int_value(1, [])], [])
     )]
     fn test_is_same_type_comparison_negative_cases(#[case] a: Shape, #[case] b: Shape) {
         assert!(!is_same_type_comparison(&a, &b));
@@ -628,13 +617,13 @@ mod tests {
         Shape::error_with_partial("a", Shape::one([arg_error("b"), Shape::none()], []), []),
         vec!["a", "b"]
     )]
-    #[case::array_element(Shape::tuple([Shape::bool([]), arg_error("a")], []), vec!["a"])]
+    #[case::array_element(Shape::closed_tuple([Shape::bool([]), arg_error("a")], []), vec!["a"])]
     #[case::array_tail(Shape::list(arg_error("a"), []), vec!["a"])]
     #[case::object_field(
-        Shape::record([("f".to_string(), arg_error("a"))].into_iter().collect(), []),
+        Shape::closed_record([("f".to_string(), arg_error("a"))].into_iter().collect(), []),
         vec!["a"]
     )]
-    #[case::repeated(Shape::tuple([arg_error("a"), arg_error("a")], []), vec!["a"])]
+    #[case::repeated(Shape::closed_tuple([arg_error("a"), arg_error("a")], []), vec!["a"])]
     fn test_with_arg_errors(#[case] arg_shape: Shape, #[case] expected: Vec<&str>) {
         let (messages, result) = unwrap_errors(with_arg_errors([&arg_shape], Shape::string([])));
         assert_eq!(messages, expected);
@@ -661,7 +650,10 @@ mod tests {
         Shape::one([Shape::string([]), arg_error("a")], [])
     )]
     fn test_with_arg_errors_skips_existing(#[case] arg_shape: Shape, #[case] result: Shape) {
-        assert_eq!(with_arg_errors([&arg_shape], result.clone()), result);
+        assert_eq!(
+            with_arg_errors([&arg_shape], result.clone()).pretty_print(),
+            result.pretty_print()
+        );
     }
 
     // Argument errors are added around a method's result only when the result
@@ -671,7 +663,8 @@ mod tests {
     #[rstest::rstest]
     #[case::echo(r#"$->echo($(1)->gt("x"))"#, 1)]
     #[case::echo_array(r#"$->echo([$(1)->gt("x")])"#, 0)]
-    #[case::match_value(r#"$(1)->match([1, $(1)->gt("x")], [@, true])"#, 0)]
+    // The match's `Bool` arms merge into one `Bool`, which carries the error.
+    #[case::match_value(r#"$(1)->match([1, $(1)->gt("x")], [@, true])"#, 1)]
     #[case::map_body(r#"$([1])->map($(1)->gt("x"))"#, 0)]
     #[case::nested_echo(r#"$->echo($->echo($(1)->gt("x")))"#, 1)]
     #[case::and(r#"$(true)->and($(1)->gt("x"))"#, 1)]
@@ -680,15 +673,12 @@ mod tests {
     fn test_argument_errors_are_not_duplicated(#[case] selection: &str, #[case] chain: usize) {
         for spec in [ConnectSpec::V0_3, ConnectSpec::V0_4, ConnectSpec::V0_5] {
             let shape = crate::selection!(selection, spec).shape();
-            let (messages, inner) = unwrap_errors(shape.clone());
-            let mut inner_errors = vec![];
-            collect_errors(&inner, &mut inner_errors);
-            let inner_messages: Vec<_> = inner_errors
-                .iter()
-                .filter_map(|error| match error.case() {
-                    ShapeCase::Error(shape::Error { message, .. }) => Some(message.clone()),
-                    _ => None,
-                })
+            let (messages, _) = unwrap_errors(shape.clone());
+            // `errors()` lists the shape's own errors first, then its children's.
+            let inner_messages: Vec<_> = shape
+                .errors()
+                .skip(messages.len())
+                .map(|error| error.message.clone())
                 .collect();
 
             assert_eq!(messages.len(), chain, "{spec:?}: {}", shape.pretty_print());
@@ -702,16 +692,14 @@ mod tests {
         }
     }
 
-    /// Unwraps the chain of errors around a shape, returning their messages,
-    /// outermost first, and the innermost partial.
-    fn unwrap_errors(mut shape: Shape) -> (Vec<String>, Shape) {
-        let mut messages = vec![];
-        while let ShapeCase::Error(shape::Error { message, partial }) = shape.case() {
-            messages.push(message.clone());
-            shape = partial
-                .clone()
-                .expect("errors keep the result as a partial");
-        }
+    /// Returns the messages of the errors attached to a shape, in the order
+    /// they were added, and the shape itself, which compares equal to the
+    /// same shape without errors.
+    fn unwrap_errors(shape: Shape) -> (Vec<String>, Shape) {
+        let messages = shape
+            .own_errors()
+            .map(|error| error.message.clone())
+            .collect();
         (messages, shape)
     }
 }

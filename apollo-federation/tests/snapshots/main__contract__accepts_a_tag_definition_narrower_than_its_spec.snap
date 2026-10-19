@@ -1,0 +1,12 @@
+---
+source: apollo-federation/tests/contract.rs
+expression: api_schema(&supergraph)
+---
+type Query {
+  public: Product!
+}
+
+type Product {
+  id: ID!
+  name: String!
+}

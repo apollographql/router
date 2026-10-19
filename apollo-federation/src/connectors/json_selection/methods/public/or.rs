@@ -322,11 +322,9 @@ mod shape_tests {
             get_shape(
                 vec![WithRange::new(LitExpr::Bool(true), None)],
                 Shape::string([])
-            ),
-            Shape::error(
-                "Method ->or can only be applied to boolean values. Got String.".to_string(),
-                [get_location()]
             )
+            .pretty_print(),
+            r#"Unknown (err "Method ->or can only be applied to boolean values. Got String.")"#,
         );
     }
 
@@ -336,23 +334,17 @@ mod shape_tests {
             get_shape(
                 vec![WithRange::new(LitExpr::String("test".to_string()), None)],
                 Shape::bool([])
-            ),
-            Shape::error(
-                "Method ->or can only accept boolean arguments. Got \"test\" at position 0."
-                    .to_string(),
-                [get_location()]
             )
+            .pretty_print(),
+            r#"Unknown (err "Method ->or can only accept boolean arguments. Got \"test\" at position 0.")"#,
         );
     }
 
     #[test]
     fn or_shape_should_error_on_no_args() {
         assert_eq!(
-            get_shape(vec![], Shape::bool([])),
-            Shape::error(
-                "Method ->or requires at least one argument".to_string(),
-                [get_location()]
-            )
+            get_shape(vec![], Shape::bool([])).pretty_print(),
+            r#"Unknown (err "Method ->or requires at least one argument")"#,
         );
     }
 
@@ -366,11 +358,9 @@ mod shape_tests {
                 None,
                 Shape::bool([]),
                 Shape::none(),
-            ),
-            Shape::error(
-                "Method ->or requires at least one argument".to_string(),
-                [get_location()]
             )
+            .pretty_print(),
+            r#"Unknown (err "Method ->or requires at least one argument")"#,
         );
     }
 

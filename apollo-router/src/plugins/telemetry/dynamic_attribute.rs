@@ -8,6 +8,7 @@
 
 use opentelemetry::Key;
 use opentelemetry::KeyValue;
+use opentelemetry::trace::TraceContextExt;
 use tracing_subscriber::Layer;
 use tracing_subscriber::Registry;
 use tracing_subscriber::layer::Context;
@@ -20,7 +21,6 @@ use super::consts::OTEL_STATUS_MESSAGE;
 use super::formatters::APOLLO_CONNECTOR_PREFIX;
 use super::formatters::APOLLO_PRIVATE_PREFIX;
 use super::otel::OtelData;
-use super::otel::layer::str_to_span_kind;
 use super::otel::layer::str_to_status;
 use super::utils::upsert_attribute;
 use crate::plugins::telemetry::reload::otel::IsSampled;
@@ -97,13 +97,7 @@ impl SpanDynAttribute for ::tracing::Span {
                             match extensions.get_mut::<OtelData>() {
                                 Some(otel_data) => {
                                     update_otel_data(otel_data, &key, &value);
-                                    if let Some(attrs) = otel_data.builder.attributes.as_mut() {
-                                        // Replace existing attribute with same key, or add new one
-                                        upsert_attribute(attrs, KeyValue::new(key, value));
-                                    } else {
-                                        otel_data.builder.attributes =
-                                            Some([KeyValue::new(key, value)].into_iter().collect());
-                                    }
+                                    otel_data.upsert_attribute(KeyValue::new(key, value));
                                 }
                                 None => {
                                     // Can't use ::tracing::error! because it could create deadlock on extensions
@@ -154,14 +148,8 @@ impl SpanDynAttribute for ::tracing::Span {
                                             update_otel_data(otel_data, &attr.key, &attr.value)
                                         })
                                         .collect();
-                                    if let Some(existing_attributes) =
-                                        otel_data.builder.attributes.as_mut()
-                                    {
-                                        for attr in attributes {
-                                            upsert_attribute(existing_attributes, attr);
-                                        }
-                                    } else {
-                                        otel_data.builder.attributes = Some(attributes);
+                                    for attr in attributes {
+                                        otel_data.upsert_attribute(attr);
                                     }
                                 }
                                 None => {
@@ -204,11 +192,16 @@ fn update_otel_data(otel_data: &mut OtelData, key: &Key, value: &opentelemetry::
         OTEL_NAME if otel_data.forced_span_name.is_none() => {
             otel_data.forced_span_name = Some(value.to_string())
         }
-        OTEL_KIND => otel_data.builder.span_kind = str_to_span_kind(&value.as_str()),
+        OTEL_KIND => {
+            // Span kind can't be changed once a span is built, and by the time a
+            // dynamic attribute can be set here, it always already is (see `OtelData`'s
+            // doc comment) - so this is a no-op, matching the limitation
+            // `tracing-opentelemetry` itself accepts for the same reason.
+        }
         OTEL_STATUS_CODE => otel_data.forced_status = str_to_status(&value.as_str()).into(),
         OTEL_STATUS_MESSAGE => {
-            otel_data.builder.status =
-                opentelemetry::trace::Status::error(value.as_str().to_string())
+            let status = opentelemetry::trace::Status::error(value.as_str().to_string());
+            otel_data.current_cx.span().set_status(status);
         }
         _ => {}
     }

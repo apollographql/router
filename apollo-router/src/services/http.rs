@@ -2,10 +2,7 @@
 use std::sync::Arc;
 
 use tower::BoxError;
-use tower::ServiceExt;
-use tower_service::Service;
 
-use super::Plugins;
 use super::router::body::RouterBody;
 use crate::Context;
 
@@ -16,7 +13,6 @@ mod tests;
 
 pub(crate) use service::HttpClientService;
 
-pub(crate) type BoxService = tower::util::BoxService<HttpRequest, HttpResponse, BoxError>;
 pub(crate) type BoxCloneService = tower::util::BoxCloneService<HttpRequest, HttpResponse, BoxError>;
 pub(crate) type ServiceResult = Result<HttpResponse, BoxError>;
 
@@ -32,66 +28,54 @@ pub(crate) struct HttpResponse {
     pub(crate) context: Context,
 }
 
-#[derive(Clone)]
-pub(crate) struct HttpClientServiceFactory {
-    pub(crate) service: HttpClientService,
-    pub(crate) plugins: Arc<Plugins>,
-}
+/// Marks a response whose headers arrived but whose body did not: the connection failed while
+/// the body was being read.
+///
+/// The subgraph and connector services keep the status the headers carried, so without this a
+/// `200` whose body was cut off is indistinguishable from one that was answered in full. They
+/// insert it into the response's `http` extensions, where the circuit breaker reads it to count
+/// the transport failure against the target. A body the router cut short itself, at a
+/// configured response size limit, is not marked: that is the router's decision, not a failure
+/// of the target.
+#[derive(Clone, Copy, Debug)]
+pub(crate) struct IncompleteResponseBody;
 
-impl HttpClientServiceFactory {
-    pub(crate) fn new(service: HttpClientService, plugins: Arc<Plugins>) -> Self {
-        HttpClientServiceFactory { service, plugins }
-    }
+/// Marks a subgraph response the router produced without calling the subgraph: a coprocessor, a
+/// rhai script or one of the router's own plugins broke the request, or the response cache
+/// answered it. Each of them inserts it on the response it builds, through
+/// [`subgraph::Response::answered_by_router`](crate::services::subgraph::Response::answered_by_router).
+///
+/// Such a response says nothing about the subgraph's health, so the circuit breaker records no
+/// outcome for it. It lives in the response's `http` extensions, like [`IncompleteResponseBody`].
+/// A connector response carries the same fact as its `answered_by_router` field.
+#[derive(Clone, Copy, Debug)]
+pub(crate) struct AnsweredByRouter;
 
-    #[cfg(test)]
-    pub(crate) fn from_config(
-        service: impl Into<String>,
-        configuration: &crate::Configuration,
-        client_config: crate::configuration::shared::Client,
-    ) -> Self {
-        use indexmap::IndexMap;
+/// Marks a subgraph response to a request whose file upload, which the router was streaming from
+/// the client to the subgraph, failed part way through. The file uploads plugin inserts it.
+///
+/// The failure is the client's, not the subgraph's, so the circuit breaker records no outcome for
+/// it, whatever status the response carries.
+#[derive(Clone, Copy, Debug)]
+pub(crate) struct UploadStreamFailed;
 
-        let service = HttpClientService::from_config_for_subgraph(
-            service,
-            configuration,
-            &rustls::RootCertStore::empty(),
-            client_config,
-        )
-        .unwrap();
-
-        HttpClientServiceFactory {
-            service,
-            plugins: Arc::new(IndexMap::default()),
-        }
-    }
-
-    pub(crate) fn create(&self, name: &str) -> BoxService {
-        let service = self.service.clone();
-        self.plugins
-            .iter()
-            .rev()
-            .fold(service.boxed(), |acc, (_, e)| {
-                e.http_client_service(name, acc)
-            })
-    }
-}
-
-pub(crate) trait MakeHttpService: Send + Sync + 'static {
-    fn make(&self) -> BoxService;
-}
-
-impl<S> MakeHttpService for S
-where
-    S: Service<HttpRequest, Response = HttpResponse, Error = BoxError>
-        + Clone
-        + Send
-        + Sync
-        + 'static,
-    <S as Service<HttpRequest>>::Future: Send,
-{
-    fn make(&self) -> BoxService {
-        self.clone().boxed()
-    }
+/// Test-only wrapper around the `build_http_client_service` pipeline function: a
+/// subgraph client for `name` built from default configuration with no plugins.
+#[cfg(test)]
+pub(crate) fn test_http_client_service(name: &str) -> BoxCloneService {
+    let inputs = service::HttpClientInputs::for_subgraph(
+        name,
+        &crate::Configuration::default(),
+        &rustls::RootCertStore::empty(),
+        crate::configuration::shared::Client::default(),
+        &mut service::DnsResolverCache::default(),
+    )
+    .unwrap();
+    crate::pipeline::build_http_client_service(
+        name,
+        inputs,
+        Arc::new(indexmap::IndexMap::default()),
+    )
 }
 
 /// The kind of remote service an [`HttpClientService`] is configured to talk to.

@@ -184,7 +184,7 @@ async fn make_request(request: Request) -> apollo_router::graphql::Response {
                     json!({"data": {"me": {"id": 1}}}),
                 )
                 .build()
-                .boxed(),
+                .boxed_clone(),
             _ => default,
         })
         .build_router()

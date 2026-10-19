@@ -22,7 +22,6 @@ use crate::graphql::Response;
 use crate::json_ext::Path;
 use crate::json_ext::Value;
 use crate::spec::SpecError;
-use crate::spec::operation_limits::OperationLimits;
 
 /// Return up to this many GraphQL parsing or validation errors.
 ///
@@ -63,7 +62,7 @@ pub(crate) enum FetchError {
         reason: String,
     },
 
-    /// service '{service}' response was malformed: {reason}
+    /// response was malformed: {reason}
     SubrequestMalformedResponse {
         /// The service that responded with the malformed response.
         service: String,
@@ -72,13 +71,13 @@ pub(crate) enum FetchError {
         reason: String,
     },
 
-    /// service '{service}' returned a PATCH response which was not expected
+    /// subgraph returned a PATCH response which was not expected
     SubrequestUnexpectedPatchResponse {
         /// The service that returned the PATCH response.
         service: String,
     },
 
-    /// HTTP fetch failed from '{service}': {reason}
+    /// HTTP fetch failed: {reason}
     ///
     /// note that this relates to a transport error and not a GraphQL error
     SubrequestHttpError {
@@ -90,7 +89,7 @@ pub(crate) enum FetchError {
         /// The reason the fetch failed.
         reason: String,
     },
-    /// Websocket fetch failed from '{service}': {reason}
+    /// Websocket fetch failed: {reason}
     ///
     /// note that this relates to a transport error and not a GraphQL error
     SubrequestWsError {
@@ -104,7 +103,7 @@ pub(crate) enum FetchError {
     /// could not find path: {reason}
     ExecutionPathNotFound { reason: String },
 
-    /// Batching error for '{service}': {reason}
+    /// Batching error: {reason}
     SubrequestBatchingError {
         /// The service for which batch processing failed.
         service: String,
@@ -209,8 +208,6 @@ pub(crate) enum CacheResolverError {
     RetrievalError(Arc<QueryPlannerError>),
     /// {0}
     Backpressure(crate::compute_job::ComputeBackPressureError),
-    /// batch processing failed: {0}
-    BatchingError(String),
 }
 
 impl IntoGraphQLErrors for CacheResolverError {
@@ -222,12 +219,6 @@ impl IntoGraphQLErrors for CacheResolverError {
                 .into_graphql_errors()
                 .map_err(|_err| CacheResolverError::RetrievalError(retrieval_error)),
             CacheResolverError::Backpressure(e) => Ok(vec![e.to_graphql_error()]),
-            CacheResolverError::BatchingError(msg) => Ok(vec![
-                Error::builder()
-                    .message(msg)
-                    .extension_code("BATCH_PROCESSING_FAILED")
-                    .build(),
-            ]),
         }
     }
 }
@@ -274,21 +265,11 @@ pub(crate) enum QueryPlannerError {
     /// query planning panicked: {0}
     JoinError(String),
 
-    /// empty query plan. This behavior is unexpected and we suggest opening an issue to apollographql/router with a reproduction.
-    EmptyPlan(String), // usage_reporting stats_report_key
-
     /// unhandled planner result
     UnhandledPlannerResult,
 
     /// spec error: {0}
     SpecError(SpecError),
-
-    /// complexity limit exceeded
-    LimitExceeded(OperationLimits<bool>),
-
-    // Safe to cache because user scopes and policies are included in the cache key.
-    /// Unauthorized field or type
-    Unauthorized(Vec<Path>),
 
     /// Federation error: {0}
     FederationError(FederationErrorBridge),
@@ -306,6 +287,8 @@ impl From<FederationErrorBridge> for QueryPlannerError {
     }
 }
 
+const QUERY_PLAN_COMPLEXITY_EXCEEDED: &str = "QUERY_PLAN_COMPLEXITY_EXCEEDED";
+
 /// A temporary error type used to extract a few variants from `apollo-federation`'s
 /// `FederationError`. For backwards compatibility, these other variant need to be extracted so
 /// that the correct status code (GRAPHQL_VALIDATION_ERROR) can be added to the response. For
@@ -322,6 +305,8 @@ pub(crate) enum FederationErrorBridge {
     Other(String),
     /// {0}
     Cancellation(String),
+    /// {0}
+    QueryPlanComplexityExceeded(String),
 }
 
 impl From<FederationError> for FederationErrorBridge {
@@ -336,6 +321,11 @@ impl From<FederationError> for FederationErrorBridge {
             err @ FederationError::SingleFederationError(
                 apollo_federation::error::SingleFederationError::PlanningCancelled,
             ) => Self::Cancellation(err.to_string()),
+            err @ FederationError::SingleFederationError(
+                apollo_federation::error::SingleFederationError::QueryPlanComplexityExceeded {
+                    ..
+                },
+            ) => Self::QueryPlanComplexityExceeded(err.to_string()),
             err => Self::Other(err.to_string()),
         }
     }
@@ -354,6 +344,12 @@ impl IntoGraphQLErrors for FederationErrorBridge {
                 Error::builder()
                     .message(msg)
                     .extension_code("GRAPHQL_VALIDATION_FAILED")
+                    .build(),
+            ]),
+            FederationErrorBridge::QueryPlanComplexityExceeded(msg) => Ok(vec![
+                Error::builder()
+                    .message(msg)
+                    .extension_code(QUERY_PLAN_COMPLEXITY_EXCEEDED)
                     .build(),
             ]),
             // All other errors will be pushed on and be treated as internal server errors
@@ -396,46 +392,6 @@ impl IntoGraphQLErrors for QueryPlannerError {
             QueryPlannerError::OperationValidationErrors(errs) => errs
                 .into_graphql_errors()
                 .map_err(QueryPlannerError::OperationValidationErrors),
-
-            QueryPlannerError::LimitExceeded(OperationLimits {
-                depth,
-                height,
-                root_fields,
-                aliases,
-            }) => {
-                let mut errors = Vec::new();
-                let mut build = |exceeded, code, message| {
-                    if exceeded {
-                        errors.push(
-                            Error::builder()
-                                .message(message)
-                                .extension_code(code)
-                                .build(),
-                        )
-                    }
-                };
-                build(
-                    depth,
-                    "MAX_DEPTH_LIMIT",
-                    "Maximum depth limit exceeded in this operation",
-                );
-                build(
-                    height,
-                    "MAX_HEIGHT_LIMIT",
-                    "Maximum height (field count) limit exceeded in this operation",
-                );
-                build(
-                    root_fields,
-                    "MAX_ROOT_FIELDS_LIMIT",
-                    "Maximum root fields limit exceeded in this operation",
-                );
-                build(
-                    aliases,
-                    "MAX_ALIASES_LIMIT",
-                    "Maximum aliases limit exceeded in this operation",
-                );
-                Ok(errors)
-            }
             QueryPlannerError::FederationError(err) => err
                 .into_graphql_errors()
                 .map_err(QueryPlannerError::FederationError),
@@ -475,11 +431,6 @@ impl From<SpecError> for QueryPlannerError {
 impl From<ValidationErrors> for QueryPlannerError {
     fn from(err: ValidationErrors) -> Self {
         QueryPlannerError::OperationValidationErrors(ValidationErrors { errors: err.errors })
-    }
-}
-impl From<OperationLimits<bool>> for QueryPlannerError {
-    fn from(error: OperationLimits<bool>) -> Self {
-        QueryPlannerError::LimitExceeded(error)
     }
 }
 
@@ -662,7 +613,7 @@ mod tests {
             reason: String::from("invalid request"),
         };
         let expected_gql_error = graphql::Error::builder()
-            .message("HTTP fetch failed from 'my_service': invalid request")
+            .message("HTTP fetch failed: invalid request")
             .extension_code("SUBREQUEST_HTTP_ERROR")
             .extension("reason", Value::String("invalid request".into()))
             .extension("service", Value::String("my_service".into()))
@@ -673,5 +624,26 @@ mod tests {
             .build();
 
         assert_error_eq_ignoring_id!(expected_gql_error, error.to_graphql_error(None));
+    }
+
+    #[test]
+    fn test_query_plan_complexity_exceeded_keeps_its_error_code() {
+        let federation_error: apollo_federation::error::FederationError =
+            apollo_federation::error::SingleFederationError::QueryPlanComplexityExceeded {
+                message: "Number of non-local selections exceeds limit of 100000".to_string(),
+            }
+            .into();
+
+        let errors = FederationErrorBridge::from(federation_error)
+            .into_graphql_errors()
+            .expect("complexity errors must convert to a GraphQL error, not an internal error");
+
+        let expected_gql_error = graphql::Error::builder()
+            .message("Number of non-local selections exceeds limit of 100000")
+            .extension_code(QUERY_PLAN_COMPLEXITY_EXCEEDED)
+            .build();
+
+        assert_eq!(errors.len(), 1);
+        assert_error_eq_ignoring_id!(expected_gql_error, errors[0].clone());
     }
 }

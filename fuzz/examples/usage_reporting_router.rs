@@ -3,6 +3,7 @@ use std::ops::ControlFlow;
 use anyhow::Result;
 use apollo_router::graphql;
 use apollo_router::layers::ServiceBuilderExt;
+use apollo_router::plugin::Enabled;
 use apollo_router::plugin::Plugin;
 use apollo_router::plugin::PluginInit;
 use apollo_router::register_plugin;
@@ -15,12 +16,12 @@ use tower::ServiceExt;
 #[derive(Debug)]
 struct ExposeReferencedFieldsByType {
     #[allow(dead_code)]
-    configuration: bool,
+    configuration: Enabled,
 }
 
 #[async_trait::async_trait]
 impl Plugin for ExposeReferencedFieldsByType {
-    type Config = bool;
+    type Config = Enabled;
 
     async fn new(init: PluginInit<Self::Config>) -> Result<Self, BoxError> {
         Ok(Self {
@@ -28,7 +29,10 @@ impl Plugin for ExposeReferencedFieldsByType {
         })
     }
 
-    fn supergraph_service(&self, service: supergraph::BoxService) -> supergraph::BoxService {
+    fn supergraph_service(
+        &self,
+        service: supergraph::BoxCloneService,
+    ) -> supergraph::BoxCloneService {
         ServiceBuilder::new()
             .map_first_graphql_response(
                 |context, http_parts, mut graphql_response: graphql::Response| {
@@ -40,12 +44,12 @@ impl Plugin for ExposeReferencedFieldsByType {
                 },
             )
             .service(service)
-            .boxed()
+            .boxed_clone()
     }
 
-    fn execution_service(&self, service: execution::BoxService) -> execution::BoxService {
+    fn execution_service(&self, service: execution::BoxCloneService) -> execution::BoxCloneService {
         ServiceBuilder::new()
-            .checkpoint(|req: execution::Request| {
+            .checkpoint_async(|req: execution::Request| async move {
                 let as_json: serde_json_bytes::Value =
                     serde_json_bytes::to_value(&req.query_plan).unwrap();
 
@@ -62,7 +66,7 @@ impl Plugin for ExposeReferencedFieldsByType {
                 ))
             })
             .service(service)
-            .boxed()
+            .boxed_clone()
     }
 }
 

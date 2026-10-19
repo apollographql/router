@@ -11,8 +11,6 @@ use opentelemetry_sdk::trace::BatchConfigBuilder;
 use opentelemetry_sdk::trace::Span;
 use opentelemetry_sdk::trace::SpanData;
 use opentelemetry_sdk::trace::SpanProcessor;
-use schemars::JsonSchema;
-use serde::Deserialize;
 use tower::BoxError;
 
 use super::formatters::APOLLO_CONNECTOR_PREFIX;
@@ -23,16 +21,15 @@ use crate::plugins::telemetry::tracing::datadog::DatadogSpanProcessor;
 
 pub(crate) mod apollo;
 pub(crate) mod apollo_telemetry;
+pub(crate) mod apollo_trace_throttle;
 pub(crate) mod datadog;
 #[allow(unreachable_pub, dead_code)]
 pub(crate) mod datadog_exporter;
 mod named;
 pub(crate) mod otlp;
 pub(crate) mod reload;
-pub(crate) mod zipkin;
 
 pub(crate) use named::NamedSpanExporter;
-pub(crate) use named::NamedTokioRuntime;
 
 #[derive(Debug)]
 struct ApolloFilterSpanProcessor<T: SpanProcessor> {
@@ -223,30 +220,32 @@ where
 }
 
 /// Batch processor configuration
-#[derive(Debug, Clone, Deserialize, JsonSchema, PartialEq)]
-#[serde(default)]
+#[apollo_configuration::configuration]
+#[derive(PartialEq)]
 pub(crate) struct BatchProcessorConfig {
-    #[serde(deserialize_with = "humantime_serde::deserialize")]
+    #[config(default = scheduled_delay_default().into())]
     #[schemars(with = "String")]
     /// The delay interval in milliseconds between two consecutive processing
     /// of batches. The default value is 5 seconds.
-    pub(crate) scheduled_delay: Duration,
+    pub(crate) scheduled_delay: apollo_configuration::types::Duration,
 
     /// The maximum queue size to buffer spans for delayed processing. If the
     /// queue gets full it drops the spans. The default value is 2048.
+    #[config(default = max_queue_size_default())]
     pub(crate) max_queue_size: usize,
 
     /// The maximum number of spans to process in a single batch. If there are
     /// more than one batch worth of spans then it processes multiple batches
     /// of spans one batch after the other without any delay. The default value
     /// is 512.
+    #[config(default = 512)]
     pub(crate) max_export_batch_size: usize,
 
     /// The maximum duration to export a batch of data.
     /// The default value is 30 seconds.
-    #[serde(deserialize_with = "humantime_serde::deserialize")]
+    #[config(default = max_export_timeout_default().into())]
     #[schemars(with = "String")]
-    pub(crate) max_export_timeout: Duration,
+    pub(crate) max_export_timeout: apollo_configuration::types::Duration,
 
     /// Maximum number of concurrent exports
     ///
@@ -254,6 +253,7 @@ pub(crate) struct BatchProcessorConfig {
     /// by an exporter. A value of 1 will cause exports to be performed
     /// synchronously on the BatchSpanProcessor task.
     /// The default is 1.
+    #[config(default = 1)]
     pub(crate) max_concurrent_exports: usize,
 }
 
@@ -265,28 +265,19 @@ pub(crate) fn max_queue_size_default() -> usize {
     2048
 }
 
-fn max_export_batch_size_default() -> usize {
-    512
-}
-
 pub(crate) fn max_export_timeout_default() -> Duration {
     Duration::from_secs(30)
 }
 
-fn max_concurrent_exports_default() -> usize {
-    1
-}
-
 impl BatchProcessorConfig {
-    /// Apply OTEL_BSP_* environment variable overrides to this config.
-    /// This should be used for third-party exporters (OTLP, Datadog, Zipkin)
-    /// but NOT for Apollo exporters.
+    /// Applies `OTEL_BSP_*` environment variable overrides to this config.
     pub(crate) fn with_env_overrides(self) -> Result<Self, BoxError> {
         Ok(BatchProcessorConfig {
             scheduled_delay: Self::parse_duration_env(
                 "OTEL_BSP_SCHEDULE_DELAY",
-                self.scheduled_delay,
-            )?,
+                *self.scheduled_delay,
+            )?
+            .into(),
             max_queue_size: Self::parse_usize_env("OTEL_BSP_MAX_QUEUE_SIZE", self.max_queue_size)?,
             max_export_batch_size: Self::parse_usize_env(
                 "OTEL_BSP_MAX_EXPORT_BATCH_SIZE",
@@ -294,8 +285,9 @@ impl BatchProcessorConfig {
             )?,
             max_export_timeout: Self::parse_duration_env(
                 "OTEL_BSP_EXPORT_TIMEOUT",
-                self.max_export_timeout,
-            )?,
+                *self.max_export_timeout,
+            )?
+            .into(),
             max_concurrent_exports: Self::parse_usize_env(
                 "OTEL_BSP_MAX_CONCURRENT_EXPORTS",
                 self.max_concurrent_exports,
@@ -335,12 +327,12 @@ impl BatchProcessorConfig {
 impl From<BatchProcessorConfig> for BatchConfig {
     fn from(config: BatchProcessorConfig) -> Self {
         BatchConfigBuilder::default()
-            .with_scheduled_delay(config.scheduled_delay)
+            .with_scheduled_delay(*config.scheduled_delay)
             .with_max_queue_size(config.max_queue_size)
             .with_max_export_batch_size(config.max_export_batch_size)
             // Concurrent exports and export timeout require experimental_trace_batch_span_processor_with_async_runtime feature
             .with_max_concurrent_exports(config.max_concurrent_exports)
-            .with_max_export_timeout(config.max_export_timeout)
+            .with_max_export_timeout(*config.max_export_timeout)
             .build()
     }
 }
@@ -348,23 +340,11 @@ impl From<BatchProcessorConfig> for BatchConfig {
 impl Display for BatchProcessorConfig {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
         f.write_str(&format!("BatchConfig {{ scheduled_delay={}, max_queue_size={}, max_export_batch_size={}, max_export_timeout={}, max_concurrent_exports={} }}",
-                             humantime::format_duration(self.scheduled_delay),
+                             self.scheduled_delay,
                              self.max_queue_size,
                              self.max_export_batch_size,
-                             humantime::format_duration(self.max_export_timeout),
+                             self.max_export_timeout,
                              self.max_concurrent_exports))
-    }
-}
-
-impl Default for BatchProcessorConfig {
-    fn default() -> Self {
-        BatchProcessorConfig {
-            scheduled_delay: scheduled_delay_default(),
-            max_queue_size: max_queue_size_default(),
-            max_export_batch_size: max_export_batch_size_default(),
-            max_export_timeout: max_export_timeout_default(),
-            max_concurrent_exports: max_concurrent_exports_default(),
-        }
     }
 }
 

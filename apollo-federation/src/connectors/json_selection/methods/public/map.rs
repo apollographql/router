@@ -217,7 +217,7 @@ mod tests {
         //         &IndexMap::default(),
         //         &SourceId::new("test"),
         //     );
-        //     assert_eq!(output_shape.pretty_print(), "List<String>");
+        //     assert_eq!(output_shape.pretty_print(), "[...String]");
         // }
     }*/
 
@@ -264,7 +264,7 @@ mod tests {
             selection!(r#"items: $([])->map({ id: "x" })"#, spec)
                 .shape()
                 .pretty_print(),
-            r#"{ items: List<{ id: "x" }> }"#,
+            r#"{ items: [...{ id: "x" }] }"#,
         );
         assert_eq!(
             selection!(r#"items: $(["a"])->map(@)"#, spec)

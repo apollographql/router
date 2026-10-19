@@ -4,6 +4,7 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use apollo_compiler::Schema;
+use apollo_redaction::Redacted;
 use futures::StreamExt;
 use http::HeaderName;
 use http::HeaderValue;
@@ -48,9 +49,9 @@ use crate::plugins::response_cache::storage::CacheStorage;
 use crate::plugins::response_cache::storage::Document;
 use crate::plugins::response_cache::storage::redis::Config;
 use crate::plugins::response_cache::storage::redis::Storage;
-use crate::router_factory::RouterSuperServiceFactory;
-use crate::router_factory::YamlRouterFactory;
-use crate::services::new_service::ServiceFactory;
+use crate::router_factory::PipelineFactory;
+use crate::router_factory::RouterFactory;
+use crate::router_factory::RouterServiceFactory;
 use crate::services::subgraph;
 use crate::services::supergraph;
 use crate::uplink::license_enforcement::LicenseState;
@@ -93,7 +94,7 @@ pub(super) fn create_subgraph_conf(
         all: Subgraph {
             invalidation: Some(SubgraphInvalidationConfig {
                 enabled: true,
-                shared_key: INVALIDATION_SHARED_KEY.to_string(),
+                shared_key: Redacted::new(INVALIDATION_SHARED_KEY.to_string()),
                 ..Default::default()
             }),
             ..Default::default()
@@ -316,7 +317,7 @@ async fn insert() {
             "id": "1",
             "creatorUser": {
               "__typename": "User",
-              "id": 2
+              "id": "2"
             }
           }
         }
@@ -366,7 +367,7 @@ async fn insert() {
             "id": "1",
             "creatorUser": {
               "__typename": "User",
-              "id": 2
+              "id": "2"
             }
           }
         }
@@ -503,7 +504,7 @@ async fn insert_with_custom_key() {
             "id": "1",
             "creatorUser": {
               "__typename": "User",
-              "id": 2
+              "id": "2"
             }
           }
         }
@@ -553,7 +554,7 @@ async fn insert_with_custom_key() {
             "id": "1",
             "creatorUser": {
               "__typename": "User",
-              "id": 2
+              "id": "2"
             }
           }
         }
@@ -676,7 +677,7 @@ async fn already_expired_cache_control() {
             "id": "1",
             "creatorUser": {
               "__typename": "User",
-              "id": 2
+              "id": "2"
             }
           }
         }
@@ -722,7 +723,7 @@ async fn already_expired_cache_control() {
             "id": "1",
             "creatorUser": {
               "__typename": "User",
-              "id": 2
+              "id": "2"
             }
           }
         }
@@ -837,7 +838,7 @@ async fn insert_without_debug_header() {
             "id": "1",
             "creatorUser": {
               "__typename": "User",
-              "id": 2
+              "id": "2"
             }
           }
         }
@@ -877,7 +878,7 @@ async fn insert_without_debug_header() {
             "id": "1",
             "creatorUser": {
               "__typename": "User",
-              "id": 2
+              "id": "2"
             }
           }
         }
@@ -1313,7 +1314,7 @@ async fn no_cache_control() {
             "id": "1",
             "creatorUser": {
               "__typename": "User",
-              "id": 2
+              "id": "2"
             }
           }
         }
@@ -1354,7 +1355,7 @@ async fn no_cache_control() {
             "id": "1",
             "creatorUser": {
               "__typename": "User",
-              "id": 2
+              "id": "2"
             }
           }
         }
@@ -1450,7 +1451,7 @@ async fn no_store_from_request() {
             "id": "1",
             "creatorUser": {
               "__typename": "User",
-              "id": 2
+              "id": "2"
             }
           }
         }
@@ -1517,7 +1518,7 @@ async fn no_store_from_request() {
             "id": "1",
             "creatorUser": {
               "__typename": "User",
-              "id": 2
+              "id": "2"
             }
           }
         }
@@ -1627,7 +1628,7 @@ async fn no_cache_from_request() {
             "id": "1",
             "creatorUser": {
               "__typename": "User",
-              "id": 2
+              "id": "2"
             }
           }
         }
@@ -1673,7 +1674,7 @@ async fn no_cache_from_request() {
             "id": "1",
             "creatorUser": {
               "__typename": "User",
-              "id": 2
+              "id": "2"
             }
           }
         }
@@ -1797,7 +1798,7 @@ async fn private_only() {
                 "id": "1",
                 "creatorUser": {
                   "__typename": "User",
-                  "id": 2
+                  "id": "2"
                 }
               }
             }
@@ -1843,7 +1844,7 @@ async fn private_only() {
                 "id": "1",
                 "creatorUser": {
                   "__typename": "User",
-                  "id": 2
+                  "id": "2"
                 }
               }
             }
@@ -1879,7 +1880,7 @@ async fn private_only() {
                 "id": "1",
                 "creatorUser": {
                   "__typename": "User",
-                  "id": 2
+                  "id": "2"
                 }
               }
             }
@@ -2004,7 +2005,7 @@ async fn private_and_public() {
             "id": "1",
             "creatorUser": {
               "__typename": "User",
-              "id": 2
+              "id": "2"
             }
           }
         },
@@ -2053,7 +2054,7 @@ async fn private_and_public() {
             "id": "1",
             "creatorUser": {
               "__typename": "User",
-              "id": 2
+              "id": "2"
             }
           }
         },
@@ -2092,7 +2093,7 @@ async fn private_and_public() {
             "id": "1",
             "creatorUser": {
               "__typename": "User",
-              "id": 2
+              "id": "2"
             }
           }
         },
@@ -2218,7 +2219,7 @@ async fn polymorphic_private_and_public() {
                 "id": "1",
                 "creatorUser": {
                   "__typename": "User",
-                  "id": 2
+                  "id": "2"
                 }
               }
             },
@@ -2300,7 +2301,7 @@ async fn polymorphic_private_and_public() {
                 "id": "1",
                 "creatorUser": {
                   "__typename": "User",
-                  "id": 3
+                  "id": "3"
                 }
               }
             },
@@ -2349,7 +2350,7 @@ async fn polymorphic_private_and_public() {
                 "id": "1",
                 "creatorUser": {
                   "__typename": "User",
-                  "id": 2
+                  "id": "2"
                 }
               }
             },
@@ -2397,7 +2398,7 @@ async fn polymorphic_private_and_public() {
                 "id": "1",
                 "creatorUser": {
                   "__typename": "User",
-                  "id": 3
+                  "id": "3"
                 }
               }
             },
@@ -2438,7 +2439,7 @@ async fn polymorphic_private_and_public() {
                 "id": "1",
                 "creatorUser": {
                   "__typename": "User",
-                  "id": 2
+                  "id": "2"
                 }
               }
             },
@@ -2486,7 +2487,7 @@ async fn polymorphic_private_and_public() {
                 "id": "1",
                 "creatorUser": {
                   "__typename": "User",
-                  "id": 3
+                  "id": "3"
                 }
               }
             },
@@ -2604,7 +2605,7 @@ async fn private_without_private_id() {
                 "id": "1",
                 "creatorUser": {
                   "__typename": "User",
-                  "id": 2
+                  "id": "2"
                 }
               }
             }
@@ -2649,7 +2650,7 @@ async fn private_without_private_id() {
                 "id": "1",
                 "creatorUser": {
                   "__typename": "User",
-                  "id": 2
+                  "id": "2"
                 }
               }
             }
@@ -2846,7 +2847,7 @@ async fn no_data() {
                     }
                 });
                 drain_drivers_clone.lock().unwrap().push(driver);
-                mock.boxed()
+                mock.boxed_clone()
             } else {
                 service
             }
@@ -2894,7 +2895,7 @@ async fn no_data() {
       },
       "errors": [
         {
-          "message": "HTTP fetch failed from 'orga': orga not found",
+          "message": "HTTP fetch failed: orga not found",
           "path": [
             "currentUser",
             "allOrganizations",
@@ -3030,9 +3031,13 @@ async fn missing_entities() {
         .build()
         .unwrap();
     let mut response = service.oneshot(request).await.unwrap();
+    let cache_keys = get_cache_keys_context(&response).expect("missing cache keys");
     let mut response = response.next_response().await.unwrap();
     assert!(remove_debug_extensions_key(&mut response));
     insta::assert_json_snapshot!(response);
+
+    // The second request reads what the first one cached, and cache writes are asynchronous
+    wait_for_cache(&storage, expected_cached_keys(&cache_keys)).await;
 
     // Reuse the same namespace so cached entities from the first request are accessible
     let (drop_tx, drop_rx) = tokio::sync::broadcast::channel(2);
@@ -3147,7 +3152,7 @@ async fn invalidate_by_cache_tag() {
         });
 
         let (drop_tx, drop_rx) = tokio::sync::broadcast::channel(2);
-        let storage = Storage::new(&Config::test(false,"test_invalidate_by_cache_tag"), drop_rx)
+        let storage = Storage::new(&Config::test(false, &Uuid::new_v4().to_string()), drop_rx)
             .await
             .unwrap();
         let map = [
@@ -3217,7 +3222,7 @@ async fn invalidate_by_cache_tag() {
                 "id": "1",
                 "creatorUser": {
                   "__typename": "User",
-                  "id": 2
+                  "id": "2"
                 }
               }
             }
@@ -3264,7 +3269,7 @@ async fn invalidate_by_cache_tag() {
                 "id": "1",
                 "creatorUser": {
                   "__typename": "User",
-                  "id": 2
+                  "id": "2"
                 }
               }
             }
@@ -3320,7 +3325,7 @@ async fn invalidate_by_cache_tag() {
                 "id": "1",
                 "creatorUser": {
                   "__typename": "User",
-                  "id": 2
+                  "id": "2"
                 }
               }
             }
@@ -3432,7 +3437,7 @@ async fn complex_cache_tag() {
                 "id": "1",
                 "creatorUser": {
                   "__typename": "User",
-                  "id": 2
+                  "id": "2"
                 }
               }
             }
@@ -4473,7 +4478,7 @@ async fn invalidate_by_type() {
         });
 
         let (drop_tx, drop_rx) = tokio::sync::broadcast::channel(2);
-        let storage = Storage::new(&Config::test(false,"test_invalidate_by_subgraph"), drop_rx)
+        let storage = Storage::new(&Config::test(false, &Uuid::new_v4().to_string()), drop_rx)
             .await
             .unwrap();
         let map = [
@@ -4543,7 +4548,7 @@ async fn invalidate_by_type() {
                 "id": "1",
                 "creatorUser": {
                   "__typename": "User",
-                  "id": 2
+                  "id": "2"
                 }
               }
             }
@@ -4589,7 +4594,7 @@ async fn invalidate_by_type() {
                 "id": "1",
                 "creatorUser": {
                   "__typename": "User",
-                  "id": 2
+                  "id": "2"
                 }
               }
             }
@@ -4642,7 +4647,7 @@ async fn invalidate_by_type() {
                 "id": "1",
                 "creatorUser": {
                   "__typename": "User",
-                  "id": 2
+                  "id": "2"
                 }
               }
             }
@@ -4746,7 +4751,7 @@ async fn failure_mode() {
                 "id": "1",
                 "creatorUser": {
                   "__typename": "User",
-                  "id": 2
+                  "id": "2"
                 }
               }
             }
@@ -4800,7 +4805,7 @@ async fn failure_mode() {
                 "id": "1",
                 "creatorUser": {
                   "__typename": "User",
-                  "id": 2
+                  "id": "2"
                 }
               }
             }
@@ -4925,7 +4930,7 @@ async fn failure_mode_reconnect() {
                 "id": "1",
                 "creatorUser": {
                   "__typename": "User",
-                  "id": 2
+                  "id": "2"
                 }
               }
             }
@@ -4990,7 +4995,7 @@ async fn failure_mode_reconnect() {
                 "id": "1",
                 "creatorUser": {
                   "__typename": "User",
-                  "id": 2
+                  "id": "2"
                 }
               }
             }
@@ -5051,7 +5056,7 @@ async fn failure_mode_reconnect() {
                 "id": "1",
                 "creatorUser": {
                   "__typename": "User",
-                  "id": 2
+                  "id": "2"
                 }
               }
             }
@@ -5146,7 +5151,7 @@ async fn no_store_on_subgraph_timeout() {
                     // Unreachable in practice — the traffic shaping timeout fires first.
                     Err::<subgraph::Response, tower::BoxError>("orga sleep exceeded".into())
                 })
-                .boxed()
+                .boxed_clone()
             } else {
                 service
             }
@@ -5287,22 +5292,15 @@ async fn no_store_on_partial_subgraph_failure() {
 
 const CONNECTOR_SCHEMA: &str = include_str!("../../testdata/connector_response_cache.graphql");
 
-/// Helper to create a router service with connector caching enabled via YamlRouterFactory.
+/// Helper to create a router service with connector caching enabled via PipelineFactory.
 ///
-/// We cannot use TestHarness because connectors are extracted during YamlRouterFactory
-/// initialization, not during TestHarness construction.
+/// We cannot use TestHarness because connectors are extracted while the pipeline is built,
+/// not during TestHarness construction.
 async fn create_connector_cache_factory(
     connector_uri: &str,
     namespace: &str,
     extra_config: Option<serde_json_bytes::Value>,
-) -> impl crate::services::new_service::ServiceFactory<
-    crate::services::router::Request,
-    Service = impl tower::Service<
-        crate::services::router::Request,
-        Response = crate::services::router::Response,
-        Error = tower::BoxError,
-    >,
-> {
+) -> impl RouterFactory {
     create_connector_cache_factory_with_schema(
         CONNECTOR_SCHEMA,
         connector_uri,
@@ -5317,14 +5315,7 @@ async fn create_connector_cache_factory_with_schema(
     connector_uri: &str,
     namespace: &str,
     extra_config: Option<serde_json_bytes::Value>,
-) -> impl crate::services::new_service::ServiceFactory<
-    crate::services::router::Request,
-    Service = impl tower::Service<
-        crate::services::router::Request,
-        Response = crate::services::router::Response,
-        Error = tower::BoxError,
-    >,
-> {
+) -> impl RouterFactory {
     let connector_url = format!("{connector_uri}/");
 
     let mut config = serde_json_bytes::json!({
@@ -5362,9 +5353,8 @@ async fn create_connector_cache_factory_with_schema(
     }
 
     let config: Configuration = serde_json_bytes::from_value(config).unwrap();
-    let mut factory = YamlRouterFactory;
-    factory
-        .create(
+    PipelineFactory
+        .create_pipeline(
             false,
             Arc::new(config.clone()),
             Arc::new(crate::spec::Schema::parse(schema, &config).unwrap()),
@@ -7366,7 +7356,7 @@ fn toggled_subgraph_service(
     mode: Arc<std::sync::Mutex<ToggledSubgraphResponse>>,
     calls: Arc<std::sync::atomic::AtomicUsize>,
     healthy_data: serde_json_bytes::Value,
-) -> subgraph::BoxService {
+) -> subgraph::BoxCloneService {
     tower::service_fn(move |req: subgraph::Request| {
         let mode = *mode.lock().unwrap();
         calls.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
@@ -7464,7 +7454,7 @@ fn toggled_subgraph_service(
             ))
         }
     })
-    .boxed()
+    .boxed_clone()
 }
 
 /// A supergraph with the response cache in front of one toggleable subgraph: `user` for a

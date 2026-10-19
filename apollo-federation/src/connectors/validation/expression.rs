@@ -14,13 +14,13 @@ use apollo_compiler::parser::LineColumn;
 use itertools::Itertools;
 use shape::Shape;
 use shape::ShapeCase;
-use shape::graphql::shape_for_arguments;
 use shape::location::Location;
-use shape::location::SourceId;
 use shape::name::NameCase;
 
 use crate::connectors::JSONSelection;
 use crate::connectors::Namespace;
+use crate::connectors::graphql_shapes::shape_for_arguments;
+use crate::connectors::graphql_shapes::source_file;
 use crate::connectors::id::ConnectedElement;
 use crate::connectors::id::ObjectCategory;
 use crate::connectors::json_selection::VarPaths;
@@ -34,7 +34,7 @@ use crate::connectors::validation::graphql::subslice_location;
 use crate::connectors::variable::VariableReference;
 
 static REQUEST_SHAPE: LazyLock<Shape> = LazyLock::new(|| {
-    Shape::record(
+    Shape::closed_record(
         [(
             "headers".to_string(),
             Shape::dict(Shape::list(Shape::string([]), []), []),
@@ -45,7 +45,7 @@ static REQUEST_SHAPE: LazyLock<Shape> = LazyLock::new(|| {
 });
 
 static RESPONSE_SHAPE: LazyLock<Shape> = LazyLock::new(|| {
-    Shape::record(
+    Shape::closed_record(
         [(
             "headers".to_string(),
             Shape::dict(Shape::list(Shape::string([]), []), []),
@@ -87,7 +87,7 @@ impl<'schema> Context<'schema> {
                 parent_category,
             } => {
                 let mut var_lookup: IndexMap<Namespace, Shape> = [
-                    (Namespace::Args, shape_for_arguments(field_def)),
+                    (Namespace::Args, shape_for_arguments(schema, field_def)),
                     (Namespace::Config, Shape::unknown([])),
                     (Namespace::Context, Shape::unknown([])),
                     (Namespace::Request, REQUEST_SHAPE.clone()),
@@ -146,7 +146,7 @@ impl<'schema> Context<'schema> {
                 parent_category,
             } => {
                 let mut var_lookup: IndexMap<Namespace, Shape> = [
-                    (Namespace::Args, shape_for_arguments(field_def)),
+                    (Namespace::Args, shape_for_arguments(schema, field_def)),
                     (Namespace::Config, Shape::unknown([])),
                     (Namespace::Context, Shape::unknown([])),
                     (Namespace::Status, Shape::int([])),
@@ -396,6 +396,17 @@ fn resolve_shape(
     expression: &Expression,
     resolving: &mut HashSet<String>,
 ) -> Result<Shape, Message> {
+    // Shape errors are stored as metadata on the shape itself rather than as a
+    // dedicated `ShapeCase::Error` variant. If any are present, surface the
+    // first message as a validation failure before attempting structural
+    // dispatch on the (possibly partial) case.
+    if let Some(error) = shape.own_errors().next() {
+        return Err(Message {
+            code: context.code,
+            message: error.message.clone(),
+            locations: transform_locations(shape.locations(), context, expression),
+        });
+    }
     match shape.case() {
         ShapeCase::One(shapes) => {
             let mut inners = Vec::new();
@@ -583,11 +594,6 @@ fn resolve_shape(
             }
             result
         }
-        ShapeCase::Error(shape::Error { message, .. }) => Err(Message {
-            code: context.code,
-            message: message.clone(),
-            locations: transform_locations(shape.locations(), context, expression),
-        }),
         ShapeCase::Array { prefix, tail } => {
             let prefix = prefix
                 .iter()
@@ -628,14 +634,15 @@ fn transform_locations<'a>(
 ) -> Vec<Range<LineColumn>> {
     let mut locations: Vec<_> = locations
         .into_iter()
-        .filter_map(|location| match &location.source_id {
-            SourceId::GraphQL(file_id) => context
-                .schema
-                .sources
-                .get(file_id)
-                .and_then(|source| source.get_line_column_range(location.span.clone())),
-            SourceId::Other(_) => {
-                // Right now, this always refers to the JSONSelection location
+        .filter_map(|location| {
+            // Since shape 0.9.0, a GraphQL location is a `SourceId::Other` of
+            // the form `graphql:<path>` rather than its own variant, so it is
+            // `source_file` that tells one apart from the `JSONSelection` ids
+            // we mint ourselves: it returns `None` for any id that
+            // `graphql_shapes` did not produce.
+            if let Some(source) = source_file(context.schema, &location.source_id) {
+                source.get_line_column_range(location.span.clone())
+            } else {
                 subslice_location(
                     context.node,
                     location.span.start + expression.location.start
@@ -658,6 +665,9 @@ fn transform_locations<'a>(
 
 /// A simplified shape name for error messages
 fn short_shape_name(shape: &Shape) -> &'static str {
+    if shape.has_own_errors() {
+        return "error";
+    }
     match shape.case() {
         ShapeCase::Bool(_) => "boolean",
         ShapeCase::String(_) => "string",
@@ -671,7 +681,6 @@ fn short_shape_name(shape: &Shape) -> &'static str {
         ShapeCase::Name(_, _) => "named type",
         ShapeCase::Unknown => "unknown",
         ShapeCase::None => "none",
-        ShapeCase::Error(_) => "error",
     }
 }
 

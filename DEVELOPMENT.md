@@ -29,7 +29,6 @@ docker compose up -d
 
 This starts:
 - **Redis** (port 6379, 7000-7005) - Required for entity caching, response caching, and Redis-related integration tests
-- **Zipkin** (port 9411) - For distributed tracing tests
 - **Datadog Agent** (port 8126) - For Datadog telemetry integration tests
 
 Some tests that use the features above are configured with `required_to_start: true`. The router won't start if these services aren't available, causing test failures.

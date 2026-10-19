@@ -6,8 +6,7 @@
 //! ## Global State
 //!
 //! OpenTelemetry requires global state for tracer providers and propagators. This module maintains:
-//! - **Tracer handle** ([`OPENTELEMETRY_TRACER_HANDLE`]) - Allows hot-swapping the active tracer,
-//!   and keeps the tracer provider it came from
+//! - **Tracer handle** ([`OPENTELEMETRY_TRACER_HANDLE`]) - Allows hot-swapping the active tracer
 //! - **Format layer handle** ([`FMT_LAYER_HANDLE`]) - Allows hot-swapping the logging format
 //!
 //! These handles are set once during initialization and then used to reload components when
@@ -28,6 +27,7 @@
 //! entire subscriber stack, which would require restarting the application.
 
 use std::io::IsTerminal;
+use std::sync::LazyLock;
 use std::time::Duration;
 
 use anyhow::anyhow;
@@ -35,15 +35,14 @@ use once_cell::sync::OnceCell;
 use opentelemetry::Context;
 use opentelemetry::InstrumentationScope;
 use opentelemetry::trace::SpanContext;
-use opentelemetry::trace::SpanId;
 use opentelemetry::trace::TraceContextExt;
 use opentelemetry::trace::TraceFlags;
 use opentelemetry::trace::TraceState;
 use opentelemetry::trace::TracerProvider;
+use opentelemetry_sdk::trace::IdGenerator;
 use opentelemetry_sdk::trace::SdkTracerProvider;
 use opentelemetry_sdk::trace::Tracer;
 use parking_lot::Mutex;
-use tokio::task::block_in_place;
 use tower::BoxError;
 use tracing_subscriber::EnvFilter;
 use tracing_subscriber::Layer;
@@ -54,14 +53,13 @@ use tracing_subscriber::registry::SpanRef;
 use tracing_subscriber::reload::Handle;
 use tracing_subscriber::util::SubscriberInitExt;
 
-use crate::plugins::telemetry::GLOBAL_TRACER_NAME;
 use crate::plugins::telemetry::dynamic_attribute::DynAttributeLayer;
 use crate::plugins::telemetry::fmt_layer::FmtLayer;
 use crate::plugins::telemetry::formatters::json::Json;
 use crate::plugins::telemetry::formatters::text::Text;
 use crate::plugins::telemetry::otel;
 use crate::plugins::telemetry::otel::OpenTelemetryLayer;
-use crate::plugins::telemetry::otel::PreSampledTracer;
+use crate::plugins::telemetry::otel::OtelData;
 use crate::plugins::telemetry::reload::rate_limit::RateLimitLayer;
 use crate::plugins::telemetry::tracing::reload::ReloadTracer;
 use crate::tracer::TraceId;
@@ -74,76 +72,9 @@ pub(in crate::plugins::telemetry) type LayeredTracer =
 ///
 /// This handle allows the activation phase to swap in a new tracer without rebuilding
 /// the entire tracing subscriber stack.
-pub(in crate::plugins::telemetry) static OPENTELEMETRY_TRACER_HANDLE: OnceCell<TracerHandle> =
-    OnceCell::new();
-
-/// The tracer the subscriber exports through, together with the tracer provider it came from.
-///
-/// The global OpenTelemetry API does not hand back the provider it replaces, so the provider is
-/// kept here, next to the tracer it feeds. Every tracer and span holds a clone of its provider, and
-/// the SDK shuts a provider down when its last clone is dropped. A span still being exported when
-/// the provider is replaced could otherwise run that blocking shutdown on an async worker, so
-/// whoever installs a provider is handed the one it replaces and must shut it down explicitly, off
-/// the async workers.
-pub(in crate::plugins::telemetry) struct TracerHandle {
-    tracer: ReloadTracer<Tracer>,
-    tracer_provider: Mutex<Option<SdkTracerProvider>>,
-    /// Runs once, part-way through the next install, so that tests can pause it there.
-    #[cfg(test)]
-    after_tracer_reload: Mutex<Option<Box<dyn FnOnce() + Send>>>,
-}
-
-impl TracerHandle {
-    pub(in crate::plugins::telemetry) fn new() -> Self {
-        Self {
-            tracer: ReloadTracer::new(
-                SdkTracerProvider::default()
-                    .tracer_with_scope(InstrumentationScope::builder("noop").build()),
-            ),
-            tracer_provider: Mutex::default(),
-            #[cfg(test)]
-            after_tracer_reload: Mutex::default(),
-        }
-    }
-
-    /// Installs `tracer_provider`: hot-swaps a tracer built from it into the tracing subscriber and
-    /// makes it the global provider. Returns the provider it replaces, which the caller MUST shut
-    /// down off the async workers.
-    pub(in crate::plugins::telemetry) fn install(
-        &self,
-        tracer_provider: SdkTracerProvider,
-    ) -> Option<SdkTracerProvider> {
-        // Holding the lock for the whole install keeps concurrent installs from interleaving, so
-        // the hot tracer, the recorded provider and the global always end up on the same provider.
-        // Spans read the hot tracer through its own lock and never wait on this one. The lock is
-        // released on return, before the caller shuts the replaced provider down.
-        let mut installed = self.tracer_provider.lock();
-        let scope = InstrumentationScope::builder(GLOBAL_TRACER_NAME)
-            .with_version(env!("CARGO_PKG_VERSION"))
-            .build();
-        self.tracer.reload(tracer_provider.tracer_with_scope(scope));
-        #[cfg(test)]
-        {
-            let after_tracer_reload = self.after_tracer_reload.lock().take();
-            if let Some(after_tracer_reload) = after_tracer_reload {
-                after_tracer_reload();
-            }
-        }
-        let replaced = installed.replace(tracer_provider.clone());
-
-        // `set_tracer_provider` drops the provider it replaces rather than returning it. We still
-        // hold the replaced provider, so that drop cannot trigger its shutdown, but block_in_place
-        // keeps the worker safe if the global held the last reference to a provider installed
-        // elsewhere.
-        block_in_place(move || opentelemetry::global::set_tracer_provider(tracer_provider));
-        replaced
-    }
-
-    /// Takes the installed tracer provider, for example to shut it down at exit.
-    pub(in crate::plugins::telemetry) fn take_tracer_provider(&self) -> Option<SdkTracerProvider> {
-        self.tracer_provider.lock().take()
-    }
-}
+pub(in crate::plugins::telemetry) static OPENTELEMETRY_TRACER_HANDLE: OnceCell<
+    ReloadTracer<opentelemetry_sdk::trace::Tracer>,
+> = OnceCell::new();
 
 /// Global handle for hot-reloading the logging format layer
 ///
@@ -153,9 +84,26 @@ static FMT_LAYER_HANDLE: OnceCell<
     Handle<Box<dyn Layer<LayeredTracer> + Send + Sync>, LayeredTracer>,
 > = OnceCell::new();
 
+/// The tracer provider installed by the most recent activation.
+///
+/// Nothing else in the process can shut this provider down. `SdkTracer` holds a *strong*
+/// `SdkTracerProvider`, and [`OPENTELEMETRY_TRACER_HANDLE`] — a process-lifetime static — holds a
+/// tracer via `ReloadTracer`. So `global::set_tracer_provider` only ever drops one of several
+/// clones and never triggers the provider's own `Drop` -> `shutdown()`. The consequences are that
+/// spans buffered in its batch processors are silently lost at exit, and that those processors'
+/// background workers are still polling Tokio timers when the runtime is torn down, which panics.
+///
+/// Keeping an explicit handle here lets shutdown call
+/// [`shutdown_installed_tracer_provider`] instead of relying on drop order.
+static INSTALLED_TRACER_PROVIDER: LazyLock<Mutex<Option<SdkTracerProvider>>> =
+    LazyLock::new(Default::default);
+
 pub(crate) fn init_telemetry(log_level: &str) -> anyhow::Result<()> {
-    let hot_tracer = TracerHandle::new();
-    let opentelemetry_layer = otel::layer().with_tracer(hot_tracer.tracer.clone());
+    let hot_tracer = ReloadTracer::new(
+        opentelemetry_sdk::trace::SdkTracerProvider::default()
+            .tracer_with_scope(InstrumentationScope::builder("noop").build()),
+    );
+    let opentelemetry_layer = otel::layer().with_tracer(hot_tracer.clone());
 
     // We choose json or plain based on tty
     let fmt = if std::io::stdout().is_terminal() {
@@ -178,7 +126,6 @@ pub(crate) fn init_telemetry(log_level: &str) -> anyhow::Result<()> {
                 .with(DynAttributeLayer::new())
                 .with(opentelemetry_layer)
                 .with(fmt_layer)
-                .with(WarnLegacyMetricsLayer)
                 // Rate limit OpenTelemetry internal log messages to avoid log spam when things go wrong
                 .with(RateLimitLayer::new(
                     "opentelemetry",
@@ -205,29 +152,53 @@ pub(in crate::plugins::telemetry) fn reload_fmt(
     }
 }
 
-/// Shuts down the tracer provider the router has installed, flushing its pending spans.
-///
-/// This blocks until the provider's span processors have shut down, so it MUST be called from a
-/// blocking thread.
-pub(crate) fn shutdown_installed_tracer_provider() {
-    if let Some(tracer_provider) = OPENTELEMETRY_TRACER_HANDLE
-        .get()
-        .and_then(TracerHandle::take_tracer_provider)
-    {
-        shutdown_tracer_provider(tracer_provider);
-    }
-}
-
-/// Shuts down a tracer provider. This blocks until its span processors have shut down, so it MUST
-/// be called from a blocking thread.
-pub(in crate::plugins::telemetry) fn shutdown_tracer_provider(tracer_provider: SdkTracerProvider) {
-    if let Err(error) = tracer_provider.shutdown() {
-        tracing::warn!(%error, "failed to shut down tracer provider");
-    }
-}
-
 pub(crate) fn apollo_opentelemetry_initialized() -> bool {
     OPENTELEMETRY_TRACER_HANDLE.get().is_some()
+}
+
+/// Records the tracer provider that has just been installed globally, returning the one it
+/// replaced. The caller owns the returned provider and must hand it to
+/// [`shutdown_tracer_provider`] from a blocking context.
+///
+/// See [`INSTALLED_TRACER_PROVIDER`] for why this bookkeeping is needed.
+pub(in crate::plugins::telemetry) fn set_installed_tracer_provider(
+    provider: SdkTracerProvider,
+) -> Option<SdkTracerProvider> {
+    INSTALLED_TRACER_PROVIDER.lock().replace(provider)
+}
+
+/// Shuts down the tracer provider installed by the last activation, flushing whatever its batch
+/// processors have buffered.
+///
+/// Must be called from a blocking thread, and while the Tokio runtime is still alive: shutdown
+/// blocks until each span processor has flushed, and those processors need the runtime to make
+/// progress.
+pub(crate) fn shutdown_installed_tracer_provider() {
+    // Take the provider out before shutting it down: shutdown can emit logs and metrics, which
+    // must not re-enter this lock.
+    let provider = INSTALLED_TRACER_PROVIDER.lock().take();
+    shutdown_tracer_provider(provider);
+}
+
+/// Shuts `provider` down, if there is one, and reports failures.
+///
+/// Calling `shutdown()` rather than dropping the provider guarantees its span processors
+/// are flushed and stopped. `SdkTracerProvider` is refcounted, so its `Drop` reaches the
+/// processors only when the *last* clone goes away, and clones outlive every point at which the
+/// router is done with a provider: the `SdkTracer` in [`OPENTELEMETRY_TRACER_HANDLE`] holds one
+/// for the whole process lifetime, and every span still in flight at a reload holds one of the
+/// provider it started under. `shutdown()` ignores the refcount and reaches the processors
+/// regardless.
+///
+/// Must be called from a blocking thread while the Tokio runtime is still alive: shutting a batch
+/// processor down blocks until it has flushed, and it needs the runtime to make progress.
+pub(in crate::plugins::telemetry) fn shutdown_tracer_provider(provider: Option<SdkTracerProvider>) {
+    let Some(provider) = provider else {
+        return;
+    };
+    if let Err(error) = provider.shutdown() {
+        tracing::error!(%error, "Failed to shut down OTel tracer provider cleanly");
+    }
 }
 
 // When propagating trace headers to a subgraph or coprocessor, we need a valid trace id and span id
@@ -236,14 +207,13 @@ pub(crate) fn apollo_opentelemetry_initialized() -> bool {
 // To that end, we update the context just for that request to create valid span et trace ids, with the
 // sampling bit set to false
 pub(crate) fn prepare_context(context: Context) -> Context {
-    if !context.span().span_context().is_valid()
-        && let Some(tracer) = OPENTELEMETRY_TRACER_HANDLE
-            .get()
-            .map(|handle| &handle.tracer)
-    {
+    if !context.span().span_context().is_valid() {
+        // There's no real span behind these ids (the trace isn't sampled), so any
+        // random generator works here - nothing needs to match a span build later.
+        let id_generator = opentelemetry_sdk::trace::RandomIdGenerator::default();
         let span_context = SpanContext::new(
-            tracer.new_trace_id(),
-            tracer.new_span_id(),
+            id_generator.new_trace_id(),
+            id_generator.new_span_id(),
             TraceFlags::default(),
             false,
             TraceState::default(),
@@ -251,21 +221,6 @@ pub(crate) fn prepare_context(context: Context) -> Context {
         return context.with_remote_span_context(span_context);
     }
     context
-}
-
-#[derive(Clone, Debug)]
-pub(crate) enum SampledSpan {
-    NotSampled(TraceId, SpanId),
-    Sampled(TraceId, SpanId),
-}
-
-impl SampledSpan {
-    pub(crate) fn trace_and_span_id(&self) -> (TraceId, SpanId) {
-        match self {
-            SampledSpan::NotSampled(trace_id, span_id)
-            | SampledSpan::Sampled(trace_id, span_id) => (trace_id.clone(), *span_id),
-        }
-    }
 }
 
 pub(crate) trait IsSampled {
@@ -278,189 +233,79 @@ where
     T: tracing_subscriber::registry::LookupSpan<'a>,
 {
     fn is_sampled(&self) -> bool {
-        // if this extension is set, that means the parent span was accepted, and so the
-        // entire trace is accepted
         self.extensions()
-            .get::<SampledSpan>()
-            .is_some_and(|s| matches!(s, SampledSpan::Sampled(_, _)))
+            .get::<OtelData>()
+            .is_some_and(|d| d.current_cx.span().is_recording())
     }
 
+    /// Returns the trace ID for this span, or `None` if the span context is invalid.
+    ///
+    /// An invalid span context (all-zero IDs) is produced by a `NoopTracer` or a not-yet-
+    /// initialised provider. Callers should not propagate all-zero IDs into headers or logs.
     fn get_trace_id(&self) -> Option<TraceId> {
+        // OtelData is always inserted by on_new_span; the ? is a defensive fallback.
         let extensions = self.extensions();
-        extensions.get::<SampledSpan>().map(|s| match s {
-            SampledSpan::Sampled(trace_id, _) | SampledSpan::NotSampled(trace_id, _) => {
-                trace_id.clone()
-            }
-        })
-    }
-}
-
-const LEGACY_METRIC_PREFIX_MONOTONIC_COUNTER: &str = "monotonic_counter.";
-const LEGACY_METRIC_PREFIX_COUNTER: &str = "counter.";
-const LEGACY_METRIC_PREFIX_HISTOGRAM: &str = "histogram.";
-const LEGACY_METRIC_PREFIX_VALUE: &str = "value.";
-
-/// REMOVE in 3.0
-/// Detects use of the 1.x `tracing`-based metrics events, which are no longer supported in 2.x.
-struct WarnLegacyMetricsLayer;
-
-// We can't use the tracing macros inside our `on_event` callback, instead we have to manually
-// produce an event, which requires a significant amount of ceremony.
-// This metadata mimicks what `tracing::error!()` does.
-static WARN_LEGACY_METRIC_CALLSITE: tracing_core::callsite::DefaultCallsite =
-    tracing_core::callsite::DefaultCallsite::new(&WARN_LEGACY_METRIC_METADATA);
-static WARN_LEGACY_METRIC_METADATA: tracing_core::Metadata = tracing_core::metadata! {
-    name: "warn_legacy_metric",
-    target: module_path!(),
-    level: tracing_core::Level::ERROR,
-    fields: &["message", "metric_name"],
-    callsite: &WARN_LEGACY_METRIC_CALLSITE,
-    kind: tracing_core::metadata::Kind::EVENT,
-};
-
-impl<S: tracing::Subscriber> Layer<S> for WarnLegacyMetricsLayer {
-    fn on_event(&self, event: &tracing::Event<'_>, ctx: tracing_subscriber::layer::Context<'_, S>) {
-        if let Some(field) = event.fields().find(|field| {
-            field
-                .name()
-                .starts_with(LEGACY_METRIC_PREFIX_MONOTONIC_COUNTER)
-                || field.name().starts_with(LEGACY_METRIC_PREFIX_COUNTER)
-                || field.name().starts_with(LEGACY_METRIC_PREFIX_HISTOGRAM)
-                || field.name().starts_with(LEGACY_METRIC_PREFIX_VALUE)
-        }) {
-            // Doing all this manually is a flippin nightmare!
-            // We allocate a bunch but I reckon it's fine because this only happens in a deprecated
-            // code path that we want people to upgrade from.
-            let fields = WARN_LEGACY_METRIC_METADATA.fields();
-            let message_field = fields.field("message").unwrap();
-            let message =
-                "Detected unsupported legacy metrics reporting, remove or migrate to opentelemetry"
-                    .to_string();
-            let name_field = fields.field("metric_name").unwrap();
-            let metric_name = field.name().to_string();
-            let value_set = &[
-                (&message_field, Some(&message as &dyn tracing::Value)),
-                (&name_field, Some(&metric_name as &dyn tracing::Value)),
-            ];
-            let value_set = fields.value_set(value_set);
-            ctx.event(&tracing_core::Event::new(
-                &WARN_LEGACY_METRIC_METADATA,
-                &value_set,
-            ));
-        }
+        let d = extensions.get::<OtelData>()?;
+        let otel_span = d.current_cx.span();
+        let sc = otel_span.span_context();
+        sc.is_valid().then(|| sc.trace_id().to_bytes().into())
     }
 }
 
 #[cfg(test)]
 mod tests {
-    use std::sync::Arc;
-    use std::sync::atomic::AtomicUsize;
-    use std::sync::atomic::Ordering;
-    use std::sync::mpsc;
-    use std::thread;
-    use std::time::Duration;
-
+    use opentelemetry::trace::Span as _;
     use opentelemetry::trace::Tracer as _;
-    use opentelemetry_sdk::error::OTelSdkResult;
-    use opentelemetry_sdk::trace::Span;
-    use opentelemetry_sdk::trace::SpanData;
-    use opentelemetry_sdk::trace::SpanProcessor;
 
     use super::*;
+    use crate::plugins::telemetry::reload::testing::ShutdownProbe;
 
-    #[derive(Debug, Default)]
-    struct Counts {
-        ended: AtomicUsize,
-        shutdowns: AtomicUsize,
-    }
-
-    #[derive(Debug)]
-    struct CountingProcessor(Arc<Counts>);
-
-    impl SpanProcessor for CountingProcessor {
-        fn on_start(&self, _span: &mut Span, _cx: &Context) {}
-
-        fn on_end(&self, _span: SpanData) {
-            self.0.ended.fetch_add(1, Ordering::SeqCst);
-        }
-
-        fn force_flush(&self) -> OTelSdkResult {
-            Ok(())
-        }
-
-        fn shutdown_with_timeout(&self, _timeout: Duration) -> OTelSdkResult {
-            self.0.shutdowns.fetch_add(1, Ordering::SeqCst);
-            Ok(())
-        }
-    }
-
-    fn counting_tracer_provider() -> (SdkTracerProvider, Arc<Counts>) {
-        let counts = Arc::new(Counts::default());
-        let tracer_provider = SdkTracerProvider::builder()
-            .with_span_processor(CountingProcessor(counts.clone()))
+    /// The provider a batch processor belongs to used to be shut down only by dropping its last
+    /// clone — which never happened, because `ReloadTracer` holds a `SdkTracer` (and therefore a
+    /// strong `SdkTracerProvider`) for the whole process lifetime. Spans buffered at exit were
+    /// lost, and the processors' background workers outlived the Tokio runtime and panicked.
+    #[test]
+    fn tracer_provider_is_shut_down_while_a_tracer_still_holds_it() {
+        let probe = ShutdownProbe::default();
+        let provider = SdkTracerProvider::builder()
+            .with_span_processor(probe.clone())
             .build();
-        (tracer_provider, counts)
+
+        // Stands in for the tracer stashed in OPENTELEMETRY_TRACER_HANDLE: a strong clone that
+        // outlives every attempt to shut the provider down by dropping it.
+        let stale_tracer =
+            provider.tracer_with_scope(InstrumentationScope::builder("test").build());
+
+        // Sanity check that the probe reports the state we are about to assert a change in, and
+        // that merely handing the provider over does not shut it down.
+        let provider = Some(provider);
+        assert!(!probe.was_shut_down());
+
+        shutdown_tracer_provider(provider);
+
+        assert!(
+            probe.was_shut_down(),
+            "shutdown must reach the span processors even though `stale_tracer` still holds a \
+             strong clone of the provider"
+        );
+        // A tracer left pointing at the shut-down provider must stop recording rather than hand
+        // spans to processors that are no longer running.
+        assert!(!stale_tracer.start("after-shutdown").is_recording());
     }
 
     #[test]
-    fn concurrent_installs_leave_the_hot_tracer_on_the_live_provider() {
-        // Fails the test if the second install never starts; it never lets the first one resume.
-        const WATCHDOG: Duration = Duration::from_secs(30);
+    fn shutting_down_the_tracer_provider_twice_does_not_panic() {
+        let probe = ShutdownProbe::default();
+        let provider = SdkTracerProvider::builder()
+            .with_span_processor(probe.clone())
+            .build();
 
-        // A local handle rather than the process-wide one, which is only set by the executable.
-        let hot_tracer = Arc::new(TracerHandle::new());
-        let (first, first_counts) = counting_tracer_provider();
-        let (second, second_counts) = counting_tracer_provider();
+        shutdown_tracer_provider(Some(provider.clone()));
+        assert!(probe.was_shut_down());
 
-        // Pause the first install after it hot-swaps the tracer. While it is paused, start the
-        // second install on another thread and wait until it is about to install. The first install
-        // must still hold the install lock at that point, so the second can only run after it.
-        let second_install = Arc::new(Mutex::new(None));
-        let paused = hot_tracer.clone();
-        let second_install_slot = second_install.clone();
-        *hot_tracer.after_tracer_reload.lock() = Some(Box::new(move || {
-            let (installing_tx, installing_rx) = mpsc::channel();
-            let installer = paused.clone();
-            *second_install_slot.lock() = Some(thread::spawn(move || {
-                installing_tx.send(()).expect("the controller is waiting");
-                installer.install(second)
-            }));
-            installing_rx
-                .recv_timeout(WATCHDOG)
-                .expect("the second install never started");
-            assert!(
-                paused.tracer_provider.is_locked(),
-                "the paused install must hold the install lock"
-            );
-        }));
-
-        let replaced_by_first = hot_tracer.install(first);
-        let replaced_by_second = second_install
-            .lock()
-            .take()
-            .expect("the second install was started")
-            .join()
-            .expect("the second install completed");
-
-        // Retire every provider an install handed back, as activations do.
-        for retired in [replaced_by_first, replaced_by_second]
-            .into_iter()
-            .flatten()
-        {
-            retired
-                .shutdown()
-                .expect("retired provider shuts down once");
-        }
-
-        // The subscriber's hot tracer must still export through a live provider.
-        hot_tracer.tracer.start("after both installs");
-        assert_eq!(
-            second_counts.ended.load(Ordering::SeqCst),
-            1,
-            "the hot tracer must use the provider installed last"
-        );
-        assert_eq!(second_counts.shutdowns.load(Ordering::SeqCst), 0);
-        assert_eq!(first_counts.shutdowns.load(Ordering::SeqCst), 1);
-        assert!(hot_tracer.take_tracer_provider().is_some());
+        shutdown_tracer_provider(Some(provider));
+        // And the no-provider-installed case, which is what a second
+        // `shutdown_installed_tracer_provider` call sees.
+        shutdown_tracer_provider(None);
     }
 }

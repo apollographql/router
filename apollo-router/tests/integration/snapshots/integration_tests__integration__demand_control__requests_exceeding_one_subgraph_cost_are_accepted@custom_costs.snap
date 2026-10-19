@@ -30,7 +30,7 @@ expression: parse_result_for_snapshot(response).await
       "fieldWithListSize": null,
       "inputWithCost": 5,
       "objectWithCost": {
-        "id": 9
+        "id": "9"
       },
       "scalarWithCost": 6172364
     },

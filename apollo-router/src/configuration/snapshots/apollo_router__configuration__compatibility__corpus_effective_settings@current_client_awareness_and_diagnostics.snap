@@ -1,0 +1,11 @@
+---
+source: apollo-router/src/configuration/compatibility.rs
+description: enhanced_client_awareness and experimental_diagnostics top-level keys
+expression: changed_settings(&config)
+---
+{
+  "/enhanced_client_awareness": {},
+  "/experimental_diagnostics": {
+    "enabled": true
+  }
+}

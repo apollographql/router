@@ -29,8 +29,6 @@ use tower::util::MapFutureLayer;
 
 use crate::Context;
 use crate::configuration::shared::Client;
-use crate::context::context_key_from_deprecated;
-use crate::context::context_key_to_deprecated;
 use crate::error::Error;
 use crate::graphql;
 use crate::json_ext::Value;
@@ -193,55 +191,6 @@ impl PluginPrivate for CoprocessorPlugin<HTTPClientService> {
     async fn new(init: PluginInit<Self::Config>) -> Result<Self, BoxError> {
         let client_config = init.config.client.clone().unwrap_or_default();
 
-        for (path, conf) in [
-            (
-                "coprocessor.router.request.context",
-                &init.config.router.request.context,
-            ),
-            (
-                "coprocessor.router.response.context",
-                &init.config.router.response.context,
-            ),
-            (
-                "coprocessor.supergraph.request.context",
-                &init.config.supergraph.request.context,
-            ),
-            (
-                "coprocessor.supergraph.response.context",
-                &init.config.supergraph.response.context,
-            ),
-            (
-                "coprocessor.execution.request.context",
-                &init.config.execution.request.context,
-            ),
-            (
-                "coprocessor.execution.response.context",
-                &init.config.execution.response.context,
-            ),
-            (
-                "coprocessor.subgraph.all.request.context",
-                &init.config.subgraph.all.request.context,
-            ),
-            (
-                "coprocessor.subgraph.all.response.context",
-                &init.config.subgraph.all.response.context,
-            ),
-            (
-                "coprocessor.connector.all.request.context",
-                &init.config.connector.all.request.context,
-            ),
-            (
-                "coprocessor.connector.all.response.context",
-                &init.config.connector.all.response.context,
-            ),
-        ] {
-            if let Some(value) = conf.deprecated_value_str() {
-                tracing::warn!(
-                    "Configuration `{path}: {value}` is deprecated. See https://go.apollo.dev/o/coprocessor-context"
-                );
-            }
-        }
-
         // Validate all coprocessor URLs
         validate_coprocessor_url(&init.config.url, "coprocessor.url")?;
         if let Some(ref url) = init.config.router.request.url {
@@ -278,7 +227,7 @@ impl PluginPrivate for CoprocessorPlugin<HTTPClientService> {
                 client_config,
             )?;
 
-        let client = TimeoutLayer::new(init.config.timeout).layer(http_client_service);
+        let client = TimeoutLayer::new(*init.config.timeout).layer(http_client_service);
 
         // Masking rules are published by the headers plugin into request
         // context at router-service time; each coprocessor stage reads them
@@ -287,33 +236,37 @@ impl PluginPrivate for CoprocessorPlugin<HTTPClientService> {
         CoprocessorPlugin::new(client, init.config, init.supergraph_sdl)
     }
 
-    fn router_service(&self, service: router::BoxService) -> router::BoxService {
+    fn router_service(&self, service: router::BoxCloneService) -> router::BoxCloneService {
         self.router_service(service)
     }
 
     fn supergraph_service(
         &self,
-        service: services::supergraph::BoxService,
-    ) -> services::supergraph::BoxService {
+        service: services::supergraph::BoxCloneService,
+    ) -> services::supergraph::BoxCloneService {
         self.supergraph_service(service)
     }
 
     fn execution_service(
         &self,
-        service: services::execution::BoxService,
-    ) -> services::execution::BoxService {
+        service: services::execution::BoxCloneService,
+    ) -> services::execution::BoxCloneService {
         self.execution_service(service)
     }
 
-    fn subgraph_service(&self, name: &str, service: subgraph::BoxService) -> subgraph::BoxService {
+    fn subgraph_service(
+        &self,
+        name: &str,
+        service: subgraph::BoxCloneService,
+    ) -> subgraph::BoxCloneService {
         self.subgraph_service(name, service)
     }
 
     fn connector_request_service(
         &self,
-        service: crate::services::connector::request_service::BoxService,
+        service: crate::services::connector::request_service::BoxCloneService,
         source_name: String,
-    ) -> crate::services::connector::request_service::BoxService {
+    ) -> crate::services::connector::request_service::BoxCloneService {
         self.connector_request_service(&source_name, service)
     }
 }
@@ -367,7 +320,7 @@ where
         })
     }
 
-    fn router_service(&self, service: router::BoxService) -> router::BoxService {
+    fn router_service(&self, service: router::BoxCloneService) -> router::BoxCloneService {
         self.configuration.router.as_service(
             self.http_client.clone(),
             service,
@@ -379,8 +332,8 @@ where
 
     fn supergraph_service(
         &self,
-        service: services::supergraph::BoxService,
-    ) -> services::supergraph::BoxService {
+        service: services::supergraph::BoxCloneService,
+    ) -> services::supergraph::BoxCloneService {
         self.configuration.supergraph.as_service(
             self.http_client.clone(),
             service,
@@ -392,8 +345,8 @@ where
 
     fn execution_service(
         &self,
-        service: services::execution::BoxService,
-    ) -> services::execution::BoxService {
+        service: services::execution::BoxCloneService,
+    ) -> services::execution::BoxCloneService {
         self.configuration.execution.as_service(
             self.http_client.clone(),
             service,
@@ -403,7 +356,11 @@ where
         )
     }
 
-    fn subgraph_service(&self, name: &str, service: subgraph::BoxService) -> subgraph::BoxService {
+    fn subgraph_service(
+        &self,
+        name: &str,
+        service: subgraph::BoxCloneService,
+    ) -> subgraph::BoxCloneService {
         self.configuration.subgraph.all.as_service(
             self.http_client.clone(),
             service,
@@ -416,8 +373,8 @@ where
     fn connector_request_service(
         &self,
         source_name: &str,
-        service: crate::services::connector::request_service::BoxService,
-    ) -> crate::services::connector::request_service::BoxService {
+        service: crate::services::connector::request_service::BoxCloneService,
+    ) -> crate::services::connector::request_service::BoxCloneService {
         self.configuration.connector.all.as_service(
             self.http_client.clone(),
             service,
@@ -427,14 +384,18 @@ where
     }
 }
 /// What information is passed to a router request/response stage
-#[derive(Clone, Debug, Default, Deserialize, PartialEq, JsonSchema)]
-#[serde(default, deny_unknown_fields)]
+#[apollo_configuration::configuration]
+#[derive(PartialEq)]
 pub(super) struct RouterRequestConf {
     /// Condition to trigger this stage
+    // Condition is generic, so it can't take the configuration attribute.
+    #[config(skip_validate)]
     pub(super) condition: Option<Condition<RouterSelector>>,
     /// Send the headers
     pub(super) headers: bool,
     /// Send the context
+    // ContextConf's Selective tuple variant holds a HashSet, which has no Validate impl.
+    #[config(skip_validate)]
     pub(super) context: ContextConf,
     /// Send the body
     pub(super) body: bool,
@@ -449,14 +410,18 @@ pub(super) struct RouterRequestConf {
 }
 
 /// What information is passed to a router request/response stage
-#[derive(Clone, Debug, Default, Deserialize, PartialEq, JsonSchema)]
-#[serde(default, deny_unknown_fields)]
+#[apollo_configuration::configuration]
+#[derive(PartialEq)]
 pub(super) struct RouterResponseConf {
     /// Condition to trigger this stage
+    // Condition is generic, so it can't take the configuration attribute.
+    #[config(skip_validate)]
     pub(super) condition: Condition<RouterSelector>,
     /// Send the headers
     pub(super) headers: bool,
     /// Send the context
+    // ContextConf's Selective tuple variant holds a HashSet, which has no Validate impl.
+    #[config(skip_validate)]
     pub(super) context: ContextConf,
     /// Send the body
     pub(super) body: bool,
@@ -468,14 +433,18 @@ pub(super) struct RouterResponseConf {
     pub(super) url: Option<String>,
 }
 /// What information is passed to a subgraph request/response stage
-#[derive(Clone, Debug, Default, Deserialize, PartialEq, JsonSchema)]
-#[serde(default, deny_unknown_fields)]
+#[apollo_configuration::configuration]
+#[derive(PartialEq)]
 pub(super) struct SubgraphRequestConf {
     /// Condition to trigger this stage
+    // Condition is generic, so it can't take the configuration attribute.
+    #[config(skip_validate)]
     pub(super) condition: Condition<SubgraphSelector>,
     /// Send the headers
     pub(super) headers: bool,
     /// Send the context
+    // ContextConf's Selective tuple variant holds a HashSet, which has no Validate impl.
+    #[config(skip_validate)]
     pub(super) context: ContextConf,
     /// Send the body
     pub(super) body: bool,
@@ -492,14 +461,18 @@ pub(super) struct SubgraphRequestConf {
 }
 
 /// What information is passed to a subgraph request/response stage
-#[derive(Clone, Debug, Default, Deserialize, PartialEq, JsonSchema)]
-#[serde(default, deny_unknown_fields)]
+#[apollo_configuration::configuration]
+#[derive(PartialEq)]
 pub(super) struct SubgraphResponseConf {
     /// Condition to trigger this stage
+    // Condition is generic, so it can't take the configuration attribute.
+    #[config(skip_validate)]
     pub(super) condition: Condition<SubgraphSelector>,
     /// Send the headers
     pub(super) headers: bool,
     /// Send the context
+    // ContextConf's Selective tuple variant holds a HashSet, which has no Validate impl.
+    #[config(skip_validate)]
     pub(super) context: ContextConf,
     /// Send the body (can be true/false or selective with data/errors/extensions)
     pub(super) body: BodyConf,
@@ -514,52 +487,42 @@ pub(super) struct SubgraphResponseConf {
 }
 
 /// Configures the externalization plugin
-#[derive(Clone, Debug, Deserialize, JsonSchema)]
-#[serde(deny_unknown_fields)]
+#[apollo_configuration::configuration]
 #[schemars(rename = "CoprocessorConfig")]
 struct Conf {
     /// The url you'd like to offload processing to (can be overridden per-stage). Supports HTTP/HTTPS (http://127.0.0.1:8081/urlpath) and Unix Domain Socket (unix:///path/to/socket) URLs
+    #[config(required)]
     url: String,
     client: Option<Client>,
     /// The timeout for external requests
-    #[serde(deserialize_with = "humantime_serde::deserialize")]
     #[schemars(with = "String", default = "default_timeout")]
-    #[serde(default = "default_timeout")]
-    timeout: Duration,
+    #[config(default = default_timeout().into())]
+    timeout: apollo_configuration::types::Duration,
     /// Response validation defaults to true
-    #[serde(default = "default_response_validation")]
+    #[config(default = default_response_validation())]
     response_validation: bool,
     /// The router stage request/response configuration
-    #[serde(default)]
     router: RouterStage,
     /// The supergraph stage request/response configuration
-    #[serde(default)]
     supergraph: supergraph::SupergraphStage,
     /// The execution stage request/response configuration
-    #[serde(default)]
     execution: execution::ExecutionStage,
     /// The subgraph stage request/response configuration
-    #[serde(default)]
     subgraph: SubgraphStages,
     /// The connector stage request/response configuration
-    #[serde(default)]
     connector: connector::ConnectorStages,
 }
 
 /// Configuration for which body fields to send to coprocessor
-#[derive(Clone, Copy, Debug, Deserialize, PartialEq, JsonSchema)]
+#[apollo_configuration::configuration]
+#[derive(Copy, PartialEq)]
 #[serde(untagged)]
 pub(super) enum BodyConf {
     /// Send entire body (true) or nothing (false)
+    #[config(default)]
     All(bool),
     /// Send specific fields
     Selective(BodyFieldsConf),
-}
-
-impl Default for BodyConf {
-    fn default() -> Self {
-        BodyConf::All(false)
-    }
 }
 
 impl BodyConf {
@@ -574,8 +537,8 @@ impl BodyConf {
 }
 
 /// Configuration for selective body fields
-#[derive(Clone, Copy, Debug, Default, Deserialize, PartialEq, JsonSchema)]
-#[serde(default, deny_unknown_fields)]
+#[apollo_configuration::configuration]
+#[derive(Copy, PartialEq)]
 pub(super) struct BodyFieldsConf {
     /// Send the data field
     pub(super) data: bool,
@@ -586,46 +549,14 @@ pub(super) struct BodyFieldsConf {
 }
 
 /// Configures the context
-#[derive(Clone, Debug, Deserialize, JsonSchema, PartialEq)]
-#[serde(deny_unknown_fields, untagged)]
-pub(super) enum ContextConf {
-    /// Deprecated configuration using a boolean
-    Deprecated(bool),
-    NewContextConf(NewContextConf),
-}
-
-impl ContextConf {
-    fn is_deprecated(&self) -> bool {
-        match self {
-            Self::Deprecated(v) => *v,
-            Self::NewContextConf(c) => *c == NewContextConf::Deprecated,
-        }
-    }
-
-    /// Returns the config value string as the user wrote it, if this conf is deprecated.
-    fn deprecated_value_str(&self) -> Option<&'static str> {
-        match self {
-            Self::Deprecated(true) => Some("true"),
-            Self::NewContextConf(NewContextConf::Deprecated) => Some("deprecated"),
-            _ => None,
-        }
-    }
-}
-
-impl Default for ContextConf {
-    fn default() -> Self {
-        Self::Deprecated(false)
-    }
-}
-
-/// Configures the context
-#[derive(Clone, Debug, Deserialize, JsonSchema, PartialEq)]
+#[derive(Clone, Debug, Default, Deserialize, JsonSchema, PartialEq)]
 #[serde(deny_unknown_fields, rename_all = "snake_case")]
-pub(super) enum NewContextConf {
+pub(super) enum ContextConf {
+    /// Do not send context to the coprocessor (the default)
+    #[default]
+    None,
     /// Send all context keys to coprocessor
     All,
-    /// Send all context keys using deprecated names (from router 1.x) to coprocessor
-    Deprecated,
     /// Only send the list of context keys to coprocessor
     Selective(Arc<HashSet<String>>),
 }
@@ -633,7 +564,8 @@ pub(super) enum NewContextConf {
 impl ContextConf {
     pub(crate) fn get_context(&self, ctx: &Context) -> Option<(Context, HashSet<String>)> {
         match self {
-            Self::NewContextConf(NewContextConf::All) => {
+            Self::None => None,
+            Self::All => {
                 let mut keys_sent = HashSet::new();
                 let mut new_ctx = Context::from_iter(ctx.iter().map(|elt| {
                     keys_sent.insert(elt.key().clone());
@@ -642,19 +574,7 @@ impl ContextConf {
                 new_ctx.id = ctx.id.clone();
                 Some((new_ctx, keys_sent))
             }
-            Self::NewContextConf(NewContextConf::Deprecated) | Self::Deprecated(true) => {
-                let mut keys_sent = HashSet::new();
-                let mut new_ctx = Context::from_iter(ctx.iter().map(|elt| {
-                    keys_sent.insert(elt.key().clone());
-                    (
-                        context_key_to_deprecated(elt.key().clone()),
-                        elt.value().clone(),
-                    )
-                }));
-                new_ctx.id = ctx.id.clone();
-                Some((new_ctx, keys_sent))
-            }
-            Self::NewContextConf(NewContextConf::Selective(context_keys)) => {
+            Self::Selective(context_keys) => {
                 let mut keys_sent = HashSet::new();
                 let mut new_ctx = Context::from_iter(ctx.iter().filter_map(|elt| {
                     if context_keys.contains(elt.key()) {
@@ -667,7 +587,6 @@ impl ContextConf {
                 new_ctx.id = ctx.id.clone();
                 Some((new_ctx, keys_sent))
             }
-            Self::Deprecated(false) => None,
         }
     }
 }
@@ -721,16 +640,11 @@ pub(crate) fn validate_coprocessor_url(url: &str, config_path: &str) -> Result<(
 pub(crate) fn update_context_from_coprocessor(
     target_context: &Context,
     context_returned: Context,
-    context_config: &ContextConf,
     keys_sent: &HashSet<String>,
 ) -> Result<(), BoxError> {
     let mut keys_returned = HashSet::with_capacity(context_returned.len());
 
-    for (mut key, value) in context_returned.try_into_iter()? {
-        if context_config.is_deprecated() {
-            key = context_key_from_deprecated(key);
-        }
-
+    for (key, value) in context_returned.try_into_iter()? {
         keys_returned.insert(key.clone());
         target_context.insert_json_value(key, value);
     }
@@ -743,7 +657,7 @@ pub(crate) fn update_context_from_coprocessor(
 }
 
 fn get_coprocessor_timer(stage: PipelineStep) -> crate::metrics::HistogramTimerGuard {
-    f64_histogram_timer!(
+    f64_histogram_timer_with_unit!(
         "apollo.router.operations.coprocessor.duration",
         "Time spent waiting for the coprocessor to answer, in seconds",
         coprocessor.stage = stage.to_string()
@@ -760,8 +674,8 @@ fn record_coprocessor_operation(stage: PipelineStep, succeeded: bool) {
     );
 }
 
-#[derive(Clone, Debug, Default, Deserialize, PartialEq, JsonSchema)]
-#[serde(default)]
+#[apollo_configuration::configuration]
+#[derive(PartialEq)]
 pub(super) struct RouterStage {
     /// The request configuration
     pub(super) request: RouterRequestConf,
@@ -773,11 +687,11 @@ impl RouterStage {
     pub(crate) fn as_service<C>(
         &self,
         http_client: C,
-        service: router::BoxService,
+        service: router::BoxCloneService,
         default_url: String,
         sdl: Arc<String>,
         response_validation: bool,
-    ) -> router::BoxService
+    ) -> router::BoxCloneService
     where
         C: Service<HttpRequest, Response = HttpResponse, Error = BoxError>
             + Clone
@@ -884,29 +798,25 @@ impl RouterStage {
             .instrument(external_service_span())
             .option_layer(request_layer)
             .option_layer(response_layer)
-            .buffered() // XXX: Added during backpressure fixing
             .service(service)
-            .boxed()
+            .boxed_clone()
     }
 }
 
 // -----------------------------------------------------------------------------------------
 
 /// What information is passed to a subgraph request/response stage
-#[derive(Clone, Debug, Default, Deserialize, PartialEq, JsonSchema)]
-#[serde(default, deny_unknown_fields)]
+#[apollo_configuration::configuration]
+#[derive(PartialEq)]
 pub(super) struct SubgraphStages {
-    #[serde(default)]
     pub(super) all: SubgraphStage,
 }
 
 /// What information is passed to a subgraph request/response stage
-#[derive(Clone, Debug, Default, Deserialize, PartialEq, JsonSchema)]
-#[serde(default, deny_unknown_fields)]
+#[apollo_configuration::configuration]
+#[derive(PartialEq)]
 pub(super) struct SubgraphStage {
-    #[serde(default)]
     pub(super) request: SubgraphRequestConf,
-    #[serde(default)]
     pub(super) response: SubgraphResponseConf,
 }
 
@@ -914,11 +824,11 @@ impl SubgraphStage {
     pub(crate) fn as_service<C>(
         &self,
         http_client: C,
-        service: subgraph::BoxService,
+        service: subgraph::BoxCloneService,
         default_url: String,
         service_name: String,
         response_validation: bool,
-    ) -> subgraph::BoxService
+    ) -> subgraph::BoxCloneService
     where
         C: Service<HttpRequest, Response = HttpResponse, Error = BoxError>
             + Clone
@@ -1026,9 +936,8 @@ impl SubgraphStage {
             .instrument(external_service_span())
             .option_layer(request_layer)
             .option_layer(response_layer)
-            .buffered() // XXX: Added during backpressure fixing
             .service(service)
-            .boxed()
+            .boxed_clone()
     }
 }
 
@@ -1196,12 +1105,7 @@ where
         }
 
         if let Some(context) = co_processor_output.context {
-            for (mut key, value) in context.try_into_iter()? {
-                if let ContextConf::NewContextConf(NewContextConf::Deprecated) =
-                    &request_config.context
-                {
-                    key = context_key_from_deprecated(key);
-                }
+            for (key, value) in context.try_into_iter()? {
                 res.context.upsert_json_value(key, move |_current| value);
             }
         }
@@ -1221,11 +1125,7 @@ where
     request.router_request = http::Request::from_parts(parts, new_body);
 
     if let Some(context) = co_processor_output.context {
-        for (mut key, value) in context.try_into_iter()? {
-            if let ContextConf::NewContextConf(NewContextConf::Deprecated) = &request_config.context
-            {
-                key = context_key_from_deprecated(key);
-            }
+        for (key, value) in context.try_into_iter()? {
             request
                 .context
                 .upsert_json_value(key, move |_current| value);
@@ -1378,7 +1278,7 @@ where
             parts.status = control.get_http_status()?;
         }
         if let Some(ctx) = co_processor_output.context {
-            update_context_from_coprocessor(&context, ctx, &response_config.context, &keys_sent)?;
+            update_context_from_coprocessor(&context, ctx, &keys_sent)?;
         }
         if let Some(headers) = co_processor_output.headers {
             parts.headers = internalize_header_map(headers)?;
@@ -1483,7 +1383,6 @@ where
                         update_context_from_coprocessor(
                             &generator_map_context,
                             ctx,
-                            &context_conf,
                             &keys_sent,
                         )?;
                     }
@@ -1656,12 +1555,7 @@ where
             };
 
             if let Some(context) = co_processor_output.context {
-                for (mut key, value) in context.try_into_iter()? {
-                    if let ContextConf::NewContextConf(NewContextConf::Deprecated) =
-                        &request_config.context
-                    {
-                        key = context_key_from_deprecated(key);
-                    }
+                for (key, value) in context.try_into_iter()? {
                     subgraph_response
                         .context
                         .upsert_json_value(key, move |_current| value);
@@ -1670,7 +1564,7 @@ where
 
             subgraph_response
         };
-        return Ok(ControlFlow::Break(res));
+        return Ok(ControlFlow::Break(res.answered_by_router()));
     }
 
     // Finally, process our reply and act on the contents. Our processing logic is
@@ -1684,11 +1578,7 @@ where
     request.subgraph_request = http::Request::from_parts(parts, new_body);
 
     if let Some(context) = co_processor_output.context {
-        for (mut key, value) in context.try_into_iter()? {
-            if let ContextConf::NewContextConf(NewContextConf::Deprecated) = &request_config.context
-            {
-                key = context_key_from_deprecated(key);
-            }
+        for (key, value) in context.try_into_iter()? {
             request
                 .context
                 .upsert_json_value(key, move |_current| value);
@@ -1837,12 +1727,7 @@ where
     }
 
     if let Some(context) = co_processor_output.context {
-        update_context_from_coprocessor(
-            &response.context,
-            context,
-            &response_config.context,
-            &keys_sent,
-        )?;
+        update_context_from_coprocessor(&response.context, context, &keys_sent)?;
     }
 
     if let Some(headers) = co_processor_output.headers {

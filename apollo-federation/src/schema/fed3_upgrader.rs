@@ -1,12 +1,15 @@
 use std::ops::Range;
 
+use apollo_compiler::Name;
+use apollo_compiler::Node;
 use apollo_compiler::Schema;
 use apollo_compiler::ast::Directive;
+use apollo_compiler::ast::DirectiveList;
+use apollo_compiler::ast::FieldDefinition;
 use apollo_compiler::collections::IndexMap;
 use apollo_compiler::collections::IndexSet;
 use apollo_compiler::parser::LineColumn;
 use apollo_compiler::parser::SourceMap;
-use apollo_compiler::schema::Component;
 use apollo_compiler::schema::ExtendedType;
 
 use crate::error::SubgraphLocation;
@@ -104,10 +107,10 @@ pub(crate) fn apply_fed3_upgrade(schema: &mut Schema, subgraph_name: &str) -> Ve
 
 /// An `@deprecated` removed by [`strip_invalid_implementation_deprecations`].
 pub(crate) struct StrippedDeprecation {
-    pub(crate) type_name: apollo_compiler::Name,
-    pub(crate) field_name: apollo_compiler::Name,
-    pub(crate) interface_name: apollo_compiler::Name,
-    pub(crate) directive: apollo_compiler::Node<Directive>,
+    pub(crate) type_name: Name,
+    pub(crate) field_name: Name,
+    pub(crate) interface_name: Name,
+    pub(crate) directive: Node<Directive>,
 }
 
 impl StrippedDeprecation {
@@ -188,8 +191,8 @@ pub(crate) fn strip_invalid_implementation_deprecations(
 /// Strip `@deprecated(reason: null)` from all fields and their arguments.
 fn upgrade_fields_and_args(
     hints: &mut Vec<CompositionHint>,
-    fields: &mut IndexMap<apollo_compiler::Name, Component<apollo_compiler::ast::FieldDefinition>>,
-    type_name: &apollo_compiler::Name,
+    fields: &mut IndexMap<Name, Node<FieldDefinition>>,
+    type_name: &Name,
     subgraph_name: &str,
     sources: &SourceMap,
 ) {
@@ -222,9 +225,7 @@ fn upgrade_fields_and_args(
 /// Returns a map from interface name to the set of non-deprecated field names
 /// for every interface type in the schema. Fields the interface does not declare
 /// are absent, so the 2025 rule never applies to them.
-fn collect_interface_non_deprecated_fields(
-    schema: &Schema,
-) -> IndexMap<apollo_compiler::Name, IndexSet<apollo_compiler::Name>> {
+fn collect_interface_non_deprecated_fields(schema: &Schema) -> IndexMap<Name, IndexSet<Name>> {
     let mut result = IndexMap::default();
     for ty in schema.types.values() {
         if let ExtendedType::Interface(interface) = ty {
@@ -241,7 +242,7 @@ fn collect_interface_non_deprecated_fields(
 }
 
 /// Returns true if the directive list contains any `@deprecated` application.
-fn has_deprecated(directives: &apollo_compiler::ast::DirectiveList) -> bool {
+fn has_deprecated(directives: &DirectiveList) -> bool {
     directives.0.iter().any(|d| d.name == "deprecated")
 }
 
@@ -254,9 +255,9 @@ fn default_range() -> Range<LineColumn> {
 /// "No longer supported"). Emits a hint for each occurrence.
 fn strip_deprecated_reason_null(
     hints: &mut Vec<CompositionHint>,
-    directives: &mut apollo_compiler::ast::DirectiveList,
-    type_name: &apollo_compiler::Name,
-    member_name: &apollo_compiler::Name,
+    directives: &mut DirectiveList,
+    type_name: &Name,
+    member_name: &Name,
     subgraph_name: &str,
     sources: &SourceMap,
 ) {

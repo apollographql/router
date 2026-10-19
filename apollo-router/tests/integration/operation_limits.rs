@@ -282,12 +282,13 @@ supergraph:
           - redis://localhost:6379
         ttl: 10s
 limits:
-  max_aliases: 1
+  router:
+    max_aliases: 1
+    warn_only: ${WARN_ONLY}
 "#;
 
-    let config_warn_only = format!("{base_config}\n  warn_only: true");
-
-    let config_enforce = format!("{base_config}\n  warn_only: false");
+    let config_warn_only = base_config.replace("${WARN_ONLY}", "true");
+    let config_enforce = base_config.replace("${WARN_ONLY}", "false");
 
     let mut router = IntegrationTest::builder()
         .config(config_warn_only)
@@ -346,7 +347,7 @@ async fn build_test_harness(
     let get_execution_count = move || execution_count_2.load(Ordering::Acquire);
     let service = TestHarness::builder()
         .configuration_json(json!({
-            "limits": limits_config,
+            "limits": { "router": limits_config },
             "include_subgraph_errors": { "all": true },
         }))
         .unwrap()
@@ -367,7 +368,7 @@ async fn build_test_harness(
                         .unwrap())
                 }
             })
-            .boxed()
+            .boxed_clone()
         })
         .build_supergraph()
         .await

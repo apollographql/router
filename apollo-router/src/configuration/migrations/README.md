@@ -7,6 +7,7 @@ A migration has the following format:
 
 The filename should begin with a 4 digit numerical prefix. This allows us to apply migrations in a deterministic order.
 `Filename: 0001-name.yaml`. It must start with the current major version of the router. For example for router 2.x it should start with `2001-name.yaml`. If it doesn't start with the right version then it would be considered as a real breaking change and won't be automatically migrated when the router starts.
+Use the next unused number; two migrations for the current major version must not share a prefix. To add the first migration for a new major version, bump the crate's major version first.
 
 The yaml consists of a description and a number of actions:
 ```yaml
@@ -76,3 +77,6 @@ In future we will be able to use these files to support offline migrations.
 
 # Testing
 Once you have made a new migration place a config file in `testdata/migrations`. It will automatically be picked up by the `upgrade_old_configuration` test.
+
+
+The fixture should contain the **old** configuration, i.e. the format your migration upgrades from, not the new one. For example, the fixture for a migration that renames `Continue` to `continue` still uses `Continue`. The `upgrade_old_configuration` test runs every file in that folder through the migrations and then validates the migrated result against the current configuration schema, so a fixture that is already in the new format proves nothing about the migration.

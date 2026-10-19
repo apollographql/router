@@ -461,7 +461,7 @@ fn connect_directive_spec() -> DirectiveSpecification {
         None,
         // Some(DirectiveCompositionOptions {
         //     supergraph_specification: &|v| {
-        //         CONNECT_VERSIONS.get_dyn_minimum_required_version(v)
+        //         CONNECT_VERSIONS.get_dyn_maximum_allowed_version(v)
         //     },
         //     static_argument_transform: None,
         //     use_join_directive: true,

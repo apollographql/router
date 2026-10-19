@@ -2,12 +2,18 @@
 source: apollo-router/src/configuration/tests.rs
 expression: error.to_string()
 ---
-configuration had errors: 
-1. at line 9
+apollo::configuration::schema
 
-    listen: 127.0.0.1:4000
-  cors:
-    allow_headers:
-      - Content-Type
-      - 5
-        ^----- 5 is not of type "string"
+  × schema validation error
+  ╰─▶ schema validation error
+
+Error: apollo::configuration::validation
+
+  × 5 is not of type "string"
+    ╭─[9:7]
+  8 │     - Content-Type
+  9 │     - 5
+    ·       ┬
+    ·       ╰── 5 is not of type "string"
+ 10 │         
+    ╰────

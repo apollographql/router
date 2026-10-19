@@ -5,12 +5,12 @@ use apollo_compiler::Node;
 use apollo_compiler::Schema;
 use apollo_compiler::collections::IndexMap;
 use apollo_compiler::collections::IndexSet;
-use apollo_compiler::schema::Component;
-use apollo_compiler::schema::ComponentName;
-use apollo_compiler::schema::ComponentOrigin;
+use apollo_compiler::schema::ExtensionId;
 use apollo_compiler::validation::Valid;
 use itertools::Itertools;
 use itertools::kmerge_by;
+
+type Origin = Option<ExtensionId>;
 
 /// For any two [Schema]s that are considered "equal", normalizing them with this function will make
 /// it such that:
@@ -163,31 +163,31 @@ impl<T: std::fmt::Display> std::fmt::Display for Normalized<T> {
 
 fn sort_schema_definition(definition: &mut Node<apollo_compiler::schema::SchemaDefinition>) {
     let definition = definition.make_mut();
-    let grouped_query = group_components_by_origin_and_sort(
+    let grouped_query = group_by_origin_and_sort(
         definition.query.take(),
-        |name| name.origin.clone(),
+        |name| name.extension_id().cloned(),
         |_| {},
-        compare_component_names,
+        compare_names,
     );
-    let grouped_mutation = group_components_by_origin_and_sort(
+    let grouped_mutation = group_by_origin_and_sort(
         definition.mutation.take(),
-        |name| name.origin.clone(),
+        |name| name.extension_id().cloned(),
         |_| {},
-        compare_component_names,
+        compare_names,
     );
-    let grouped_subscription = group_components_by_origin_and_sort(
+    let grouped_subscription = group_by_origin_and_sort(
         definition.subscription.take(),
-        |name| name.origin.clone(),
+        |name| name.extension_id().cloned(),
         |_| {},
-        compare_component_names,
+        compare_names,
     );
-    let grouped_directives = group_components_by_origin_and_sort(
+    let grouped_directives = group_by_origin_and_sort(
         definition.directives.drain(..),
-        |directive| directive.origin.clone(),
-        sort_component_directive,
-        compare_sorted_component_directives,
+        |directive| directive.extension_id().cloned(),
+        sort_directive,
+        compare_sorted_directives,
     );
-    let mut origins: IndexSet<ComponentOrigin> = grouped_query
+    let mut origins: IndexSet<Origin> = grouped_query
         .keys()
         .chain(grouped_mutation.keys())
         .chain(grouped_subscription.keys())
@@ -195,68 +195,48 @@ fn sort_schema_definition(definition: &mut Node<apollo_compiler::schema::SchemaD
         .cloned()
         .collect();
     sort_origins(&mut origins, |left, right| {
-        match compare_origins_by_sorted_components(
-            left,
-            right,
-            &grouped_query,
-            compare_component_names,
-        ) {
+        match compare_origins_by_sorted_items(left, right, &grouped_query, compare_names) {
             Ordering::Equal => (),
             non_equal => return non_equal,
         }
-        match compare_origins_by_sorted_components(
-            left,
-            right,
-            &grouped_mutation,
-            compare_component_names,
-        ) {
+        match compare_origins_by_sorted_items(left, right, &grouped_mutation, compare_names) {
             Ordering::Equal => (),
             non_equal => return non_equal,
         }
-        match compare_origins_by_sorted_components(
-            left,
-            right,
-            &grouped_subscription,
-            compare_component_names,
-        ) {
+        match compare_origins_by_sorted_items(left, right, &grouped_subscription, compare_names) {
             Ordering::Equal => (),
             non_equal => return non_equal,
         }
-        compare_origins_by_sorted_components(
-            left,
-            right,
-            &grouped_directives,
-            compare_sorted_component_directives,
-        )
+        compare_origins_by_sorted_items(left, right, &grouped_directives, compare_sorted_directives)
     });
-    definition.query = kmerge_sorted_components_and_origins(
+    definition.query = kmerge_sorted_items_and_origins(
         grouped_query,
         &origins,
-        |name| &name.origin,
-        compare_component_names,
+        |name| name.extension_id().cloned(),
+        compare_names,
     )
     .next();
-    definition.mutation = kmerge_sorted_components_and_origins(
+    definition.mutation = kmerge_sorted_items_and_origins(
         grouped_mutation,
         &origins,
-        |name| &name.origin,
-        compare_component_names,
+        |name| name.extension_id().cloned(),
+        compare_names,
     )
     .next();
-    definition.subscription = kmerge_sorted_components_and_origins(
+    definition.subscription = kmerge_sorted_items_and_origins(
         grouped_subscription,
         &origins,
-        |name| &name.origin,
-        compare_component_names,
+        |name| name.extension_id().cloned(),
+        compare_names,
     )
     .next();
     definition
         .directives
-        .extend(kmerge_sorted_components_and_origins(
+        .extend(kmerge_sorted_items_and_origins(
             grouped_directives,
             &origins,
-            |directive| &directive.origin,
-            compare_sorted_component_directives,
+            |directive| directive.extension_id().cloned(),
+            compare_sorted_directives,
         ));
 }
 
@@ -274,292 +254,254 @@ fn sort_extended_type_definition(definition: &mut apollo_compiler::schema::Exten
 
 fn sort_scalar_type_definition(definition: &mut Node<apollo_compiler::schema::ScalarType>) {
     let definition = definition.make_mut();
-    let grouped_directives = group_components_by_origin_and_sort(
+    let grouped_directives = group_by_origin_and_sort(
         definition.directives.drain(..),
-        |directive| directive.origin.clone(),
-        sort_component_directive,
-        compare_sorted_component_directives,
+        |directive| directive.extension_id().cloned(),
+        sort_directive,
+        compare_sorted_directives,
     );
-    let mut origins: IndexSet<ComponentOrigin> = grouped_directives.keys().cloned().collect();
+    let mut origins: IndexSet<Origin> = grouped_directives.keys().cloned().collect();
     sort_origins(&mut origins, |left, right| {
-        compare_origins_by_sorted_components(
-            left,
-            right,
-            &grouped_directives,
-            compare_sorted_component_directives,
-        )
+        compare_origins_by_sorted_items(left, right, &grouped_directives, compare_sorted_directives)
     });
     definition
         .directives
-        .extend(kmerge_sorted_components_and_origins(
+        .extend(kmerge_sorted_items_and_origins(
             grouped_directives,
             &origins,
-            |directive| &directive.origin,
-            compare_sorted_component_directives,
+            |directive| directive.extension_id().cloned(),
+            compare_sorted_directives,
         ));
 }
 
 fn sort_object_type_definition(definition: &mut Node<apollo_compiler::schema::ObjectType>) {
     let definition = definition.make_mut();
-    let grouped_fields = group_components_by_origin_and_sort(
+    let grouped_fields = group_by_origin_and_sort(
         definition.fields.drain(..),
-        |(_, field)| field.origin.clone(),
-        sort_component_field_definition,
-        compare_sorted_component_field_definitions,
+        |(_, field)| field.extension_id().cloned(),
+        sort_field_definition,
+        compare_sorted_field_definitions,
     );
-    let grouped_implements_interfaces = group_components_by_origin_and_sort(
+    let grouped_implements_interfaces = group_by_origin_and_sort(
         definition.implements_interfaces.drain(..),
-        |implements_interface| implements_interface.origin.clone(),
+        |implements_interface| implements_interface.extension_id().cloned(),
         |_| {},
-        compare_component_names,
+        compare_names,
     );
-    let grouped_directives = group_components_by_origin_and_sort(
+    let grouped_directives = group_by_origin_and_sort(
         definition.directives.drain(..),
-        |directive| directive.origin.clone(),
-        sort_component_directive,
-        compare_sorted_component_directives,
+        |directive| directive.extension_id().cloned(),
+        sort_directive,
+        compare_sorted_directives,
     );
-    let mut origins: IndexSet<ComponentOrigin> = grouped_fields
+    let mut origins: IndexSet<Origin> = grouped_fields
         .keys()
         .chain(grouped_implements_interfaces.keys())
         .chain(grouped_directives.keys())
         .cloned()
         .collect();
     sort_origins(&mut origins, |left, right| {
-        match compare_origins_by_sorted_components(
+        match compare_origins_by_sorted_items(
             left,
             right,
             &grouped_fields,
-            compare_sorted_component_field_definitions,
+            compare_sorted_field_definitions,
         ) {
             Ordering::Equal => (),
             non_equal => return non_equal,
         }
-        match compare_origins_by_sorted_components(
+        match compare_origins_by_sorted_items(
             left,
             right,
             &grouped_implements_interfaces,
-            compare_component_names,
+            compare_names,
         ) {
             Ordering::Equal => (),
             non_equal => return non_equal,
         }
-        compare_origins_by_sorted_components(
-            left,
-            right,
-            &grouped_directives,
-            compare_sorted_component_directives,
-        )
+        compare_origins_by_sorted_items(left, right, &grouped_directives, compare_sorted_directives)
     });
-    definition
-        .fields
-        .extend(kmerge_sorted_components_and_origins(
-            grouped_fields,
-            &origins,
-            |(_, field)| &field.origin,
-            compare_sorted_component_field_definitions,
-        ));
+    definition.fields.extend(kmerge_sorted_items_and_origins(
+        grouped_fields,
+        &origins,
+        |(_, field)| field.extension_id().cloned(),
+        compare_sorted_field_definitions,
+    ));
     definition
         .implements_interfaces
-        .extend(kmerge_sorted_components_and_origins(
+        .extend(kmerge_sorted_items_and_origins(
             grouped_implements_interfaces,
             &origins,
-            |implements_interface| &implements_interface.origin,
-            compare_component_names,
+            |implements_interface| implements_interface.extension_id().cloned(),
+            compare_names,
         ));
     definition
         .directives
-        .extend(kmerge_sorted_components_and_origins(
+        .extend(kmerge_sorted_items_and_origins(
             grouped_directives,
             &origins,
-            |directive| &directive.origin,
-            compare_sorted_component_directives,
+            |directive| directive.extension_id().cloned(),
+            compare_sorted_directives,
         ));
 }
 
 fn sort_interface_type_definition(definition: &mut Node<apollo_compiler::schema::InterfaceType>) {
     let definition = definition.make_mut();
-    let grouped_fields = group_components_by_origin_and_sort(
+    let grouped_fields = group_by_origin_and_sort(
         definition.fields.drain(..),
-        |(_, field)| field.origin.clone(),
-        sort_component_field_definition,
-        compare_sorted_component_field_definitions,
+        |(_, field)| field.extension_id().cloned(),
+        sort_field_definition,
+        compare_sorted_field_definitions,
     );
-    let grouped_implements_interfaces = group_components_by_origin_and_sort(
+    let grouped_implements_interfaces = group_by_origin_and_sort(
         definition.implements_interfaces.drain(..),
-        |implements_interface| implements_interface.origin.clone(),
+        |implements_interface| implements_interface.extension_id().cloned(),
         |_| {},
-        compare_component_names,
+        compare_names,
     );
-    let grouped_directives = group_components_by_origin_and_sort(
+    let grouped_directives = group_by_origin_and_sort(
         definition.directives.drain(..),
-        |directive| directive.origin.clone(),
-        sort_component_directive,
-        compare_sorted_component_directives,
+        |directive| directive.extension_id().cloned(),
+        sort_directive,
+        compare_sorted_directives,
     );
-    let mut origins: IndexSet<ComponentOrigin> = grouped_fields
+    let mut origins: IndexSet<Origin> = grouped_fields
         .keys()
         .chain(grouped_implements_interfaces.keys())
         .chain(grouped_directives.keys())
         .cloned()
         .collect();
     sort_origins(&mut origins, |left, right| {
-        match compare_origins_by_sorted_components(
+        match compare_origins_by_sorted_items(
             left,
             right,
             &grouped_fields,
-            compare_sorted_component_field_definitions,
+            compare_sorted_field_definitions,
         ) {
             Ordering::Equal => (),
             non_equal => return non_equal,
         }
-        match compare_origins_by_sorted_components(
+        match compare_origins_by_sorted_items(
             left,
             right,
             &grouped_implements_interfaces,
-            compare_component_names,
+            compare_names,
         ) {
             Ordering::Equal => (),
             non_equal => return non_equal,
         }
-        compare_origins_by_sorted_components(
-            left,
-            right,
-            &grouped_directives,
-            compare_sorted_component_directives,
-        )
+        compare_origins_by_sorted_items(left, right, &grouped_directives, compare_sorted_directives)
     });
-    definition
-        .fields
-        .extend(kmerge_sorted_components_and_origins(
-            grouped_fields,
-            &origins,
-            |(_, field)| &field.origin,
-            compare_sorted_component_field_definitions,
-        ));
+    definition.fields.extend(kmerge_sorted_items_and_origins(
+        grouped_fields,
+        &origins,
+        |(_, field)| field.extension_id().cloned(),
+        compare_sorted_field_definitions,
+    ));
     definition
         .implements_interfaces
-        .extend(kmerge_sorted_components_and_origins(
+        .extend(kmerge_sorted_items_and_origins(
             grouped_implements_interfaces,
             &origins,
-            |implements_interface| &implements_interface.origin,
-            compare_component_names,
+            |implements_interface| implements_interface.extension_id().cloned(),
+            compare_names,
         ));
     definition
         .directives
-        .extend(kmerge_sorted_components_and_origins(
+        .extend(kmerge_sorted_items_and_origins(
             grouped_directives,
             &origins,
-            |directive| &directive.origin,
-            compare_sorted_component_directives,
+            |directive| directive.extension_id().cloned(),
+            compare_sorted_directives,
         ));
 }
 
 fn sort_union_type_definition(definition: &mut Node<apollo_compiler::schema::UnionType>) {
     let definition = definition.make_mut();
-    let grouped_members = group_components_by_origin_and_sort(
+    let grouped_members = group_by_origin_and_sort(
         definition.members.drain(..),
-        |member| member.origin.clone(),
+        |member| member.extension_id().cloned(),
         |_| {},
-        compare_component_names,
+        compare_names,
     );
-    let grouped_directives = group_components_by_origin_and_sort(
+    let grouped_directives = group_by_origin_and_sort(
         definition.directives.drain(..),
-        |directive| directive.origin.clone(),
-        sort_component_directive,
-        compare_sorted_component_directives,
+        |directive| directive.extension_id().cloned(),
+        sort_directive,
+        compare_sorted_directives,
     );
-    let mut origins: IndexSet<ComponentOrigin> = grouped_members
+    let mut origins: IndexSet<Origin> = grouped_members
         .keys()
         .chain(grouped_directives.keys())
         .cloned()
         .collect();
     sort_origins(&mut origins, |left, right| {
-        match compare_origins_by_sorted_components(
-            left,
-            right,
-            &grouped_members,
-            compare_component_names,
-        ) {
+        match compare_origins_by_sorted_items(left, right, &grouped_members, compare_names) {
             Ordering::Equal => (),
             non_equal => return non_equal,
         }
-        compare_origins_by_sorted_components(
-            left,
-            right,
-            &grouped_directives,
-            compare_sorted_component_directives,
-        )
+        compare_origins_by_sorted_items(left, right, &grouped_directives, compare_sorted_directives)
     });
-    definition
-        .members
-        .extend(kmerge_sorted_components_and_origins(
-            grouped_members,
-            &origins,
-            |member| &member.origin,
-            compare_component_names,
-        ));
+    definition.members.extend(kmerge_sorted_items_and_origins(
+        grouped_members,
+        &origins,
+        |member| member.extension_id().cloned(),
+        compare_names,
+    ));
     definition
         .directives
-        .extend(kmerge_sorted_components_and_origins(
+        .extend(kmerge_sorted_items_and_origins(
             grouped_directives,
             &origins,
-            |directive| &directive.origin,
-            compare_sorted_component_directives,
+            |directive| directive.extension_id().cloned(),
+            compare_sorted_directives,
         ));
 }
 
 fn sort_enum_type_definition(definition: &mut Node<apollo_compiler::schema::EnumType>) {
     let definition = definition.make_mut();
-    let grouped_values = group_components_by_origin_and_sort(
+    let grouped_values = group_by_origin_and_sort(
         definition.values.drain(..),
-        |(_, value)| value.origin.clone(),
-        sort_component_enum_value_definition,
-        compare_sorted_component_enum_value_definitions,
+        |(_, value)| value.extension_id().cloned(),
+        sort_enum_value_definition,
+        compare_sorted_enum_value_definitions,
     );
-    let grouped_directives = group_components_by_origin_and_sort(
+    let grouped_directives = group_by_origin_and_sort(
         definition.directives.drain(..),
-        |directive| directive.origin.clone(),
-        sort_component_directive,
-        compare_sorted_component_directives,
+        |directive| directive.extension_id().cloned(),
+        sort_directive,
+        compare_sorted_directives,
     );
-    let mut origins: IndexSet<ComponentOrigin> = grouped_values
+    let mut origins: IndexSet<Origin> = grouped_values
         .keys()
         .chain(grouped_directives.keys())
         .cloned()
         .collect();
     sort_origins(&mut origins, |left, right| {
-        match compare_origins_by_sorted_components(
+        match compare_origins_by_sorted_items(
             left,
             right,
             &grouped_values,
-            compare_sorted_component_enum_value_definitions,
+            compare_sorted_enum_value_definitions,
         ) {
             Ordering::Equal => (),
             non_equal => return non_equal,
         }
-        compare_origins_by_sorted_components(
-            left,
-            right,
-            &grouped_directives,
-            compare_sorted_component_directives,
-        )
+        compare_origins_by_sorted_items(left, right, &grouped_directives, compare_sorted_directives)
     });
-    definition
-        .values
-        .extend(kmerge_sorted_components_and_origins(
-            grouped_values,
-            &origins,
-            |(_, value)| &value.origin,
-            compare_sorted_component_enum_value_definitions,
-        ));
+    definition.values.extend(kmerge_sorted_items_and_origins(
+        grouped_values,
+        &origins,
+        |(_, value)| value.extension_id().cloned(),
+        compare_sorted_enum_value_definitions,
+    ));
     definition
         .directives
-        .extend(kmerge_sorted_components_and_origins(
+        .extend(kmerge_sorted_items_and_origins(
             grouped_directives,
             &origins,
-            |directive| &directive.origin,
-            compare_sorted_component_directives,
+            |directive| directive.extension_id().cloned(),
+            compare_sorted_directives,
         ));
 }
 
@@ -567,61 +509,52 @@ fn sort_input_object_type_definition(
     definition: &mut Node<apollo_compiler::schema::InputObjectType>,
 ) {
     let definition = definition.make_mut();
-    let grouped_fields = group_components_by_origin_and_sort(
+    let grouped_fields = group_by_origin_and_sort(
         definition.fields.drain(..),
-        |(_, field)| field.origin.clone(),
-        sort_component_input_value_definition,
-        compare_sorted_component_input_value_definitions,
+        |(_, field)| field.extension_id().cloned(),
+        |item: &mut _| sort_input_value_definition(&mut item.1),
+        |left: &_, right: &_| compare_sorted_input_value_definitions(&left.1, &right.1),
     );
-    let grouped_directives = group_components_by_origin_and_sort(
+    let grouped_directives = group_by_origin_and_sort(
         definition.directives.drain(..),
-        |directive| directive.origin.clone(),
-        sort_component_directive,
-        compare_sorted_component_directives,
+        |directive| directive.extension_id().cloned(),
+        sort_directive,
+        compare_sorted_directives,
     );
-    let mut origins: IndexSet<ComponentOrigin> = grouped_fields
+    let mut origins: IndexSet<Origin> = grouped_fields
         .keys()
         .chain(grouped_directives.keys())
         .cloned()
         .collect();
     sort_origins(&mut origins, |left, right| {
-        match compare_origins_by_sorted_components(
+        match compare_origins_by_sorted_items(
             left,
             right,
             &grouped_fields,
-            compare_sorted_component_input_value_definitions,
+            |left: &_, right: &_| compare_sorted_input_value_definitions(&left.1, &right.1),
         ) {
             Ordering::Equal => (),
             non_equal => return non_equal,
         }
-        compare_origins_by_sorted_components(
-            left,
-            right,
-            &grouped_directives,
-            compare_sorted_component_directives,
-        )
+        compare_origins_by_sorted_items(left, right, &grouped_directives, compare_sorted_directives)
     });
-    definition
-        .fields
-        .extend(kmerge_sorted_components_and_origins(
-            grouped_fields,
-            &origins,
-            |(_, value)| &value.origin,
-            compare_sorted_component_input_value_definitions,
-        ));
+    definition.fields.extend(kmerge_sorted_items_and_origins(
+        grouped_fields,
+        &origins,
+        |(_, value)| value.extension_id().cloned(),
+        |left: &_, right: &_| compare_sorted_input_value_definitions(&left.1, &right.1),
+    ));
     definition
         .directives
-        .extend(kmerge_sorted_components_and_origins(
+        .extend(kmerge_sorted_items_and_origins(
             grouped_directives,
             &origins,
-            |directive| &directive.origin,
-            compare_sorted_component_directives,
+            |directive| directive.extension_id().cloned(),
+            compare_sorted_directives,
         ));
 }
 
-fn sort_component_field_definition(
-    definition: &mut (Name, Component<apollo_compiler::schema::FieldDefinition>),
-) {
+fn sort_field_definition(definition: &mut (Name, Node<apollo_compiler::schema::FieldDefinition>)) {
     let definition = definition.1.make_mut();
     sort_slice(
         &mut definition.arguments,
@@ -635,9 +568,9 @@ fn sort_component_field_definition(
     );
 }
 
-fn compare_sorted_component_field_definitions(
-    left: &(Name, Component<apollo_compiler::schema::FieldDefinition>),
-    right: &(Name, Component<apollo_compiler::schema::FieldDefinition>),
+fn compare_sorted_field_definitions(
+    left: &(Name, Node<apollo_compiler::schema::FieldDefinition>),
+    right: &(Name, Node<apollo_compiler::schema::FieldDefinition>),
 ) -> Ordering {
     let left = &left.1;
     let right = &right.1;
@@ -668,21 +601,8 @@ fn compare_sorted_component_field_definitions(
     compare_options(&left.description, &right.description, compare_descriptions)
 }
 
-fn sort_component_input_value_definition(
-    definition: &mut (Name, Component<apollo_compiler::ast::InputValueDefinition>),
-) {
-    sort_input_value_definition(&mut definition.1);
-}
-
-fn compare_sorted_component_input_value_definitions(
-    left: &(Name, Component<apollo_compiler::ast::InputValueDefinition>),
-    right: &(Name, Component<apollo_compiler::ast::InputValueDefinition>),
-) -> Ordering {
-    compare_sorted_input_value_definitions(&left.1, &right.1)
-}
-
-fn sort_component_enum_value_definition(
-    definition: &mut (Name, Component<apollo_compiler::ast::EnumValueDefinition>),
+fn sort_enum_value_definition(
+    definition: &mut (Name, Node<apollo_compiler::ast::EnumValueDefinition>),
 ) {
     sort_slice(
         &mut definition.1.make_mut().directives,
@@ -691,9 +611,9 @@ fn sort_component_enum_value_definition(
     );
 }
 
-fn compare_sorted_component_enum_value_definitions(
-    left: &(Name, Component<apollo_compiler::ast::EnumValueDefinition>),
-    right: &(Name, Component<apollo_compiler::ast::EnumValueDefinition>),
+fn compare_sorted_enum_value_definitions(
+    left: &(Name, Node<apollo_compiler::ast::EnumValueDefinition>),
+    right: &(Name, Node<apollo_compiler::ast::EnumValueDefinition>),
 ) -> Ordering {
     let left = &left.1;
     let right = &right.1;
@@ -712,27 +632,16 @@ fn compare_sorted_component_enum_value_definitions(
     compare_options(&left.description, &right.description, compare_descriptions)
 }
 
-fn sort_component_directive(directive: &mut Component<apollo_compiler::ast::Directive>) {
-    sort_directive(directive);
+fn compare_names(left: &Node<Name>, right: &Node<Name>) -> Ordering {
+    Name::cmp(left, right)
 }
 
-fn compare_sorted_component_directives(
-    left: &Component<apollo_compiler::ast::Directive>,
-    right: &Component<apollo_compiler::ast::Directive>,
-) -> Ordering {
-    compare_sorted_directives(left, right)
-}
-
-fn compare_component_names(left: &ComponentName, right: &ComponentName) -> Ordering {
-    left.name.cmp(&right.name)
-}
-
-fn group_components_by_origin_and_sort<T>(
+fn group_by_origin_and_sort<T>(
     iter: impl IntoIterator<Item = T>,
-    mut origin: impl FnMut(&T) -> ComponentOrigin,
+    mut origin: impl FnMut(&T) -> Origin,
     mut sort: impl FnMut(&mut T),
     mut compare: impl FnMut(&T, &T) -> Ordering,
-) -> IndexMap<ComponentOrigin, Vec<T>> {
+) -> IndexMap<Origin, Vec<T>> {
     iter.into_iter()
         .chunk_by(|component| origin(component))
         .into_iter()
@@ -745,25 +654,24 @@ fn group_components_by_origin_and_sort<T>(
 }
 
 fn sort_origins(
-    origins: &mut IndexSet<ComponentOrigin>,
-    mut compare: impl FnMut(&ComponentOrigin, &ComponentOrigin) -> Ordering,
+    origins: &mut IndexSet<Origin>,
+    mut compare: impl FnMut(&Origin, &Origin) -> Ordering,
 ) {
     origins.sort_unstable_by(|left, right| {
         match (left, right) {
-            (ComponentOrigin::Definition, ComponentOrigin::Extension(_)) => return Ordering::Less,
-            (ComponentOrigin::Extension(_), ComponentOrigin::Definition) => {
-                return Ordering::Greater;
-            }
+            // Definitions (None) sort before extensions (Some)
+            (None, Some(_)) => return Ordering::Less,
+            (Some(_), None) => return Ordering::Greater,
             _ => (),
         }
         compare(left, right)
     })
 }
 
-fn compare_origins_by_sorted_components<T>(
-    left: &ComponentOrigin,
-    right: &ComponentOrigin,
-    components: &IndexMap<ComponentOrigin, Vec<T>>,
+fn compare_origins_by_sorted_items<T>(
+    left: &Origin,
+    right: &Origin,
+    components: &IndexMap<Origin, Vec<T>>,
     compare: impl FnMut(&T, &T) -> Ordering,
 ) -> Ordering {
     compare_slices(
@@ -773,10 +681,10 @@ fn compare_origins_by_sorted_components<T>(
     )
 }
 
-fn kmerge_sorted_components_and_origins<T>(
-    components: IndexMap<ComponentOrigin, Vec<T>>,
-    origins: &IndexSet<ComponentOrigin>,
-    mut origin: impl FnMut(&T) -> &ComponentOrigin,
+fn kmerge_sorted_items_and_origins<T>(
+    components: IndexMap<Origin, Vec<T>>,
+    origins: &IndexSet<Origin>,
+    mut origin: impl FnMut(&T) -> Origin,
     mut compare: impl FnMut(&T, &T) -> Ordering,
 ) -> impl Iterator<Item = T> {
     kmerge_by(components.into_values(), move |left: &T, right: &T| {
@@ -785,8 +693,8 @@ fn kmerge_sorted_components_and_origins<T>(
             non_equal => return non_equal == Ordering::Less,
         }
         origins
-            .get_index_of(origin(left))
-            .cmp(&origins.get_index_of(origin(right)))
+            .get_index_of(&origin(left))
+            .cmp(&origins.get_index_of(&origin(right)))
             == Ordering::Less
     })
 }
@@ -1204,13 +1112,17 @@ mod tests {
     "#;
 
     fn remove_extensions(schema: &mut Schema) {
-        fn handle_component<T>(component: &mut Component<T>) {
-            component.origin = ComponentOrigin::Definition
+        fn handle_component<T: Clone>(component: &mut Node<T>) {
+            if component.extension_id().is_some() {
+                *component = Node::new((**component).clone());
+            }
         }
-        fn handle_component_name(component: &mut ComponentName) {
-            component.origin = ComponentOrigin::Definition
+        fn handle_component_name(component: &mut Node<Name>) {
+            if component.extension_id().is_some() {
+                *component = (**component).clone().to_node(None);
+            }
         }
-        fn handle_indexset(components: &mut IndexSet<ComponentName>) {
+        fn handle_indexset(components: &mut IndexSet<Node<Name>>) {
             *components = components
                 .drain(..)
                 .map(|mut component| {

@@ -457,7 +457,8 @@ mod tests {
         let analysis = analyze("false->and($status)");
         assert_eq!(analysis.consumption().to_string(), "$status");
         assert!(
-            matches!(analysis.output_shape().case(), ShapeCase::Bool(None)),
+            matches!(analysis.output_shape().case(), ShapeCase::Bool(None))
+                && !analysis.output_shape().has_errors(),
             "expected clean Bool shape, got {}",
             analysis.output_shape().pretty_print(),
         );
@@ -471,7 +472,8 @@ mod tests {
             "$response { headers { trace } }"
         );
         assert!(
-            matches!(analysis.output_shape().case(), ShapeCase::Bool(None)),
+            matches!(analysis.output_shape().case(), ShapeCase::Bool(None))
+                && !analysis.output_shape().has_errors(),
             "expected clean Bool shape, got {}",
             analysis.output_shape().pretty_print(),
         );
@@ -502,7 +504,8 @@ mod tests {
         let analysis = analyze("false->and($status, 1->gt(\"x\"))");
         assert_eq!(analysis.consumption().to_string(), "$status");
         assert!(
-            matches!(analysis.output_shape().case(), ShapeCase::Bool(None)),
+            matches!(analysis.output_shape().case(), ShapeCase::Bool(None))
+                && !analysis.output_shape().has_errors(),
             "expected clean Bool shape, got {}",
             analysis.output_shape().pretty_print(),
         );
@@ -513,7 +516,8 @@ mod tests {
             "$response { headers { trace } }"
         );
         assert!(
-            matches!(analysis.output_shape().case(), ShapeCase::Bool(None)),
+            matches!(analysis.output_shape().case(), ShapeCase::Bool(None))
+                && !analysis.output_shape().has_errors(),
             "expected clean Bool shape, got {}",
             analysis.output_shape().pretty_print(),
         );
@@ -525,14 +529,14 @@ mod tests {
         // same argument error does surface (and consumption is recorded).
         let analysis = analyze("true->and(1->gt(\"x\"))");
         assert!(
-            !matches!(analysis.output_shape().case(), ShapeCase::Bool(None)),
+            analysis.output_shape().has_errors(),
             "expected the ->gt error to surface, got {}",
             analysis.output_shape().pretty_print(),
         );
 
         let analysis = analyze("false->or(1->gt(\"x\"))");
         assert!(
-            !matches!(analysis.output_shape().case(), ShapeCase::Bool(None)),
+            analysis.output_shape().has_errors(),
             "expected the ->gt error to surface, got {}",
             analysis.output_shape().pretty_print(),
         );
@@ -546,7 +550,8 @@ mod tests {
         let analysis = analyze("{ foo: false->and($status) }.foo");
         assert_eq!(analysis.consumption().to_string(), "$status");
         assert!(
-            matches!(analysis.output_shape().case(), ShapeCase::Bool(None)),
+            matches!(analysis.output_shape().case(), ShapeCase::Bool(None))
+                && !analysis.output_shape().has_errors(),
             "expected clean Bool shape, got {}",
             analysis.output_shape().pretty_print(),
         );
@@ -555,7 +560,8 @@ mod tests {
         // receiver evaluates its argument, producing an unknown Bool.
         let analysis = analyze("{ foo: true->and(false) }.foo");
         assert!(
-            matches!(analysis.output_shape().case(), ShapeCase::Bool(None)),
+            matches!(analysis.output_shape().case(), ShapeCase::Bool(None))
+                && !analysis.output_shape().has_errors(),
             "expected clean Bool shape, got {}",
             analysis.output_shape().pretty_print(),
         );
@@ -568,7 +574,8 @@ mod tests {
         let analysis = analyze("[true, false]->first->or($status)");
         assert_eq!(analysis.consumption().to_string(), "$status");
         assert!(
-            matches!(analysis.output_shape().case(), ShapeCase::Bool(None)),
+            matches!(analysis.output_shape().case(), ShapeCase::Bool(None))
+                && !analysis.output_shape().has_errors(),
             "expected clean Bool shape, got {}",
             analysis.output_shape().pretty_print(),
         );
@@ -585,7 +592,8 @@ mod tests {
             "$response { headers { trace } } $status"
         );
         assert!(
-            matches!(analysis.output_shape().case(), ShapeCase::Bool(None)),
+            matches!(analysis.output_shape().case(), ShapeCase::Bool(None))
+                && !analysis.output_shape().has_errors(),
             "expected clean Bool shape, got {}",
             analysis.output_shape().pretty_print(),
         );

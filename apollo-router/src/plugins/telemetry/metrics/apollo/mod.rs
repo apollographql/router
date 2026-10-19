@@ -16,7 +16,6 @@ use opentelemetry_sdk::metrics::InstrumentKind;
 use opentelemetry_sdk::metrics::Stream;
 use opentelemetry_sdk::metrics::Temporality;
 use opentelemetry_sdk::metrics::periodic_reader_with_async_runtime::PeriodicReader;
-use opentelemetry_sdk::runtime;
 use sys_info::hostname;
 use tonic::metadata::MetadataMap;
 use tonic::transport::ClientTlsConfig;
@@ -32,12 +31,14 @@ use crate::plugins::telemetry::apollo_exporter::ApolloExporter;
 use crate::plugins::telemetry::apollo_exporter::get_uname;
 use crate::plugins::telemetry::config::ApolloMetricsReferenceMode;
 use crate::plugins::telemetry::config::Conf;
+use crate::plugins::telemetry::metrics::BlockingSafeTokioRuntime;
 use crate::plugins::telemetry::metrics::NamedMetricExporter;
 use crate::plugins::telemetry::metrics::OverflowCounting;
 use crate::plugins::telemetry::metrics::OverflowMetricExporter;
 use crate::plugins::telemetry::metrics::RetryMetricExporter;
 use crate::plugins::telemetry::otlp::Protocol;
 use crate::plugins::telemetry::otlp::TelemetryDataKind;
+use crate::plugins::telemetry::otlp::no_retries;
 use crate::plugins::telemetry::otlp::process_endpoint;
 use crate::plugins::telemetry::reload::metrics::MetricsBuilder;
 use crate::plugins::telemetry::reload::metrics::MetricsConfigurator;
@@ -76,8 +77,8 @@ impl MetricsConfigurator for Config {
         static ENABLED: AtomicBool = AtomicBool::new(false);
         if let Config {
             endpoint,
-            experimental_otlp_endpoint: otlp_endpoint,
-            experimental_otlp_metrics_protocol: otlp_metrics_protocol,
+            otlp_endpoint,
+            otlp_metrics_protocol,
             apollo_key: Some(key),
             apollo_graph_ref: Some(reference),
             schema_id,
@@ -140,9 +141,10 @@ impl Config {
 
                 let exporter = MetricExporter::builder()
                     .with_tonic()
+                    .with_retry_policy(no_retries())
                     .with_tls_config(ClientTlsConfig::new().with_native_roots())
                     .with_endpoint(endpoint.as_str())
-                    .with_timeout(batch_config.max_export_timeout)
+                    .with_timeout(*batch_config.max_export_timeout)
                     .with_metadata(metadata.clone())
                     .with_compression(opentelemetry_otlp::Compression::Gzip)
                     .with_temporality(Temporality::Delta)
@@ -151,9 +153,10 @@ impl Config {
                 // MetricExporter builder does not implement Clone, so we need to create a new builder for the realtime exporter
                 let realtime_exporter = MetricExporter::builder()
                     .with_tonic()
+                    .with_retry_policy(no_retries())
                     .with_tls_config(ClientTlsConfig::new().with_native_roots())
                     .with_endpoint(endpoint.as_str())
-                    .with_timeout(batch_config.max_export_timeout)
+                    .with_timeout(*batch_config.max_export_timeout)
                     .with_metadata(metadata.clone())
                     .with_compression(opentelemetry_otlp::Compression::Gzip)
                     .with_temporality(Temporality::Delta)
@@ -171,7 +174,8 @@ impl Config {
 
                 let exporter = MetricExporter::builder()
                     .with_http()
-                    .with_timeout(batch_config.max_export_timeout)
+                    .with_retry_policy(no_retries())
+                    .with_timeout(*batch_config.max_export_timeout)
                     .with_temporality(Temporality::Delta)
                     .with_compression(opentelemetry_otlp::Compression::Gzip)
                     .with_headers(headers.clone())
@@ -181,7 +185,8 @@ impl Config {
                 // MetricExporter builder does not implement Clone, so we need to create a new builder for the realtime exporter
                 let realtime_exporter = MetricExporter::builder()
                     .with_http()
-                    .with_timeout(batch_config.max_export_timeout)
+                    .with_retry_policy(no_retries())
+                    .with_timeout(*batch_config.max_export_timeout)
                     .with_temporality(Temporality::Delta)
                     .with_compression(opentelemetry_otlp::Compression::Gzip)
                     .with_headers(headers)
@@ -207,13 +212,17 @@ impl Config {
             "apollo",
         );
 
-        let default_reader = PeriodicReader::builder(named_exporter, runtime::Tokio)
-            .with_interval(Duration::from_secs(60))
-            .build();
+        let default_reader =
+            PeriodicReader::builder(named_exporter, BlockingSafeTokioRuntime::new_for_metrics())
+                .with_interval(Duration::from_secs(60))
+                .build();
 
-        let realtime_reader = PeriodicReader::builder(named_realtime_exporter, runtime::Tokio)
-            .with_interval(batch_config.scheduled_delay)
-            .build();
+        let realtime_reader = PeriodicReader::builder(
+            named_realtime_exporter,
+            BlockingSafeTokioRuntime::new_for_metrics(),
+        )
+        .with_interval(*batch_config.scheduled_delay)
+        .build();
 
         let resource = Resource::builder_empty()
             .with_attributes([
@@ -332,7 +341,6 @@ mod test {
     use crate::plugins::subscription;
     use crate::plugins::telemetry::STUDIO_EXCLUDE;
     use crate::plugins::telemetry::Telemetry;
-    use crate::plugins::telemetry::apollo;
     use crate::plugins::telemetry::apollo::ENDPOINT_DEFAULT;
     use crate::plugins::telemetry::apollo_exporter::Sender;
     use crate::query_planner::OperationKind;
@@ -663,14 +671,11 @@ mod test {
             .collect::<Vec<_>>()
             .await
             .into_iter()
-            .filter_map(|m| match m {
-                apollo::SingleReport::Stats(mut m) => {
-                    m.stats.iter_mut().for_each(|(_k, v)| {
-                        v.stats_with_context.query_latency_stats.latency = default_latency
-                    });
-                    Some(m)
-                }
-                apollo::SingleReport::Traces(_) => None,
+            .map(|mut m| {
+                m.stats.iter_mut().for_each(|(_k, v)| {
+                    v.stats_with_context.query_latency_stats.latency = default_latency
+                });
+                m
             })
             .collect();
         Ok(results)

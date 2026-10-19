@@ -2,21 +2,19 @@
 source: apollo-router/src/configuration/tests.rs
 expression: error.to_string()
 ---
-configuration had errors: 
-1. at line 6
+apollo::configuration::schema
 
-  supergraph:
-    # The socket address and port to listen on
-    # Defaults to 127.0.0.1:4000
-    listen: 127.0.0.1:4000
-┌   bad: "donotwork"
-└-----> Additional properties are not allowed ('bad' was unexpected)
+  × schema validation error
+  ╰─▶ schema validation error
 
-1. at line 7
+Error: apollo::configuration::validation
 
-    # The socket address and port to listen on
-    # Defaults to 127.0.0.1:4000
-    listen: 127.0.0.1:4000
-    bad: "donotwork"
-┌   another_one: true
-└-----> Additional properties are not allowed ('another_one' was unexpected)
+  × Additional properties are not allowed ('bad', 'another_one' were
+  │ unexpected)
+   ╭─[6:3]
+ 5 │   listen: 127.0.0.1:4000
+ 6 │   bad: "donotwork"
+   ·   ─┬─
+   ·    ╰── Additional properties are not allowed ('bad', 'another_one' were unexpected)
+ 7 │   another_one: true
+   ╰────

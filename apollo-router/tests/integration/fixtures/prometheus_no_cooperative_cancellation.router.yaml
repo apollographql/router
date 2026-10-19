@@ -1,0 +1,16 @@
+# Cooperative cancellation defaults to enabled (in `measure` mode), which runs query planning
+# through a different branch of `CachingQueryPlanner::call`. Disabling it pins the branch whose
+# memory tracking regressed in PR #8902.
+#
+# `listen` is intentionally omitted: the integration test harness always overrides it with an
+# ephemeral port.
+telemetry:
+  exporters:
+    metrics:
+      prometheus:
+        enabled: true
+        path: /metrics
+supergraph:
+  query_planning:
+    experimental_cooperative_cancellation:
+      enabled: false

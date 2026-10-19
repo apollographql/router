@@ -182,6 +182,11 @@ The operation was not executed due to exceeding the `max_root_fields` limit.
 The operation was not executed because safelisting is enabled and the freeform GraphQL document provided was not found in the persisted query safelist.
 
 </Property>
+<Property name="QUERY_PLAN_COMPLEXITY_EXCEEDED">
+
+The operation was not executed because query planning exceeded a complexity limit: the non-local selections limit, the `supergraph.query_planning.experimental_paths_limit` option, or the cap on path combinations.
+
+</Property>
 <Property name="PERSISTED_QUERY_HASH_MISMATCH">
 
 The operation was not executed due to a mismatch with the automatic persisted query (APQ) protocol.
@@ -207,6 +212,11 @@ The operation (specified by ID) was not executed because the ID was not found in
 <Property name="PERSISTED_QUERY_ID_REQUIRED">
 
 The router is configured to only execute operations specified by persisted query ID, but the request contained freeform GraphQL instead.
+
+</Property>
+<Property name="REQUEST_CIRCUIT_BREAKER_OPEN">
+
+The router didn't send the request because the circuit for its target subgraph or connector source is open. Learn more about [circuit breaking](/graphos/routing/performance/circuit-breaking).
 
 </Property>
 <Property name="REQUEST_LIMIT_EXCEEDED">

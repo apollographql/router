@@ -1,0 +1,25 @@
+---
+source: apollo-router/src/configuration/tests.rs
+expression: new_config
+---
+---
+supergraph:
+  query_planning:
+    experimental_plans_limit: 100
+    experimental_paths_limit: 50
+  log_on_broken_pipe: true
+traffic_shaping:
+  all:
+    http2: enable
+  subgraphs:
+    accounts:
+      http2: enable
+coprocessor:
+  url: "http://example.com"
+  client:
+    http2: enable
+telemetry:
+  exporters:
+    tracing:
+      response_trace_id:
+        enabled: true

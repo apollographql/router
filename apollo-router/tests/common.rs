@@ -13,6 +13,8 @@ use std::time::Duration;
 use std::time::SystemTime;
 use std::time::UNIX_EPOCH;
 
+use apollo_router::_private::telemetry::DatadogPropagator;
+use apollo_router::_private::telemetry::datadog_pipeline;
 use buildstructor::buildstructor;
 use flate2::read::GzDecoder;
 use fred::clients::Client as RedisClient;
@@ -86,6 +88,12 @@ pub(crate) fn redact_cache_debug_query_hash(key: &str) -> String {
     REDACT_HASH_RE
         .replace(key, ":hash:[query-hash]")
         .into_owned()
+}
+
+/// Isolate tests from each other by adding a random redis key prefix
+#[allow(dead_code)] // used by integration/response_cache and integration/redis test binaries
+pub(crate) fn namespace() -> String {
+    Uuid::new_v4().simple().to_string()
 }
 
 /// Default test license JWT served by `mock_license_uplink()` and
@@ -177,6 +185,34 @@ pub fn mint_license_jwt(
     if let Some(features) = allowed_features {
         claims["allowedFeatures"] = serde_json::json!(features);
     }
+    jsonwebtoken::encode(&header, &claims, &key).expect("sign test license JWT")
+}
+
+/// Mint a test license JWT, signed with the same bundled HS256 test secret as
+/// [`mint_license_jwt`], that omits the required `haltAt` claim.
+/// `License::from_str`'s `set_required_spec_claims` rejects this with
+/// `jsonwebtoken::errors::ErrorKind::MissingRequiredClaim`, which
+/// `Error::is_version_incompatible()` classifies as a version-incompatible
+/// license (the router doesn't understand this license's shape) rather than a
+/// generically invalid/corrupt one.
+#[allow(dead_code)]
+pub fn mint_version_incompatible_license_jwt() -> String {
+    use base64::Engine;
+    use base64::engine::general_purpose::URL_SAFE_NO_PAD;
+
+    let secret_bytes = URL_SAFE_NO_PAD
+        .decode(TEST_LICENSE_JWKS_SECRET_BASE64URL)
+        .expect("test JWKS secret is valid base64url");
+    let key = jsonwebtoken::EncodingKey::from_secret(&secret_bytes);
+    let header = jsonwebtoken::Header::new(jsonwebtoken::Algorithm::HS256);
+    let claims = serde_json::json!({
+        "exp": 10000000000_u64,
+        "iss": "https://www.apollographql.com/",
+        "sub": "apollo",
+        "aud": "SELF_HOSTED",
+        "warnAt": 10000000000_u64,
+        // haltAt is deliberately omitted.
+    });
     jsonwebtoken::encode(&header, &claims, &key).expect("sign test license JWT")
 }
 
@@ -420,6 +456,8 @@ pub struct IntegrationTest {
     log: String,
     subgraph_context: Arc<Mutex<Option<SpanContext>>>,
     logs: Vec<String>,
+    /// Exit status of the router process, or `None` until the router has exited.
+    exit_status: Option<std::process::ExitStatus>,
     port_replacements: HashMap<String, u16>,
     jwt: Option<String>,
     env: HashMap<String, OsString>,
@@ -436,7 +474,7 @@ pub struct IntegrationTest {
     /// **Note:** Studio reporting (`usage-reporting.api.apollographql.com`)
     /// is NOT reached even in the opt-in branch. `merge_overrides()`
     /// unconditionally pins `telemetry.apollo.endpoint` and
-    /// `telemetry.apollo.experimental_otlp_endpoint` in the YAML config
+    /// `telemetry.apollo.otlp_endpoint` in the YAML config
     /// to the per-test `apollo_otlp_server` mock, regardless of this
     /// flag. That pinning is load-bearing for keeping CI off the
     /// public Internet. If a future test genuinely needs real Studio
@@ -612,7 +650,6 @@ pub enum Telemetry {
         endpoint: Option<String>,
     },
     Datadog,
-    Zipkin,
     #[default]
     None,
 }
@@ -649,28 +686,11 @@ impl Telemetry {
                 .with_resource(resource)
                 .with_span_processor(
                     BatchSpanProcessor::builder(
-                        opentelemetry_datadog::new_pipeline()
+                        datadog_pipeline()
                             .with_service_name(service_name)
+                            .with_http_client(reqwest::Client::new())
                             .build_exporter()
                             .expect("datadog pipeline failed"),
-                        runtime::Tokio,
-                    )
-                    .with_batch_config(
-                        BatchConfigBuilder::default()
-                            .with_scheduled_delay(Duration::from_millis(10))
-                            .build(),
-                    )
-                    .build(),
-                )
-                .build(),
-            Telemetry::Zipkin => SdkTracerProvider::builder()
-                .with_resource(resource)
-                .with_span_processor(
-                    BatchSpanProcessor::builder(
-                        opentelemetry_zipkin::ZipkinExporter::builder()
-                            .with_collector_endpoint("http://127.0.0.1:9411/api/v2/spans")
-                            .build()
-                            .expect("zipkin pipeline failed"),
                         runtime::Tokio,
                     )
                     .with_batch_config(
@@ -699,7 +719,7 @@ impl Telemetry {
                     .headers()
                     .get("x-datadog-sampling-priority")
                     .cloned();
-                let propagator = opentelemetry_datadog::DatadogPropagator::new();
+                let propagator = DatadogPropagator::new();
                 propagator.inject_context(
                     &ctx,
                     &mut opentelemetry_http::HeaderInjector(request.headers_mut()),
@@ -713,13 +733,6 @@ impl Telemetry {
             }
             Telemetry::Otlp { .. } => {
                 let propagator = opentelemetry_sdk::propagation::TraceContextPropagator::default();
-                propagator.inject_context(
-                    &ctx,
-                    &mut opentelemetry_http::HeaderInjector(request.headers_mut()),
-                )
-            }
-            Telemetry::Zipkin => {
-                let propagator = opentelemetry_zipkin::Propagator::new();
                 propagator.inject_context(
                     &ctx,
                     &mut opentelemetry_http::HeaderInjector(request.headers_mut()),
@@ -752,7 +765,7 @@ impl Telemetry {
             Telemetry::Datadog => {
                 let span_ref = context.span();
                 let original_span_context = span_ref.span_context();
-                let propagator = opentelemetry_datadog::DatadogPropagator::new();
+                let propagator = DatadogPropagator::new();
                 let mut context = propagator.extract_with_context(context, &headers);
                 // We're going to override the sampled so that we can test sampling priority
                 if let Some(psr) = headers.get("x-datadog-sampling-priority") {
@@ -780,10 +793,6 @@ impl Telemetry {
             }
             Telemetry::Otlp { .. } => {
                 let propagator = opentelemetry_sdk::propagation::TraceContextPropagator::default();
-                propagator.extract_with_context(context, &headers)
-            }
-            Telemetry::Zipkin => {
-                let propagator = opentelemetry_zipkin::Propagator::new();
                 propagator.extract_with_context(context, &headers)
             }
             _ => context.clone(),
@@ -1012,6 +1021,7 @@ impl IntegrationTest {
             log: log.unwrap_or_else(|| "error,apollo_router=info".to_owned()),
             subgraph_context,
             logs: vec![],
+            exit_status: None,
             port_replacements: HashMap::new(),
             jwt,
             env,
@@ -1610,6 +1620,12 @@ impl IntegrationTest {
         self.assert_shutdown().await;
     }
 
+    #[cfg(target_os = "windows")]
+    pub async fn graceful_shutdown(&mut self) {
+        // We don’t have SIGTERM on Windows, so do a non-graceful kill instead
+        self.kill().await
+    }
+
     /// Like `graceful_shutdown` but lets the caller widen the
     /// `assert_shutdown` budget. Use only for tests with a documented
     /// shutdown-drain race that the default 20 s budget cannot beat.
@@ -1621,12 +1637,6 @@ impl IntegrationTest {
             libc::kill(self.pid(), libc::SIGTERM);
         }
         self.assert_shutdown_with_deadline(deadline).await;
-    }
-
-    #[cfg(target_os = "windows")]
-    pub async fn graceful_shutdown(&mut self) {
-        // We don’t have SIGTERM on Windows, so do a non-graceful kill instead
-        self.kill().await
     }
 
     #[allow(dead_code)]
@@ -1735,17 +1745,23 @@ impl IntegrationTest {
     }
 
     #[allow(dead_code)]
-    pub fn assert_log_contained(&self, msg: &str) {
+    pub fn log_contains(&self, msg: &str) -> bool {
         for line in &self.logs {
             if line.contains(msg) {
-                return;
+                return true;
             }
         }
+        false
+    }
 
-        panic!(
-            "'{msg}' not detected in logs. Log dump below:\n\n{logs}",
-            logs = self.logs.join("\n")
-        );
+    #[allow(dead_code)]
+    pub fn assert_log_contained(&self, msg: &str) {
+        if !self.log_contains(msg) {
+            panic!(
+                "'{msg}' not detected in logs. Log dump below:\n\n{logs}",
+                logs = self.logs.join("\n")
+            );
+        }
     }
 
     #[allow(dead_code)]
@@ -2119,7 +2135,8 @@ impl IntegrationTest {
         let now = Instant::now();
         while now.elapsed() < deadline {
             match router.try_wait() {
-                Ok(Some(_)) => {
+                Ok(Some(status)) => {
+                    self.exit_status = Some(status);
                     self.router = None;
                     return;
                 }
@@ -2130,6 +2147,24 @@ impl IntegrationTest {
 
         self.dump_stack_traces().await;
         panic!("unable to shutdown router, this probably means a hang and should be investigated");
+    }
+
+    /// Asserts the router process exited successfully.
+    ///
+    /// `assert_shutdown` only waits for the process to be reaped and deliberately ignores the
+    /// exit code, so a router that panics on its way out still looks like a clean shutdown to
+    /// it. Call this after `graceful_shutdown()` when a test cares that SIGTERM produced an
+    /// orderly exit rather than just an exit.
+    #[allow(dead_code)]
+    pub fn assert_clean_exit(&self) {
+        let status = self
+            .exit_status
+            .expect("router has not been shut down yet - call graceful_shutdown() first");
+        assert!(
+            status.success(),
+            "router exited with {status}, expected a clean exit. Log dump below:\n\n{logs}",
+            logs = self.logs.join("\n")
+        );
     }
 
     #[allow(dead_code)]
@@ -2503,7 +2538,7 @@ fn merge_overrides(
     // tests only did so if the request landed within the assertion deadline).
     //
     // We override two distinct keys:
-    //   * `experimental_otlp_endpoint` is consumed by the OTLP exporter
+    //   * `otlp_endpoint` is consumed by the OTLP exporter
     //     (`apollo_otlp_exporter.rs`).
     //   * `endpoint` is consumed by the legacy Apollo-protocol exporter
     //     (`apollo_exporter.rs`).
@@ -2524,7 +2559,7 @@ fn merge_overrides(
             .or_insert_with(|| serde_json::Value::Object(Default::default()));
         if let Some(apollo_config) = apollo_entry.as_object_mut() {
             apollo_config.insert(
-                "experimental_otlp_endpoint".to_string(),
+                "otlp_endpoint".to_string(),
                 serde_json::Value::String(apollo_otlp_endpoint.to_string()),
             );
             apollo_config.insert(
@@ -2551,19 +2586,13 @@ fn merge_overrides(
 
     insert_redis_namespace(config.pointer_mut("/supergraph/query_planning/cache/redis"));
     insert_redis_namespace(config.pointer_mut("/apq/router/cache/redis"));
-    insert_redis_namespace(config.pointer_mut("/preview_entity_cache/subgraph/all/redis"));
     insert_redis_namespace(config.pointer_mut("/response_cache/subgraph/all/redis"));
-    for per_subgraph_path in [
-        "/response_cache/subgraph/subgraphs",
-        "/preview_entity_cache/subgraph/subgraphs",
-    ] {
-        if let Some(subgraphs) = config
-            .pointer_mut(per_subgraph_path)
-            .and_then(|o| o.as_object_mut())
-        {
-            for subgraph_config in subgraphs.values_mut() {
-                insert_redis_namespace(subgraph_config.pointer_mut("/redis"));
-            }
+    if let Some(subgraphs) = config
+        .pointer_mut("/response_cache/subgraph/subgraphs")
+        .and_then(|o| o.as_object_mut())
+    {
+        for subgraph_config in subgraphs.values_mut() {
+            insert_redis_namespace(subgraph_config.pointer_mut("/redis"));
         }
     }
 
@@ -2582,7 +2611,6 @@ fn get_redis_urls(config: &Value) -> Option<Vec<String>> {
     let top_level_paths = [
         "/supergraph/query_planning/cache/redis/urls",
         "/apq/router/cache/redis/urls",
-        "/preview_entity_cache/subgraph/all/redis/urls",
         "/response_cache/subgraph/all/redis/urls",
     ];
     for path in top_level_paths {
@@ -2591,19 +2619,16 @@ fn get_redis_urls(config: &Value) -> Option<Vec<String>> {
         }
     }
 
-    let per_subgraph_sections = [
-        "/response_cache/subgraph/subgraphs",
-        "/preview_entity_cache/subgraph/subgraphs",
-    ];
-    for section in per_subgraph_sections {
-        if let Some(subgraphs) = config.pointer(section).and_then(|o| o.as_object()) {
-            for subgraph_config in subgraphs.values() {
-                if let Some(urls) = subgraph_config
-                    .pointer("/redis/urls")
-                    .and_then(|o| o.as_array())
-                {
-                    return Some(convert_urls(urls));
-                }
+    if let Some(subgraphs) = config
+        .pointer("/response_cache/subgraph/subgraphs")
+        .and_then(|o| o.as_object())
+    {
+        for subgraph_config in subgraphs.values() {
+            if let Some(urls) = subgraph_config
+                .pointer("/redis/urls")
+                .and_then(|o| o.as_array())
+            {
+                return Some(convert_urls(urls));
             }
         }
     }

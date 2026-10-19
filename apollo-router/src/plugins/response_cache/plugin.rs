@@ -58,6 +58,7 @@ use super::metrics::record_fetch_error;
 use crate::Context;
 use crate::Endpoint;
 use crate::ListenAddr;
+use crate::configuration::subgraph::SchemaDefault;
 use crate::configuration::subgraph::SubgraphConfiguration;
 use crate::context::CONTAINS_GRAPHQL_ERROR;
 use crate::error::FetchError;
@@ -66,7 +67,6 @@ use crate::graphql::Error;
 use crate::json_ext::Object;
 use crate::json_ext::Path;
 use crate::json_ext::PathElement;
-use crate::layers::ServiceBuilderExt;
 use crate::plugin::PluginInit;
 use crate::plugin::PluginPrivate;
 use crate::plugins::authorization::CacheKeyMetadata;
@@ -219,30 +219,6 @@ impl StorageInterface {
     pub(crate) fn has_connector_storage(&self) -> bool {
         self.connector_all.is_some() || !self.connector_sources.is_empty()
     }
-
-    /// Activate all storages so they can start emitting metrics.
-    pub(crate) fn activate(&self) {
-        if let Some(all) = &self.all
-            && let Some(storage) = all.get()
-        {
-            storage.activate();
-        }
-        for storage in self.subgraphs.values() {
-            if let Some(storage) = storage.get() {
-                storage.activate();
-            }
-        }
-        if let Some(all) = &self.connector_all
-            && let Some(storage) = all.get()
-        {
-            storage.activate();
-        }
-        for storage in self.connector_sources.values() {
-            if let Some(storage) = storage.get() {
-                storage.activate();
-            }
-        }
-    }
 }
 
 #[cfg(all(
@@ -256,6 +232,16 @@ impl StorageInterface {
     /// and then add one later, simulating a delayed storage connection.
     pub(crate) fn replace_storage(&self, storage: Storage) -> Option<()> {
         self.all.as_ref()?.set(storage).ok()
+    }
+
+    /// A `StorageInterface` whose connector `all` layer is `storage`, with nothing for subgraphs.
+    pub(crate) fn for_connectors(storage: Storage) -> Self {
+        Self {
+            all: None,
+            subgraphs: HashMap::new(),
+            connector_all: Some(Arc::new(storage.into())),
+            connector_sources: HashMap::new(),
+        }
     }
 }
 
@@ -275,43 +261,50 @@ impl From<Storage> for StorageInterface {
 }
 
 /// Configuration for response caching
-#[derive(Clone, Debug, JsonSchema, Deserialize)]
-#[serde(rename_all = "snake_case", deny_unknown_fields)]
+#[apollo_configuration::configuration]
+#[serde(rename_all = "snake_case")]
 pub(crate) struct Config {
     /// Enable or disable the response caching feature
-    #[serde(default)]
     pub(crate) enabled: bool,
 
     /// Enable debug mode for the debugger
-    #[serde(default)]
     debug: bool,
 
     /// Whether to include a Cache-Control header in the supergraph response sent to clients.
     /// When set to false, the router will not set a Cache-Control header on the client response,
     /// while all internal caching behavior (TTL calculations, Redis storage, cache debugger) remains unchanged.
     /// Defaults to true for backward compatibility.
-    #[serde(default = "default_include_cache_control_header_on_router_response")]
+    #[config(default = default_include_cache_control_header_on_router_response())]
     include_cache_control_header_on_router_response: bool,
 
     /// Configure invalidation per subgraph
-    #[serde(default = "default_disabled_subgraph")]
+    // Generic with a hand-written merging Deserialize, which the macro can't express.
+    #[config(default = default_disabled_subgraph(), skip_validate)]
+    #[schemars(extend("default" = {
+        "all": {
+            "enabled": false,
+            "invalidation": null,
+            "private_id": null,
+            "redis": null,
+            "ttl": null
+        },
+        "subgraphs": {}
+    }))]
     pub(crate) subgraph: SubgraphConfiguration<Subgraph>,
 
     /// Configure response caching per connector source
-    #[serde(default)]
     pub(crate) connector: ConnectorCacheConfiguration,
 
     /// Global invalidation configuration
     invalidation: Option<InvalidationEndpointConfig>,
 
     /// Buffer size for known private queries (default: 2048)
-    #[serde(default = "default_lru_private_queries_size")]
+    #[config(default = default_lru_private_queries_size())]
     private_queries_buffer_size: NonZeroUsize,
 
     /// Propagation of aggregated response_cache cache tags to the supergraph response.
     /// Off by default; opt in to surface cache tags to a CDN for tag-based purging. See
     /// `CdnInvalidationConfig` for the individual fields.
-    #[serde(default)]
     pub(crate) cdn_invalidation: CdnInvalidationConfig,
 }
 
@@ -325,20 +318,23 @@ pub(crate) struct Config {
 /// coprocessors or Rhai regardless of this config), but the fine-grained tag values are only
 /// aggregated when `enabled` is `true` — there's no way to read the full label set from context
 /// without also enabling header emission.
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, JsonSchema)]
-#[serde(rename_all = "snake_case", deny_unknown_fields, default)]
+#[apollo_configuration::configuration]
+#[derive(PartialEq, Serialize)]
 pub(crate) struct CdnInvalidationConfig {
     /// Whether to emit the configured header on the supergraph response. Defaults to false.
     pub(crate) enabled: bool,
 
     /// Name of the invalidation labels header used by CDNs
+    #[config(default = "Cache-Tag".to_string())]
     pub(crate) header_name: String,
 
     /// The delimiter used by the invalidation labels header (eg, `" "`, `","`). Defaults to `","`.
+    #[config(default = ",".to_string())]
     pub(crate) header_delimiter: String,
 
     /// Maximum number of bytes for the joined header value. When the joined value would exceed
     /// this size, `experimental_on_overflow` decides what to do. Defaults to 16kb.
+    #[config(default = 16384)]
     pub(crate) max_bytes: usize,
 
     /// What to do when the joined header value would exceed `max_bytes`.
@@ -350,13 +346,13 @@ pub(crate) struct CdnInvalidationConfig {
 
 /// What the router does when the joined `Cache-Tag`/invalidation-labels header value would
 /// exceed `max_bytes`. See `CdnInvalidationConfig::experimental_on_overflow`.
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
-#[serde(rename_all = "snake_case")]
+#[apollo_configuration::configuration]
+#[derive(Copy, PartialEq, Eq, Serialize)]
 pub(crate) enum OverflowBehavior {
     /// Pack the header coarsest-first (subgraph, then type, then tag) and drop whatever doesn't
     /// fit, finest-grained first, so an oversized response still gets a usable, if partial,
     /// header.
-    #[default]
+    #[config(default)]
     Truncate,
     /// Omit the header entirely rather than send a partial one. Note: this does not drop the
     /// `Cache-Control` header, so the response is still cached — this option is only useful
@@ -364,18 +360,6 @@ pub(crate) enum OverflowBehavior {
     /// to bypass caching for that response (e.g. Cloudflare response rules setting `no-store`
     /// when the header is absent).
     Drop,
-}
-
-impl Default for CdnInvalidationConfig {
-    fn default() -> Self {
-        Self {
-            enabled: false,
-            header_name: "Cache-Tag".to_string(),
-            header_delimiter: ",".to_string(),
-            max_bytes: 16384,
-            experimental_on_overflow: OverflowBehavior::default(),
-        }
-    }
 }
 
 const fn default_lru_private_queries_size() -> NonZeroUsize {
@@ -404,10 +388,12 @@ fn default_disabled_subgraph() -> SubgraphConfiguration<Subgraph> {
 }
 
 /// Per subgraph configuration for response caching
-#[derive(Clone, Debug, JsonSchema, Deserialize, Serialize)]
+// Holds Redis credentials, so it cannot serialize its defaults: the schema declares them by hand.
+#[derive(Clone, Debug, JsonSchema, Deserialize)]
 #[serde(rename_all = "snake_case", deny_unknown_fields, default)]
 pub(crate) struct Subgraph {
     /// Redis configuration
+    #[schemars(extend("default" = null))]
     pub(crate) redis: Option<storage::redis::Config>,
 
     /// expiration for all keys for this subgraph, unless overridden by the `Cache-Control` header in subgraph responses
@@ -420,7 +406,20 @@ pub(crate) struct Subgraph {
     pub(crate) private_id: Option<String>,
 
     /// Invalidation configuration
+    #[schemars(extend("default" = null))]
     pub(crate) invalidation: Option<SubgraphInvalidationConfig>,
+}
+
+impl SchemaDefault for Subgraph {
+    fn schema_default() -> Option<serde_json::Value> {
+        Some(serde_json::json!({
+            "enabled": true,
+            "invalidation": null,
+            "private_id": null,
+            "redis": null,
+            "ttl": null
+        }))
+    }
 }
 
 impl Default for Subgraph {
@@ -469,7 +468,7 @@ impl PluginPrivate for ResponseCache {
             .schema_definition
             .query
             .as_ref()
-            .map(|q| q.name.to_string());
+            .map(|q| q.to_string());
 
         if init.config.subgraph.all.ttl.is_none()
             && init
@@ -490,7 +489,7 @@ impl PluginPrivate for ResponseCache {
             .all
             .invalidation
             .as_ref()
-            .map(|i| i.shared_key.is_empty())
+            .map(|i| i.shared_key.unredact().is_empty())
             .unwrap_or_default()
         {
             return Err(
@@ -566,7 +565,7 @@ impl PluginPrivate for ResponseCache {
             .all
             .invalidation
             .as_ref()
-            .map(|i| i.shared_key.is_empty())
+            .map(|i| i.shared_key.unredact().is_empty())
             .unwrap_or_default()
         {
             return Err(
@@ -692,11 +691,10 @@ impl PluginPrivate for ResponseCache {
         })
     }
 
-    fn activate(&self) {
-        self.storage.activate();
-    }
-
-    fn supergraph_service(&self, service: supergraph::BoxService) -> supergraph::BoxService {
+    fn supergraph_service(
+        &self,
+        service: supergraph::BoxCloneService,
+    ) -> supergraph::BoxCloneService {
         let debug = self.debug;
         let include_cache_control_header_on_router_response =
             self.include_cache_control_header_on_router_response;
@@ -805,10 +803,14 @@ impl PluginPrivate for ResponseCache {
                 response
             })
             .service(service)
-            .boxed()
+            .boxed_clone()
     }
 
-    fn subgraph_service(&self, name: &str, service: subgraph::BoxService) -> subgraph::BoxService {
+    fn subgraph_service(
+        &self,
+        name: &str,
+        service: subgraph::BoxCloneService,
+    ) -> subgraph::BoxCloneService {
         let subgraph_ttl = self
             .subgraph_ttl(name)
             .unwrap_or_else(|| Duration::from_secs(60 * 60 * 24)); // The unwrap should not happen because it's checked when creating the plugin (except for tests)
@@ -837,10 +839,7 @@ impl PluginPrivate for ResponseCache {
                     response
                 })
                 .service(CacheService {
-                    service: ServiceBuilder::new()
-                        .buffered()
-                        .service(service)
-                        .boxed_clone(),
+                    service,
                     entity_type: self.entity_type.clone(),
                     name: name.to_string(),
                     storage: self.storage.clone(),
@@ -854,7 +853,7 @@ impl PluginPrivate for ResponseCache {
                     indexes,
                     cdn_invalidation_enabled: self.cdn_invalidation.enabled,
                 });
-            tower::util::BoxService::new(inner)
+            tower::util::BoxCloneService::new(inner)
         } else {
             ServiceBuilder::new()
                 .map_response(move |response: subgraph::Response| {
@@ -868,15 +867,13 @@ impl PluginPrivate for ResponseCache {
                     response
                 })
                 .service(service)
-                .boxed()
+                .boxed_clone()
         }
     }
 
-    fn connector_service(&self, service: connect::BoxService) -> connect::BoxService {
+    fn connector_service(&self, service: connect::BoxCloneService) -> connect::BoxCloneService {
         // Skip wrapping entirely when the plugin is off or no connector storage is configured:
-        // caching can never happen, and the wrapper's buffering would spawn a per-pipeline
-        // worker task that keeps the service chain (and the plugins it references) alive
-        // asynchronously after teardown.
+        // caching can never happen.
         if !self.enabled || !self.storage.has_connector_storage() {
             return service;
         }
@@ -891,10 +888,7 @@ impl PluginPrivate for ResponseCache {
 
         ServiceBuilder::new()
             .service(ConnectorCacheService {
-                service: ServiceBuilder::new()
-                    .buffered()
-                    .service(service)
-                    .boxed_clone(),
+                service,
                 storage,
                 connectors_config,
                 enabled: self.enabled,
@@ -904,14 +898,14 @@ impl PluginPrivate for ResponseCache {
                 subgraph_enums,
                 lru_size_instrument,
             })
-            .boxed()
+            .boxed_clone()
     }
 
     fn connector_request_service(
         &self,
-        service: crate::services::connector::request_service::BoxService,
+        service: crate::services::connector::request_service::BoxCloneService,
         source_name: String,
-    ) -> crate::services::connector::request_service::BoxService {
+    ) -> crate::services::connector::request_service::BoxCloneService {
         if !self
             .connectors
             .is_source_enabled(self.enabled, &source_name)
@@ -943,7 +937,7 @@ impl PluginPrivate for ResponseCache {
                     },
                 )
                 .service(service)
-                .boxed();
+                .boxed_clone();
         }
 
         let connector_ttl = self
@@ -968,10 +962,7 @@ impl PluginPrivate for ResponseCache {
 
         ServiceBuilder::new()
             .service(ConnectorRequestCacheService {
-                service: ServiceBuilder::new()
-                    .buffered()
-                    .service(service)
-                    .boxed_clone(),
+                service,
                 storage,
                 source_name: source_name_owned,
                 connector_ttl,
@@ -984,7 +975,7 @@ impl PluginPrivate for ResponseCache {
                 indexes,
                 cache_key_headers,
             })
-            .boxed()
+            .boxed_clone()
     }
 
     fn web_endpoints(&self) -> MultiMap<ListenAddr, Endpoint> {
@@ -1055,7 +1046,7 @@ impl PluginPrivate for ResponseCache {
                             self.connectors.clone(),
                             self.invalidation.clone(),
                         )
-                        .boxed(),
+                        .boxed_clone(),
                     );
                     tracing::info!(
                         "Response cache invalidation endpoint listening on: {}{}",
@@ -1229,7 +1220,9 @@ impl ResponseCache {
                 all: Subgraph {
                     invalidation: Some(SubgraphInvalidationConfig {
                         enabled: true,
-                        shared_key: INVALIDATION_SHARED_KEY.to_string(),
+                        shared_key: apollo_redaction::Redacted::new(
+                            INVALIDATION_SHARED_KEY.to_string(),
+                        ),
                         ..Default::default()
                     }),
                     ..Default::default()
@@ -1354,7 +1347,7 @@ struct CacheService {
 impl Service<subgraph::Request> for CacheService {
     type Response = subgraph::Response;
     type Error = BoxError;
-    type Future = <subgraph::BoxService as Service<subgraph::Request>>::Future;
+    type Future = <subgraph::BoxCloneService as Service<subgraph::Request>>::Future;
 
     fn poll_ready(
         &mut self,
@@ -1369,6 +1362,50 @@ impl Service<subgraph::Request> for CacheService {
 
         Box::pin(inner.call_inner(request))
     }
+}
+
+/// The response cache for subgraph `name` in front of `service`, as the response cache places it
+/// for a subgraph it caches, with `store` as a mock Redis behind it.
+#[cfg(all(
+    test,
+    any(not(feature = "ci"), all(target_arch = "x86_64", target_os = "linux"))
+))]
+pub(crate) async fn subgraph_cache_for_test(
+    service: subgraph::BoxCloneService,
+    name: &str,
+    store: Arc<dyn fred::mocks::Mocks>,
+) -> subgraph::BoxCloneService {
+    let config = storage::redis::Config::test(false, "subgraph-cache");
+    let (_drop_tx, drop_rx) = tokio::sync::broadcast::channel(1);
+    let storage = Storage::mocked(&config, false, store, drop_rx)
+        .await
+        .expect("mock storage builds");
+    let supergraph_schema = Arc::new(
+        Schema::parse_and_validate(
+            "type Query { hello: String } type Product { upc: String name: String }",
+            "schema.graphql",
+        )
+        .unwrap(),
+    );
+
+    CacheService {
+        service,
+        name: name.to_string(),
+        entity_type: None,
+        storage: Arc::new(storage.into()),
+        subgraph_ttl: Duration::from_secs(60),
+        private_queries: Arc::new(RwLock::new(LruCache::new(
+            std::num::NonZeroUsize::new(1).unwrap(),
+        ))),
+        private_id_key_name: None,
+        debug: false,
+        supergraph_schema,
+        subgraph_enums: Default::default(),
+        lru_size_instrument: LruSizeInstrument::new("test.private_queries.lru.size"),
+        indexes: Default::default(),
+        cdn_invalidation_enabled: false,
+    }
+    .boxed_clone()
 }
 
 impl CacheService {
@@ -1441,7 +1478,8 @@ impl CacheService {
                                 .build(),
                         )
                         .extensions(Object::default())
-                        .build());
+                        .build()
+                        .answered_by_router());
                 }
             };
 
@@ -1607,7 +1645,7 @@ impl CacheService {
                     CacheSubgraph(cache_hit),
                 );
 
-                Ok(response)
+                Ok(response.answered_by_router())
             }
             ControlFlow::Continue((
                 request,
@@ -1820,7 +1858,7 @@ impl CacheService {
         ))
         .await?
         {
-            ControlFlow::Break(response) => Ok(response),
+            ControlFlow::Break(response) => Ok(response.answered_by_router()),
             ControlFlow::Continue((request, mut cache_result)) => {
                 let context = request.context.clone();
                 let mut debug_subgraph_request = None;
@@ -2221,7 +2259,7 @@ fn get_invalidation_root_keys_from_schema(
         fn resolve_field<'a>(
             &'a self,
             info: &'a resolvers::ResolveInfo<'a>,
-        ) -> Result<resolvers::ResolvedValue<'a>, resolvers::FieldError> {
+        ) -> Result<resolvers::ResolvedValue<'a>, resolvers::ExecutionError> {
             let mut result = self.result.borrow_mut();
             let Ok(keys) = &mut *result else {
                 return Ok(resolvers::ResolvedValue::SkipForPartialExecution);
@@ -3881,13 +3919,7 @@ mod tests {
 
         assert!(response_cache.subgraph_enabled("user"));
         assert!(!response_cache.subgraph_enabled("archive"));
-        let subgraph_config = serde_json_bytes::json!({
-            "all": {
-                "enabled": false
-            },
-            "subgraphs": response_cache.subgraphs.subgraphs.clone()
-        });
-        response_cache.subgraphs = Arc::new(serde_json_bytes::from_value(subgraph_config).unwrap());
+        Arc::make_mut(&mut response_cache.subgraphs).all.enabled = Some(false);
         assert!(!response_cache.subgraph_enabled("archive"));
         assert!(response_cache.subgraph_enabled("user"));
         assert!(response_cache.subgraph_enabled("orga"));

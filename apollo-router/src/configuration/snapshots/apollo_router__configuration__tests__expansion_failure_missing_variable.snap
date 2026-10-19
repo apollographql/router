@@ -1,5 +1,19 @@
 ---
-source: apollo-router/src/configuration/mod.rs
+source: apollo-router/src/configuration/tests.rs
 expression: error.to_string()
 ---
-could not expand variable: TEST_CONFIG_UNKNOWN_WITH_NO_DEFAULT, environment variable not found
+apollo::configuration::expansion
+
+  × could not expand configuration values
+  ╰─▶ could not expand configuration values
+
+Error: apollo::configuration::expansion_missing
+
+  × expansion value not present
+   ╭─[3:18]
+ 2 │ supergraph:
+ 3 │   introspection: ${env.TEST_CONFIG_UNKNOWN_WITH_NO_DEFAULT}
+   ·                  ─────────────────────┬────────────────────
+   ·                                       ╰── expansion value not present
+ 4 │         
+   ╰────

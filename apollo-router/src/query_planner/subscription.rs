@@ -7,10 +7,10 @@ use serde::Serialize;
 use tokio::sync::broadcast;
 
 use super::OperationKind;
-use super::fetch::SubgraphSchemas;
 use super::rewrites;
 use crate::error::ValidationErrors;
 use crate::plugins::subscription::SubscriptionTaskParams;
+use crate::query_planner::SubgraphSchemas;
 
 pub(crate) const SUBSCRIPTION_EVENT_SPAN_NAME: &str = "subscription_event";
 pub(crate) static OPENED_SUBSCRIPTIONS: AtomicUsize = AtomicUsize::new(0);
@@ -71,7 +71,7 @@ impl SubscriptionNode {
         subgraph_schemas: &SubgraphSchemas,
     ) -> Result<(), ValidationErrors> {
         let schema = &subgraph_schemas[self.service_name.as_ref()];
-        self.operation.init_parsed(&schema.schema)?;
+        self.operation.init_parsed(schema)?;
         Ok(())
     }
 }
