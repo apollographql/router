@@ -370,7 +370,7 @@ tracing-mock = "0.1.0-beta.1"
 walkdir = "2.5.0"
 wiremock = "0.6"
 libtest-mimic = "0.8.0"
-rstest = "0.27.0"
+rstest = "0.28.0"
 indoc = "2.0.7"
 
 [target.'cfg(tracing_unstable)'.dev-dependencies]
