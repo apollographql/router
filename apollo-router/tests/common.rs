@@ -1264,6 +1264,56 @@ impl IntegrationTest {
         self.wait_for_log_message("GraphQL endpoint exposed").await;
     }
 
+    /// Waits until the router answers an HTTP request on its GraphQL address.
+    ///
+    /// `assert_started` only waits for the `GraphQL endpoint exposed` log line. The router
+    /// prints it before its accept loop is running and before it binds its other listeners,
+    /// so a request sent straight after it can fail. Any HTTP response counts as ready.
+    ///
+    /// # Panics
+    ///
+    /// - At once, with the exit status and the router's logs, if the router process exits.
+    /// - With the router's logs, if the router hasn't answered within `deadline`.
+    #[allow(dead_code)]
+    pub async fn wait_for_router_ready(&mut self, deadline: Duration) {
+        let url = format!("http://{}/", self.bind_address());
+        let client = reqwest::Client::builder()
+            .timeout(Duration::from_millis(200))
+            .build()
+            .expect("build reqwest client");
+        let start = Instant::now();
+        while start.elapsed() < deadline {
+            let router = self.router.as_mut().expect("router must have been started");
+            if let Some(status) = router.try_wait().expect("check router process") {
+                self.drain_logs_until_quiet().await;
+                panic!(
+                    "router exited ({status}) before accepting HTTP requests. Log dump below:\n\n{logs}",
+                    logs = self.logs.join("\n")
+                );
+            }
+            if client.head(&url).send().await.is_ok() {
+                return;
+            }
+            tokio::time::sleep(Duration::from_millis(20)).await;
+        }
+        self.read_logs();
+        panic!(
+            "router at {url} did not accept HTTP requests within {deadline:?}. Log dump below:\n\n{logs}",
+            logs = self.logs.join("\n")
+        );
+    }
+
+    /// Collects log lines until none arrives for a second. The stdout reader task can still
+    /// be delivering a just-exited router's last lines, which usually hold the error.
+    #[allow(dead_code)]
+    async fn drain_logs_until_quiet(&mut self) {
+        while let Ok(Some(line)) =
+            tokio::time::timeout(Duration::from_secs(1), self.stdio_rx.recv()).await
+        {
+            self.logs.push(line);
+        }
+    }
+
     #[allow(dead_code)]
     pub async fn assert_not_started(&mut self) {
         self.wait_for_log_message("no valid configuration").await;
