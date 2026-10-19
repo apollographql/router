@@ -1426,9 +1426,7 @@ impl FieldRoutingSearchSpace {
             Ok::<bool, FederationError>(true)
         });
         let result = result?;
-        // The guard only removes routes, so a routable result holds in any
-        // context. An unroutable one holds unless a cut reached outside it.
-        if result || !cuts_outside {
+        if !cuts_outside {
             self.caches
                 .conditions_routable
                 .borrow_mut()
