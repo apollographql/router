@@ -3205,16 +3205,10 @@ mod tests {
         let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
         let socket_addr = listener.local_addr().unwrap();
         tokio::task::spawn(emulate_subgraph_closing_connections(listener));
-        let subgraph_service = SubgraphService::new(
+        let subgraph_service = with_content_negotiation_layer(SubgraphService::new(
             "test",
-            true,
-            HttpClientServiceFactory::from_config(
-                "test",
-                &Configuration::default(),
-                crate::configuration::shared::Client::default(),
-            ),
-        )
-        .expect("can create a SubgraphService");
+            test_http_client_service("test"),
+        ));
 
         let url = Uri::from_str(&format!("http://{socket_addr}")).unwrap();
         let request = SubgraphRequest::builder()
@@ -3230,7 +3224,7 @@ mod tests {
         assert!(
             response.response.body().errors[0]
                 .message
-                .starts_with("HTTP fetch failed from 'test'"),
+                .starts_with("HTTP fetch failed:"),
             "unexpected error: {:?}",
             response.response.body().errors
         );

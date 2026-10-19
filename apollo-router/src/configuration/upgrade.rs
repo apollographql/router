@@ -75,26 +75,11 @@ const REMOVAL_EXPRESSION: &str = r#"const("__PLEASE_DELETE_ME")"#;
 pub(crate) enum UpgradeMode {
     /// Upgrade using migrations for major version (eg: from router 1.x to router 2.x)
     Major,
-<<<<<<< HEAD
-    /// Upgrade using migrations for a given minor version (eg: from router 2.x to router 2.y)
-=======
     /// Upgrade using the within-major migrations of the given major version (eg: from router 2.x to router 2.y)
->>>>>>> origin/dev
     Minor(i64),
 }
 
 impl UpgradeMode {
-<<<<<<< HEAD
-    /// The within-major migrations for this router's own major version, which startup and
-    /// reload apply automatically.
-    pub(crate) fn current_minor() -> Self {
-        Self::Minor(
-            env!("CARGO_PKG_VERSION_MAJOR")
-                .parse()
-                .expect("CARGO_PKG_VERSION_MAJOR should be an integer"),
-        )
-    }
-=======
     /// The within-major migrations for this router's own major version (for a nightly, the
     /// major of its base version), which startup and reload apply automatically.
     pub(crate) fn current_minor() -> Self {
@@ -124,7 +109,6 @@ fn migration_major(major: &str, pre: &str) -> Option<i64> {
         .parse()
         .ok()
         .filter(|&major| major > 0)
->>>>>>> origin/dev
 }
 
 pub(crate) fn upgrade_configuration(
@@ -132,7 +116,6 @@ pub(crate) fn upgrade_configuration(
     log_warnings: bool,
     upgrade_mode: UpgradeMode,
 ) -> Result<serde_json::Value, super::ConfigurationError> {
-<<<<<<< HEAD
     upgrade(config, log_warnings, true, upgrade_mode)
 }
 
@@ -151,8 +134,6 @@ fn upgrade(
     log_notices: bool,
     upgrade_mode: UpgradeMode,
 ) -> Result<serde_json::Value, super::ConfigurationError> {
-=======
->>>>>>> origin/dev
     // Transformers are loaded from a file and applied in order
     let mut migrations: Vec<Migration> = Vec::new();
     let files = Asset::iter().sorted().filter(|f| match upgrade_mode {
@@ -637,12 +618,9 @@ mod test {
     use crate::configuration::upgrade::UpgradeMode;
     use crate::configuration::upgrade::apply_migration;
     use crate::configuration::upgrade::generate_upgrade_output;
-<<<<<<< HEAD
     use crate::configuration::upgrade::migrate_connectors_subgraphs_to_sources;
-=======
     use crate::configuration::upgrade::migration_major;
     use crate::configuration::upgrade::upgrade_configuration;
->>>>>>> origin/dev
 
     fn source_doc() -> Value {
         json!( {
@@ -658,7 +636,6 @@ mod test {
     }
 
     #[test]
-<<<<<<< HEAD
     fn detects_settings_that_startup_migrates() {
         assert!(super::uses_migrated_settings(
             crate::configuration::apollo_configuration_parse::STARTUP_MIGRATED_SETTING
@@ -728,7 +705,9 @@ mod test {
              major version before adding them",
             current_major()
         );
-=======
+    }
+
+    #[test]
     fn migration_major_uses_the_nightly_base_version() {
         assert_eq!(migration_major("2", ""), Some(2));
         assert_eq!(migration_major("3", "rc.0"), Some(3));
@@ -757,7 +736,6 @@ mod test {
         let upgraded = upgrade_configuration(&config, false, UpgradeMode::Minor(0))
             .expect("expected successful migration");
         assert_eq!(upgraded, json!({}));
->>>>>>> origin/dev
     }
 
     #[test]

@@ -276,11 +276,7 @@ dependencies = [
 
 [[package]]
 name = "apollo-federation"
-<<<<<<< HEAD
 version = "3.0.0-preview.0"
-=======
-version = "2.18.0"
->>>>>>> origin/dev
 dependencies = [
  "ahash",
  "apollo-compiler",
@@ -450,11 +446,7 @@ dependencies = [
 
 [[package]]
 name = "apollo-router"
-<<<<<<< HEAD
 version = "3.0.0-preview.0"
-=======
-version = "2.18.0"
->>>>>>> origin/dev
 dependencies = [
  "addr2line 0.27.1",
  "ahash",
@@ -637,11 +629,7 @@ dependencies = [
 
 [[package]]
 name = "apollo-router-benchmarks"
-<<<<<<< HEAD
 version = "3.0.0-preview.0"
-=======
-version = "2.18.0"
->>>>>>> origin/dev
 dependencies = [
  "apollo-parser",
  "apollo-router",
