@@ -431,7 +431,7 @@ name = "planner"
 
 [lints.rust]
 
-# ROUTER-2100: `tracing_unstable` is set via RUSTFLAGS, not by a Cargo feature, so rustc
+# `tracing_unstable` is set via RUSTFLAGS, not by a Cargo feature, so rustc
 # doesn't know it's a legitimate cfg name and warns on every `#[cfg(tracing_unstable)]`.
 # This registers it as expected without silencing the lint for anything else.
 unexpected_cfgs = { level = "warn", check-cfg = ['cfg(tracing_unstable)'] }
