@@ -490,7 +490,7 @@ dependencies = [
  "docker_credential",
  "ecdsa 0.17.0",
  "encoding_rs 0.8.42",
- "erased-serde",
+ "erased-serde 0.4.10",
  "flate2",
  "fred",
  "futures",
@@ -2776,6 +2776,17 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "6c138974f9d5e7fe373eb04df7cae98833802ae4b11c24ac7039a21d5af4b26c"
 dependencies = [
  "serde",
+]
+
+[[package]]
+name = "erased-serde"
+version = "0.4.10"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "d2add8a07dd6a8d93ff627029c51de145e12686fbc36ecb298ac22e74cf02dec"
+dependencies = [
+ "serde",
+ "serde_core",
+ "typeid",
 ]
 
 [[package]]
@@ -8469,7 +8480,7 @@ version = "0.1.8"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "4080564c5b2241b5bff53ab610082234e0c57b0417f4bd10596f183001505b8a"
 dependencies = [
- "erased-serde",
+ "erased-serde 0.3.31",
  "inventory",
  "once_cell",
  "serde",
