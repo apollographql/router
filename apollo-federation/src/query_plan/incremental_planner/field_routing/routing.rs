@@ -1829,4 +1829,125 @@ mod tests {
             "the nested enumeration for kx at s0 should be cached"
         );
     }
+
+    /// `p`'s key `f { g }` is unroutable from `a`, since only `p` has `g`.
+    /// Enumerating hops for `hk` evaluates that key while `(a.T, hk)` is in
+    /// flight, so the guard makes `h` circular and the chain search runs.
+    /// Results computed there must not leak into later lookups.
+    mod routing_order {
+        use super::*;
+        use crate::operation::Field;
+        use crate::operation::SelectionSet;
+        use crate::schema::position::CompositeTypeDefinitionPosition;
+
+        const LINK: &str = r#"extend schema @link(url: "https://specs.apollo.dev/federation/v2.3", import: ["@key", "@shareable", "@inaccessible"])"#;
+
+        fn subgraphs() -> Vec<(&'static str, String)> {
+            vec![
+                (
+                    "a",
+                    format!(
+                        "{LINK}\ntype Query {{ t: T }}\ntype T @key(fields: \"id\") {{ id: ID! }}"
+                    ),
+                ),
+                (
+                    "q",
+                    format!("{LINK}\ntype T @key(fields: \"id\") {{ id: ID! hk: ID! @shareable }}"),
+                ),
+                (
+                    "h",
+                    format!(
+                        "{LINK}\ntype T @key(fields: \"hk\") {{ hk: ID! @shareable f: U @shareable }}\ntype U {{ a: Int @shareable }}"
+                    ),
+                ),
+                (
+                    "p",
+                    format!(
+                        "{LINK}\ntype T @key(fields: \"f {{ g }}\") {{ hk: ID! @shareable f: U @shareable }}\ntype U {{ a: Int @shareable g: Int @inaccessible }}"
+                    ),
+                ),
+            ]
+        }
+
+        fn space() -> FieldRoutingSearchSpace {
+            let owned = subgraphs();
+            let borrowed: Vec<(&str, &str)> = owned.iter().map(|(n, s)| (*n, s.as_str())).collect();
+            test_support::search_space(&borrowed)
+        }
+
+        fn selections(space: &FieldRoutingSearchSpace, subgraph: &str, text: &str) -> SelectionSet {
+            let schema = space
+                .qg()
+                .schema_by_source(subgraph)
+                .expect("subgraph schema")
+                .clone();
+            let t: CompositeTypeDefinitionPosition = schema
+                .get_type(&name!("T"))
+                .expect("T exists")
+                .try_into()
+                .expect("T is composite");
+            SelectionSet::parse(schema, t, text).expect("selection parses")
+        }
+
+        fn field(space: &FieldRoutingSearchSpace, subgraph: &str, text: &str) -> Field {
+            match selections(space, subgraph, text)
+                .selections
+                .values()
+                .next()
+                .expect("one selection")
+            {
+                Selection::Field(field) => field.field.clone(),
+                Selection::InlineFragment(_) => panic!("expected a field"),
+            }
+        }
+
+        fn hops(space: &FieldRoutingSearchSpace, field: &Field) -> Vec<String> {
+            let node = test_support::node_for(space, "a", "T");
+            space
+                .cached_key_hops(
+                    node,
+                    None,
+                    RoutingSiteKey::Field(field.name().clone()),
+                    |target| space.cached_query_graph.edge_for_field(target, field),
+                )
+                .expect("key hops enumerate")
+                .iter()
+                .map(|hop| {
+                    let debug = format!("{hop:?}");
+                    let variant = debug.split([' ', '(', '{']).next().unwrap_or_default();
+                    format!("{variant}->{}", hop.target_subgraph())
+                })
+                .collect()
+        }
+
+        #[test]
+        fn fresh_conditions_for_p_key_are_unroutable() {
+            let space = space();
+            let a_t = test_support::node_for(&space, "a", "T");
+            let conditions = selections(&space, "p", "f { g }");
+            assert!(
+                !space
+                    .conditions_routable(a_t, &conditions)
+                    .expect("routability check runs")
+            );
+        }
+
+        /// A routable result found under a cycle cut can come from the chain
+        /// search running only because the cut hid a hop, so caching it
+        /// would change what later lookups see.
+        #[test]
+        fn key_hops_for_f_do_not_depend_on_routing_hk_first() {
+            let fresh = space();
+            let f = field(&fresh, "h", "f { a }");
+            let fresh_hops = hops(&fresh, &f);
+
+            let ordered = space();
+            let hk = field(&ordered, "q", "hk");
+            hops(&ordered, &hk);
+            let f = field(&ordered, "h", "f { a }");
+            let ordered_hops = hops(&ordered, &f);
+
+            assert_eq!(ordered_hops, fresh_hops);
+        }
+    }
 }
