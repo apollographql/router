@@ -11,7 +11,6 @@ use apollo_compiler::ExecutableDocument;
 use apollo_compiler::Name;
 use apollo_compiler::executable;
 use apollo_compiler::schema::ExtendedType;
-use derivative::Derivative;
 use indexmap::IndexSet;
 use serde::Deserialize;
 use serde::Serialize;
@@ -59,30 +58,36 @@ pub(crate) const ERROR_CODE_RESPONSE_VALIDATION: &str = "RESPONSE_VALIDATION_FAI
 pub(crate) const EXTENSIONS_VALUE_COMPLETION_KEY: &str = "valueCompletion";
 
 /// A GraphQL query.
-#[derive(Derivative, Serialize, Deserialize)]
-#[derivative(PartialEq, Hash, Eq, Debug)]
+#[derive(Debug, derive_more::PartialEq, derive_more::Eq, Serialize, Deserialize)]
 pub(crate) struct Query {
     pub(crate) string: String,
-    #[derivative(PartialEq = "ignore", Hash = "ignore")]
+    #[eq(skip)]
     pub(crate) fragments: Fragments,
-    #[derivative(PartialEq = "ignore", Hash = "ignore")]
+    #[eq(skip)]
     pub(crate) operation: Operation,
-    #[derivative(PartialEq = "ignore", Hash = "ignore")]
+    #[eq(skip)]
     pub(crate) subselections: HashMap<SubSelectionKey, SubSelectionValue>,
-    #[derivative(PartialEq = "ignore", Hash = "ignore")]
+    #[eq(skip)]
     pub(crate) unauthorized: UnauthorizedPaths,
-    #[derivative(PartialEq = "ignore", Hash = "ignore")]
+    #[eq(skip)]
     pub(crate) filtered_query: Option<Arc<Query>>,
-    #[derivative(PartialEq = "ignore", Hash = "ignore")]
+    #[eq(skip)]
     pub(crate) defer_stats: DeferStats,
-    #[derivative(PartialEq = "ignore", Hash = "ignore")]
+    #[eq(skip)]
     pub(crate) is_original: bool,
 
     /// This is a hash that depends on:
     /// - the query itself
     /// - the schema
-    #[derivative(PartialEq = "ignore", Hash = "ignore")]
+    #[eq(skip)]
     pub(crate) schema_aware_hash: QueryHash,
+}
+
+// Only `string` participates in equality, so only it may participate in hashing.
+impl std::hash::Hash for Query {
+    fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
+        self.string.hash(state);
+    }
 }
 
 #[derive(Debug, Serialize, Deserialize)]
