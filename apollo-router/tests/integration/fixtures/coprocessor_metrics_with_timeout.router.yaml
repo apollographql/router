@@ -1,6 +1,6 @@
 # This coprocessor url will be updated to a test-scoped mock server
 coprocessor:
-  url: "<replace>"
+  url: "${env.TEST_CONFIG_COPROCESSOR_URL}"
   router:
     request:
       body: true
