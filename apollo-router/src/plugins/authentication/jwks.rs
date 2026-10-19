@@ -369,7 +369,7 @@ pub(super) fn search_jwks(
             // Record whether the algorithm explicitly matched so we can order candidates by it.
             let alg_matched = match key.common.key_algorithm {
                 Some(algorithm) => {
-                    if convert_key_algorithm(algorithm) != Some(criteria.alg) {
+                    if Algorithm::try_from(algorithm) != Ok(criteria.alg) {
                         continue;
                     }
                     true
@@ -389,7 +389,7 @@ pub(super) fn search_jwks(
                             Algorithm::HS256 | Algorithm::HS384 | Algorithm::HS512,
                             AlgorithmParameters::OctetKey(_),
                         ) => {
-                            key.common.key_algorithm = Some(convert_algorithm(criteria.alg));
+                            key.common.key_algorithm = Some(criteria.alg.into());
                         }
                         (
                             Algorithm::RS256
@@ -400,21 +400,21 @@ pub(super) fn search_jwks(
                             | Algorithm::PS512,
                             AlgorithmParameters::RSA(_),
                         ) => {
-                            key.common.key_algorithm = Some(convert_algorithm(criteria.alg));
+                            key.common.key_algorithm = Some(criteria.alg.into());
                         }
                         (Algorithm::ES256, AlgorithmParameters::EllipticCurve(params)) => {
                             if params.curve == EllipticCurve::P256 {
-                                key.common.key_algorithm = Some(convert_algorithm(criteria.alg));
+                                key.common.key_algorithm = Some(criteria.alg.into());
                             }
                         }
                         (Algorithm::ES384, AlgorithmParameters::EllipticCurve(params)) => {
                             if params.curve == EllipticCurve::P384 {
-                                key.common.key_algorithm = Some(convert_algorithm(criteria.alg));
+                                key.common.key_algorithm = Some(criteria.alg.into());
                             }
                         }
                         (Algorithm::EdDSA, AlgorithmParameters::EllipticCurve(params)) => {
                             if params.curve == EllipticCurve::Ed25519 {
-                                key.common.key_algorithm = Some(convert_algorithm(criteria.alg));
+                                key.common.key_algorithm = Some(criteria.alg.into());
                             }
                         }
                         _ => {
@@ -646,9 +646,9 @@ fn validate_jwk_against_jwt(
         }
     };
 
-    let algorithm = match convert_key_algorithm(key_algorithm) {
-        Some(a) => a,
-        None => {
+    let algorithm = match Algorithm::try_from(key_algorithm) {
+        Ok(a) => a,
+        Err(_) => {
             return Err((
                 AuthenticationError::UnsupportedKeyAlgorithm(key_algorithm),
                 StatusCode::INTERNAL_SERVER_ERROR,
@@ -828,48 +828,6 @@ pub(crate) fn jwt_expires_in(context: &Context) -> Duration {
             }
         })
         .unwrap_or(Duration::MAX)
-}
-
-// Apparently the `jsonwebtoken` crate now has 2 different enums for algorithms
-pub(crate) fn convert_key_algorithm(algorithm: KeyAlgorithm) -> Option<Algorithm> {
-    Some(match algorithm {
-        KeyAlgorithm::HS256 => Algorithm::HS256,
-        KeyAlgorithm::HS384 => Algorithm::HS384,
-        KeyAlgorithm::HS512 => Algorithm::HS512,
-        KeyAlgorithm::ES256 => Algorithm::ES256,
-        KeyAlgorithm::ES384 => Algorithm::ES384,
-        KeyAlgorithm::RS256 => Algorithm::RS256,
-        KeyAlgorithm::RS384 => Algorithm::RS384,
-        KeyAlgorithm::RS512 => Algorithm::RS512,
-        KeyAlgorithm::PS256 => Algorithm::PS256,
-        KeyAlgorithm::PS384 => Algorithm::PS384,
-        KeyAlgorithm::PS512 => Algorithm::PS512,
-        KeyAlgorithm::EdDSA => Algorithm::EdDSA,
-        // We don't use these encryption algorithms
-        KeyAlgorithm::RSA1_5
-        | KeyAlgorithm::RSA_OAEP
-        | KeyAlgorithm::RSA_OAEP_256
-        | KeyAlgorithm::UNKNOWN_ALGORITHM
-        | _ => return None,
-    })
-}
-
-fn convert_algorithm(algorithm: Algorithm) -> KeyAlgorithm {
-    match algorithm {
-        Algorithm::HS256 => KeyAlgorithm::HS256,
-        Algorithm::HS384 => KeyAlgorithm::HS384,
-        Algorithm::HS512 => KeyAlgorithm::HS512,
-        Algorithm::ES256 => KeyAlgorithm::ES256,
-        Algorithm::ES384 => KeyAlgorithm::ES384,
-        Algorithm::RS256 => KeyAlgorithm::RS256,
-        Algorithm::RS384 => KeyAlgorithm::RS384,
-        Algorithm::RS512 => KeyAlgorithm::RS512,
-        Algorithm::PS256 => KeyAlgorithm::PS256,
-        Algorithm::PS384 => KeyAlgorithm::PS384,
-        Algorithm::PS512 => KeyAlgorithm::PS512,
-        Algorithm::EdDSA => KeyAlgorithm::EdDSA,
-        _ => KeyAlgorithm::UNKNOWN_ALGORITHM,
-    }
 }
 
 #[cfg(test)]
