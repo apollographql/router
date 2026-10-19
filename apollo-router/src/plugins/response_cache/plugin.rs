@@ -3403,7 +3403,7 @@ fn filter_representations(
 /// [`reindex_entity_errors`], which keeps only errors whose path starts `_entities[i]`. Anything
 /// else (a top-level error, an error on a non-entity field) has no slot to be reindexed into and
 /// would be dropped by that rebuild, so it is carried across unchanged instead. An `_entities`
-/// error without an index is dropped; the connector runtime always writes the index. The subgraph
+/// error without an index is dropped. The subgraph
 /// loop handles these through `attribute_errors_to_entities`.
 pub(super) fn non_entity_errors(errors: &[Error]) -> Vec<Error> {
     errors
