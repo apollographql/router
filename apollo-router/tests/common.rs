@@ -1620,12 +1620,6 @@ impl IntegrationTest {
         self.assert_shutdown().await;
     }
 
-    #[cfg(target_os = "windows")]
-    pub async fn graceful_shutdown(&mut self) {
-        // We don’t have SIGTERM on Windows, so do a non-graceful kill instead
-        self.kill().await
-    }
-
     /// Like `graceful_shutdown` but lets the caller widen the
     /// `assert_shutdown` budget. Use only for tests with a documented
     /// shutdown-drain race that the default 20 s budget cannot beat.
@@ -1637,6 +1631,12 @@ impl IntegrationTest {
             libc::kill(self.pid(), libc::SIGTERM);
         }
         self.assert_shutdown_with_deadline(deadline).await;
+    }
+
+    #[cfg(target_os = "windows")]
+    pub async fn graceful_shutdown(&mut self) {
+        // We don’t have SIGTERM on Windows, so do a non-graceful kill instead
+        self.kill().await
     }
 
     #[allow(dead_code)]
