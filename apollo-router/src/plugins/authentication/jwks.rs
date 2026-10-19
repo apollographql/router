@@ -1,6 +1,5 @@
 use std::collections::HashMap;
 use std::collections::HashSet;
-use std::mem;
 use std::sync::Arc;
 use std::time::Duration;
 use std::time::SystemTime;
@@ -242,37 +241,47 @@ pub(crate) fn parse_jwks(data: &str) -> Option<JwkSet> {
         .ok()?;
 
     // remove any keys that can't be parsed
-    raw_json.get_mut("keys").and_then(|keys| {
-        keys.as_array_mut().map(|array| {
-            *array = mem::take(array).into_iter().enumerate().filter(|(index, key)| {
-                let alg = key.get("alg").and_then(|alg| alg.as_str()).unwrap_or("<unknown>");
-                match serde_json::from_value::<Jwk>(key.clone()) {
-                    Err(err) => {
-                        tracing::warn!(%err, alg, index, "ignoring a key since it is not valid, enable debug logs to full content");
-                        false
-                    }
-                    // jsonwebtoken deserializes keys that fit no known shape as `Other`, but
-                    // those can never be turned into a decoding key.
-                    Ok(jwk) if matches!(jwk.algorithm, AlgorithmParameters::Other(_)) => {
-                        tracing::warn!(
-                            err = "unrecognized or malformed key parameters",
-                            alg,
-                            index,
-                            "ignoring a key since it is not valid, enable debug logs to full content",
-                        );
-                        false
-                    }
-                    Ok(_) => true,
+    if let Some(keys) = raw_json
+        .get_mut("keys")
+        .and_then(|keys| keys.as_array_mut())
+    {
+        let mut index = 0;
+        keys.retain(|key| {
+            let error = match serde_json::from_value::<Jwk>(key.clone()) {
+                Err(err) => Some(err.to_string()),
+                // jsonwebtoken deserializes keys that fit no known shape as `Other`, but
+                // those can never be turned into a decoding key.
+                Ok(jwk) if matches!(jwk.algorithm, AlgorithmParameters::Other(_)) => {
+                    Some("unrecognized or malformed key parameters".to_string())
                 }
-            }).map(|(_, key)| key).collect();
-        })
-    });
+                Ok(_) => None,
+            };
+
+            if let Some(err) = &error {
+                let alg = key
+                    .get("alg")
+                    .and_then(|alg| alg.as_str())
+                    .unwrap_or("<unknown>");
+                tracing::warn!(
+                    err,
+                    alg,
+                    index,
+                    "ignoring a key since it is not valid, enable debug logs to see content",
+                );
+            }
+
+            index += 1;
+            error.is_none()
+        });
+    }
+
     let jwks: JwkSet = serde_json::from_value(raw_json)
         .map_err(|e| {
             tracing::error!(%e, "could not create JWKS from url content, enable debug logs to see content");
             e
         })
         .ok()?;
+
     Some(jwks)
 }
 
