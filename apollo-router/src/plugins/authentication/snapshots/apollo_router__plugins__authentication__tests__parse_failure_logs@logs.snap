@@ -14,3 +14,15 @@ expression: yaml
     index: 5
   level: WARN
   message: "ignoring a key since it is not valid, enable debug logs to full content"
+- fields:
+    alg: ML-DSA-44
+    err: unrecognized or malformed key parameters
+    index: 6
+  level: WARN
+  message: "ignoring a key since it is not valid, enable debug logs to full content"
+- fields:
+    alg: RS256
+    err: unrecognized or malformed key parameters
+    index: 7
+  level: WARN
+  message: "ignoring a key since it is not valid, enable debug logs to full content"

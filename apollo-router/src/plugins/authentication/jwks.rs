@@ -245,12 +245,25 @@ pub(crate) fn parse_jwks(data: &str) -> Option<JwkSet> {
     raw_json.get_mut("keys").and_then(|keys| {
         keys.as_array_mut().map(|array| {
             *array = mem::take(array).into_iter().enumerate().filter(|(index, key)| {
-                if let Err(err) = serde_json::from_value::<Jwk>(key.clone()) {
-                    let alg = key.get("alg").and_then(|alg|alg.as_str()).unwrap_or("<unknown>");
-                    tracing::warn!(%err, alg, index, "ignoring a key since it is not valid, enable debug logs to full content");
-                    return false;
+                let alg = key.get("alg").and_then(|alg| alg.as_str()).unwrap_or("<unknown>");
+                match serde_json::from_value::<Jwk>(key.clone()) {
+                    Err(err) => {
+                        tracing::warn!(%err, alg, index, "ignoring a key since it is not valid, enable debug logs to full content");
+                        false
+                    }
+                    // jsonwebtoken deserializes keys that fit no known shape as `Other`, but
+                    // those can never be turned into a decoding key.
+                    Ok(jwk) if matches!(jwk.algorithm, AlgorithmParameters::Other(_)) => {
+                        tracing::warn!(
+                            err = "unrecognized or malformed key parameters",
+                            alg,
+                            index,
+                            "ignoring a key since it is not valid, enable debug logs to full content",
+                        );
+                        false
+                    }
+                    Ok(_) => true,
                 }
-                true
             }).map(|(_, key)| key).collect();
         })
     });
