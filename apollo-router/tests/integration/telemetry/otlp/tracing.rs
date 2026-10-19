@@ -122,12 +122,15 @@ async fn test_graceful_shutdown_exits_cleanly() -> Result<(), BoxError> {
         return Ok(());
     }
     let mock_server = mock_otlp_server(1..).await;
-    let config = include_str!("../fixtures/otlp_shutdown_flush.router.yaml")
-        .replace("<otel-collector-endpoint>", &mock_server.uri());
+    let config = include_str!("../fixtures/otlp_shutdown_flush.router.yaml");
     // Deliberately no `.telemetry(Telemetry::Otlp { .. })`: that would point the *harness's* own
     // tracer at the same collector on a 10ms schedule, and its exports would satisfy the
     // post-shutdown assertion below without the router having flushed anything.
-    let mut router = IntegrationTest::builder().config(&config).build().await;
+    let mut router = IntegrationTest::builder()
+        .config(config)
+        .env_entry("TEST_CONFIG_COLLECTOR_ENDPOINT", mock_server.uri())
+        .build()
+        .await;
 
     router.start().await;
     router.assert_started().await;
