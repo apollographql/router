@@ -505,7 +505,7 @@ mod unix_tests {
 
         let mut router = IntegrationTest::builder()
             .config(config)
-            .env_entry("TEST_CONFIG_UNIX_SOCKET_ID", &uuid)
+            .env_entry("TEST_CONFIG_UNIX_SOCKET_PATH", &socket_path)
             .build()
             .await;
 
