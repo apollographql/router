@@ -1,0 +1,6 @@
+---
+source: apollo-federation/src/connectors/validation/mod.rs
+expression: errors
+input_file: apollo-federation/src/connectors/validation/test_data/keys_and_entities/valid/this_first_object_list_with_subselection.graphql
+---
+[]
