@@ -375,16 +375,16 @@ impl<F: Future> WithMemoryTracking for F {
     }
 }
 
-/// Custom allocator wrapper that delegates to tikv-jemalloc.
+/// Custom allocator wrapper that delegates to mimalloc.
 /// This allows for custom allocation tracking and instrumentation
-/// while still using jemalloc as the underlying allocator.
+/// while still using mimalloc as the underlying allocator.
 ///
 /// The allocator hooks into allocation/deallocation to track memory usage
 /// per-task via thread-local storage. This adds minimal overhead (~1-2ns per
-/// allocation) compared to using jemalloc directly.
+/// allocation) compared to using mimalloc directly.
 #[cfg(all(feature = "global-allocator", not(feature = "dhat-heap"), unix))]
 struct CustomAllocator {
-    inner: tikv_jemallocator::Jemalloc,
+    inner: mimalloc::MiMalloc,
 }
 
 #[cfg(all(feature = "global-allocator", not(feature = "dhat-heap"), unix))]
@@ -392,12 +392,12 @@ impl CustomAllocator {
     #[allow(dead_code)] // only used if feature global-allocator is enabled
     const fn new() -> Self {
         Self {
-            inner: tikv_jemallocator::Jemalloc,
+            inner: mimalloc::MiMalloc,
         }
     }
 }
 
-// SAFETY: All methods below properly delegate to jemalloc and only add tracking
+// SAFETY: All methods below properly delegate to mimalloc and only add tracking
 // on top. The tracking uses thread-locals with raw pointers to avoid TLS destructor
 // issues (see CURRENT_TASK_STATS documentation above).
 #[cfg(all(feature = "global-allocator", not(feature = "dhat-heap"), unix))]
