@@ -643,6 +643,7 @@ mod tests {
     use std::sync::atomic::AtomicUsize;
     use std::sync::atomic::Ordering;
 
+    use apollo_configuration::Draft;
     use apollo_configuration::expansion::MapVariables;
     use apollo_configuration::expansion::argument_for_kind;
     use serde_json::json;
@@ -679,15 +680,28 @@ mod tests {
         );
     }
 
-    /// `parser_builder` must not pin a JSON Schema draft, so startup validation reads the
-    /// generated schema in the dialect its `$schema` declares, as editors do.
+    const DRAFT_2020_12: &str = "https://json-schema.org/draft/2020-12/schema";
+    const DRAFT_7: &str = "http://json-schema.org/draft-07/schema#";
+
+    /// `parser_builder` must not pin a JSON Schema draft: startup validation reads the generated
+    /// schema in the dialect its `$schema` declares, as editors do, unless a draft is forced.
     ///
-    /// The probe is a keyword beside `$ref`: draft 2020-12 applies it and draft 7 ignores it. The
-    /// router's parser must reject the document; the same parser forced to draft 7 accepts it,
-    /// which shows the probe tells the two dialects apart.
-    #[test]
-    fn validation_uses_the_dialect_the_schema_declares() {
+    /// The probe is a `not` beside `$ref`, which draft 2020-12 applies and draft 7 ignores, so the
+    /// document is rejected exactly when the parser reads the schema as 2020-12.
+    #[rstest::rstest]
+    #[case::declares_2020_12(DRAFT_2020_12, None, true)]
+    #[case::declares_draft_7(DRAFT_7, None, false)]
+    #[case::declares_2020_12_forced_to_2020_12(DRAFT_2020_12, Some(Draft::Draft202012), true)]
+    #[case::declares_2020_12_forced_to_draft_7(DRAFT_2020_12, Some(Draft::Draft7), false)]
+    #[case::declares_draft_7_forced_to_2020_12(DRAFT_7, Some(Draft::Draft202012), true)]
+    #[case::declares_draft_7_forced_to_draft_7(DRAFT_7, Some(Draft::Draft7), false)]
+    fn validation_uses_the_dialect_the_schema_declares(
+        #[case] declared: &str,
+        #[case] forced: Option<Draft>,
+        #[case] rejected: bool,
+    ) {
         let mut schema = router_config_schema().clone();
+        schema["$schema"] = json!(declared);
         let supergraph = &mut schema["properties"]["supergraph"];
         assert!(supergraph.get("$ref").is_some(), "{supergraph}");
         supergraph["not"] = json!({ "required": ["listen"] });
@@ -696,28 +710,29 @@ mod tests {
               listen: 127.0.0.1:4000
         "};
 
-        let declared = parser_builder::<ExpandedDocument>(&[], &None)
-            .schema(schema.clone())
+        let mut builder = parser_builder::<ExpandedDocument>(&[], &None).schema(schema);
+        if let Some(draft) = forced {
+            builder = builder.draft(draft);
+        }
+        let result = builder
             .build()
-            .expect("the schema compiles");
-        let error = declared
-            .parse_yaml(text)
-            .err()
-            .expect("draft 2020-12 applies the keyword beside `$ref`");
-        let rendered = ConfigurationError::from(error).to_string();
-        assert!(
-            rendered.contains(r#"{"required":["listen"]} is not allowed"#),
-            "the error should come from the keyword beside `$ref`: {rendered}"
-        );
+            .expect("the schema compiles")
+            .parse_yaml(text);
 
-        let draft_7 = parser_builder::<ExpandedDocument>(&[], &None)
-            .schema(schema)
-            .draft(apollo_configuration::Draft::Draft7)
-            .build()
-            .expect("the schema compiles");
-        draft_7
-            .parse_yaml(text)
-            .expect("draft 7 ignores the keyword beside `$ref`");
+        match result {
+            Ok(_) => assert!(!rejected, "2020-12 should apply the keyword beside `$ref`"),
+            Err(error) => {
+                let rendered = ConfigurationError::from(error).to_string();
+                assert!(
+                    rejected,
+                    "draft 7 should ignore the keyword beside `$ref`: {rendered}"
+                );
+                assert!(
+                    rendered.contains(r#"{"required":["listen"]} is not allowed"#),
+                    "the error should come from the keyword beside `$ref`: {rendered}"
+                );
+            }
+        }
     }
 
     #[test]
