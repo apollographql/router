@@ -136,6 +136,21 @@ struct PrivateQueryKey {
     has_private_id: bool,
 }
 
+/// Whether a successful response with this `Cache-Control` adds its query to the known-private
+/// queries: it must be private and allow storing.
+///
+/// Entries stay until they are evicted or the router restarts, so learning from a response the
+/// cache could not store would let a single error response (frameworks often mark those
+/// `private`) turn off caching for the query.
+fn marks_query_private(cache_control: &CacheControl) -> bool {
+    cache_control.private() && cache_control.should_store()
+}
+
+/// Whether a subgraph response has a 2xx status and no GraphQL errors.
+fn succeeded_without_errors(response: &http::Response<graphql::Response>) -> bool {
+    response.status().is_success() && response.body().errors.is_empty()
+}
+
 /// Adds a query to the known-private queries and updates their size gauge.
 async fn remember_private_query(
     private_queries: &RwLock<LruCache<PrivateQueryKey, ()>>,
@@ -1062,29 +1077,35 @@ impl CacheService {
                     cache_control.clone(),
                 );
 
-                if cache_control.private() {
-                    // we did not know in advance that this was a query with a private scope, so we update the cache key
-                    if !is_known_private {
-                        remember_private_query(
-                            &self.private_queries,
-                            private_query_key,
-                            &self.lru_size_instrument,
-                        )
-                        .await;
-
-                        if let Some(s) = private_id.as_ref() {
-                            root_cache_key = format!("{root_cache_key}:{s}");
-                        }
-                    }
-                }
-
                 // if the request had no_store on it, propagate that to this cache control
                 if let Some(request_cache_control) = request_cache_control {
                     cache_control.merge_no_store(&request_cache_control);
                 }
 
                 let body = response.response.body();
-                let storable_data = body.data.as_ref().filter(|_| body.errors.is_empty());
+                // Marking the query private, the debugger's `shouldStore` and the store below must agree,
+                // so all three read this value.
+                let storable_data = body.data.as_ref().filter(|_| {
+                    response.response.status().is_success()
+                        && body.errors.is_empty()
+                        && cache_control.should_store()
+                });
+
+                // we did not know in advance that this was a query with a private scope, so we update the cache key
+                if cache_control.private() && !is_known_private {
+                    if storable_data.is_some() {
+                        remember_private_query(
+                            &self.private_queries,
+                            private_query_key,
+                            &self.lru_size_instrument,
+                        )
+                        .await;
+                    }
+
+                    if let Some(s) = private_id.as_ref() {
+                        root_cache_key = format!("{root_cache_key}:{s}");
+                    }
+                }
 
                 if self.debug {
                     let cache_key_context = CacheKeyContext {
@@ -1117,7 +1138,6 @@ impl CacheService {
 
                 if let Some(data) = storable_data
                     && !unstorable_private_response
-                    && cache_control.should_store()
                 {
                     // Prepend the whole-subgraph index entry when that index is active. The
                     // by-type and per-tag entries were already appended in scope by the
@@ -1264,7 +1284,10 @@ impl CacheService {
                     cache_control.merge_no_store(&request_cache_control);
                 }
 
-                if !is_known_private && cache_control.private() {
+                if !is_known_private
+                    && succeeded_without_errors(&response.response)
+                    && marks_query_private(&cache_control)
+                {
                     remember_private_query(
                         &self.private_queries,
                         private_query_key,
