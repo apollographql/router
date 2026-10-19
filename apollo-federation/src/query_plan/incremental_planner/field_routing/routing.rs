@@ -1308,11 +1308,15 @@ impl FieldRoutingSearchSpace {
     ) -> (T, bool) {
         let outer = self.caches.earliest_cycle_cut.take();
         let result = evaluate();
-        let inner = self.caches.earliest_cycle_cut.get();
+        let escaped = self
+            .caches
+            .earliest_cycle_cut
+            .get()
+            .filter(|&cut| cut < position);
         self.caches
             .earliest_cycle_cut
-            .set(outer.into_iter().chain(inner).min());
-        (result, inner.is_some_and(|cut| cut < position))
+            .set(outer.into_iter().chain(escaped).min());
+        (result, escaped.is_some())
     }
 
     /// Cached key hop enumeration with integrated cycle guard. The guard
@@ -1946,6 +1950,16 @@ mod tests {
             let ordered_hops = hops(&ordered, &f);
 
             assert_eq!(ordered_hops, fresh_hops);
+        }
+
+        /// The cut tracker describes the innermost open evaluation, so it is
+        /// empty again once the outermost call returns.
+        #[test]
+        fn cycle_cut_is_cleared_after_the_outermost_call() {
+            let space = space();
+            let hk = field(&space, "q", "hk");
+            hops(&space, &hk);
+            assert_eq!(space.caches.earliest_cycle_cut.get(), None);
         }
     }
 }
