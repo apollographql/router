@@ -4,8 +4,6 @@ use std::collections::HashMap;
 use std::str::FromStr;
 
 use http::Uri;
-use schemars::JsonSchema;
-use serde::Deserialize;
 use serde::Serialize;
 use tower::BoxError;
 use tower::ServiceExt;
@@ -23,8 +21,8 @@ struct OverrideSubgraphUrl {
 }
 
 /// Subgraph URL mappings
-#[derive(Debug, Clone, Deserialize, Serialize, JsonSchema)]
-#[serde(deny_unknown_fields)]
+#[apollo_configuration::configuration]
+#[derive(Serialize)]
 #[serde(untagged)]
 enum Conf {
     /// Subgraph URL mappings
@@ -74,8 +72,8 @@ impl Plugin for OverrideSubgraphUrl {
     fn subgraph_service(
         &self,
         subgraph_name: &str,
-        service: subgraph::BoxService,
-    ) -> subgraph::BoxService {
+        service: subgraph::BoxCloneService,
+    ) -> subgraph::BoxCloneService {
         let new_url = self.urls.get(subgraph_name).cloned();
         service
             .map_request(move |mut req: SubgraphRequest| {
@@ -85,7 +83,7 @@ impl Plugin for OverrideSubgraphUrl {
 
                 req
             })
-            .boxed()
+            .boxed_clone()
     }
 }
 
@@ -99,6 +97,7 @@ mod tests {
     use serde_json::Value;
     use tower::Service;
     use tower::ServiceExt;
+    use tower::util::BoxCloneService;
 
     use crate::Context;
     use crate::plugin::DynPlugin;
@@ -127,7 +126,8 @@ mod tests {
         let context = Context::new();
         context.insert("test".to_string(), 5i64).unwrap();
 
-        let mut subgraph_service = dyn_plugin.subgraph_service("test_one", mock.boxed());
+        let mut subgraph_service =
+            dyn_plugin.subgraph_service("test_one", BoxCloneService::new(mock));
         let call = subgraph_service
             .ready()
             .await
@@ -171,7 +171,8 @@ mod tests {
             .await
             .unwrap();
 
-        let mut subgraph_service = dyn_plugin.subgraph_service("test_one", mock.boxed());
+        let mut subgraph_service =
+            dyn_plugin.subgraph_service("test_one", BoxCloneService::new(mock));
         let call = subgraph_service.ready().await.unwrap().call(
             SubgraphRequest::fake_builder()
                 .context(Context::new())

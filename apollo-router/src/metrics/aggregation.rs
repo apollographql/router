@@ -261,7 +261,7 @@ impl AggregateMeterProvider {
                 (Ok(_), err) => Err(err),
             };
         }
-        Ok(())
+        result
     }
 
     /// Shutdown MUST be called from a blocking thread.

@@ -13,12 +13,11 @@ telemetry:
       otlp:
         enabled: true
         protocol: http
-        endpoint: <otel-collector-endpoint>/traces
+        endpoint: ${env.TEST_CONFIG_COLLECTOR_ENDPOINT}/traces
         batch_processor:
           scheduled_delay: 10ms
   instrumentation:
     spans:
-      mode: spec_compliant
       supergraph:
         attributes:
           graphql.operation.name: true

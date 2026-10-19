@@ -1,0 +1,547 @@
+---
+title: Upgrading from Versions 2.x
+subtitle: Upgrade from version 2.x to 3.x of GraphOS Router
+description: Learn how to upgrade from version 2.x to 3.x of Apollo GraphOS Router.
+---
+
+GraphOS Router v3.x includes various breaking changes when upgrading from v2.x, including removing deprecated features and consolidating on OpenTelemetry-native tracing formats.
+
+This upgrade guide describes the steps to upgrade your GraphOS Router deployment from version 2.x to 3.x. It describes breaking changes and how to resolve them. It also recommends new features to use.
+
+## Upgrade strategy
+
+This guide starts from a configuration that works with router v2.x. If you run router v1.x, first upgrade to v2.x by following [Upgrading from Versions 1.x](/graphos/reference/upgrade/from-router-v1), using a v2.x router to upgrade your configuration.
+
+Before making any changes, auto-upgrade your configuration. This will remove options that already have no effect in v2.x, and make the rest of the upgrade easier.
+
+Check the changes that will be applied using:
+```bash
+router config upgrade --diff router.yaml
+```
+
+Then apply the changes using:
+```bash
+router config upgrade router.yaml > router.next.yaml
+mv router.next.yaml router.yaml
+```
+
+## Removals and deprecations
+
+The following headings describe features that have been removed in router v3.x. Alternatives to the removed features are described, if available.
+
+### Removed Jaeger trace propagator
+
+The `opentelemetry-jaeger-propagator` crate has deprecated the Jaeger propagation format in favor of W3C TraceContext propagation. The Jaeger propagator has been removed entirely.
+
+**Upgrade step**:
+
+- Change your router config to use `trace_context` propagation instead:
+
+```yaml title="router.yaml"
+telemetry:
+  exporters:
+    tracing:
+      propagation:
+        # Before (no longer supported)
+        # jaeger: true
+        trace_context: true
+```
+
+This only affects the propagation format used for distributed tracing headers; sending traces to Jaeger via the OTLP exporter is unaffected.
+
+### Removed Zipkin trace exporter and propagator
+
+The `opentelemetry-zipkin` crate has deprecated its exporter and propagator in favor of OTLP (Zipkin supports OTLP ingestion via [zipkin-otel](https://github.com/openzipkin-contrib/zipkin-otel)). The native Zipkin exporter and propagator have been removed entirely.
+
+**Upgrade step**:
+
+- Change your router config to send traces to Zipkin via the `otlp` exporter instead:
+
+```yaml title="router.yaml"
+telemetry:
+  exporters:
+    tracing:
+      # Before (no longer supported)
+      # zipkin:
+      #   enabled: true
+      #   endpoint: "http://127.0.0.1:9411/api/v2/spans"
+      otlp:
+        enabled: true
+        endpoint: "http://127.0.0.1:9411"
+        protocol: http
+```
+
+### Removed `preview_entity_cache` plugin
+
+The `preview_entity_cache` plugin is removed in GraphOS Router v3.0.0. It was superseded by `response_cache`.
+
+**Upgrade step**:
+- Adopt the new plugin:
+
+```diff
+-preview_entity_cache:
++response_cache:
+   enabled: true
+   subgraph:
+     all:
+       enabled: true
+       redis:
+         urls: ["redis://localhost:6379"]
+       ttl: 24h
+```
+
+### Removed legacy Apollo trace transport and `otlp_tracing_sampler`
+
+In v1.x and v2.x, traces could be sent to GraphOS either via the legacy Apollo Usage Reporting protocol or via OTLP, with the split between the two controlled by `telemetry.apollo.otlp_tracing_sampler`. In v3.x, the legacy trace transport is removed: traces are always reported to GraphOS via OTLP, and the `otlp_tracing_sampler` option no longer exists.
+
+This only affects trace export. Usage report metrics are unchanged and continue to use the Apollo Usage Reporting protocol.
+
+**Upgrade step**:
+
+- Remove `telemetry.apollo.otlp_tracing_sampler` from your router config. The `router config upgrade` command does this for you.
+- To control how many traces are sent to GraphOS, use `telemetry.apollo.sampler` or the common tracing sampler. See [trace reporting via OTLP](/graphos/routing/observability/graphos/graphos-reporting#trace-reporting-via-otlp).
+
+### Removed `experimental_reuse_query_plans`
+
+The experimental query plan reuse feature has been removed. We recommend using distributed query plan caching as well as the new [incremental query planner][].
+
+### Removed `experimental_chaos`
+
+The `experimental_chaos` plugin was an internal plugin for testing the Router, not meant for external use. It is now removed.
+
+### Removed 1.x context compatibility from coprocessors
+
+The router request context is used to share data across stages of the request pipeline. Many keys were renamed in v2.0 to be more consistent. A full list is available in the [v2 upgrade guide](/graphos/routing/upgrade/from-router-v1#renamed-context-keys).
+
+During the v2.x release cycle, you could configure coprocessors to use `context: deprecated`. The Router would then translate the new names to the old names and back when communicating with coprocessors.
+
+The `context` option in Router v3.0 no longer supports the `deprecated` option _or_ the old boolean syntax:
+
+| Old value | Recommendation |
+| --- | --- |
+| `context: deprecated` | use `context: all` with new context keys |
+| `context: true` | use `context: all` |
+| `context: false` | use `context: none` |
+
+**Upgrade step**:
+- Ensure your coprocessor code has been migrated.
+- Run v2.x with `context: all` instead of `context: deprecated` and validate that everything works before upgrading to v3.x.
+
+### Removed deprecated `by_response_shape` cost mode from Demand Control
+
+The `by_response_shape` cost mode was deprecated because it's prone to under-counting the actual work involved in a federated GraphQL operation. It is now removed in favour of `by_subgraph`.
+
+**Upgrade step**:
+- Use `by_subgraph` instead of `by_response_shape`.
+
+```diff
+ demand_control:
+   strategy:
+     static_estimated:
+-      actual_cost_mode: by_response_shape
++      actual_cost_mode: by_subgraph
+```
+
+## Changes affecting Rust plugins
+
+If you use the `apollo-router` crate from Rust, you may have to update your code.
+
+### Default rustls crypto provider switched from `ring` to `aws-lc-rs`
+
+The router's default process-wide rustls `CryptoProvider` is now `aws-lc-rs` instead of `ring`. This only affects consumers embedding `apollo-router` as a library:
+
+- If your binary installs `rustls::crypto::ring::default_provider()` (or otherwise assumes `ring` is the installed provider) before or after calling into `apollo-router`, the two installs will race, and whichever runs first wins. Update your own crypto-provider install to use `aws-lc-rs`, or remove it and rely on the router's install.
+- If your binary depends directly on `ring`-backed features of `reqwest`, `tonic`, `fred`, or any other ecosystem crate that uses `rustls`, switch to the `aws-lc-rs` equivalent.
+
+### Changed service type in Rust plugin hooks
+
+The plugin hooks available to Rust plugins now use `BoxCloneService` rather than `BoxService`. Any tower service your plugin returns must now be `Clone`.
+
+Plugin hooks are called once on startup and reload.
+
+The following methods are affected:
+
+- `Plugin::router_service`
+- `Plugin::supergraph_service`
+- `Plugin::execution_service`
+- `Plugin::subgraph_service`
+- `PluginUnstable::connector_request_service`
+
+**Upgrade step**:
+
+- Use the `BoxCloneService` type instead of `apollo_router::services::router::BoxService` in your method signatures, and equivalent for the other methods:
+    - `apollo_router::services::router::BoxService` -> `apollo_router::services::router::BoxCloneService`
+    - `apollo_router::services::subgraph::BoxService` -> `apollo_router::services::subgraph::BoxCloneService`
+    - `apollo_router::services::supergraph::BoxService` -> `apollo_router::services::supergraph::BoxCloneService`
+    - `apollo_router::services::execution::BoxService` -> `apollo_router::services::execution::BoxCloneService`
+    - `apollo_router::services::connector::request_service::BoxService` -> `apollo_router::services::connector::request_service::BoxCloneService`
+- Use `.boxed_clone()` instead of `.boxed()` to return the correct service type.
+If some of your tower layers are _not_ `Clone`, use the `.buffered()` layer:
+
+```rust
+fn router_service(service: router::BoxCloneService) -> router::BoxCloneService {
+    use apollo_router::layers::ServiceBuilderExt as _;
+
+    ServiceBuilder::new()
+        .buffered()
+        .layer(MyNonCloneLayer::new())
+        .service(service)
+        .boxed_clone()
+}
+```
+
+### Rust plugin configuration must use `apollo-configuration`
+
+The `Config` associated type of the `Plugin` and `PluginUnstable` traits must now implement `apollo_configuration::Configuration`, in place of `JsonSchema + DeserializeOwned`.
+
+For full usage documentation, see the [`apollo-configuration`](https://docs.rs/apollo-configuration/latest/apollo_configuration/) crate.
+
+The full bounds are now:
+```rust
+type Config: Configuration + Clone + Send + Sync + 'static
+```
+
+**Upgrade step**:
+
+- Define your plugin configuration with the `#[configuration]` attribute. Make sure to use the `apollo-router` re-export to avoid version mismatches.
+
+```rust
+use apollo_router::apollo_configuration;
+
+#[apollo_configuration::configuration]
+struct Conf {
+    #[config(required)]
+    name: String,
+}
+```
+
+- Migrate configuration validation that you're doing in your plugin's `fn new()` method to `#[config(validate)]` attributes. This also improves the UX of your plugin!
+
+### `Configuration` no longer implements `Serialize`
+
+`apollo_router::Configuration` can still be deserialized, but it no longer implements `Serialize`.
+
+**Upgrade step**:
+- There is no replacement for this functionality.
+
+### Removed synchronous `.checkpoint()` layer
+
+The `apollo-router` crate previously provided a `ServiceBuilderExt::checkpoint` helper. This helper has been removed.
+
+**Upgrade step**:
+- The recommended approach is to replace `.checkpoint()` calls with a full-fledged tower layer.
+- A less invasive approach is to use the `.checkpoint_async()` helper instead, as it has not been removed.
+
+## Telemetry changes
+
+### Renamed metrics
+
+Several duration and byte-count metrics now include a UCUM unit (`s` for durations, `By` for bytes).
+
+These metrics were renamed:
+- `apollo.router.uplink.fetch.duration.seconds` was renamed to `apollo.router.uplink.fetch.duration` with the unit being `s`.
+
+These metrics now include a unit:
+- `apollo.router.cache.hit.time`
+- `apollo.router.cache.miss.time`
+- `apollo.router.operations.coprocessor.duration`
+- `apollo.router.query_planning.plan.duration`
+- `apollo.router.query_planning.total.duration`
+- `apollo.router.query_planning.warmup.duration`
+- `apollo.router.schema.load.duration`
+- `apollo.router.operations.file_uploads.file_size`
+
+**Upgrade step**:
+- If you use OTLP, adjust your dashboards to account for the new `apollo.router.uplink.fetch.duration` name.
+- If you use Prometheus, see the next section.
+
+### Renamed Prometheus metrics
+
+The above improvement affects Prometheus metrics. The `opentelemetry-prometheus` exporter appends a suffix derived from the unit to the exported name, so these metrics are renamed on the Prometheus scrape endpoint:
+
+| Legacy Prometheus name | New Prometheus name |
+| --- | --- |
+| `apollo_router_cache_hit_time` | `apollo_router_cache_hit_time_seconds` |
+| `apollo_router_cache_miss_time` | `apollo_router_cache_miss_time_seconds` |
+| `apollo_router_operations_coprocessor_duration` | `apollo_router_operations_coprocessor_duration_seconds` |
+| `apollo_router_query_planning_plan_duration` | `apollo_router_query_planning_plan_duration_seconds` |
+| `apollo_router_query_planning_total_duration` | `apollo_router_query_planning_total_duration_seconds` |
+| `apollo_router_query_planning_warmup_duration` | `apollo_router_query_planning_warmup_duration_seconds` |
+| `apollo_router_schema_load_duration` | `apollo_router_schema_load_duration_seconds` |
+| `apollo_router_operations_file_uploads_file_size` | `apollo_router_operations_file_uploads_file_size_bytes` |
+
+**Upgrade step**:
+
+- Update any dashboards, alerts, and recording rules that reference the legacy names above to use the new names instead.
+- If you need the legacy names to keep working while you migrate, add a Prometheus recording rule that copies the new series under the old name.
+
+### Batched requests get individual subgraph spans
+
+In GraphOS Router v2.x, batched subgraph requests produced a single subgraph span for the whole batch, with a special `batch` value for `graphql.operation.name`.
+
+Starting in Router 3, requests are instead only batched up at the HTTP level. This means that each subgraph request that is part of a batch emits its own full-fledged span, but only one HTTP client span is emitted for the entire batch.
+
+### Removed deprecated `apollo.router.session.count.active` metric
+
+The `apollo.router.session.count.active` metric is removed. It was deprecated throughout the v2.x version line.
+
+**Upgrade step**:
+- Update your dashboards to use the `http.server.active_requests` metric instead.
+
+### Removed deprecated span mode
+
+The `telemetry.instrumentation.spans.mode` option is removed. The `spec_compliant` value is now the only behavior that the Router supports.
+
+**Upgrade step**:
+- Remove the `telemetry.instrumentation.spans.mode` field from your configuration.
+
+## Configuration changes
+
+The following describes changes to router configuration, including renamed options and changed default values.
+
+### Configuration is validated more strictly when it loads
+
+The router checks your configuration more thoroughly at startup and on reload, so a configuration that loaded with router v2.x can be rejected.
+
+- **Error messages have a new format.** They quote the offending lines of your file. Errors in plugin configuration are reported together with other errors. Errors in values from substitutions call out the relevant environment variable or CLI flag.
+- **`router config validate` checks what startup would load.** It applies the same automatic upgrades as startup, and says when your file relies on them.
+- **A missing file in `${file.PATH}` is an error.** Previously the reference was left in the configuration as literal text.
+- **Plugin sections reject unknown keys.** The `authorization`, `fleet_detector`, `enhanced_client_awareness` and `progressive_override` plugins used to ignore unknown keys. Now, all plugins reject unknown keys, preventing typos from silently not taking effect. The nested `authorization.directives` and `authorization.directives.errors` blocks, and the coprocessor `router`, `supergraph`, `execution` and `connector` stage blocks, reject unknown keys too, so a misspelled `coprocessor.router.reqest` is no longer ignored. The same applies to telemetry's `batch_processor` blocks.
+- **Substituted values take the type their setting declares.** Router v2.x converted any `${env.MY_ENV_VAR}` value that looked like a number or a boolean to that type. Now a setting with a declared type takes that type, so a string setting such as a CORS header name keeps `5` as the string `"5"`. A setting that accepts either a number or a string also keeps the text. A setting that accepts any value, such as a Connector's `$config` object, reads the value as YAML: `5` becomes the number `5`, `false` becomes the boolean `false`, `~` or `null` becomes `null`, and `0042` stays the string `"0042"`. A substitution with text around it, such as `count-${env.N}`, is always a string.
+- **Some substituted values that stopped router v2.x now load.** A boolean setting accepts `True` and `TRUE` as well as `true`, and the same forms of `false`. An empty value at an optional number or boolean setting leaves the setting unset. If you relied on router v2.x refusing to start to catch an empty variable, check the variable before starting the router.
+- **Some `$config` values arrive differently.** Router v2.x sent an empty value as `""`. Now it arrives as `null`. `True` and `NULL` become `true` and `null` instead of staying text.
+
+**Upgrade step**:
+
+- Run `router config validate` against your configuration and fix any errors it reports.
+- If it says your file relies on automatic upgrades, run `router config upgrade` to update the file.
+- Make sure every file referenced with `${file.PATH}` exists wherever the router runs.
+
+### Changed default for JWT authentication errors to redact
+
+The `authentication.router.jwt.on_error` configuration now defaults to `redacted_error` instead of `error`.
+
+With `error`, users would receive a detailed error message about exactly what was wrong with the JWT, including potentially what issuers and audiences are configured on the JWKS.
+
+With `redacted_error`, users only see "Authentication failed". The details are still reported in metrics.
+
+**Upgrade step**:
+- To keep the previous behavior, set `on_error` explicitly:
+
+```yaml title="router.yaml"
+authentication:
+  router:
+    jwt:
+      jwks:
+        - url: https://auth.example.com/.well-known/jwks.json
+      on_error: error
+```
+
+### Changed default for `supergraph.early_cancel` to `true`
+
+When a client disconnects, the Router now cancels the request immediately by default, consistent with most other web services.
+
+Previously the default was `false`, which caused requests to continue running in a background task even after the client disconnected.
+
+To restore the previous behavior (e.g. to preserve telemetry for canceled requests), set `early_cancel: false` in your router config.
+
+### Stabilized `supergraph.log_on_broken_pipe`
+
+The `supergraph.experimental_log_on_broken_pipe` option is now named `supergraph.log_on_broken_pipe`.
+
+This option emits a log message when a client disconnects before the Router has produced a response.
+
+**Upgrade step**:
+- Run `router config upgrade`.
+
+### Stabilized and enabled GraphOS subgraph metrics and extended error metrics
+
+GraphOS Router now reports additional per-subgraph operation metrics and extended error metrics to GraphOS by default. This powers the Studio subgraph insights and error attribution features.
+
+The configuration fields have been moved out of preview:
+
+| Old field | New field |
+| --- | --- |
+| `telemetry.apollo.preview_subgraph_metrics` | `telemetry.apollo.subgraph_metrics` |
+| `telemetry.apollo.errors.preview_extended_error_metrics` | `telemetry.apollo.errors.extended_error_metrics` |
+
+**Upgrade step**:
+- Run `router config upgrade`.
+- To opt out of extended insights, use:
+
+```yaml
+telemetry:
+  apollo:
+    subgraph_metrics: false
+    errors:
+      extended_error_metrics: disabled
+```
+
+### Stabilized Apollo OTLP configuration
+
+The Apollo OTLP configuration under `telemetry.apollo` has been promoted out of experimental.
+
+| Old field | New field |
+| --- | --- |
+| `telemetry.apollo.experimental_otlp_endpoint` | `telemetry.apollo.otlp_endpoint` |
+| `telemetry.apollo.experimental_otlp_tracing_protocol` | `telemetry.apollo.otlp_tracing_protocol` |
+| `telemetry.apollo.experimental_otlp_metrics_protocol` | `telemetry.apollo.otlp_metrics_protocol` |
+
+**Upgrade step**:
+- Run `router config upgrade`.
+
+### Stabilized `http2` configuration
+
+The `http2` configuration to enable communication over HTTP/2 with subgraphs and coprocessors has been promoted out of experimental.
+
+| Old field | New field |
+| --- | --- |
+| `traffic_shaping.all.experimental_http2` | `traffic_shaping.all.http2` |
+| `traffic_shaping.subgraphs.<name>.experimental_http2` | `traffic_shaping.subgraphs.<name>.http2` |
+| `coprocessor.client.experimental_http2` | `coprocessor.client.http2` |
+
+**Upgrade step**:
+- Run `router config upgrade`.
+
+### Stabilized `expose_query_plan` plugin
+
+The `expose_query_plan` plugin has been promoted out of experimental.
+
+**Upgrade step**:
+- Replace a `plugins."experimental.expose_query_plan"` configuration with the top-level `expose_query_plan`.
+
+```yaml
+# Before (no longer supported)
+plugins:
+  experimental.expose_query_plan: true
+
+# After
+expose_query_plan: true
+```
+
+### Removed plain string syntax from telemetry selectors
+
+The shorthand plain string syntax was removed from custom telemetry selectors in the `supergraph`, `router`, and `subgraph` stages. Use the `static` field instead:
+
+```yaml
+# Before (no longer supported)
+attributes:
+  my.attr: "my-value"
+
+# After
+attributes:
+  my.attr:
+    static: "my-value"
+```
+
+**Upgrade step**:
+- Nest plain string attribute values under the `static:` field.
+
+### Removed deprecated configuration fields
+
+- `traffic_shaping.deduplicate_variables` already had no effect, and is now removed.
+- `persisted_queries.experimental_local_manifests` is removed as it was stabilized in v2.x. Use `persisted_queries.local_manifests` instead.
+
+**Upgrade step**:
+- Run `router config upgrade`.
+
+## Functionality changes
+
+### Removed retries during query plan warmup
+
+During router reloads, the query plan cache is warmed up by pre-planning recently used GraphQL queries against the new configuration and schema. In Router 2.x, if the router's compute job worker pool was overloaded, warmup would wait a bit and retry each query plan until space was available on the pool. In Router 3.0, warmup of a query is skipped if there is no space for it, so the router does not queue up extra work when it is already overloaded.
+
+In effect, the router may switch over to the new configuration and schema on a cold cache. This can cause a further spike in 503 responses post-reload, but the router will also stabilize faster: the old and new pipelines are not competing for resources for as long.
+
+We expect this to be a better behaviour overall, and to occur (way) less frequently with the [incremental query planner][].
+
+### Global variable mutation using `Fn("name")` callbacks in Rhai scripts
+
+When using the `Fn("name")` syntax to register plugin hooks in a Rhai script, mutating a global variable no longer persists across invocations of the script. The previous implementation required holding a lock for the full runtime of the script, meaning concurrent requests had to wait for each other.
+
+```rhai
+let counter = 0
+fn process_request(request) {
+    counter += 1
+    return request
+}
+
+// ... BAD:
+fn router_service(service) {
+    service.map_request(process_request)
+}
+// ... BAD:
+fn router_service(service) {
+    service.map_request(Fn("process_request"))
+}
+
+// ... GOOD:
+fn router_service(service) {
+    service.map_request(|request| {
+        process_request(request)
+    })
+}
+```
+
+We recommend not mutating global variables in Rhai scripts in general.
+
+**Upgrade step**:
+- Use [closure syntax](/graphos/routing/customization/rhai#curried-vs-non-curried-callback-functions) to register plugin hooks.
+
+## New capabilities
+
+The following lists new capabilities in router v3.x that we recommend you adopt. These capabilities don't introduce breaking changes.
+
+### Incremental query planner
+
+GraphOS Router 3.0 preview enables the new [incremental query planner] by default.
+
+### GraphQL September 2025 specification
+
+GraphOS Router v3.0 follows the September 2025 version of the GraphQL specification by default. The new specification closes several gaps in validation in particular.
+
+- Default values for arguments in GraphQL schemas are now validated against their type.
+- `@deprecated(reason: null)` is no longer allowed in GraphQL schemas.
+- `@deprecated` must not appear on required arguments or input object fields (non-null with no default value).
+- If an object or interface field is marked `@deprecated`, the interface field it implements must also be deprecated.
+- In introspection queries, the `includeDeprecated` option no longer allows `null`.
+
+**Upgrade step**:
+- Run the new router version.
+- If there are validation errors in the schema, first recompose the supergraph with the latest LTS release of composition. This will automatically fix many problems.
+- There may still be validation errors related to default values, as these cannot be fixed automatically. Work with subgraph owners to fix them, or disable the new rules:
+
+```yaml
+supergraph:
+  validate_default_values: false
+```
+
+### Graph artifacts
+
+[Graph Artifacts] combine the supergraph schema and persisted queries into a single versioned OCI artifact. These can be served from any standard OCI registry. Among other benefits, using Graph Artifacts simplifies rollbacks and using self-hosted artifacts.
+
+GraphOS Router 3.0 fetches the supergraph schema and persisted queries from Apollo's Graph Artifacts OCI registry by default, replacing the legacy Apollo Uplink.
+
+#### License entitlements are not backfilled
+
+When you use Graph Artifacts, the router can read your GraphOS license from the artifact itself. Apollo adds the license identifier to the artifact's manifest only when the artifact is built **after** this capability is available, and only if it's enabled for your graph. Existing artifacts are **not** backfilled.
+
+This means that upgrading the router doesn't, by itself, cause your license to come from Graph Artifacts. If the router fetches a Graph Artifact that has no license identifier, it runs without a license (GraphOS features that require a license are unavailable) and doesn't fall back to Apollo Uplink.
+
+If you see this behavior, do one of the following:
+
+- Publish a new version of your graph so the artifact is rebuilt, and confirm that the capability is enabled for your graph.
+- If you serve Graph Artifacts from your own OCI registry, provide your license explicitly with an [offline license](/graphos/routing/license#offline-license) (`APOLLO_ROUTER_LICENSE` or a license file), which takes precedence over the artifact. The router doesn't allow an offline license together with an Apollo-hosted Graph Artifact reference. It fails at startup and asks you to specify only one license source.
+
+To check where your router gets its license, look for the `using <source> as license source` message in the startup logs, or the `opt.apollo.license.source` attribute on the `apollo.router.config.env` metric.
+
+### Early enforcement of GraphQL validation
+
+GraphQL Validation is now enforced _before_ access to `@authenticated` fields is checked. An unauthenticated, invalid GraphQL operation that references an `@authenticated` field will now produce a GraphQL validation error rather than an authorization error.
+
+## Deploy your router
+
+Make sure that you are referencing the correct router release: **v{products.router.latest().version}**
+
+[Graph Artifacts]: /graphos/platform/schema-management/delivery/graph-artifacts
+[incremental query planner]: /graphos/routing/query-planning/incremental-query-planner

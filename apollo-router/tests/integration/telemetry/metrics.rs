@@ -77,7 +77,18 @@ async fn test_metrics_reloading() {
     let mut config_value: serde_yaml::Value =
         serde_yaml::from_str(PROMETHEUS_CONFIG).expect("fixture is valid YAML");
     let apollo_block: serde_yaml::Value = serde_yaml::from_str(
-        "field_level_instrumentation_sampler: always_on\nexperimental_otlp_tracing_protocol: http\nexperimental_otlp_metrics_protocol: http\nbatch_processor:\n  scheduled_delay: 100ms\n",
+        r#"
+        field_level_instrumentation_sampler: always_on
+        otlp_tracing_protocol: http
+        otlp_metrics_protocol: http
+        tracing:
+          batch_processor:
+            scheduled_delay: 100ms
+        metrics:
+          usage_reports:
+            batch_processor:
+              scheduled_delay: 100ms
+        "#,
     )
     .unwrap();
     config_value
@@ -108,7 +119,7 @@ async fn test_metrics_reloading() {
     //     also fine for this test, which just asserts the License
     //     poller's success counter increments.
     //   * Both `telemetry.apollo.endpoint` and
-    //     `telemetry.apollo.experimental_otlp_endpoint` pinned to the
+    //     `telemetry.apollo.otlp_endpoint` pinned to the
     //     per-test `apollo_otlp_server` mock with a catch-all
     //     `POST → 200` route, so all four reporting paths
     //     (`studio_reports_total{report_type=metrics|traces}` ×
@@ -155,14 +166,14 @@ async fn test_metrics_reloading() {
 
     check_metrics_contains(
         &metrics,
-        r#"apollo_router_cache_hit_time_count{kind="query planner",storage="memory",otel_scope_name="apollo/router"} 4"#,
+        r#"apollo_router_cache_hit_time_seconds_count{kind="query planner",storage="memory",otel_scope_name="apollo/router"} 4"#,
     );
     check_metrics_contains(
         &metrics,
-        r#"apollo_router_cache_miss_time_count{kind="query planner",storage="memory",otel_scope_name="apollo/router"} 2"#,
+        r#"apollo_router_cache_miss_time_seconds_count{kind="query planner",storage="memory",otel_scope_name="apollo/router"} 2"#,
     );
-    check_metrics_contains(&metrics, r#"apollo_router_cache_hit_time"#);
-    check_metrics_contains(&metrics, r#"apollo_router_cache_miss_time"#);
+    check_metrics_contains(&metrics, r#"apollo_router_cache_hit_time_seconds"#);
+    check_metrics_contains(&metrics, r#"apollo_router_cache_miss_time_seconds"#);
 
     router
         .assert_metrics_does_not_contain(r#"_total_total{"#)
@@ -170,7 +181,7 @@ async fn test_metrics_reloading() {
 
     // Studio + Uplink metrics. With both Apollo Studio and Apollo Uplink
     // pointed at local wiremocks (Studio via the harness's per-test mock at
-    // `experimental_otlp_endpoint`, Uplink via `APOLLO_UPLINK_ENDPOINTS`), all
+    // `otlp_endpoint`, Uplink via `APOLLO_UPLINK_ENDPOINTS`), all
     // four reporting paths complete successfully and deterministically — no
     // public-Internet dependency, no batch-timer race.
     //
@@ -329,7 +340,6 @@ async fn test_sigv4_does_not_leak_to_unconfigured_subgraph() {
               exporters:
                 metrics:
                   prometheus:
-                    listen: 127.0.0.1:4000
                     enabled: true
                     path: /metrics
             include_subgraph_errors:
@@ -571,18 +581,22 @@ async fn test_gauges_on_reload() {
     router
         .assert_metrics_contains(r#"apollo_router_cache_storage_estimated_size{kind="query planner",type="memory",otel_scope_name="apollo/router"} "#, None)
         .await;
+
+    // APQ cache should contain the persisted query
     router
         .assert_metrics_contains(
             r#"apollo_router_cache_size{kind="APQ",type="memory",otel_scope_name="apollo/router"} 1"#,
             None,
         )
         .await;
+    // Query plan cache should contain the regular query + the persisted query
     router
         .assert_metrics_contains(
-            r#"apollo_router_cache_size{kind="query planner",type="memory",otel_scope_name="apollo/router"} 1"#,
+            r#"apollo_router_cache_size{kind="query planner",type="memory",otel_scope_name="apollo/router"} 2"#,
             None,
         )
         .await;
+    // Introspection cache should contain the introspection query
     router
         .assert_metrics_contains(
             r#"apollo_router_cache_size{kind="introspection",type="memory",otel_scope_name="apollo/router"} 1"#,
@@ -1299,9 +1313,13 @@ async fn assert_counted_once_by_otlp(collector: &MockServer) {
 #[tokio::test(flavor = "multi_thread")]
 async fn test_otlp_cardinality_overflow_counted_once() {
     let collector = mock_otlp_server(0..).await;
-    let config = include_str!("fixtures/otlp_cardinality_overflow.router.yaml")
-        .replace("<otel-collector-endpoint>", &collector.uri());
-    let mut router = IntegrationTest::builder().config(&config).build().await;
+    let mut router = IntegrationTest::builder()
+        .config(include_str!(
+            "fixtures/otlp_cardinality_overflow.router.yaml"
+        ))
+        .env_entry("TEST_CONFIG_COLLECTOR_ENDPOINT", collector.uri())
+        .build()
+        .await;
 
     router.start().await;
     router.assert_started().await;
@@ -1314,9 +1332,13 @@ async fn test_otlp_cardinality_overflow_counted_once() {
 #[tokio::test(flavor = "multi_thread")]
 async fn test_prometheus_and_otlp_cardinality_overflow_counted_once() {
     let collector = mock_otlp_server(0..).await;
-    let config = include_str!("fixtures/prometheus_otlp_cardinality_overflow.router.yaml")
-        .replace("<otel-collector-endpoint>", &collector.uri());
-    let mut router = IntegrationTest::builder().config(&config).build().await;
+    let mut router = IntegrationTest::builder()
+        .config(include_str!(
+            "fixtures/prometheus_otlp_cardinality_overflow.router.yaml"
+        ))
+        .env_entry("TEST_CONFIG_COLLECTOR_ENDPOINT", collector.uri())
+        .build()
+        .await;
 
     router.start().await;
     router.assert_started().await;

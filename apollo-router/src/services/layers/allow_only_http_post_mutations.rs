@@ -13,13 +13,13 @@ use tower::Layer;
 use tower::Service;
 use tower::ServiceBuilder;
 
-use super::query_analysis::ParsedDocument;
 use crate::graphql::Error;
 use crate::json_ext::Object;
 use crate::layers::ServiceBuilderExt;
 use crate::layers::async_checkpoint::AsyncCheckpointService;
 use crate::services::SupergraphRequest;
 use crate::services::SupergraphResponse;
+use crate::services::query_parsing::ParsedDocument;
 
 /// A supergraph service layer that requires that GraphQL mutations use the HTTP POST method.
 ///
@@ -153,7 +153,7 @@ mod forbid_http_get_mutations_tests {
     use crate::assert_error_eq_ignoring_id;
     use crate::error::Error;
     use crate::query_planner::fetch::OperationKind;
-    use crate::services::layers::query_analysis::ParsedDocumentInner;
+    use crate::services::query_parsing::ParsedDocumentInner;
 
     #[tokio::test]
     async fn it_lets_http_post_queries_pass_through() {

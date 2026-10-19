@@ -1,0 +1,17 @@
+---
+source: apollo-router/src/configuration/compatibility.rs
+description: batching integration configuration
+expression: changed_settings(&config)
+---
+{
+  "/batching/enabled": true,
+  "/batching/subgraph": {
+    "all": {
+      "enabled": true
+    },
+    "subgraphs": {}
+  },
+  "/include_subgraph_errors": {
+    "all": true
+  }
+}

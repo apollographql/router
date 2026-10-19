@@ -1,45 +1,14 @@
 //! Utilities which make it easy to test with [`crate::plugin`].
 
-mod mock;
-#[macro_use]
-mod service;
 mod broken;
+mod mock;
 mod restricted;
 
 #[cfg(test)]
 pub use mock::connector::MockConnector;
 pub use mock::subgraph::MockSubgraph;
-#[deprecated(
-    note = "MockConnectorService is deprecated and will be removed in Router 3.0. \
-            Use `tower_test::mock::pair` instead."
-)]
-pub use service::MockConnectorService;
-#[deprecated(
-    note = "MockExecutionService is deprecated and will be removed in Router 3.0. \
-            Use `tower_test::mock::pair` instead."
-)]
-pub use service::MockExecutionService;
-#[deprecated(
-    note = "MockHttpClientService is deprecated and will be removed in Router 3.0. \
-            Use `tower_test::mock::pair` instead."
-)]
-pub use service::MockHttpClientService;
-#[deprecated(
-    note = "MockRouterService is deprecated and will be removed in Router 3.0. \
-            Use `tower_test::mock::pair` instead."
-)]
-pub use service::MockRouterService;
-#[deprecated(
-    note = "MockSubgraphService is deprecated and will be removed in Router 3.0. \
-            Use `tower_test::mock::pair` instead."
-)]
-pub use service::MockSubgraphService;
-#[deprecated(
-    note = "MockSupergraphService is deprecated and will be removed in Router 3.0. \
-            Use `tower_test::mock::pair` instead."
-)]
-pub use service::MockSupergraphService;
 
+#[cfg(any(test, feature = "mock_subgraphs_testing"))]
 pub(crate) use self::mock::canned;
 
 /// Await a mock service driver task, failing the test with a clear message if it

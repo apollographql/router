@@ -88,16 +88,6 @@ You can attach custom attributes using [router selectors](/router/configuration/
 - `apollo.router.graphql_error` - counts GraphQL errors in responses. Also counts errors which occur during the response validation and connectors' response mapping phases, which are represented in client responses as `extensions.valueCompletion` and `extensions.connectorErrors` respectively instead of actual GraphQL errors. Attributes:
   - `code`: error code, including `RESPONSE_VALIDATION_FAILED` in the case of a value completion error.
 
-## Session
-
-- `apollo.router.session.count.active` - Number of in-flight GraphQL requests. **Deprecated**: use `http.server.active_requests` instead.
-
-<Note>
-
-`apollo.router.session.count.active` is a legacy Apollo-specific metric. Apollo recommends using [`http.server.active_requests`](/graphos/routing/observability/router-telemetry-otel/enabling-telemetry/instruments#opentelemetry-standard-instruments) instead, which follows OpenTelemetry semantic conventions and is the standard way to measure in-flight HTTP requests. `apollo.router.session.count.active` might be removed in a future release.
-
-</Note>
-
 ## Cache
 
 - `apollo.router.cache.size` — Number of entries in the cache
@@ -172,7 +162,7 @@ The `apollo.router.cache.redis.errors` metric also includes an `error_type` attr
 
 ## Performance
 
-- `apollo_router_schema_load_duration` - Time spent loading the schema in seconds.
+- `apollo.router.schema.load.duration` - Time spent loading the schema in seconds.
 - `apollo.router.request.memory` - Histogram of memory allocated during request processing, in bytes. Tracks memory allocation patterns for the entire request lifecycle, including GraphQL parsing, validation, query planning, response composition, and plugin execution. Attributes:
   - `allocation.type`: The type of memory operation (`allocated`, `deallocated`, `zeroed`, `reallocated`)
   - `context`: The context name where the allocation occurred (e.g., `router.request`)
@@ -195,6 +185,8 @@ The `apollo.router.cache.redis.errors` metric also includes an `error_type` attr
 - `apollo.router.query_planning.total.duration` - Histogram of plan durations including queue time.
 - `apollo.router.query_planning.plan.evaluated_plans` - Histogram of the number of evaluated query plans.
 - `apollo.router.query_planning.plan.evaluated_paths` - Histogram of the number of paths (including intermediate ones) the planner considers before generating a plan. High values often correlate with long planning times on complex schemas or queries. Tune the limits as described in [Tuning query planner limits](/graphos/routing/query-planning/query-planning-best-practices#tuning-query-planner-limits).
+- `apollo.router.query_planning.plan.fuel_consumed` - Histogram of the fuel the [incremental query planner](/graphos/routing/query-planning/incremental-query-planner) spends improving on its first complete plan. Only recorded when the incremental planner is enabled.
+- `apollo.router.query_planning.plan.fuel_remaining` - Histogram of the fuel left when the incremental query planner stops searching. A value of `0` means the planner ran out of fuel before it finished exploring alternatives. Only recorded when the incremental planner is enabled. Both fuel histograms use the buckets `0`, `1`, `10`, `100`, `1000`, `10000`, `100000`, and `1000000` instead of the global `buckets` setting.
 - `apollo.router.query_planner.memory` - Histogram of memory allocated during query planning, in bytes. Tracks memory allocation patterns specifically for query planning operations executed in the compute job thread pool. Attributes:
   - `allocation.type`: The type of memory operation (`allocated`, `deallocated`, `zeroed`, `reallocated`)
   - `context`: The context name where the allocation occurred (e.g., `query_planning`)
@@ -221,7 +213,7 @@ The `apollo.router.cache.redis.errors` metric also includes an `error_type` attr
 
 </Tip>
 
-- `apollo.router.uplink.fetch.duration.seconds` - Uplink request duration, attributes:
+- `apollo.router.uplink.fetch.duration` - Uplink request duration, attributes:
   - `url`: The Uplink URL that was polled
   - `query`: The query that the router sent to Uplink (`SupergraphSdl` or `License`)
   - `kind`: (`new`, `unchanged`, `http_error`, `uplink_error`)
@@ -329,7 +321,7 @@ telemetry:
     - `bypassed_batch`: The request is a query that is part of a query batch, so it wasn't considered.
     - `bypassed_operation`: The request is a mutation or subscription, so it wasn't considered, whether or not it is part of a batch.
 
-  A cancelled request (for example, one that times out) is counted under the outcome it had when it was cancelled. If a `leader` is cancelled, a `follower` waiting on it sends the request itself and is counted as a `leader` instead.
+  A request that is cancelled before it finishes (for example, because the client disconnected) is counted under the outcome it had when it was cancelled. If a `leader` is cancelled, its request keeps running for any `follower` waiting on it, and each keeps its own outcome. A subgraph `timeout` doesn't cancel requests: every request sharing the timed-out fetch receives its error and keeps its own outcome.
 
 ## Limits
 
@@ -343,12 +335,12 @@ telemetry:
 
 - `apollo.router.telemetry.studio.reports` - The number of reports submitted to GraphOS Studio by the router.
   - `report.type`: The type of report submitted: "traces" or "metrics"
-  - `report.protocol`: Either "apollo" or "otlp", depending on the otlp_tracing_sampler configuration.
+  - `report.protocol`: "apollo" for usage report metrics, "otlp" for traces.
 
 ## Telemetry
 
 - `apollo.router.telemetry.batch_processor.errors` - The number of errors encountered by exporter batch processors.
-  - `name`: One of `apollo-tracing`, `datadog-tracing`, `jaeger-collector`, `otlp-tracing`, `zipkin-tracing`.
+  - `name`: One of `apollo-tracing`, `datadog-tracing`, `otlp-tracing`.
   - `error`: One of `channel closed`, `channel full`.
 
 - `apollo.router.telemetry.metrics.cardinality_overflow` - A count of how often a telemetry metric hit OpenTelemetry's cardinality limit. When a metric exceeds its cardinality limit, new attribute combinations are aggregated into an overflow bucket. Every metrics exporter reports it, including Prometheus. It increases by one when a metric starts overflowing, and not again while that metric stays overflowed. A metric that stops overflowing and later starts again, such as an observable gauge or a metric exported with delta temporality, counts again. The exception is metrics sent to GraphOS usage reporting, which count once for every report that has overflow.

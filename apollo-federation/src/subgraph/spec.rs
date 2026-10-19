@@ -16,8 +16,6 @@ use apollo_compiler::ast::Value;
 use apollo_compiler::collections::IndexMap;
 use apollo_compiler::collections::IndexSet;
 use apollo_compiler::name;
-use apollo_compiler::schema::Component;
-use apollo_compiler::schema::ComponentName;
 use apollo_compiler::schema::EnumType;
 use apollo_compiler::schema::ExtendedType;
 use apollo_compiler::schema::ObjectType;
@@ -362,7 +360,7 @@ impl FederationSpecDefinitions {
                 .into(),
             ],
             repeatable: true,
-            locations: vec![DirectiveLocation::Schema],
+            locations: IndexSet::from_iter([DirectiveLocation::Schema]),
         }
     }
 
@@ -382,11 +380,11 @@ impl FederationSpecDefinitions {
                 .into(),
             ],
             repeatable: true,
-            locations: vec![
+            locations: IndexSet::from_iter([
                 DirectiveLocation::Interface,
                 DirectiveLocation::Object,
                 DirectiveLocation::Union,
-            ],
+            ]),
         }
     }
 
@@ -410,7 +408,10 @@ impl FederationSpecDefinitions {
                 .into(),
             ],
             repeatable: true,
-            locations: vec![DirectiveLocation::Object, DirectiveLocation::Interface],
+            locations: IndexSet::from_iter([
+                DirectiveLocation::Object,
+                DirectiveLocation::Interface,
+            ]),
         })
     }
 
@@ -421,7 +422,10 @@ impl FederationSpecDefinitions {
             name: alias.clone().unwrap_or(EXTENDS_DIRECTIVE_NAME),
             arguments: Vec::new(),
             repeatable: false,
-            locations: vec![DirectiveLocation::Object, DirectiveLocation::Interface],
+            locations: IndexSet::from_iter([
+                DirectiveLocation::Object,
+                DirectiveLocation::Interface,
+            ]),
         }
     }
 
@@ -432,10 +436,10 @@ impl FederationSpecDefinitions {
             name: alias.clone().unwrap_or(EXTERNAL_DIRECTIVE_NAME),
             arguments: Vec::new(),
             repeatable: false,
-            locations: vec![
+            locations: IndexSet::from_iter([
                 DirectiveLocation::Object,
                 DirectiveLocation::FieldDefinition,
-            ],
+            ]),
         }
     }
 
@@ -463,7 +467,7 @@ impl FederationSpecDefinitions {
                 .into(),
             ],
             repeatable: false,
-            locations: vec![DirectiveLocation::ArgumentDefinition],
+            locations: IndexSet::from_iter([DirectiveLocation::ArgumentDefinition]),
         }
     }
 
@@ -484,7 +488,7 @@ impl FederationSpecDefinitions {
             name: alias.clone().unwrap_or(INACCESSIBLE_DIRECTIVE_NAME),
             arguments: Vec::new(),
             repeatable: false,
-            locations: vec![
+            locations: IndexSet::from_iter([
                 DirectiveLocation::ArgumentDefinition,
                 DirectiveLocation::Enum,
                 DirectiveLocation::EnumValue,
@@ -495,7 +499,7 @@ impl FederationSpecDefinitions {
                 DirectiveLocation::Object,
                 DirectiveLocation::Scalar,
                 DirectiveLocation::Union,
-            ],
+            ]),
         }
     }
 
@@ -506,7 +510,7 @@ impl FederationSpecDefinitions {
             name: alias.clone().unwrap_or(INTF_OBJECT_DIRECTIVE_NAME),
             arguments: Vec::new(),
             repeatable: false,
-            locations: vec![DirectiveLocation::Object],
+            locations: IndexSet::from_iter([DirectiveLocation::Object]),
         }
     }
 
@@ -526,7 +530,7 @@ impl FederationSpecDefinitions {
                 .into(),
             ],
             repeatable: false,
-            locations: vec![DirectiveLocation::FieldDefinition],
+            locations: IndexSet::from_iter([DirectiveLocation::FieldDefinition]),
         }
     }
 
@@ -540,7 +544,7 @@ impl FederationSpecDefinitions {
             name: alias.clone().unwrap_or(PROVIDES_DIRECTIVE_NAME),
             arguments: vec![self.fields_argument_definition()?.into()],
             repeatable: false,
-            locations: vec![DirectiveLocation::FieldDefinition],
+            locations: IndexSet::from_iter([DirectiveLocation::FieldDefinition]),
         })
     }
 
@@ -554,7 +558,7 @@ impl FederationSpecDefinitions {
             name: alias.clone().unwrap_or(REQUIRES_DIRECTIVE_NAME),
             arguments: vec![self.fields_argument_definition()?.into()],
             repeatable: false,
-            locations: vec![DirectiveLocation::FieldDefinition],
+            locations: IndexSet::from_iter([DirectiveLocation::FieldDefinition]),
         })
     }
 
@@ -565,10 +569,10 @@ impl FederationSpecDefinitions {
             name: alias.clone().unwrap_or(SHAREABLE_DIRECTIVE_NAME),
             arguments: Vec::new(),
             repeatable: true,
-            locations: vec![
+            locations: IndexSet::from_iter([
                 DirectiveLocation::FieldDefinition,
                 DirectiveLocation::Object,
-            ],
+            ]),
         }
     }
 
@@ -598,7 +602,7 @@ impl FederationSpecDefinitions {
                 .into(),
             ],
             repeatable: true,
-            locations: vec![
+            locations: IndexSet::from_iter([
                 DirectiveLocation::ArgumentDefinition,
                 DirectiveLocation::Enum,
                 DirectiveLocation::EnumValue,
@@ -609,7 +613,7 @@ impl FederationSpecDefinitions {
                 DirectiveLocation::Object,
                 DirectiveLocation::Scalar,
                 DirectiveLocation::Union,
-            ],
+            ]),
         }
     }
 
@@ -622,10 +626,7 @@ impl FederationSpecDefinitions {
         ExtendedType::Scalar(Node::new(any_scalar))
     }
 
-    pub(crate) fn entity_union_definition(
-        &self,
-        entities: IndexSet<ComponentName>,
-    ) -> ExtendedType {
+    pub(crate) fn entity_union_definition(&self, entities: IndexSet<Node<Name>>) -> ExtendedType {
         let service_type = UnionType {
             description: None,
             name: ENTITY_UNION_NAME,
@@ -644,7 +645,7 @@ impl FederationSpecDefinitions {
         };
         service_type.fields.insert(
             name!("_sdl"),
-            Component::new(FieldDefinition {
+            Node::new(FieldDefinition {
                 name: name!("_sdl"),
                 description: None,
                 directives: Default::default(),
@@ -655,8 +656,8 @@ impl FederationSpecDefinitions {
         ExtendedType::Object(Node::new(service_type))
     }
 
-    pub(crate) fn entities_query_field(&self) -> Component<FieldDefinition> {
-        Component::new(FieldDefinition {
+    pub(crate) fn entities_query_field(&self) -> Node<FieldDefinition> {
+        Node::new(FieldDefinition {
             name: ENTITIES_QUERY,
             description: None,
             directives: Default::default(),
@@ -673,8 +674,8 @@ impl FederationSpecDefinitions {
         })
     }
 
-    pub(crate) fn service_sdl_query_field(&self) -> Component<FieldDefinition> {
-        Component::new(FieldDefinition {
+    pub(crate) fn service_sdl_query_field(&self) -> Node<FieldDefinition> {
+        Node::new(FieldDefinition {
             name: SERVICE_SDL_QUERY,
             description: None,
             directives: Default::default(),
@@ -778,7 +779,7 @@ impl LinkSpecDefinitions {
                 .into(),
             ],
             repeatable: true,
-            locations: vec![DirectiveLocation::Schema],
+            locations: IndexSet::from_iter([DirectiveLocation::Schema]),
         })
     }
 }

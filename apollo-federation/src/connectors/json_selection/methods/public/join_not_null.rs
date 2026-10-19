@@ -264,11 +264,8 @@ mod tests {
     fn test_join_not_null_shape_no_args() {
         let output_shape = get_shape(vec![], Shape::list(Shape::string([]), []));
         assert_eq!(
-            output_shape,
-            Shape::error(
-                "Method ->joinNotNull requires one argument".to_string(),
-                vec![]
-            )
+            output_shape.pretty_print(),
+            r#"Unknown (err "Method ->joinNotNull requires one argument")"#,
         );
     }
 
@@ -279,11 +276,8 @@ mod tests {
             Shape::list(Shape::string([]), []),
         );
         assert_eq!(
-            output_shape,
-            Shape::error(
-                "Method ->joinNotNull requires a string argument".to_string(),
-                vec![]
-            )
+            output_shape.pretty_print(),
+            r#"Unknown (err "Method ->joinNotNull requires a string argument")"#,
         );
     }
 
@@ -297,11 +291,8 @@ mod tests {
             Shape::list(Shape::string([]), []),
         );
         assert_eq!(
-            output_shape,
-            Shape::error(
-                "Method ->joinNotNull requires only one argument, but 2 were provided".to_string(),
-                vec![]
-            )
+            output_shape.pretty_print(),
+            r#"Unknown (err "Method ->joinNotNull requires only one argument, but 2 were provided")"#,
         );
     }
 
@@ -324,11 +315,8 @@ mod tests {
             Shape::list(Shape::list(Shape::string([]), []), []),
         );
         assert_eq!(
-            output_shape,
-            Shape::error(
-                "Method ->joinNotNull requires an array of scalar values as input".to_string(),
-                vec![]
-            )
+            output_shape.pretty_print(),
+            r#"Unknown (err "Method ->joinNotNull requires an array of scalar values as input")"#,
         );
     }
 

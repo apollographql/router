@@ -13,7 +13,18 @@ info:
         subgraph:
           http.client.request.duration: false
           http.client.request.body.size: true
+          http.client.response.body.size: false
 ---
+- name: apollo.router.operations.fetch.duration
+  description: Duration of a subgraph fetch.
+  unit: s
+  data:
+    datapoints:
+      - sum: 0.1
+        count: 1
+        attributes:
+          has_errors: false
+          subgraph.name: products
 - name: http.client.request.body.size
   description: Size of HTTP client request bodies.
   unit: By

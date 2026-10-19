@@ -1,10 +1,13 @@
+use apollo_router::graphql;
 use apollo_router::graphql::Request;
 use insta::assert_yaml_snapshot;
 use itertools::Itertools;
 use tower::BoxError;
 use wiremock::ResponseTemplate;
 
+use crate::integration::IntegrationTest;
 use crate::integration::ValueExt as _;
+use crate::integration::common::Query;
 use crate::integration::common::graph_os_enabled;
 
 const CONFIG: &str = include_str!("../fixtures/batching/all_enabled.router.yaml");
@@ -108,6 +111,69 @@ async fn it_supports_multi_subgraph_batching() -> Result<(), BoxError> {
         entryB:
           index: 2
     "###);
+    }
+
+    Ok(())
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn it_rejects_a_batched_deferred_query() -> Result<(), BoxError> {
+    const MULTIPART_DEFER_CONTENT_TYPE: &str =
+        r#"multipart/mixed;boundary="graphql";deferSpec=20220824"#;
+    const REQUEST_COUNT: usize = 2;
+
+    let requests: Vec<_> = (0..REQUEST_COUNT)
+        .map(|index| {
+            Request::fake_builder()
+                .query(format!(
+                    "query op{index}{{ entryA(count: {REQUEST_COUNT}) {{ ... @defer {{ index }} }} }}"
+                ))
+                .build()
+        })
+        .collect();
+
+    // Start up the router. We don't expect any subgraph requests.
+    let mut router = IntegrationTest::builder()
+        .config(CONFIG)
+        .supergraph("tests/fixtures/batching/schema.graphql")
+        .build()
+        .await;
+
+    router.start().await;
+    router.assert_started().await;
+
+    // Execute the request
+    let request = serde_json::to_value(requests)?;
+    let (_span, response) = router
+        .execute_query(
+            Query::builder()
+                .header(
+                    http::header::ACCEPT.to_string(),
+                    MULTIPART_DEFER_CONTENT_TYPE,
+                )
+                .body(request)
+                .build(),
+        )
+        .await;
+
+    let responses = serde_json::from_slice::<Vec<graphql::Response>>(&response.bytes().await?)?;
+
+    if graph_os_enabled() {
+        assert_eq!(responses.len(), REQUEST_COUNT);
+        for response in &responses {
+            assert_eq!(response.errors.len(), 1);
+            assert_eq!(
+                response.errors[0].message,
+                "Deferred responses and subscriptions aren't supported in batches"
+            );
+            assert_eq!(
+                response.errors[0]
+                    .extensions
+                    .get("code")
+                    .and_then(|v| v.as_str()),
+                Some("BATCHING_DEFER_UNSUPPORTED")
+            );
+        }
     }
 
     Ok(())
@@ -552,14 +618,16 @@ async fn it_handles_cancelled_by_coprocessor() -> Result<(), BoxError> {
         .named("coprocessor POST /");
     coprocessor.register(subgraph_a_canceller).await;
 
-    // Make sure to patch the config with the coprocessor's port
-    let config = COPROCESSOR_CONFIG.replace("REPLACEME", &coprocessor.address().port().to_string());
-
     // Interleave requests so that we can verify that they get properly separated
     // Have the A subgraph get all of its requests cancelled by a coprocessor
     let requests: Vec<_> = requests_a.interleave(requests_b).collect();
-    let responses = helper::run_test(
-        config.as_str(),
+    let responses = helper::run_test_with_env(
+        COPROCESSOR_CONFIG,
+        [(
+            "TEST_CONFIG_COPROCESSOR_URL".into(),
+            coprocessor.uri().into(),
+        )]
+        .into(),
         &requests,
         None::<helper::Handler>,
         Some(helper::expect_batch),
@@ -699,14 +767,16 @@ async fn it_handles_single_request_cancelled_by_coprocessor() -> Result<(), BoxE
         )
     }
 
-    // Make sure to patch the config with the coprocessor's port
-    let config = COPROCESSOR_CONFIG.replace("REPLACEME", &coprocessor.address().port().to_string());
-
     // Interleave requests so that we can verify that they get properly separated
     // Have the A subgraph get all of its requests cancelled by a coprocessor
     let requests: Vec<_> = requests_a.interleave(requests_b).collect();
-    let responses = helper::run_test(
-        config.as_str(),
+    let responses = helper::run_test_with_env(
+        COPROCESSOR_CONFIG,
+        [(
+            "TEST_CONFIG_COPROCESSOR_URL".into(),
+            coprocessor.uri().into(),
+        )]
+        .into(),
         &requests,
         Some(handle_a),
         Some(helper::expect_batch),
@@ -840,6 +910,8 @@ async fn it_handles_single_invalid_graphql() -> Result<(), BoxError> {
 
 /// Utility methods for these tests
 mod helper {
+    use std::collections::HashMap;
+    use std::ffi::OsString;
     use std::time::Duration;
 
     use apollo_router::graphql::Request;
@@ -885,6 +957,17 @@ mod helper {
         handler_a: Option<A>,
         handler_b: Option<B>,
     ) -> Result<Vec<Response>, BoxError> {
+        run_test_with_env(config, HashMap::new(), requests, handler_a, handler_b).await
+    }
+
+    /// Set up the integration test stack, passing `env` to the router for `${env.…}` expansion
+    pub async fn run_test_with_env<A: Respond + 'static, B: Respond + 'static>(
+        config: &str,
+        env: HashMap<String, OsString>,
+        requests: &[Request],
+        handler_a: Option<A>,
+        handler_b: Option<B>,
+    ) -> Result<Vec<Response>, BoxError> {
         // Ensure that we have the test keys before running
         // Note: The [IntegrationTest] ensures that these test credentials get
         // set before running the router.
@@ -904,6 +987,7 @@ mod helper {
             .supergraph("tests/fixtures/batching/schema.graphql")
             .subgraph_override("a", format!("{}/a", mock_server_a.uri()))
             .subgraph_override("b", format!("{}/b", mock_server_b.uri()))
+            .env(env)
             .build()
             .await;
 

@@ -1,15 +1,15 @@
 use std::time::Duration;
 
+use apollo_redaction::Redacted;
 use schemars::JsonSchema;
 use serde::Deserialize;
-use serde::Serialize;
 
 use crate::configuration::RedisCache;
 use crate::configuration::TlsClient;
 use crate::configuration::default_metrics_interval;
 use crate::configuration::default_required_to_start;
 
-#[derive(Debug, Clone, Deserialize, Serialize, JsonSchema, PartialEq)]
+#[derive(Debug, Clone, Deserialize, JsonSchema, PartialEq)]
 #[serde(deny_unknown_fields)]
 /// Redis cache configuration
 pub(crate) struct Config {
@@ -17,9 +17,17 @@ pub(crate) struct Config {
     pub(crate) urls: Vec<url::Url>,
 
     /// Redis username if not provided in the URLs. This field takes precedence over the username in the URL
-    pub(crate) username: Option<String>,
+    #[serde(
+        deserialize_with = "crate::plugin::serde::deserialize_redacted_string_option",
+        default
+    )]
+    pub(crate) username: Option<Redacted<String>>,
     /// Redis password if not provided in the URLs. This field takes precedence over the password in the URL
-    pub(crate) password: Option<String>,
+    #[serde(
+        deserialize_with = "crate::plugin::serde::deserialize_redacted_string_option",
+        default
+    )]
+    pub(crate) password: Option<Redacted<String>>,
 
     #[serde(
         deserialize_with = "humantime_serde::deserialize",
@@ -143,5 +151,32 @@ impl Config {
             "required_to_start": true,
         }))
         .unwrap()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::Config;
+
+    static_assertions::assert_not_impl_any!(Config: serde::Serialize);
+
+    #[test]
+    fn redacted_credentials_preserve_change_detection() {
+        let input = serde_json::json!({
+            "urls": ["redis://localhost:6379"],
+            "username": "synthetic-user",
+            "password": "synthetic-credential", // gitleaks:allow
+        });
+        let config: Config = serde_json::from_value(input.clone()).unwrap();
+        let identical: Config = serde_json::from_value(input.clone()).unwrap();
+        assert_eq!(config, identical);
+        for field in ["username", "password"] {
+            for value in [serde_json::Value::Null, serde_json::json!("rotated")] {
+                let mut changed = input.clone();
+                changed[field] = value;
+                let changed: Config = serde_json::from_value(changed).unwrap();
+                assert_ne!(config, changed);
+            }
+        }
     }
 }

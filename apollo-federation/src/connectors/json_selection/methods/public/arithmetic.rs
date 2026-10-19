@@ -916,11 +916,9 @@ mod shape_tests {
                 "add",
                 vec![WithRange::new(LitExpr::Number(Number::from(1)), None)],
                 Shape::string([]),
-            ),
-            Shape::error(
-                "Method ->add received non-numeric input".to_string(),
-                [get_location()]
             )
+            .pretty_print(),
+            r#"Unknown (err "Method ->add received non-numeric input")"#,
         );
     }
 
@@ -934,11 +932,9 @@ mod shape_tests {
                     None,
                 )],
                 Shape::int([]),
-            ),
-            Shape::error(
-                "Method ->add received non-numeric argument 0".to_string(),
-                [get_location()]
             )
+            .pretty_print(),
+            r#"Unknown (err "Method ->add received non-numeric argument 0")"#,
         );
     }
 
@@ -1057,11 +1053,9 @@ mod shape_tests {
                 "mul",
                 vec![WithRange::new(LitExpr::Number(Number::from(1)), None)],
                 Shape::string([]),
-            ),
-            Shape::error(
-                "Method ->mul received non-numeric input".to_string(),
-                [get_location()]
             )
+            .pretty_print(),
+            r#"Unknown (err "Method ->mul received non-numeric input")"#,
         );
     }
 
@@ -1072,11 +1066,9 @@ mod shape_tests {
                 "div",
                 vec![WithRange::new(LitExpr::String("invalid".to_string()), None)],
                 Shape::int([]),
-            ),
-            Shape::error(
-                "Method ->div received non-numeric argument 0".to_string(),
-                [get_location()]
             )
+            .pretty_print(),
+            r#"Unknown (err "Method ->div received non-numeric argument 0")"#,
         );
     }
 }

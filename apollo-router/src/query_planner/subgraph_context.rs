@@ -249,6 +249,7 @@ fn transform_operation(
                     ty: v.ty.clone(),
                     default_value: v.default_value.clone(),
                     directives: v.directives.clone(),
+                    description: None,
                 }));
             }
         } else {
@@ -445,6 +446,7 @@ mod subgraph_context_unit_tests {
             variables: vec![],
             directives: ast::DirectiveList(vec![]),
             selection_set: clone,
+            description: None,
         });
         let count = 3;
         transform_operation(&mut operation, &hash_set, &count).unwrap();

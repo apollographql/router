@@ -1,15 +1,16 @@
 use opentelemetry_otlp::MetricExporter;
 use opentelemetry_otlp::WithExportConfig;
 use opentelemetry_sdk::metrics::periodic_reader_with_async_runtime::PeriodicReader;
-use opentelemetry_sdk::runtime;
 use tower::BoxError;
 
 use crate::metrics::aggregation::MeterProviderType;
 use crate::plugins::telemetry::config::Conf;
+use crate::plugins::telemetry::metrics::BlockingSafeTokioRuntime;
 use crate::plugins::telemetry::metrics::NamedMetricExporter;
 use crate::plugins::telemetry::metrics::RetryMetricExporter;
 use crate::plugins::telemetry::otlp::Protocol;
 use crate::plugins::telemetry::otlp::TelemetryDataKind;
+use crate::plugins::telemetry::otlp::no_retries;
 use crate::plugins::telemetry::otlp::process_endpoint;
 use crate::plugins::telemetry::reload::metrics::MetricsBuilder;
 use crate::plugins::telemetry::reload::metrics::MetricsConfigurator;
@@ -36,8 +37,8 @@ impl MetricsConfigurator for super::super::otlp::Config {
         );
         builder.with_reader(
             MeterProviderType::Public,
-            PeriodicReader::builder(named_exporter, runtime::Tokio)
-                .with_interval(config.batch_processor.scheduled_delay)
+            PeriodicReader::builder(named_exporter, BlockingSafeTokioRuntime::new_for_metrics())
+                .with_interval(*config.batch_processor.scheduled_delay)
                 .build(),
         );
 
@@ -73,8 +74,9 @@ impl super::super::otlp::Config {
 
         let mut exporter_builder = MetricExporter::builder()
             .with_tonic()
+            .with_retry_policy(no_retries())
             .with_temporality(self.temporality.into())
-            .with_timeout(self.batch_processor.max_export_timeout)
+            .with_timeout(*self.batch_processor.max_export_timeout)
             .with_metadata(MetadataMap::from_headers(self.grpc.metadata.clone()));
 
         if let Some(endpoint) = endpoint_opt {
@@ -95,8 +97,9 @@ impl super::super::otlp::Config {
 
         let mut exporter_builder = MetricExporter::builder()
             .with_http()
+            .with_retry_policy(no_retries())
             .with_temporality(self.temporality.into())
-            .with_timeout(self.batch_processor.max_export_timeout)
+            .with_timeout(*self.batch_processor.max_export_timeout)
             .with_headers(self.http.headers.clone());
 
         if let Some(endpoint) = endpoint_opt {

@@ -2,22 +2,30 @@
 source: apollo-router/src/configuration/tests.rs
 expression: error.to_string()
 ---
-configuration had errors: 
-1. at line 3
+apollo::configuration::schema
 
-  
-  plugins:
-┌   non_existant:
-|     foo: "bar"
-└-----> Additional properties are not allowed ('non_existant' was unexpected)
+  × schema validation error
+  ╰─▶ schema validation error
 
-2. at line 7
+Error: apollo::configuration::validation
 
-    non_existant:
-      foo: "bar"
-  
-  telemetry:
-┌   another_non_existant: 3
-└-----> Additional properties are not allowed ('another_non_existant' was unexpected)
+  × Additional properties are not allowed ('non_existant' was unexpected)
+   ╭─[3:3]
+ 2 │ plugins:
+ 3 │   non_existant:
+   ·   ──────┬─────
+   ·         ╰── Additional properties are not allowed ('non_existant' was unexpected)
+ 4 │     foo: "bar"
+   ╰────
 
+Error: apollo::configuration::validation
 
+  × Additional properties are not allowed ('another_non_existant' was
+  │ unexpected)
+   ╭─[7:3]
+ 6 │ telemetry:
+ 7 │   another_non_existant: 3
+   ·   ──────────┬─────────
+   ·             ╰── Additional properties are not allowed ('another_non_existant' was unexpected)
+ 8 │   
+   ╰────

@@ -13,9 +13,6 @@ use lru::LruCache;
 use opentelemetry::Array;
 use opentelemetry::Key;
 use opentelemetry::StringValue;
-use schemars::JsonSchema;
-use serde::Deserialize;
-use serde::Serialize;
 use serde_json_bytes::ByteString;
 use serde_json_bytes::Value;
 use tokio::sync::RwLock;
@@ -88,14 +85,21 @@ use crate::services::connector::request_service::TransportOutcome;
 use crate::spec::TYPENAME;
 
 /// Configuration for connector response caching: global defaults plus per-source overrides
-#[derive(Clone, Debug, Default, JsonSchema, Deserialize)]
-#[serde(rename_all = "snake_case", deny_unknown_fields, default)]
+#[apollo_configuration::configuration]
 pub(crate) struct ConnectorCacheConfiguration {
     /// Options applying to all connector sources
+    #[schemars(extend("default" = {
+        "cache_key_headers": null,
+        "enabled": null,
+        "invalidation": null,
+        "private_id": null,
+        "redis": null,
+        "ttl": null
+    }))]
     pub(crate) all: ConnectorCacheSource,
 
     /// Map of subgraph_name.connector_source_name to configuration
-    #[serde(default)]
+    #[schemars(extend("default" = {}))]
     pub(crate) sources: HashMap<String, ConnectorCacheSource>,
 }
 
@@ -153,19 +157,21 @@ impl ConnectorCacheConfiguration {
 }
 
 /// Per connector source configuration for response caching
-#[derive(Clone, Debug, Default, JsonSchema, Deserialize, Serialize)]
-#[serde(rename_all = "snake_case", deny_unknown_fields)]
+// Holds Redis credentials, so it cannot serialize its defaults: the schema declares them by hand.
+#[apollo_configuration::configuration]
 pub(crate) struct ConnectorCacheSource {
     /// Redis configuration
-    #[serde(default)]
+    #[schemars(extend("default" = null))]
+    // The Redis config doesn't use the configuration attribute, so it has no Validate impl.
+    #[config(skip_validate)]
     pub(crate) redis: Option<storage::redis::Config>,
 
     /// Expiration for all keys for this connector source, unless overridden by the `Cache-Control` header in connector responses
-    #[serde(default)]
+    // Ttl is a tuple struct, which the configuration attribute can't take yet (PLAT-320).
+    #[config(skip_validate)]
     pub(crate) ttl: Option<Ttl>,
 
     /// Activates caching for this connector source, overrides the global configuration
-    #[serde(default)]
     pub(crate) enabled: Option<bool>,
 
     /// The client request header names whose values are folded into this source's cache key.
@@ -195,15 +201,18 @@ pub(crate) struct ConnectorCacheSource {
     // better fit and cheaper here. (See `configuration::cors` for the same pattern.) This is a
     // deliberate, localized departure from the surrounding `Vec`/`String` convention — keep it
     // scoped to these cache-key-header fields unless you are converting a field for the same reason.
-    #[serde(default)]
+    //
+    // A slice (`[Arc<str>]`) has no Validate impl.
+    #[config(skip_validate)]
     pub(crate) cache_key_headers: Option<Arc<[Arc<str>]>>,
 
     /// Context key used to separate cache sections per user
-    #[serde(default)]
     pub(crate) private_id: Option<String>,
 
     /// Invalidation configuration
-    #[serde(default)]
+    #[schemars(extend("default" = null))]
+    // SubgraphInvalidationConfig doesn't use the configuration attribute, so it has no Validate impl.
+    #[config(skip_validate)]
     pub(crate) invalidation: Option<SubgraphInvalidationConfig>,
 }
 
@@ -239,7 +248,7 @@ pub(super) struct ConnectorCacheService {
 impl Service<connect::Request> for ConnectorCacheService {
     type Response = connect::Response;
     type Error = BoxError;
-    type Future = <connect::BoxService as Service<connect::Request>>::Future;
+    type Future = <connect::BoxCloneService as Service<connect::Request>>::Future;
 
     fn poll_ready(
         &mut self,
@@ -1253,7 +1262,7 @@ pub(super) struct ConnectorRequestCacheService {
 impl Service<connector::request_service::Request> for ConnectorRequestCacheService {
     type Response = connector::request_service::Response;
     type Error = BoxError;
-    type Future = <connector::request_service::BoxService as Service<
+    type Future = <connector::request_service::BoxCloneService as Service<
         connector::request_service::Request,
     >>::Future;
 
@@ -1355,6 +1364,7 @@ impl ConnectorRequestCacheService {
                             transport_outcome: TransportOutcome::Error(
                                 apollo_federation::connectors::runtime::errors::Error::InvalidCacheControl(message),
                             ),
+                            answered_by_router: true,
                             mapped_response:
                                 apollo_federation::connectors::runtime::responses::MappedResponse::Error {
                                     error: runtime_error,
@@ -1647,7 +1657,9 @@ impl ConnectorRequestCacheService {
                 // downstream — telemetry selectors, the coprocessor `ConnectorResponse` stage,
                 // public connector plugins — reads a hit exactly as it reads a fetch, so none
                 // of them need a cache concept. This mirrors the subgraph path, which builds a
-                // `subgraph::Response` on a hit and lets its status default to 200.
+                // `subgraph::Response` on a hit and lets its status default to 200. Only the
+                // circuit breaker is told, through `answered_by_router`: a hit says nothing about
+                // the source's health.
                 //
                 // The status is the one the origin actually sent (replayed from the entry)
                 // rather than a blanket 200, because `@connect(errors: { is_success: ... })`
@@ -1659,6 +1671,7 @@ impl ConnectorRequestCacheService {
                     context: request.context,
                     subgraph_name,
                     transport_outcome: TransportOutcome::Response(http_response),
+                    answered_by_router: true,
                     mapped_response:
                         apollo_federation::connectors::runtime::responses::MappedResponse::Data {
                             data: entry.data,
@@ -2160,6 +2173,47 @@ fn connector_key_inputs(
     root.insert(ByteString::from("context"), Value::Object(context_obj));
     root.insert(ByteString::from("headers"), Value::Object(headers_obj));
     Value::Object(root)
+}
+
+/// The connector request cache for `source_name` in front of `service`, as the response cache
+/// places it for a source it caches, with `store` as a mock Redis behind it.
+#[cfg(all(
+    test,
+    any(not(feature = "ci"), all(target_arch = "x86_64", target_os = "linux"))
+))]
+pub(crate) async fn request_cache_for_test(
+    service: ConnectorRequestBoxCloneService,
+    source_name: &str,
+    store: Arc<dyn fred::mocks::Mocks>,
+) -> ConnectorRequestBoxCloneService {
+    use tower::ServiceExt as _;
+
+    let config = storage::redis::Config::test(false, "connector-request-cache");
+    let (_drop_tx, drop_rx) = tokio::sync::broadcast::channel(1);
+    let storage = Storage::mocked(&config, false, store, drop_rx)
+        .await
+        .expect("mock storage builds");
+    let supergraph_schema = Arc::new(
+        Schema::parse_and_validate("type Query { hello: String }", "schema.graphql").unwrap(),
+    );
+
+    ConnectorRequestCacheService {
+        service,
+        storage: Arc::new(StorageInterface::for_connectors(storage)),
+        source_name: source_name.to_string(),
+        connector_ttl: Duration::from_secs(60),
+        private_id_key: None,
+        debug: false,
+        supergraph_schema,
+        subgraph_enums: Default::default(),
+        private_queries: Arc::new(RwLock::new(LruCache::new(
+            std::num::NonZeroUsize::new(1).unwrap(),
+        ))),
+        lru_size_instrument: LruSizeInstrument::new("test.private_queries.lru.size"),
+        indexes: Default::default(),
+        cache_key_headers: Arc::new([]),
+    }
+    .boxed_clone()
 }
 
 #[cfg(test)]

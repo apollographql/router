@@ -1,8 +1,6 @@
 use std::ops::ControlFlow;
 
 use http::StatusCode;
-use schemars::JsonSchema;
-use serde::Deserialize;
 use tower::BoxError;
 use tower::ServiceBuilder;
 use tower::ServiceExt;
@@ -20,7 +18,7 @@ const CLIENT_LIBRARY_NAME_KEY: &str = "name";
 const CLIENT_LIBRARY_VERSION_KEY: &str = "version";
 
 /// The enhanced client-awareness plugin has no configuration.
-#[derive(Debug, Deserialize, JsonSchema)]
+#[apollo_configuration::configuration]
 struct Config {}
 
 struct EnhancedClientAwareness {}
@@ -35,9 +33,12 @@ impl Plugin for EnhancedClientAwareness {
         Ok(EnhancedClientAwareness {})
     }
 
-    fn supergraph_service(&self, service: supergraph::BoxService) -> supergraph::BoxService {
+    fn supergraph_service(
+        &self,
+        service: supergraph::BoxCloneService,
+    ) -> supergraph::BoxCloneService {
         ServiceBuilder::new()
-            .checkpoint(|request: supergraph::Request| {
+            .checkpoint_async(|request: supergraph::Request| async move {
                 if let Some(client_library_metadata) = request
                     .supergraph_request
                     .body()
@@ -88,7 +89,7 @@ impl Plugin for EnhancedClientAwareness {
                 Ok(ControlFlow::Continue(request))
             })
             .service(service)
-            .boxed()
+            .boxed_clone()
     }
 }
 

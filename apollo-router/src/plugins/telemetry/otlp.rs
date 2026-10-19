@@ -1,12 +1,11 @@
 //! Shared configuration for Otlp tracing and metrics.
 use std::collections::HashMap;
 
+use apollo_redaction::Redacted;
 use http::Uri;
+use opentelemetry_otlp::RetryPolicy;
 use opentelemetry_sdk::metrics::Temporality as SdkTemporality;
-use schemars::JsonSchema;
-use serde::Deserialize;
 use serde::Serialize;
-use serde_json::Value;
 use tonic::transport::Certificate;
 use tonic::transport::ClientTlsConfig;
 use tonic::transport::Identity;
@@ -16,36 +15,39 @@ use url::Url;
 use crate::plugins::telemetry::config::SamplerOption;
 use crate::plugins::telemetry::tracing::BatchProcessorConfig;
 
-#[derive(Debug, Clone, Deserialize, JsonSchema, Default, PartialEq)]
-#[serde(deny_unknown_fields)]
+#[apollo_configuration::configuration]
+#[derive(Default, PartialEq)]
 #[schemars(rename = "OTLPConfig")]
 pub(crate) struct Config {
     /// Enable otlp
+    #[config(required)]
     pub(crate) enabled: bool,
 
     /// The endpoint to send data to
-    #[serde(default)]
     pub(crate) endpoint: Option<String>,
 
     /// The protocol to use when sending data
-    #[serde(default)]
     pub(crate) protocol: Protocol,
 
     /// gRPC configuration settings
-    #[serde(default)]
+    // `GrpcExporter` holds a private key, so it cannot serialize its default.
+    #[schemars(extend("default" = {
+        "ca": null,
+        "cert": null,
+        "domain_name": null,
+        "key": null,
+        "metadata": {}
+    }))]
     pub(crate) grpc: GrpcExporter,
 
     /// HTTP configuration settings
-    #[serde(default)]
     pub(crate) http: HttpExporter,
 
     /// Batch processor settings
-    #[serde(default)]
     pub(crate) batch_processor: BatchProcessorConfig,
 
     /// Temporality for export (default: `Cumulative`).
     /// Note that when exporting to Datadog agent use `Delta`.
-    #[serde(default)]
     pub(crate) temporality: Temporality,
 
     /// Per-exporter sampler for tracing.
@@ -63,7 +65,7 @@ pub(crate) struct Config {
     /// startup. If this OTLP endpoint targets the Datadog agent, the agent may receive incomplete
     /// traces; if it targets a different backend (e.g. Jaeger or Grafana Tempo), subsampling
     /// independently is safe.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub(crate) sampler: Option<SamplerOption>,
 }
 
@@ -133,6 +135,15 @@ impl Config {
             .into()),
         }
     }
+}
+
+/// The retry policy for every OTLP exporter the router builds: none.
+///
+/// Metric exports already retry in `RetryMetricExporter`, so exporter retries would multiply the
+/// attempts. Trace exports are sent once, so a failing collector doesn't delay the flush on
+/// shutdown or reload.
+pub(super) fn no_retries() -> RetryPolicy {
+    RetryPolicy::disabled()
 }
 
 #[derive(Copy, Clone, Debug)]
@@ -235,15 +246,15 @@ pub(super) fn process_endpoint(
         .transpose()
 }
 
-#[derive(Debug, Clone, Deserialize, Serialize, Default, JsonSchema, PartialEq)]
-#[serde(deny_unknown_fields, default)]
+#[apollo_configuration::configuration]
+#[derive(Serialize, PartialEq)]
 pub(crate) struct HttpExporter {
     /// Headers to send on report requests
     pub(crate) headers: HashMap<String, String>,
 }
 
-#[derive(Debug, Clone, Deserialize, Serialize, Default, JsonSchema, PartialEq)]
-#[serde(deny_unknown_fields, default)]
+#[apollo_configuration::configuration]
+#[derive(PartialEq)]
 pub(crate) struct GrpcExporter {
     /// The optional domain name for tls config.
     /// Note that domain name is will be defaulted to match the endpoint is not explicitly set.
@@ -253,16 +264,30 @@ pub(crate) struct GrpcExporter {
     /// The optional cert for tls config
     pub(crate) cert: Option<String>,
     /// The optional private key file for TLS configuration.
-    pub(crate) key: Option<String>,
+    #[serde(deserialize_with = "crate::plugin::serde::deserialize_redacted_string_option")]
+    #[schemars(extend("default" = null))]
+    pub(crate) key: Option<Redacted<String>>,
 
     /// gRPC metadata
+    // http::HeaderMap has no Validate impl.
+    #[config(skip_validate)]
     #[serde(with = "http_serde::header_map")]
     #[schemars(schema_with = "header_map", default)]
     pub(crate) metadata: http::HeaderMap,
 }
 
-fn header_map(generator: &mut schemars::SchemaGenerator) -> schemars::Schema {
-    HashMap::<String, Value>::json_schema(generator)
+/// `http_serde::header_map` reads each value as a string or a list of strings. Declaring them as
+/// strings also keeps an expanded `${env.NAME}` such as `12345` a string.
+fn header_map(_generator: &mut schemars::SchemaGenerator) -> schemars::Schema {
+    schemars::json_schema!({
+        "type": "object",
+        "additionalProperties": {
+            "anyOf": [
+                { "type": "string" },
+                { "type": "array", "items": { "type": "string" } }
+            ]
+        }
+    })
 }
 
 impl GrpcExporter {
@@ -280,7 +305,7 @@ impl GrpcExporter {
                 .with_native_roots()
                 .domain_name(domain_name)
                 .ca_certificate(Certificate::from_pem(ca.clone()))
-                .identity(Identity::from_pem(cert.clone(), key.clone())))
+                .identity(Identity::from_pem(cert.clone(), key.unredact().clone())))
         } else {
             // This was a breaking change in tonic where we now have to specify native roots.
             Ok(ClientTlsConfig::new().with_native_roots())
@@ -304,19 +329,19 @@ impl GrpcExporter {
     }
 }
 
-#[derive(Debug, Default, Clone, Deserialize, Serialize, JsonSchema, PartialEq)]
-#[serde(deny_unknown_fields, rename_all = "snake_case")]
+#[apollo_configuration::configuration]
+#[derive(Serialize, PartialEq)]
 pub(crate) enum Protocol {
-    #[default]
+    #[config(default)]
     Grpc,
     Http,
 }
 
-#[derive(Debug, Default, Clone, Deserialize, Serialize, JsonSchema, PartialEq, Copy)]
-#[serde(deny_unknown_fields, rename_all = "snake_case")]
+#[apollo_configuration::configuration]
+#[derive(Serialize, PartialEq, Copy)]
 pub(crate) enum Temporality {
     /// Export cumulative metrics.
-    #[default]
+    #[config(default)]
     Cumulative,
     /// Export delta metrics. `Delta` should be used when exporting to DataDog Agent.
     Delta,
@@ -334,6 +359,48 @@ impl From<Temporality> for SdkTemporality {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    static_assertions::assert_not_impl_any!(GrpcExporter: serde::Serialize);
+
+    #[test]
+    fn advertised_grpc_defaults_match_the_runtime_default() {
+        use crate::configuration::schema::advertised_defaults;
+
+        advertised_defaults::assert_describes_default::<GrpcExporter>(
+            advertised_defaults::of_property("OTLPConfig", "grpc"),
+        );
+        advertised_defaults::assert_describes_default::<GrpcExporter>(
+            advertised_defaults::of_every_property("GrpcExporter"),
+        );
+    }
+
+    #[test]
+    fn redacted_grpc_key_preserves_contents_and_change_detection() {
+        let input = serde_json::json!({"key": "synthetic-otlp-private-key"}); // gitleaks:allow
+        let config: GrpcExporter = serde_json::from_value(input.clone()).unwrap();
+        let debug = format!("{config:?}");
+        assert!(debug.contains("key: Some([REDACTED])"), "{debug}");
+        assert!(!debug.contains("synthetic-otlp-private-key"), "{debug}");
+        assert_eq!(
+            config.key.as_ref().unwrap().unredact(),
+            "synthetic-otlp-private-key"
+        );
+        let identical: GrpcExporter = serde_json::from_value(input).unwrap();
+        assert_eq!(config, identical);
+
+        for key in [serde_json::Value::Null, serde_json::json!("rotated-key")] {
+            let changed = serde_json::from_value(serde_json::json!({"key": key})).unwrap();
+            assert_ne!(config, changed);
+        }
+        let error = serde_json::from_value::<GrpcExporter>(serde_json::json!({"key": 424242}))
+            .expect_err("a numeric key is rejected")
+            .to_string();
+        assert!(
+            error.contains("invalid type: integer, expected a string"),
+            "{error}"
+        );
+        assert!(!error.contains("424242"), "{error}");
+    }
 
     #[test]
     fn endpoint_grpc_defaulting_no_scheme() {

@@ -245,7 +245,7 @@ fn as_shape(
         // computed result shape as the value shape. Although there can be at
         // most one variable in this object for now, we might let ->as define
         // multiple variables in the future.
-        Shape::record(
+        Shape::closed_record(
             [(var_name.clone(), result_shape)].into(),
             // No need for locations, as this is a utility/internal object.
             [],
@@ -323,12 +323,12 @@ mod tests {
 
         assert_eq!(
             selection!("person->as", spec).shape().pretty_print(),
-            "Error<\n  \"Method ->as requires one or two arguments (got 0)\",\n  $root.person,\n>",
+            "$root.person (err \"Method ->as requires one or two arguments (got 0)\")",
         );
 
         assert_eq!(
             selection!("person->as()", spec).shape().pretty_print(),
-            "Error<\n  \"Method ->as requires one or two arguments (got 0)\",\n  $root.person,\n>",
+            "$root.person (err \"Method ->as requires one or two arguments (got 0)\")",
         );
     }
 
@@ -361,7 +361,7 @@ mod tests {
             selection!("person->as($x, @.id, @.name)", spec)
                 .shape()
                 .pretty_print(),
-            "Error<\n  \"Method ->as requires one or two arguments (got 3)\",\n  $root.person,\n>",
+            "$root.person (err \"Method ->as requires one or two arguments (got 3)\")",
         );
     }
 
@@ -421,17 +421,17 @@ mod tests {
 
         assert_eq!(
             selection!("person->as(123)", spec).shape().pretty_print(),
-            "Error<\n  \"First argument to ->as must be a single $variable name\",\n  $root.person,\n>",
+            "$root.person (err \"First argument to ->as must be a single $variable name\")",
         );
 
         assert_eq!(
             selection!("person->as($x.id)", spec).shape().pretty_print(),
-            "Error<\n  \"First argument to ->as must be a single $variable name with no path suffix\",\n  $root.person,\n>",
+            "$root.person (err \"First argument to ->as must be a single $variable name with no path suffix\")",
         );
 
         assert_eq!(
             selection!("person->as(p)", spec).shape().pretty_print(),
-            "Error<\n  \"First argument to ->as must be a single $variable name\",\n  $root.person,\n>",
+            "$root.person (err \"First argument to ->as must be a single $variable name\")",
         );
     }
 
@@ -515,12 +515,12 @@ mod tests {
                     &ShapeContext::new(SourceId::Other("JSONSelection".into()))
                         .with_spec(spec)
                         .with_named_shapes(vars),
-                    Shape::record(
+                    Shape::closed_record(
                         {
                             let mut map = Shape::empty_map();
                             map.insert(
                                 "person".to_string(),
-                                Shape::record(
+                                Shape::closed_record(
                                     {
                                         let mut map = Shape::empty_map();
                                         map.insert("id".to_string(), Shape::int([]));
@@ -597,7 +597,7 @@ mod tests {
             )
             .shape()
             .pretty_print(),
-            "{ listsOfPairs: List<List<[$root.*.xs.*, $root.*.ys.*]>> }",
+            "{ listsOfPairs: [...[...[$root.*.xs.*, $root.*.ys.*]]] }",
         );
 
         assert_eq!(
@@ -609,7 +609,7 @@ mod tests {
             )
             .shape()
             .pretty_print(),
-            "List<List<[$root.xs.*, $root.ys.*]>>",
+            "[...[...[$root.xs.*, $root.ys.*]]]",
         );
     }
 

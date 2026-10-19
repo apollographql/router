@@ -9,8 +9,6 @@ use apollo_compiler::ast::Value;
 use apollo_compiler::collections::IndexMap;
 use apollo_compiler::collections::IndexSet;
 use apollo_compiler::parser::LineColumn;
-use apollo_compiler::schema::Component;
-use apollo_compiler::schema::ComponentName;
 use apollo_compiler::schema::Directive;
 use apollo_compiler::schema::ExtendedType;
 use apollo_compiler::schema::Type;
@@ -46,6 +44,7 @@ use crate::link::link_spec_definition::LINK_DIRECTIVE_IMPORT_ARGUMENT_NAME;
 use crate::link::link_spec_definition::LINK_DIRECTIVE_NAME_IN_SPEC;
 use crate::link::link_spec_definition::LINK_DIRECTIVE_URL_ARGUMENT_NAME;
 use crate::link::spec::Identity;
+use crate::link::spec::Version;
 use crate::link::spec_definition::SpecDefinition;
 use crate::query_graph::build_query_graph::FEDERATED_GRAPH_ROOT_SOURCE;
 use crate::schema::FederationSchema;
@@ -301,7 +300,7 @@ impl Subgraph<Initial> {
             .schema_definition
             .make_mut()
             .directives
-            .push(Component::new(Directive {
+            .push(Node::new(Directive {
                 name: Identity::LINK_NAME,
                 arguments: vec![
                     Node::new(ast::Argument {
@@ -415,7 +414,7 @@ mod parser_backward_compatibility {
     }
 
     fn remove_duplicate_arguments_in_fields(
-        fields: &mut IndexMap<Name, Component<ast::FieldDefinition>>,
+        fields: &mut IndexMap<Name, Node<ast::FieldDefinition>>,
     ) {
         for (_, field) in fields {
             let unique_arguments = deduped_arguments(field.arguments.iter().cloned());
@@ -512,13 +511,13 @@ impl Subgraph<Expanded> {
             .iter_root_operations()
         {
             let default_name = default_operation_name(&op_type);
-            if op_name.name != default_name {
-                operation_types_to_rename.insert(op_name.name.clone(), default_name.clone());
+            if **op_name != default_name {
+                operation_types_to_rename.insert(Name::clone(op_name), default_name.clone());
                 if self.schema().try_get_type(&default_name).is_some() {
                     return Err(SingleFederationError::root_already_used(
                         op_type,
                         default_name,
-                        op_name.name.clone(),
+                        Name::clone(op_name),
                     )
                     .into());
                 }
@@ -561,6 +560,17 @@ impl Subgraph<Expanded> {
                 metadata,
             },
         })
+    }
+
+    /// Transitions from Expanded to Upgraded by upgrading the subgraph's federation spec `@link` to
+    /// the given federation version.
+    pub(crate) fn into_federation_version(
+        self,
+        version: &Version,
+    ) -> Result<Subgraph<Upgraded>, FederationError> {
+        let mut subgraph = self.assume_upgraded();
+        subgraph.upgrade_federation_version(version)?;
+        Ok(subgraph)
     }
 
     /// Transitions from Expanded to Upgraded skipping the actual upgrade process.
@@ -635,13 +645,13 @@ fn normalize_root_types_in_subgraph_schema(
     let mut operation_types_to_rename = IndexMap::default();
     for (op_type, op_name) in schema.schema().schema_definition.iter_root_operations() {
         let default_name = default_operation_name(&op_type);
-        if op_name.name != default_name {
-            operation_types_to_rename.insert(op_name.name.clone(), default_name.clone());
+        if **op_name != default_name {
+            operation_types_to_rename.insert(Name::clone(op_name), default_name.clone());
             if schema.try_get_type(&default_name).is_some() {
                 return Err(SingleFederationError::root_already_used(
                     op_type,
                     default_name,
-                    op_name.name.clone(),
+                    Name::clone(op_name),
                 )
                 .into());
             }
@@ -662,8 +672,8 @@ impl Subgraph<Upgraded> {
     pub fn validate(self) -> Result<Subgraph<Validated>, CompositionFailure> {
         tracing::debug!("Subgraph<Upgraded>: validate `{}`", self.name);
         // See the note in `Subgraph::<Expanded>::validate`. A connectors subgraph is necessarily
-        // fed2 and so does not normally reach this state, but running here keeps the two paths into
-        // `Validated` equivalent.
+        // fed2, so it only reaches this state when it is upgraded to fed3; running here keeps the
+        // two paths into `Validated` equivalent.
         let hints = ConnectorsBlueprint::on_validation(&self)?;
         let schema = validate_subgraph_schema(self.state.schema)
             .map_err(|err| SubgraphError::new_without_locations(self.name.clone(), err))?;
@@ -690,11 +700,31 @@ impl Subgraph<Upgraded> {
         })
     }
 
+    /// Upgrades the subgraph's federation spec `@link` to the given federation version.
+    pub(crate) fn upgrade_federation_version(
+        &mut self,
+        version: &Version,
+    ) -> Result<(), FederationError> {
+        self.state.metadata = upgrade_federation_version(&mut self.state.schema, version)?;
+        Ok(())
+    }
+
     pub fn normalize_root_types(&mut self) -> Result<(), SubgraphError> {
         normalize_root_types_in_subgraph_schema(&mut self.state.schema, &mut self.state.metadata)
             .map_err(|e| SubgraphError::new_without_locations(self.name.clone(), e))?;
         Ok(())
     }
+}
+
+fn upgrade_federation_version(
+    schema: &mut FederationSchema,
+    version: &Version,
+) -> Result<SubgraphMetadata, FederationError> {
+    schema.upgrade_federation_link(version)?;
+    schema
+        .subgraph_metadata()
+        .cloned()
+        .ok_or_else(|| internal_error!("Unable to detect federation version used in subgraph"))
 }
 
 fn default_operation_name(op_type: &OperationType) -> Name {
@@ -898,13 +928,13 @@ pub(crate) fn schema_as_fed2_subgraph(
     // PORT_NOTE: We are adding the fed spec link to the schema definition unconditionally, not
     //            considering extensions. This seems consistent with the JS version. But, it's
     //            not consistent with the `add_to_schema`'s behavior. We may change to use the
-    //            `schema_definition.origin_to_use()` method in the future.
+    //            `schema_definition.origin_extension_id()` method in the future.
     let inner_schema = schema.schema_mut();
     inner_schema
         .schema_definition
         .make_mut()
         .directives
-        .push(Component::new(Directive {
+        .push(Node::new(Directive {
             name: link_name_in_schema,
             arguments: vec![
                 Node::new(ast::Argument {
@@ -963,9 +993,12 @@ fn new_federation_subgraph_schema(
 }
 
 // PORT_NOTE: This corresponds to the `newEmptyFederation2Schema` function in JS.
-pub(crate) fn new_empty_federation_2_subgraph_schema() -> Result<FederationSchema, FederationError>
-{
-    let mut schema = new_federation_subgraph_schema(Schema::new())?;
+pub(crate) fn new_empty_federation_2_subgraph_schema(
+    validate_default_values: bool,
+) -> Result<FederationSchema, FederationError> {
+    let mut inner_schema = Schema::new();
+    inner_schema.validate_default_values = validate_default_values;
+    let mut schema = new_federation_subgraph_schema(inner_schema)?;
     schema_as_fed2_subgraph(&mut schema, true)?;
     Ok(schema)
 }
@@ -1116,10 +1149,10 @@ impl FederationSchema {
         let query_root_type_name = if query_root_pos.try_get(self.schema()).is_none() {
             // If not present, add the default Query type with empty fields.
             EMPTY_QUERY_TYPE_SPEC.check_or_add(self, None)?;
-            query_root_pos.insert(self, ComponentName::from(EMPTY_QUERY_TYPE_SPEC.name))?;
+            query_root_pos.insert(self, EMPTY_QUERY_TYPE_SPEC.name.to_node(None))?;
             EMPTY_QUERY_TYPE_SPEC.name
         } else {
-            query_root_pos.get(self.schema())?.name.clone()
+            Name::clone(query_root_pos.get(self.schema())?)
         };
 
         let is_fed_1_subgraph = self.is_fed_1_subgraph();
@@ -1146,8 +1179,7 @@ impl FederationSchema {
         // Add or remove `Query._entities` (if applicable)
         if let Some(_entity_type) = self.entity_type()? {
             if entity_field_pos.try_get(self.schema()).is_none() {
-                entity_field_pos
-                    .insert(self, Component::new(self.entities_field_spec()?.into()))?;
+                entity_field_pos.insert(self, Node::new(self.entities_field_spec()?.into()))?;
             }
             // PORT_NOTE: JS version checks if the entity field definition's type is null when the
             //            definition is found, but the `type` field is not nullable in Rust.
@@ -1159,7 +1191,7 @@ impl FederationSchema {
 
         // Add `Query._service` (if not already present)
         if service_field_pos.try_get(self.schema()).is_none() {
-            service_field_pos.insert(self, Component::new(self.service_field_spec()?.into()))?;
+            service_field_pos.insert(self, Node::new(self.service_field_spec()?.into()))?;
         }
 
         Ok(())
@@ -1178,7 +1210,7 @@ impl FederationSchema {
             let key_directive_app = key_directive_app?;
             let target = key_directive_app.target();
             if let ObjectOrInterfaceTypeDefinitionPosition::Object(obj_ty) = target {
-                entity_members.insert(ComponentName::from(&obj_ty.type_name));
+                entity_members.insert(obj_ty.type_name.clone().to_node(None));
             }
         }
 
@@ -1346,6 +1378,7 @@ mod tests {
                 name!("external"),
                 name!("include"),
                 name!("key"),
+                name!("oneOf"),
                 name!("provides"),
                 name!("requires"),
                 name!("skip"),
@@ -1395,6 +1428,7 @@ mod tests {
                 name!("federation__tag"),
                 name!("include"),
                 name!("link"),
+                name!("oneOf"),
                 name!("skip"),
                 name!("specifiedBy"),
             ]
@@ -1442,6 +1476,7 @@ mod tests {
                 name!("federation__tag"),
                 name!("include"),
                 name!("link"),
+                name!("oneOf"),
                 name!("skip"),
                 name!("specifiedBy"),
             ]
@@ -1498,6 +1533,7 @@ mod tests {
                 name!("federation__tag"),
                 name!("include"),
                 name!("link"),
+                name!("oneOf"),
                 name!("skip"),
                 name!("specifiedBy")
             ]
@@ -1555,6 +1591,7 @@ mod tests {
                 name!("federation__tag"),
                 name!("include"),
                 name!("link"),
+                name!("oneOf"),
                 name!("skip"),
                 name!("specifiedBy"),
             ]
@@ -2122,7 +2159,7 @@ mod tests {
     /// When a schema has both an explicit `schema { ... }` definition and an
     /// `extend schema @link(...) { ... }` extension, the link-to-link `@link` directive
     /// should be added to the definition (not the extension), because a definition exists.
-    /// This tests the `origin_to_use()` fix.
+    /// This tests the `origin_extension_id()` fix.
     #[test]
     fn link_to_link_goes_on_definition_when_both_definition_and_extension_exist() {
         let subgraph = build_and_validate(
@@ -2150,7 +2187,7 @@ mod tests {
         let schema_str = subgraph.schema_string();
         let first_lines: String = schema_str.lines().take(9).collect::<Vec<_>>().join("\n");
         // The link-to-link @link should be on the schema definition (first block),
-        // NOT on the extension block. Before the fix, origin_to_use() would return
+        // NOT on the extension block. Before the fix, origin_extension_id() would return
         // Extension whenever any extensions existed, causing the @link to end up on
         // the extend schema block instead of the definition.
         insta::assert_snapshot!(first_lines, @r#"

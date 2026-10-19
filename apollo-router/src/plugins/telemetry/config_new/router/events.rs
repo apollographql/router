@@ -131,6 +131,9 @@ pub(crate) struct RouterEventsConfig {
 mod tests {
     use http::HeaderValue;
     use http::header::CONTENT_LENGTH;
+    use tower::Service as _;
+    use tower::ServiceBuilder;
+    use tower::ServiceExt as _;
     use tracing::instrument::WithSubscriber;
 
     use super::*;
@@ -148,16 +151,29 @@ mod tests {
             .expect("test harness");
 
         async {
-            test_harness
-                .router_service(|_r| async {
-                    Ok(router::Response::fake_builder()
+            let (mock_service, mut handle) =
+                tower_test::mock::pair::<router::Request, router::Response>();
+            let driver = tokio::spawn(async move {
+                let (_req, responder) = handle.next_request().await.unwrap();
+                responder.send_response(
+                    router::Response::fake_builder()
                         .header("custom-header", "val1")
                         .header(CONTENT_LENGTH, "25")
                         .header("x-log-request", HeaderValue::from_static("log"))
                         .data(serde_json_bytes::json!({"data": "res"}))
                         .build()
-                        .expect("expecting valid response"))
-                })
+                        .expect("expecting valid response"),
+                );
+            });
+
+            let mut service = ServiceBuilder::new()
+                .layer(test_harness.instrument_router_layer())
+                .service(mock_service);
+
+            service
+                .ready()
+                .await
+                .unwrap()
                 .call(
                     router::Request::fake_builder()
                         .header(CONTENT_LENGTH, "0")
@@ -168,6 +184,8 @@ mod tests {
                 )
                 .await
                 .expect("expecting successful response");
+
+            crate::plugin::test::await_mock_driver(driver).await;
         }
         .with_subscriber(assert_snapshot_subscriber!({
             r#"[].span["apollo_private.duration_ns"]"# => "[duration]",
@@ -187,28 +205,42 @@ mod tests {
 
         async {
             // Without the header to enable custom event
-            test_harness
-                .router_service(
+            let (mock_service, mut handle) =
+                tower_test::mock::pair::<router::Request, router::Response>();
+            let driver = tokio::spawn(async move {
+                let (_req, responder) = handle.next_request().await.unwrap();
+                let context_with_error = Context::new();
+                let _ = context_with_error
+                    .insert(CONTAINS_GRAPHQL_ERROR, true)
+                    .unwrap();
+                responder.send_response(
+                    router::Response::fake_builder()
+                        .header("custom-header", "val1")
+                        .context(context_with_error)
+                        .data(serde_json_bytes::json!({"errors": [{"message": "res"}]}))
+                        .build()
+                        .expect("expecting valid response"),
+                );
+            });
 
-                    |_r| async {
-                        let context_with_error = Context::new();
-                        let _ = context_with_error
-                            .insert(CONTAINS_GRAPHQL_ERROR, true)
-                            .unwrap();
-                        Ok(router::Response::fake_builder()
-                            .header("custom-header", "val1")
-                            .context(context_with_error)
-                            .data(serde_json_bytes::json!({"errors": [{"message": "res"}]}))
-                            .build()
-                            .expect("expecting valid response"))
-                    },
+            let mut service = ServiceBuilder::new()
+                .layer(test_harness.instrument_router_layer())
+                .service(mock_service);
+
+            service
+                .ready()
+                .await
+                .unwrap()
+                .call(
+                    router::Request::fake_builder()
+                        .header("custom-header", "val1")
+                        .build()
+                        .unwrap(),
                 )
-                .call(router::Request::fake_builder()
-                    .header("custom-header", "val1")
-                    .build()
-                    .unwrap())
                 .await
                 .expect("expecting successful response");
+
+            crate::plugin::test::await_mock_driver(driver).await;
         }
         .with_subscriber(
             assert_snapshot_subscriber!({r#"[].span["apollo_private.duration_ns"]"# => "[duration]", r#"[].spans[]["apollo_private.duration_ns"]"# => "[duration]", "[].fields.attributes" => insta::sorted_redaction()}),
@@ -226,24 +258,39 @@ mod tests {
 
         async {
             // Without the header to enable custom event
-            test_harness
-                .router_service(
-                    |_r| async {
-                        Ok(router::Response::fake_builder()
-                            .header("custom-header", "val1")
-                            .header(CONTENT_LENGTH, "25")
-                            .header("x-log-response", HeaderValue::from_static("log"))
-                            .data(serde_json_bytes::json!({"data": "res"}))
-                            .build()
-                            .expect("expecting valid response"))
-                    },
+            let (mock_service, mut handle) =
+                tower_test::mock::pair::<router::Request, router::Response>();
+            let driver = tokio::spawn(async move {
+                let (_req, responder) = handle.next_request().await.unwrap();
+                responder.send_response(
+                    router::Response::fake_builder()
+                        .header("custom-header", "val1")
+                        .header(CONTENT_LENGTH, "25")
+                        .header("x-log-response", HeaderValue::from_static("log"))
+                        .data(serde_json_bytes::json!({"data": "res"}))
+                        .build()
+                        .expect("expecting valid response"),
+                );
+            });
+
+            let mut service = ServiceBuilder::new()
+                .layer(test_harness.instrument_router_layer())
+                .service(mock_service);
+
+            service
+                .ready()
+                .await
+                .unwrap()
+                .call(
+                    router::Request::fake_builder()
+                        .header("custom-header", "val1")
+                        .build()
+                        .unwrap(),
                 )
-                .call(router::Request::fake_builder()
-                    .header("custom-header", "val1")
-                    .build()
-                    .unwrap())
                 .await
                 .expect("expecting successful response");
+
+            crate::plugin::test::await_mock_driver(driver).await;
         }
         .with_subscriber(
             assert_snapshot_subscriber!({r#"[].span["apollo_private.duration_ns"]"# => "[duration]", r#"[].spans[]["apollo_private.duration_ns"]"# => "[duration]", "[].fields.attributes" => insta::sorted_redaction()}),

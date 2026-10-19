@@ -3,7 +3,6 @@ use std::ops::Deref;
 use apollo_compiler::Name;
 use apollo_compiler::Node;
 use apollo_compiler::ast::FieldDefinition;
-use apollo_compiler::schema::Component;
 use apollo_compiler::schema::EnumType;
 use apollo_compiler::schema::ExtendedType;
 use apollo_compiler::schema::InterfaceType;
@@ -130,13 +129,13 @@ impl FieldVisitor<NamedSelection> for SchemaVisitor<'_, ObjectTypeDefinitionPosi
                 directives: filter_directives(self.directive_deny_list, &field.directives),
             };
             if let Some(old_field) = r#type.fields.get(&field_name) {
-                if *old_field.deref().deref() != new_field {
+                if *old_field.deref() != new_field {
                     return Err(FederationError::internal(format!(
                         "tried to write field to existing type, but field type was different. expected {new_field:?} found {old_field:?}"
                     )));
                 }
             } else {
-                r#type.fields.insert(field_name, Component::new(new_field));
+                r#type.fields.insert(field_name, Node::new(new_field));
             }
         }
 
@@ -373,7 +372,7 @@ impl<'a> TypeShapeWalker<'a> {
                         directives: filter_directives(self.directive_deny_list, &field.directives),
                     };
                     if let Some(old_field) = new_object_type.fields.get(&field_name) {
-                        if *old_field.deref().deref() != new_field {
+                        if *old_field.deref() != new_field {
                             return Err(FederationError::internal(format!(
                                 "tried to write field to existing type, but field type was different. expected {new_field:?} found {old_field:?}"
                             )));
@@ -381,7 +380,7 @@ impl<'a> TypeShapeWalker<'a> {
                     } else {
                         new_object_type
                             .fields
-                            .insert(field_name, Component::new(new_field));
+                            .insert(field_name, Node::new(new_field));
                     }
                 }
             }
@@ -435,15 +434,6 @@ impl<'a> TypeShapeWalker<'a> {
                     shape.pretty_print(),
                     object.type_name.as_str(),
                 )));
-            }
-
-            ShapeCase::Error(shape::Error { partial, .. }) => {
-                if let Some(partial) = partial {
-                    // Errors with partial shapes still mostly behave like those
-                    // shapes (except for simplification), so we need to
-                    // validate the object against the partial shape.
-                    self.walk_object_helper(object, new_object_type, partial)?;
-                }
             }
         };
 
@@ -583,15 +573,6 @@ impl<'a> TypeShapeWalker<'a> {
                     shape.pretty_print()
                 )));
             }
-
-            ShapeCase::Error(shape::Error { partial, .. }) => {
-                if let Some(partial) = partial {
-                    // Errors with partial shapes still mostly behave like those
-                    // shapes (except for simplification), so we need to
-                    // validate the interface against the partial shape.
-                    self.walk_interface_helper(interface, partial)?;
-                }
-            }
         };
 
         Ok(())
@@ -670,7 +651,7 @@ impl<'a> TypeShapeWalker<'a> {
 
         for member_name in def.members.iter() {
             if let TypeDefinitionPosition::Object(object_type_pos) =
-                self.original_schema.get_type(&member_name.name)?
+                self.original_schema.get_type(member_name)?
             {
                 try_pre_insert!(self.to_schema, object_type_pos)?;
             }
@@ -708,7 +689,7 @@ impl<'a> TypeShapeWalker<'a> {
                                         // GraphQL __typename string will need
                                         // character escaping, but we're all hedged
                                         // up if such a possibility comes to pass.
-                                        serde_json_bytes::Value::String(n.name.to_string().into())
+                                        serde_json_bytes::Value::String(n.to_string().into())
                                             .to_string()
                                     })
                                     .collect::<Vec<_>>()
@@ -771,15 +752,6 @@ impl<'a> TypeShapeWalker<'a> {
                     "Unexpected primitive shape provided for union type: {}",
                     shape.pretty_print()
                 )));
-            }
-
-            ShapeCase::Error(shape::Error { partial, .. }) => {
-                if let Some(partial) = partial {
-                    // Errors with partial shapes still mostly behave like those
-                    // shapes (except for simplification), so we need to
-                    // validate the union against the partial shape.
-                    self.walk_union_helper(union_type, partial)?;
-                }
             }
         }
 

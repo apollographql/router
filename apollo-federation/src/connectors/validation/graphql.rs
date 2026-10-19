@@ -10,6 +10,7 @@ mod strings;
 
 pub(super) use strings::subslice_location;
 
+use crate::connectors::graphql_shapes::shapes_for_schema;
 use crate::connectors::spec::ConnectLink;
 use crate::schema::FederationSchema;
 
@@ -28,7 +29,7 @@ impl<'schema> SchemaInfo<'schema> {
         Self {
             federation_schema,
             connect_link,
-            shape_lookup: shape::graphql::shapes_for_schema(federation_schema.schema()),
+            shape_lookup: shapes_for_schema(federation_schema.schema()),
         }
     }
 
