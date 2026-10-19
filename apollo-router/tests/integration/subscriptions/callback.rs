@@ -30,16 +30,14 @@ async fn test_subscription_callback() -> Result<(), BoxError> {
     )
     .await;
 
-    // Create router with port reservations
     let mut router = IntegrationTest::builder()
         .supergraph("tests/integration/subscriptions/fixtures/supergraph.graphql")
         .config(CALLBACK_CONFIG)
         .build()
         .await;
 
-    // Reserve ports using the existing external ports and allocate new ones
+    // Point the router at the test's callback receiver and mock subgraph
     let callback_receiver_port = callback_addr.port();
-    let _callback_listener_port = router.reserve_address("CALLBACK_LISTENER_PORT");
     router.set_address("CALLBACK_RECEIVER_PORT", callback_receiver_port);
     router.set_address_from_uri("SUBGRAPH_PORT", &subgraph_server.uri());
 
@@ -413,16 +411,14 @@ async fn test_subscription_callback_error_payload() -> Result<(), BoxError> {
     )
     .await;
 
-    // Create router with port reservations
     let mut router = IntegrationTest::builder()
         .supergraph("tests/integration/subscriptions/fixtures/supergraph.graphql")
         .config(CALLBACK_CONFIG)
         .build()
         .await;
 
-    // Reserve ports using the existing external ports and allocate new ones
+    // Point the router at the test's callback receiver and mock subgraph
     let callback_receiver_port = callback_addr.port();
-    let _callback_listener_port = router.reserve_address("CALLBACK_LISTENER_PORT");
     router.set_address("CALLBACK_RECEIVER_PORT", callback_receiver_port);
     router.set_address_from_uri("SUBGRAPH_PORT", &subgraph_server.uri());
 
@@ -536,16 +532,14 @@ async fn test_subscription_callback_pure_error_payload() -> Result<(), BoxError>
     )
     .await;
 
-    // Create router with port reservations
     let mut router = IntegrationTest::builder()
         .supergraph("tests/integration/subscriptions/fixtures/supergraph.graphql")
         .config(CALLBACK_CONFIG)
         .build()
         .await;
 
-    // Reserve ports using the existing external ports and allocate new ones
+    // Point the router at the test's callback receiver and mock subgraph
     let callback_receiver_port = callback_addr.port();
-    let _callback_listener_port = router.reserve_address("CALLBACK_LISTENER_PORT");
     router.set_address("CALLBACK_RECEIVER_PORT", callback_receiver_port);
     router.set_address_from_uri("SUBGRAPH_PORT", &subgraph_server.uri());
 
