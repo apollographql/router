@@ -34,7 +34,7 @@ default = ["global-allocator"]
 # [dependencies]
 # apollo-router = {version = "1.20", default-features = false}
 # ```
-global-allocator = ["tikv-jemallocator/profiling", "tikv-jemalloc-ctl/stats", "tikv-jemalloc-ctl/profiling"]
+global-allocator = ["dep:mimalloc", "tikv-jemallocator/profiling", "tikv-jemalloc-ctl/stats", "tikv-jemalloc-ctl/profiling"]
 
 # if you are doing heap profiling
 dhat-heap = ["dhat"]
@@ -308,6 +308,7 @@ uname = "0.1.1"
 hyperlocal = { version = "0.9.1", default-features = false, features = [
     "client",
 ] }
+mimalloc = { version = "0.1.52", optional = true }
 tikv-jemallocator = { version = "0.7.0", features = ["profiling"], optional = true }
 tikv-jemalloc-ctl = { version = "0.7.0", features = ["stats", "profiling"], optional = true }
 tikv-jemalloc-sys = { version = "0.7.0", features = ["profiling"] }
