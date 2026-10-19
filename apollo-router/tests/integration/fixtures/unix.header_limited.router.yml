@@ -1,5 +1,5 @@
 supergraph:
-  listen: /tmp/apollo_router_test_${env.TEST_CONFIG_UNIX_SOCKET_ID}.sock
+  listen: ${env.TEST_CONFIG_UNIX_SOCKET_PATH}
 
 limits:
   http1_max_request_headers: 100

@@ -398,15 +398,7 @@ enum HttpProtocol {
 async fn test_http1_connection_persistence(
     #[case] http_protocol: HttpProtocol,
 ) -> Result<(), BoxError> {
-    let mut router = IntegrationTest::builder()
-        .config(
-            r#"
-            supergraph:
-              listen: localhost:80
-            "#,
-        )
-        .build()
-        .await;
+    let mut router = IntegrationTest::builder().config("{}").build().await;
 
     router.start().await;
     router.assert_started().await;
@@ -513,7 +505,7 @@ mod unix_tests {
 
         let mut router = IntegrationTest::builder()
             .config(config)
-            .env_entry("TEST_CONFIG_UNIX_SOCKET_ID", &uuid)
+            .env_entry("TEST_CONFIG_UNIX_SOCKET_PATH", &socket_path)
             .build()
             .await;
 
