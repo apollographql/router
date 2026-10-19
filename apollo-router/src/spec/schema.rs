@@ -431,7 +431,7 @@ impl SchemaHash {
     pub(crate) fn new(sdl: &str) -> Self {
         let mut hasher = Sha256::new();
         hasher.update(sdl);
-        let hash = format!("{:x}", hasher.finalize());
+        let hash = hex::encode(hasher.finalize());
         Self(Arc::new(hash))
     }
 

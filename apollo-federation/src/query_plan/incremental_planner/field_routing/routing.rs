@@ -991,7 +991,7 @@ impl FieldRoutingSearchSpace {
             self.push_entity_resolver_options(
                 &mut options,
                 type_pos.type_name(),
-                field_selection.field.name(),
+                &pending.selection,
             );
         }
 
@@ -1230,12 +1230,13 @@ impl FieldRoutingSearchSpace {
     }
 
     /// Append entity-resolver connector hops for a field no connector serves
-    /// directly.
+    /// directly. A resolver qualifies when it returns some of `selection`;
+    /// what it leaves out is routed again, so each hop makes progress.
     fn push_entity_resolver_options(
         &self,
         options: &mut Vec<RoutingChoice>,
         type_name: &Name,
-        field_name: &Name,
+        selection: &Selection,
     ) {
         // An implementation of an @interfaceObject can also be resolved
         // through the connectors on the interface, which the connector
@@ -1259,7 +1260,7 @@ impl FieldRoutingSearchSpace {
         for entry in &resolvers {
             if !self
                 .connector_index
-                .resolver_provides(&entry.coordinate, field_name.as_str())
+                .resolver_provides_any(&entry.coordinate, selection)
             {
                 continue;
             }
