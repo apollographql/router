@@ -4,12 +4,19 @@ use apollo_compiler::Name;
 use apollo_compiler::Node;
 use apollo_compiler::Schema;
 use apollo_compiler::ast::Directive;
+<<<<<<< HEAD
 use apollo_compiler::ast::DirectiveList;
 use apollo_compiler::ast::FieldDefinition;
+=======
+>>>>>>> origin/dev
 use apollo_compiler::collections::IndexMap;
 use apollo_compiler::collections::IndexSet;
 use apollo_compiler::parser::LineColumn;
 use apollo_compiler::parser::SourceMap;
+<<<<<<< HEAD
+=======
+use apollo_compiler::schema::Component;
+>>>>>>> origin/dev
 use apollo_compiler::schema::ExtendedType;
 
 use crate::error::SubgraphLocation;
@@ -107,10 +114,17 @@ pub(crate) fn apply_fed3_upgrade(schema: &mut Schema, subgraph_name: &str) -> Ve
 
 /// An `@deprecated` removed by [`strip_invalid_implementation_deprecations`].
 pub(crate) struct StrippedDeprecation {
+<<<<<<< HEAD
     pub(crate) type_name: Name,
     pub(crate) field_name: Name,
     pub(crate) interface_name: Name,
     pub(crate) directive: Node<Directive>,
+=======
+    pub(crate) type_name: apollo_compiler::Name,
+    pub(crate) field_name: apollo_compiler::Name,
+    pub(crate) interface_name: apollo_compiler::Name,
+    pub(crate) directive: apollo_compiler::Node<Directive>,
+>>>>>>> origin/dev
 }
 
 impl StrippedDeprecation {
@@ -225,7 +239,13 @@ fn upgrade_fields_and_args(
 /// Returns a map from interface name to the set of non-deprecated field names
 /// for every interface type in the schema. Fields the interface does not declare
 /// are absent, so the 2025 rule never applies to them.
+<<<<<<< HEAD
 fn collect_interface_non_deprecated_fields(schema: &Schema) -> IndexMap<Name, IndexSet<Name>> {
+=======
+fn collect_interface_non_deprecated_fields(
+    schema: &Schema,
+) -> IndexMap<apollo_compiler::Name, IndexSet<apollo_compiler::Name>> {
+>>>>>>> origin/dev
     let mut result = IndexMap::default();
     for ty in schema.types.values() {
         if let ExtendedType::Interface(interface) = ty {
