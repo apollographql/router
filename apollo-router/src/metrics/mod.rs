@@ -1509,8 +1509,8 @@ macro_rules! assert_metric {
             };
             panic!(
                 "metric not found:\n{}\nmetrics present:\n{}",
-                serde_yaml::to_string(&metric).unwrap(),
-                serde_yaml::to_string(&crate::metrics::collect_metrics().all()).unwrap()
+                yaml_serde::to_string(&metric).unwrap(),
+                yaml_serde::to_string(&crate::metrics::collect_metrics().all()).unwrap()
             )
         }
     };
@@ -1546,8 +1546,8 @@ macro_rules! assert_no_metric {
             };
             panic!(
                 "unexpected metric found:\n{}\nmetrics present:\n{}",
-                serde_yaml::to_string(&metric).unwrap(),
-                serde_yaml::to_string(&crate::metrics::collect_metrics().all()).unwrap()
+                yaml_serde::to_string(&metric).unwrap(),
+                yaml_serde::to_string(&crate::metrics::collect_metrics().all()).unwrap()
             )
         }
     };

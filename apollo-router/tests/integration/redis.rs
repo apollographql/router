@@ -644,7 +644,7 @@ async fn test_redis_emits_configuration_error_metric() {
     });
 
     let mut router = IntegrationTest::builder()
-        .config(serde_yaml::to_string(&config).unwrap())
+        .config(yaml_serde::to_string(&config).unwrap())
         .build()
         .await;
 

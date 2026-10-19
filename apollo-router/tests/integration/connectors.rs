@@ -913,8 +913,8 @@ mod tls {
     fn file_reference_keeps_windows_paths_intact() {
         let path = r"C:\Users\runner\router\apollo-router/src/services/http/testdata/CA/ca.crt";
         let yaml = format!("certificate_authorities: {}", file_reference(path));
-        let parsed: serde_yaml::Value =
-            serde_yaml::from_str(&yaml).expect("the reference is valid YAML");
+        let parsed: yaml_serde::Value =
+            yaml_serde::from_str(&yaml).expect("the reference is valid YAML");
         assert_eq!(
             parsed["certificate_authorities"].as_str(),
             Some(format!("${{file.{path}}}").as_str())

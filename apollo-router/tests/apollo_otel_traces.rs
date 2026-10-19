@@ -82,12 +82,12 @@ async fn config(
     });
 
     let mut config: serde_json::Value = if batch {
-        serde_yaml::from_str(include_str!(
+        yaml_serde::from_str(include_str!(
             "fixtures/reports/apollo_reports_batch.router.yaml"
         ))
         .expect("apollo_reports.router.yaml was invalid")
     } else {
-        serde_yaml::from_str(include_str!("fixtures/reports/apollo_reports.router.yaml"))
+        yaml_serde::from_str(include_str!("fixtures/reports/apollo_reports.router.yaml"))
             .expect("apollo_reports.router.yaml was invalid")
     };
     config = jsonpath_lib::replace_with(config, "$.telemetry.apollo.endpoint", &mut |_| {

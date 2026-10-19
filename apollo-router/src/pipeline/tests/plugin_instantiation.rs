@@ -151,7 +151,7 @@ fn user_plugin_config_is_deserialized_when_parsed() {
 /// built.
 #[test]
 fn user_plugins_are_built_from_their_parsed_config() {
-    let config: Configuration = serde_yaml::from_str(
+    let config: Configuration = yaml_serde::from_str(
         "plugins:\n  test.always_fails_to_start:\n    name: first\n  test.always_starts_and_stops:\n    name: second\n",
     )
     .expect("the user plugin sections deserialize");
@@ -161,7 +161,7 @@ fn user_plugins_are_built_from_their_parsed_config() {
         names,
         ["test.always_fails_to_start", "test.always_starts_and_stops"]
     );
-    serde_yaml::from_str::<Configuration>("plugins:\n  acme.unregistered: {}\n")
+    yaml_serde::from_str::<Configuration>("plugins:\n  acme.unregistered: {}\n")
         .expect_err("no plugin is registered as acme.unregistered");
 }
 
@@ -202,7 +202,7 @@ async fn test_yaml_no_extras() {
 
 #[tokio::test]
 async fn test_yaml_plugins_always_starts_and_stops() {
-    let config: Configuration = serde_yaml::from_str(
+    let config: Configuration = yaml_serde::from_str(
         r#"
             plugins:
                 test.always_starts_and_stops:
@@ -216,7 +216,7 @@ async fn test_yaml_plugins_always_starts_and_stops() {
 
 #[tokio::test]
 async fn test_yaml_plugins_always_fails_to_start() {
-    let config: Configuration = serde_yaml::from_str(
+    let config: Configuration = yaml_serde::from_str(
         r#"
             plugins:
                 test.always_fails_to_start:
@@ -230,7 +230,7 @@ async fn test_yaml_plugins_always_fails_to_start() {
 
 #[tokio::test]
 async fn test_yaml_plugins_combo_start_and_fail() {
-    let config: Configuration = serde_yaml::from_str(
+    let config: Configuration = yaml_serde::from_str(
         r#"
             plugins:
                 test.always_starts_and_stops:
@@ -415,12 +415,12 @@ async fn test_oss_plugins_added(#[case] allowed_features: HashSet<AllowedFeature
 
     // Create config for oss plugins
     let forbid_mutations_config =
-        serde_yaml::from_str::<serde_json::Value>(get_plugin_config("forbid_mutations")).unwrap();
+        yaml_serde::from_str::<serde_json::Value>(get_plugin_config("forbid_mutations")).unwrap();
     let override_subgraph_url_config =
-        serde_yaml::from_str::<serde_json::Value>(get_plugin_config("override_subgraph_url"))
+        yaml_serde::from_str::<serde_json::Value>(get_plugin_config("override_subgraph_url"))
             .unwrap();
     let connectors_config =
-        serde_yaml::from_str::<serde_json::Value>(get_plugin_config("connectors")).unwrap();
+        yaml_serde::from_str::<serde_json::Value>(get_plugin_config("connectors")).unwrap();
 
     let router_config = Configuration::builder()
         .apollo_plugin("forbid_mutations", forbid_mutations_config)
@@ -504,7 +504,7 @@ async fn test_optional_plugin_added_with_restricted_allowed_features(
     };
 
     let plugin_config =
-        serde_yaml::from_str::<serde_json::Value>(get_plugin_config(plugin)).unwrap();
+        yaml_serde::from_str::<serde_json::Value>(get_plugin_config(plugin)).unwrap();
     dbg!(&plugin_config);
     let router_config = Configuration::builder()
         .apollo_plugin(plugin, plugin_config)
@@ -592,7 +592,7 @@ async fn test_optional_plugin_not_added_with_restricted_allowed_features(
     };
 
     let plugin_config =
-        serde_yaml::from_str::<serde_json::Value>(get_plugin_config(plugin)).unwrap();
+        yaml_serde::from_str::<serde_json::Value>(get_plugin_config(plugin)).unwrap();
     let router_config = Configuration::builder()
         .apollo_plugin(plugin, plugin_config)
         .build()
@@ -664,7 +664,7 @@ async fn test_optional_plugin_that_does_not_map_to_an_allowed_feature_is_added(
     };
 
     let plugin_config =
-        serde_yaml::from_str::<serde_json::Value>(get_plugin_config(plugin)).unwrap();
+        yaml_serde::from_str::<serde_json::Value>(get_plugin_config(plugin)).unwrap();
     let router_config = Configuration::builder()
         .apollo_plugin(plugin, plugin_config)
         .build()
@@ -742,7 +742,7 @@ async fn test_optional_plugin_with_unrestricted_allowed_features(#[case] plugin:
     };
 
     let plugin_config =
-        serde_yaml::from_str::<serde_json::Value>(get_plugin_config(plugin)).unwrap();
+        yaml_serde::from_str::<serde_json::Value>(get_plugin_config(plugin)).unwrap();
     let router_config = Configuration::builder()
         .apollo_plugin(plugin, plugin_config)
         .build()
@@ -810,18 +810,18 @@ async fn test_optional_plugin_with_default_license_limits(#[case] plugin: &str) 
 
     // Create config for the given `plugin`
     let plugin_config =
-        serde_yaml::from_str::<serde_json::Value>(get_plugin_config(plugin)).unwrap();
+        yaml_serde::from_str::<serde_json::Value>(get_plugin_config(plugin)).unwrap();
 
     // Create config for oss plugins
     let forbid_mutations_config =
-        serde_yaml::from_str::<serde_json::Value>(get_plugin_config("forbid_mutations")).unwrap();
+        yaml_serde::from_str::<serde_json::Value>(get_plugin_config("forbid_mutations")).unwrap();
     let override_subgraph_url_config =
-        serde_yaml::from_str::<serde_json::Value>(get_plugin_config("override_subgraph_url"))
+        yaml_serde::from_str::<serde_json::Value>(get_plugin_config("override_subgraph_url"))
             .unwrap();
     let connectors_config =
-        serde_yaml::from_str::<serde_json::Value>(get_plugin_config("connectors")).unwrap();
+        yaml_serde::from_str::<serde_json::Value>(get_plugin_config("connectors")).unwrap();
     let response_cache_config =
-        serde_yaml::from_str::<serde_json::Value>(get_plugin_config("response_cache")).unwrap();
+        yaml_serde::from_str::<serde_json::Value>(get_plugin_config("response_cache")).unwrap();
 
     let router_config = Configuration::builder()
         .apollo_plugin("forbid_mutations", forbid_mutations_config)

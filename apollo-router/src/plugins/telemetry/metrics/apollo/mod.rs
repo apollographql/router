@@ -700,7 +700,7 @@ mod test {
     }
 
     async fn create_telemetry_plugin(full_config: &str) -> Result<Telemetry, BoxError> {
-        let full_config = serde_yaml::from_str::<Value>(full_config).expect("yaml must be valid");
+        let full_config = yaml_serde::from_str::<Value>(full_config).expect("yaml must be valid");
         let telemetry_config = full_config
             .as_object()
             .expect("must be an object")

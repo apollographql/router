@@ -2,9 +2,8 @@
 source: apollo-router/src/configuration/tests.rs
 expression: new_config
 ---
----
 supergraph:
-  listen: "1.2.3.4:5"
+  listen: 1.2.3.4:5
 telemetry:
   exporters:
     tracing:
@@ -16,4 +15,3 @@ telemetry:
     metrics:
       common:
         service_name: test_metrics
-

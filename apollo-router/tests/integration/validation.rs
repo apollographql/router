@@ -233,7 +233,7 @@ async fn variable_validation_mode_propagates_fully(
     }
 
     let mut router = IntegrationTest::builder()
-        .config(serde_yaml::to_string(&config).unwrap())
+        .config(yaml_serde::to_string(&config).unwrap())
         .supergraph(PathBuf::from(
             "tests/fixtures/supergraph_input_variables.graphql",
         ))

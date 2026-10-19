@@ -16,7 +16,6 @@ use apollo_configuration::provenance::Injection;
 use parking_lot::Mutex;
 use serde::de::MapAccess;
 use serde::de::Visitor;
-use serde_json::Value;
 use serde_json::json;
 
 use super::Configuration;
@@ -240,11 +239,10 @@ impl ExternalValues {
     /// snapshot of the providers, so they see the same expanded values.
     pub(crate) fn into_parser(mut self) -> Result<ConfigurationParser, ConfigError> {
         if self.dev_mode {
-            self.injections.extend(
-                DEV_MODE_SETTINGS
-                    .iter()
-                    .map(|(path, value)| Injection::cli_flag(path, Value::Bool(*value), "--dev")),
-            );
+            self.injections
+                .extend(DEV_MODE_SETTINGS.iter().map(|(path, value)| {
+                    Injection::cli_flag(path, serde_json::Value::Bool(*value), "--dev")
+                }));
         }
         let snapshot = self.snapshot();
         Ok(ConfigurationParser {
@@ -268,7 +266,10 @@ impl ExternalValues {
     /// Expands `text` with these values but without Router's schema, for testing expansion on
     /// documents that are not router configuration.
     #[cfg(test)]
-    pub(crate) fn expand_without_schema(mut self, text: &str) -> Result<Value, ConfigError> {
+    pub(crate) fn expand_without_schema(
+        mut self,
+        text: &str,
+    ) -> Result<serde_json::Value, ConfigError> {
         let snapshot = self.snapshot();
         let mut builder = ConfigParser::<ExpandedDocument>::builder().inject(self.injections);
         if let Some(snapshot) = snapshot {
@@ -341,7 +342,7 @@ impl ProviderSnapshot {
 /// Router's schema governs its validation and expansion coercion.
 #[derive(serde::Deserialize, schemars::JsonSchema)]
 #[serde(transparent)]
-struct ExpandedDocument(Value);
+struct ExpandedDocument(serde_json::Value);
 
 impl apollo_configuration::Validate for ExpandedDocument {}
 impl apollo_configuration::Configuration for ExpandedDocument {}
@@ -385,18 +386,23 @@ impl ConfigurationParser {
                 snapshot.resolved.lock().clear();
             }
         }
-        // Migration serialization must not hide duplicate keys in the original document.
-        super::yaml::check_duplicate_keys(text)?;
-        let file: Value = if text.trim().is_empty() {
-            Value::Object(Default::default())
+        // Parse into a YAML value first (to check duplicate keys), then convert to JSON value
+        let file: yaml_serde::Value = if text.trim().is_empty() {
+            yaml_serde::Value::Mapping(Default::default())
         } else {
-            serde_yaml::from_str(text).map_err(|error| {
+            yaml_serde::from_str(text).map_err(|error| {
                 ConfigurationError::InvalidConfiguration {
                     message: "failed to parse yaml",
                     error: error.to_string(),
                 }
             })?
         };
+        let file: serde_json::Value = yaml_serde::from_value(file).map_err(|error| {
+            ConfigurationError::InvalidConfiguration {
+                message: "failed to convert yaml value to json value",
+                error: error.to_string(),
+            }
+        })?;
         let mut config = match migrate(&file, migration) {
             Ok(None) => parse_document(text, self).map_err(|error| report_error(error, &file)),
             Ok(Some(migrated)) => parse_document(&migrated, self).map_err(|error| {
@@ -425,7 +431,10 @@ impl ConfigurationParser {
 /// The document with `migration` applied, serialized for parsing, or `None` when migration
 /// changes nothing. An error means migration itself failed, and the caller loads the text as
 /// written instead.
-fn migrate(file: &Value, migration: Migration) -> Result<Option<String>, ConfigurationError> {
+fn migrate(
+    file: &serde_json::Value,
+    migration: Migration,
+) -> Result<Option<String>, ConfigurationError> {
     let migrated = match migration {
         Migration::WithinMajor => upgrade_configuration(file, true, UpgradeMode::current_minor())?,
         Migration::WithinMajorQuietly => {
@@ -440,7 +449,7 @@ fn migrate(file: &Value, migration: Migration) -> Result<Option<String>, Configu
     if migrated == *file {
         return Ok(None);
     }
-    serde_yaml::to_string(&migrated).map(Some).map_err(|error| {
+    yaml_serde::to_string(&migrated).map(Some).map_err(|error| {
         ConfigurationError::MigrationFailure {
             error: error.to_string(),
         }
@@ -469,12 +478,12 @@ fn apply_dev_mode(config: &mut Configuration) {
     );
     let document = config
         .validated_yaml
-        .get_or_insert_with(|| Value::Object(Default::default()));
+        .get_or_insert_with(|| serde_json::Value::Object(Default::default()));
     let section = &mut document[NAME];
     if !section.is_object() {
         *section = json!({});
     }
-    section["all"] = Value::Bool(true);
+    section["all"] = serde_json::Value::Bool(true);
 }
 
 /// Parses `text` with `parser`, building it with `build` on first use. Building a parser compiles
@@ -554,7 +563,7 @@ pub(crate) fn parse_configuration(
 /// would change the operator's `file`. The upgrade is run here without logging any of its notices,
 /// and only on failure, so a configuration that loads pays nothing for it. A failing upgrade gives
 /// no hint.
-fn report_error(error: ConfigError, file: &Value) -> ConfigurationError {
+fn report_error(error: ConfigError, file: &serde_json::Value) -> ConfigurationError {
     if matches!(error, ConfigError::ValidationError(_)) && upgrade_would_change(file) {
         tracing::warn!(
             "Configuration had errors. It may be possible to update your configuration automatically. Execute 'router config upgrade --help' for more details. If you are upgrading from Router 2.x, please refer to the upgrade guide: {UPGRADE_GUIDE}"
@@ -564,7 +573,7 @@ fn report_error(error: ConfigError, file: &Value) -> ConfigurationError {
 }
 
 /// Whether the upgrade `router config upgrade` performs changes `file`.
-fn upgrade_would_change(file: &Value) -> bool {
+fn upgrade_would_change(file: &serde_json::Value) -> bool {
     upgrade_configuration_silently(file, UpgradeMode::Major).is_ok_and(|upgraded| upgraded != *file)
 }
 
@@ -723,7 +732,7 @@ mod tests {
         assert!(matches!(
             error,
             ConfigurationError::InvalidConfiguration {
-                message: "could not parse yaml",
+                message: "failed to parse yaml",
                 ..
             }
         ));
@@ -953,7 +962,7 @@ mod tests {
             STARTUP_MIGRATED_PLUGIN,
             include_str!("testdata/compat/plugin_config_error_after_migration.yaml"),
         ] {
-            let file: Value = serde_yaml::from_str(text).expect("test inputs are YAML");
+            let file: serde_json::Value = yaml_serde::from_str(text).expect("test inputs are YAML");
             let migrated = upgrade_configuration_silently(&file, UpgradeMode::current_minor())
                 .expect("test inputs migrate");
             assert_ne!(migrated, file, "startup no longer migrates:\n{text}");
@@ -1290,7 +1299,7 @@ mod tests {
     /// Configurations built with serde or the test builders go through the same rules.
     #[test]
     fn serde_and_builder_configurations_run_plugin_rules() {
-        let error = serde_yaml::from_str::<Configuration>(
+        let error = yaml_serde::from_str::<Configuration>(
             "plugins:\n  test.validated:\n    name: reserved\n",
         )
         .expect_err("the plugin's rule rejects the name")
@@ -1357,8 +1366,8 @@ mod tests {
             error.contains("this_key_does_not_exist_anywhere"),
             "{error}"
         );
-        // The key is on line 4 of the migrated copy and on line 5 of the file.
-        assert!(error.contains("[4:1]"), "{error}");
+        // The key is on line 3 of the migrated copy and on line 5 of the file.
+        assert!(error.contains("[3:1]"), "{error}");
         assert!(!error.contains("[5:1]"), "{error}");
     }
 

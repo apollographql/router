@@ -344,7 +344,7 @@ fn compose_from_config_inner(
     config_path: &Path,
 ) -> Result<composition::Supergraph<composition::Satisfiable>, CompositionFailure> {
     let config_str = read_input(config_path);
-    let config: SupergraphConfig = serde_yaml::from_str(&config_str).map_err(|e| {
+    let config: SupergraphConfig = yaml_serde::from_str(&config_str).map_err(|e| {
         CompositionFailure::from_errors(vec![CompositionError::MergeError {
             error: SingleFederationError::Internal {
                 message: format!("Failed to parse YAML config: {}", e),

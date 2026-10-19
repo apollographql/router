@@ -488,7 +488,7 @@ mod test {
     }
 
     fn config(config: &'static str) -> CostInstrumentsConfig {
-        let config: serde_json::Value = serde_yaml::from_str(config).expect("config");
+        let config: serde_json::Value = yaml_serde::from_str(config).expect("config");
         let supergraph_instruments = jsonpath_lib::select(&config, "$..supergraph");
 
         serde_json::from_value((*supergraph_instruments.unwrap().first().unwrap()).clone())

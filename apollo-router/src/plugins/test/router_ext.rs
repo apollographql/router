@@ -93,8 +93,8 @@ impl RequestTestExt<router::Request, router::Response> for RouterRequest {
             .expect("body value not deserializable");
         let expected_value = serde_json::to_value(value).expect("expected value not serializable");
         pretty_assertions::assert_eq!(
-            serde_yaml::to_string(&body_value).expect("could not serialize"),
-            serde_yaml::to_string(&expected_value).expect("could not serialize")
+            yaml_serde::to_string(&body_value).expect("could not serialize"),
+            yaml_serde::to_string(&expected_value).expect("could not serialize")
         );
     }
 
@@ -150,8 +150,8 @@ impl ResponseTestExt for RouterResponse {
             .expect("body value not deserializable");
         let expected_value = serde_json::to_value(value).expect("expected value not serializable");
         pretty_assertions::assert_eq!(
-            serde_yaml::to_string(&body_value).expect("could not serialize"),
-            serde_yaml::to_string(&expected_value).expect("could not serialize")
+            yaml_serde::to_string(&body_value).expect("could not serialize"),
+            yaml_serde::to_string(&expected_value).expect("could not serialize")
         );
     }
 
@@ -172,8 +172,8 @@ impl ResponseTestExt for RouterResponse {
         if !errors.iter().contains(error) {
             panic!(
                 "Expected error {}\nActual errors\n{}",
-                serde_yaml::to_string(error).expect("error"),
-                serde_yaml::to_string(errors).expect("errors")
+                yaml_serde::to_string(error).expect("error"),
+                yaml_serde::to_string(errors).expect("errors")
             )
         }
     }

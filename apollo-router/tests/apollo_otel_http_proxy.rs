@@ -242,7 +242,7 @@ async fn setup(
     *apollo_router::_private::APOLLO_GRAPH_REF.lock() = Some("test".to_string());
 
     let mut config: serde_json::Value =
-        serde_yaml::from_str(include_str!("fixtures/reports/apollo_reports.router.yaml"))
+        yaml_serde::from_str(include_str!("fixtures/reports/apollo_reports.router.yaml"))
             .expect("apollo_reports.router.yaml was invalid");
 
     config = jsonpath_lib::replace_with(config, "$.telemetry.apollo.endpoint", &mut |_| {
