@@ -3440,9 +3440,12 @@ fn filter_representations(
 /// `connectors.rs`) rebuilds the error list from the errors it can reindex — see
 /// [`reindex_entity_errors`], which keeps only errors whose path starts `_entities[i]`. Anything
 /// else (a top-level error, an error on a non-entity field) has no slot to be reindexed into and
-/// would be dropped by that rebuild, so it is carried across unchanged instead. An `_entities`
-/// error without an index is dropped. The subgraph
-/// loop handles these through `attribute_errors_to_entities`.
+/// would be dropped by that rebuild, so it is carried across unchanged instead.
+///
+/// An `_entities` error without an index is dropped. A connector reports one only for a failed
+/// batch request, which adds no entities to `_entities`, so the merge fails with
+/// `MalformedResponse` before its errors are rebuilt. The subgraph loop handles these errors
+/// through `attribute_errors_to_entities`.
 pub(super) fn non_entity_errors(errors: &[Error]) -> Vec<Error> {
     errors
         .iter()

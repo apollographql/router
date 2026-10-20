@@ -1,6 +1,6 @@
-### Entity errors without an index in their path are no longer dropped by response caching ([PR #10550](https://github.com/apollographql/router/pull/10550))
+### Subgraph entity errors without an index in their path are no longer dropped by response caching ([PR #10550](https://github.com/apollographql/router/pull/10550))
 
-Previously, when `response_cache` reassembled an `_entities` fetch, it kept only the errors it could match to a fetched entity by the index in their path, such as `["_entities", 0, "name"]`. Errors reported without that index were silently discarded. Clients saw nulled fields with no error explaining them, or, with `supergraph.enable_result_coercion_errors` on, only a `RESPONSE_VALIDATION_FAILED` "Missing field".
+Previously, when `response_cache` reassembled a subgraph's `_entities` fetch, it kept only the errors it could match to a fetched entity by the index in their path, such as `["_entities", 0, "name"]`. Errors reported without that index were silently discarded. Clients saw nulled fields with no error explaining them, or, with `supergraph.enable_result_coercion_errors` on, only a `RESPONSE_VALIDATION_FAILED` "Missing field".
 
 Some subgraph frameworks report entity errors without the index (`["_entities", "name"]`). These errors are now passed through, giving the same response as with caching disabled. If the fetch asked the subgraph for one entity, the error is attributed to that entity.
 
