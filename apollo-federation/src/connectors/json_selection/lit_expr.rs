@@ -37,7 +37,7 @@ use super::parser::SubSelection;
 use super::parser::key_start_char;
 use super::parser::nom_fail_message;
 use super::parser::parse_string_literal;
-use super::parser::raise_recursion_limit;
+use super::parser::propagate_recursion_error;
 use crate::connectors::spec::ConnectSpec;
 
 /// Keys that begin with (or are prefixes of) `true`/`false`/`null`, all of
@@ -237,7 +237,7 @@ impl LitExpr {
                 // We begin parsing the path at depth 1 rather than 0 because
                 // we've already parsed the initial literal at depth 0, so the
                 // subpath should obey the parsing rules for for depth > 0.
-                match raise_recursion_limit(PathList::parse_with_depth(suffix.clone(), 1))? {
+                match propagate_recursion_error(PathList::parse_with_depth(suffix.clone(), 1))? {
                     Ok((remainder, subpath)) => {
                         if matches!(subpath.as_ref(), PathList::Empty) {
                             return Ok((remainder, initial_literal));
@@ -466,7 +466,7 @@ impl LitExpr {
         let mut output = IndexMap::default();
 
         if let Ok((remainder, (key, value))) =
-            raise_recursion_limit(Self::parse_property(input.clone()))?
+            propagate_recursion_error(Self::parse_property(input.clone()))?
         {
             output.insert(key, value);
             input = remainder;
@@ -474,7 +474,7 @@ impl LitExpr {
             while let Ok((remainder, _)) = (spaces_or_comments, char(',')).parse(input.clone()) {
                 input = remainder;
                 if let Ok((remainder, (key, value))) =
-                    raise_recursion_limit(Self::parse_property(input.clone()))?
+                    propagate_recursion_error(Self::parse_property(input.clone()))?
                 {
                     output.insert(key, value);
                     input = remainder;
@@ -500,7 +500,7 @@ impl LitExpr {
 
     // LitProperty ::= Key ":" LitExpr | KeyPath (shorthand, V0_4+)
     fn parse_property(input: Span) -> ParseResult<(WithRange<Key>, WithRange<Self>)> {
-        let full_result = raise_recursion_limit(
+        let full_result = propagate_recursion_error(
             (Key::parse, spaces_or_comments, char(':'), Self::parse).parse(input.clone()),
         )?;
 
