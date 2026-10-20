@@ -3021,59 +3021,79 @@ fn inc_partial_overlap_explodes_abstract_type() {
     );
 }
 
-/// Entity fetches reached through different union members that select
-/// different fields stay separate, so each product is only asked for the
-/// field selected under its own member.
+/// Union members that each lead to the same entity type but select different
+/// fields on it get separate, type-conditioned entity fetches. A merged fetch
+/// would ask every entity for every member's fields.
 #[test]
-fn inc_union_member_entity_fetches_stay_type_conditioned() {
+fn inc_same_entity_type_under_union_members_fetched_per_member() {
     let planner = planner!(
         config = incremental_config(),
-        card: r#"
+        catalog: r#"
           type Query {
-            card: Card
+            shelf: Shelf
+            otherShelf: Shelf
           }
 
-          type Card @key(fields: "id") {
+          type Shelf @key(fields: "id") {
             id: ID!
-            components: [Component]
+            entries: [Entry]
           }
 
-          type Product @key(fields: "id") {
+          type Item @key(fields: "id") {
             id: ID!
           }
 
-          union Component = ComponentA | ComponentB
+          union Entry = Book | Film | Album
 
-          type ComponentA {
-            product: Product
+          type Book {
+            isbn: String
+            item: Item
           }
 
-          type ComponentB {
-            product: Product
+          type Film {
+            studio: String
+            item: Item
+          }
+
+          type Album {
+            label: String
+            item: Item
           }
         "#,
-        product: r#"
-          type Product @key(fields: "id") {
+        inventory: r#"
+          type Item @key(fields: "id") {
             id: ID!
-            a: String!
-            b: String!
+            pages: Int!
+            minutes: Int!
+            tracks: Int!
           }
         "#,
     );
+
+    // Every member selected, along with the key.
     assert_plan!(
         &planner,
         r#"
           {
-            card {
-              components {
-                ... on ComponentA {
-                  product {
-                    a
+            shelf {
+              entries {
+                __typename
+                ... on Book {
+                  item {
+                    id
+                    pages
                   }
                 }
-                ... on ComponentB {
-                  product {
-                    b
+                ... on Film {
+                  item {
+                    id
+                    minutes
+                  }
+                }
+                ... on Album {
+                  item {
+                    id
+                    tracks
                   }
                 }
               }
@@ -3081,64 +3101,357 @@ fn inc_union_member_entity_fetches_stay_type_conditioned() {
           }
         "#,
         @r###"
-        QueryPlan {
-          Sequence {
-            Fetch(service: "card") {
-              {
-                card {
-                  components {
+    QueryPlan {
+      Sequence {
+        Fetch(service: "catalog") {
+          {
+            shelf {
+              entries {
+                __typename
+                ... on Album {
+                  item {
                     __typename
-                    ... on ComponentA {
-                      product {
-                        __typename
-                        id
-                      }
-                    }
-                    ... on ComponentB {
-                      product {
-                        __typename
-                        id
-                      }
-                    }
+                    id
+                  }
+                }
+                ... on Film {
+                  item {
+                    __typename
+                    id
+                  }
+                }
+                ... on Book {
+                  item {
+                    __typename
+                    id
                   }
                 }
               }
-            },
-            Parallel {
-              Flatten(path: "card.components.@|[ComponentB].product") {
-                Fetch(service: "product") {
-                  {
-                    ... on Product {
-                      __typename
-                      id
-                    }
-                  } =>
-                  {
-                    ... on Product {
-                      b
-                    }
-                  }
-                },
-              },
-              Flatten(path: "card.components.@|[ComponentA].product") {
-                Fetch(service: "product") {
-                  {
-                    ... on Product {
-                      __typename
-                      id
-                    }
-                  } =>
-                  {
-                    ... on Product {
-                      a
-                    }
-                  }
-                },
-              },
+            }
+          }
+        },
+        Parallel {
+          Flatten(path: "shelf.entries.@|[Book].item") {
+            Fetch(service: "inventory") {
+              {
+                ... on Item {
+                  __typename
+                  id
+                }
+              } =>
+              {
+                ... on Item {
+                  pages
+                }
+              }
             },
           },
-        }
-        "###
+          Flatten(path: "shelf.entries.@|[Film].item") {
+            Fetch(service: "inventory") {
+              {
+                ... on Item {
+                  __typename
+                  id
+                }
+              } =>
+              {
+                ... on Item {
+                  minutes
+                }
+              }
+            },
+          },
+          Flatten(path: "shelf.entries.@|[Album].item") {
+            Fetch(service: "inventory") {
+              {
+                ... on Item {
+                  __typename
+                  id
+                }
+              } =>
+              {
+                ... on Item {
+                  tracks
+                }
+              }
+            },
+          },
+        },
+      },
+    }
+    "###
+    );
+
+    // No key or __typename in the operation.
+    assert_plan!(
+        &planner,
+        r#"
+          {
+            shelf {
+              entries {
+                ... on Book {
+                  item {
+                    pages
+                  }
+                }
+                ... on Film {
+                  item {
+                    minutes
+                  }
+                }
+                ... on Album {
+                  item {
+                    tracks
+                  }
+                }
+              }
+            }
+          }
+        "#,
+        @r###"
+    QueryPlan {
+      Sequence {
+        Fetch(service: "catalog") {
+          {
+            shelf {
+              entries {
+                __typename
+                ... on Book {
+                  item {
+                    __typename
+                    id
+                  }
+                }
+                ... on Film {
+                  item {
+                    __typename
+                    id
+                  }
+                }
+                ... on Album {
+                  item {
+                    __typename
+                    id
+                  }
+                }
+              }
+            }
+          }
+        },
+        Parallel {
+          Flatten(path: "shelf.entries.@|[Album].item") {
+            Fetch(service: "inventory") {
+              {
+                ... on Item {
+                  __typename
+                  id
+                }
+              } =>
+              {
+                ... on Item {
+                  tracks
+                }
+              }
+            },
+          },
+          Flatten(path: "shelf.entries.@|[Film].item") {
+            Fetch(service: "inventory") {
+              {
+                ... on Item {
+                  __typename
+                  id
+                }
+              } =>
+              {
+                ... on Item {
+                  minutes
+                }
+              }
+            },
+          },
+          Flatten(path: "shelf.entries.@|[Book].item") {
+            Fetch(service: "inventory") {
+              {
+                ... on Item {
+                  __typename
+                  id
+                }
+              } =>
+              {
+                ... on Item {
+                  pages
+                }
+              }
+            },
+          },
+        },
+      },
+    }
+    "###
+    );
+
+    // Another root field reaching the same union.
+    assert_plan!(
+        &planner,
+        r#"
+          {
+            otherShelf {
+              entries {
+                __typename
+                ... on Book {
+                  item {
+                    pages
+                  }
+                }
+                ... on Film {
+                  item {
+                    minutes
+                  }
+                }
+                ... on Album {
+                  item {
+                    tracks
+                  }
+                }
+              }
+            }
+          }
+        "#,
+        @r###"
+    QueryPlan {
+      Sequence {
+        Fetch(service: "catalog") {
+          {
+            otherShelf {
+              entries {
+                __typename
+                ... on Book {
+                  item {
+                    __typename
+                    id
+                  }
+                }
+                ... on Film {
+                  item {
+                    __typename
+                    id
+                  }
+                }
+                ... on Album {
+                  item {
+                    __typename
+                    id
+                  }
+                }
+              }
+            }
+          }
+        },
+        Parallel {
+          Flatten(path: "otherShelf.entries.@|[Album].item") {
+            Fetch(service: "inventory") {
+              {
+                ... on Item {
+                  __typename
+                  id
+                }
+              } =>
+              {
+                ... on Item {
+                  tracks
+                }
+              }
+            },
+          },
+          Flatten(path: "otherShelf.entries.@|[Film].item") {
+            Fetch(service: "inventory") {
+              {
+                ... on Item {
+                  __typename
+                  id
+                }
+              } =>
+              {
+                ... on Item {
+                  minutes
+                }
+              }
+            },
+          },
+          Flatten(path: "otherShelf.entries.@|[Book].item") {
+            Fetch(service: "inventory") {
+              {
+                ... on Item {
+                  __typename
+                  id
+                }
+              } =>
+              {
+                ... on Item {
+                  pages
+                }
+              }
+            },
+          },
+        },
+      },
+    }
+    "###
+    );
+
+    // One member alone has nothing to merge with.
+    assert_plan!(
+        &planner,
+        r#"
+          {
+            shelf {
+              entries {
+                ... on Book {
+                  item {
+                    id
+                    pages
+                  }
+                }
+              }
+            }
+          }
+        "#,
+        @r###"
+    QueryPlan {
+      Sequence {
+        Fetch(service: "catalog") {
+          {
+            shelf {
+              entries {
+                __typename
+                ... on Book {
+                  item {
+                    __typename
+                    id
+                  }
+                }
+              }
+            }
+          }
+        },
+        Flatten(path: "shelf.entries.@|[Book].item") {
+          Fetch(service: "inventory") {
+            {
+              ... on Item {
+                __typename
+                id
+              }
+            } =>
+            {
+              ... on Item {
+                pages
+              }
+            }
+          },
+        },
+      },
+    }
+    "###
     );
 }
 

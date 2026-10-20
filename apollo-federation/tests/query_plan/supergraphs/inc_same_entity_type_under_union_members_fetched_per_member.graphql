@@ -1,4 +1,4 @@
-# Composed from subgraphs with hash: 5caf49d094170adc1b990ad392f9264a33a19910
+# Composed from subgraphs with hash: fd3003ebaf0b1e08d2cff9dc84efb218e37fc062
 schema
   @link(url: "https://specs.apollo.dev/link/v1.0")
   @link(url: "https://specs.apollo.dev/join/v0.5", for: EXECUTION)
@@ -22,29 +22,42 @@ directive @join__unionMember(graph: join__Graph!, member: String!) repeatable on
 
 directive @link(url: String, as: String, for: link__Purpose, import: [link__Import]) repeatable on SCHEMA
 
-type Card
-  @join__type(graph: CARD, key: "id")
+type Album
+  @join__type(graph: CATALOG)
+{
+  label: String
+  item: Item
+}
+
+type Book
+  @join__type(graph: CATALOG)
+{
+  isbn: String
+  item: Item
+}
+
+union Entry
+  @join__type(graph: CATALOG)
+  @join__unionMember(graph: CATALOG, member: "Book")
+  @join__unionMember(graph: CATALOG, member: "Film")
+  @join__unionMember(graph: CATALOG, member: "Album")
+ = Book | Film | Album
+
+type Film
+  @join__type(graph: CATALOG)
+{
+  studio: String
+  item: Item
+}
+
+type Item
+  @join__type(graph: CATALOG, key: "id")
+  @join__type(graph: INVENTORY, key: "id")
 {
   id: ID!
-  components: [Component]
-}
-
-union Component
-  @join__type(graph: CARD)
-  @join__unionMember(graph: CARD, member: "ComponentA")
-  @join__unionMember(graph: CARD, member: "ComponentB")
- = ComponentA | ComponentB
-
-type ComponentA
-  @join__type(graph: CARD)
-{
-  product: Product
-}
-
-type ComponentB
-  @join__type(graph: CARD)
-{
-  product: Product
+  pages: Int! @join__field(graph: INVENTORY)
+  minutes: Int! @join__field(graph: INVENTORY)
+  tracks: Int! @join__field(graph: INVENTORY)
 }
 
 input join__ContextArgument {
@@ -61,8 +74,8 @@ scalar join__FieldSet
 scalar join__FieldValue
 
 enum join__Graph {
-  CARD @join__graph(name: "card", url: "none")
-  PRODUCT @join__graph(name: "product", url: "none")
+  CATALOG @join__graph(name: "catalog", url: "none")
+  INVENTORY @join__graph(name: "inventory", url: "none")
 }
 
 scalar link__Import
@@ -79,18 +92,17 @@ enum link__Purpose {
   EXECUTION
 }
 
-type Product
-  @join__type(graph: CARD, key: "id")
-  @join__type(graph: PRODUCT, key: "id")
+type Query
+  @join__type(graph: CATALOG)
+  @join__type(graph: INVENTORY)
 {
-  id: ID!
-  a: String! @join__field(graph: PRODUCT)
-  b: String! @join__field(graph: PRODUCT)
+  shelf: Shelf @join__field(graph: CATALOG)
+  otherShelf: Shelf @join__field(graph: CATALOG)
 }
 
-type Query
-  @join__type(graph: CARD)
-  @join__type(graph: PRODUCT)
+type Shelf
+  @join__type(graph: CATALOG, key: "id")
 {
-  card: Card @join__field(graph: CARD)
+  id: ID!
+  entries: [Entry]
 }
