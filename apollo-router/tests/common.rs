@@ -417,12 +417,10 @@ pub struct IntegrationTest {
     router_location: PathBuf,
     stdio_tx: tokio::sync::mpsc::Sender<String>,
     stdio_rx: tokio::sync::mpsc::Receiver<String>,
-    stderr_tx: tokio::sync::mpsc::Sender<String>,
-    /// Lines written to the router process's stderr (e.g. a top-level
-    /// `anyhow::Error` from `main()`, printed via `eprintln!` rather than
-    /// through the tracing logger that stdout carries). Continuously
-    /// appended by a background task so reading it never backpressures the
-    /// child process; see `stderr_log_contains` / `wait_for_stderr_message`.
+    /// Lines the most recently started router process wrote to stderr (e.g. a
+    /// top-level `anyhow::Error` from `main()`, printed via `eprintln!` rather
+    /// than through the tracing logger that stdout carries). Replaced on each
+    /// `start()`; see `stderr_log_contains` / `wait_for_stderr_message`.
     stderr_logs: Arc<Mutex<Vec<String>>>,
     apollo_otlp_metrics_rx: tokio::sync::mpsc::Receiver<ExportMetricsServiceRequest>,
     collect_stdio: Option<(tokio::sync::oneshot::Sender<String>, regex::Regex)>,
@@ -926,19 +924,6 @@ impl IntegrationTest {
         fs::copy(&supergraph, &test_schema_location).expect("could not write schema");
 
         let (stdio_tx, stdio_rx) = tokio::sync::mpsc::channel(2000);
-        // we separate stderr and stdio (previously they were both just handled by a single
-        // channel) to avoid congestion in one to contend the other
-
-        let (stderr_tx, mut stderr_rx) = tokio::sync::mpsc::channel::<String>(2000);
-        // We want to continually drain stderr, not let it build up backpressure, so this
-        // appends to a shared buffer rather than waiting for a test to read it.
-        let stderr_logs = Arc::new(Mutex::new(Vec::new()));
-        let stderr_logs_writer = stderr_logs.clone();
-        task::spawn(async move {
-            while let Some(line) = stderr_rx.recv().await {
-                stderr_logs_writer.lock().push(line);
-            }
-        });
         let collect_stdio = collect_stdio.map(|sender| {
             let version_line_re = regex::Regex::new("Apollo Router v[^ ]+ ").unwrap();
             (sender, version_line_re)
@@ -1010,8 +995,7 @@ impl IntegrationTest {
             test_schema_location,
             stdio_tx,
             stdio_rx,
-            stderr_tx,
-            stderr_logs,
+            stderr_logs: Default::default(),
             apollo_otlp_metrics_rx,
             collect_stdio,
             _subgraphs: subgraphs,
@@ -1303,13 +1287,15 @@ impl IntegrationTest {
         });
 
         // we separate out stderr to avoid congestion there affecting stdout; previous to this, we
-        // had both stdout and stderr in the same channel, allowing one's congestion to swamp the other
-        let stderr_tx = self.stderr_tx.clone();
+        // had both stdout and stderr in the same channel, allowing one's congestion to swamp the other.
+        // Each start gets a fresh buffer, so lines from an earlier router process can't satisfy a
+        // wait meant for this one.
+        let stderr_logs = Arc::new(Mutex::new(Vec::new()));
+        self.stderr_logs = stderr_logs.clone();
         task::spawn(async move {
             let mut lines = stderr_reader.lines();
             while let Ok(Some(line)) = lines.next_line().await {
-                // try_send to never block - if the channel is full, just drop the line
-                let _ = stderr_tx.try_send(line);
+                stderr_logs.lock().push(line);
             }
         });
         self.router = Some(router);
