@@ -4,6 +4,8 @@
 use std::collections::HashMap;
 use std::sync::Arc;
 
+use apollo_cache_memory::InMemoryConfig;
+use apollo_cache_memory::ServiceBuilderExt as _;
 use apollo_federation::query_plan::query_planner::QueryPlanner;
 use indexmap::IndexMap;
 use tower::Service;
@@ -22,6 +24,7 @@ use crate::batching::JoinBatchRequestsLayer;
 use crate::batching::SplitBatchRequestLayer;
 use crate::cache::DeduplicatingCache;
 use crate::cache::redis::RedisCacheStorage;
+use crate::compute_job::MaybeBackPressureError;
 use crate::introspection;
 use crate::introspection::IntrospectionService;
 use crate::layers::DEFAULT_BUFFER_SIZE;
@@ -74,7 +77,6 @@ use crate::services::layers::persisted_queries::ExpandIdsLayer;
 use crate::services::layers::persisted_queries::PersistedQueryExpander;
 use crate::services::layers::static_page::StaticPageLayer;
 use crate::services::query_parsing;
-use crate::services::query_parsing::cache::QueryParsingCacheLayer;
 use crate::services::query_parsing::recursive_selections_limit::LimitRecursiveSelectionLayer;
 use crate::services::query_parsing::service::QueryParsingService;
 use crate::services::query_planner;
@@ -87,6 +89,7 @@ use crate::services::subgraph::service::BufferedSubgraphService;
 use crate::services::supergraph;
 use crate::services::supergraph::service::SupergraphService;
 use crate::spec::Schema;
+use crate::spec::SpecError;
 
 /// Builds the query-plan cache around a pre-connected Redis client and registers its
 /// gauges.
@@ -495,8 +498,40 @@ pub(crate) fn build_query_parsing_service(
     let max_recursive_selections = configuration.limits.router.max_recursive_selections;
     let warn_only = configuration.limits.router.warn_only;
 
+    let cache_config = InMemoryConfig::<512> {
+        limit: u64::try_from(cache_limit.get()).expect("usize should fit in u64"),
+    };
+
+    /// Only `Ok` responses are cached, and we want to cache parse errors, so they have to be
+    /// double-Resulted
+    fn split_cacheable_parse_error(
+        result: Result<query_parsing::ParsedDocument, query_parsing::ServiceError>,
+    ) -> Result<Result<query_parsing::ParsedDocument, SpecError>, query_parsing::ServiceError> {
+        match result {
+            Ok(document) => Ok(Ok(document)),
+            Err(MaybeBackPressureError::PermanentError(err)) => Ok(Err(err)),
+            Err(err) => Err(err),
+        }
+    }
+
+    /// The inverse of [`split_cacheable_parse_error`].
+    fn flatten_cacheable_parse_error(
+        result: Result<
+            Result<query_parsing::ParsedDocument, SpecError>,
+            query_parsing::ServiceError,
+        >,
+    ) -> Result<query_parsing::ParsedDocument, query_parsing::ServiceError> {
+        match result {
+            Ok(Ok(document)) => Ok(document),
+            Ok(Err(err)) => Err(MaybeBackPressureError::PermanentError(err)),
+            Err(err) => Err(err),
+        }
+    }
+
     ServiceBuilder::new()
-        .layer(QueryParsingCacheLayer::new(cache_limit))
+        .map_result(flatten_cacheable_parse_error)
+        .cache_in_memory("query_parsing", cache_config)
+        .map_result(split_cacheable_parse_error)
         .layer(LimitRecursiveSelectionLayer::new(
             max_recursive_selections,
             warn_only,

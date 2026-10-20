@@ -16,7 +16,6 @@ use crate::compute_job::MaybeBackPressureError;
 use crate::spec::QueryHash;
 use crate::spec::SpecError;
 
-pub(crate) mod cache;
 pub(crate) mod recursive_selections_limit;
 pub(crate) mod service;
 
