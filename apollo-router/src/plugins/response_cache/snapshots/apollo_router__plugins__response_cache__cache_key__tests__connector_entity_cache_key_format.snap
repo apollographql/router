@@ -1,0 +1,5 @@
+---
+source: apollo-router/src/plugins/response_cache/cache_key.rs
+expression: hash
+---
+version:1.2:connector:mysubgraph.my_api:type:User:representation:f6e8c0c4f36d6c0d11330be52b76316559e0390ff75fd002ed3fa73f9b6470f7:hash:abc123:data:def456

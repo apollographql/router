@@ -137,6 +137,7 @@ mod tests {
     use crate::services::SubgraphRequest;
     use crate::services::SubgraphResponse;
     use crate::services::connector::request_service;
+    use crate::services::connector::request_service::TransportOutcome;
 
     /// The response a 100ms timeout gives for a subgraph that answers after `delay`.
     async fn respond_after(delay: Duration) -> Result<SubgraphResponse, BoxError> {
@@ -195,8 +196,8 @@ mod tests {
     async fn late_source_response_becomes_gateway_timeout() {
         let response = source_responds_after(Duration::from_secs(1)).await.unwrap();
         assert!(matches!(
-            response.transport_result,
-            Err(Error::GatewayTimeout)
+            response.transport_outcome,
+            TransportOutcome::Error(Error::GatewayTimeout)
         ));
     }
 
@@ -205,6 +206,9 @@ mod tests {
         let response = source_responds_after(Duration::from_millis(10))
             .await
             .unwrap();
-        assert!(response.transport_result.is_ok());
+        assert!(!matches!(
+            response.transport_outcome,
+            TransportOutcome::Error(_)
+        ));
     }
 }

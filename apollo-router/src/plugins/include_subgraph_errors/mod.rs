@@ -1,6 +1,6 @@
 // Declare modules
-mod config;
-mod effective_config;
+pub(crate) mod config;
+pub(crate) mod effective_config;
 #[cfg(test)]
 mod tests;
 
@@ -67,8 +67,21 @@ where
 
     fn layer(&self, inner: S) -> Self::Service {
         let config = self.config.clone();
+        let request_config = self.config.clone();
 
         inner
+            .map_request(move |req: supergraph::Request| {
+                // On the request because the reader runs before the
+                // response hook exists: `declared_error_for_client` in the
+                // connectors plugin consults this while mapping a connector
+                // response. It also needs this because declared errors ride
+                // in `extensions`, which the hook below never walks. Missing
+                // config drops the error rather than leaking it.
+                req.context
+                    .extensions()
+                    .with_lock(|lock| lock.insert::<Arc<EffectiveConfig>>(request_config.clone()));
+                req
+            })
             .map_response(move |response: supergraph::Response| {
                 response.map_stream(move |mut graphql_response: graphql::Response| {
                     for error in &mut graphql_response.errors {
@@ -203,7 +216,11 @@ impl Plugin for IncludeSubgraphErrors {
 }
 
 impl IncludeSubgraphErrors {
-    fn process_error(config: &Arc<EffectiveConfig>, error: &mut Error) {
+    /// Apply the effective configuration to one error: redact it fully when the
+    /// subgraph's errors are excluded, otherwise redact the message and filter
+    /// the extension keys as configured. Removes the private extension that
+    /// carries the subgraph name.
+    pub(crate) fn process_error(config: &Arc<EffectiveConfig>, error: &mut Error) {
         if let Some(subgraph_name) = error.subgraph_name() {
             // Get the effective config for this specific subgraph, or use default
             let effective_config = config

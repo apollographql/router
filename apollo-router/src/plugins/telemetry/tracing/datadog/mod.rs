@@ -23,8 +23,6 @@ use opentelemetry_sdk::trace::SpanExporter;
 use opentelemetry_sdk::trace::span_processor_with_async_runtime::BatchSpanProcessor;
 use opentelemetry_semantic_conventions::resource::SERVICE_NAME;
 use opentelemetry_semantic_conventions::resource::SERVICE_VERSION;
-use schemars::JsonSchema;
-use serde::Deserialize;
 pub(crate) use span_processor::DatadogSpanProcessor;
 use tower::BoxError;
 
@@ -72,27 +70,26 @@ const DD_TRACE_AGENT_URL: &str = "DD_TRACE_AGENT_URL";
 const DD_AGENT_HOST: &str = "DD_AGENT_HOST";
 const DD_TRACE_AGENT_PORT: &str = "DD_TRACE_AGENT_PORT";
 
-#[derive(Debug, Clone, Deserialize, JsonSchema, serde_derive_default::Default, PartialEq)]
-#[serde(deny_unknown_fields)]
+#[apollo_configuration::configuration]
+#[derive(serde_derive_default::Default, PartialEq)]
 #[schemars(rename = "DatadogConfig")]
 pub(crate) struct Config {
     /// Enable datadog
+    #[config(required)]
     pub(crate) enabled: bool,
 
     /// The endpoint to send to
-    #[serde(default)]
     endpoint: UriEndpoint,
 
     /// batch processor configuration
-    #[serde(default)]
     batch_processor: BatchProcessorConfig,
 
     /// Enable datadog span mapping for span name and resource name.
-    #[serde(default = "default_true")]
+    #[config(default = true)]
     enable_span_mapping: bool,
 
     /// Fixes the span names, this means that the APM view will show the original span names in the operation dropdown.
-    #[serde(default = "default_true")]
+    #[config(default = true)]
     fixed_span_names: bool,
 
     /// Custom mapping to be used as the resource field in spans, defaults to:
@@ -102,12 +99,11 @@ pub(crate) struct Config {
     /// subgraph -> subgraph.name
     /// subgraph_request -> subgraph.name
     /// http_request -> http.route
-    #[serde(default)]
     resource_mapping: HashMap<String, String>,
 
     /// Which spans will be eligible for span stats to be collected for viewing in the APM view.
     /// Defaults to true for `request`, `router`, `query_parsing`, `supergraph`, `execution`, `query_planning`, `subgraph`, `subgraph_request`, `connect`, `connect_request` and `http_request`.
-    #[serde(default = "default_span_metrics")]
+    #[config(default = default_span_metrics())]
     span_metrics: HashMap<String, bool>,
 
     /// Per-exporter sampler.
@@ -122,7 +118,7 @@ pub(crate) struct Config {
     ///
     /// Ignored when `preview_datadog_agent_sampling` is enabled — in that mode the Datadog agent
     /// controls sampling via `sampling.priority` and all spans must be forwarded unfiltered.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub(crate) sampler: Option<SamplerOption>,
 }
 
@@ -132,10 +128,6 @@ fn default_span_metrics() -> HashMap<String, bool> {
         map.insert(name.to_string(), true);
     }
     map
-}
-
-fn default_true() -> bool {
-    true
 }
 
 impl Config {

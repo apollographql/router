@@ -169,21 +169,30 @@ Subgraphs and connector sources are configured independently: an `all` block und
 Every request to a subgraph or connector source passes through two phases, and the circuit sits between them:
 
 - **Admission** is the router deciding whether to send the request at all: a traffic shaping [rate limit](./traffic-shaping#rate-limiting) and the load shedding in front of it, and a connector's [`max_requests`](/graphos/routing/connectors/limits) limit. These run before the circuit, so a request they turn away never reaches it and isn't recorded, as either a failure or a success. The router's own throttling can't open the circuit of a healthy target, and a throttled request can't stand in for the probe that closes one.
-- **Execution** is everything the router does to fulfill an admitted request: [coprocessors](/router/customizations/coprocessor), [rhai scripts](/graphos/routing/customization/rhai), the [response cache](./caching/response-caching), your own [native Rust plugins](/graphos/routing/customization/native), and the call to the target, all bounded by the target's [traffic shaping timeout](./traffic-shaping#timeouts). These run behind the circuit, so the circuit judges its target by the outcome of all of them together.
+- **Execution** is everything the router does to fulfill an admitted request: [coprocessors](/router/customizations/coprocessor), [rhai scripts](/graphos/routing/customization/rhai), the [response cache](./caching/response-caching), except for a connector's entity lookups (see [Cached connector entities](#cached-connector-entities)), your own [native Rust plugins](/graphos/routing/customization/native), and the call to the target, all bounded by the target's [traffic shaping timeout](./traffic-shaping#timeouts). These run behind the circuit, so the circuit judges its target by the outcome of all of them together.
 
 Identical requests joined by [query deduplication](./traffic-shaping#query-deduplication) are one call to the target, so they're recorded once, and each of them receives the same answer.
 
 The router records a request as a failure when:
 
-- The response carries a `5xx` or `429` HTTP status, whether the target sent it or a coprocessor, rhai script, or native plugin built it. A coprocessor `break` is judged by the status it breaks with. A `429` means the target is overloaded, which is what a circuit protects it from.
+- The response carries a `5xx` or `429` HTTP status. A `429` means the target is overloaded, which is what a circuit protects it from.
 - The request fails with an error. For example, the router can't connect, the connection drops before the whole response arrives, or a coprocessor can't be reached.
 - The request runs past its traffic shaping timeout.
 
 Timeouts count because a target that has stopped responding never returns an error of its own, so the timeout is the only evidence the circuit gets. They count only for a subgraph or connector source that traffic shaping configures, in `traffic_shaping.all`, `traffic_shaping.subgraphs`, `traffic_shaping.connector.all`, or `traffic_shaping.connector.sources`; its timeout is 30 seconds unless that block sets another. Without one, nothing ends a request to a target that has stopped responding except the router-level timeout or the client giving up, and neither of those is recorded. The timeout covers the whole of execution, including time spent in coprocessors and rhai scripts before the request reaches the target.
 
-Everything else, including any other `4xx` response and GraphQL errors in an otherwise successful response, counts as a success. A `4xx` usually says something about the request rather than the health of the target. A response cache hit counts as a success too.
+Everything else, including any other `4xx` response and GraphQL errors in an otherwise successful response, counts as a success. A `4xx` usually says something about the request rather than the health of the target.
 
-Some requests end without the router recording anything, because the target might still have answered them: the client disconnects, the router-level request timeout fires, the operation stops waiting after another fetch fails, or the router shuts down. If a recovery probe ends this way, the circuit stays half-open and the next request becomes the probe, without another wait.
+Some responses say nothing about the target's health, so the router records no outcome for them, whatever their status:
+
+- A coprocessor or rhai script turns the request away before it's sent: a coprocessor `break`, or a rhai script that throws from a subgraph request callback. For example, a coprocessor that rejects unauthenticated requests with a `401` can't change the circuit's state or its failure rate, however many requests it rejects.
+- A native plugin fails a connector request with `into_error_response`.
+- The router answers the request itself: the response cache returns a cached response or rejects an invalid `Cache-Control` header, or demand control rejects the request as too expensive.
+- A [file upload](/graphos/routing/operations/file-upload) fails part way through because the client's upload stream failed while the router was forwarding it to the subgraph.
+
+A `5xx` or `429` from the target still counts as a failure when a coprocessor, rhai script, or native plugin let the request through or ran on its response. A native plugin that answers a subgraph request itself, instead of sending it on, is judged by the status of its answer, like a response from the subgraph.
+
+Some requests end without the router recording anything, because the target might still have answered them: the client disconnects, the router-level request timeout fires, the operation stops waiting after another fetch fails, or the router shuts down. If a recovery probe ends this way, or with one of the responses above that say nothing about the target's health, the circuit stays half-open and the next request becomes the probe, without another wait.
 
 A mapping-only connector (a `@connect` with no `http` argument) never makes a request, so it's invisible to the circuit and keeps being served while the circuit is open, even when the connector names a `@source`.
 
@@ -193,7 +202,7 @@ A subgraph fetch that joins a [subgraph batch](/graphos/routing/performance/quer
 
 Because timeouts count as failures, a traffic shaping timeout shorter than a target's normal response time opens its circuit even while the target is healthy. Time a slow coprocessor or rhai script spends before the request reaches the target counts toward that timeout too. Size the timeout, `consecutive_failures`, and `failure_rate_threshold` with that in mind. If the router-level request timeout isn't longer than a target's timeout, that target's timeouts never count.
 
-For the same reason, a coprocessor that is unreachable or breaks requests with a `5xx` status, a rhai script that throws, or a native plugin that returns errors counts against the circuit of every target it runs for. This applies to connectors too: a coprocessor that breaks a connector request is judged by the status it breaks with, so a `401` break counts as a success and a `503` break as a failure. A native plugin that fails a connector request with `into_error_response` gives it no status, so that counts as a failure.
+For the same reason, a coprocessor that is unreachable, a rhai script that throws from a response callback, or a native plugin whose service fails the request with an error (rather than breaking it) counts against the circuit of every target it runs for.
 
 </Note>
 
@@ -217,7 +226,7 @@ Requests turned away by admission never reach the circuit, so they don't appear 
 
 ## What clients see
 
-While a circuit is open, the affected fetch fails immediately without the router making a request. Coprocessors, rhai scripts, native plugins, and the response cache don't run for a rejected fetch, so a response the cache holds isn't served while the circuit is open. The traffic shaping rate limit still applies first, so a request it turns away gets its own error instead. The router adds an error to the GraphQL response with the extension code `REQUEST_CIRCUIT_BREAKER_OPEN`:
+While a circuit is open, the affected fetch fails immediately without the router making a request. Coprocessors, rhai scripts, native plugins, and the response cache don't run for a rejected fetch, so a response the cache holds isn't served while the circuit is open. Connector entity fetches are the exception; see [Cached connector entities](#cached-connector-entities). The traffic shaping rate limit still applies first, so a request it turns away gets its own error instead. The router adds an error to the GraphQL response with the extension code `REQUEST_CIRCUIT_BREAKER_OPEN`:
 
 ```json
 {
@@ -239,6 +248,18 @@ Whether the client receives partial data alongside the error depends on the quer
 The error is attached to the subgraph response, so [`include_subgraph_errors`](/router/configuration/subgraph-error-inclusion) applies to it like any other subgraph error. With the default configuration, your client sees `Subgraph errors redacted` instead of the message and code above.
 
 </Note>
+
+### Cached connector entities
+
+The router looks up a connector's entities in the [response cache](/graphos/routing/performance/caching/response-caching/overview) before the request reaches the source's circuit. While a connector source's circuit is open:
+
+- An entity fetch whose entities are all cached is served from the cache, with no error.
+- An entity fetch whose entities are only partly cached returns the cached entities. Each entity that isn't cached is `null`, with a `REQUEST_CIRCUIT_BREAKER_OPEN` error.
+- Every other request the router sends to the source fails with `REQUEST_CIRCUIT_BREAKER_OPEN`, including a root field fetch whose response is cached.
+
+A fully cached entity fetch never reaches the circuit, whether the circuit is open or closed. It isn't recorded as a success or a failure, isn't counted in `apollo.qos.circuit_breaker.requests`, opens no `apollo.qos.circuit_breaker` span, and can't be the probe that closes the circuit. In a partly cached fetch, only the request for the uncached entities reaches the circuit, and it's recorded like any other request.
+
+An entity counts as cached only when the response cache would also serve it with the circuit closed. If the cache is skipped, for example because caching is turned off for the source or the client sent `Cache-Control: no-cache`, the request goes to the source's circuit and is rejected.
 
 ## Alternatives
 

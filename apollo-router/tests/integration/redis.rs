@@ -634,7 +634,6 @@ async fn test_redis_emits_configuration_error_metric() {
                 "metrics": {
                     "prometheus": {
                         "enabled": true,
-                        "listen": "127.0.0.1:0",
                         "path": "/metrics",
                     },
                 },

@@ -231,6 +231,7 @@ async fn call_http(
                 .status_code(StatusCode::INTERNAL_SERVER_ERROR)
                 .context(context)
                 .extensions(Object::default())
+                .id(subgraph_request_id)
                 .build());
         }
     };
@@ -463,6 +464,13 @@ mod tests {
         }
 
         serve(listener, handle).await.unwrap();
+    }
+
+    // Closes every connection without responding, so fetches fail at the transport level.
+    async fn emulate_subgraph_closing_connections(listener: TcpListener) {
+        while let Ok((stream, _)) = listener.accept().await {
+            drop(stream);
+        }
     }
 
     // starts a local server emulating a subgraph returning status code 401
@@ -817,7 +825,9 @@ mod tests {
             enabled: true,
             mode: SubscriptionModeConfig {
                 callback: Some(CallbackMode {
-                    public_url: Url::parse("http://localhost:4000/testcallback").unwrap(),
+                    public_url: Url::parse("http://localhost:4000/testcallback")
+                        .unwrap()
+                        .into(),
                     listen: None,
                     path: Some("/testcallback".to_string()),
                     subgraphs: vec![String::from("testbis")].into_iter().collect(),
@@ -2244,7 +2254,7 @@ mod tests {
             && let Some(ws) = passthrough.subgraphs.get_mut("test")
         {
             ws.max_reconnect_attempts = max_reconnect_attempts;
-            ws.reconnect_delay = Some(reconnect_delay);
+            ws.reconnect_delay = Some(reconnect_delay.into());
         }
         config
     }
@@ -3188,6 +3198,37 @@ mod tests {
         }
         .with_metrics()
         .await;
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn test_failed_fetch_response_keeps_subgraph_request_id() {
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let socket_addr = listener.local_addr().unwrap();
+        tokio::task::spawn(emulate_subgraph_closing_connections(listener));
+        let subgraph_service = with_content_negotiation_layer(SubgraphService::new(
+            "test",
+            test_http_client_service("test"),
+        ));
+
+        let url = Uri::from_str(&format!("http://{socket_addr}")).unwrap();
+        let request = SubgraphRequest::builder()
+            .supergraph_request(supergraph_request("query"))
+            .subgraph_request(subgraph_http_request(url, "query"))
+            .operation_kind(OperationKind::Query)
+            .subgraph_name(String::from("test"))
+            .context(Context::new())
+            .build();
+        let request_id = request.id.clone();
+        let response = subgraph_service.oneshot(request).await.unwrap();
+
+        assert!(
+            response.response.body().errors[0]
+                .message
+                .starts_with("HTTP fetch failed:"),
+            "unexpected error: {:?}",
+            response.response.body().errors
+        );
+        assert_eq!(response.id, request_id);
     }
 
     #[tokio::test(flavor = "multi_thread")]

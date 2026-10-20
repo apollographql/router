@@ -43,9 +43,10 @@ pub mod validation;
 pub(crate) mod variable;
 
 use apollo_compiler::name;
-use id::ConnectorPosition;
+pub(crate) use id::ConnectorPosition;
 use id::ObjectTypeDefinitionDirectivePosition;
 pub use json_selection::ApplyToError;
+pub use json_selection::ApplyToErrorKind;
 pub use json_selection::JSONSelection;
 pub use json_selection::Key;
 pub(crate) use json_selection::LitExpr;

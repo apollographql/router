@@ -7,7 +7,6 @@ use apollo_compiler::ExecutableDocument;
 use apollo_compiler::ast;
 use apollo_federation::link::spec::Identity;
 use http::StatusCode;
-use schemars::JsonSchema;
 use serde::Deserialize;
 use serde::Serialize;
 use serde_json_bytes::Value;
@@ -65,7 +64,6 @@ pub(crate) struct Conf {
     /// Reject unauthenticated requests
     require_authentication: bool,
     /// `@authenticated`, `@requiresScopes` and `@policy` directives
-    #[config(skip_validate)]
     directives: Directives,
 }
 
@@ -75,41 +73,29 @@ impl Conf {
     }
 }
 
-#[derive(Copy, Clone, Debug, serde_derive_default::Default, Deserialize, JsonSchema)]
+#[apollo_configuration::configuration]
+#[derive(Copy)]
 #[schemars(rename = "AuthorizationDirectivesConfig")]
 pub(crate) struct Directives {
     /// enables the `@authenticated` and `@requiresScopes` directives
-    #[serde(default = "default_enable_directives")]
+    #[config(default = default_enable_directives())]
     enabled: bool,
     /// generates the authorization error messages without modying the query
-    #[serde(default)]
     dry_run: bool,
     /// refuse a query entirely if any part would be filtered
-    #[serde(default)]
     reject_unauthorized: bool,
     /// authorization errors behaviour
-    #[serde(default)]
     errors: ErrorConfig,
 }
 
-#[derive(
-    Copy,
-    Clone,
-    Debug,
-    serde_derive_default::Default,
-    PartialEq,
-    Eq,
-    Serialize,
-    Deserialize,
-    JsonSchema,
-)]
+#[apollo_configuration::configuration]
+#[derive(Copy, PartialEq, Eq, Serialize)]
 #[schemars(rename = "AuthorizationErrorConfig")]
 pub(crate) struct ErrorConfig {
     /// log authorization errors
-    #[serde(default = "enable_log_errors")]
+    #[config(default = enable_log_errors())]
     pub(crate) log: bool,
     /// location of authorization errors in the GraphQL response
-    #[serde(default)]
     pub(crate) response: ErrorLocation,
 }
 
@@ -117,11 +103,11 @@ fn enable_log_errors() -> bool {
     true
 }
 
-#[derive(Copy, Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
-#[serde(rename_all = "snake_case")]
+#[apollo_configuration::configuration]
+#[derive(Copy, PartialEq, Eq, Serialize)]
 pub(crate) enum ErrorLocation {
     /// store authorization errors in the response errors
-    #[default]
+    #[config(default)]
     Errors,
     /// store authorization errors in the response extensions
     Extensions,

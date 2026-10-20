@@ -102,6 +102,10 @@ impl<'de> Deserialize<'de> for UriEndpoint {
     }
 }
 
+// UriEndpoint's hand-written Deserialize accepts a URI or `default`, which the configuration
+// attribute can't express. It is a scalar with no nested rules.
+impl apollo_configuration::Validate for UriEndpoint {}
+
 impl JsonSchema for UriEndpoint {
     fn schema_name() -> std::borrow::Cow<'static, str> {
         "UriEndpoint".into()

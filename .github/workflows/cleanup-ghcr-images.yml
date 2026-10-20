@@ -38,9 +38,7 @@ jobs:
       - name: Delete ${{ matrix.package }} versions older than ${{ matrix.retention_days }} days
         env:
           # Requires packages:delete scope (classic PAT) or "Packages: read
-          # and write" (fine-grained PAT). Same identity used elsewhere in
-          # this repo's GitHub Actions (forward-port-dev-to-dev-v3.yml) --
-          # its scope may need to be extended to cover package deletion.
+          # and write" (fine-grained PAT).
           GH_TOKEN: ${{ secrets.APOLLO_BOT2_GITHUB_PAT }}
           PACKAGE: ${{ matrix.package }}
           RETENTION_DAYS: ${{ matrix.retention_days }}

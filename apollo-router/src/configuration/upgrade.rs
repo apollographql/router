@@ -75,20 +75,40 @@ const REMOVAL_EXPRESSION: &str = r#"const("__PLEASE_DELETE_ME")"#;
 pub(crate) enum UpgradeMode {
     /// Upgrade using migrations for major version (eg: from router 1.x to router 2.x)
     Major,
-    /// Upgrade using migrations for a given minor version (eg: from router 2.x to router 2.y)
+    /// Upgrade using the within-major migrations of the given major version (eg: from router 2.x to router 2.y)
     Minor(i64),
 }
 
 impl UpgradeMode {
-    /// The within-major migrations for this router's own major version, which startup and
-    /// reload apply automatically.
+    /// The within-major migrations for this router's own major version (for a nightly, the
+    /// major of its base version), which startup and reload apply automatically.
     pub(crate) fn current_minor() -> Self {
         Self::Minor(
-            env!("CARGO_PKG_VERSION_MAJOR")
-                .parse()
-                .expect("CARGO_PKG_VERSION_MAJOR should be an integer"),
+            migration_major(
+                env!("CARGO_PKG_VERSION_MAJOR"),
+                env!("CARGO_PKG_VERSION_PRE"),
+            )
+            .expect("0.x router versions should be nightlies: `0.0.0-nightly-{base_version}…`"),
         )
     }
+}
+
+/// The major version whose migrations a build applies at startup.
+///
+/// Nightlies are versioned `0.0.0-nightly-{base_version}.{date}+{sha}` (see `cargo xtask release
+/// prepare nightly`), so their real major is the one in `base_version`.  Taking `0` at face value
+/// would apply the 1.x (`0xxx`) migrations.
+fn migration_major(major: &str, pre: &str) -> Option<i64> {
+    let major: i64 = major.parse().ok()?;
+    if major != 0 {
+        return Some(major);
+    }
+    pre.strip_prefix("nightly-")?
+        .split('.')
+        .next()?
+        .parse()
+        .ok()
+        .filter(|&major| major > 0)
 }
 
 pub(crate) fn upgrade_configuration(
@@ -595,9 +615,12 @@ mod test {
 
     use crate::configuration::upgrade::Action;
     use crate::configuration::upgrade::Migration;
+    use crate::configuration::upgrade::UpgradeMode;
     use crate::configuration::upgrade::apply_migration;
     use crate::configuration::upgrade::generate_upgrade_output;
     use crate::configuration::upgrade::migrate_connectors_subgraphs_to_sources;
+    use crate::configuration::upgrade::migration_major;
+    use crate::configuration::upgrade::upgrade_configuration;
 
     fn source_doc() -> Value {
         json!( {
@@ -614,15 +637,105 @@ mod test {
 
     #[test]
     fn detects_settings_that_startup_migrates() {
-        assert!(super::uses_migrated_settings(indoc::indoc! {"
-            subscription:
-              deduplication:
-                enabled: true
-        "}));
+        assert!(super::uses_migrated_settings(
+            crate::configuration::apollo_configuration_parse::STARTUP_MIGRATED_SETTING
+        ));
         assert!(!super::uses_migrated_settings(indoc::indoc! {"
             supergraph:
               listen: 127.0.0.1:4000
         "}));
+    }
+
+    /// Each migration file with its numeric prefix. Like `upgrade`, this only considers `.yaml`
+    /// files. A migration's major version is the first digit of its four-digit prefix.
+    fn numbered_migrations() -> Vec<(u32, String)> {
+        super::Asset::iter()
+            .filter(|f| f.ends_with(".yaml"))
+            .map(|filename| {
+                let prefix = filename.split('-').next().unwrap_or_default();
+                let number = prefix
+                    .parse()
+                    .ok()
+                    .filter(|_| prefix.len() == 4)
+                    .unwrap_or_else(|| {
+                        panic!("migration {filename} must start with a four-digit number")
+                    });
+                (number, filename.to_string())
+            })
+            .collect()
+    }
+
+    fn current_major() -> u32 {
+        env!("CARGO_PKG_VERSION_MAJOR")
+            .parse()
+            .expect("CARGO_PKG_VERSION_MAJOR should be an integer")
+    }
+
+    /// Migrations are applied in filename order, so a shared prefix leaves their relative order to
+    /// the rest of the name. Earlier majors have shipped and keep their file names.
+    #[test]
+    fn current_major_migrations_have_unique_prefixes() {
+        let mut by_prefix: std::collections::BTreeMap<u32, Vec<String>> = Default::default();
+        for (number, filename) in numbered_migrations() {
+            if number / 1000 == current_major() {
+                by_prefix.entry(number).or_default().push(filename);
+            }
+        }
+        let duplicates: Vec<_> = by_prefix.values().filter(|files| files.len() > 1).collect();
+        assert!(
+            duplicates.is_empty(),
+            "migrations must not share a numeric prefix: {duplicates:?}; give the newer migration \
+             the next unused number"
+        );
+    }
+
+    /// Startup only applies migrations for the router's own major version, so migrations numbered
+    /// for a later major are never exercised at startup until the crates are bumped. Requiring the
+    /// bump first keeps every test running against the version that will ship.
+    #[test]
+    fn no_migration_is_numbered_for_a_later_major_version() {
+        let later: Vec<_> = numbered_migrations()
+            .into_iter()
+            .filter(|(number, _)| number / 1000 > current_major())
+            .map(|(_, filename)| filename)
+            .collect();
+        assert!(
+            later.is_empty(),
+            "migrations {later:?} are numbered for a major version later than {}; bump the crate \
+             major version before adding them",
+            current_major()
+        );
+    }
+
+    #[test]
+    fn migration_major_uses_the_nightly_base_version() {
+        assert_eq!(migration_major("2", ""), Some(2));
+        assert_eq!(migration_major("3", "rc.0"), Some(3));
+        assert_eq!(migration_major("0", "nightly-2.17.0.20260924"), Some(2));
+        assert_eq!(
+            migration_major("0", "nightly-3.0.0-alpha.0.20260924"),
+            Some(3)
+        );
+        assert_eq!(migration_major("0", ""), None);
+        assert_eq!(migration_major("0", "dev"), None);
+        assert_eq!(migration_major("0", "nightly-0.1.0.20260924"), None);
+    }
+
+    #[test]
+    fn nightly_keeps_server_section() {
+        let config = json!({ "server": { "http": { "header_read_timeout": "30s" } } });
+
+        let nightly = UpgradeMode::Minor(
+            migration_major("0", "nightly-2.17.0.20260924").expect("nightly should parse"),
+        );
+        let upgraded =
+            upgrade_configuration(&config, false, nightly).expect("expected successful migration");
+        assert_eq!(upgraded, config);
+
+        // What nightlies used before: the 1.x migrations, which delete `server`.
+        let upgraded = upgrade_configuration(&config, false, UpgradeMode::Minor(0))
+            .expect("expected successful migration");
+        assert_eq!(upgraded, json!({}));
     }
 
     #[test]

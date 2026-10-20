@@ -983,7 +983,7 @@ mod tests {
     fn calculate_manifest_digest(manifest: &OciManifest) -> String {
         let manifest_bytes = serde_json::to_vec(manifest).unwrap();
         let hash = Sha256::digest(&manifest_bytes);
-        format!("sha256:{:x}", hash)
+        format!("sha256:{}", hex::encode(hash))
     }
 
     fn registry_error(code: OciErrorCode) -> OciDistributionError {

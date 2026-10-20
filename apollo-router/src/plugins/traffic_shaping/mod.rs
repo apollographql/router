@@ -19,8 +19,6 @@ use http::HeaderValue;
 use http::StatusCode;
 use http::header::CONTENT_ENCODING;
 use parking_lot::Mutex;
-use schemars::JsonSchema;
-use serde::Deserialize;
 use tower::BoxError;
 use tower::ServiceBuilder;
 use tower::ServiceExt;
@@ -40,6 +38,7 @@ use self::timeout::ConnectorSourceTimeoutLayer;
 use self::timeout::SubgraphTimeoutLayer;
 use crate::configuration::shared::DnsResolutionStrategy;
 use crate::configuration::shared::default_pool_idle_timeout;
+use crate::configuration::shared::without_default;
 use crate::graphql;
 use crate::layers::DEFAULT_BUFFER_SIZE;
 use crate::layers::OptionLayer;
@@ -61,9 +60,26 @@ trait Merge {
     fn merge(&self, fallback: Option<&Self>) -> Self;
 }
 
+/// `pool_idle_timeout` as written in one block: `None` if omitted (inherit from `all`, then
+/// [`default_pool_idle_timeout`]), `Some(None)` for `null` (no idle eviction).
+type PoolIdleTimeout = Option<Option<apollo_configuration::types::Duration>>;
+
+fn deserialize_pool_idle_timeout<'de, D: serde::Deserializer<'de>>(
+    deserializer: D,
+) -> Result<PoolIdleTimeout, D::Error> {
+    use serde::Deserialize as _;
+    Option::<apollo_configuration::types::Duration>::deserialize(deserializer).map(Some)
+}
+
+fn resolve_pool_idle_timeout(pool_idle_timeout: PoolIdleTimeout) -> Option<Duration> {
+    pool_idle_timeout
+        .map(|inner| inner.map(|duration| *duration))
+        .unwrap_or_else(default_pool_idle_timeout)
+}
+
 /// Traffic shaping options
-#[derive(PartialEq, Debug, Clone, Deserialize, JsonSchema)]
-#[serde(deny_unknown_fields)]
+#[apollo_configuration::configuration]
+#[derive(PartialEq)]
 struct Shaping {
     /// Enable query deduplication
     deduplicate_query: Option<bool>,
@@ -71,42 +87,41 @@ struct Shaping {
     compression: Option<Compression>,
     /// Enable global rate limiting
     global_rate_limit: Option<RateLimitConf>,
-    #[serde(deserialize_with = "humantime_serde::deserialize", default)]
     #[schemars(with = "String", default)]
     /// Enable timeout for incoming requests
-    timeout: Option<Duration>,
+    timeout: Option<apollo_configuration::types::Duration>,
     /// Enable HTTP2 for subgraphs
     http2: Option<Http2Config>,
     /// DNS resolution strategy for subgraphs
     dns_resolution_strategy: Option<DnsResolutionStrategy>,
-    /// Specify a timeout for idle sockets being kept-alive in the client's connection pool
-    #[serde(
-        deserialize_with = "humantime_serde::deserialize",
-        default = "default_pool_idle_timeout"
-    )]
-    #[schemars(with = "Option<String>", default = "default_pool_idle_timeout")]
-    pool_idle_timeout: Option<Duration>,
+    /// Specify a timeout for idle sockets being kept-alive in the client's connection pool.
+    /// Defaults to 15 seconds; `null` disables idle eviction. A `subgraphs.<name>` block that
+    /// omits it uses the value from `all`.
+    #[serde(deserialize_with = "deserialize_pool_idle_timeout")]
+    #[config(default)]
+    #[schemars(with = "Option<String>", transform = without_default)]
+    pool_idle_timeout: PoolIdleTimeout,
     /// Configure the interval for HTTP/2 keep-alive pings. Requires HTTP/2 to be enabled. If
     /// unset (the default), keep-alive pings are disabled.
-    #[serde(deserialize_with = "humantime_serde::deserialize", default)]
     #[schemars(with = "Option<String>", default)]
-    experimental_http2_keep_alive_interval: Option<Duration>,
+    experimental_http2_keep_alive_interval: Option<apollo_configuration::types::Duration>,
     /// Configure the timeout for HTTP/2 keep-alive pings. Requires HTTP/2 to be enabled and
     /// `experimental_http2_keep_alive_interval` to be set. Defaults to 20 seconds.
-    #[serde(deserialize_with = "humantime_serde::deserialize", default)]
     #[schemars(with = "Option<String>", default)]
-    experimental_http2_keep_alive_timeout: Option<Duration>,
+    experimental_http2_keep_alive_timeout: Option<apollo_configuration::types::Duration>,
 }
 
-#[derive(PartialEq, Default, Debug, Clone, Deserialize, JsonSchema)]
-#[serde(rename_all = "lowercase")]
+#[apollo_configuration::configuration]
+#[derive(PartialEq)]
 pub(crate) enum Http2Config {
-    #[default]
+    #[config(default)]
     /// Enable HTTP2 for subgraphs
     Enable,
     /// Disable HTTP2 for subgraphs
     Disable,
     /// Only HTTP2 is active
+    // The macro renames variants to snake_case; this keeps the lowercase name.
+    #[serde(rename = "http2only")]
     Http2Only,
 }
 
@@ -150,8 +165,8 @@ impl Merge for Shaping {
 }
 
 // this is a wrapper struct to add subgraph specific options over Shaping
-#[derive(PartialEq, Debug, Clone, Deserialize, JsonSchema)]
-#[serde(deny_unknown_fields)]
+#[apollo_configuration::configuration]
+#[derive(PartialEq)]
 struct SubgraphShaping {
     #[serde(flatten)]
     shaping: Shaping,
@@ -168,8 +183,8 @@ impl Merge for SubgraphShaping {
     }
 }
 
-#[derive(PartialEq, Debug, Clone, Deserialize, JsonSchema, Default)]
-#[serde(deny_unknown_fields, default)]
+#[apollo_configuration::configuration]
+#[derive(PartialEq)]
 struct ConnectorsShapingConfig {
     /// Applied on all connectors
     all: Option<ConnectorShaping>,
@@ -177,38 +192,35 @@ struct ConnectorsShapingConfig {
     sources: HashMap<String, ConnectorShaping>,
 }
 
-#[derive(PartialEq, Debug, Clone, Deserialize, JsonSchema)]
-#[serde(deny_unknown_fields)]
+#[apollo_configuration::configuration]
+#[derive(PartialEq)]
 struct ConnectorShaping {
     /// Enable compression for connectors (available compressions are deflate, br, gzip)
     compression: Option<Compression>,
     /// Enable global rate limiting
     global_rate_limit: Option<RateLimitConf>,
-    #[serde(deserialize_with = "humantime_serde::deserialize", default)]
     #[schemars(with = "String", default)]
     /// Enable timeout for connectors requests
-    timeout: Option<Duration>,
+    timeout: Option<apollo_configuration::types::Duration>,
     /// Enable HTTP2 for connectors
     experimental_http2: Option<Http2Config>,
     /// DNS resolution strategy for connectors
     dns_resolution_strategy: Option<DnsResolutionStrategy>,
-    /// Specify a timeout for idle sockets being kept-alive in the client's connection pool
-    #[serde(
-        deserialize_with = "humantime_serde::deserialize",
-        default = "default_pool_idle_timeout"
-    )]
-    #[schemars(with = "Option<String>", default = "default_pool_idle_timeout")]
-    pool_idle_timeout: Option<Duration>,
+    /// Specify a timeout for idle sockets being kept-alive in the client's connection pool.
+    /// Defaults to 15 seconds; `null` disables idle eviction. A `sources.<name>` block that omits
+    /// it uses the value from `connector.all`.
+    #[serde(deserialize_with = "deserialize_pool_idle_timeout")]
+    #[config(default)]
+    #[schemars(with = "Option<String>", transform = without_default)]
+    pool_idle_timeout: PoolIdleTimeout,
     /// Configure the interval for HTTP/2 keep-alive pings. Requires HTTP/2 to be enabled. If
     /// unset (the default), keep-alive pings are disabled.
-    #[serde(deserialize_with = "humantime_serde::deserialize", default)]
     #[schemars(with = "Option<String>", default)]
-    experimental_http2_keep_alive_interval: Option<Duration>,
+    experimental_http2_keep_alive_interval: Option<apollo_configuration::types::Duration>,
     /// Configure the timeout for HTTP/2 keep-alive pings. Requires HTTP/2 to be enabled and
     /// `experimental_http2_keep_alive_interval` to be set. Defaults to 20 seconds.
-    #[serde(deserialize_with = "humantime_serde::deserialize", default)]
     #[schemars(with = "Option<String>", default)]
-    experimental_http2_keep_alive_timeout: Option<Duration>,
+    experimental_http2_keep_alive_timeout: Option<apollo_configuration::types::Duration>,
 }
 
 impl Merge for ConnectorShaping {
@@ -253,18 +265,17 @@ impl Merge for ConnectorShaping {
     }
 }
 
-#[derive(PartialEq, Debug, Clone, Deserialize, JsonSchema, Default)]
-#[serde(deny_unknown_fields)]
+#[apollo_configuration::configuration]
+#[derive(PartialEq)]
 struct RouterShaping {
     /// The global concurrency limit
     concurrency_limit: Option<usize>,
 
     /// Enable global rate limiting
     global_rate_limit: Option<RateLimitConf>,
-    #[serde(deserialize_with = "humantime_serde::deserialize", default)]
     #[schemars(with = "String", default)]
     /// Enable timeout for incoming requests
-    timeout: Option<Duration>,
+    timeout: Option<apollo_configuration::types::Duration>,
 }
 
 #[apollo_configuration::configuration]
@@ -274,28 +285,25 @@ struct RouterShaping {
 /// Configuration for the traffic shaping plugin
 pub(crate) struct Config {
     /// Applied at the router level
-    #[config(skip_validate)]
     router: Option<RouterShaping>,
     /// Applied on all subgraphs
-    #[config(skip_validate)]
     all: Option<SubgraphShaping>,
     /// Applied on specific subgraphs
-    #[config(skip_validate)]
     subgraphs: HashMap<String, SubgraphShaping>,
     /// Applied on specific subgraphs
-    #[config(skip_validate)]
     connector: ConnectorsShapingConfig,
 }
 
-#[derive(PartialEq, Debug, Clone, Deserialize, JsonSchema)]
-#[serde(deny_unknown_fields)]
+#[apollo_configuration::configuration]
+#[derive(PartialEq)]
 struct RateLimitConf {
     /// Number of requests allowed
+    #[config(required)]
     capacity: NonZeroU64,
-    #[serde(deserialize_with = "humantime_serde::deserialize")]
+    #[config(required)]
     #[schemars(with = "String")]
     /// Per interval
-    interval: Duration,
+    interval: apollo_configuration::types::Duration,
 }
 
 impl Merge for RateLimitConf {
@@ -359,7 +367,7 @@ impl PluginPrivate for TrafficShaping {
                 self.config
                     .router
                     .as_ref()
-                    .and_then(|r| r.timeout)
+                    .and_then(|r| r.timeout.as_deref().copied())
                     .unwrap_or(DEFAULT_TIMEOUT),
             ))
             .map_future_with_request_data(
@@ -406,7 +414,7 @@ impl PluginPrivate for TrafficShaping {
                 router
                     .global_rate_limit
                     .as_ref()
-                    .map(|limit| RateLimitLayer::new(limit.capacity.into(), limit.interval))
+                    .map(|limit| RateLimitLayer::new(limit.capacity.into(), *limit.interval))
             }))
             .service(service)
             .boxed_clone()
@@ -430,17 +438,7 @@ impl TrafficShaping {
             self.config.all.as_ref(),
             self.config.subgraphs.get(service_name),
         )
-        .map(|config| crate::configuration::shared::Client {
-            http2: config.shaping.http2,
-            dns_resolution_strategy: config.shaping.dns_resolution_strategy,
-            pool_idle_timeout: config.shaping.pool_idle_timeout,
-            experimental_http2_keep_alive_interval: config
-                .shaping
-                .experimental_http2_keep_alive_interval,
-            experimental_http2_keep_alive_timeout: config
-                .shaping
-                .experimental_http2_keep_alive_timeout,
-        })
+        .map(|config| config.shaping.into())
         .unwrap_or_default()
     }
 
@@ -450,14 +448,7 @@ impl TrafficShaping {
     ) -> crate::configuration::shared::Client {
         let source_config = self.config.connector.sources.get(source_name).cloned();
         Self::merge_config(self.config.connector.all.as_ref(), source_config.as_ref())
-            .map(|config| crate::configuration::shared::Client {
-                http2: config.experimental_http2,
-                dns_resolution_strategy: config.dns_resolution_strategy,
-                pool_idle_timeout: config.pool_idle_timeout,
-                experimental_http2_keep_alive_interval: config
-                    .experimental_http2_keep_alive_interval,
-                experimental_http2_keep_alive_timeout: config.experimental_http2_keep_alive_timeout,
-            })
+            .map(Into::into)
             .unwrap_or_default()
     }
 }
@@ -539,7 +530,7 @@ impl TrafficShaping {
             rate_limits
                 .lock()
                 .entry(key.to_string())
-                .or_insert_with(|| RateLimitLayer::new(conf.capacity.into(), conf.interval))
+                .or_insert_with(|| RateLimitLayer::new(conf.capacity.into(), *conf.interval))
                 .clone()
         }))
     }
@@ -559,11 +550,15 @@ impl TrafficShaping {
     /// Returns a layer that answers a request to this subgraph with a `504` once it runs past
     /// the subgraph's timeout (30 seconds by default).
     pub(crate) fn subgraph_timeout_layer(&self, name: &str) -> OptionLayer<SubgraphTimeoutLayer> {
-        option_layer(
-            self.subgraph_shaping(name).map(|shaping| {
-                SubgraphTimeoutLayer::new(shaping.timeout.unwrap_or(DEFAULT_TIMEOUT))
-            }),
-        )
+        option_layer(self.subgraph_shaping(name).map(|shaping| {
+            SubgraphTimeoutLayer::new(
+                shaping
+                    .timeout
+                    .as_deref()
+                    .copied()
+                    .unwrap_or(DEFAULT_TIMEOUT),
+            )
+        }))
     }
 
     /// Returns a layer that lets identical in-flight queries to this subgraph share one
@@ -576,7 +571,7 @@ impl TrafficShaping {
             shaping
                 .deduplicate_query
                 .unwrap_or_default()
-                .then(QueryDeduplicationLayer::default)
+                .then(|| QueryDeduplicationLayer::new(name))
         }))
     }
 
@@ -633,7 +628,13 @@ impl TrafficShaping {
         source: &str,
     ) -> OptionLayer<ConnectorSourceTimeoutLayer> {
         option_layer(self.connector_source_shaping(source).map(|shaping| {
-            ConnectorSourceTimeoutLayer::new(shaping.timeout.unwrap_or(DEFAULT_TIMEOUT))
+            ConnectorSourceTimeoutLayer::new(
+                shaping
+                    .timeout
+                    .as_deref()
+                    .copied()
+                    .unwrap_or(DEFAULT_TIMEOUT),
+            )
         }))
     }
 
@@ -678,6 +679,42 @@ impl TrafficShaping {
             self.connector_source_shaping(source)
                 .map(|_| UnconstrainedBufferLayer::new(DEFAULT_BUFFER_SIZE)),
         )
+    }
+}
+
+impl From<Shaping> for crate::configuration::shared::Client {
+    fn from(shaping: Shaping) -> Self {
+        Self {
+            http2: shaping.http2,
+            dns_resolution_strategy: shaping.dns_resolution_strategy,
+            pool_idle_timeout: resolve_pool_idle_timeout(shaping.pool_idle_timeout),
+            experimental_http2_keep_alive_interval: shaping
+                .experimental_http2_keep_alive_interval
+                .as_deref()
+                .copied(),
+            experimental_http2_keep_alive_timeout: shaping
+                .experimental_http2_keep_alive_timeout
+                .as_deref()
+                .copied(),
+        }
+    }
+}
+
+impl From<ConnectorShaping> for crate::configuration::shared::Client {
+    fn from(shaping: ConnectorShaping) -> Self {
+        Self {
+            http2: shaping.experimental_http2,
+            dns_resolution_strategy: shaping.dns_resolution_strategy,
+            pool_idle_timeout: resolve_pool_idle_timeout(shaping.pool_idle_timeout),
+            experimental_http2_keep_alive_interval: shaping
+                .experimental_http2_keep_alive_interval
+                .as_deref()
+                .copied(),
+            experimental_http2_keep_alive_timeout: shaping
+                .experimental_http2_keep_alive_timeout
+                .as_deref()
+                .copied(),
+        }
     }
 }
 
@@ -1180,6 +1217,8 @@ mod test {
             pool_idle_timeout: 2s
           explicit_null:
             pool_idle_timeout: null
+          omitted:
+            http2: enable
         router:
           timeout: 65s
         "#,
@@ -1202,8 +1241,16 @@ mod test {
             shaping_config
                 .subgraph_client_config("explicit_null")
                 .pool_idle_timeout,
+            None,
+            "explicit null disables idle eviction"
+        );
+
+        assert_eq!(
+            shaping_config
+                .subgraph_client_config("omitted")
+                .pool_idle_timeout,
             Some(Duration::from_secs(10)),
-            "explicit null falls back to all"
+            "subgraph block that omits it falls back to all"
         );
 
         assert_eq!(
@@ -1226,6 +1273,8 @@ mod test {
             pool_idle_timeout: 10s
           explicit_null:
             pool_idle_timeout: null
+          omitted:
+            http2: enable
         router:
           timeout: 65s
         "#,
@@ -1244,12 +1293,20 @@ mod test {
             "subgraph-specific override should win"
         );
 
+        assert_eq!(
+            shaping_config
+                .subgraph_client_config("explicit_null")
+                .pool_idle_timeout,
+            None,
+            "explicit null disables idle eviction instead of using the default"
+        );
+
         assert!(
             shaping_config
-                .subgraph_client_config("unknown")
+                .subgraph_client_config("omitted")
                 .pool_idle_timeout
                 .is_none(),
-            "explicit null falls back to all"
+            "subgraph block that omits it falls back to all"
         );
 
         assert!(
@@ -1273,6 +1330,8 @@ mod test {
               pool_idle_timeout: 3s
             explicit_null:
               pool_idle_timeout: null
+            omitted:
+              experimental_http2: enable
         router:
           timeout: 65s
         "#,
@@ -1295,8 +1354,16 @@ mod test {
             shaping_config
                 .connector_client_config("explicit_null")
                 .pool_idle_timeout,
+            None,
+            "explicit null disables idle eviction"
+        );
+
+        assert_eq!(
+            shaping_config
+                .connector_client_config("omitted")
+                .pool_idle_timeout,
             Some(Duration::from_secs(20)),
-            "explicit null falls back to all"
+            "source block that omits it falls back to all"
         );
 
         assert_eq!(
@@ -1330,6 +1397,71 @@ mod test {
                 .pool_idle_timeout,
             default_pool_idle_timeout(),
             "when pool_idle_timeout is not in the config, it should use the default"
+        );
+    }
+
+    #[tokio::test]
+    async fn test_pool_idle_timeout_uses_default_without_all_block() {
+        let config = serde_yaml::from_str::<Config>(
+            r#"
+        subgraphs:
+          products:
+            pool_idle_timeout: 2s
+          explicit_null:
+            pool_idle_timeout: null
+        connector:
+          sources:
+            my_source:
+              pool_idle_timeout: 3s
+            explicit_null:
+              pool_idle_timeout: null
+        "#,
+        )
+        .unwrap();
+
+        let shaping_config = TrafficShaping::new(PluginInit::fake_builder().config(config).build())
+            .await
+            .unwrap();
+
+        assert_eq!(
+            shaping_config
+                .subgraph_client_config("products")
+                .pool_idle_timeout,
+            Some(Duration::from_secs(2)),
+        );
+        assert_eq!(
+            shaping_config
+                .subgraph_client_config("unconfigured")
+                .pool_idle_timeout,
+            default_pool_idle_timeout(),
+            "a subgraph with no block and no all block should use the default"
+        );
+        assert_eq!(
+            shaping_config
+                .subgraph_client_config("explicit_null")
+                .pool_idle_timeout,
+            None,
+            "explicit null must not fall through to the default"
+        );
+        assert_eq!(
+            shaping_config
+                .connector_client_config("my_source")
+                .pool_idle_timeout,
+            Some(Duration::from_secs(3)),
+        );
+        assert_eq!(
+            shaping_config
+                .connector_client_config("unconfigured")
+                .pool_idle_timeout,
+            default_pool_idle_timeout(),
+            "a source with no block and no all block should use the default"
+        );
+        assert_eq!(
+            shaping_config
+                .connector_client_config("explicit_null")
+                .pool_idle_timeout,
+            None,
+            "explicit null must not fall through to the default"
         );
     }
 

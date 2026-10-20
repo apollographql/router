@@ -13,6 +13,8 @@ use std::time::Duration;
 use std::time::SystemTime;
 use std::time::UNIX_EPOCH;
 
+use apollo_router::_private::telemetry::DatadogPropagator;
+use apollo_router::_private::telemetry::datadog_pipeline;
 use buildstructor::buildstructor;
 use flate2::read::GzDecoder;
 use fred::clients::Client as RedisClient;
@@ -21,6 +23,7 @@ use fred::interfaces::KeysInterface;
 use fred::prelude::Config as RedisConfig;
 use fred::types::scan::Scanner;
 use futures::StreamExt;
+use futures::TryStreamExt;
 use http::header::ACCEPT;
 use http::header::CONTENT_TYPE;
 use mime::APPLICATION_JSON;
@@ -463,7 +466,7 @@ pub struct IntegrationTest {
     exit_status: Option<std::process::ExitStatus>,
     port_replacements: HashMap<String, u16>,
     jwt: Option<String>,
-    env: Option<HashMap<String, OsString>>,
+    env: HashMap<String, OsString>,
     hot_reload: bool,
     reqwest_client: reqwest::Client,
     /// When `true`, the harness forwards the host's `TEST_APOLLO_KEY`
@@ -541,7 +544,6 @@ impl IntegrationTest {
             &current_config,
             &self._subgraph_overrides,
             &self._apollo_otlp_server.uri().to_string(),
-            None, // Don't override bind address here
             &self.redis_namespace,
             Some(&self.port_replacements),
         );
@@ -556,7 +558,7 @@ impl IntegrationTest {
     /// Set environment variables for the router subprocess
     #[allow(dead_code)]
     pub fn set_env(&mut self, env: HashMap<String, OsString>) {
-        self.env.get_or_insert_with(HashMap::new).extend(env);
+        self.env.extend(env);
     }
 
     /// Path to the temp file holding this test's supergraph schema. Tests
@@ -689,8 +691,9 @@ impl Telemetry {
                 .with_resource(resource)
                 .with_span_processor(
                     BatchSpanProcessor::builder(
-                        opentelemetry_datadog::new_pipeline()
+                        datadog_pipeline()
                             .with_service_name(service_name)
+                            .with_http_client(reqwest::Client::new())
                             .build_exporter()
                             .expect("datadog pipeline failed"),
                         runtime::Tokio,
@@ -721,7 +724,7 @@ impl Telemetry {
                     .headers()
                     .get("x-datadog-sampling-priority")
                     .cloned();
-                let propagator = opentelemetry_datadog::DatadogPropagator::new();
+                let propagator = DatadogPropagator::new();
                 propagator.inject_context(
                     &ctx,
                     &mut opentelemetry_http::HeaderInjector(request.headers_mut()),
@@ -767,7 +770,7 @@ impl Telemetry {
             Telemetry::Datadog => {
                 let span_ref = context.span();
                 let original_span_context = span_ref.span_context();
-                let propagator = opentelemetry_datadog::DatadogPropagator::new();
+                let propagator = DatadogPropagator::new();
                 let mut context = propagator.extract_with_context(context, &headers);
                 // We're going to override the sampled so that we can test sampling priority
                 if let Some(psr) = headers.get("x-datadog-sampling-priority") {
@@ -817,7 +820,7 @@ impl IntegrationTest {
         subgraph_callback: Option<Box<dyn Fn() + Send + Sync>>,
         http_method: Option<String>,
         jwt: Option<String>,
-        env: Option<HashMap<String, OsString>>,
+        env: HashMap<String, OsString>,
         redis_namespace: Option<String>,
         hot_reload: Option<bool>,
         reqwest_client: Option<reqwest::Client>,
@@ -861,7 +864,6 @@ impl IntegrationTest {
             &config,
             &subgraph_overrides,
             &apollo_otlp_endpoint,
-            None,
             &redis_namespace,
             None,
         );
@@ -1146,15 +1148,13 @@ impl IntegrationTest {
         // explicit `.env(...)` builder call wins over the defaults
         // (eg. for a test that wants to override `APOLLO_UPLINK_ENDPOINTS`
         // to its own custom mock).
-        if let Some(env) = &self.env {
-            for (key, val) in env {
-                // If env vars are used to configure which schema to load, do not
-                // override later with the --supergraph cli arg
-                if non_file_startup_env.iter().any(|x| x == key) {
-                    needs_supergraph_cli_arg = false;
-                }
-                router.env(key, val);
+        for (key, val) in &self.env {
+            // If env vars are used to configure which schema to load, do not
+            // override later with the --supergraph cli arg
+            if non_file_startup_env.iter().any(|x| x == key) {
+                needs_supergraph_cli_arg = false;
             }
+            router.env(key, val);
         }
 
         // Opt-in real Studio credentials. Reads `TEST_APOLLO_KEY` and
@@ -1347,7 +1347,6 @@ impl IntegrationTest {
             yaml,
             &self._subgraph_overrides,
             &self._apollo_otlp_server.uri().to_string(),
-            None,
             &self.redis_namespace,
             Some(&self.port_replacements),
         );
@@ -1462,11 +1461,17 @@ impl IntegrationTest {
     }
 
     /// Make a raw multipart request to the router.
+    ///
+    /// By default the form is streamed part by part. With `buffered`, it is collected first and
+    /// sent as a single body with a `Content-Length`. Use this when the router rejects the request
+    /// after reading only the first parts: if the rest of a streamed body is still arriving, the
+    /// router closes the connection and the client can hit a reset before it reads the response.
     #[allow(dead_code)]
     pub fn execute_multipart_request(
         &self,
         request: reqwest::multipart::Form,
         transform: Option<fn(reqwest::Request) -> reqwest::Request>,
+        buffered: bool,
     ) -> impl std::future::Future<Output = (String, reqwest::Response)> + use<> {
         assert!(
             self.router.is_some(),
@@ -1481,14 +1486,26 @@ impl IntegrationTest {
             let span_id = span.context().span().span_context().trace_id().to_string();
 
             async move {
-                let mut request = client
+                let builder = client
                     .post(url)
                     .header("apollographql-client-name", "custom_name")
                     .header("apollographql-client-version", "1.0")
-                    .header("apollo-require-preflight", "test")
-                    .multipart(request)
-                    .build()
-                    .unwrap();
+                    .header("apollo-require-preflight", "test");
+                let builder = if buffered {
+                    let content_type =
+                        format!("multipart/form-data; boundary={}", request.boundary());
+                    let chunks: Vec<bytes::Bytes> = request
+                        .into_stream()
+                        .try_collect()
+                        .await
+                        .expect("multipart form can be buffered");
+                    builder
+                        .header(CONTENT_TYPE, content_type)
+                        .body(chunks.concat())
+                } else {
+                    builder.multipart(request)
+                };
+                let mut request = builder.build().unwrap();
 
                 // Optionally transform the request if needed
                 let transformer = transform.unwrap_or(core::convert::identity);
@@ -2385,13 +2402,11 @@ fn merge_overrides(
     yaml: &str,
     subgraph_overrides: &HashMap<String, String>,
     apollo_otlp_endpoint: &str,
-    bind_addr: Option<SocketAddr>,
     redis_namespace: &str,
     port_replacements: Option<&HashMap<String, u16>>,
 ) -> Value {
-    let bind_addr = bind_addr
-        .map(|a| a.to_string())
-        .unwrap_or_else(|| "127.0.0.1:0".into());
+    /// Any free port, so concurrent tests don't collide.
+    const HARNESS_LISTEN_ADDRESS: &str = "127.0.0.1:0";
 
     // Apply port replacements to the YAML string first
     let mut yaml_with_ports = yaml.to_string();
@@ -2447,8 +2462,9 @@ fn merge_overrides(
         }
     }
 
-    // Override the listening address always since we spawn the router on a
-    // random port. However, don't override Unix socket paths.
+    // Listen on a random port unless the config chooses its own address.
+    // Tests find the address the router actually bound from its startup log
+    // (see `bind_address`), so either way they reach the right listener.
     //
     // Also inject a bounded `connection_shutdown_timeout` default for every
     // integration test. The production default is 60 s (see
@@ -2486,53 +2502,24 @@ fn merge_overrides(
     // small_connection_shutdown_timeout tests that exercise the feature
     // itself) keep their configured value.
     const HARNESS_CONNECTION_SHUTDOWN_TIMEOUT: &str = "5s";
-    match config
+    let supergraph_conf = config
         .as_object_mut()
-        .and_then(|o| o.get_mut("supergraph"))
-        .and_then(|o| o.as_object_mut())
-    {
-        None => {
-            if let Some(o) = config.as_object_mut() {
-                o.insert(
-                    "supergraph".to_string(),
-                    serde_json::json!({
-                        "listen": bind_addr.to_string(),
-                        "connection_shutdown_timeout": HARNESS_CONNECTION_SHUTDOWN_TIMEOUT,
-                    }),
-                );
-            }
-        }
-        Some(supergraph_conf) => {
-            // check if the listen address is a Unix socket path (ie, starts with /)
-            let is_unix_socket = supergraph_conf
-                .get("listen")
-                .and_then(|v| v.as_str())
-                .map(|s| s.starts_with('/'))
-                .unwrap_or(false);
+        .expect("config should be an object")
+        .entry("supergraph")
+        .or_insert_with(|| json!({}))
+        .as_object_mut()
+        .expect("supergraph config should be an object");
+    let supergraph_listen = supergraph_conf
+        .entry("listen")
+        .or_insert_with(|| HARNESS_LISTEN_ADDRESS.into())
+        .clone();
+    supergraph_conf
+        .entry("connection_shutdown_timeout")
+        .or_insert_with(|| HARNESS_CONNECTION_SHUTDOWN_TIMEOUT.into());
 
-            // only override if it's not a Unix socket
-            if !is_unix_socket {
-                supergraph_conf.insert(
-                    "listen".to_string(),
-                    serde_json::Value::String(bind_addr.to_string()),
-                );
-            }
-
-            // Only inject the shutdown timeout if the fixture hasn't set one.
-            // Tests in integration::lifecycle deliberately configure this
-            // setting to exercise its behavior and must not have their value
-            // clobbered.
-            if !supergraph_conf.contains_key("connection_shutdown_timeout") {
-                supergraph_conf.insert(
-                    "connection_shutdown_timeout".to_string(),
-                    serde_json::Value::String(HARNESS_CONNECTION_SHUTDOWN_TIMEOUT.to_string()),
-                );
-            }
-        }
-    }
-
-    // Override the metrics listening address always since we spawn the router on a
-    // random port.
+    // Serve Prometheus metrics on the supergraph listener unless the config
+    // chooses its own address, so `get_metrics_response` finds them at
+    // `bind_address`.
     if let Some(prom_config) = config
         .as_object_mut()
         .and_then(|o| o.get_mut("telemetry"))
@@ -2544,10 +2531,7 @@ fn merge_overrides(
         .and_then(|o| o.get_mut("prometheus"))
         .and_then(|o| o.as_object_mut())
     {
-        prom_config.insert(
-            "listen".to_string(),
-            serde_json::Value::String(bind_addr.to_string()),
-        );
+        prom_config.entry("listen").or_insert(supergraph_listen);
     }
 
     // Pin every Apollo Studio reporting endpoint to the per-test wiremock at
@@ -2595,7 +2579,7 @@ fn merge_overrides(
         .expect("config should be an object")
         .insert(
             "health_check".to_string(),
-            json!({"listen": bind_addr.to_string()}),
+            json!({"listen": HARNESS_LISTEN_ADDRESS}),
         );
 
     let insert_redis_namespace = |v: Option<&mut Value>| {

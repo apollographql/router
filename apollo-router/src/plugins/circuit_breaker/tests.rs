@@ -28,6 +28,7 @@ use crate::plugins::test::PluginTestHarness;
 use crate::plugins::test::ServiceHandle;
 use crate::services::connector::request_service::Request as ConnectorRequest;
 use crate::services::connector::request_service::Response as ConnectorResponse;
+use crate::services::connector::request_service::TransportOutcome;
 use crate::services::http::HttpRequest as SourceHttpRequest;
 use crate::services::http::HttpResponse as SourceHttpResponse;
 use crate::services::router;
@@ -388,13 +389,14 @@ fn connector_response(status: StatusCode, request: &ConnectorRequest) -> Connect
     ConnectorResponse {
         context: request.context.clone(),
         subgraph_name: request.connector.id.subgraph_name.to_string(),
-        transport_result: Ok(HttpResponse { inner: parts }.into()),
+        transport_outcome: TransportOutcome::Response(HttpResponse { inner: parts }),
         mapped_response: MappedResponse::Data {
             data: Default::default(),
             problems: Vec::new(),
+            declared_errors: vec![],
             key: response_key(),
         },
-        break_status: None,
+        answered_by_router: false,
     }
 }
 
@@ -1207,34 +1209,73 @@ async fn a_coprocessor_failure_counts_against_the_subgraph() {
     );
 }
 
-/// A coprocessor that breaks every request at `stage` with `status`.
-async fn breaking_coprocessor(stage: &str, status: u16) -> wiremock::MockServer {
+/// A coprocessor at `stage` that lets the first request through, breaks the next `breaks` with
+/// `status`, and lets every request after them through.
+async fn coprocessor_breaking_between(
+    stage: &str,
+    breaks: u64,
+    status: u16,
+) -> wiremock::MockServer {
     let coprocessor = wiremock::MockServer::start().await;
-    wiremock::Mock::given(wiremock::matchers::method("POST"))
-        .respond_with(
-            wiremock::ResponseTemplate::new(200).set_body_json(serde_json::json!({
-                "version": 1,
-                "stage": stage,
-                "control": { "break": status },
-                "body": "the coprocessor turned this request away",
-            })),
-        )
-        .mount(&coprocessor)
-        .await;
+    let proceed = wiremock::ResponseTemplate::new(200).set_body_json(serde_json::json!({
+        "version": 1,
+        "stage": stage,
+        "control": "continue",
+    }));
+    let turn_away = wiremock::ResponseTemplate::new(200).set_body_json(serde_json::json!({
+        "version": 1,
+        "stage": stage,
+        "control": { "break": status },
+        "body": "the coprocessor turned this request away",
+    }));
+    for (priority, response, times) in [
+        (1, proceed.clone(), Some(1)),
+        (2, turn_away, Some(breaks)),
+        (3, proceed, None),
+    ] {
+        let mock = wiremock::Mock::given(wiremock::matchers::method("POST"))
+            .respond_with(response)
+            .with_priority(priority);
+        match times {
+            Some(times) => mock.up_to_n_times(times).mount(&coprocessor).await,
+            None => mock.mount(&coprocessor).await,
+        }
+    }
     coprocessor
 }
 
-/// Two requests to subgraph `products` through a coprocessor that breaks each with `status`, and
-/// the answers they get, with the subgraph's circuit opening after one failure.
-async fn subgraph_behind_a_break(status: u16) -> [subgraph::Response; 2] {
-    let coprocessor = breaking_coprocessor("SubgraphRequest", status).await;
-    let target = Target::answering(StatusCode::OK);
+/// How many requests the coprocessor in [`subgraph_around_breaks`] and [`source_around_breaks`]
+/// breaks between the two that reach the target.
+const BREAKS: usize = 5;
+
+/// A circuit that opens once both of the last two recorded requests failed. A break recorded as a
+/// failure would open it at the first break, and one recorded as a success would keep it closed
+/// after the second failure.
+fn opens_on_two_failures_in_a_row() -> serde_json::Value {
+    serde_json::json!({
+        "window_size": 2,
+        "min_requests": 2,
+        "failure_rate_threshold": 0.75,
+        "consecutive_failures": 100,
+    })
+}
+
+/// Requests to subgraph `products`, answering with `target_status`, through a coprocessor that
+/// breaks the [`BREAKS`] requests between the first and the last two with `break_status`. Returns
+/// the answers, after checking which requests reached the subgraph.
+async fn subgraph_around_breaks(
+    break_status: u16,
+    target_status: StatusCode,
+) -> Vec<subgraph::Response> {
+    let coprocessor =
+        coprocessor_breaking_between("SubgraphRequest", BREAKS as u64, break_status).await;
+    let target = Target::answering(target_status);
     let service = subgraph_stack(
         &[
             ("apollo.traffic_shaping", serde_json::json!({})),
             (
                 "apollo.circuit_breaker",
-                serde_json::json!({ "all": { "consecutive_failures": 1 } }),
+                serde_json::json!({ "all": opens_on_two_failures_in_a_row() }),
             ),
             (
                 "apollo.coprocessor",
@@ -1249,7 +1290,7 @@ async fn subgraph_behind_a_break(status: u16) -> [subgraph::Response; 2] {
     .await;
 
     let mut responses = Vec::new();
-    for _ in 0..2 {
+    for _ in 0..BREAKS + 3 {
         responses.push(
             service
                 .clone()
@@ -1258,51 +1299,73 @@ async fn subgraph_behind_a_break(status: u16) -> [subgraph::Response; 2] {
                 .expect("answered"),
         );
     }
-    assert_eq!(target.calls(), 0, "every request was broken");
-    responses.try_into().expect("two responses")
-}
-
-/// A coprocessor breaking a request with a `401` says the request is at fault, not the path to
-/// the subgraph, so it counts as a success like the subgraph answering `401` would.
-#[tokio::test]
-async fn a_subgraph_request_a_coprocessor_breaks_with_a_4xx_is_a_success() {
-    let [first, second] = subgraph_behind_a_break(401).await;
-
-    assert_eq!(first.response.status(), StatusCode::UNAUTHORIZED);
     assert_eq!(
-        second.response.status(),
-        StatusCode::UNAUTHORIZED,
-        "the circuit should still be closed"
+        target.calls(),
+        2,
+        "only the first and the last but one reach the subgraph"
     );
+    responses
 }
 
-/// A coprocessor breaking a request with a `503` counts against the subgraph's circuit, like the
-/// subgraph answering `503` would.
-#[tokio::test]
-async fn a_subgraph_request_a_coprocessor_breaks_with_a_5xx_is_a_failure() {
-    let [first, second] = subgraph_behind_a_break(503).await;
-
+/// Checks the answers from [`subgraph_around_breaks`]: the breaks reach the client while the
+/// circuit stays closed, and the two failures either side of them open it.
+fn assert_breaks_recorded_nothing(responses: &[subgraph::Response], break_status: StatusCode) {
+    let (breaks, last_two) = responses[1..].split_at(BREAKS);
+    for response in breaks {
+        assert_eq!(
+            response.response.status(),
+            break_status,
+            "the circuit should still be closed"
+        );
+    }
     assert_ne!(
-        subgraph_error_code(&first).as_deref(),
+        subgraph_error_code(&last_two[0]).as_deref(),
         Some(Error::CircuitBreakerOpen.code())
     );
     assert_eq!(
-        subgraph_error_code(&second).as_deref(),
+        subgraph_error_code(&last_two[1]).as_deref(),
         Some(Error::CircuitBreakerOpen.code()),
-        "the break should have opened the circuit"
+        "the failures either side of the breaks should have opened the circuit"
     );
 }
 
-/// The connector counterpart of [`subgraph_behind_a_break`], for source `products.api`.
-async fn source_behind_a_break(status: u16) -> [ConnectorResponse; 2] {
-    let coprocessor = breaking_coprocessor("ConnectorRequest", status).await;
-    let target = Target::answering(StatusCode::OK);
+/// A coprocessor breaking requests with a `401` turned them away itself: the subgraph never saw
+/// them. A burst of them changes neither the circuit's state nor its failure rate.
+#[tokio::test]
+async fn a_burst_of_subgraph_requests_a_coprocessor_breaks_records_nothing() {
+    let responses = subgraph_around_breaks(401, StatusCode::INTERNAL_SERVER_ERROR).await;
+    assert_breaks_recorded_nothing(&responses, StatusCode::UNAUTHORIZED);
+}
+
+/// The status a coprocessor breaks with is its own, so a `503` break says nothing about the
+/// subgraph either.
+#[tokio::test]
+async fn a_subgraph_request_a_coprocessor_breaks_with_a_5xx_records_nothing() {
+    let responses = subgraph_around_breaks(503, StatusCode::INTERNAL_SERVER_ERROR).await;
+    assert_breaks_recorded_nothing(&responses, StatusCode::SERVICE_UNAVAILABLE);
+}
+
+/// A `429` from the subgraph still counts on a request a coprocessor let through.
+#[tokio::test]
+async fn a_429_from_the_subgraph_counts_when_a_coprocessor_ran() {
+    let responses = subgraph_around_breaks(401, StatusCode::TOO_MANY_REQUESTS).await;
+    assert_breaks_recorded_nothing(&responses, StatusCode::UNAUTHORIZED);
+}
+
+/// The connector counterpart of [`subgraph_around_breaks`], for source `products.api`.
+async fn source_around_breaks(
+    break_status: u16,
+    target_status: StatusCode,
+) -> Vec<ConnectorResponse> {
+    let coprocessor =
+        coprocessor_breaking_between("ConnectorRequest", BREAKS as u64, break_status).await;
+    let target = Target::answering(target_status);
     let service = source_stack(
         &[
             ("apollo.traffic_shaping", serde_json::json!({})),
             (
                 "apollo.circuit_breaker",
-                serde_json::json!({ "connector": { "all": { "consecutive_failures": 1 } } }),
+                serde_json::json!({ "connector": { "all": opens_on_two_failures_in_a_row() } }),
             ),
             (
                 "apollo.coprocessor",
@@ -1317,7 +1380,7 @@ async fn source_behind_a_break(status: u16) -> [ConnectorResponse; 2] {
     .await;
 
     let mut responses = Vec::new();
-    for _ in 0..2 {
+    for _ in 0..BREAKS + 3 {
         responses.push(
             service
                 .clone()
@@ -1326,40 +1389,280 @@ async fn source_behind_a_break(status: u16) -> [ConnectorResponse; 2] {
                 .expect("answered"),
         );
     }
-    assert_eq!(target.calls(), 0, "every request was broken");
-    responses.try_into().expect("two responses")
+    assert_eq!(
+        target.calls(),
+        2,
+        "only the first and the last but one reach the source"
+    );
+    responses
 }
 
-/// A connector request carries no HTTP status of its own when a coprocessor breaks it, so the
-/// break's status is what the circuit judges: a `401` is a success.
-#[tokio::test]
-async fn a_connector_request_a_coprocessor_breaks_with_a_4xx_is_a_success() {
-    let [first, second] = source_behind_a_break(401).await;
-
-    for response in [&first, &second] {
+/// The connector counterpart of [`assert_breaks_recorded_nothing`].
+fn assert_source_breaks_recorded_nothing(responses: &[ConnectorResponse]) {
+    let (breaks, last_two) = responses[1..].split_at(BREAKS);
+    for response in breaks {
+        assert!(response.error().is_some(), "the coprocessor broke it");
         assert_ne!(
             connector_error_code(response),
             Some(Error::CircuitBreakerOpen.code()),
             "the circuit should still be closed"
         );
-        assert!(response.error().is_some(), "the coprocessor broke it");
     }
-}
-
-/// The connector counterpart of [`a_subgraph_request_a_coprocessor_breaks_with_a_5xx_is_a_failure`].
-#[tokio::test]
-async fn a_connector_request_a_coprocessor_breaks_with_a_5xx_is_a_failure() {
-    let [first, second] = source_behind_a_break(503).await;
-
     assert_ne!(
-        connector_error_code(&first),
+        connector_error_code(&last_two[0]),
         Some(Error::CircuitBreakerOpen.code())
     );
     assert_eq!(
-        connector_error_code(&second),
+        connector_error_code(&last_two[1]),
         Some(Error::CircuitBreakerOpen.code()),
-        "the break should have opened the circuit"
+        "the failures either side of the breaks should have opened the circuit"
     );
+}
+
+/// A connector request carries no HTTP response when a coprocessor breaks it, and the break is
+/// what tells it apart from a transport failure: a burst of `401` breaks records nothing.
+#[tokio::test]
+async fn a_burst_of_connector_requests_a_coprocessor_breaks_records_nothing() {
+    let responses = source_around_breaks(401, StatusCode::INTERNAL_SERVER_ERROR).await;
+    assert_source_breaks_recorded_nothing(&responses);
+}
+
+/// The connector counterpart of [`a_subgraph_request_a_coprocessor_breaks_with_a_5xx_records_nothing`],
+/// with a `429` from the source still counting on the requests the coprocessor let through.
+#[tokio::test]
+async fn a_connector_request_a_coprocessor_breaks_with_a_5xx_records_nothing() {
+    let responses = source_around_breaks(503, StatusCode::TOO_MANY_REQUESTS).await;
+    assert_source_breaks_recorded_nothing(&responses);
+}
+
+/// Sends source `products.api`, behind the connector request cache on `store` and then the
+/// source's circuit, one request past the cache, then [`BREAKS`] sent with `cache_control` for
+/// the cache to answer, then two more past the cache. The source fails every request it receives,
+/// and the circuit opens on two failures in a row, so the cache's answers record nothing only if
+/// the circuit opens on the last request and not before. Returns the cache's answers.
+#[cfg(any(not(feature = "ci"), all(target_arch = "x86_64", target_os = "linux")))]
+async fn source_around_cache_answers(
+    store: Arc<dyn fred::mocks::Mocks>,
+    cache_control: Option<&'static str>,
+) -> Vec<ConnectorResponse> {
+    let plugin = harness(
+        r#"
+        circuit_breaker:
+          connector:
+            all:
+              consecutive_failures: 2
+        "#,
+    )
+    .await;
+
+    let calls = Arc::new(AtomicUsize::new(0));
+    let source = {
+        let calls = calls.clone();
+        tower::service_fn(move |req: ConnectorRequest| {
+            calls.fetch_add(1, Ordering::SeqCst);
+            let response = connector_response(StatusCode::INTERNAL_SERVER_ERROR, &req);
+            async move { Ok::<_, BoxError>(response) }
+        })
+        .boxed_clone()
+    };
+    let cache = crate::plugins::response_cache::connectors::request_cache_for_test(
+        source,
+        "products.api",
+        store,
+    )
+    .await;
+    let service = behind_source_circuit(&plugin, "products.api", cache);
+
+    let send = |cache_control: Option<&'static str>| {
+        let mut request = connector_request();
+        let mut supergraph_request = http::Request::builder();
+        if let Some(cache_control) = cache_control {
+            supergraph_request =
+                supergraph_request.header(http::header::CACHE_CONTROL, cache_control);
+        }
+        request.supergraph_request = Arc::new(
+            supergraph_request
+                .body(crate::graphql::Request::default())
+                .unwrap(),
+        );
+        service.clone().oneshot(request)
+    };
+    // `no-cache, no-store` sends the request past the cache to the source.
+    const PAST_THE_CACHE: Option<&str> = Some("no-cache, no-store");
+
+    send(PAST_THE_CACHE).await.expect("answered");
+    let mut answers = Vec::new();
+    for _ in 0..BREAKS {
+        let response = send(cache_control).await.expect("answered");
+        assert_ne!(
+            connector_error_code(&response),
+            Some(Error::CircuitBreakerOpen.code()),
+            "the circuit should still be closed"
+        );
+        answers.push(response);
+    }
+    assert_eq!(
+        calls.load(Ordering::SeqCst),
+        1,
+        "the cache never calls the source"
+    );
+
+    let response = send(PAST_THE_CACHE).await.expect("answered");
+    assert_ne!(
+        connector_error_code(&response),
+        Some(Error::CircuitBreakerOpen.code())
+    );
+    let response = send(PAST_THE_CACHE).await.expect("answered");
+    assert_eq!(
+        connector_error_code(&response),
+        Some(Error::CircuitBreakerOpen.code()),
+        "the failures either side of the cache's answers should have opened the circuit"
+    );
+    assert_eq!(calls.load(Ordering::SeqCst), 2);
+    answers
+}
+
+/// The response cache in front of a connector source turns away a request whose client sent a
+/// `Cache-Control` header it can't parse, without calling the source. A burst of them records
+/// nothing. This covers the cache's check beneath the circuit; it makes the same check at the
+/// connector stage, above the circuit, where a rejection never reaches the circuit at all.
+#[cfg(any(not(feature = "ci"), all(target_arch = "x86_64", target_os = "linux")))]
+#[tokio::test]
+async fn a_burst_of_connector_requests_the_response_cache_rejects_records_nothing() {
+    let answers =
+        source_around_cache_answers(Arc::new(fred::mocks::Echo), Some("max-age=notanumber")).await;
+    for response in answers {
+        assert_eq!(
+            connector_error_code(&response),
+            Some("INVALID_CACHE_CONTROL_HEADER")
+        );
+    }
+}
+
+/// A connector cache hit is served without calling the source, so a burst of them records
+/// nothing.
+#[cfg(any(not(feature = "ci"), all(target_arch = "x86_64", target_os = "linux")))]
+#[tokio::test]
+async fn a_burst_of_connector_cache_hits_records_nothing() {
+    let store = crate::plugins::response_cache::AlwaysHit::new(
+        serde_json_bytes::json!({ "hello": "cached" }),
+    );
+    let answers = source_around_cache_answers(Arc::new(store), None).await;
+    for response in answers {
+        assert!(response.error().is_none(), "the cache should have answered");
+    }
+}
+
+/// A subgraph cache hit is served without calling the subgraph, so a burst of them records
+/// nothing. A request sent with `Cache-Control: no-cache, no-store` goes past the cache.
+#[cfg(any(not(feature = "ci"), all(target_arch = "x86_64", target_os = "linux")))]
+#[tokio::test]
+async fn a_burst_of_subgraph_cache_hits_records_nothing() {
+    use crate::plugins::circuit_breaker::test_support::assert_router_answers_record_nothing;
+    use crate::plugins::circuit_breaker::test_support::subgraph_request;
+
+    let store = crate::plugins::response_cache::AlwaysHit::new(
+        serde_json_bytes::json!({ "hello": "cached" }),
+    );
+    let schema = apollo_compiler::Schema::parse_and_validate("type Query { hello: String }", "")
+        .expect("schema is valid");
+    let document = Arc::new(
+        apollo_compiler::ExecutableDocument::parse_and_validate(
+            &schema,
+            "query Products { hello }",
+            "",
+        )
+        .expect("operation is valid"),
+    );
+    // The cache keys a lookup on the operation, so it needs the parsed document.
+    let request = || {
+        let mut request = subgraph_request("Products");
+        request.executable_document = Some(document.clone());
+        request
+    };
+    assert_router_answers_record_nothing(
+        async |subgraph| {
+            crate::plugins::response_cache::plugin::subgraph_cache_for_test(
+                subgraph,
+                "products",
+                Arc::new(store),
+            )
+            .await
+        },
+        || subgraph_request_with_cache_control(request(), "no-cache, no-store"),
+        request,
+    )
+    .await;
+}
+
+/// A subgraph request sent with `cache_control`.
+fn subgraph_request_with_cache_control(
+    request: crate::services::subgraph::Request,
+    cache_control: &'static str,
+) -> crate::services::subgraph::Request {
+    let mut request = request;
+    request.subgraph_request.headers_mut().insert(
+        http::header::CACHE_CONTROL,
+        http::HeaderValue::from_static(cache_control),
+    );
+    request
+}
+
+/// The subgraph counterpart of
+/// [`a_burst_of_connector_requests_the_response_cache_rejects_records_nothing`].
+#[cfg(any(not(feature = "ci"), all(target_arch = "x86_64", target_os = "linux")))]
+#[tokio::test]
+async fn a_burst_of_subgraph_requests_the_response_cache_rejects_records_nothing() {
+    use crate::plugins::circuit_breaker::test_support::assert_router_answers_record_nothing;
+    use crate::plugins::circuit_breaker::test_support::subgraph_request;
+
+    assert_router_answers_record_nothing(
+        async |subgraph| {
+            crate::plugins::response_cache::plugin::subgraph_cache_for_test(
+                subgraph,
+                "products",
+                Arc::new(fred::mocks::Echo),
+            )
+            .await
+        },
+        || subgraph_request_with_cache_control(subgraph_request("Products"), "no-cache, no-store"),
+        || subgraph_request_with_cache_control(subgraph_request("Products"), "max-age=notanumber"),
+    )
+    .await;
+}
+
+/// A subgraph cache hit on every entity of an entity fetch is served without calling the
+/// subgraph, so a burst of them records nothing.
+#[cfg(any(not(feature = "ci"), all(target_arch = "x86_64", target_os = "linux")))]
+#[tokio::test]
+async fn a_burst_of_subgraph_entity_cache_hits_records_nothing() {
+    use crate::plugins::circuit_breaker::test_support::assert_router_answers_record_nothing;
+    use crate::plugins::circuit_breaker::test_support::subgraph_request;
+
+    let store = crate::plugins::response_cache::AlwaysHit::new(
+        serde_json_bytes::json!({ "name": "cached" }),
+    );
+    let entity_fetch = || {
+        let mut request = subgraph_request("Products");
+        request.subgraph_request.body_mut().variables.insert(
+            "representations",
+            serde_json_bytes::json!([{ "__typename": "Product", "upc": "1" }]),
+        );
+        request
+    };
+    assert_router_answers_record_nothing(
+        async |subgraph| {
+            crate::plugins::response_cache::plugin::subgraph_cache_for_test(
+                subgraph,
+                "products",
+                Arc::new(store),
+            )
+            .await
+        },
+        || subgraph_request_with_cache_control(entity_fetch(), "no-cache, no-store"),
+        entity_fetch,
+    )
+    .await;
 }
 
 /// A caller that goes away before the subgraph answers says nothing about the subgraph: between
@@ -1475,6 +1778,195 @@ async fn a_probe_whose_caller_goes_away_hands_the_probe_to_the_next_request() {
         response.response.status(),
         StatusCode::OK,
         "the successful probe should have closed the circuit"
+    );
+    assert_eq!(calls.load(Ordering::SeqCst), 4);
+}
+
+/// The config for the probe tests: two failures in a row open the circuit, while a half-open
+/// circuit reopens on its probe's first failure. A failure straight after a probe that recorded
+/// nothing therefore reopens the circuit only if that probe left it half-open: had the probe
+/// counted as a success, the circuit would be closed and need a second failure.
+const PROBE_CONFIG: &str = r#"
+    circuit_breaker:
+      all:
+        consecutive_failures: 2
+        open_duration: 10s
+      connector:
+        all:
+          consecutive_failures: 2
+          open_duration: 10s
+    "#;
+
+/// A recovery probe that `mark` marks as saying nothing about the subgraph records nothing and
+/// hands the probe on: the circuit stays half-open, and the next request becomes the probe
+/// without another `open_duration`.
+async fn assert_a_marked_probe_hands_the_probe_on(mark: fn(&mut subgraph::Response)) {
+    let plugin = harness(PROBE_CONFIG).await;
+
+    let calls = Arc::new(AtomicUsize::new(0));
+    let service = protected_subgraph(&plugin, "products", {
+        let calls = calls.clone();
+        move |req: subgraph::Request| {
+            let call = calls.fetch_add(1, Ordering::SeqCst);
+            async move {
+                let mut response = subgraph_response(StatusCode::INTERNAL_SERVER_ERROR, &req);
+                if call == 2 {
+                    mark(&mut response);
+                }
+                Ok(response)
+            }
+        }
+    });
+    let request = || subgraph::Request::fake_builder().build();
+
+    for _ in 0..2 {
+        service
+            .call(request())
+            .await
+            .expect("the subgraph answered");
+    }
+    tokio::time::advance(Duration::from_secs(11)).await;
+    service
+        .call(request())
+        .await
+        .expect("the probe was let through");
+
+    let response = service
+        .call(request())
+        .await
+        .expect("the next request was let through as the probe");
+    assert_eq!(
+        response.response.status(),
+        StatusCode::INTERNAL_SERVER_ERROR
+    );
+    assert_eq!(calls.load(Ordering::SeqCst), 4);
+
+    let response = service.call(request()).await.expect("the circuit answered");
+    assert_eq!(
+        subgraph_error_code(&response).as_deref(),
+        Some(Error::CircuitBreakerOpen.code()),
+        "the failed probe should have reopened the circuit"
+    );
+    assert_eq!(calls.load(Ordering::SeqCst), 4);
+}
+
+/// A coprocessor or plugin break, or a response-cache hit, on the probe.
+#[tokio::test(start_paused = true)]
+async fn a_probe_the_router_answers_hands_the_probe_to_the_next_request() {
+    assert_a_marked_probe_hands_the_probe_on(|response| {
+        response.response.extensions_mut().insert(AnsweredByRouter);
+    })
+    .await;
+}
+
+/// A file upload failing part way through on the probe.
+#[tokio::test(start_paused = true)]
+async fn a_probe_whose_upload_fails_hands_the_probe_to_the_next_request() {
+    assert_a_marked_probe_hands_the_probe_on(|response| {
+        response
+            .response
+            .extensions_mut()
+            .insert(UploadStreamFailed);
+    })
+    .await;
+}
+
+/// The connector counterpart of [`assert_a_marked_probe_hands_the_probe_on`], for a probe the
+/// router answered without calling the source.
+#[tokio::test(start_paused = true)]
+async fn a_connector_probe_the_router_answers_hands_the_probe_to_the_next_request() {
+    let plugin = harness(PROBE_CONFIG).await;
+
+    let call = Arc::new(AtomicUsize::new(0));
+    let (mut service, calls) = connector_service(&plugin, "products.api", {
+        let call = call.clone();
+        move |req| {
+            let mut response = connector_response(StatusCode::INTERNAL_SERVER_ERROR, req);
+            response.answered_by_router = call.fetch_add(1, Ordering::SeqCst) == 2;
+            response
+        }
+    });
+    let mut send = async || {
+        service
+            .ready()
+            .await
+            .expect("ready")
+            .call(connector_request())
+            .await
+            .expect("answered")
+    };
+
+    for _ in 0..2 {
+        send().await;
+    }
+    tokio::time::advance(Duration::from_secs(11)).await;
+    send().await;
+
+    let response = send().await;
+    assert_ne!(
+        connector_error_code(&response),
+        Some(Error::CircuitBreakerOpen.code()),
+        "the next request should have been let through as the probe"
+    );
+    assert_eq!(calls.load(Ordering::SeqCst), 4);
+
+    let response = send().await;
+    assert_eq!(
+        connector_error_code(&response),
+        Some(Error::CircuitBreakerOpen.code()),
+        "the failed probe should have reopened the circuit"
+    );
+    assert_eq!(calls.load(Ordering::SeqCst), 4);
+}
+
+/// A file upload whose stream from the client fails part way through fails the fetch with a
+/// `500`, but the client is at fault, so however many of them there are, the subgraph's circuit
+/// stays closed.
+#[tokio::test]
+async fn uploads_that_fail_part_way_cannot_open_a_healthy_circuit() {
+    let plugin = harness(
+        r#"
+        circuit_breaker:
+          all:
+            consecutive_failures: 1
+        "#,
+    )
+    .await;
+
+    let calls = Arc::new(AtomicUsize::new(0));
+    let service = protected_subgraph(&plugin, "products", {
+        let calls = calls.clone();
+        move |req: subgraph::Request| {
+            let upload_fails = calls.fetch_add(1, Ordering::SeqCst) < 3;
+            async move {
+                if upload_fails {
+                    let mut response = subgraph_response(StatusCode::INTERNAL_SERVER_ERROR, &req);
+                    response
+                        .response
+                        .extensions_mut()
+                        .insert(UploadStreamFailed);
+                    Ok(response)
+                } else {
+                    Ok(subgraph_response(StatusCode::OK, &req))
+                }
+            }
+        }
+    });
+
+    for _ in 0..3 {
+        service
+            .call(subgraph::Request::fake_builder().build())
+            .await
+            .expect("the subgraph service answered");
+    }
+    let response = service
+        .call(subgraph::Request::fake_builder().build())
+        .await
+        .expect("the subgraph answered");
+    assert_eq!(
+        response.response.status(),
+        StatusCode::OK,
+        "the circuit should still be closed"
     );
     assert_eq!(calls.load(Ordering::SeqCst), 4);
 }
@@ -1668,7 +2160,10 @@ async fn a_connector_circuit_opens_after_consecutive_failures() {
             .call(connector_request())
             .await
             .expect("the source answered");
-        assert!(response.transport_result.is_ok());
+        assert!(!matches!(
+            response.transport_outcome,
+            TransportOutcome::Error(_)
+        ));
         assert_eq!(connector_error_code(&response), None);
     }
     assert_eq!(calls.load(Ordering::SeqCst), 2);
@@ -1681,8 +2176,8 @@ async fn a_connector_circuit_opens_after_consecutive_failures() {
         .await
         .expect("the circuit answered");
     assert!(matches!(
-        response.transport_result,
-        Err(Error::CircuitBreakerOpen)
+        response.transport_outcome,
+        TransportOutcome::Error(Error::CircuitBreakerOpen)
     ));
     assert_eq!(
         connector_error_code(&response),
@@ -1731,7 +2226,7 @@ async fn a_connector_source_with_no_entry_of_its_own_follows_all() {
             .await
             .expect("the source answered");
         assert!(
-            response.transport_result.is_ok(),
+            !matches!(response.transport_outcome, TransportOutcome::Error(_)),
             "reviews.api should still be reaching the source after {failure} failures"
         );
     }
@@ -1782,7 +2277,10 @@ async fn a_connector_circuit_opens_and_recovers_on_a_probe() {
             .call(connector_request())
             .await
             .expect("the source answered");
-        assert!(response.transport_result.is_ok());
+        assert!(!matches!(
+            response.transport_outcome,
+            TransportOutcome::Error(_)
+        ));
     }
     assert_eq!(calls.load(Ordering::SeqCst), 2);
 
@@ -1794,8 +2292,8 @@ async fn a_connector_circuit_opens_and_recovers_on_a_probe() {
         .await
         .expect("the circuit answered");
     assert!(matches!(
-        response.transport_result,
-        Err(Error::CircuitBreakerOpen)
+        response.transport_outcome,
+        TransportOutcome::Error(Error::CircuitBreakerOpen)
     ));
     assert_eq!(
         calls.load(Ordering::SeqCst),
@@ -1816,7 +2314,10 @@ async fn a_connector_circuit_opens_and_recovers_on_a_probe() {
             .call(connector_request())
             .await
             .expect("the source answered");
-        assert!(response.transport_result.is_ok());
+        assert!(!matches!(
+            response.transport_outcome,
+            TransportOutcome::Error(_)
+        ));
         assert_eq!(connector_error_code(&response), None);
         assert_eq!(calls.load(Ordering::SeqCst), expected_calls);
     }
@@ -1858,7 +2359,10 @@ async fn a_connector_circuit_is_shared_by_every_service_built_for_it() {
         .await
         .expect("the circuit answered");
     assert!(
-        matches!(response.transport_result, Err(Error::CircuitBreakerOpen)),
+        matches!(
+            response.transport_outcome,
+            TransportOutcome::Error(Error::CircuitBreakerOpen)
+        ),
         "the failure recorded by one service should open the circuit for the other"
     );
 }
@@ -1888,7 +2392,7 @@ async fn a_4xx_connector_response_is_not_a_failure() {
             .await
             .expect("the source answered");
         assert!(
-            response.transport_result.is_ok(),
+            !matches!(response.transport_outcome, TransportOutcome::Error(_)),
             "a 4xx should not open the circuit"
         );
     }
@@ -1957,7 +2461,10 @@ async fn a_connector_request_over_max_requests_is_not_recorded() {
         .oneshot(request_in(&operation))
         .await
         .expect("the source answered");
-    assert!(response.transport_result.is_ok());
+    assert!(!matches!(
+        response.transport_outcome,
+        TransportOutcome::Error(_)
+    ));
 
     let response = service
         .clone()
@@ -1965,8 +2472,8 @@ async fn a_connector_request_over_max_requests_is_not_recorded() {
         .await
         .expect("the limit answered");
     assert!(matches!(
-        response.transport_result,
-        Err(Error::RequestLimitExceeded)
+        response.transport_outcome,
+        TransportOutcome::Error(Error::RequestLimitExceeded)
     ));
 
     // Another operation, with its own allowance.
@@ -2024,8 +2531,8 @@ async fn a_connector_request_over_max_requests_does_not_take_the_recovery_probe(
         .await
         .expect("the limit answered");
     assert!(matches!(
-        response.transport_result,
-        Err(Error::RequestLimitExceeded)
+        response.transport_outcome,
+        TransportOutcome::Error(Error::RequestLimitExceeded)
     ));
 
     // Had the rejected request closed the circuit, this failure would only start a new count;
@@ -2065,7 +2572,10 @@ async fn a_connector_request_the_rate_limit_sheds_is_not_recorded() {
 
     call().await.expect("the source answered");
     let response = call().await.expect("the rate limit answered");
-    assert!(matches!(response.transport_result, Err(Error::RateLimited)));
+    assert!(matches!(
+        response.transport_outcome,
+        TransportOutcome::Error(Error::RateLimited)
+    ));
 
     tokio::time::advance(Duration::from_secs(10)).await;
     call().await.expect("the source answered");
@@ -2190,7 +2700,7 @@ async fn a_mapping_only_connector_response_is_not_a_failure() {
         "products.api",
         tower::service_fn(|req: ConnectorRequest| async move {
             let mut response = connector_response(StatusCode::OK, &req);
-            response.transport_result = Ok(TransportResponse::MappingOnly);
+            response.transport_outcome = TransportOutcome::MappingOnly;
             Ok(response)
         })
         .boxed_clone(),
@@ -2205,8 +2715,8 @@ async fn a_mapping_only_connector_response_is_not_a_failure() {
             .await
             .expect("the connector answered");
         assert!(matches!(
-            response.transport_result,
-            Ok(TransportResponse::MappingOnly)
+            response.transport_outcome,
+            TransportOutcome::MappingOnly
         ));
     }
 }
@@ -2234,8 +2744,8 @@ async fn a_source_that_stops_answering_opens_its_circuit_at_its_timeout() {
         .await
         .expect("the timeout answered");
     assert!(matches!(
-        response.transport_result,
-        Err(Error::GatewayTimeout)
+        response.transport_outcome,
+        TransportOutcome::Error(Error::GatewayTimeout)
     ));
 
     // That timeout was the circuit's one failure.
@@ -2271,7 +2781,7 @@ async fn a_connector_response_cut_off_part_way_through_its_body_is_a_failure() {
     let (mut service, calls) =
         connector_service(&plugin, "products.api", |req: &ConnectorRequest| {
             let mut response = connector_response(StatusCode::OK, req);
-            if let Ok(TransportResponse::Http(http_response)) = &mut response.transport_result {
+            if let TransportOutcome::Response(http_response) = &mut response.transport_outcome {
                 http_response
                     .inner
                     .extensions
@@ -2314,7 +2824,7 @@ async fn a_mapping_only_request_goes_around_an_open_circuit() {
         connector_service(&plugin, "products.api", |req: &ConnectorRequest| {
             if matches!(req.transport_request, TransportRequest::MappingOnly) {
                 let mut response = connector_response(StatusCode::OK, req);
-                response.transport_result = Ok(TransportResponse::MappingOnly);
+                response.transport_outcome = TransportOutcome::MappingOnly;
                 response
             } else {
                 connector_response(StatusCode::BAD_GATEWAY, req)
@@ -2347,8 +2857,8 @@ async fn a_mapping_only_request_goes_around_an_open_circuit() {
         .await
         .expect("the connector answered");
     assert!(matches!(
-        response.transport_result,
-        Ok(TransportResponse::MappingOnly)
+        response.transport_outcome,
+        TransportOutcome::MappingOnly
     ));
     assert_eq!(
         calls.load(Ordering::SeqCst),
@@ -2377,7 +2887,7 @@ async fn a_mapping_only_request_uses_the_permit_it_was_readied_with() {
         .concurrency_limit(1)
         .service_fn(|request: ConnectorRequest| async move {
             let mut response = connector_response(StatusCode::OK, &request);
-            response.transport_result = Ok(TransportResponse::MappingOnly);
+            response.transport_outcome = TransportOutcome::MappingOnly;
             Ok::<_, BoxError>(response)
         })
         .boxed_clone();
@@ -2392,17 +2902,16 @@ async fn a_mapping_only_request_uses_the_permit_it_was_readied_with() {
     .expect("the request should not wait on a permit its own service is holding")
     .expect("the connector answered");
     assert!(matches!(
-        response.transport_result,
-        Ok(TransportResponse::MappingOnly)
+        response.transport_outcome,
+        TransportOutcome::MappingOnly
     ));
     assert_permit_is_free(&service).await;
 }
 
-/// [`ConnectorRequest::into_error_response`] is how a native plugin, or a coprocessor's `break`,
-/// fails a connector request. Plugins are part of fulfilling a fetch, so a plugin failing it
-/// counts against the source like any other failure beneath the circuit.
+/// [`ConnectorRequest::into_error_response`] is how a native plugin breaks a connector request.
+/// The source is never called, so however many of them there are, its circuit stays closed.
 #[tokio::test]
-async fn a_request_a_plugin_fails_counts_against_the_source() {
+async fn a_request_a_plugin_breaks_records_nothing() {
     let plugin = harness(
         r#"
         circuit_breaker:
@@ -2430,27 +2939,17 @@ async fn a_request_a_plugin_fails_counts_against_the_source() {
         .boxed_clone()
     });
 
-    let response = service
-        .ready()
-        .await
-        .expect("ready")
-        .call(connector_request())
-        .await
-        .expect("the plugin answered");
-    assert_eq!(connector_error_code(&response), Some("UPSTREAM_UNHEALTHY"));
-
-    let response = service
-        .ready()
-        .await
-        .expect("ready")
-        .call(connector_request())
-        .await
-        .expect("the circuit answered");
-    assert_eq!(
-        connector_error_code(&response),
-        Some(Error::CircuitBreakerOpen.code())
-    );
-    assert_eq!(calls.load(Ordering::SeqCst), 1);
+    for _ in 0..3 {
+        let response = service
+            .ready()
+            .await
+            .expect("ready")
+            .call(connector_request())
+            .await
+            .expect("the plugin answered");
+        assert_eq!(connector_error_code(&response), Some("UPSTREAM_UNHEALTHY"));
+    }
+    assert_eq!(calls.load(Ordering::SeqCst), 3);
 }
 
 // --- through the whole router --------------------------------------------------------------

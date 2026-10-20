@@ -1,17 +1,17 @@
-use std::time::Duration;
-
+use apollo_configuration::types::Duration;
 use bytesize::ByteSize;
-use schemars::JsonSchema;
-use serde::Deserialize;
 
 /// Request limits for a multipart request
-#[derive(Debug, Clone, Copy, Deserialize, JsonSchema)]
-#[serde(deny_unknown_fields)]
+#[apollo_configuration::configuration]
+#[derive(Copy)]
 pub(crate) struct MultipartRequestLimits {
     /// The maximum amount of files allowed for a single query (default: 5)
+    #[config(required)]
     pub(crate) max_files: usize,
 
     /// The maximum size of each file (default: 1MB)
+    // ByteSize has no Validate impl.
+    #[config(required, skip_validate)]
     #[serde(deserialize_with = "bytesize::ByteSize::deserialize")]
     #[schemars(with = "String")]
     pub(crate) max_file_size: ByteSize,
@@ -22,7 +22,6 @@ pub(crate) struct MultipartRequestLimits {
     /// rejected with a `504 Gateway Timeout` error.
     ///
     /// If not set, no operation body timeout is applied.
-    #[serde(deserialize_with = "humantime_serde::deserialize", default)]
     #[schemars(with = "Option<String>", default)]
     pub(crate) operation_body_timeout: Option<Duration>,
 
@@ -33,10 +32,9 @@ pub(crate) struct MultipartRequestLimits {
     /// allowance to the content the other limits already permit. It enforces the sum as a limit on
     /// the whole request. A request over that sum gets a `413 Payload Too Large`. The sum grows
     /// with `max_files` and `max_file_size`.
-    #[serde(
-        deserialize_with = "bytesize::ByteSize::deserialize",
-        default = "default_max_overhead_size"
-    )]
+    // ByteSize has no Validate impl.
+    #[config(default = default_max_overhead_size(), skip_validate)]
+    #[serde(deserialize_with = "bytesize::ByteSize::deserialize")]
     #[schemars(with = "String", default = "default_max_overhead_size")]
     pub(crate) max_overhead_size: ByteSize,
 }
@@ -70,8 +68,7 @@ impl Default for MultipartRequestLimits {
 }
 
 /// Supported mode for a multipart request
-#[derive(Debug, Clone, Default, Deserialize, JsonSchema)]
-#[serde(deny_unknown_fields, rename_all = "lowercase")]
+#[apollo_configuration::configuration]
 pub(crate) enum MultipartRequestMode {
     /// The multipart request will not be loaded into memory and instead will
     /// be streamed directly to the subgraph in the order received. This has some
@@ -80,17 +77,17 @@ pub(crate) enum MultipartRequestMode {
     ///
     /// In practice, this means that certain queries will fail due to ordering of the
     /// files.
-    #[default]
+    #[config(default)]
     Stream,
 }
 
 /// Configuration for a multipart request for file uploads.
 ///
 /// This protocol conforms to [jaydenseric's multipart spec](https://github.com/jaydenseric/graphql-multipart-request-spec)
-#[derive(Debug, Clone, Deserialize, JsonSchema)]
-#[serde(deny_unknown_fields, default)]
+#[apollo_configuration::configuration]
 pub(crate) struct MultipartRequest {
     /// Whether to enable the multipart protocol for file uploads (default: true)
+    #[config(default = true)]
     pub(crate) enabled: bool,
 
     /// The supported mode for the request (default: [MultipartRequestMode::Stream])
@@ -100,23 +97,14 @@ pub(crate) struct MultipartRequest {
     pub(crate) limits: MultipartRequestLimits,
 }
 
-impl Default for MultipartRequest {
-    fn default() -> Self {
-        Self {
-            enabled: true,
-            mode: Default::default(),
-            limits: Default::default(),
-        }
-    }
-}
-
 /// Configuration for the various protocols supported by the file upload plugin
-#[derive(Debug, Clone, Default, Deserialize, JsonSchema)]
-#[serde(deny_unknown_fields)]
+#[apollo_configuration::configuration]
+#[derive(Default)]
 pub(crate) struct FileUploadProtocols {
     /// Configuration for multipart requests.
     ///
     /// This protocol conforms to [jaydenseric's multipart spec](https://github.com/jaydenseric/graphql-multipart-request-spec)
+    #[config(required)]
     pub(crate) multipart: MultipartRequest,
 }
 
@@ -129,6 +117,6 @@ pub(crate) struct FileUploadsConfig {
     pub(crate) enabled: bool,
 
     /// Supported protocol configurations for file uploads
-    #[config(required, skip_validate)]
+    #[config(required)]
     pub(crate) protocols: FileUploadProtocols,
 }

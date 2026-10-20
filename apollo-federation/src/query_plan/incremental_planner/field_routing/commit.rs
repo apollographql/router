@@ -294,25 +294,28 @@ impl FieldRoutingSearchSpace {
         // field available here (the subgraph echoes provided fields),
         // including through downcasts out of the provides-copy layer that
         // `can_resolve_in_place` cannot see.
-        let key_locally_resolvable = match first_key {
+        let (key_locally_resolvable, (anchor_key, routed_key)) = match first_key {
             Some(key_conditions) => {
-                matches!(choice, RoutingChoice::KeyHopWithProvidedKey { .. })
-                    || self.can_resolve_in_place(
-                        pending.query_graph_node,
-                        key_conditions,
-                        &source,
-                    )?
+                let locally_resolvable =
+                    matches!(choice, RoutingChoice::KeyHopWithProvidedKey { .. })
+                        || self.can_resolve_in_place(
+                            pending.query_graph_node,
+                            key_conditions,
+                            &source,
+                        )?;
+                let split =
+                    self.split_anchor_key(state, pending, key_conditions, locally_resolvable)?;
+                (locally_resolvable, split)
             }
-            None => true,
+            None => (true, (None, None)),
         };
 
         // Key fields plus __typename, which identifies the entity type.
-        let anchor_key = key_locally_resolvable.then_some(first_key).flatten();
         self.append_entity_inputs(
             state,
             pending.fetch_node,
             &pending.op_path,
-            anchor_key,
+            anchor_key.as_ref(),
             &source,
         );
 
@@ -328,14 +331,25 @@ impl FieldRoutingSearchSpace {
             None => (choice.target_subgraph(), None),
         };
 
-        let new_group = self.entity_group_avoiding_cycles(
-            state,
-            first_subgraph,
-            merge_at.clone(),
-            pending.fetch_node,
-            pending.ordering_dependent(),
-            pending.defer_ref.clone(),
-        );
+        let new_group = if intermediate_hops.is_empty() {
+            self.entity_group_avoiding_cycles(
+                state,
+                first_subgraph,
+                merge_at.clone(),
+                pending.fetch_node,
+                pending.ordering_dependent(),
+                pending.defer_ref.clone(),
+            )
+        } else {
+            self.chain_hop_group(
+                state,
+                pending,
+                choice,
+                0,
+                merge_at.clone(),
+                pending.fetch_node,
+            )?
+        };
 
         let key_input = if let Some(key_conditions) = first_key {
             let dest_node = match first_dest_node {
@@ -367,19 +381,28 @@ impl FieldRoutingSearchSpace {
         // they commit. Statically circular keys are the exception: routing
         // their conditions would recurse without progress, so the anchor
         // must resolve the whole key itself or the commit fails.
-        if !key_locally_resolvable && let Some(key_conditions) = first_key.cloned() {
+        if let Some(routed_key) = &routed_key {
             if matches!(choice, RoutingChoice::CircularKeyHop { .. }) {
+                // A routed part of a locally resolvable key is what a
+                // connector anchor's selection doesn't map.
+                if key_locally_resolvable {
+                    return Err(FederationError::internal(format!(
+                        "circular key conditions missing from the connector output at {}: {}",
+                        source.type_pos.type_name(),
+                        routed_key,
+                    )));
+                }
                 self.commit_circular_key_conditions(
                     state,
                     pending,
-                    &key_conditions,
+                    routed_key,
                     &source,
                     pending.fetch_node,
                     &pending.op_path,
                     new_group,
                 )?;
             } else {
-                self.push_condition_pendings(state, pending, &key_conditions, new_group)?;
+                self.push_condition_pendings(state, pending, routed_key, new_group)?;
             }
         }
 
@@ -390,6 +413,49 @@ impl FieldRoutingSearchSpace {
         }
 
         Ok((new_group, edge))
+    }
+
+    /// Split `conditions` into the part the anchor fetch selects and the part
+    /// routed as condition pendings. Conditions the anchor can't resolve in
+    /// place are routed whole; a connector anchor returns only the fields its
+    /// selection maps, and the rest are routed like external fields.
+    pub(super) fn split_in_place(
+        &self,
+        state: &PlanState,
+        pending: &PendingSelection,
+        conditions: &Arc<SelectionSet>,
+        resolvable_in_place: bool,
+    ) -> ConditionSplit {
+        if !resolvable_in_place {
+            return (None, Some(conditions.clone()));
+        }
+        match self.connector_unprovided(state, pending.fetch_node, &pending.op_path, conditions) {
+            Some((provided, missing)) => (provided, Some(missing)),
+            None => (Some(conditions.clone()), None),
+        }
+    }
+
+    /// [`Self::split_in_place`] for an entity hop's key. Fails when the routed
+    /// part contains everything the hop fetches: any route for that part is
+    /// also a route for the fetched selection, so the hop is circular or
+    /// redundant.
+    pub(super) fn split_anchor_key(
+        &self,
+        state: &PlanState,
+        pending: &PendingSelection,
+        key_conditions: &Arc<SelectionSet>,
+        key_locally_resolvable: bool,
+    ) -> Result<ConditionSplit, FederationError> {
+        let (anchor_key, routed_key) =
+            self.split_in_place(state, pending, key_conditions, key_locally_resolvable);
+        if let Some(routed_key) = &routed_key
+            && key_contains_selection(&pending.selection, routed_key)
+        {
+            return Err(FederationError::internal(
+                "entity hop needs the field it fetches as its key",
+            ));
+        }
+        Ok((anchor_key, routed_key))
     }
 
     /// Handle a circular key at commit time: its conditions can't be
@@ -457,35 +523,41 @@ impl FieldRoutingSearchSpace {
             };
             let next_subgraph = &qg.node_weight(next_dest_node)?.source;
 
-            let next_group = self.entity_group_avoiding_cycles(
-                state,
-                next_subgraph,
-                merge_at.clone(),
-                prev_group,
-                pending.ordering_dependent(),
-                pending.defer_ref.clone(),
-            );
+            let next_group = if i + 1 < intermediate_hops.len() {
+                self.chain_hop_group(state, pending, choice, i + 1, merge_at.clone(), prev_group)?
+            } else {
+                self.entity_group_avoiding_cycles(
+                    state,
+                    next_subgraph,
+                    merge_at.clone(),
+                    prev_group,
+                    pending.ordering_dependent(),
+                    pending.defer_ref.clone(),
+                )
+            };
 
             if let Some(key_conds) = exit_key {
                 let hop_source = self.node_source(hop.target_node)?;
                 let hop_path = self.entity_root_path(hop_type_pos.type_name())?;
-                if self.can_resolve_in_place(hop.target_node, key_conds, &hop_source)? {
-                    self.append_entity_inputs(
-                        state,
-                        prev_group,
-                        &hop_path,
-                        Some(key_conds),
-                        &hop_source,
-                    );
-                } else {
-                    self.append_entity_inputs(state, prev_group, &hop_path, None, &hop_source);
-                    let hop_anchor = pending
-                        .fork(pending.selection.clone())
-                        .at(hop.target_node, prev_group)
-                        .with_op_path(hop_path.clone())
-                        .with_response_path(SharedPath::new())
-                        .with_provides_anchor(None);
-                    self.push_condition_pendings(state, &hop_anchor, key_conds, next_group)?;
+                let hop_anchor = pending
+                    .fork(pending.selection.clone())
+                    .at(hop.target_node, prev_group)
+                    .with_op_path(hop_path.clone())
+                    .with_response_path(SharedPath::new())
+                    .with_provides_anchor(None);
+                let resolvable_in_place =
+                    self.can_resolve_in_place(hop.target_node, key_conds, &hop_source)?;
+                let (in_place, routed) =
+                    self.split_in_place(state, &hop_anchor, key_conds, resolvable_in_place);
+                self.append_entity_inputs(
+                    state,
+                    prev_group,
+                    &hop_path,
+                    in_place.as_ref(),
+                    &hop_source,
+                );
+                if let Some(routed) = &routed {
+                    self.push_condition_pendings(state, &hop_anchor, routed, next_group)?;
                 }
             }
 
@@ -511,6 +583,44 @@ impl FieldRoutingSearchSpace {
         }
 
         last.ok_or_else(|| FederationError::internal("intermediate_key_hops is empty"))
+    }
+
+    /// The group a chain enters at its `index`th intermediate hop. A connector
+    /// subgraph has no GraphQL endpoint, so a chain enters it through one of
+    /// its entity-resolver connectors.
+    fn chain_hop_group(
+        &self,
+        state: &mut PlanState,
+        pending: &PendingSelection,
+        choice: &RoutingChoice,
+        index: usize,
+        merge_at: Vec<FetchDataPathElement>,
+        anchor_fetch: NodeIndex,
+    ) -> Result<NodeIndex, FederationError> {
+        let hops = choice.intermediate_hops();
+        let hop = &hops[index];
+        let subgraph = &self.qg().node_weight(hop.target_node)?.source;
+        if !self.connector_index.is_connector_subgraph(subgraph) {
+            return Ok(self.entity_group_avoiding_cycles(
+                state,
+                subgraph,
+                merge_at,
+                anchor_fetch,
+                pending.ordering_dependent(),
+                pending.defer_ref.clone(),
+            ));
+        }
+        let exit_key = match hops.get(index + 1) {
+            Some(next) => next.entry_key.as_ref(),
+            None => Some(&choice.key()?.key_conditions),
+        };
+        let resolver = self.chain_hop_resolver(hop, exit_key)?;
+        Ok(state.graph.add_connector_entity_group(
+            subgraph,
+            merge_at,
+            resolver.connector.clone(),
+            pending.defer_ref.clone(),
+        ))
     }
 
     /// Get or create the entity group for (subgraph, merge_at), falling
@@ -1333,6 +1443,21 @@ impl FieldRoutingSearchSpace {
                 "condition resolution nested more than {CONDITION_DEPTH_LIMIT} levels deep (circular @requires?)",
             )));
         }
+        // A condition the anchor is already resolving can't help resolve
+        // itself: the route that needs it again only recurses until the
+        // depth limit, and every level of a key-hop cycle can branch, so
+        // reaching that limit is exponential. Failing here lets the anchor
+        // try its other routes instead.
+        if let Some(sel) = conditions
+            .selections
+            .values()
+            .find(|sel| anchor.is_resolving_condition(anchor.query_graph_node, sel))
+        {
+            return Err(FederationError::internal(format!(
+                "condition {} already being resolved at this position",
+                selection_label(sel),
+            )));
+        }
         // Condition data is entity-fetch input: route it unconditionally
         // (see `unconditioned_input_path`).
         let input_path = unconditioned_input_path(&anchor.op_path);
@@ -1553,4 +1678,34 @@ pub(super) fn field_response_elements(
         }
     }
     Ok(elements)
+}
+
+/// Conditions split into the part the anchor fetch selects and the part routed
+/// as condition pendings; `None` stands for an empty part.
+type ConditionSplit = (Option<Arc<SelectionSet>>, Option<Arc<SelectionSet>>);
+
+/// Whether `key` contains everything the field `selection` selects (matched by
+/// field name, `__typename` aside). Entering an entity to fetch part of its own
+/// key is circular when that part isn't already available: routing the key
+/// would need the same hop again.
+fn key_contains_selection(selection: &Selection, key: &SelectionSet) -> bool {
+    let Selection::Field(field_sel) = selection else {
+        return false;
+    };
+    key.selections.values().any(|key_selection| {
+        let Selection::Field(key_field) = key_selection else {
+            return false;
+        };
+        if key_field.field.name() != field_sel.field.name() {
+            return false;
+        }
+        match (&field_sel.selection_set, &key_field.selection_set) {
+            (None, _) => true,
+            (Some(sub_ss), Some(key_sub_ss)) => sub_ss
+                .selections
+                .values()
+                .all(|sub| sub.is_typename_field() || key_contains_selection(sub, key_sub_ss)),
+            (Some(_), None) => false,
+        }
+    })
 }
