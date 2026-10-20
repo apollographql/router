@@ -2227,11 +2227,12 @@ fn aliases_nested_conflicts_under_merged_fields() {
         aliased(
             ALIAS_SCHEMA,
             "I",
-            "... on A { o { r { s } } v } ... on B { o { p } v id } ... on C { o { r { s } q } }",
+            "... on A { o { r { s } } v } ... on B { o { r: p } v id } ... on C { o { r { s } q } }",
         ),
         @r###"
-    { ... on A { o { r { s } } v } ... on B { o { p } v__alias_0: v id } ... on C { o { r { s } q } } }
+    { ... on A { o { r { s } } v } ... on B { o { r__alias_0: p } v__alias_0: v id } ... on C { o { r { s } q } } }
     KeyRenamer(FetchDataKeyRenamer { path: [TypenameEquals("B"), Key("v__alias_0", None)], rename_key_to: "v" })
+    KeyRenamer(FetchDataKeyRenamer { path: [TypenameEquals("B"), Key("o", None), Key("r__alias_0", None)], rename_key_to: "r" })
     "###
     );
 }
