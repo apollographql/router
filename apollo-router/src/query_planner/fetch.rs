@@ -37,6 +37,7 @@ use crate::query_planner::SubgraphSchemas;
 use crate::services::SubgraphRequest;
 use crate::services::fetch::ErrorMapping;
 use crate::services::subgraph::BoxCloneService;
+use crate::spec::Query;
 use crate::spec::QueryHash;
 use crate::spec::Schema;
 
@@ -159,6 +160,7 @@ impl Variables {
         data: &Value,
         current_dir: &Path,
         request: &Arc<http::Request<Request>>,
+        query: &Query,
         schema: &Schema,
         input_rewrites: &Option<Vec<rewrites::DataRewrite>>,
         context_rewrites: &Option<Vec<rewrites::DataRewrite>>,
@@ -166,6 +168,13 @@ impl Variables {
         let body = request.body();
         let mut subgraph_context = SubgraphContext::new(data, schema, context_rewrites);
         if !requires.is_empty() {
+            // Resolves the boolean variables that `@skip`/`@include` conditions on the `requires`
+            // selections may refer to, taking the operation's variable defaults into account.
+            let boolean_variable = |name: &str| {
+                query
+                    .variable_value(name, &body.variables)
+                    .and_then(Value::as_bool)
+            };
             let mut variables = Object::with_capacity(1 + variable_usages.len());
 
             variables.extend(variable_usages.iter().filter_map(|key| {
@@ -182,7 +191,8 @@ impl Variables {
                     context.execute_on_path(path);
                 }
 
-                let mut value = execute_selection_set(value, requires, schema, None);
+                let mut value =
+                    execute_selection_set(value, requires, schema, None, &boolean_variable);
                 if value.as_object().map(|o| !o.is_empty()).unwrap_or(false) {
                     rewrites::apply_rewrites(schema, &mut value, input_rewrites);
                     match values.get_index_of(&value) {
@@ -605,6 +615,7 @@ mod tests {
         vec![requires_selection::Selection::InlineFragment(
             requires_selection::InlineFragment {
                 type_condition: Some(name!("T")),
+                conditions: vec![],
                 selections: vec![requires_selection::Selection::Field(
                     requires_selection::Field {
                         alias: None,
@@ -1438,6 +1449,7 @@ mod tests {
             &data,
             &current_dir,
             &request,
+            &Query::empty_for_tests(),
             &schema,
             &None,
             &None,
