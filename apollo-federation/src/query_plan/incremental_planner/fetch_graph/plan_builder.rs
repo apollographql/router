@@ -1,7 +1,7 @@
 //! Materializing the winning fetch graph into a query plan: nested
-//! Sequence/Parallel nodes that start each fetch at its pipeline level, one subgraph operation per
-//! fetch group, entity representations from edge inputs, and @defer
-//! partitioning.
+//! Sequence/Parallel nodes that start each fetch at its pipeline level, one
+//! subgraph operation per fetch group, entity representations from edge
+//! inputs, and @defer partitioning.
 
 use std::collections::HashMap;
 use std::collections::HashSet;
