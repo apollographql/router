@@ -1671,6 +1671,62 @@ async fn test_router_oci_records_metric_for_license_fetch_failures() -> Result<(
     Ok(())
 }
 
+/// With both a graph artifact reference and Studio credentials
+/// (`APOLLO_KEY`/`APOLLO_GRAPH_REF`) set, the router takes its license from the
+/// OCI registry and never asks Uplink for one. The OCI license is expired
+/// (`LicensedHalt`) while the Uplink mock serves a valid one, so the resulting
+/// license state shows which source won.
+#[tokio::test(flavor = "multi_thread")]
+async fn test_router_oci_license_takes_precedence_over_uplink() -> Result<(), BoxError> {
+    if !graph_os_enabled() {
+        return Ok(());
+    }
+
+    let expired_jwt = mint_license_jwt(None, LICENSE_SIX_MONTHS_SECS, -60);
+    let (_mock_server, artifact_reference) =
+        setup_mock_oci_server_with_license(LOCAL_SCHEMA, &expired_jwt).await;
+    let (_subgraphs_server, subgraph_overrides) = setup_mock_subgraphs().await;
+
+    // The harness already sets these Studio credentials and points Uplink at
+    // its mock; setting them here keeps the test meaningful if that default
+    // changes.
+    let mut router = IntegrationTest::builder()
+        .config(MIN_CONFIG)
+        .env(HashMap::from([
+            (
+                String::from("APOLLO_GRAPH_ARTIFACT_REFERENCE"),
+                OsString::from(artifact_reference),
+            ),
+            (
+                String::from("APOLLO_KEY"),
+                OsString::from("test-mocked-key"),
+            ),
+            (
+                String::from("APOLLO_GRAPH_REF"),
+                OsString::from("test-mocked-graph@current"),
+            ),
+        ]))
+        .subgraph_overrides(subgraph_overrides)
+        .hot_reload(false)
+        .build()
+        .await;
+
+    router.start().await;
+    router.assert_started().await;
+    if !router.log_contains("UpdateLicense(LicensedHalt") {
+        router
+            .wait_for_log_message("UpdateLicense(LicensedHalt")
+            .await;
+    }
+    assert_eq!(
+        router.uplink_license_query_count().await,
+        0,
+        "the router must not fetch its license from Uplink when a graph artifact reference is set"
+    );
+    router.graceful_shutdown().await;
+    Ok(())
+}
+
 /// An Apollo-hosted graph artifact reference together with an explicit license
 /// (`APOLLO_ROUTER_LICENSE`) makes the router exit at startup with an error
 /// saying the two cannot be used together.

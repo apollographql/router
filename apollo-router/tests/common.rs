@@ -579,6 +579,19 @@ impl IntegrationTest {
         self._apollo_uplink_server.uri()
     }
 
+    /// Number of `LicenseQuery` requests the per-test Uplink mock has
+    /// received so far.
+    #[allow(dead_code)]
+    pub async fn uplink_license_query_count(&self) -> usize {
+        self._apollo_uplink_server
+            .received_requests()
+            .await
+            .expect("the Uplink mock records requests")
+            .iter()
+            .filter(|request| String::from_utf8_lossy(&request.body).contains("LicenseQuery"))
+            .count()
+    }
+
     /// Set an address placeholder using a URI, extracting the port automatically
     /// This is a convenience method for the common pattern of extracting port from a server URI
     #[allow(dead_code)]
