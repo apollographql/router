@@ -3273,85 +3273,247 @@ fn inc_nested_defer_does_not_depend_on_its_own_fetches() {
           }
         "#,
         @r###"
-               QueryPlan {
-                 Defer {
-                   Primary {
-                     { t { x } }:
-                     Fetch(service: "Subgraph1", id: 0) {
-                       {
-                         t {
-                           __typename
-                           x
-                           id
-                         }
-                       }
-                     },
-                   }, [
-                     Deferred(depends: [0], path: "t") {
-                       Defer {
-                         Primary {
-                           { u { name } }:
-                           Sequence {
-                             Flatten(path: "t") {
-                               Fetch(service: "Subgraph2", id: 1) {
-                                 {
-                                   ... on T {
-                                     __typename
-                                     id
-                                   }
-                                 } =>
-                                 {
-                                   ... on T {
-                                     u {
-                                       __typename
-                                       id
-                                     }
-                                   }
-                                 }
-                               },
-                             },
-                             Flatten(path: "t.u") {
-                               Fetch(service: "Subgraph3") {
-                                 {
-                                   ... on U {
-                                     __typename
-                                     id
-                                   }
-                                 } =>
-                                 {
-                                   ... on U {
-                                     name
-                                   }
-                                 }
-                               },
-                             },
-                           },
-                         }, [
-                           Deferred(depends: [1], path: "t/u") {
-                             { age }:
-                             Flatten(path: "t.u") {
-                               Fetch(service: "Subgraph3") {
-                                 {
-                                   ... on U {
-                                     __typename
-                                     id
-                                   }
-                                 } =>
-                                 {
-                                   ... on U {
-                                     age
-                                   }
-                                 }
-                               },
-                             },
-                           },
-                         ]
-                       },
-                     },
-                   ]
-                 },
-               }
-               "###
+    QueryPlan {
+      Defer {
+        Primary {
+          { t { x } }:
+          Fetch(service: "Subgraph1", id: 0) {
+            {
+              t {
+                __typename
+                x
+                id
+              }
+            }
+          },
+        }, [
+          Deferred(depends: [0], path: "t") {
+            Defer {
+              Primary {
+                { u { name } }:
+                Sequence {
+                  Flatten(path: "t") {
+                    Fetch(service: "Subgraph2", id: 1) {
+                      {
+                        ... on T {
+                          __typename
+                          id
+                        }
+                      } =>
+                      {
+                        ... on T {
+                          u {
+                            __typename
+                            id
+                          }
+                        }
+                      }
+                    },
+                  },
+                  Flatten(path: "t.u") {
+                    Fetch(service: "Subgraph3") {
+                      {
+                        ... on U {
+                          __typename
+                          id
+                        }
+                      } =>
+                      {
+                        ... on U {
+                          name
+                        }
+                      }
+                    },
+                  },
+                },
+              }, [
+                Deferred(depends: [1], path: "t/u") {
+                  { age }:
+                  Flatten(path: "t.u") {
+                    Fetch(service: "Subgraph3") {
+                      {
+                        ... on U {
+                          __typename
+                          id
+                        }
+                      } =>
+                      {
+                        ... on U {
+                          age
+                        }
+                      }
+                    },
+                  },
+                },
+              ]
+            },
+          },
+        ]
+      },
+    }
+    "###
+    );
+    match &plan.node {
+        Some(TopLevelPlanNode::Defer(defer)) => assert_no_self_dependent_deferred_blocks(defer),
+        other => panic!("expected a top-level Defer node, got {other:?}"),
+    }
+}
+
+/// The deferred block needs only `t`'s key from the primary's first fetch,
+/// so it depends on that fetch alone and starts while the primary is still
+/// fetching `y`. Listing the block's own Subgraph2 fetch would hold it until
+/// the whole primary finished.
+#[test]
+fn inc_nested_defer_starts_before_the_primary_finishes() {
+    let planner = planner!(
+        config = incremental_defer_config(),
+        Subgraph1: r#"
+          type Query {
+            t: T
+          }
+          type T @key(fields: "id") {
+            id: ID!
+            x: Int
+          }
+        "#,
+        Subgraph2: r#"
+          type T @key(fields: "id") {
+            id: ID!
+            u: U
+          }
+          type U @key(fields: "id") {
+            id: ID!
+          }
+        "#,
+        Subgraph3: r#"
+          type U @key(fields: "id") {
+            id: ID!
+            name: String
+            age: Int
+          }
+        "#,
+        Subgraph4: r#"
+          type T @key(fields: "id") {
+            id: ID!
+            y: Int
+          }
+        "#,
+    );
+    let plan = assert_plan!(
+        &planner,
+        r#"
+          {
+            t {
+              x
+              y
+              ... @defer {
+                u {
+                  name
+                  ... @defer {
+                    age
+                  }
+                }
+              }
+            }
+          }
+        "#,
+        @r###"
+    QueryPlan {
+      Defer {
+        Primary {
+          { t { x y } }:
+          Sequence {
+            Fetch(service: "Subgraph1", id: 0) {
+              {
+                t {
+                  __typename
+                  x
+                  id
+                }
+              }
+            },
+            Flatten(path: "t") {
+              Fetch(service: "Subgraph4") {
+                {
+                  ... on T {
+                    __typename
+                    id
+                  }
+                } =>
+                {
+                  ... on T {
+                    y
+                  }
+                }
+              },
+            },
+          },
+        }, [
+          Deferred(depends: [0], path: "t") {
+            Defer {
+              Primary {
+                { u { name } }:
+                Sequence {
+                  Flatten(path: "t") {
+                    Fetch(service: "Subgraph2", id: 1) {
+                      {
+                        ... on T {
+                          __typename
+                          id
+                        }
+                      } =>
+                      {
+                        ... on T {
+                          u {
+                            __typename
+                            id
+                          }
+                        }
+                      }
+                    },
+                  },
+                  Flatten(path: "t.u") {
+                    Fetch(service: "Subgraph3") {
+                      {
+                        ... on U {
+                          __typename
+                          id
+                        }
+                      } =>
+                      {
+                        ... on U {
+                          name
+                        }
+                      }
+                    },
+                  },
+                },
+              }, [
+                Deferred(depends: [1], path: "t/u") {
+                  { age }:
+                  Flatten(path: "t.u") {
+                    Fetch(service: "Subgraph3") {
+                      {
+                        ... on U {
+                          __typename
+                          id
+                        }
+                      } =>
+                      {
+                        ... on U {
+                          age
+                        }
+                      }
+                    },
+                  },
+                },
+              ]
+            },
+          },
+        ]
+      },
+    }
+    "###
     );
     match &plan.node {
         Some(TopLevelPlanNode::Defer(defer)) => assert_no_self_dependent_deferred_blocks(defer),
