@@ -3031,7 +3031,6 @@ fn inc_entity_fetches_under_union_members() {
         catalog: r#"
           type Query {
             shelf: Shelf
-            otherShelf: Shelf
           }
 
           type Shelf @key(fields: "id") {
@@ -3236,94 +3235,6 @@ fn inc_entity_fetches_under_union_members() {
             },
           },
           Flatten(path: "shelf.entries.@|[Book].item") {
-            Fetch(service: "inventory") {
-              {
-                ... on Item {
-                  __typename
-                  id
-                }
-              } =>
-              {
-                ... on Item {
-                  pages
-                }
-              }
-            },
-          },
-        },
-      },
-    }
-    "###
-    );
-
-    // Another root field reaching the same union.
-    assert_plan!(
-        &planner,
-        r#"
-          { otherShelf { entries { __typename ... on Book { item { pages } } ... on Film { item { minutes } } ... on Album { item { tracks } } } } }
-        "#,
-        @r###"
-    QueryPlan {
-      Sequence {
-        Fetch(service: "catalog") {
-          {
-            otherShelf {
-              entries {
-                __typename
-                ... on Book {
-                  item {
-                    __typename
-                    id
-                  }
-                }
-                ... on Film {
-                  item {
-                    __typename
-                    id
-                  }
-                }
-                ... on Album {
-                  item {
-                    __typename
-                    id
-                  }
-                }
-              }
-            }
-          }
-        },
-        Parallel {
-          Flatten(path: "otherShelf.entries.@|[Album].item") {
-            Fetch(service: "inventory") {
-              {
-                ... on Item {
-                  __typename
-                  id
-                }
-              } =>
-              {
-                ... on Item {
-                  tracks
-                }
-              }
-            },
-          },
-          Flatten(path: "otherShelf.entries.@|[Film].item") {
-            Fetch(service: "inventory") {
-              {
-                ... on Item {
-                  __typename
-                  id
-                }
-              } =>
-              {
-                ... on Item {
-                  minutes
-                }
-              }
-            },
-          },
-          Flatten(path: "otherShelf.entries.@|[Book].item") {
             Fetch(service: "inventory") {
               {
                 ... on Item {

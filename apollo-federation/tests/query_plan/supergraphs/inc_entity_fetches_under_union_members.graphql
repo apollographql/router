@@ -1,4 +1,4 @@
-# Composed from subgraphs with hash: 7b53bec6a6cfaefc0c0e9462dcdee30dd9124f69
+# Composed from subgraphs with hash: 3b5075afa4b6c50cd4d675860e92a6ad5839242e
 schema
   @link(url: "https://specs.apollo.dev/link/v1.0")
   @link(url: "https://specs.apollo.dev/join/v0.5", for: EXECUTION)
@@ -101,7 +101,6 @@ type Query
   @join__type(graph: INVENTORY)
 {
   shelf: Shelf @join__field(graph: CATALOG)
-  otherShelf: Shelf @join__field(graph: CATALOG)
 }
 
 type Shelf
