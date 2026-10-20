@@ -29,6 +29,7 @@ use super::location::WithRange;
 use super::location::merge_ranges;
 use super::location::ranged_span;
 use super::nom_error_message;
+use super::parser::DepthGuard;
 use super::parser::IDENTIFIER_CONTINUE_CHARS;
 use super::parser::Key;
 use super::parser::PathSelection;
@@ -36,6 +37,7 @@ use super::parser::SubSelection;
 use super::parser::key_start_char;
 use super::parser::nom_fail_message;
 use super::parser::parse_string_literal;
+use super::parser::raise_recursion_limit;
 use crate::connectors::spec::ConnectSpec;
 
 /// Keys that begin with (or are prefixes of) `true`/`false`/`null`, all of
@@ -138,6 +140,7 @@ impl LitOp {
 impl LitExpr {
     // LitExpr ::= LitOpChain | LitPath | LitPrimitive | LitObject | LitArray | PathSelection
     pub(crate) fn parse(input: Span) -> ParseResult<WithRange<Self>> {
+        let _depth = DepthGuard::increment(&input)?;
         match input.extra.spec {
             ConnectSpec::V0_1 | ConnectSpec::V0_2 => {
                 let (input, _) = spaces_or_comments(input)?;
@@ -234,7 +237,7 @@ impl LitExpr {
                 // We begin parsing the path at depth 1 rather than 0 because
                 // we've already parsed the initial literal at depth 0, so the
                 // subpath should obey the parsing rules for for depth > 0.
-                match PathList::parse_with_depth(suffix.clone(), 1) {
+                match raise_recursion_limit(PathList::parse_with_depth(suffix.clone(), 1))? {
                     Ok((remainder, subpath)) => {
                         if matches!(subpath.as_ref(), PathList::Empty) {
                             return Ok((remainder, initial_literal));
@@ -462,13 +465,17 @@ impl LitExpr {
 
         let mut output = IndexMap::default();
 
-        if let Ok((remainder, (key, value))) = Self::parse_property(input.clone()) {
+        if let Ok((remainder, (key, value))) =
+            raise_recursion_limit(Self::parse_property(input.clone()))?
+        {
             output.insert(key, value);
             input = remainder;
 
             while let Ok((remainder, _)) = (spaces_or_comments, char(',')).parse(input.clone()) {
                 input = remainder;
-                if let Ok((remainder, (key, value))) = Self::parse_property(input.clone()) {
+                if let Ok((remainder, (key, value))) =
+                    raise_recursion_limit(Self::parse_property(input.clone()))?
+                {
                     output.insert(key, value);
                     input = remainder;
                 } else {
@@ -493,8 +500,9 @@ impl LitExpr {
 
     // LitProperty ::= Key ":" LitExpr | KeyPath (shorthand, V0_4+)
     fn parse_property(input: Span) -> ParseResult<(WithRange<Key>, WithRange<Self>)> {
-        let full_result =
-            (Key::parse, spaces_or_comments, char(':'), Self::parse).parse(input.clone());
+        let full_result = raise_recursion_limit(
+            (Key::parse, spaces_or_comments, char(':'), Self::parse).parse(input.clone()),
+        )?;
 
         match full_result {
             Ok((remainder, (key, _, _, value))) => Ok((remainder, (key, value))),

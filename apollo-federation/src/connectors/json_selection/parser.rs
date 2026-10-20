@@ -1,3 +1,4 @@
+use std::cell::Cell;
 use std::fmt::Display;
 use std::hash::Hash;
 use std::str::FromStr;
@@ -86,6 +87,73 @@ pub(super) fn nom_fail_message(
         }),
         nom::error::ErrorKind::IsNot,
     ))
+}
+
+// Counts each PathList step, SubSelection and LitExpr the parser enters, which
+// are the points every recursive cycle passes through. One `a { ... }` level
+// spends three, one `.key` or `->method` step spends one. Chosen experimentally
+// with Rust 1.99.0 on aarch64-apple-darwin, unoptimized (default test
+// profile), on a 2MB thread stack, the default for test threads and tokio
+// workers. Nested arrays, the most expensive levels, overflowed past 55, so 32
+// is about 60% of that. Real selections rarely nest more than a handful of
+// levels.
+const DEFAULT_RECURSION_LIMIT: usize = 32;
+
+const RECURSION_LIMIT_MESSAGE: &str = "Selection nested too deeply";
+
+thread_local! {
+    // Kept per thread rather than on SpanExtra, because spans are cloned
+    // constantly while parsing and a shared counter there made every clone
+    // pay for a reference count. Parsing never yields, so one parse owns the
+    // thread's counter until it returns, and the depth drops back to zero as
+    // guards drop, including on errors and unwinding.
+    static DEPTH: Cell<usize> = const { Cell::new(0) };
+}
+
+/// Decrements the depth when dropped.
+pub(super) struct DepthGuard(());
+
+impl DepthGuard {
+    /// Marks that the parser is recursing, failing once the limit is reached.
+    pub(super) fn increment<'a>(
+        input: &Span<'a>,
+    ) -> Result<Self, nom::Err<nom::error::Error<Span<'a>>>> {
+        DEPTH.with(|depth| {
+            if depth.get() >= DEFAULT_RECURSION_LIMIT {
+                return Err(
+                    nom_fail_message(input.clone(), RECURSION_LIMIT_MESSAGE).map(|error| {
+                        nom::error::Error {
+                            code: nom::error::ErrorKind::TooLarge,
+                            ..error
+                        }
+                    }),
+                );
+            }
+            depth.set(depth.get() + 1);
+            Ok(Self(()))
+        })
+    }
+}
+
+impl Drop for DepthGuard {
+    fn drop(&mut self) {
+        DEPTH.with(|depth| depth.set(depth.get() - 1));
+    }
+}
+
+// Hands a parse result back for the caller to inspect, unless it failed on the
+// recursion limit. That failure has to abort the whole parse, because callers
+// that backtrack on failure would otherwise retry alternatives at every level,
+// which takes time exponential in the depth.
+pub(super) fn raise_recursion_limit<'a, T>(
+    result: ParseResult<'a, T>,
+) -> Result<ParseResult<'a, T>, nom::Err<nom::error::Error<Span<'a>>>> {
+    match result {
+        Err(nom::Err::Failure(error)) if error.code == nom::error::ErrorKind::TooLarge => {
+            Err(nom::Err::Failure(error))
+        }
+        result => Ok(result),
+    }
 }
 
 pub(crate) trait VarPaths {
@@ -811,7 +879,9 @@ impl NamedSelection {
         let (after_alias, alias) = opt(Alias::parse).parse(input.clone())?;
 
         if let Some(alias) = alias {
-            if let Ok((remainder, sub)) = SubSelection::parse(after_alias.clone()) {
+            if let Ok((remainder, sub)) =
+                raise_recursion_limit(SubSelection::parse(after_alias.clone()))?
+            {
                 let sub_range = sub.range();
                 return Ok((
                     remainder,
@@ -901,7 +971,9 @@ impl NamedSelection {
         let (after_alias, alias) = opt(Alias::parse).parse(input.clone())?;
 
         if let Some(alias) = alias {
-            if let Ok((remainder, sub)) = SubSelection::parse(after_alias.clone()) {
+            if let Ok((remainder, sub)) =
+                raise_recursion_limit(SubSelection::parse(after_alias.clone()))?
+            {
                 let sub_range = sub.range();
                 return Ok((
                     remainder,
@@ -1211,6 +1283,7 @@ impl PathList {
     }
 
     pub(super) fn parse_with_depth(input: Span, depth: usize) -> ParseResult<WithRange<Self>> {
+        let _depth = DepthGuard::increment(&input)?;
         let spec = get_connect_spec(&input);
 
         // If the input is empty (i.e. this method will end up returning
@@ -1431,7 +1504,9 @@ impl PathList {
             // method name, so we can unconditionally return based on what
             // parse_identifier tells us. since MethodArgs::parse is optional,
             // the absence of args will never trigger the error case.
-            return match (parse_identifier, opt(MethodArgs::parse)).parse(suffix) {
+            return match raise_recursion_limit(
+                (parse_identifier, opt(MethodArgs::parse)).parse(suffix),
+            )? {
                 Ok((suffix, (method, args_opt))) => {
                     let mut local_var_name = None;
 
@@ -1508,7 +1583,8 @@ impl PathList {
         // responsible for enforcing a trailing SubSelection in the
         // PathWithSubSelection case, since that requirement is checked by
         // NamedSelection::parse_path.
-        if let Ok((suffix, selection)) = SubSelection::parse(input.clone()) {
+        if let Ok((suffix, selection)) = raise_recursion_limit(SubSelection::parse(input.clone()))?
+        {
             let selection_range = selection.range();
             return Ok((
                 suffix,
@@ -1668,16 +1744,12 @@ impl Ranged for SubSelection {
 
 impl SubSelection {
     pub(crate) fn parse(input: Span) -> ParseResult<Self> {
-        match (
-            spaces_or_comments,
-            ranged_span("{"),
-            Self::parse_naked,
-            spaces_or_comments,
-            ranged_span("}"),
-        )
-            .parse(input)
-        {
-            Ok((remainder, (_, open_brace, sub, _, close_brace))) => {
+        // Counting the level only after the `{` keeps speculative calls on
+        // input without a subselection from tripping the recursion limit.
+        let (input, (_, open_brace)) = (spaces_or_comments, ranged_span("{")).parse(input)?;
+        let _depth = DepthGuard::increment(&input)?;
+        match (Self::parse_naked, spaces_or_comments, ranged_span("}")).parse(input) {
+            Ok((remainder, (sub, _, close_brace))) => {
                 let range = merge_ranges(open_brace.range(), close_brace.range());
                 Ok((
                     remainder,
@@ -1816,7 +1888,7 @@ impl SubSelection {
                     // another NamedSelection follows without a preceding
                     // comma, that is an inconsistent-separator error; if no
                     // NamedSelection follows, the list is simply over.
-                    if NamedSelection::parse(after_ws.clone()).is_ok() {
+                    if raise_recursion_limit(NamedSelection::parse(after_ws.clone()))?.is_ok() {
                         // Likewise, the colon-led summary ("Missing comma
                         // before item") lands at the end so the offending
                         // item follows it directly when the error is shown.
@@ -2168,13 +2240,14 @@ impl MethodArgs {
         input = spaces_or_comments(input)?.0;
 
         let mut args = Vec::new();
-        if let Ok((remainder, first)) = LitExpr::parse(input.clone()) {
+        if let Ok((remainder, first)) = raise_recursion_limit(LitExpr::parse(input.clone()))? {
             args.push(first);
             input = remainder;
 
             while let Ok((remainder, _)) = (spaces_or_comments, char(',')).parse(input.clone()) {
                 input = spaces_or_comments(remainder)?.0;
-                if let Ok((remainder, arg)) = LitExpr::parse(input.clone()) {
+                if let Ok((remainder, arg)) = raise_recursion_limit(LitExpr::parse(input.clone()))?
+                {
                     args.push(arg);
                     input = remainder;
                 } else {
@@ -5213,5 +5286,104 @@ mod tests {
             parsed.pretty_print_with_indentation(true, 0),
             "$(falsePositives ?? \"fallback\")",
         );
+    }
+
+    type Nesting = (
+        &'static str,
+        &'static str,
+        &'static str,
+        &'static str,
+        &'static str,
+        usize,
+    );
+
+    // Each shape nests by repeating `open` around `leaf`, then closing. The
+    // last column is the deepest nesting the limit accepts, which differs by
+    // shape because each level passes through a different number of guards.
+    const NESTINGS: [Nesting; 8] = [
+        ("subselection", "", "a { ", "b", " }", 9),
+        ("group", "", "a: { ", "b", " }", 30),
+        ("path", "a: b", ".c", "", "", 29),
+        ("method", "a: b", "->first", "", "", 29),
+        ("method arg", "a: ", "b->echo(", "1", ")", 10),
+        ("expr", "a: ", "$(", "1", ")", 15),
+        ("array", "a: ", "[", "1", "]", 30),
+        ("mixed", "", "{ a: [", "1", "] }", 10),
+    ];
+
+    fn nested(shape: Nesting, levels: usize) -> String {
+        let (_, prefix, open, leaf, close, _) = shape;
+        format!(
+            "{prefix}{}{leaf}{}",
+            open.repeat(levels),
+            close.repeat(levels)
+        )
+    }
+
+    // Test threads and tokio workers both default to a 2MB stack, so the
+    // limit has to keep parsing and printing within that budget.
+    fn on_default_stack<T: Send + 'static>(f: impl FnOnce() -> T + Send + 'static) -> T {
+        std::thread::Builder::new()
+            .stack_size(2 * 1024 * 1024)
+            .spawn(f)
+            .expect("spawn parser thread")
+            .join()
+            .expect("parser thread should not panic")
+    }
+
+    #[rstest]
+    #[case::v0_4(ConnectSpec::V0_4)]
+    #[case::v0_5(ConnectSpec::V0_5)]
+    fn deep_nesting_is_a_parse_error(#[case] spec: ConnectSpec) {
+        for shape in NESTINGS {
+            let err = on_default_stack(move || {
+                JSONSelection::parse_with_spec(&nested(shape, 300), spec).map(|_| ())
+            })
+            .expect_err("deep nesting should be rejected");
+            assert_eq!(
+                err.message, RECURSION_LIMIT_MESSAGE,
+                "{} under {spec:?}",
+                shape.0
+            );
+        }
+    }
+
+    #[rstest]
+    #[case::v0_4(ConnectSpec::V0_4)]
+    #[case::v0_5(ConnectSpec::V0_5)]
+    fn limit_accepts_up_to_the_deepest_nesting(#[case] spec: ConnectSpec) {
+        for shape in NESTINGS {
+            let (name, .., deepest) = shape;
+            let (at_limit, past_limit) = on_default_stack(move || {
+                let parse = |levels| {
+                    JSONSelection::parse_with_spec(&nested(shape, levels), spec)
+                        .map(|_| ())
+                        .map_err(|e| e.message)
+                };
+                (parse(deepest), parse(deepest + 1))
+            });
+            assert_eq!(
+                at_limit,
+                Ok(()),
+                "{name} at {deepest} levels under {spec:?}"
+            );
+            assert_eq!(
+                past_limit,
+                Err(RECURSION_LIMIT_MESSAGE.to_string()),
+                "{name} at {} levels under {spec:?}",
+                deepest + 1,
+            );
+        }
+    }
+
+    #[test]
+    fn reaching_the_limit_does_not_affect_the_next_parse() {
+        let deep = nested(NESTINGS[0], 300);
+        let shallow = nested(NESTINGS[0], 5);
+        on_default_stack(move || {
+            JSONSelection::parse(&deep).expect_err("deep nesting should be rejected");
+            assert_eq!(DEPTH.with(Cell::get), 0);
+            JSONSelection::parse(&shallow).expect("the next parse should start from zero");
+        });
     }
 }
