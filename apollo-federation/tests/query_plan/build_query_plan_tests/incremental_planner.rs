@@ -4364,38 +4364,40 @@ fn inc_plain_requires_after_aliased_requires_does_not_overwrite() {
               }
             },
           },
-          Flatten(path: "t.__require_0_a") {
-            Fetch(service: "S3") {
-              {
-                ... on A {
-                  __typename
-                  id
+          Sequence {
+            Flatten(path: "t.__require_0_a") {
+              Fetch(service: "S3") {
+                {
+                  ... on A {
+                    __typename
+                    id
+                  }
+                } =>
+                {
+                  ... on A {
+                    x
+                  }
                 }
-              } =>
-              {
-                ... on A {
-                  x
-                }
-              }
+              },
             },
-          },
-        },
-        Flatten(path: "t") {
-          Fetch(service: "S2") {
-            {
-              ... on T {
-                __typename
-                id
-                __require_0_a: a {
-                  x
+            Flatten(path: "t") {
+              Fetch(service: "S2") {
+                {
+                  ... on T {
+                    __typename
+                    id
+                    __require_0_a: a {
+                      x
+                    }
+                  }
+                } =>
+                {
+                  ... on T {
+                    b
+                  }
                 }
-              }
-            } =>
-            {
-              ... on T {
-                b
-              }
-            }
+              },
+            },
           },
         },
       },
@@ -4815,38 +4817,40 @@ fn inc_requires_aliased_then_plain_input_does_not_collide() {
               }
             },
           },
-          Flatten(path: "t.__require_0_a") {
-            Fetch(service: "S3") {
-              {
-                ... on A {
-                  __typename
-                  id
+          Sequence {
+            Flatten(path: "t.__require_0_a") {
+              Fetch(service: "S3") {
+                {
+                  ... on A {
+                    __typename
+                    id
+                  }
+                } =>
+                {
+                  ... on A {
+                    x
+                  }
                 }
-              } =>
-              {
-                ... on A {
-                  x
-                }
-              }
+              },
             },
-          },
-        },
-        Flatten(path: "t") {
-          Fetch(service: "S2") {
-            {
-              ... on T {
-                __typename
-                id
-                __require_0_a: a {
-                  x
+            Flatten(path: "t") {
+              Fetch(service: "S2") {
+                {
+                  ... on T {
+                    __typename
+                    id
+                    __require_0_a: a {
+                      x
+                    }
+                  }
+                } =>
+                {
+                  ... on T {
+                    b
+                  }
                 }
-              }
-            } =>
-            {
-              ... on T {
-                b
-              }
-            }
+              },
+            },
           },
         },
       },
@@ -5843,6 +5847,178 @@ fn inc_key_condition_cycle_does_not_recurse_to_the_depth_limit() {
                 k3
               }
             }
+          },
+        },
+      },
+    }
+    "###
+    );
+}
+
+// A fetch whose inputs come from sibling fetches must not wait for an
+// unrelated, deeper sibling branch. Here `e` needs `c` and `d`, while
+// `b -> f -> g` is independent, so `e` runs alongside `f`.
+#[test]
+fn inc_multi_parent_fetch_does_not_wait_for_unrelated_branch() {
+    let planner = planner!(
+        config = incremental_config(),
+        a: r#"
+          type Query { t: T }
+          type T @key(fields: "id") { id: ID! }
+        "#,
+        b: r#"
+          type T @key(fields: "id") { id: ID! u: U }
+          type U @key(fields: "id") { id: ID! }
+        "#,
+        c: r#"
+          type T @key(fields: "id") { id: ID! c: Int }
+        "#,
+        d: r#"
+          type T @key(fields: "id") { id: ID! d: Int }
+        "#,
+        e: r#"
+          type T @key(fields: "id") {
+            id: ID!
+            c: Int @external
+            d: Int @external
+            e: Int @requires(fields: "c d")
+          }
+        "#,
+        f: r#"
+          type U @key(fields: "id") { id: ID! v: V }
+          type V @key(fields: "id") { id: ID! }
+        "#,
+        g: r#"
+          type V @key(fields: "id") { id: ID! w: Int }
+        "#,
+    );
+
+    assert_plan!(
+        validate_correctness = false,
+        &planner,
+        r#"
+          {
+            t {
+              e
+              u { v { w } }
+            }
+          }
+        "#,
+        @r###"
+    QueryPlan {
+      Sequence {
+        Fetch(service: "a") {
+          {
+            t {
+              __typename
+              id
+            }
+          }
+        },
+        Parallel {
+          Sequence {
+            Flatten(path: "t") {
+              Fetch(service: "b") {
+                {
+                  ... on T {
+                    __typename
+                    id
+                  }
+                } =>
+                {
+                  ... on T {
+                    u {
+                      __typename
+                      id
+                    }
+                  }
+                }
+              },
+            },
+            Flatten(path: "t.u") {
+              Fetch(service: "f") {
+                {
+                  ... on U {
+                    __typename
+                    id
+                  }
+                } =>
+                {
+                  ... on U {
+                    v {
+                      __typename
+                      id
+                    }
+                  }
+                }
+              },
+            },
+            Flatten(path: "t.u.v") {
+              Fetch(service: "g") {
+                {
+                  ... on V {
+                    __typename
+                    id
+                  }
+                } =>
+                {
+                  ... on V {
+                    w
+                  }
+                }
+              },
+            },
+          },
+          Sequence {
+            Parallel {
+              Flatten(path: "t") {
+                Fetch(service: "d") {
+                  {
+                    ... on T {
+                      __typename
+                      id
+                    }
+                  } =>
+                  {
+                    ... on T {
+                      __require_1_d: d
+                    }
+                  }
+                },
+              },
+              Flatten(path: "t") {
+                Fetch(service: "c") {
+                  {
+                    ... on T {
+                      __typename
+                      id
+                    }
+                  } =>
+                  {
+                    ... on T {
+                      __require_0_c: c
+                    }
+                  }
+                },
+              },
+            },
+            Flatten(path: "t") {
+              Fetch(service: "e") {
+                {
+                  ... on T {
+                    __typename
+                    id
+                    __require_0_c: c
+                    __require_1_d: d
+                  }
+                } =>
+                {
+                  ... on T {
+                    e
+                  }
+                }
+              },
+            },
           },
         },
       },

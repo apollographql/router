@@ -1,5 +1,5 @@
-//! Materializing the winning fetch graph into a query plan: dependency
-//! wavefronts of nested Sequence/Parallel nodes, one subgraph operation per
+//! Materializing the winning fetch graph into a query plan: nested
+//! Sequence/Parallel nodes that start each fetch at its pipeline level, one subgraph operation per
 //! fetch group, entity representations from edge inputs, and @defer
 //! partitioning.
 
@@ -71,10 +71,9 @@ pub(crate) struct PlanBuildContext<'a> {
     pub(crate) skip_validation: bool,
 }
 
-/// The slice of the graph one plan covers (the whole graph, the primary
-/// part, or one deferred block) plus per-node metadata for materialization.
+/// Per-node metadata for materializing one plan's slice of the graph (the
+/// whole graph, the primary part, or one deferred block).
 struct PlanScope<'a> {
-    members: &'a HashSet<NodeIndex>,
     /// Pipeline depth per node over the whole graph, for cost scaling.
     depth: &'a [u32],
     /// Fetch IDs for defer dependency tracking.
@@ -100,93 +99,6 @@ fn stamp_fetch_id(plan_node: &mut PlanNode, id: u64) {
             }
         }
         _ => {}
-    }
-}
-
-/// A node that cannot be materialized yet because some parents are still
-/// unprocessed.
-struct UnhandledNode {
-    node: NodeIndex,
-    unhandled_parents: Vec<NodeIndex>,
-}
-
-/// Wavefront bookkeeping for dependency-order materialization: nodes whose
-/// parents are all processed, and nodes still waiting on some parents.
-struct ProcessingState {
-    next: Vec<NodeIndex>,
-    unhandled: Vec<UnhandledNode>,
-}
-
-impl ProcessingState {
-    fn empty() -> Self {
-        Self {
-            next: Vec::new(),
-            unhandled: Vec::new(),
-        }
-    }
-
-    fn of_ready_nodes(next: Vec<NodeIndex>) -> Self {
-        Self {
-            next,
-            unhandled: Vec::new(),
-        }
-    }
-
-    /// Merge sibling states from one wavefront. A node waiting in both keeps
-    /// only the parents unprocessed on both sides; each side has already
-    /// dropped the parent that discovered it, so an empty intersection means
-    /// every parent is processed and the node is ready.
-    fn merge_with(self, other: ProcessingState) -> ProcessingState {
-        let mut next = self.next;
-        for node in other.next {
-            if !next.contains(&node) {
-                next.push(node);
-            }
-        }
-
-        let mut other_unhandled = other.unhandled;
-        let mut unhandled = Vec::new();
-        for mut entry in self.unhandled {
-            if let Some(pos) = other_unhandled
-                .iter()
-                .position(|other_entry| other_entry.node == entry.node)
-            {
-                let other_entry = other_unhandled.remove(pos);
-                entry
-                    .unhandled_parents
-                    .retain(|parent| other_entry.unhandled_parents.contains(parent));
-            }
-            if entry.unhandled_parents.is_empty() {
-                if !next.contains(&entry.node) {
-                    next.push(entry.node);
-                }
-            } else {
-                unhandled.push(entry);
-            }
-        }
-        unhandled.extend(other_unhandled);
-
-        ProcessingState { next, unhandled }
-    }
-
-    /// Drop just-processed nodes from every waiting entry; entries with no
-    /// remaining parents become ready.
-    fn update_for_processed_nodes(self, processed: &[NodeIndex]) -> ProcessingState {
-        let mut next = self.next;
-        let mut unhandled = Vec::new();
-        for mut entry in self.unhandled {
-            entry
-                .unhandled_parents
-                .retain(|parent| !processed.contains(parent));
-            if entry.unhandled_parents.is_empty() {
-                if !next.contains(&entry.node) {
-                    next.push(entry.node);
-                }
-            } else {
-                unhandled.push(entry);
-            }
-        }
-        ProcessingState { next, unhandled }
     }
 }
 
@@ -232,12 +144,10 @@ fn reduce_parallel(mut nodes: Vec<PlanNode>) -> Option<PlanNode> {
 
 impl FetchGraph {
     /// Generate a PlanNode tree from the winning fetch graph, wrapped in a
-    /// DeferNode when defer info is provided. Nodes are materialized in
-    /// dependency wavefronts: sole-parented descendants nest in a Sequence
-    /// under their parent, independent branches run in Parallel, and a node
-    /// with parents in several branches is sequenced at the level where its
-    /// last parent's branch completes. This keeps a fetch from waiting on
-    /// unrelated fetches that merely share its depth.
+    /// DeferNode when defer info is provided. Each fetch starts at its level,
+    /// one past its latest parent, so the plan's depth equals the graph's
+    /// critical path. Disconnected parts run in Parallel and never wait on
+    /// each other.
     pub(crate) fn to_query_plan_with_defer(
         &self,
         ctx: &mut PlanBuildContext<'_>,
@@ -411,38 +321,30 @@ impl FetchGraph {
         }
 
         let members: HashSet<NodeIndex> = nodes.iter().copied().collect();
-        let roots: Vec<NodeIndex> = nodes
-            .iter()
-            .copied()
-            .filter(|node| {
-                !self
-                    .graph
-                    .edges_directed(*node, Direction::Incoming)
-                    .any(|e| members.contains(&e.source()))
-            })
-            .collect();
-        let scope = PlanScope {
-            members: &members,
-            depth,
-            fetch_ids,
-        };
+        let scope = PlanScope { depth, fetch_ids };
+
+        // Levels count only parents inside this subset; parents outside it
+        // run in an enclosing or earlier defer block. `nodes` is in
+        // dependency order, so every member parent already has a level.
+        let mut levels: HashMap<NodeIndex, u32> = HashMap::with_capacity(nodes.len());
+        for &node in nodes {
+            let mut level = 0;
+            for edge in self.graph.edges_directed(node, Direction::Incoming) {
+                let parent = edge.source();
+                if !members.contains(&parent) {
+                    continue;
+                }
+                let parent_level = levels.get(&parent).ok_or_else(|| {
+                    FederationError::internal("fetch groups are not in dependency order")
+                })?;
+                level = level.max(parent_level + 1);
+            }
+            levels.insert(node, level);
+        }
 
         let mut cost: QueryPlanCost = 0.0;
-        let (sequence, state) = self.process_wavefronts(
-            ctx,
-            ProcessingState::of_ready_nodes(roots),
-            &scope,
-            &mut cost,
-        )?;
-        // pipeline_depths already rejected cycles, so leftovers mean the
-        // state bookkeeping lost track of a parent.
-        if !state.unhandled.is_empty() {
-            return Err(FederationError::internal(format!(
-                "{} fetch groups still waiting on parents after processing",
-                state.unhandled.len(),
-            )));
-        }
-        Ok((reduce_sequence(sequence), cost))
+        let plan = self.plan_by_level(ctx, nodes, &levels, &scope, &mut cost)?;
+        Ok((plan, cost))
     }
 
     /// Recursively build `DeferredDeferBlock`s for a set of labels; a label
@@ -557,66 +459,166 @@ impl FetchGraph {
         Ok(blocks)
     }
 
-    /// Sequence of parallel wavefronts: materialize every ready node, then
-    /// whatever those unblocked, until nothing is ready. Nodes still waiting
-    /// on parents in other branches are handed back in the returned state.
-    fn process_wavefronts(
+    /// Plan `nodes` so each fetch starts at its level, the length of its
+    /// longest chain of parents within the subset. Disconnected parts run in
+    /// Parallel, so unrelated branches never wait on each other, and the
+    /// plan's depth equals the fetch graph's critical path.
+    fn plan_by_level(
         &self,
         ctx: &mut PlanBuildContext<'_>,
-        mut state: ProcessingState,
+        nodes: &[NodeIndex],
+        levels: &HashMap<NodeIndex, u32>,
         scope: &PlanScope<'_>,
         cost: &mut QueryPlanCost,
-    ) -> Result<(Vec<PlanNode>, ProcessingState), FederationError> {
-        let mut sequence: Vec<PlanNode> = Vec::new();
-        while !state.next.is_empty() {
-            let (parallel, new_state) = self.process_ready_nodes(ctx, state, scope, cost)?;
-            if let Some(plan_node) = reduce_parallel(parallel) {
-                push_into_sequence(&mut sequence, plan_node);
-            }
-            state = new_state;
-        }
-        Ok((sequence, state))
-    }
-
-    /// Materialize one wavefront of ready nodes as parallel branches, each
-    /// with its sole-parented descendants nested beneath it.
-    fn process_ready_nodes(
-        &self,
-        ctx: &mut PlanBuildContext<'_>,
-        state: ProcessingState,
-        scope: &PlanScope<'_>,
-        cost: &mut QueryPlanCost,
-    ) -> Result<(Vec<PlanNode>, ProcessingState), FederationError> {
-        let mut parallel: Vec<PlanNode> = Vec::new();
-        // Waiting nodes carry forward so sibling branches' records of the
-        // same multi-parent child meet here; the child becomes ready at the
-        // merge level where its last parent's record arrives, which is also
-        // where the plan sequences it after all of them.
-        let mut merged = ProcessingState {
-            next: Vec::new(),
-            unhandled: state.unhandled,
-        };
-        for &node_idx in &state.next {
-            let (plan_node, node_state) = self.process_node(ctx, node_idx, scope, cost)?;
-            if let Some(plan_node) = plan_node {
+    ) -> Result<Option<PlanNode>, FederationError> {
+        let mut parallel = Vec::new();
+        for component in self.connected_components(nodes) {
+            if let Some(plan_node) = self.plan_component(ctx, &component, levels, scope, cost)? {
                 push_into_parallel(&mut parallel, plan_node);
             }
-            merged = merged.merge_with(node_state);
         }
-        Ok((parallel, merged.update_for_processed_nodes(&state.next)))
+        Ok(reduce_parallel(parallel))
     }
 
-    /// Materialize one node and, sequenced after it, every descendant only
-    /// it unblocks. Descendants with other unprocessed parents are handed
-    /// back in the state.
-    fn process_node(
+    /// Run a connected part's lowest-level fetches, each followed by the
+    /// fetches that depend on it alone, then plan the rest after them all.
+    /// A private chain is cut below the level of the first shared fetch, so
+    /// it never holds up the join, and every fetch still starts at its level.
+    fn plan_component(
+        &self,
+        ctx: &mut PlanBuildContext<'_>,
+        component: &[NodeIndex],
+        levels: &HashMap<NodeIndex, u32>,
+        scope: &PlanScope<'_>,
+        cost: &mut QueryPlanCost,
+    ) -> Result<Option<PlanNode>, FederationError> {
+        #[derive(Clone, Copy, PartialEq)]
+        enum Owner {
+            Front(NodeIndex),
+            Shared,
+        }
+
+        let front_level = component
+            .iter()
+            .map(|node| levels[node])
+            .min()
+            .unwrap_or_default();
+        let (front, rest): (Vec<NodeIndex>, Vec<NodeIndex>) = component
+            .iter()
+            .partition(|node| levels[*node] == front_level);
+
+        // `component` is in dependency order, so parents are owned before
+        // their children. Parents outside the part are already done.
+        let mut owners: HashMap<NodeIndex, Owner> = front
+            .iter()
+            .map(|node| (*node, Owner::Front(*node)))
+            .collect();
+        for &node in &rest {
+            let mut owner = None;
+            for edge in self.graph.edges_directed(node, Direction::Incoming) {
+                let Some(&parent_owner) = owners.get(&edge.source()) else {
+                    continue;
+                };
+                owner = match owner {
+                    None => Some(parent_owner),
+                    Some(current) if current == parent_owner => Some(current),
+                    Some(_) => Some(Owner::Shared),
+                };
+            }
+            owners.insert(node, owner.unwrap_or(Owner::Shared));
+        }
+        let first_shared_level = rest
+            .iter()
+            .filter(|node| owners[*node] == Owner::Shared)
+            .map(|node| levels[node])
+            .min();
+        let is_branch = |node: &NodeIndex| {
+            matches!(owners[node], Owner::Front(_))
+                && first_shared_level.is_none_or(|shared| levels[node] < shared)
+        };
+
+        let mut parallel = Vec::new();
+        for &front_node in &front {
+            let branch: Vec<NodeIndex> = rest
+                .iter()
+                .copied()
+                .filter(|node| is_branch(node) && owners[node] == Owner::Front(front_node))
+                .collect();
+            let mut sequence = Vec::new();
+            if let Some(plan_node) = self.materialize(ctx, front_node, scope, cost)? {
+                push_into_sequence(&mut sequence, plan_node);
+            }
+            if let Some(plan_node) = self.plan_by_level(ctx, &branch, levels, scope, cost)? {
+                push_into_sequence(&mut sequence, plan_node);
+            }
+            if let Some(plan_node) = reduce_sequence(sequence) {
+                push_into_parallel(&mut parallel, plan_node);
+            }
+        }
+
+        let after: Vec<NodeIndex> = rest
+            .iter()
+            .copied()
+            .filter(|node| !is_branch(node))
+            .collect();
+        let mut sequence = Vec::new();
+        if let Some(plan_node) = reduce_parallel(parallel) {
+            push_into_sequence(&mut sequence, plan_node);
+        }
+        if let Some(plan_node) = self.plan_by_level(ctx, &after, levels, scope, cost)? {
+            push_into_sequence(&mut sequence, plan_node);
+        }
+        Ok(reduce_sequence(sequence))
+    }
+
+    /// Weakly connected parts of `nodes` over the edges between them. Parts,
+    /// and the nodes within each part, keep `nodes` order.
+    fn connected_components(&self, nodes: &[NodeIndex]) -> Vec<Vec<NodeIndex>> {
+        fn find(parent: &mut [usize], mut i: usize) -> usize {
+            while parent[i] != i {
+                parent[i] = parent[parent[i]];
+                i = parent[i];
+            }
+            i
+        }
+
+        let position: HashMap<NodeIndex, usize> = nodes
+            .iter()
+            .enumerate()
+            .map(|(i, node)| (*node, i))
+            .collect();
+        let mut parent: Vec<usize> = (0..nodes.len()).collect();
+        for (i, node) in nodes.iter().enumerate() {
+            for edge in self.graph.edges_directed(*node, Direction::Outgoing) {
+                if let Some(&j) = position.get(&edge.target()) {
+                    let (a, b) = (find(&mut parent, i), find(&mut parent, j));
+                    // The smaller index stays the root, so parts come out
+                    // in order of their first node.
+                    if a != b {
+                        parent[a.max(b)] = a.min(b);
+                    }
+                }
+            }
+        }
+
+        let mut components: IndexMap<usize, Vec<NodeIndex>> = IndexMap::new();
+        for (i, node) in nodes.iter().enumerate() {
+            let root = find(&mut parent, i);
+            components.entry(root).or_default().push(*node);
+        }
+        components.into_values().collect()
+    }
+
+    /// Materialize one node, adding its pipelined cost and its defer fetch
+    /// ID.
+    fn materialize(
         &self,
         ctx: &mut PlanBuildContext<'_>,
         node_idx: NodeIndex,
         scope: &PlanScope<'_>,
         cost: &mut QueryPlanCost,
-    ) -> Result<(Option<PlanNode>, ProcessingState), FederationError> {
-        let plan_node = self
+    ) -> Result<Option<PlanNode>, FederationError> {
+        Ok(self
             .node_to_plan_node(ctx, node_idx)?
             .map(|(mut plan_node, node_cost)| {
                 *cost += node_cost * pipelining_factor(scope.depth[node_idx.index()]);
@@ -625,45 +627,7 @@ impl FetchGraph {
                     stamp_fetch_id(&mut plan_node, fetch_id);
                 }
                 plan_node
-            });
-
-        let state = self.state_for_children(node_idx, scope);
-        if state.next.is_empty() {
-            return Ok((plan_node, state));
-        }
-
-        let (descendants, new_state) = self.process_wavefronts(ctx, state, scope, cost)?;
-        let mut sequence = Vec::from_iter(plan_node);
-        sequence.extend(descendants);
-        Ok((reduce_sequence(sequence), new_state))
-    }
-
-    /// Classify a just-processed node's children: sole-parented children are
-    /// ready; the rest wait on their remaining parents. Children and parents
-    /// outside the scope are ignored; they belong to a different defer block.
-    fn state_for_children(&self, processed: NodeIndex, scope: &PlanScope<'_>) -> ProcessingState {
-        let mut state = ProcessingState::empty();
-        for edge in self.graph.edges_directed(processed, Direction::Outgoing) {
-            let child = edge.target();
-            if !scope.members.contains(&child) {
-                continue;
-            }
-            let remaining: Vec<NodeIndex> = self
-                .graph
-                .edges_directed(child, Direction::Incoming)
-                .map(|e| e.source())
-                .filter(|parent| *parent != processed && scope.members.contains(parent))
-                .collect();
-            if remaining.is_empty() {
-                state.next.push(child);
-            } else {
-                state.unhandled.push(UnhandledNode {
-                    node: child,
-                    unhandled_parents: remaining,
-                });
-            }
-        }
-        state
+            }))
     }
 
     /// Convert a single FetchGraph node into a PlanNode.
