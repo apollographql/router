@@ -3300,8 +3300,9 @@ fn inc_entity_fetches_under_union_members() {
     );
 
     // Different entity types merge onto a path keeping both members'
-    // conditions, so Album items aren't asked for pages. The checker requires
-    // every branch to supply every input type, so it can't validate this.
+    // conditions, so Album items aren't asked for pages. The response shape
+    // checker can't match a path condition spanning several union members,
+    // so it can't validate this or the next case.
     assert_plan!(
         validate_correctness = false,
         &planner,
@@ -3367,6 +3368,7 @@ fn inc_entity_fetches_under_union_members() {
 
     // The same entity type with identical selections shares one fetch.
     assert_plan!(
+        validate_correctness = false,
         &planner,
         r#"
           { shelf { entries { ... on Book { item { pages } } ... on Film { item { pages } } } } }
