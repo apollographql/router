@@ -242,7 +242,7 @@ fn restrict_to_entry_types(require_types: &[&Name], body: Vec<Selection>) -> Vec
 /// correctly so: a path element that reaches no type mounts no requirement and admits no
 /// fragment, so the fetch demands nothing and contributes nothing. That makes it dead code in the
 /// plan rather than a soundness violation, which is why
-/// [`CheckerOptions::check_empty_flatten_path_type_condition`] is off by default.
+/// [`CheckerOptions::check_empty_flatten_path_type_condition`] can turn it off.
 fn check_path_reaches_a_type(path: &[FetchDataPathElement]) -> Result<(), ComparisonError> {
     for element in path {
         let condition = match element {

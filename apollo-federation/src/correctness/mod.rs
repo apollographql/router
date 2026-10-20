@@ -123,13 +123,13 @@ pub mod legacy {
     pub use super::check_plan_with_response_shapes as check_plan;
 }
 
-/// Checks the plan checker can make but does not make by default.
+/// Checks the plan checker makes by default and a caller may turn off.
 ///
-/// Each one reports a real query-planner defect that the planner cannot currently avoid, so
-/// turning it on will fault plans the router ships today. They are options rather than findings
-/// so that a corpus run can ask how widespread each defect is without the checker rejecting
-/// working plans in ordinary use.
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+/// Each one reports a real query-planner defect that the planner cannot currently avoid, so it
+/// faults plans the router ships today. They are on so that the checker stays as strict as it can
+/// be and a planner that stops producing a defect shows it. They are options so that a caller for
+/// whom one is too noisy can turn it off, and a corpus run can count each defect on its own.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct CheckerOptions {
     /// Report a flatten path element narrowed to no runtime type at all — FED-516.
     ///
@@ -148,6 +148,15 @@ pub struct CheckerOptions {
     /// demand the entry is compared against is a concatenation of the two field sets, which
     /// `query_compare` reads as one call because GraphQL validation would have merged them.
     pub check_requires_conflict: bool,
+}
+
+impl Default for CheckerOptions {
+    fn default() -> Self {
+        Self {
+            check_empty_flatten_path_type_condition: true,
+            check_requires_conflict: true,
+        }
+    }
 }
 
 /// Check that a query plan is correct for a client operation.

@@ -620,8 +620,8 @@ pub(super) fn requires_half(
 ///   stand for the rest.
 /// - Two demands under conditions that cannot both hold are not in conflict, so the comparison is
 ///   made only where the positions overlap.
-/// - Off by default, as [`CheckerOptions::check_requires_conflict`] says: the planner emits these
-///   plans today.
+/// - [`CheckerOptions::check_requires_conflict`] can turn it off: the planner emits these plans
+///   today.
 pub(super) fn check_requires_conflict(
     schema: &ValidFederationSchema,
     selections: &[Selection],
