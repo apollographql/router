@@ -579,24 +579,21 @@ pub(crate) type OciPersistedQueryChunks = Vec<String>;
 pub(crate) type OciPersistedQueryChunkStream =
     Pin<Box<dyn Stream<Item = Result<OciPersistedQueryChunks, OciError>> + Send>>;
 
-/// Create a persisted query chunk stream from the persisted-queries artifact's OCI config,
-/// gated on reference type and hot-reload the same way as the schema stream. The artifact is
-/// standalone: it lives in its own repository and is fetched and polled independently of the
-/// schema image, so a persisted query publish and a schema publish never wait on each other.
+/// Create a persisted query chunk stream from the persisted-queries artifact's OCI config.
+/// The reference type alone decides the behavior: a tag is the variant's pointer and is polled
+/// for moves, a digest is immutable and is fetched exactly once. Unlike the schema stream, the
+/// `--hot-reload` flag plays no part (it governs local file watching, and like Uplink-sourced
+/// persisted queries, a pointer tag is always followed). The artifact is standalone: it lives in
+/// its own repository and is fetched and polled independently of the schema image, so a
+/// persisted query publish and a schema publish never wait on each other.
 pub(crate) fn create_oci_pq_chunk_stream(
     oci_config: OciConfig,
 ) -> Result<OciPersistedQueryChunkStream, anyhow::Error> {
     let (_, ref_type) = validate_oci_reference(&oci_config.reference)?;
 
-    match (ref_type, oci_config.hot_reload) {
-        (OciReferenceType::Tag, true) => Ok(Box::pin(stream_pq_chunks_from_oci(oci_config))),
-        (OciReferenceType::Tag, false) => Err(anyhow::anyhow!(
-            "Tag references without --hot-reload are not yet supported."
-        )),
-        (OciReferenceType::Digest, true) => Err(anyhow::anyhow!(
-            "Digest references are immutable so --hot-reload flag is not allowed."
-        )),
-        (OciReferenceType::Digest, false) => {
+    match ref_type {
+        OciReferenceType::Tag => Ok(Box::pin(stream_pq_chunks_from_oci(oci_config))),
+        OciReferenceType::Digest => {
             let stream = stream::once(async move {
                 fetch_pq_chunks(&oci_config, &mut HashMap::new())
                     .await
@@ -2207,37 +2204,39 @@ mod tests {
     }
 
     #[tokio::test(flavor = "multi_thread")]
-    async fn create_oci_pq_chunk_stream_rejects_tag_without_hot_reload() {
-        let oci_config =
-            mock_oci_config_with_reference("registry.example.com/test-graph:latest".to_string());
-        let error = match create_oci_pq_chunk_stream(oci_config) {
-            Ok(_) => panic!("expected tag-without-hot-reload to be rejected"),
-            Err(e) => e,
-        };
-        assert!(
-            error
-                .to_string()
-                .contains("Tag references without --hot-reload")
-        );
+    async fn create_oci_pq_chunk_stream_follows_tag_regardless_of_hot_reload() {
+        for hot_reload in [false, true] {
+            let oci_config = OciConfig {
+                hot_reload,
+                ..mock_oci_config_with_reference(
+                    "registry.example.com/test-graph:latest".to_string(),
+                )
+            };
+            assert!(
+                create_oci_pq_chunk_stream(oci_config).is_ok(),
+                "a tag reference must be accepted with hot_reload={hot_reload}"
+            );
+        }
     }
 
     #[tokio::test(flavor = "multi_thread")]
-    async fn create_oci_pq_chunk_stream_rejects_digest_with_hot_reload() {
-        let oci_config = OciConfig {
-            hot_reload: true,
-            ..mock_oci_config_with_reference(format!(
-                "registry.example.com/test-graph@sha256:{}",
-                "a".repeat(64)
-            ))
-        };
-        let error = match create_oci_pq_chunk_stream(oci_config) {
-            Ok(_) => panic!("expected digest-with-hot-reload to be rejected"),
-            Err(e) => e,
-        };
-        assert!(
-            error
-                .to_string()
-                .contains("Digest references are immutable")
-        );
+    async fn create_oci_pq_chunk_stream_fetches_digest_once_regardless_of_hot_reload() {
+        for hot_reload in [false, true] {
+            let oci_config = OciConfig {
+                hot_reload,
+                ..mock_oci_config_with_reference(format!(
+                    "registry.example.com/test-graph@sha256:{}",
+                    "a".repeat(64)
+                ))
+            };
+            let stream = create_oci_pq_chunk_stream(oci_config).unwrap_or_else(|e| {
+                panic!("a digest reference must be accepted with hot_reload={hot_reload}: {e}")
+            });
+            // One fetch, then the stream ends: nothing polls an immutable reference. The fetch
+            // itself fails here (no registry behind the mock config), which is fine.
+            let results = stream.collect::<Vec<_>>().await;
+            assert_eq!(results.len(), 1, "hot_reload={hot_reload}");
+            assert!(results[0].is_err(), "hot_reload={hot_reload}");
+        }
     }
 }

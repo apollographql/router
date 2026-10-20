@@ -186,6 +186,9 @@ pub struct Opt {
 
     /// An OCI reference to the persisted-queries artifact for the router to serve its persisted
     /// query manifest from. Fetched and polled independently of the graph artifact schema image.
+    /// A tag reference is polled and the manifest hot-swaps when the tag moves; a digest
+    /// reference is fetched once and pinned. This does not depend on --hot-reload, so a
+    /// digest-pinned schema can be combined with a polled persisted-queries tag.
     #[clap(long, env = "APOLLO_PQ_ARTIFACT_REFERENCE", action = ArgAction::Append)]
     pq_artifact_reference: Option<String>,
 

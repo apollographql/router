@@ -4,7 +4,7 @@ When the router is configured with a persisted-queries artifact reference (`APOL
 
 A zero-layer artifact is an emptied list and yields an empty manifest, which in enforcing mode blocks all unregistered operations; an absent tag means no list is linked to the variant and surfaces as a fetch error rather than an empty manifest, so the two cannot be confused.
 
-The persisted-queries reference follows the same rules as the schema reference: a tag is polled and requires `--hot-reload`, a digest is fetched once and requires it off. Both references share that flag, so a pointer tag pairs with a tag-referenced schema, and a digest-pinned schema with a digest-pinned persisted-queries artifact.
+The reference type decides how the artifact is followed: a tag reference is polled and the manifest hot-swaps in place when the tag moves, a digest reference is fetched once and pinned. This does not depend on `--hot-reload` (which only governs local file watching), so a digest-pinned schema can be combined with a polled persisted-queries tag, letting persisted query publishes reach an immutably deployed router without a redeploy.
 
 Local manifest files still take precedence, and routers without a persisted-queries artifact reference continue to use Uplink.
 

@@ -875,6 +875,52 @@ async fn test_router_oci_pq_pointer_move_hot_swaps() -> Result<(), BoxError> {
 }
 
 #[tokio::test(flavor = "multi_thread")]
+async fn test_router_oci_pq_tag_polls_with_digest_pinned_schema() -> Result<(), BoxError> {
+    if !graph_os_enabled() {
+        return Ok(());
+    }
+
+    // An immutable deployment: the schema is pinned by digest and --hot-reload is off. The
+    // persisted-queries pointer tag is still followed, so a publish reaches this router
+    // without a redeploy.
+    let (_schema_server, schema_reference) =
+        setup_mock_oci_server(include_str!("fixtures/oci_initial_schema.graphql")).await;
+
+    let chunk_one = pq_chunk_layer(&[("pq-count", "{ count }")]);
+    let chunk_two = pq_chunk_layer(&[("pq-hello", "{ hello }")]);
+    let v1 = build_pq_artifact(&[&chunk_one]);
+    let v2 = build_pq_artifact(&[&chunk_one, &chunk_two]);
+
+    let (_pq_server, pq_reference, current) =
+        setup_switchable_pq_server(&[&chunk_one, &chunk_two], v1).await;
+    let (_subgraphs_server, subgraph_overrides) = setup_pq_mock_subgraphs().await;
+
+    let mut router = IntegrationTest::builder()
+        .config(MIN_PQ_CONFIG)
+        .env(pq_test_env(&schema_reference, &pq_reference))
+        .subgraph_overrides(subgraph_overrides)
+        .hot_reload(false)
+        .build()
+        .await;
+
+    router.start().await;
+    router.assert_started().await;
+
+    assert_pq_succeeds(&mut router, "pq-count").await;
+    assert_pq_fails(&mut router, "pq-hello").await;
+
+    *current.lock() = v2;
+    router
+        .wait_for_log_message("persisted query manifest successfully updated (2 operations total)")
+        .await;
+
+    assert_pq_succeeds(&mut router, "pq-hello").await;
+
+    router.graceful_shutdown().await;
+    Ok(())
+}
+
+#[tokio::test(flavor = "multi_thread")]
 async fn test_router_oci_pq_emptied_artifact_blocks_operations() -> Result<(), BoxError> {
     if !graph_os_enabled() {
         return Ok(());
