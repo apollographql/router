@@ -302,13 +302,11 @@ where
                     context,
                 })
             }
-            Some(response) => {
+            Some(mut response) => {
                 if !response.has_next.unwrap_or(false)
                     && !response.subscribed.unwrap_or(false)
                     && (response.has_next.is_none() || accepts_json || accepts_wildcard)
                 {
-                    let errors = response.errors.clone();
-
                     parts
                         .headers
                         .insert(CONTENT_TYPE, APPLICATION_JSON_HEADER_VALUE.clone());
@@ -318,21 +316,22 @@ where
                             Ok(body)
                         });
                     let body = body?;
+                    // The response has been serialized, so its errors can be moved out instead of cloned
+                    let errors = std::mem::take(&mut response.errors);
                     // XXX(@goto-bus-stop): I strongly suspect that it would be better to move this into its own layer.
                     let display_router_response = context
                         .extensions()
                         .with_lock(|ext| ext.get::<DisplayRouterResponse>().is_some());
+                    // Only copy the serialized body when it also has to be stashed for telemetry
+                    let (body, body_to_stash) = if display_router_response {
+                        (body.clone(), Some(body))
+                    } else {
+                        (body, None)
+                    };
 
                     router::Response::http_response_builder()
-                        .response(Response::from_parts(
-                            parts,
-                            router::body::from_bytes(body.clone()),
-                        ))
-                        .and_body_to_stash(if display_router_response {
-                            Some(body)
-                        } else {
-                            None
-                        })
+                        .response(Response::from_parts(parts, router::body::from_bytes(body)))
+                        .and_body_to_stash(body_to_stash)
                         .context(context)
                         .errors_for_context(errors)
                         .build()

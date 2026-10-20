@@ -408,24 +408,9 @@ impl Query {
         // for every type, if we have an invalid value, we will replace it with null
         // and return Ok(()), because values are optional by default
         match field_type {
-            executable::Type::Named(name) => match name.as_str() {
-                // Scalar formatters return `Err` on coercion failure.  Propagating `Err` here
-                // avoids redundant "Null value found for non-nullable" errors.
-                "Int" => self.format_integer(parameters, path, input, output)?,
-                "Float" => self.format_float(parameters, path, input, output)?,
-                "Boolean" => self.format_boolean(parameters, path, input, output)?,
-                "String" => self.format_string(parameters, path, input, output)?,
-                "Id" => self.format_id(parameters, path, input, output)?,
-                _ => self.format_named_type(
-                    parameters,
-                    field_type,
-                    input,
-                    name,
-                    output,
-                    path,
-                    selection_set,
-                )?,
-            },
+            executable::Type::Named(name) => {
+                self.format_named(parameters, name, input, output, path, selection_set)?
+            }
             // if the list contains nonnullable types, we will receive a Err(InvalidValue)
             // and should replace the entire list with null
             // if the types are nullable, the inner call to filter_errors will take care
@@ -449,6 +434,30 @@ impl Query {
         Ok(())
     }
 
+    /// Format the value of a nullable named type.
+    /// - Returns Err(InvalidValue) if formatting fails and error(s) have been emitted.
+    #[inline]
+    fn format_named<'a: 'b, 'b>(
+        &'a self,
+        parameters: &mut FormatParameters,
+        name: &Name,
+        input: &mut Value,
+        output: &mut Value,
+        path: &mut Vec<ResponsePathElement<'b>>,
+        selection_set: &'a [Selection],
+    ) -> Result<(), InvalidValue> {
+        match name.as_str() {
+            // Scalar formatters return `Err` on coercion failure.  Propagating `Err` here
+            // avoids redundant "Null value found for non-nullable" errors.
+            "Int" => self.format_integer(parameters, path, input, output),
+            "Float" => self.format_float(parameters, path, input, output),
+            "Boolean" => self.format_boolean(parameters, path, input, output),
+            "String" => self.format_string(parameters, path, input, output),
+            "Id" => self.format_id(parameters, path, input, output),
+            _ => self.format_named_type(parameters, input, name, output, path, selection_set),
+        }
+    }
+
     /// Format a non-null field's value.
     /// - Returns Err(InvalidValue) if formatting fails and error(s) have been emitted.
     #[inline]
@@ -461,9 +470,15 @@ impl Query {
         path: &mut Vec<ResponsePathElement<'b>>,
         selection_set: &'a [Selection],
     ) -> Result<(), InvalidValue> {
-        let inner_type = match field_type {
-            executable::Type::NonNullList(ty) => ty.clone().list(),
-            executable::Type::NonNullNamed(name) => executable::Type::Named(name.clone()),
+        // Format with the nullable inner type directly, rather than building a new `Type` for
+        // every value
+        let inner_result = match field_type {
+            executable::Type::NonNullList(ty) => {
+                self.format_list(parameters, input, ty, output, path, selection_set)
+            }
+            executable::Type::NonNullNamed(name) => {
+                self.format_named(parameters, name, input, output, path, selection_set)
+            }
             // This function should never be called for non-nullable types
             _ => {
                 tracing::error!("`format_non_nullable_value` was called with a nullable type!!");
@@ -472,10 +487,8 @@ impl Query {
             }
         };
 
-        let inner_result =
-            self.format_value(parameters, &inner_type, input, output, path, selection_set);
-
         if output.is_null() {
+            let inner_type = field_type.clone().nullable();
             let message = format!("Null value found for non-nullable type {inner_type}");
             match inner_result {
                 Ok(()) => {
@@ -593,20 +606,19 @@ impl Query {
     }
 
     #[inline]
-    #[allow(clippy::too_many_arguments)]
     fn format_named_type<'a: 'b, 'b>(
         &'a self,
         parameters: &mut FormatParameters,
-        field_type: &executable::Type,
         input: &mut Value,
         type_name: &Name,
         output: &mut Value,
         path: &mut Vec<ResponsePathElement<'b>>,
         selection_set: &'a [Selection],
     ) -> Result<(), InvalidValue> {
+        let schema_type = parameters.schema.types.get(type_name);
         // we cannot know about the expected format of custom scalars
         // so we must pass them directly to the client
-        match parameters.schema.types.get(type_name) {
+        match schema_type {
             Some(ExtendedType::Scalar(_)) => {
                 *output = input.clone();
                 return Ok(());
@@ -632,8 +644,12 @@ impl Query {
                 // this is fine (that is, we should not return such a __typename to the user, but
                 // as long as it's not returned, having it in the internal data is ok and sometimes
                 // expected).
-                let Some(ExtendedType::Object(_) | ExtendedType::Interface(_)) =
+                let input_schema_type = if input_type == type_name.as_str() {
+                    schema_type
+                } else {
                     parameters.schema.types.get(input_type)
+                };
+                let Some(ExtendedType::Object(_) | ExtendedType::Interface(_)) = input_schema_type
                 else {
                     parameters.nullified.push(Path::from_response_slice(path));
                     *output = Value::Null;
@@ -646,18 +662,22 @@ impl Query {
             }
             let output_object = output.as_object_mut().ok_or(InvalidValue)?;
 
-            let typename = input_object
-                .get(TYPENAME)
-                .and_then(|val| val.as_str())
-                .and_then(|s| apollo_compiler::ast::NamedType::new(s).ok())
-                .map(apollo_compiler::ast::Type::Named);
-
-            let current_type = match parameters.schema.types.get(field_type.inner_named_type()) {
+            // For abstract types, the selections apply to the concrete type named by the
+            // `__typename` of the data, when it is a valid name.
+            let typename = match schema_type {
                 Some(ExtendedType::Interface(..) | ExtendedType::Union(..)) => {
-                    typename.as_ref().unwrap_or(field_type)
+                    match input_object.get(TYPENAME) {
+                        Some(Value::String(s)) if Name::is_valid_syntax(s.as_str()) => {
+                            Some(s.clone())
+                        }
+                        _ => None,
+                    }
                 }
-                _ => field_type,
+                _ => None,
             };
+            let current_type = typename
+                .as_ref()
+                .map_or(type_name.as_str(), |typename| typename.as_str());
 
             // The spec's `CollectFields` step 1: "if visitedFragments is not provided,
             // initialize it to the empty set". Each object gets a fresh set, so a
@@ -842,8 +862,8 @@ impl Query {
         input: &mut Object,
         output: &mut Object,
         path: &mut Vec<ResponsePathElement<'b>>,
-        // the type under which we apply selections
-        current_type: &executable::Type,
+        // the name of the type under which we apply selections
+        current_type: &str,
         // The spec's `visitedFragments` (CollectFields, step 3.d): shared with the
         // recursive calls for inline fragments and fragment bodies on the same
         // object; each new object gets a fresh set from its caller in
@@ -868,10 +888,8 @@ impl Query {
                     }
 
                     if name.as_str() == TYPENAME {
-                        let object_type = parameters
-                            .schema
-                            .get_object(current_type.inner_named_type())
-                            .or_else(|| {
+                        let object_type =
+                            parameters.schema.get_object(current_type).or_else(|| {
                                 let input_value = input.get(field_name.as_str())?.as_str()?;
                                 parameters.schema.get_object(input_value)
                             });
@@ -970,11 +988,8 @@ impl Query {
                     // This formatter processes fragments sequentially rather than pre-merging them
                     // via CollectFields (as the GraphQL spec prescribes) — root cause of several
                     // correctness bugs, tracked in ROUTER-740.
-                    let is_apply = current_type.inner_named_type().as_str()
-                        == type_condition.as_str()
-                        || parameters
-                            .schema
-                            .is_subtype(type_condition, current_type.inner_named_type().as_str());
+                    let is_apply = current_type == type_condition.as_str()
+                        || parameters.schema.is_subtype(type_condition, current_type);
 
                     if is_apply {
                         // if this is the filtered query, we must keep the __typename field because the original query must know the type
@@ -1028,12 +1043,8 @@ impl Query {
                     {
                         // NOTE: This subtype logic is a bit strange. See the InlineFragment
                         // branch for why its done this way.
-                        let is_apply = current_type.inner_named_type().as_str()
-                            == type_condition.as_str()
-                            || parameters.schema.is_subtype(
-                                type_condition,
-                                current_type.inner_named_type().as_str(),
-                            );
+                        let is_apply = current_type == type_condition.as_str()
+                            || parameters.schema.is_subtype(type_condition, current_type);
 
                         if is_apply {
                             // if this is the filtered query, we must keep the __typename field because the original query must know the type
