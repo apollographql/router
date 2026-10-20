@@ -15,6 +15,7 @@ use indexmap::IndexMap;
 use petgraph::Direction;
 use petgraph::algo::toposort;
 use petgraph::stable_graph::NodeIndex;
+use petgraph::unionfind::UnionFind;
 use petgraph::visit::EdgeRef;
 
 use super::super::defer::DeferInfo;
@@ -593,37 +594,25 @@ impl FetchGraph {
     /// Weakly connected parts of `nodes` over the edges between them. Parts,
     /// and the nodes within each part, keep `nodes` order.
     fn connected_components(&self, nodes: &[NodeIndex]) -> Vec<Vec<NodeIndex>> {
-        fn find(parent: &mut [usize], mut i: usize) -> usize {
-            while parent[i] != i {
-                parent[i] = parent[parent[i]];
-                i = parent[i];
-            }
-            i
-        }
-
         let position: HashMap<NodeIndex, usize> = nodes
             .iter()
             .enumerate()
             .map(|(i, node)| (*node, i))
             .collect();
-        let mut parent: Vec<usize> = (0..nodes.len()).collect();
+        let mut parts = UnionFind::new(nodes.len());
         for (i, node) in nodes.iter().enumerate() {
             for edge in self.graph.edges_directed(*node, Direction::Outgoing) {
                 if let Some(&j) = position.get(&edge.target()) {
-                    let (a, b) = (find(&mut parent, i), find(&mut parent, j));
-                    // The smaller index stays the root, so parts come out
-                    // in order of their first node.
-                    if a != b {
-                        parent[a.max(b)] = a.min(b);
-                    }
+                    parts.union(i, j);
                 }
             }
         }
 
+        // Keyed by each part's representative, in order of the part's first
+        // node, so the plan keeps a stable order.
         let mut components: IndexMap<usize, Vec<NodeIndex>> = IndexMap::new();
         for (i, node) in nodes.iter().enumerate() {
-            let root = find(&mut parent, i);
-            components.entry(root).or_default().push(*node);
+            components.entry(parts.find_mut(i)).or_default().push(*node);
         }
         components.into_values().collect()
     }
