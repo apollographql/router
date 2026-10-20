@@ -425,13 +425,11 @@ async fn setup_mock_oci_server_no_entitlement(schema_content: &str) -> (MockServ
 }
 
 /// Helper function to set up a mock OCI registry server whose graph manifest
-/// carries the entitlement id annotation (unlike `setup_mock_oci_server_no_entitlement`),
-/// but whose entitlement repository's manifest exists with only an unrelated
-/// layer — no `ENTITLEMENT_MEDIA_TYPE` layer at all. This is `OciError::LayerNotFound`
-/// / `is_missing_entitlement_layer()`: a malformed publish that, unlike a 404,
-/// won't fix itself on the next poll, so the router must boot unlicensed with
-/// an explicit error log rather than hanging or silently retrying.
-async fn setup_mock_oci_server_with_missing_entitlement_layer(
+/// comes from `mount_graph_manifest`, but whose entitlement manifest carries
+/// only an unrelated layer and no `ENTITLEMENT_MEDIA_TYPE` layer. Unlike a 404,
+/// this won't fix itself on the next poll, so the router boots unlicensed and
+/// logs an error.
+async fn setup_mock_oci_server_with_entitlement_manifest_without_license_layer(
     schema_content: &str,
 ) -> (MockServer, String) {
     let mock_server = MockServer::start().await;
@@ -476,14 +474,11 @@ async fn setup_mock_oci_server_with_missing_entitlement_layer(
     (mock_server, artifact_reference)
 }
 
-/// Helper function to set up a mock OCI registry server whose graph manifest is
-/// exactly like `setup_mock_oci_server`'s (static, with the entitlement id
-/// annotation), but whose entitlement repository serves `initial_license_bytes`
-/// (e.g. malformed or version-incompatible JWT content) at the `latest` tag
-/// until the caller arms the returned switch, after which it serves a freshly
-/// minted valid six-month license. Used to prove the router treats a bad
-/// entitlement artifact as retryable rather than collapsing to unlicensed, and
-/// recovers on its own once the artifact is corrected — without a restart.
+/// Helper function to set up a mock OCI registry server whose graph manifest
+/// comes from `mount_graph_manifest`, but whose entitlement repository serves
+/// `initial_license_bytes` (e.g. malformed or version-incompatible JWT content)
+/// at the `latest` tag until the caller arms the returned switch, after which
+/// it serves a freshly minted valid six-month license.
 async fn setup_mock_oci_server_with_recovering_entitlement(
     schema_content: &str,
     initial_license_bytes: Vec<u8>,
@@ -505,22 +500,19 @@ async fn setup_mock_oci_server_with_recovering_entitlement(
 }
 
 /// Mount the entitlement manifest fetch under `entitlements/{TEST_ENTITLEMENT_ID}`
-/// so it returns `unavailable_status` until the caller arms the returned
-/// switch, after which it serves a valid six-month license. Used for status
-/// codes where the router must not collapse to unlicensed: a 403 is a
-/// transient access error (`OciError::is_transient_not_found() == false`,
-/// still retried), and a 404 is the "not yet backfilled" quiet-retry path
-/// (`is_transient_not_found() == true`, and must not even log at warn level
-/// or increment the failure metric — see ROUTER-2085).
+/// so it serves a valid six-month license while the returned `available`
+/// switch is set, and responds with `unavailable_status` while it is cleared.
+/// `initially_available` sets the switch's starting value.
 ///
-/// Also returns a request counter for the unavailable response, so callers
-/// can wait for a specific number of poll cycles (a condition, not a fixed
-/// sleep) before asserting on behavior during the unavailable phase.
-async fn mount_entitlement_mocks_unavailable_then_recovers(
+/// Also returns a counter of `unavailable_status` responses, so callers can
+/// wait for a specific number of poll cycles (a condition, not a fixed sleep)
+/// before asserting on behavior during the unavailable phase.
+async fn mount_entitlement_mocks_with_availability_switch(
     mock_server: &MockServer,
     unavailable_status: u16,
+    initially_available: bool,
 ) -> (Arc<AtomicBool>, Arc<AtomicUsize>) {
-    let authorized = Arc::new(AtomicBool::new(false));
+    let available = Arc::new(AtomicBool::new(initially_available));
     let unavailable_request_count = Arc::new(AtomicUsize::new(0));
 
     let license_layer = ImageLayer {
@@ -555,10 +547,10 @@ async fn mount_entitlement_mocks_unavailable_then_recovers(
             entitlement_repository
         )))
         .respond_with({
-            let authorized = authorized.clone();
+            let available = available.clone();
             let unavailable_request_count = unavailable_request_count.clone();
             move |_req: &wiremock::Request| {
-                if authorized.load(Ordering::SeqCst) {
+                if available.load(Ordering::SeqCst) {
                     ResponseTemplate::new(200)
                         .append_header("content-type", OCI_IMAGE_MEDIA_TYPE)
                         .set_body_bytes(serde_json::to_vec(&entitlement_manifest).unwrap())
@@ -571,57 +563,54 @@ async fn mount_entitlement_mocks_unavailable_then_recovers(
         .mount(mock_server)
         .await;
 
-    (authorized, unavailable_request_count)
+    (available, unavailable_request_count)
 }
 
-/// Helper function to set up a mock OCI registry server whose graph manifest is
-/// exactly like `setup_mock_oci_server`'s, but whose entitlement manifest fetch
-/// returns 403 Forbidden until the caller arms the returned switch, after which
-/// it serves a valid license. Used to prove a 403 is treated as a transient
-/// error (see `OciError::is_transient_not_found`) — retried without collapsing
-/// the router to unlicensed — and that the router recovers on its own once
-/// access is restored.
-async fn setup_mock_oci_server_with_unauthorized_entitlement(
+/// Helper function to set up a mock OCI registry server whose graph manifest
+/// comes from `mount_graph_manifest`, but whose entitlement manifest fetch
+/// responds with `status` until the caller sets the returned switch, after
+/// which it serves a valid license. Also returns the count of `status`
+/// responses.
+async fn setup_mock_oci_server_with_entitlement_after_status(
     schema_content: &str,
-) -> (MockServer, String, Arc<AtomicBool>) {
-    let mock_server = MockServer::start().await;
-    let artifact_reference = mount_graph_manifest(&mock_server, schema_content).await;
-    let (authorized, _unavailable_request_count) =
-        mount_entitlement_mocks_unavailable_then_recovers(&mock_server, 403).await;
-    (mock_server, artifact_reference, authorized)
-}
-
-/// Helper function to set up a mock OCI registry server whose graph manifest is
-/// exactly like `setup_mock_oci_server`'s, but whose entitlement manifest fetch
-/// returns 404 until the caller arms the returned switch, after which it
-/// serves a valid license. Used to prove the "not yet backfilled" path
-/// (`OciError::is_transient_not_found() == true`) never logs above `debug` and
-/// never touches the failure metric — unlike every other entitlement-fetch
-/// failure — and that the router still boots once the entitlement appears.
-async fn setup_mock_oci_server_with_not_yet_found_entitlement(
-    schema_content: &str,
+    status: u16,
 ) -> (MockServer, String, Arc<AtomicBool>, Arc<AtomicUsize>) {
     let mock_server = MockServer::start().await;
     let artifact_reference = mount_graph_manifest(&mock_server, schema_content).await;
-    let (found, not_found_request_count) =
-        mount_entitlement_mocks_unavailable_then_recovers(&mock_server, 404).await;
+    let (available, unavailable_request_count) =
+        mount_entitlement_mocks_with_availability_switch(&mock_server, status, false).await;
     (
         mock_server,
         artifact_reference,
-        found,
-        not_found_request_count,
+        available,
+        unavailable_request_count,
     )
 }
 
-/// Mount the entitlement manifest + blob under `entitlements/{TEST_ENTITLEMENT_ID}`
-/// serving a valid six-month license until the caller arms the returned
-/// switch, after which the manifest carries only an unrelated layer — the
-/// same "missing entitlement layer" shape `setup_mock_oci_server_no_entitlement`'s
-/// sibling test covers at startup, but reached here from an already-licensed
-/// `Running` state. Used to prove `state_machine::accumulate_inputs`'s
-/// "ignoring reload because of loss of license" guard: a router already
-/// serving traffic under a good license must not be knocked back to
-/// unlicensed by a later entitlement regression.
+/// Helper function to set up a mock OCI registry server whose graph manifest
+/// comes from `mount_graph_manifest`, and whose entitlement manifest serves a
+/// valid license until the caller clears the returned switch, after which the
+/// fetch responds with `status` until the switch is set again. This reaches
+/// the failure after the router is `Running`, when `/metrics` can report what
+/// it recorded. Also returns the count of `status` responses.
+async fn setup_mock_oci_server_with_entitlement_then_status(
+    schema_content: &str,
+    status: u16,
+) -> (MockServer, String, Arc<AtomicBool>, Arc<AtomicUsize>) {
+    let mock_server = MockServer::start().await;
+    let artifact_reference = mount_graph_manifest(&mock_server, schema_content).await;
+    let (available, unavailable_request_count) =
+        mount_entitlement_mocks_with_availability_switch(&mock_server, status, true).await;
+    (
+        mock_server,
+        artifact_reference,
+        available,
+        unavailable_request_count,
+    )
+}
+
+/// Serves a valid license until `degraded` is set, then an entitlement
+/// manifest with no license layer, which the router reads as "unlicensed".
 async fn setup_mock_oci_server_with_degrading_entitlement(
     schema_content: &str,
 ) -> (MockServer, String, Arc<AtomicBool>) {
@@ -639,80 +628,6 @@ async fn setup_mock_oci_server_with_degrading_entitlement(
     .await;
 
     (mock_server, artifact_reference, degraded)
-}
-
-/// Mount the entitlement manifest + blob under `entitlements/{TEST_ENTITLEMENT_ID}`
-/// serving a valid six-month license until the caller arms the returned
-/// switch, after which the manifest fetch returns 403 Forbidden forever.
-/// Unlike `setup_mock_oci_server_with_unauthorized_entitlement` (403 from the
-/// very first poll, before the router has ever started and so before any
-/// metrics pipeline exists to observe), this reaches the 403 only after the
-/// router is already `Running` — needed to prove
-/// `apollo.router.license.fetch.failure.total` actually increments, since
-/// `/metrics` isn't reachable until the router's HTTP listener exists.
-async fn setup_mock_oci_server_with_entitlement_then_unauthorized(
-    schema_content: &str,
-) -> (MockServer, String, Arc<AtomicBool>, Arc<AtomicUsize>) {
-    let mock_server = MockServer::start().await;
-    let degraded = Arc::new(AtomicBool::new(false));
-    let unauthorized_request_count = Arc::new(AtomicUsize::new(0));
-    let artifact_reference = mount_graph_manifest(&mock_server, schema_content).await;
-
-    let valid_jwt = mint_license_jwt(None, LICENSE_SIX_MONTHS_SECS, LICENSE_SIX_MONTHS_SECS);
-    let license_layer = ImageLayer {
-        data: valid_jwt.into_bytes().into(),
-        media_type: ENTITLEMENT_MEDIA_TYPE.to_string(),
-        annotations: None,
-    };
-    let license_blob_digest = license_layer.sha256_digest();
-    let entitlement_repository = format!("entitlements/{TEST_ENTITLEMENT_ID}");
-    let entitlement_manifest = build_single_layer_manifest(
-        ENTITLEMENT_MEDIA_TYPE,
-        &license_blob_digest,
-        license_layer.data.len(),
-    );
-
-    Mock::given(method("GET"))
-        .and(path(format!(
-            "/v2/{}/blobs/{}",
-            entitlement_repository, license_blob_digest
-        )))
-        .respond_with(
-            ResponseTemplate::new(200)
-                .append_header("content-type", "application/octet-stream")
-                .set_body_bytes(license_layer.data.clone()),
-        )
-        .mount(&mock_server)
-        .await;
-
-    Mock::given(method("GET"))
-        .and(path(format!(
-            "/v2/{}/manifests/latest",
-            entitlement_repository
-        )))
-        .respond_with({
-            let degraded = degraded.clone();
-            let unauthorized_request_count = unauthorized_request_count.clone();
-            move |_req: &wiremock::Request| {
-                if degraded.load(Ordering::SeqCst) {
-                    unauthorized_request_count.fetch_add(1, Ordering::SeqCst);
-                    ResponseTemplate::new(403)
-                } else {
-                    ResponseTemplate::new(200)
-                        .append_header("content-type", OCI_IMAGE_MEDIA_TYPE)
-                        .set_body_bytes(serde_json::to_vec(&entitlement_manifest).unwrap())
-                }
-            }
-        })
-        .mount(&mock_server)
-        .await;
-
-    (
-        mock_server,
-        artifact_reference,
-        degraded,
-        unauthorized_request_count,
-    )
 }
 
 /// Helper function to set up a mock OCI registry server with tag-based references.
@@ -1358,19 +1273,74 @@ async fn test_router_oci_recovers_after_version_incompatible_license() -> Result
     Ok(())
 }
 
-/// A 403 on the entitlement manifest fetch must be treated as transient (an
-/// access problem or a blip), never as a signal that the graph has no license:
-/// only a 404 means "unlicensed" (see `OciError::is_transient_not_found` and
-/// ROUTER-2085). The router keeps polling and recovers on its own once access
-/// is restored.
+/// Waits until the entitlement mock has served `at_least` unavailable
+/// responses, so assertions about the unavailable phase cover several polls.
+async fn wait_for_unavailable_polls(unavailable_request_count: &AtomicUsize, at_least: usize) {
+    let polled_enough = tokio::time::timeout(Duration::from_secs(30), async {
+        while unavailable_request_count.load(Ordering::SeqCst) < at_least {
+            tokio::time::sleep(Duration::from_millis(20)).await;
+        }
+    })
+    .await;
+    assert!(
+        polled_enough.is_ok(),
+        "expected at least {at_least} polls of the unavailable entitlement within timeout"
+    );
+}
+
+/// Matches any `apollo_router_license_fetch_failure_total` series for the OCI
+/// license source.
+fn oci_failure_counter() -> Regex {
+    Regex::new(r#"(?m)^apollo_router_license_fetch_failure_total\{[^}]*source="oci"[^}]*\}"#)
+        .expect("regex must be valid")
+}
+
+/// Polls `/metrics` until
+/// `apollo_router_license_fetch_failure_total{reason="http_error",source="oci"}`
+/// reaches `at_least`, panicking with the last scrape if it doesn't within 30s.
+async fn wait_for_oci_http_error_failures(router: &IntegrationTest, at_least: u64) {
+    // The Rust `regex` crate doesn't support look-around, so match both label
+    // orderings explicitly rather than asserting each is present independently.
+    let failure_counter = Regex::new(
+        r#"(?m)^apollo_router_license_fetch_failure_total\{(?:reason="http_error",source="oci"|source="oci",reason="http_error")[^}]*\}\s+(\d+)"#,
+    )
+    .expect("regex must be valid");
+    let deadline = tokio::time::Instant::now() + Duration::from_secs(30);
+    let mut metrics = String::new();
+    while tokio::time::Instant::now() < deadline {
+        metrics = router
+            .get_metrics_response()
+            .await
+            .expect("metrics request should succeed")
+            .text()
+            .await
+            .expect("metrics response should have a body");
+        let failure_count = failure_counter.captures(&metrics).map(|captures| {
+            captures[1]
+                .parse::<u64>()
+                .expect("counter value must be a number")
+        });
+        if failure_count.is_some_and(|count| count >= at_least) {
+            return;
+        }
+        tokio::time::sleep(Duration::from_millis(100)).await;
+    }
+    panic!(
+        "expected apollo_router_license_fetch_failure_total{{reason=\"http_error\",source=\"oci\"}} >= {at_least} in /metrics, got:\n{metrics}"
+    );
+}
+
+/// A 403 on the entitlement manifest fetch is treated as transient (an access
+/// problem or a blip), never as a signal that the graph has no license. The
+/// router keeps polling and recovers on its own once access is restored.
 #[tokio::test(flavor = "multi_thread")]
 async fn test_router_oci_recovers_after_unauthorized_entitlement_fetch() -> Result<(), BoxError> {
     if !graph_os_enabled() {
         return Ok(());
     }
 
-    let (_mock_server, artifact_reference, authorized) =
-        setup_mock_oci_server_with_unauthorized_entitlement(LOCAL_SCHEMA).await;
+    let (_mock_server, artifact_reference, authorized, _unauthorized_request_count) =
+        setup_mock_oci_server_with_entitlement_after_status(LOCAL_SCHEMA, 403).await;
     let (_subgraphs_server, subgraph_overrides) = setup_mock_subgraphs().await;
 
     let mut router = IntegrationTest::builder()
@@ -1406,15 +1376,9 @@ async fn test_router_oci_recovers_after_unauthorized_entitlement_fetch() -> Resu
     Ok(())
 }
 
-/// A 404 on the entitlement manifest fetch — the "not yet backfilled" shape
-/// expected during rollout, per `OciError::is_transient_not_found()` — must
-/// behave differently from every *other* entitlement-fetch failure: it must
-/// never log above `debug`, and it must never touch
-/// `apollo.router.license.fetch.failure.total` (see ROUTER-2085 and
-/// `router/event/license.rs`'s `Err(e)` arm in `LicenseSource::OCI`'s
-/// `into_stream`). This is the "stay quiet" half of ROUTER-2145 item 2;
-/// `test_router_oci_recovers_after_unauthorized_entitlement_fetch` above
-/// proves the opposite (403 recorded, warned on) for comparison.
+/// A 404 on the entitlement manifest means the entitlement has not been
+/// published yet. The router retries quietly (no warning) and starts licensed
+/// once the entitlement appears.
 #[tokio::test(flavor = "multi_thread")]
 async fn test_router_oci_entitlement_not_found_stays_quiet_and_recovers() -> Result<(), BoxError> {
     if !graph_os_enabled() {
@@ -1422,7 +1386,63 @@ async fn test_router_oci_entitlement_not_found_stays_quiet_and_recovers() -> Res
     }
 
     let (_mock_server, artifact_reference, found, not_found_request_count) =
-        setup_mock_oci_server_with_not_yet_found_entitlement(LOCAL_SCHEMA).await;
+        setup_mock_oci_server_with_entitlement_after_status(LOCAL_SCHEMA, 404).await;
+    let (_subgraphs_server, subgraph_overrides) = setup_mock_subgraphs().await;
+
+    let mut router = IntegrationTest::builder()
+        .config(MIN_CONFIG)
+        .env(HashMap::from([
+            (
+                String::from("APOLLO_GRAPH_ARTIFACT_REFERENCE"),
+                OsString::from(artifact_reference),
+            ),
+            (
+                String::from("TEST_APOLLO_OCI_POLL_INTERVAL"),
+                OsString::from("1"),
+            ),
+        ]))
+        .subgraph_overrides(subgraph_overrides)
+        .hot_reload(false)
+        .build()
+        .await;
+
+    router.start().await;
+    wait_for_unavailable_polls(&not_found_request_count, 3).await;
+
+    router.read_logs();
+    assert!(
+        !router.log_contains("transient error fetching license from oci registry, will retry"),
+        "a 404 (not yet published) must never be logged as a transient error"
+    );
+    assert!(
+        !router.log_contains("UpdateLicense(Unlicensed)"),
+        "a 404 (not yet published) must never be treated as a revocation signal"
+    );
+
+    found.store(true, Ordering::SeqCst);
+
+    router.assert_started().await;
+    if !router.log_contains("UpdateLicense(Licensed") {
+        router.wait_for_log_message("UpdateLicense(Licensed").await;
+    }
+    router.execute_default_query().await;
+    router.graceful_shutdown().await;
+    Ok(())
+}
+
+/// A 404 on the entitlement manifest while the router is running under a valid
+/// license logs no warning, records no license fetch failure metric and leaves
+/// the license in place. The 404s happen after startup because `/metrics` only
+/// reports counts recorded once the router is running.
+#[tokio::test(flavor = "multi_thread")]
+async fn test_router_oci_entitlement_not_found_while_running_records_no_failure_metric()
+-> Result<(), BoxError> {
+    if !graph_os_enabled() {
+        return Ok(());
+    }
+
+    let (_mock_server, artifact_reference, available, not_found_request_count) =
+        setup_mock_oci_server_with_entitlement_then_status(LOCAL_SCHEMA, 404).await;
     let (_subgraphs_server, subgraph_overrides) = setup_mock_subgraphs().await;
 
     let mut router = IntegrationTest::builder()
@@ -1443,40 +1463,25 @@ async fn test_router_oci_entitlement_not_found_stays_quiet_and_recovers() -> Res
         .await;
 
     router.start().await;
+    router.assert_started().await;
+    if !router.log_contains("UpdateLicense(Licensed") {
+        router.wait_for_log_message("UpdateLicense(Licensed").await;
+    }
 
-    // Wait for several 404 polls (a condition, not a fixed sleep) before
-    // asserting on the quiet phase, so the assertions below cover more than
-    // just the very first poll.
-    let polled_enough = tokio::time::timeout(Duration::from_secs(10), async {
-        while not_found_request_count.load(Ordering::SeqCst) < 3 {
-            tokio::time::sleep(Duration::from_millis(20)).await;
-        }
-    })
-    .await;
-    assert!(
-        polled_enough.is_ok(),
-        "expected at least 3 polls of the not-yet-found entitlement within timeout"
-    );
+    available.store(false, Ordering::SeqCst);
+    // The router finishes handling one poll before it sends the next, so by the
+    // third 404 at least two have been fully processed.
+    wait_for_unavailable_polls(&not_found_request_count, 3).await;
 
     router.read_logs();
     assert!(
         !router.log_contains("transient error fetching license from oci registry, will retry"),
-        "a 404 (not yet backfilled) must never be logged as a transient error"
+        "a 404 (not yet published) must never be logged as a transient error"
     );
     assert!(
         !router.log_contains("UpdateLicense(Unlicensed)"),
-        "a 404 (not yet backfilled) must never be treated as a revocation signal"
+        "a 404 (not yet published) must never be treated as a revocation signal"
     );
-
-    found.store(true, Ordering::SeqCst);
-
-    // The router has no HTTP listener yet during the 404 phase (it can't
-    // reach `Running` without a license — see `state_machine::attempt_reload`),
-    // so `/metrics` isn't reachable until after it starts. The counter is
-    // cumulative and neither the quiet 404s above nor a successful recovery
-    // fetch increment it, so checking it here still proves the quiet phase
-    // never touched it.
-    router.assert_started().await;
     let metrics = router
         .get_metrics_response()
         .await
@@ -1484,37 +1489,32 @@ async fn test_router_oci_entitlement_not_found_stays_quiet_and_recovers() -> Res
         .text()
         .await
         .expect("metrics response should have a body");
-    let oci_failure_counter =
-        Regex::new(r#"(?m)^apollo_router_license_fetch_failure_total\{[^}]*source="oci"[^}]*\}"#)
-            .expect("regex must be valid");
     assert!(
-        !oci_failure_counter.is_match(&metrics),
-        "a 404 (not yet backfilled) must never increment the oci license fetch failure counter, got:\n{metrics}"
+        !oci_failure_counter().is_match(&metrics),
+        "a 404 (not yet published) must never increment the oci license fetch failure counter, got:\n{metrics}"
     );
 
-    if !router.log_contains("UpdateLicense(Licensed") {
-        router.wait_for_log_message("UpdateLicense(Licensed").await;
-    }
+    available.store(true, Ordering::SeqCst);
     router.execute_default_query().await;
     router.graceful_shutdown().await;
     Ok(())
 }
 
-/// A manifest that exists under `entitlements/{id}` but carries no entitlement
-/// JWT layer (`OciError::LayerNotFound` / `is_missing_entitlement_layer()`) is
-/// malformed, not merely absent: unlike a 404, it won't fix itself on the next
-/// poll. The router must still boot (unlicensed), logging an explicit error —
-/// distinct from both the "missing annotation" case
-/// (`test_router_oci_boots_unlicensed_without_entitlement_layer`) and the
-/// quiet 404 case above.
+/// An entitlement manifest that exists but has no license layer boots the
+/// router unlicensed and logs an `ERROR` with code
+/// `APOLLO_ROUTER_LICENSE_INVALID`. This differs from a graph manifest with no
+/// entitlement annotation
+/// (`test_router_oci_boots_unlicensed_without_entitlement_layer`), which boots
+/// unlicensed without an error.
 #[tokio::test(flavor = "multi_thread")]
-async fn test_router_oci_boots_unlicensed_with_missing_entitlement_layer() -> Result<(), BoxError> {
+async fn test_router_oci_boots_unlicensed_when_entitlement_manifest_has_no_license_layer()
+-> Result<(), BoxError> {
     if !graph_os_enabled() {
         return Ok(());
     }
 
     let (_mock_server, artifact_reference) =
-        setup_mock_oci_server_with_missing_entitlement_layer(LOCAL_SCHEMA).await;
+        setup_mock_oci_server_with_entitlement_manifest_without_license_layer(LOCAL_SCHEMA).await;
     let (_subgraphs_server, subgraph_overrides) = setup_mock_subgraphs().await;
 
     let mut router = IntegrationTest::builder()
@@ -1541,30 +1541,21 @@ async fn test_router_oci_boots_unlicensed_with_missing_entitlement_layer() -> Re
             .wait_for_log_message("APOLLO_ROUTER_LICENSE_INVALID")
             .await;
     }
-    assert!(
-        router.log_contains("the router will run unlicensed"),
-        "expected the missing-entitlement-layer error to explain the router will run unlicensed"
-    );
+    let line = router
+        .logs()
+        .into_iter()
+        .find(|line| line.contains("APOLLO_ROUTER_LICENSE_INVALID"))
+        .expect("missing-license-layer error should be logged");
+    assert!(line.contains(r#""level":"ERROR""#), "{line}");
+    assert!(line.contains("the router will run unlicensed"), "{line}");
     router.execute_default_query().await;
     router.graceful_shutdown().await;
     Ok(())
 }
 
-/// A router that is already `Running` under a good license must not be
-/// knocked back to unlicensed by a later entitlement regression —
-/// `state_machine::accumulate_inputs` has an explicit guard for exactly this:
-///
-/// ```ignore
-/// if self.is_licensed() && new_license.as_deref().is_some_and(|l| l.is_unlicensed()) {
-///     tracing::info!(event = STATE_CHANGE, "ignoring reload because of loss of license");
-///     return self;
-/// }
-/// ```
-///
-/// This is the resiliency half of ROUTER-2145 item 1: every other test in
-/// this module proves "start broken, then recover"; this one proves the
-/// reverse direction, "start good, then degrade," is ignored rather than
-/// applied.
+/// A router serving under a valid license keeps that license when a later
+/// poll returns an entitlement with no license layer, and logs that it ignored
+/// the reload.
 #[tokio::test(flavor = "multi_thread")]
 async fn test_router_oci_ignores_license_loss_while_running() -> Result<(), BoxError> {
     if !graph_os_enabled() {
@@ -1625,25 +1616,18 @@ async fn test_router_oci_ignores_license_loss_while_running() -> Result<(), BoxE
     Ok(())
 }
 
-/// `record_license_fetch_failure` emits both a `tracing::warn!` and an
-/// `apollo.router.license.fetch.failure.total` increment from the same call
-/// site, but every other test in this module only verifies the log side.
-/// This asserts on the counter directly (ROUTER-2145 item 4), scraping
-/// `/metrics` after the router is already `Running` under a good license and
-/// degrades to repeated 403s — `/metrics` isn't reachable during `Startup`
-/// (the router has no HTTP listener until `attempt_reload` succeeds), so a
-/// failure that only ever happens pre-license (as in
-/// `test_router_oci_recovers_after_unauthorized_entitlement_fetch`) can't be
-/// observed this way; recording it from an already-`Running` state sidesteps
-/// that.
+/// A failed entitlement fetch increments
+/// `apollo_router_license_fetch_failure_total{source="oci",reason="http_error"}`.
+/// The failure is triggered after startup because `/metrics` only reports
+/// counts recorded once the router is running.
 #[tokio::test(flavor = "multi_thread")]
 async fn test_router_oci_records_metric_for_license_fetch_failures() -> Result<(), BoxError> {
     if !graph_os_enabled() {
         return Ok(());
     }
 
-    let (_mock_server, artifact_reference, degraded, unauthorized_request_count) =
-        setup_mock_oci_server_with_entitlement_then_unauthorized(LOCAL_SCHEMA).await;
+    let (_mock_server, artifact_reference, available, _unauthorized_request_count) =
+        setup_mock_oci_server_with_entitlement_then_status(LOCAL_SCHEMA, 403).await;
     let (_subgraphs_server, subgraph_overrides) = setup_mock_subgraphs().await;
 
     let mut router = IntegrationTest::builder()
@@ -1672,48 +1656,14 @@ async fn test_router_oci_records_metric_for_license_fetch_failures() -> Result<(
 
     // Only now arm the degrade, i.e. once the router has already committed a
     // good license and its metrics pipeline is live.
-    degraded.store(true, Ordering::SeqCst);
+    available.store(false, Ordering::SeqCst);
 
     router
         .wait_for_log_message("transient error fetching license from oci registry, will retry")
         .await;
-
-    // Wait for a second 403 poll (a condition, not a fixed sleep) so the
-    // counter reflects more than just the first failure.
-    let polled_enough = tokio::time::timeout(Duration::from_secs(10), async {
-        while unauthorized_request_count.load(Ordering::SeqCst) < 2 {
-            tokio::time::sleep(Duration::from_millis(20)).await;
-        }
-    })
-    .await;
-    assert!(
-        polled_enough.is_ok(),
-        "expected at least 2 polls of the degraded entitlement within timeout"
-    );
-
-    let metrics = router
-        .get_metrics_response()
-        .await
-        .expect("metrics request should succeed")
-        .text()
-        .await
-        .expect("metrics response should have a body");
-    // The Rust `regex` crate doesn't support look-around, so match both label
-    // orderings explicitly rather than asserting each is present independently.
-    let failure_counter = Regex::new(
-        r#"(?m)^apollo_router_license_fetch_failure_total\{(?:reason="http_error",source="oci"|source="oci",reason="http_error")[^}]*\}\s+(\d+)"#,
-    )
-    .expect("regex must be valid");
-    let captures = failure_counter.captures(&metrics).unwrap_or_else(|| {
-        panic!(
-            "expected apollo_router_license_fetch_failure_total{{reason=\"http_error\",source=\"oci\"}} in /metrics, got:\n{metrics}"
-        )
-    });
-    let failure_count: u64 = captures[1].parse().expect("counter value must be a number");
-    assert!(
-        failure_count >= 2,
-        "expected at least two recorded oci/http_error license fetch failures, got {failure_count}"
-    );
+    // Two failures, so the counter is shown to accumulate rather than just
+    // appear once.
+    wait_for_oci_http_error_failures(&router, 2).await;
 
     // The router must still be serving under the original, good license.
     router.execute_default_query().await;
@@ -1721,21 +1671,9 @@ async fn test_router_oci_records_metric_for_license_fetch_failures() -> Result<(
     Ok(())
 }
 
-/// An Apollo-hosted graph artifact reference and an explicit license
-/// (`APOLLO_ROUTER_LICENSE`) are both fully-specified license sources, and an
-/// Apollo-hosted artifact is expected to carry its own entitlement layer —
-/// so configuring both is a contradiction, not a precedence question
-/// (`Opt::license_source` in `executable.rs`, the ROUTER-2087 fail-fast
-/// check). `executable.rs`'s `license_source_tests` module already proves
-/// this at the `Opt` level; this proves it through the real CLI/env surface
-/// a router process actually sees (ROUTER-2145 item 3), mirroring
-/// `lifecycle::test_invalid_config`'s pattern for a different class of bad
-/// config.
-///
-/// No OCI mock server is needed: `license_source()` is called with `?`
-/// before `RouterHttpServer` is ever built, so the router exits before any
-/// network I/O — schema and license sources are both just plain values built
-/// synchronously at this point, not yet-polling streams.
+/// An Apollo-hosted graph artifact reference together with an explicit license
+/// (`APOLLO_ROUTER_LICENSE`) makes the router exit at startup with an error
+/// saying the two cannot be used together.
 #[tokio::test(flavor = "multi_thread")]
 async fn test_router_rejects_apollo_hosted_graph_artifact_reference_with_explicit_license()
 -> Result<(), BoxError> {
