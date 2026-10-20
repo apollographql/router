@@ -7762,8 +7762,8 @@ async fn storable_private_response_marks_entity_query_private() {
     .await;
 }
 
-/// A response with errors is not stored, and the debugger says so even though its
-/// `Cache-Control` would allow storing.
+/// A response with errors is not stored, and the debugger says so, with a `SUBGRAPH_ERRORS`
+/// warning, even though its `Cache-Control` would allow storing.
 #[tokio::test]
 async fn response_with_errors_is_not_reported_as_stored() {
     let mut harness = ToggledSubgraphHarness::root_fields(false).await;
@@ -7772,6 +7772,7 @@ async fn response_with_errors_is_not_reported_as_stored() {
     let entries = harness.call(None).await;
     assert_eq!(entries.len(), 1);
     assert!(!entries[0].should_store);
+    assert!(has_subgraph_errors_warning(&entries[0]));
 
     harness.assert_healthy_response_is_cached(None).await;
 }
@@ -8208,6 +8209,19 @@ async fn connector_batch_with_declared_error_stores_no_entities(
                 .all(|entry| entry.pointer("/shouldStore") == Some(&serde_json::json!(false))),
             "no entity of a batch with a declared error should be stored, got: {entity_entries:?}"
         );
+        assert!(
+            entity_entries.iter().all(|entry| {
+                entry
+                    .pointer("/warnings")
+                    .and_then(|warnings| warnings.as_array())
+                    .is_some_and(|warnings| {
+                        warnings.iter().any(|warning| {
+                            warning.pointer("/code") == Some(&serde_json::json!("SUBGRAPH_ERRORS"))
+                        })
+                    })
+            }),
+            "every entity of the batch should carry a SUBGRAPH_ERRORS warning, got: {entity_entries:?}"
+        );
         assert_gauge!("apollo.router.response_cache.private_queries.lru.size", 0);
         grace_period_for_unwanted_insert().await;
 
@@ -8595,6 +8609,49 @@ async fn entity_error_with_index_in_path() {
         cached.iter().all(Option::is_none),
         "the entity the error was attributed to must not be cached, got: {cached:?}"
     );
+}
+
+/// An error with no path can't be about one of the fetched entities, so it doesn't keep them out
+/// of the cache: a subgraph that attaches a notice to every response still gets its entities
+/// cached. The error still reaches the client.
+#[tokio::test]
+async fn entity_error_without_path_keeps_caching() {
+    let (drop_tx, drop_rx) = tokio::sync::broadcast::channel(2);
+    let storage = Storage::new(&Config::test(false, &Uuid::new_v4().to_string()), drop_rx)
+        .await
+        .unwrap();
+
+    let service = entity_error_harness(
+        storage.clone(),
+        drop_tx,
+        vec![OrgaResponse {
+            ids: &["1", "2"],
+            entities: serde_json::json!([{"name": "Organization 1"}, {"name": "Organization 2"}]),
+            errors: serde_json::json!([{"message": "notice"}]),
+        }],
+    )
+    .await;
+
+    let mut response = service.oneshot(entity_error_request()).await.unwrap();
+
+    let debug_entries = organization_debug_entries(&response);
+    let mut keys = Vec::new();
+    for id in ["1", "2"] {
+        let entry = debug_entries
+            .get(id)
+            .unwrap_or_else(|| panic!("missing debug entry for organization {id}"));
+        assert!(entry.should_store, "organization {id} should be cached");
+        assert!(!has_subgraph_errors_warning(entry));
+        keys.push(entry.key.clone());
+    }
+
+    let body = response.next_response().await.unwrap();
+    assert!(
+        body.errors.iter().any(|error| error.message == "notice"),
+        "the error should reach the client, got: {body:?}"
+    );
+
+    wait_for_cache(&storage, keys).await;
 }
 
 /// On a partial cache hit, only the cache misses go to the subgraph. With a single miss, an
