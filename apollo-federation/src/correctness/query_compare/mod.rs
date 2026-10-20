@@ -137,7 +137,7 @@ pub(crate) fn includes_with_constraint<T: PathConstraint>(
 /// A comparator that holds the schema index across comparisons.
 ///
 /// [`includes`] builds a possible-type index over the whole schema before it looks at either
-/// operation. Measured on the eight-type schema in the differential harness that setup is about
+/// operation. Measured on an eight-type schema, that setup is about
 /// 2.7us of the roughly 4.5us a comparison costs, and it grows with the schema rather than the
 /// query, so on a supergraph with hundreds of types it dominates outright. Callers comparing many
 /// operation pairs against one schema should build this once and reuse it.
@@ -285,7 +285,7 @@ fn compare_shared_variable_declarations(
 // harness does. Keeping it thread-local makes the reading right by construction rather than by a
 // rule callers have to know.
 //
-// This is not a debugging aid left in by accident: `fuzz/runners/metamorphic.rs` asserts on it.
+// This is not a debugging aid left in by accident: the tests assert on it.
 
 thread_local! {
     /// Response-name groups this thread's searches have decided.

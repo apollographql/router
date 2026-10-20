@@ -795,12 +795,11 @@ impl Checker<'_> {
     /// `None` means matched; `Some(why)` says why not, per `@key` tried. An `Err` is a malformed
     /// plan or schema, not a mismatch.
     ///
-    /// The `@key`-does-not-apply arm below has no test, and neither `tests.rs` nor the fuzz plan
-    /// lane reaches it. It needs two things at once: entity types whose keys name different
+    /// The `@key`-does-not-apply arm below has no test; `tests.rs` does not reach it. It needs two things at once: entity types whose keys name different
     /// fields, so that one type's key can fail to typecheck at another's entry, and a plan whose
     /// pairs of equal type do not settle the table, so that the search looks at any other pair at
-    /// all. A plan the planner produced never supplies the second. Covering it means building a
-    /// plan whose diagonal fails, the way the fuzz lane's perturbations build wrong plans.
+    /// all. A plan the planner produced never supplies the second. Covering it means writing a
+    /// plan whose diagonal fails by hand.
     #[allow(clippy::too_many_arguments)]
     fn requirement_matches_case(
         &self,

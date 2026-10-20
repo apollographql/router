@@ -1,3 +1,70 @@
+# The supergraph for the constraint-state tests in `tests.rs`, composed with `Supergraph::compose`
+# from the two subgraphs below. Recompose it when they change.
+#
+# Subgraph `a`:
+#
+#   extend schema @link(url: "https://specs.apollo.dev/federation/v2.5", import: ["@key", "@shareable"])
+#
+#   type Query {
+#     items: [I!]! @shareable
+#   }
+#
+#   interface I {
+#     id: ID!
+#     f: R!
+#   }
+#
+#   type P implements I @key(fields: "id") {
+#     id: ID!
+#     f: R!
+#   }
+#
+#   type R @key(fields: "id") {
+#     id: ID!
+#     g: G! @shareable
+#   }
+#
+#   interface G {
+#     id: ID!
+#   }
+#
+#   type X implements G @key(fields: "id") {
+#     id: ID!
+#     x: Int!
+#   }
+#
+# Subgraph `b`:
+#
+#   extend schema @link(url: "https://specs.apollo.dev/federation/v2.5", import: ["@key", "@shareable"])
+#
+#   type Query {
+#     items: [I!]! @shareable
+#   }
+#
+#   interface I {
+#     id: ID!
+#     f: R!
+#   }
+#
+#   type Q implements I @key(fields: "id") {
+#     id: ID!
+#     f: R!
+#   }
+#
+#   type R @key(fields: "id", resolvable: false) {
+#     id: ID!
+#     g: G! @shareable
+#   }
+#
+#   interface G {
+#     id: ID!
+#   }
+#
+#   type Y implements G @key(fields: "id") {
+#     id: ID!
+#     y: Int!
+#   }
+
 schema @link(url: "https://specs.apollo.dev/link/v1.0") @link(url: "https://specs.apollo.dev/join/v0.5", for: EXECUTION) {
   query: Query
 }

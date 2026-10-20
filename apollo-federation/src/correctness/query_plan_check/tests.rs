@@ -4,8 +4,8 @@
 //! test is the whole walk — entity fetches, `@key` and `@requires` matching, and the completeness
 //! comparison — rather than a hand-built plan that may not be a shape the planner emits.
 //!
-//! The supergraph beside this file is composed by `compose_fixture` in the fuzz package from the
-//! subgraph SDL written there, so the fixture has a visible source. It is deliberately close to
+//! The supergraph beside this file carries the subgraph SDL it was composed from, so the fixture
+//! has a visible source. It is deliberately close to
 //! the shape a corpus graph had when it found a defect here: an entity whose `@requires` field set
 //! wraps its body in a type condition that is already the field's own type.
 
