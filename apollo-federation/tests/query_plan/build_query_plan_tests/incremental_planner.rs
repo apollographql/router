@@ -1,4 +1,5 @@
 use apollo_compiler::Name;
+use apollo_federation::query_plan::DeferNode;
 use apollo_federation::query_plan::FetchDataPathElement;
 use apollo_federation::query_plan::FetchDataRewrite;
 use apollo_federation::query_plan::PlanNode;
@@ -3214,6 +3215,198 @@ fn inc_nested_defer_produces_nested_defer_nodes() {
     }
     "###
     );
+}
+
+/// Nested @defer whose outer block plans an entity hop that feeds both the
+/// outer block's own follow-up fetch and the inner block. That hop gets a
+/// fetch id for the inner block, but the outer block must not list it in its
+/// own `depends`: the router would wait for a fetch that only runs once the
+/// block itself starts.
+#[test]
+fn inc_nested_defer_does_not_depend_on_its_own_fetches() {
+    let planner = planner!(
+        config = incremental_defer_config(),
+        Subgraph1: r#"
+          type Query {
+            t: T
+          }
+
+          type T @key(fields: "id") {
+            id: ID!
+            x: Int
+          }
+        "#,
+        Subgraph2: r#"
+          type T @key(fields: "id") {
+            id: ID!
+            u: U
+          }
+
+          type U @key(fields: "id") {
+            id: ID!
+          }
+        "#,
+        Subgraph3: r#"
+          type U @key(fields: "id") {
+            id: ID!
+            name: String
+            age: Int
+          }
+        "#,
+    );
+
+    let plan = assert_plan!(
+        &planner,
+        r#"
+          {
+            t {
+              x
+              ... @defer {
+                u {
+                  name
+                  ... @defer {
+                    age
+                  }
+                }
+              }
+            }
+          }
+        "#,
+        @r###"
+               QueryPlan {
+                 Defer {
+                   Primary {
+                     { t { x } }:
+                     Fetch(service: "Subgraph1", id: 0) {
+                       {
+                         t {
+                           __typename
+                           x
+                           id
+                         }
+                       }
+                     },
+                   }, [
+                     Deferred(depends: [0], path: "t") {
+                       Defer {
+                         Primary {
+                           { u { name } }:
+                           Sequence {
+                             Flatten(path: "t") {
+                               Fetch(service: "Subgraph2", id: 1) {
+                                 {
+                                   ... on T {
+                                     __typename
+                                     id
+                                   }
+                                 } =>
+                                 {
+                                   ... on T {
+                                     u {
+                                       __typename
+                                       id
+                                     }
+                                   }
+                                 }
+                               },
+                             },
+                             Flatten(path: "t.u") {
+                               Fetch(service: "Subgraph3") {
+                                 {
+                                   ... on U {
+                                     __typename
+                                     id
+                                   }
+                                 } =>
+                                 {
+                                   ... on U {
+                                     name
+                                   }
+                                 }
+                               },
+                             },
+                           },
+                         }, [
+                           Deferred(depends: [1], path: "t/u") {
+                             { age }:
+                             Flatten(path: "t.u") {
+                               Fetch(service: "Subgraph3") {
+                                 {
+                                   ... on U {
+                                     __typename
+                                     id
+                                   }
+                                 } =>
+                                 {
+                                   ... on U {
+                                     age
+                                   }
+                                 }
+                               },
+                             },
+                           },
+                         ]
+                       },
+                     },
+                   ]
+                 },
+               }
+               "###
+    );
+    match &plan.node {
+        Some(TopLevelPlanNode::Defer(defer)) => assert_no_self_dependent_deferred_blocks(defer),
+        other => panic!("expected a top-level Defer node, got {other:?}"),
+    }
+}
+
+fn assert_no_self_dependent_deferred_blocks(defer: &DeferNode) {
+    for block in &defer.deferred {
+        let Some(node) = &block.node else { continue };
+        let mut inside = Vec::new();
+        collect_fetch_ids(node, &mut inside);
+        for dependency in &block.depends {
+            assert!(
+                !inside.contains(&dependency.id),
+                "deferred block at {:?} depends on fetch {} planned inside itself",
+                block.query_path,
+                dependency.id,
+            );
+        }
+        if let PlanNode::Defer(nested) = node.as_ref() {
+            assert_no_self_dependent_deferred_blocks(nested);
+        }
+    }
+}
+
+fn collect_fetch_ids(node: &PlanNode, ids: &mut Vec<String>) {
+    match node {
+        PlanNode::Fetch(fetch) => ids.extend(fetch.id.map(|id| id.to_string())),
+        PlanNode::Flatten(flatten) => collect_fetch_ids(&flatten.node, ids),
+        PlanNode::Sequence(sequence) => sequence
+            .nodes
+            .iter()
+            .for_each(|node| collect_fetch_ids(node, ids)),
+        PlanNode::Parallel(parallel) => parallel
+            .nodes
+            .iter()
+            .for_each(|node| collect_fetch_ids(node, ids)),
+        PlanNode::Condition(condition) => condition
+            .if_clause
+            .iter()
+            .chain(condition.else_clause.iter())
+            .for_each(|node| collect_fetch_ids(node, ids)),
+        PlanNode::Defer(defer) => defer
+            .primary
+            .node
+            .iter()
+            .chain(
+                defer
+                    .deferred
+                    .iter()
+                    .filter_map(|block| block.node.as_ref()),
+            )
+            .for_each(|node| collect_fetch_ids(node, ids)),
+    }
 }
 
 // ---------------------------------------------------------------------------

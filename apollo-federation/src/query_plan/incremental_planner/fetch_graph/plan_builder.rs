@@ -103,6 +103,25 @@ fn stamp_fetch_id(plan_node: &mut PlanNode, id: u64) {
     }
 }
 
+/// Whether a node with `defer_ref` is planned in the block for `label` or in
+/// a block nested inside it.
+fn is_within_defer_block<'a>(
+    defer_info: &'a DeferInfo,
+    mut defer_ref: Option<&'a str>,
+    label: &str,
+) -> bool {
+    while let Some(current) = defer_ref {
+        if current == label {
+            return true;
+        }
+        defer_ref = defer_info
+            .blocks
+            .get(current)
+            .and_then(|block| block.parent_label.as_deref());
+    }
+    false
+}
+
 /// Which wavefront fetch's branch a fetch belongs to: the one wavefront
 /// fetch it depends on (by position in the wavefront), or none when it
 /// depends on several.
@@ -382,10 +401,20 @@ impl FetchGraph {
             let child_labels = children_of.get(label);
 
             // Dependencies: parent-scope nodes feeding this label's nodes.
+            // Parents planned inside this block only run once it starts, so
+            // waiting on them would hold the block until the enclosing
+            // primary finishes.
             let mut depends: Vec<DeferredDependency> = Vec::new();
             for &deferred_idx in nodes {
                 for edge in self.graph.edges_directed(deferred_idx, Direction::Incoming) {
                     let parent_idx = edge.source();
+                    if is_within_defer_block(
+                        defer_info,
+                        self.graph[parent_idx].defer_ref.as_deref(),
+                        label,
+                    ) {
+                        continue;
+                    }
                     if let Some(&fetch_id) = node_fetch_ids.get(&parent_idx)
                         && !depends.iter().any(|d| d.id == fetch_id.to_string())
                     {
