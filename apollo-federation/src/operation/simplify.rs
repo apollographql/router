@@ -73,6 +73,8 @@ impl FieldSelection {
                 field_element.output_base_type()?.try_into()?;
             let mut normalized_selection: SelectionSet = selection_set
                 .flatten_unnecessary_fragments(&field_composite_type_position, schema)?;
+            // An empty set comes back shared, but still needs the `__typename`
+            // padding below, so it can't take this shortcut.
             if element_unchanged
                 && !selection_set.is_empty()
                 && normalized_selection.shares_selections_with(selection_set)
@@ -430,13 +432,13 @@ impl SelectionSet {
             .collect::<Result<Vec<_>, _>>()?;
         // When every selection came back as itself, the rebuilt map would be
         // identical, so share it instead.
-        let unchanged = flattened.len() == self.selections.len()
-            && flattened
+        let unchanged =
+            flattened
                 .iter()
                 .zip(self.selections.values())
                 .all(|(flattened, original)| {
                     matches!(flattened, Some(SelectionOrSet::Selection(selection))
-                        if selection.ptr_eq(original))
+                    if selection.ptr_eq(original))
                 });
         if unchanged {
             return Ok(Self {
