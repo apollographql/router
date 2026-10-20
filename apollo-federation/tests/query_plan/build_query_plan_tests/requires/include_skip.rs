@@ -47,7 +47,10 @@ fn it_handles_a_simple_at_requires_triggered_within_a_conditional() {
                       ... on T {
                         __typename
                         id
-                        a
+                        ... on T {
+                          __typename
+                          a
+                        }
                       }
                     } =>
                     {
@@ -215,7 +218,12 @@ fn it_handles_an_at_requires_where_multiple_conditional_are_involved() {
                             ... on B {
                               __typename
                               idB
-                              required
+                              ... on B {
+                                ... on B {
+                                  __typename
+                                  required
+                                }
+                              }
                             }
                           }
                         } =>
@@ -382,6 +390,164 @@ fn selections_are_not_overwritten_after_removing_directives() {
                   }
                 }
               }
+            },
+          },
+        }
+        "###
+    );
+}
+
+/// Two sibling fragment spreads carry opposite conditions on the *same* variable, so neither
+/// condition can be hoisted into an `Include`/`Skip` plan node — they have to survive into the
+/// subgraph operation. Both spreads select a field whose `@requires` is satisfied by another
+/// subgraph, which forces a post-`@requires` fetch back into Subgraph1.
+///
+/// That fetch used to lose both conditions: its path is rebuilt from `OpGraphPathContext`, which
+/// only accumulates conditionals across subgraph-jump edges, so the two branches produced the same
+/// unconditional path and merged into one node. The subgraph was then asked for `groups` and
+/// `listItems` unconditionally, with the union of both `@requires` sets as inputs — demanding
+/// `offerId`, which is only fetched on the `@skip` branch.
+///
+/// The two `@requires` sets differ (`listItems` also needs `offerId`) so that the merge is
+/// observable; with identical sets the conditions were dropped just the same, only silently.
+#[test]
+fn conditions_survive_a_post_requires_fetch() {
+    let planner = planner!(
+        Subgraph1: r#"
+            type Query {
+              shoppingListDetails: ShoppingListDetails
+            }
+
+            type ShoppingListDetails {
+              items: [ProductList!]
+            }
+
+            type ProductList @key(fields: "productsInfo") {
+              productsInfo: String
+              products: [Product] @external
+              groups: [Group!] @requires(fields: "products { usItemId }")
+              listItems: [ListItem!] @requires(fields: "products { usItemId offerId }")
+            }
+
+            type Product @key(fields: "usItemId", resolvable: false) {
+              usItemId: ID!
+              offerId: ID @external
+            }
+
+            type Group {
+              groupId: ID!
+            }
+
+            type ListItem {
+              listItemId: ID!
+            }
+        "#,
+        Subgraph2: r#"
+            type ProductList @key(fields: "productsInfo") {
+              productsInfo: String
+              products: [Product]
+            }
+
+            type Product @key(fields: "usItemId") {
+              usItemId: ID!
+              offerId: ID
+            }
+        "#,
+    );
+
+    assert_plan!(
+        &planner,
+        r#"
+            query foo($useGroupItems: Boolean!) {
+              shoppingListDetails {
+                items {
+                  ...GroupItems @include(if: $useGroupItems)
+                  ...FlatItems @skip(if: $useGroupItems)
+                }
+              }
+            }
+
+            fragment GroupItems on ProductList { groups { groupId } }
+            fragment FlatItems on ProductList { listItems { listItemId } }
+          "#,
+        @r###"
+        QueryPlan {
+          Sequence {
+            Fetch(service: "Subgraph1") {
+              {
+                shoppingListDetails {
+                  items {
+                    ... on ProductList @include(if: $useGroupItems) {
+                      __typename
+                      productsInfo
+                    }
+                    ... on ProductList @skip(if: $useGroupItems) {
+                      __typename
+                      productsInfo
+                    }
+                  }
+                }
+              }
+            },
+            Flatten(path: "shoppingListDetails.items.@") {
+              Fetch(service: "Subgraph2") {
+                {
+                  ... on ProductList {
+                    __typename
+                    productsInfo
+                  }
+                  ... on ProductList {
+                    __typename
+                    productsInfo
+                  }
+                } =>
+                {
+                  ... on ProductList @include(if: $useGroupItems) {
+                    products {
+                      usItemId
+                    }
+                  }
+                  ... on ProductList @skip(if: $useGroupItems) {
+                    products {
+                      usItemId
+                      offerId
+                    }
+                  }
+                }
+              },
+            },
+            Flatten(path: "shoppingListDetails.items.@") {
+              Fetch(service: "Subgraph1") {
+                {
+                  ... on ProductList {
+                    __typename
+                    products {
+                      usItemId
+                    }
+                    productsInfo
+                  }
+                  ... on ProductList {
+                    __typename
+                    products {
+                      usItemId
+                      offerId
+                    }
+                    productsInfo
+                  }
+                } =>
+                {
+                  ... on ProductList @include(if: $useGroupItems) {
+                    groups {
+                      groupId
+                    }
+                  }
+                  ... on ProductList @skip(if: $useGroupItems) {
+                    listItems {
+                      listItemId
+                    }
+                  }
+                }
+              },
             },
           },
         }
