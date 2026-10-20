@@ -28,7 +28,6 @@ mod test {
 
     use opentelemetry_semantic_conventions::trace::GRAPHQL_DOCUMENT;
     use parking_lot::Mutex;
-    use serde_json_bytes::path::JsonPathInst;
 
     use super::SupergraphSpans;
     use crate::Context;
@@ -40,6 +39,7 @@ mod test {
     use crate::plugins::telemetry::config_new::attributes::StandardAttribute;
     use crate::plugins::telemetry::config_new::conditional::Conditional;
     use crate::plugins::telemetry::config_new::conditions::Condition;
+    use crate::plugins::telemetry::config_new::selectors::SelectorJsonPath;
     use crate::plugins::telemetry::config_new::supergraph::selectors::SupergraphSelector;
     use crate::plugins::telemetry::otlp::TelemetryDataKind;
     use crate::services::supergraph;
@@ -168,7 +168,8 @@ mod test {
                 },
                 condition: Some(Arc::new(Mutex::new(Condition::Exists(
                     SupergraphSelector::ResponseErrors {
-                        response_errors: JsonPathInst::from_str("$[0].extensions.code").unwrap(),
+                        response_errors: SelectorJsonPath::from_str("$[0].extensions.code")
+                            .unwrap(),
                         default: None,
                     },
                 )))),

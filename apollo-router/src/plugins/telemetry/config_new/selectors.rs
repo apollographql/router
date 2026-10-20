@@ -1,4 +1,15 @@
+use std::borrow::Cow;
+use std::fmt;
+use std::ops::Deref;
+use std::str::FromStr;
 use std::time::Duration;
+
+use schemars::JsonSchema;
+use schemars::Schema;
+use schemars::SchemaGenerator;
+use serde::Deserialize;
+use serde::Deserializer;
+use serde_json_bytes::path::JsonPathInst;
 
 #[apollo_configuration::configuration]
 #[derive(PartialEq)]
@@ -127,6 +138,73 @@ impl DurationUnit {
     }
 }
 
+/// A JSONPath expression from a selector's configuration, such as `$[0].extensions.code`.
+///
+/// Parsed when the configuration loads, so an invalid expression is a configuration error.
+/// Dereferences to [`JsonPathInst`] for evaluation. Two paths are equal when their source text
+/// is equal; the source text is also its `Debug` output.
+#[derive(Clone)]
+pub(crate) struct SelectorJsonPath {
+    source: String,
+    path: JsonPathInst,
+}
+
+impl FromStr for SelectorJsonPath {
+    type Err = String;
+
+    fn from_str(source: &str) -> Result<Self, Self::Err> {
+        Ok(Self {
+            source: source.to_string(),
+            path: JsonPathInst::from_str(source)?,
+        })
+    }
+}
+
+impl Deref for SelectorJsonPath {
+    type Target = JsonPathInst;
+
+    fn deref(&self) -> &JsonPathInst {
+        &self.path
+    }
+}
+
+impl fmt::Debug for SelectorJsonPath {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        fmt::Debug::fmt(&self.source, f)
+    }
+}
+
+impl PartialEq for SelectorJsonPath {
+    fn eq(&self, other: &Self) -> bool {
+        self.source == other.source
+    }
+}
+
+impl<'de> Deserialize<'de> for SelectorJsonPath {
+    fn deserialize<D: Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        String::deserialize(deserializer)?
+            .parse()
+            .map_err(serde::de::Error::custom)
+    }
+}
+
+impl JsonSchema for SelectorJsonPath {
+    fn schema_name() -> Cow<'static, str> {
+        String::schema_name()
+    }
+
+    fn json_schema(generator: &mut SchemaGenerator) -> Schema {
+        String::json_schema(generator)
+    }
+
+    fn inline_schema() -> bool {
+        true
+    }
+}
+
+// Parsing already rejected an invalid expression; there is no further rule to check.
+impl apollo_configuration::Validate for SelectorJsonPath {}
+
 #[cfg(test)]
 mod tests {
     use std::time::Duration;
@@ -134,6 +212,16 @@ mod tests {
     use opentelemetry::Value;
 
     use super::DurationUnit;
+    use super::SelectorJsonPath;
+
+    #[test]
+    fn selector_json_path_compares_and_prints_its_source() {
+        let path: SelectorJsonPath = serde_json::from_str(r#""$[0].extensions.code""#).unwrap();
+        assert_eq!(format!("{path:?}"), r#""$[0].extensions.code""#);
+        assert_eq!(path, "$[0].extensions.code".parse().unwrap());
+        assert_ne!(path, "$[1].extensions.code".parse().unwrap());
+        assert!(serde_json::from_str::<SelectorJsonPath>(r#""$[""#).is_err());
+    }
 
     #[rstest::rstest]
     #[case(DurationUnit::Seconds, Value::F64(1.0))]

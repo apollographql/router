@@ -1,8 +1,5 @@
 use http_body::Body;
-use schemars::JsonSchema;
-use serde::Deserialize;
 use serde_json::from_str;
-use serde_json_bytes::path::JsonPathInst;
 use sha2::Digest;
 
 use super::events::DisplayRouterResponse;
@@ -10,7 +7,6 @@ use crate::Context;
 use crate::context::CHUNK_CONTAINS_GRAPHQL_ERROR;
 use crate::context::CONTAINS_GRAPHQL_ERROR;
 use crate::context::OPERATION_NAME;
-use crate::plugin::serde::deserialize_jsonpath;
 use crate::plugins::telemetry::config::AttributeValue;
 use crate::plugins::telemetry::config::TraceIdFormat;
 use crate::plugins::telemetry::config_new::Selector;
@@ -26,6 +22,7 @@ use crate::plugins::telemetry::config_new::selectors::DurationUnit;
 use crate::plugins::telemetry::config_new::selectors::ErrorRepr;
 use crate::plugins::telemetry::config_new::selectors::OperationName;
 use crate::plugins::telemetry::config_new::selectors::ResponseStatus;
+use crate::plugins::telemetry::config_new::selectors::SelectorJsonPath;
 use crate::plugins::telemetry::config_new::trace_id;
 use crate::query_planner::APOLLO_OPERATION_ID;
 use crate::services::router;
@@ -46,12 +43,14 @@ impl From<&RouterValue> for InstrumentValue<RouterSelector> {
     }
 }
 
-#[derive(derive_more::Debug, derive_more::PartialEq, Deserialize, JsonSchema, Clone)]
-#[serde(deny_unknown_fields, untagged)]
+#[apollo_configuration::configuration]
+#[derive(PartialEq)]
+#[serde(untagged)]
 pub(crate) enum RouterSelector {
     /// A value from baggage.
     Baggage {
         /// The name of the baggage item.
+        #[config(required)]
         baggage: String,
         /// Optional default value.
         default: Option<AttributeValue>,
@@ -59,6 +58,7 @@ pub(crate) enum RouterSelector {
     /// A value from an environment variable.
     Env {
         /// The name of the environment variable
+        #[config(required)]
         env: String,
         /// Optional default value.
         default: Option<String>,
@@ -70,13 +70,18 @@ pub(crate) enum RouterSelector {
     /// Critical error if it happens
     Error {
         #[allow(dead_code)]
+        #[config(required)]
         error: ErrorRepr,
     },
     /// Boolean set to true if the response body contains graphql error
-    OnGraphQLError { on_graphql_error: bool },
+    OnGraphQLError {
+        #[config(required)]
+        on_graphql_error: bool,
+    },
     /// The operation name from the query.
     OperationName {
         /// The operation name from the query.
+        #[config(required)]
         operation_name: OperationName,
         /// Optional default value.
         default: Option<String>,
@@ -84,6 +89,7 @@ pub(crate) enum RouterSelector {
     /// A header from the request
     RequestHeader {
         /// The name of the request header.
+        #[config(required)]
         request_header: String,
         /// Optional redaction pattern.
         redact: Option<crate::services::header_masking::RedactMode>,
@@ -93,6 +99,7 @@ pub(crate) enum RouterSelector {
     /// A value from context.
     RequestContext {
         /// The request context key.
+        #[config(required)]
         request_context: String,
         /// Optional default value.
         default: Option<AttributeValue>,
@@ -100,43 +107,37 @@ pub(crate) enum RouterSelector {
     /// The request method.
     RequestMethod {
         /// The request method enabled or not
+        #[config(required)]
         request_method: bool,
     },
     /// The body of the response
     ResponseBody {
         /// The response body enabled or not
+        #[config(required)]
         response_body: bool,
     },
     /// The body response errors
     ResponseErrors {
         /// The router response body json path of the chunks.
-        #[schemars(with = "String")]
-        #[debug(skip)]
-        #[partial_eq(skip)]
-        #[serde(deserialize_with = "deserialize_jsonpath")]
-        response_errors: JsonPathInst,
+        #[config(required)]
+        response_errors: SelectorJsonPath,
     },
     /// Count of response errors matching a JSONPath filter
     ResponseErrorsCount {
         /// JSONPath filter for response errors. Use "$[*]" to count all errors.
-        #[schemars(with = "String")]
-        #[debug(skip)]
-        #[partial_eq(skip)]
-        #[serde(deserialize_with = "deserialize_jsonpath")]
-        response_errors_count: JsonPathInst,
+        #[config(required)]
+        response_errors_count: SelectorJsonPath,
     },
     /// Extract a specific field from each error in the response
     ResponseErrorsField {
         /// JSONPath to extract from each error. E.g., "$.message" or "$.extensions.code"
-        #[schemars(with = "String")]
-        #[debug(skip)]
-        #[partial_eq(skip)]
-        #[serde(deserialize_with = "deserialize_jsonpath")]
-        response_errors_field: JsonPathInst,
+        #[config(required)]
+        response_errors_field: SelectorJsonPath,
     },
     /// A header from the response
     ResponseHeader {
         /// The name of the response header.
+        #[config(required)]
         response_header: String,
         /// Optional redaction pattern.
         redact: Option<crate::services::header_masking::RedactMode>,
@@ -146,6 +147,7 @@ pub(crate) enum RouterSelector {
     /// A value from context.
     ResponseContext {
         /// The response context key.
+        #[config(required)]
         response_context: String,
         /// Optional default value.
         default: Option<AttributeValue>,
@@ -153,6 +155,7 @@ pub(crate) enum RouterSelector {
     /// A status from the response
     ResponseStatus {
         /// The http response status code.
+        #[config(required)]
         response_status: ResponseStatus,
     },
     /// The size hint of the body.
@@ -161,48 +164,51 @@ pub(crate) enum RouterSelector {
     /// body has not yet been compressed at the time on_response is called.
     ResponseSizeHint {
         /// Extract response size hint in bytes
+        #[config(required)]
         response_size_hint: bool,
     },
     /// Router overhead duration (time not spent in subgraph requests)
     RouterOverhead {
         /// Extract router overhead duration in seconds
+        #[config(required)]
         router_overhead: bool,
     },
     /// Total request duration from when the request was received
     RequestDuration {
         /// The unit for the duration (milliseconds, seconds, nanoseconds)
+        #[config(required)]
         request_duration: DurationUnit,
     },
     /// Number of active subgraph requests at the time of overhead calculation
     ActiveSubgraphRequests {
         /// The mode for extracting active subgraph request information
+        #[config(required)]
         active_subgraph_requests: ActiveSubgraphRequests,
     },
     StaticField {
         /// A static value
+        #[config(required)]
         r#static: AttributeValue,
     },
     /// Apollo Studio operation id
     StudioOperationId {
         /// Apollo Studio operation id
+        #[config(required)]
         studio_operation_id: bool,
     },
     /// The trace ID of the request.
     TraceId {
         /// The format of the trace ID.
+        #[config(required)]
         trace_id: TraceIdFormat,
     },
     /// The context ID of the request (unique per request).
     ContextId {
         /// The context ID
+        #[config(required)]
         context_id: bool,
     },
 }
-
-// RouterSelector can't take the configuration attribute: its response error selectors hold a
-// JsonPathInst, which has no Debug impl for the macro's derive, nor a Validate impl. Its other
-// fields are scalars with no nested rules.
-impl apollo_configuration::Validate for RouterSelector {}
 
 impl Selector for RouterSelector {
     type Request = router::Request;
@@ -638,6 +644,7 @@ impl Selector for RouterSelector {
 
 #[cfg(test)]
 mod test {
+    use std::str::FromStr;
     use std::sync::Arc;
 
     use http::StatusCode;
@@ -651,7 +658,6 @@ mod test {
     use opentelemetry::trace::TraceId;
     use opentelemetry::trace::TraceState;
     use serde_json::json;
-    use serde_json_bytes::path::JsonPathInst;
     use tower::BoxError;
     use tracing::span;
     use tracing::subscriber;
@@ -665,6 +671,7 @@ mod test {
     use crate::plugins::telemetry::config_new::selectors::DurationUnit;
     use crate::plugins::telemetry::config_new::selectors::OperationName;
     use crate::plugins::telemetry::config_new::selectors::ResponseStatus;
+    use crate::plugins::telemetry::config_new::selectors::SelectorJsonPath;
     use crate::plugins::telemetry::otel;
     use crate::query_planner::APOLLO_OPERATION_ID;
     use crate::services::RouterRequest;
@@ -1308,7 +1315,7 @@ mod test {
     #[test]
     fn router_response_body_errors() {
         let selector = RouterSelector::ResponseErrors {
-            response_errors: JsonPathInst::new("$.[0]").unwrap(),
+            response_errors: SelectorJsonPath::from_str("$.[0]").unwrap(),
         };
         let res = &crate::services::RouterResponse::fake_builder()
             .status_code(StatusCode::BAD_REQUEST)
@@ -1418,7 +1425,7 @@ mod test {
     fn router_response_errors_count() {
         // Test counting all errors
         let selector = RouterSelector::ResponseErrorsCount {
-            response_errors_count: JsonPathInst::new("$[*]").unwrap(),
+            response_errors_count: SelectorJsonPath::from_str("$[*]").unwrap(),
         };
         let res = &crate::services::RouterResponse::fake_builder()
             .status_code(StatusCode::BAD_REQUEST)
@@ -1446,8 +1453,10 @@ mod test {
 
         // Test counting filtered errors (exclude NOT_FOUND)
         let selector_filtered = RouterSelector::ResponseErrorsCount {
-            response_errors_count: JsonPathInst::new("$[?(!(@.extensions.code == 'NOT_FOUND'))]")
-                .unwrap(),
+            response_errors_count: SelectorJsonPath::from_str(
+                "$[?(!(@.extensions.code == 'NOT_FOUND'))]",
+            )
+            .unwrap(),
         };
         assert_eq!(
             selector_filtered.on_response(res),
@@ -1487,7 +1496,7 @@ mod test {
         // A slice bound larger than the number of errors must clamp to the array length
         // rather than matching nothing.
         let selector = RouterSelector::ResponseErrorsCount {
-            response_errors_count: JsonPathInst::new("$[:10]").unwrap(),
+            response_errors_count: SelectorJsonPath::from_str("$[:10]").unwrap(),
         };
         let res = &crate::services::RouterResponse::fake_builder()
             .status_code(StatusCode::BAD_REQUEST)
@@ -1511,7 +1520,7 @@ mod test {
 
         // Same for a negative start bound reaching past the beginning of the array.
         let selector_from_end = RouterSelector::ResponseErrorsCount {
-            response_errors_count: JsonPathInst::new("$[-10:]").unwrap(),
+            response_errors_count: SelectorJsonPath::from_str("$[-10:]").unwrap(),
         };
         assert_eq!(
             selector_from_end.on_response(res),
@@ -1633,7 +1642,7 @@ mod test {
         // $[0].locations selects the locations array of the first error — this should
         // count as 1 match (one error touched), not as the length of the locations array.
         let selector_locations = RouterSelector::ResponseErrorsCount {
-            response_errors_count: JsonPathInst::new("$[0].locations").unwrap(),
+            response_errors_count: SelectorJsonPath::from_str("$[0].locations").unwrap(),
         };
         let res_with_locations = &crate::services::RouterResponse::fake_builder()
             .errors(vec![

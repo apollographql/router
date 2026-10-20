@@ -9170,6 +9170,7 @@ expression: "&schema"
                   "type": "null"
                 }
               ],
+              "default": null,
               "description": "Optional default value."
             }
           },
@@ -9183,6 +9184,7 @@ expression: "&schema"
           "description": "A value from an environment variable.",
           "properties": {
             "default": {
+              "default": null,
               "description": "Optional default value.",
               "type": [
                 "string",
@@ -9230,6 +9232,7 @@ expression: "&schema"
           "description": "The operation name from the query.",
           "properties": {
             "default": {
+              "default": null,
               "description": "Optional default value.",
               "type": [
                 "string",
@@ -9263,6 +9266,7 @@ expression: "&schema"
                   "type": "null"
                 }
               ],
+              "default": null,
               "description": "Optional default value."
             },
             "redact": {
@@ -9299,6 +9303,7 @@ expression: "&schema"
                   "type": "null"
                 }
               ],
+              "default": null,
               "description": "Optional default value."
             },
             "request_context": {
@@ -9394,6 +9399,7 @@ expression: "&schema"
                   "type": "null"
                 }
               ],
+              "default": null,
               "description": "Optional default value."
             },
             "redact": {
@@ -9430,6 +9436,7 @@ expression: "&schema"
                   "type": "null"
                 }
               ],
+              "default": null,
               "description": "Optional default value."
             },
             "response_context": {
@@ -10850,6 +10857,7 @@ expression: "&schema"
           "additionalProperties": false,
           "properties": {
             "default": {
+              "default": null,
               "description": "Optional default value.",
               "type": [
                 "string",
@@ -10917,6 +10925,7 @@ expression: "&schema"
           "additionalProperties": false,
           "properties": {
             "default": {
+              "default": null,
               "description": "Optional default value.",
               "type": [
                 "string",
@@ -10949,6 +10958,7 @@ expression: "&schema"
                   "type": "null"
                 }
               ],
+              "default": null,
               "description": "Optional default value."
             },
             "subgraph_query_variable": {
@@ -10973,6 +10983,7 @@ expression: "&schema"
                   "type": "null"
                 }
               ],
+              "default": null,
               "description": "Optional default value."
             },
             "subgraph_response_data": {
@@ -10997,6 +11008,7 @@ expression: "&schema"
                   "type": "null"
                 }
               ],
+              "default": null,
               "description": "Optional default value."
             },
             "subgraph_response_errors": {
@@ -11013,6 +11025,7 @@ expression: "&schema"
           "additionalProperties": false,
           "properties": {
             "default": {
+              "default": null,
               "description": "Optional default value.",
               "type": [
                 "string",
@@ -11057,6 +11070,7 @@ expression: "&schema"
           "additionalProperties": false,
           "properties": {
             "default": {
+              "default": null,
               "description": "Optional default value.",
               "type": [
                 "string",
@@ -11126,6 +11140,7 @@ expression: "&schema"
                   "type": "null"
                 }
               ],
+              "default": null,
               "description": "Optional default value."
             },
             "subgraph_resend_count": {
@@ -11142,6 +11157,7 @@ expression: "&schema"
           "additionalProperties": false,
           "properties": {
             "default": {
+              "default": null,
               "description": "Optional default value.",
               "type": [
                 "string",
@@ -11183,6 +11199,7 @@ expression: "&schema"
           "additionalProperties": false,
           "properties": {
             "default": {
+              "default": null,
               "description": "Optional default value.",
               "type": [
                 "string",
@@ -11215,6 +11232,7 @@ expression: "&schema"
                   "type": "null"
                 }
               ],
+              "default": null,
               "description": "Optional default value."
             },
             "supergraph_query_variable": {
@@ -11231,6 +11249,7 @@ expression: "&schema"
           "additionalProperties": false,
           "properties": {
             "default": {
+              "default": null,
               "description": "Optional default value.",
               "type": [
                 "string",
@@ -11270,6 +11289,7 @@ expression: "&schema"
                   "type": "null"
                 }
               ],
+              "default": null,
               "description": "Optional default value."
             },
             "request_context": {
@@ -11294,6 +11314,7 @@ expression: "&schema"
                   "type": "null"
                 }
               ],
+              "default": null,
               "description": "Optional default value."
             },
             "response_context": {
@@ -11335,6 +11356,7 @@ expression: "&schema"
                   "type": "null"
                 }
               ],
+              "default": null,
               "description": "Optional default value."
             }
           },
@@ -11347,6 +11369,7 @@ expression: "&schema"
           "additionalProperties": false,
           "properties": {
             "default": {
+              "default": null,
               "description": "Optional default value.",
               "type": [
                 "string",
@@ -12111,6 +12134,7 @@ expression: "&schema"
           "additionalProperties": false,
           "properties": {
             "default": {
+              "default": null,
               "description": "Optional default value.",
               "type": [
                 "string",
@@ -12152,6 +12176,7 @@ expression: "&schema"
           "additionalProperties": false,
           "properties": {
             "default": {
+              "default": null,
               "description": "Optional default value.",
               "type": [
                 "string",
@@ -12184,6 +12209,7 @@ expression: "&schema"
                   "type": "null"
                 }
               ],
+              "default": null,
               "description": "Optional default value."
             },
             "query_variable": {
@@ -12200,6 +12226,7 @@ expression: "&schema"
           "additionalProperties": false,
           "properties": {
             "default": {
+              "default": null,
               "description": "Optional default value.",
               "type": [
                 "string",
@@ -12231,6 +12258,7 @@ expression: "&schema"
           "additionalProperties": false,
           "properties": {
             "default": {
+              "default": null,
               "description": "Optional default value.",
               "type": [
                 "string",
@@ -12288,6 +12316,7 @@ expression: "&schema"
                   "type": "null"
                 }
               ],
+              "default": null,
               "description": "Optional default value."
             },
             "request_context": {
@@ -12312,6 +12341,7 @@ expression: "&schema"
                   "type": "null"
                 }
               ],
+              "default": null,
               "description": "Optional default value."
             },
             "response_context": {
@@ -12336,6 +12366,7 @@ expression: "&schema"
                   "type": "null"
                 }
               ],
+              "default": null,
               "description": "Optional default value."
             },
             "response_data": {
@@ -12360,6 +12391,7 @@ expression: "&schema"
                   "type": "null"
                 }
               ],
+              "default": null,
               "description": "Optional default value."
             },
             "response_errors": {
@@ -12388,6 +12420,7 @@ expression: "&schema"
                   "type": "null"
                 }
               ],
+              "default": null,
               "description": "Optional default value."
             }
           },
@@ -12400,6 +12433,7 @@ expression: "&schema"
           "additionalProperties": false,
           "properties": {
             "default": {
+              "default": null,
               "description": "Optional default value.",
               "type": [
                 "string",
