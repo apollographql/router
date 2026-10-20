@@ -1,4 +1,3 @@
-use derivative::Derivative;
 use schemars::JsonSchema;
 use serde::Deserialize;
 use tower::BoxError;
@@ -26,9 +25,8 @@ impl From<&HttpClientValue> for InstrumentValue<HttpClientSelector> {
     }
 }
 
-#[derive(Derivative, Deserialize, JsonSchema, Clone)]
+#[derive(derive_more::Debug, derive_more::PartialEq, Deserialize, JsonSchema, Clone)]
 #[serde(deny_unknown_fields, untagged)]
-#[derivative(Debug, PartialEq)]
 pub(crate) enum HttpClientSelector {
     /// A header from the HTTP request
     HttpClientRequestHeader {

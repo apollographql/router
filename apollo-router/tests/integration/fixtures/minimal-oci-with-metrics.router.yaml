@@ -1,0 +1,10 @@
+# `listen` is intentionally omitted: the integration test harness always overrides it with an
+# ephemeral port (see `merge_overrides` in tests/common.rs).
+supergraph:
+  introspection: false
+telemetry:
+  exporters:
+    metrics:
+      prometheus:
+        enabled: true
+        path: /metrics

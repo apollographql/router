@@ -15,7 +15,6 @@ use std::time::Duration;
 
 use apollo_redaction::Redacted;
 use connector::ConnectorConfiguration;
-use derivative::Derivative;
 use displaydoc::Display;
 use itertools::Either;
 use itertools::Itertools;
@@ -171,8 +170,7 @@ impl From<proteus::parser::Error> for ConfigurationError {
 /// or inline in Rust code with `serde_json::json!` and `serde_json::from_value`.
 // Every way in goes through `ConfigurationParser`, so the configuration is checked against
 // Router's schema and every plugin's validation rules.
-#[derive(Clone, Derivative, JsonSchema)]
-#[derivative(Debug)]
+#[derive(Clone, derive_more::Debug, JsonSchema)]
 // We can't put a global #[serde(default)] here because the Default implementation deserializes an empty document
 pub struct Configuration {
     /// The raw configuration value.

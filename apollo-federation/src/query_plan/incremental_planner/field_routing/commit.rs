@@ -1452,6 +1452,21 @@ impl FieldRoutingSearchSpace {
                 "condition resolution nested more than {CONDITION_DEPTH_LIMIT} levels deep (circular @requires?)",
             )));
         }
+        // A condition the anchor is already resolving can't help resolve
+        // itself: the route that needs it again only recurses until the
+        // depth limit, and every level of a key-hop cycle can branch, so
+        // reaching that limit is exponential. Failing here lets the anchor
+        // try its other routes instead.
+        if let Some(sel) = conditions
+            .selections
+            .values()
+            .find(|sel| anchor.is_resolving_condition(anchor.query_graph_node, sel))
+        {
+            return Err(FederationError::internal(format!(
+                "condition {} already being resolved at this position",
+                selection_label(sel),
+            )));
+        }
         // Condition data is entity-fetch input: route it unconditionally
         // (see `unconditioned_input_path`).
         let input_path = unconditioned_input_path(&anchor.op_path);

@@ -38,10 +38,16 @@ fn schema_generation() {
     );
 }
 
+/// The schema declares draft 2020-12 and is valid against that draft's meta-schema, which
+/// `meta::validate` selects from the schema's own `$schema`.
 #[test]
 fn schema_is_valid() {
     let schema = generate_config_schema();
-    jsonschema::draft7::meta::validate(schema.as_value()).expect("generated schema must be valid");
+    assert_eq!(
+        schema.get("$schema"),
+        Some(&json!("https://json-schema.org/draft/2020-12/schema"))
+    );
+    jsonschema::meta::validate(schema.as_value()).expect("generated schema must be valid");
 }
 
 #[test]
