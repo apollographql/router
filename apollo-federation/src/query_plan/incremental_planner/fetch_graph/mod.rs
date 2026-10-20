@@ -837,12 +837,11 @@ impl FetchGraph {
     /// node. Called once post-search on the winning candidate.
     ///
     /// Grouping ignores type conditions on merge_at elements: siblings
-    /// differing only in concrete type are merged, the widened path merely
-    /// offering extra candidate objects that the `requires` representations
-    /// (still gated by `__typename`) reject. Without this, deeply nested
-    /// polymorphic queries fragment into one fetch per concrete-type
-    /// combination. Siblings sending the same entity type from different
-    /// type conditions still stay apart (see `bucket_by_merge_compatibility`).
+    /// differing only in concrete type are merged onto a path carrying the
+    /// union of their conditions. Without this, deeply nested polymorphic
+    /// queries fragment into one fetch per concrete-type combination.
+    /// `bucket_by_merge_compatibility` keeps apart siblings whose merge would
+    /// ask an entity for fields its own branch didn't select.
     ///
     /// Transitively dependent nodes are NOT merged — that would create
     /// cycles (multi-hop @requires chains can revisit a subgraph at
@@ -940,16 +939,20 @@ impl FetchGraph {
     /// incompatible when their selections assign different field signatures
     /// to the same response path (e.g. `value` vs `value(scale: 100)`) or
     /// when their input conditions disagree for the same source type — the
-    /// merged entity representation cannot satisfy both branches. Nodes
-    /// sending the same source type from differently conditioned paths are
-    /// also incompatible: the merged fetch would ask each of those entities
-    /// for the other branch's fields.
+    /// merged entity representation cannot satisfy both branches. Merge
+    /// paths may differ in their conditions at one position only, so the
+    /// union of conditions reaches no object outside the members' paths.
+    /// A source type sent from differently conditioned paths needs identical
+    /// selections, or the merged fetch would ask each of those entities for
+    /// the other branch's fields.
     fn bucket_by_merge_compatibility(&self, mergeable: Vec<NodeIndex>) -> Vec<Vec<NodeIndex>> {
         struct Bucket {
             signatures: HashMap<Vec<String>, String>,
             merge_at: Option<Vec<FetchDataPathElement>>,
             input_conditions: HashMap<Name, BTreeSet<String>>,
-            merge_at_by_source_type: HashMap<Name, Vec<FetchDataPathElement>>,
+            first_merge_at: Vec<FetchDataPathElement>,
+            differing_position: Option<usize>,
+            by_source_type: HashMap<Name, SourceTypeMerge>,
             nodes: Vec<NodeIndex>,
         }
         let mut buckets: Vec<Bucket> = Vec::new();
@@ -968,31 +971,49 @@ impl FetchGraph {
             };
             let merge_at = merge_at.clone();
             match buckets.iter_mut().find(|bucket| {
-                signatures.iter().all(|(path, signature)| {
-                    bucket
-                        .signatures
-                        .get(path)
-                        .is_none_or(|taken| taken == signature)
-                }) && input_conditions.iter().all(|(ty, conditions)| {
-                    bucket
-                        .input_conditions
-                        .get(ty)
-                        .is_none_or(|taken| taken == conditions)
-                        && bucket
-                            .merge_at_by_source_type
+                let path_fits = match condition_difference(&bucket.first_merge_at, &merge_at) {
+                    None => false,
+                    Some(None) => true,
+                    Some(Some(position)) => bucket
+                        .differing_position
+                        .is_none_or(|taken| taken == position),
+                };
+                path_fits
+                    && signatures.iter().all(|(path, signature)| {
+                        bucket
+                            .signatures
+                            .get(path)
+                            .is_none_or(|taken| taken == signature)
+                    })
+                    && input_conditions.iter().all(|(ty, conditions)| {
+                        bucket
+                            .input_conditions
                             .get(ty)
-                            .is_none_or(|taken| *taken == merge_at)
-                })
+                            .is_none_or(|taken| taken == conditions)
+                            && bucket
+                                .by_source_type
+                                .get(ty)
+                                .is_none_or(|taken| taken.admits(&merge_at, &signatures))
+                    })
             }) {
                 Some(bucket) => {
+                    if let Some(Some(position)) =
+                        condition_difference(&bucket.first_merge_at, &merge_at)
+                    {
+                        bucket.differing_position = Some(position);
+                    }
+                    for ty in input_conditions.keys() {
+                        bucket
+                            .by_source_type
+                            .entry(ty.clone())
+                            .or_insert_with(|| SourceTypeMerge::new(&merge_at))
+                            .absorb(&merge_at, &signatures);
+                    }
                     bucket.signatures.extend(signatures);
                     if bucket.merge_at.as_ref() != Some(&merge_at) {
                         bucket.merge_at = None;
                     }
                     for (ty, conditions) in input_conditions {
-                        bucket
-                            .merge_at_by_source_type
-                            .insert(ty.clone(), merge_at.clone());
                         bucket
                             .input_conditions
                             .entry(ty)
@@ -1002,11 +1023,17 @@ impl FetchGraph {
                     bucket.nodes.push(n);
                 }
                 None => buckets.push(Bucket {
-                    signatures,
-                    merge_at_by_source_type: input_conditions
+                    by_source_type: input_conditions
                         .keys()
-                        .map(|ty| (ty.clone(), merge_at.clone()))
+                        .map(|ty| {
+                            let mut merge = SourceTypeMerge::new(&merge_at);
+                            merge.absorb(&merge_at, &signatures);
+                            (ty.clone(), merge)
+                        })
                         .collect(),
+                    signatures,
+                    first_merge_at: merge_at.clone(),
+                    differing_position: None,
                     merge_at: Some(merge_at),
                     input_conditions,
                     nodes: vec![n],
@@ -1037,11 +1064,11 @@ impl FetchGraph {
         fingerprints
     }
 
-    /// Rewrite the bucket's merge_at paths to the shared condition-stripped
-    /// path when members' type conditions differ. The widened flatten path
-    /// offers extra candidate objects at runtime, but entity
-    /// representations still gate on `__typename`, so non-matching objects
-    /// contribute nothing.
+    /// Rewrite the bucket's merge_at paths to one carrying the union of the
+    /// members' type conditions when they differ. Dropping the conditions
+    /// instead would reach objects under union members no sibling selected,
+    /// and `__typename` alone can't exclude an entity of a selected type
+    /// that sits under another member.
     fn union_merge_at_conditions(&mut self, bucket: &[NodeIndex]) {
         let Some((&first, rest)) = bucket.split_first() else {
             return;
@@ -1054,10 +1081,17 @@ impl FetchGraph {
         }) {
             return;
         }
-        let stripped = strip_merge_at_conditions(merge_at);
+        let paths: Vec<&[FetchDataPathElement]> = bucket
+            .iter()
+            .filter_map(|&n| match &self.graph[n].kind {
+                FetchGroupKind::Entity { merge_at } => Some(merge_at.as_slice()),
+                _ => None,
+            })
+            .collect();
+        let unioned = union_conditions(&paths);
         for &n in bucket {
             if let FetchGroupKind::Entity { merge_at } = &mut self.graph[n].kind {
-                *merge_at = stripped.clone();
+                *merge_at = unioned.clone();
             }
         }
     }
@@ -1185,6 +1219,95 @@ impl FetchGraph {
             self.graph.remove_node(merged);
         }
     }
+}
+
+/// How one source type's entity fetches have merged so far within a bucket.
+struct SourceTypeMerge {
+    /// The single merge path seen for this type, `None` once it spans several.
+    merge_at: Option<Vec<FetchDataPathElement>>,
+    signatures: HashMap<Vec<String>, String>,
+}
+
+impl SourceTypeMerge {
+    fn new(merge_at: &[FetchDataPathElement]) -> Self {
+        Self {
+            merge_at: Some(merge_at.to_vec()),
+            signatures: HashMap::new(),
+        }
+    }
+
+    /// Entities of this type reached from different paths may share a fetch
+    /// only when every path selects the same fields on them.
+    fn admits(
+        &self,
+        merge_at: &[FetchDataPathElement],
+        signatures: &HashMap<Vec<String>, String>,
+    ) -> bool {
+        self.merge_at.as_deref() == Some(merge_at) || self.signatures == *signatures
+    }
+
+    fn absorb(
+        &mut self,
+        merge_at: &[FetchDataPathElement],
+        signatures: &HashMap<Vec<String>, String>,
+    ) {
+        if self.merge_at.as_deref() != Some(merge_at) {
+            self.merge_at = None;
+        }
+        self.signatures
+            .extend(signatures.iter().map(|(k, v)| (k.clone(), v.clone())));
+    }
+}
+
+/// Where two merge paths with the same condition-stripped shape differ:
+/// `Some(None)` when identical, `Some(Some(i))` when only element `i`
+/// differs, and `None` when more than one element differs.
+fn condition_difference(
+    a: &[FetchDataPathElement],
+    b: &[FetchDataPathElement],
+) -> Option<Option<usize>> {
+    let mut differing = a.iter().zip(b).enumerate().filter(|(_, (x, y))| x != y);
+    let first = differing.next().map(|(i, _)| i);
+    if differing.next().is_some() {
+        return None;
+    }
+    Some(first)
+}
+
+/// Merge paths sharing a condition-stripped shape, with each element's
+/// conditions unioned. An unconditioned element absorbs any conditions.
+fn union_conditions(paths: &[&[FetchDataPathElement]]) -> Vec<FetchDataPathElement> {
+    let Some(first) = paths.first() else {
+        return Vec::new();
+    };
+    first
+        .iter()
+        .enumerate()
+        .map(|(i, element)| {
+            let conditions = paths.iter().map(|path| match &path[i] {
+                FetchDataPathElement::Key(_, c) | FetchDataPathElement::AnyIndex(c) => c.as_ref(),
+                _ => None,
+            });
+            let unioned = union_condition_lists(conditions);
+            match element {
+                FetchDataPathElement::Key(name, _) => {
+                    FetchDataPathElement::Key(name.clone(), unioned)
+                }
+                FetchDataPathElement::AnyIndex(_) => FetchDataPathElement::AnyIndex(unioned),
+                other => other.clone(),
+            }
+        })
+        .collect()
+}
+
+fn union_condition_lists<'a>(
+    conditions: impl Iterator<Item = Option<&'a Vec<Name>>>,
+) -> Option<Vec<Name>> {
+    let mut names = BTreeSet::new();
+    for condition in conditions {
+        names.extend(condition?.iter().cloned());
+    }
+    Some(names.into_iter().collect())
 }
 
 /// A merge_at path with all type conditions removed, for grouping sibling

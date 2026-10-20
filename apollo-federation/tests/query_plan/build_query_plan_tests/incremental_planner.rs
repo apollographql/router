@@ -2993,7 +2993,7 @@ fn inc_partial_overlap_explodes_abstract_type() {
             }
           }
         },
-        Flatten(path: "u") {
+        Flatten(path: "u|[B,C]") {
           Fetch(service: "Subgraph2") {
             {
               ... on B {
@@ -3435,6 +3435,252 @@ fn inc_same_entity_type_under_union_members_fetched_per_member() {
           }
         },
         Flatten(path: "shelf.entries.@|[Book].item") {
+          Fetch(service: "inventory") {
+            {
+              ... on Item {
+                __typename
+                id
+              }
+            } =>
+            {
+              ... on Item {
+                pages
+              }
+            }
+          },
+        },
+      },
+    }
+    "###
+    );
+}
+
+/// Siblings sending different entity types merge, but the merged fetch keeps
+/// both members' type conditions. Without them, the path also reaches the
+/// `Album` items, which would be asked for `pages`.
+#[test]
+fn inc_merged_entity_fetch_keeps_union_of_member_conditions() {
+    let planner = planner!(
+        config = incremental_config(),
+        catalog: r#"
+          type Query {
+            shelf: Shelf
+          }
+
+          type Shelf @key(fields: "id") {
+            id: ID!
+            entries: [Entry]
+          }
+
+          type Item @key(fields: "id") {
+            id: ID!
+          }
+
+          type Thing @key(fields: "id") {
+            id: ID!
+          }
+
+          union Entry = Book | Film | Album
+
+          type Book {
+            item: Item
+          }
+
+          type Film {
+            item: Thing
+          }
+
+          type Album {
+            item: Item
+          }
+        "#,
+        inventory: r#"
+          type Item @key(fields: "id") {
+            id: ID!
+            pages: Int!
+          }
+
+          type Thing @key(fields: "id") {
+            id: ID!
+            name: String!
+          }
+        "#,
+    );
+    // validate_correctness = false: the checker interprets the merged fetch
+    // per branch and requires each branch to supply every input type, but
+    // the Book branch only reaches Item and the Film branch only Thing.
+    assert_plan!(
+        validate_correctness = false,
+        &planner,
+        r#"
+          {
+            shelf {
+              entries {
+                ... on Book {
+                  item {
+                    pages
+                  }
+                }
+                ... on Film {
+                  item {
+                    name
+                  }
+                }
+                ... on Album {
+                  item {
+                    __typename
+                    id
+                  }
+                }
+              }
+            }
+          }
+        "#,
+        @r###"
+    QueryPlan {
+      Sequence {
+        Fetch(service: "catalog") {
+          {
+            shelf {
+              entries {
+                __typename
+                ... on Book {
+                  item {
+                    __typename
+                    id
+                  }
+                }
+                ... on Film {
+                  item {
+                    __typename
+                    id
+                  }
+                }
+                ... on Album {
+                  item {
+                    __typename
+                    id
+                  }
+                }
+              }
+            }
+          }
+        },
+        Flatten(path: "shelf.entries.@|[Book,Film].item") {
+          Fetch(service: "inventory") {
+            {
+              ... on Item {
+                __typename
+                id
+              }
+              ... on Thing {
+                __typename
+                id
+              }
+            } =>
+            {
+              ... on Item {
+                pages
+              }
+              ... on Thing {
+                name
+              }
+            }
+          },
+        },
+      },
+    }
+    "###
+    );
+}
+
+/// Siblings sending the same entity type with identical selections can share
+/// one fetch, since no entity is asked for fields its own member didn't
+/// select.
+#[test]
+fn inc_same_entity_type_with_identical_selections_shares_fetch() {
+    let planner = planner!(
+        config = incremental_config(),
+        catalog: r#"
+          type Query {
+            shelf: Shelf
+          }
+
+          type Shelf @key(fields: "id") {
+            id: ID!
+            entries: [Entry]
+          }
+
+          type Item @key(fields: "id") {
+            id: ID!
+          }
+
+          union Entry = Book | Film | Album
+
+          type Book {
+            item: Item
+          }
+
+          type Film {
+            item: Item
+          }
+
+          type Album {
+            item: Item
+          }
+        "#,
+        inventory: r#"
+          type Item @key(fields: "id") {
+            id: ID!
+            pages: Int!
+          }
+        "#,
+    );
+    assert_plan!(
+        &planner,
+        r#"
+          {
+            shelf {
+              entries {
+                ... on Book {
+                  item {
+                    pages
+                  }
+                }
+                ... on Film {
+                  item {
+                    pages
+                  }
+                }
+              }
+            }
+          }
+        "#,
+        @r###"
+    QueryPlan {
+      Sequence {
+        Fetch(service: "catalog") {
+          {
+            shelf {
+              entries {
+                __typename
+                ... on Book {
+                  item {
+                    __typename
+                    id
+                  }
+                }
+                ... on Film {
+                  item {
+                    __typename
+                    id
+                  }
+                }
+              }
+            }
+          }
+        },
+        Flatten(path: "shelf.entries.@|[Book,Film].item") {
           Fetch(service: "inventory") {
             {
               ... on Item {
