@@ -1469,8 +1469,8 @@ async fn test_router_oci_entitlement_not_found_while_running_records_no_failure_
     }
 
     available.store(false, Ordering::SeqCst);
-    // The router finishes handling one poll before it sends the next, so by the
-    // third 404 at least two have been fully processed.
+    // Polls are a second apart, so by the third 404 the first two have been
+    // handled, including any failure metric they would record.
     wait_for_unavailable_polls(&not_found_request_count, 3).await;
 
     router.read_logs();

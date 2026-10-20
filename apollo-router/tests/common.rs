@@ -1299,8 +1299,6 @@ impl IntegrationTest {
             }
         });
 
-        // we separate out stderr to avoid congestion there affecting stdout; previous to this, we
-        // had both stdout and stderr in the same channel, allowing one's congestion to swamp the other.
         // Each start gets a fresh buffer, so lines from an earlier router process can't satisfy a
         // wait meant for this one.
         let stderr_logs = Arc::new(Mutex::new(Vec::new()));
