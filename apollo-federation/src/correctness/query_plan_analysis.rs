@@ -741,7 +741,8 @@ fn interpret_plan_node_for_matching_conditions(
     Ok(response_defs)
 }
 
-/// Whether no state condition covers `type_cond`, but some fall within it.
+/// Whether no state condition is a superset of `type_cond`, but some are
+/// subsets of it.
 fn covered_only_in_parts(
     state_defs: &PossibleDefinitions,
     type_cond: &NormalizedTypeCondition,
