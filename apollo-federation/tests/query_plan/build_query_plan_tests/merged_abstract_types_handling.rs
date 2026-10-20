@@ -559,6 +559,303 @@ fn union_union_interaction_but_no_need_to_type_explode() {
 }
 
 #[test]
+fn union_union_interaction_with_consistent_union_does_not_type_explode() {
+    let planner = planner!(
+        Subgraph1: r#"
+          type Query {
+            u1: U1
+          }
+
+          union U1 = A | B | C
+          union U2 = A | B
+
+          type A @key(fields: "id") {
+            id: ID!
+          }
+
+          type B @key(fields: "id") {
+            id: ID!
+          }
+
+          type C @key(fields: "id") {
+            id: ID!
+          }
+        "#,
+        Subgraph2: r#"
+          type A @key(fields: "id") {
+            id: ID!
+            v: Int
+          }
+
+          type B @key(fields: "id") {
+            id: ID!
+            v: Int
+          }
+        "#,
+    );
+    assert_plan!(
+        &planner,
+        r#"
+          {
+            u1 {
+              ... on U2 {
+                __typename
+              }
+            }
+          }
+        "#,
+
+
+      // `U2` has the same members in `Subgraph1` as in the supergraph, so the type condition
+      // can be sent as-is rather than being type-exploded into `A` and `B`.
+        @r###"
+        QueryPlan {
+          Fetch(service: "Subgraph1") {
+            {
+              u1 {
+                __typename
+                ... on U2 {
+                  __typename
+                }
+              }
+            }
+          },
+        }
+      "###
+    );
+    assert_plan!(
+        &planner,
+        r#"
+          {
+            u1 {
+              ... on U2 {
+                ... on A {
+                  v
+                }
+              }
+            }
+          }
+        "#,
+        @r###"
+        QueryPlan {
+          Sequence {
+            Fetch(service: "Subgraph1") {
+              {
+                u1 {
+                  __typename
+                  ... on A {
+                    __typename
+                    id
+                  }
+                }
+              }
+            },
+            Flatten(path: "u1") {
+              Fetch(service: "Subgraph2") {
+                {
+                  ... on A {
+                    __typename
+                    id
+                  }
+                } =>
+                {
+                  ... on A {
+                    v
+                  }
+                }
+              },
+            },
+          },
+        }
+      "###
+    );
+}
+
+#[test]
+fn interface_union_interaction_with_consistent_union_does_not_type_explode() {
+    let planner = planner!(
+        Subgraph1: r#"
+          type Query {
+            i: I
+          }
+
+          union U = A | B
+
+          interface I {
+            id: ID!
+          }
+
+          type A implements I @key(fields: "id") {
+            id: ID!
+          }
+
+          type B implements I @key(fields: "id") {
+            id: ID!
+          }
+
+          type C implements I @key(fields: "id") {
+            id: ID!
+          }
+        "#,
+        Subgraph2: r#"
+          type A @key(fields: "id") {
+            id: ID!
+            v: Int
+          }
+
+          type B @key(fields: "id") {
+            id: ID!
+            v: Int
+          }
+        "#,
+    );
+    assert_plan!(
+        &planner,
+        r#"
+          {
+            i {
+              ... on U {
+                __typename
+              }
+            }
+          }
+        "#,
+
+
+      // `U` has the same members in `Subgraph1` as in the supergraph, so the type condition
+      // can be sent as-is rather than being type-exploded into `A` and `B`.
+        @r###"
+        QueryPlan {
+          Fetch(service: "Subgraph1") {
+            {
+              i {
+                __typename
+                ... on U {
+                  __typename
+                }
+              }
+            }
+          },
+        }
+      "###
+    );
+}
+
+#[test]
+fn union_union_interaction_type_explodes_without_join_union_member() {
+    // Same schema as `union_union_interaction_with_consistent_union_does_not_type_explode`, but
+    // as a join v0.2 supergraph, which has no `@join__unionMember`. Without it, we cannot know
+    // which members `Subgraph1` declared for `U2` (it could have been `union U2 = B`, with `A`
+    // added by another subgraph), so we must keep type-exploding.
+    let supergraph = apollo_federation::Supergraph::new_with_router_specs(
+        r#"
+schema
+  @link(url: "https://specs.apollo.dev/link/v1.0")
+  @link(url: "https://specs.apollo.dev/join/v0.2", for: EXECUTION)
+{
+  query: Query
+}
+
+directive @join__field(graph: join__Graph!, requires: join__FieldSet, provides: join__FieldSet, type: String, external: Boolean, override: String, usedOverridden: Boolean) repeatable on FIELD_DEFINITION | INPUT_FIELD_DEFINITION
+
+directive @join__graph(name: String!, url: String!) on ENUM_VALUE
+
+directive @join__implements(graph: join__Graph!, interface: String!) repeatable on OBJECT | INTERFACE
+
+directive @join__type(graph: join__Graph!, key: join__FieldSet, extension: Boolean! = false, resolvable: Boolean! = true) repeatable on OBJECT | INTERFACE | UNION | ENUM | INPUT_OBJECT | SCALAR
+
+directive @link(url: String, as: String, for: link__Purpose, import: [link__Import]) repeatable on SCHEMA
+
+type A
+  @join__type(graph: SUBGRAPH1, key: "id")
+  @join__type(graph: SUBGRAPH2, key: "id")
+{
+  id: ID!
+  v: Int @join__field(graph: SUBGRAPH2)
+}
+
+type B
+  @join__type(graph: SUBGRAPH1, key: "id")
+  @join__type(graph: SUBGRAPH2, key: "id")
+{
+  id: ID!
+  v: Int @join__field(graph: SUBGRAPH2)
+}
+
+type C
+  @join__type(graph: SUBGRAPH1, key: "id")
+{
+  id: ID!
+}
+
+scalar join__FieldSet
+
+enum join__Graph {
+  SUBGRAPH1 @join__graph(name: "Subgraph1", url: "none")
+  SUBGRAPH2 @join__graph(name: "Subgraph2", url: "none")
+}
+
+scalar link__Import
+
+enum link__Purpose {
+  SECURITY
+  EXECUTION
+}
+
+type Query
+  @join__type(graph: SUBGRAPH1)
+  @join__type(graph: SUBGRAPH2)
+{
+  u1: U1 @join__field(graph: SUBGRAPH1)
+}
+
+union U1
+  @join__type(graph: SUBGRAPH1)
+ = A | B | C
+
+union U2
+  @join__type(graph: SUBGRAPH1)
+ = A | B
+        "#,
+    )
+    .expect("valid supergraph");
+    let planner = apollo_federation::query_plan::query_planner::QueryPlanner::new(
+        &supergraph,
+        Default::default(),
+    )
+    .expect("can create query planner");
+    assert_plan!(
+        &planner,
+        r#"
+          {
+            u1 {
+              ... on U2 {
+                __typename
+              }
+            }
+          }
+        "#,
+        @r###"
+        QueryPlan {
+          Fetch(service: "Subgraph1") {
+            {
+              u1 {
+                __typename
+                ... on A {
+                  __typename
+                }
+                ... on B {
+                  __typename
+                }
+              }
+            }
+          },
+        }
+      "###
+    );
+}
+
+#[test]
 fn handles_spread_unions_correctly() {
     let planner = planner!(
         Subgraph1: r#"

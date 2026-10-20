@@ -66,6 +66,12 @@ pub fn build_federated_query_graph(
     for_query_planning: Option<bool>,
 ) -> Result<QueryGraph, FederationError> {
     let for_query_planning = for_query_planning.unwrap_or(true);
+    let (_, join_spec, _) = validate_supergraph_for_query_planning(&supergraph_schema)?;
+    // Supergraphs predating join v0.3 do not record which subgraph declares which union member,
+    // so union definitions extracted from them may not match the original subgraphs.
+    let has_accurate_unions = join_spec
+        .union_member_directive_definition(&supergraph_schema)?
+        .is_some();
     let query_graph = QueryGraph {
         // Note this name is a dummy initial name that gets overridden as we build the query graph.
         current_source: "".into(),
@@ -89,6 +95,7 @@ pub fn build_federated_query_graph(
                     subgraph_name,
                     subgraph.schema,
                     Some(api_schema.clone()),
+                    has_accurate_unions,
                     for_query_planning,
                     Default::default(),
                 )?
@@ -165,6 +172,7 @@ pub(crate) fn build_query_graph(
         name,
         schema,
         None,
+        false,
         false,
         override_labels_by_field,
     )?;
@@ -396,16 +404,20 @@ struct SchemaQueryGraphBuilder {
 struct SchemaQueryGraphBuilderSubgraphData {
     federation_spec_definition: &'static FederationSpecDefinition,
     api_schema: ValidFederationSchema,
+    /// Whether union members in the subgraph schema match the original subgraph (i.e. the
+    /// supergraph it was extracted from records them with `@join__unionMember`).
+    has_accurate_unions: bool,
 }
 
 impl SchemaQueryGraphBuilder {
     /// If api_schema is given, then this builder assumes the schema is a subgraph schema, and that
-    /// a subgraph query graph is being built.
+    /// a subgraph query graph is being built. `has_accurate_unions` is ignored otherwise.
     fn new(
         query_graph: QueryGraph,
         source: Arc<str>,
         schema: ValidFederationSchema,
         api_schema: Option<ValidFederationSchema>,
+        has_accurate_unions: bool,
         for_query_planning: bool,
         override_labels_by_field: IndexMap<FieldDefinitionPosition, Arc<str>>,
     ) -> Result<Self, FederationError> {
@@ -414,6 +426,7 @@ impl SchemaQueryGraphBuilder {
             Some(SchemaQueryGraphBuilderSubgraphData {
                 federation_spec_definition,
                 api_schema,
+                has_accurate_unions,
             })
         } else {
             None
@@ -879,6 +892,7 @@ impl SchemaQueryGraphBuilder {
         let Some(subgraph) = &self.subgraph else {
             return Ok(());
         };
+        let has_accurate_unions = subgraph.has_accurate_unions;
 
         // For each abstract type in the schema, compute its runtime types.
         let mut abstract_types_with_runtime_types = Vec::new();
@@ -993,37 +1007,32 @@ impl SchemaQueryGraphBuilder {
                             other_type.subgraph_runtime_type_positions.contains(type_pos) &&
                                 !intersecting_local_runtime_type_positions.contains(type_pos)
                         };
-                        // TODO: we're currently _never_ adding the edge if the target/"to" type is
-                        // a union. We shouldn't be doing that, this will genuinely make some cases
-                        // less efficient than they could be (though those cases are admittedly a
-                        // bit convoluted), but this make sense *until*
-                        // https://github.com/apollographql/federation/issues/2256 gets fixed.
-                        // Because until then, we do not properly track unions through composition,
-                        // and that means there is never a difference (in the query planner) between
-                        // a local union definition and the supergraph one, even if that different
-                        // actually exists. And so, never type-exploding in that case is somewhat
-                        // safer, as not-type-exploding is ultimately an optimisation. Please note
-                        // that this is *not* a fix for #2256, and most of the issues created by
-                        // #2256 still needs fixing, but it avoids making it even worth for a few
-                        // corner cases. We should remove the `isUnionType` below once the
-                        // fix for #2256 is implemented.
-                        if !(matches!(
-                            t2.abstract_type_definition_position,
-                            AbstractTypeDefinitionPosition::Union(_)
-                        ) || t2
-                            .api_runtime_type_positions
-                            .iter()
-                            .any(|rt| is_in_local_other_type_but_not_local_intersection(rt, t1)))
+                        // We never add the edge if the target/"to" type is a union whose local
+                        // members can't be trusted. Supergraphs predating join v0.3 don't record
+                        // which subgraph declares which union member (see
+                        // https://github.com/apollographql/federation/issues/2256), so a union
+                        // extracted from them contains every supergraph member the subgraph
+                        // defines, and the check below could wrongly conclude the local union
+                        // matches the supergraph one. Type-exploding is always correct, so we fall
+                        // back to it in that case.
+                        let is_untrusted_union = |t: &AbstractTypeWithRuntimeTypes| {
+                            !has_accurate_unions
+                                && matches!(
+                                    t.abstract_type_definition_position,
+                                    AbstractTypeDefinitionPosition::Union(_)
+                                )
+                        };
+                        if !(is_untrusted_union(t2)
+                            || t2.api_runtime_type_positions.iter().any(|rt| {
+                                is_in_local_other_type_but_not_local_intersection(rt, t1)
+                            }))
                         {
                             add_t1_to_t2 = true;
                         }
-                        if !(matches!(
-                            t1.abstract_type_definition_position,
-                            AbstractTypeDefinitionPosition::Union(_)
-                        ) || t1
-                            .api_runtime_type_positions
-                            .iter()
-                            .any(|rt| is_in_local_other_type_but_not_local_intersection(rt, t2)))
+                        if !(is_untrusted_union(t1)
+                            || t1.api_runtime_type_positions.iter().any(|rt| {
+                                is_in_local_other_type_but_not_local_intersection(rt, t2)
+                            }))
                         {
                             add_t2_to_t1 = true;
                         }
