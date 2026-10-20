@@ -198,9 +198,9 @@ dependencies = [
 
 [[package]]
 name = "apollo-configuration"
-version = "0.8.0"
+version = "0.9.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "461999f6a3d8916d83490c985c1ac50fb42a9944f0cd0f18e732e34792349670"
+checksum = "2aad828a7f8f17711a596fe28340c67c8f22ad0d5f4c33f97547e431972bd58d"
 dependencies = [
  "apollo-configuration-macros",
  "apollo-errors",
@@ -226,9 +226,9 @@ dependencies = [
 
 [[package]]
 name = "apollo-configuration-macros"
-version = "0.2.4"
+version = "0.2.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "9a25a95ce06c35c92764ebe732077e877a4bf085d8b286ca9be07a9a1b691f60"
+checksum = "c2e5ca1c711b00a55a5b8368c53697d69af4aae8028c44887ebd2866e5e98a0c"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -342,9 +342,9 @@ dependencies = [
 
 [[package]]
 name = "apollo-opentelemetry"
-version = "0.12.1"
+version = "0.12.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "c5bf81a82af450cc607742809bad56453430ba8e235b26a79293571e36472b2f"
+checksum = "3fda389ca9c02364c5afd51f75642434ed203dd7d4b08ca72396a8f755190f8d"
 dependencies = [
  "apollo-configuration",
  "apollo-errors",
@@ -378,9 +378,9 @@ dependencies = [
 
 [[package]]
 name = "apollo-opentelemetry-macros"
-version = "0.4.1"
+version = "0.4.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "3cf699ecf4a17c7a00e7a60be56e1f82c726a8659a013488853e9da19338fa82"
+checksum = "40d2a4bf6b99bd690d2e705da27d8d83f22be1205dfdf2a1f309fbd825522a55"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -413,9 +413,9 @@ dependencies = [
 
 [[package]]
 name = "apollo-qos"
-version = "0.10.1"
+version = "0.10.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "76c698bdc7b5740d472eff0125e72e2f1c635ab72eb13d44c2bdc1b92503177b"
+checksum = "7c7ef1803b3e6340e4e49aafef365f6c5ed9c2a9ed1539aff06563cd9ae8c63d"
 dependencies = [
  "apollo-configuration",
  "apollo-errors",
@@ -6876,9 +6876,9 @@ dependencies = [
 
 [[package]]
 name = "saphyr"
-version = "0.1.0"
+version = "0.2.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "79830a82cc4eeea33aa46346f910d7cc1e576249a6fbe2fefab6ba89eba8a203"
+checksum = "0662b098655e5e779a80041b640702e341cf3ede4560ecc103cf0ef098c8e33e"
 dependencies = [
  "encoding_rs 0.7.2",
  "hashlink",
@@ -6889,9 +6889,9 @@ dependencies = [
 
 [[package]]
 name = "saphyr-parser"
-version = "0.1.0"
+version = "0.2.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "7429158804c36e705d9423b7848018e535b3e92d439a763e364ee12670ef473b"
+checksum = "6c6220586c3dacac54bfddec87af86ddb31862d29666e7e35cf4baf70a25d387"
 dependencies = [
  "arraydeque",
  "thiserror 2.0.21",
@@ -7668,7 +7668,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "32497e9a4c7b38532efcdebeef879707aa9f794296a4f0244f6f69e9bc8574bd"
 dependencies = [
  "fastrand",
- "getrandom 0.3.4",
+ "getrandom 0.4.2",
  "once_cell",
  "rustix",
  "windows-sys 0.61.0",
@@ -8915,7 +8915,7 @@ version = "0.1.10"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "0978bf7171b3d90bac376700cb56d606feb40f251a475a5d6634613564460b22"
 dependencies = [
- "windows-sys 0.60.2",
+ "windows-sys 0.48.0",
 ]
 
 [[package]]
