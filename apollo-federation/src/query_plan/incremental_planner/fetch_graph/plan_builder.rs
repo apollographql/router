@@ -102,6 +102,15 @@ fn stamp_fetch_id(plan_node: &mut PlanNode, id: u64) {
     }
 }
 
+/// Which front fetch's branch a fetch belongs to: the one front fetch it
+/// depends on (by position in the front), or none when it depends on
+/// several.
+#[derive(Clone, Copy, PartialEq)]
+enum BranchAssignment {
+    Branch(usize),
+    Shared,
+}
+
 /// Push onto a Sequence child list, splicing a nested Sequence's children
 /// in rather than nesting it.
 fn push_into_sequence(nodes: &mut Vec<PlanNode>, plan_node: PlanNode) {
@@ -480,10 +489,9 @@ impl FetchGraph {
         Ok(reduce_parallel(parallel))
     }
 
-    /// Run a connected part's lowest-level fetches, each followed by the
-    /// fetches that depend on it alone, then plan the rest after them all.
-    /// A private chain is cut below the level of the first shared fetch, so
-    /// it never holds up the join, and every fetch still starts at its level.
+    /// Run a connected part's lowest-level fetches, each followed by its
+    /// branch, then plan the rest after them all. See `assign_branches` for
+    /// which fetches go in a branch.
     fn plan_component(
         &self,
         ctx: &mut PlanBuildContext<'_>,
@@ -492,12 +500,6 @@ impl FetchGraph {
         scope: &PlanScope<'_>,
         cost: &mut QueryPlanCost,
     ) -> Result<Option<PlanNode>, FederationError> {
-        #[derive(Clone, Copy, PartialEq)]
-        enum Owner {
-            Front(NodeIndex),
-            Shared,
-        }
-
         let front_level = component
             .iter()
             .map(|node| levels[node])
@@ -506,53 +508,15 @@ impl FetchGraph {
         let (front, rest): (Vec<NodeIndex>, Vec<NodeIndex>) = component
             .iter()
             .partition(|node| levels[*node] == front_level);
-
-        // `component` is in dependency order, so parents are owned before
-        // their children. Parents outside the part are already done.
-        let mut owners: HashMap<NodeIndex, Owner> = front
-            .iter()
-            .map(|node| (*node, Owner::Front(*node)))
-            .collect();
-        for &node in &rest {
-            let mut owner = None;
-            for edge in self.graph.edges_directed(node, Direction::Incoming) {
-                let Some(&parent_owner) = owners.get(&edge.source()) else {
-                    continue;
-                };
-                owner = match owner {
-                    None => Some(parent_owner),
-                    Some(current) if current == parent_owner => Some(current),
-                    Some(_) => Some(Owner::Shared),
-                };
-            }
-            owners.insert(node, owner.unwrap_or(Owner::Shared));
-        }
-        let first_shared_level = rest
-            .iter()
-            .filter(|node| owners[*node] == Owner::Shared)
-            .map(|node| levels[node])
-            .min();
-        let mut branches: HashMap<NodeIndex, Vec<NodeIndex>> = HashMap::new();
-        let mut after = Vec::new();
-        for &node in &rest {
-            match owners[&node] {
-                Owner::Front(front_node)
-                    if first_shared_level.is_none_or(|shared| levels[&node] < shared) =>
-                {
-                    branches.entry(front_node).or_default().push(node);
-                }
-                _ => after.push(node),
-            }
-        }
+        let (branches, after) = self.assign_branches(&front, &rest, levels);
 
         let mut parallel = Vec::new();
-        for &front_node in &front {
-            let branch = branches.remove(&front_node).unwrap_or_default();
+        for (&front_node, branch) in front.iter().zip(&branches) {
             let mut sequence = Vec::new();
             if let Some(plan_node) = self.materialize(ctx, front_node, scope, cost)? {
                 push_into_sequence(&mut sequence, plan_node);
             }
-            if let Some(plan_node) = self.plan_by_level(ctx, &branch, levels, scope, cost)? {
+            if let Some(plan_node) = self.plan_by_level(ctx, branch, levels, scope, cost)? {
                 push_into_sequence(&mut sequence, plan_node);
             }
             if let Some(plan_node) = reduce_sequence(sequence) {
@@ -568,6 +532,62 @@ impl FetchGraph {
             push_into_sequence(&mut sequence, plan_node);
         }
         Ok(reduce_sequence(sequence))
+    }
+
+    /// Split a connected part's non-front fetches into one branch per front
+    /// fetch plus the fetches that run after every branch. A fetch goes in a
+    /// front fetch's branch when that is the only front fetch it depends on,
+    /// so it can start as soon as that fetch is done instead of waiting for
+    /// its siblings. Branches stop below the level of the first fetch that
+    /// depends on several front fetches. Anything deeper would delay the
+    /// join that fetch waits on, so it runs after the join instead.
+    fn assign_branches(
+        &self,
+        front: &[NodeIndex],
+        rest: &[NodeIndex],
+        levels: &HashMap<NodeIndex, u32>,
+    ) -> (Vec<Vec<NodeIndex>>, Vec<NodeIndex>) {
+        // `rest` is in dependency order, so a fetch's parents in the part
+        // are assigned before it is. Parents outside the part are already
+        // done and do not constrain it.
+        let mut assignments: HashMap<NodeIndex, BranchAssignment> = front
+            .iter()
+            .enumerate()
+            .map(|(i, node)| (*node, BranchAssignment::Branch(i)))
+            .collect();
+        for &node in rest {
+            let mut assignment = None;
+            for edge in self.graph.edges_directed(node, Direction::Incoming) {
+                let Some(&parent) = assignments.get(&edge.source()) else {
+                    continue;
+                };
+                assignment = match assignment {
+                    None => Some(parent),
+                    Some(current) if current == parent => Some(current),
+                    Some(_) => Some(BranchAssignment::Shared),
+                };
+            }
+            assignments.insert(node, assignment.unwrap_or(BranchAssignment::Shared));
+        }
+
+        let first_shared_level = rest
+            .iter()
+            .filter(|node| assignments[*node] == BranchAssignment::Shared)
+            .map(|node| levels[node])
+            .min();
+        let mut branches = vec![Vec::new(); front.len()];
+        let mut after = Vec::new();
+        for &node in rest {
+            match assignments[&node] {
+                BranchAssignment::Branch(i)
+                    if first_shared_level.is_none_or(|shared| levels[&node] < shared) =>
+                {
+                    branches[i].push(node);
+                }
+                _ => after.push(node),
+            }
+        }
+        (branches, after)
     }
 
     /// Weakly connected parts of `nodes` over the edges between them. Parts,
