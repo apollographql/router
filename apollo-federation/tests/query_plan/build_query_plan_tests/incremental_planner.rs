@@ -3021,10 +3021,11 @@ fn inc_partial_overlap_explodes_abstract_type() {
     );
 }
 
-/// Union members reaching the same entity type with different selections get
-/// one type-conditioned fetch each, so no entity gets another member's fields.
+/// Entity fetches reached through different union members. Members reaching
+/// the same entity type with different selections get one type-conditioned
+/// fetch each, so no entity gets another member's fields.
 #[test]
-fn inc_same_entity_type_under_union_members_fetched_per_member() {
+fn inc_entity_fetches_under_union_members() {
     let planner = planner!(
         config = incremental_config(),
         catalog: r#"
@@ -3042,21 +3043,26 @@ fn inc_same_entity_type_under_union_members_fetched_per_member() {
             id: ID!
           }
 
-          union Entry = Book | Film | Album
+          type Thing @key(fields: "id") {
+            id: ID!
+          }
+
+          union Entry = Book | Film | Album | Game
 
           type Book {
-            isbn: String
             item: Item
           }
 
           type Film {
-            studio: String
             item: Item
           }
 
           type Album {
-            label: String
             item: Item
+          }
+
+          type Game {
+            item: Thing
           }
         "#,
         inventory: r#"
@@ -3066,6 +3072,11 @@ fn inc_same_entity_type_under_union_members_fetched_per_member() {
             minutes: Int!
             tracks: Int!
           }
+
+          type Thing @key(fields: "id") {
+            id: ID!
+            name: String!
+          }
         "#,
     );
 
@@ -3073,31 +3084,7 @@ fn inc_same_entity_type_under_union_members_fetched_per_member() {
     assert_plan!(
         &planner,
         r#"
-          {
-            shelf {
-              entries {
-                __typename
-                ... on Book {
-                  item {
-                    id
-                    pages
-                  }
-                }
-                ... on Film {
-                  item {
-                    id
-                    minutes
-                  }
-                }
-                ... on Album {
-                  item {
-                    id
-                    tracks
-                  }
-                }
-              }
-            }
-          }
+          { shelf { entries { __typename ... on Book { item { id pages } } ... on Film { item { id minutes } } ... on Album { item { id tracks } } } } }
         "#,
         @r###"
     QueryPlan {
@@ -3185,27 +3172,7 @@ fn inc_same_entity_type_under_union_members_fetched_per_member() {
     assert_plan!(
         &planner,
         r#"
-          {
-            shelf {
-              entries {
-                ... on Book {
-                  item {
-                    pages
-                  }
-                }
-                ... on Film {
-                  item {
-                    minutes
-                  }
-                }
-                ... on Album {
-                  item {
-                    tracks
-                  }
-                }
-              }
-            }
-          }
+          { shelf { entries { ... on Book { item { pages } } ... on Film { item { minutes } } ... on Album { item { tracks } } } } }
         "#,
         @r###"
     QueryPlan {
@@ -3293,28 +3260,7 @@ fn inc_same_entity_type_under_union_members_fetched_per_member() {
     assert_plan!(
         &planner,
         r#"
-          {
-            otherShelf {
-              entries {
-                __typename
-                ... on Book {
-                  item {
-                    pages
-                  }
-                }
-                ... on Film {
-                  item {
-                    minutes
-                  }
-                }
-                ... on Album {
-                  item {
-                    tracks
-                  }
-                }
-              }
-            }
-          }
+          { otherShelf { entries { __typename ... on Book { item { pages } } ... on Film { item { minutes } } ... on Album { item { tracks } } } } }
         "#,
         @r###"
     QueryPlan {
@@ -3402,18 +3348,7 @@ fn inc_same_entity_type_under_union_members_fetched_per_member() {
     assert_plan!(
         &planner,
         r#"
-          {
-            shelf {
-              entries {
-                ... on Book {
-                  item {
-                    id
-                    pages
-                  }
-                }
-              }
-            }
-          }
+          { shelf { entries { ... on Book { item { id pages } } } } }
         "#,
         @r###"
     QueryPlan {
@@ -3452,86 +3387,15 @@ fn inc_same_entity_type_under_union_members_fetched_per_member() {
     }
     "###
     );
-}
 
-/// Siblings sending different entity types merge onto a path keeping both
-/// members' conditions, so `Album` items aren't asked for `pages`.
-#[test]
-fn inc_merged_entity_fetch_keeps_union_of_member_conditions() {
-    let planner = planner!(
-        config = incremental_config(),
-        catalog: r#"
-          type Query {
-            shelf: Shelf
-          }
-
-          type Shelf @key(fields: "id") {
-            id: ID!
-            entries: [Entry]
-          }
-
-          type Item @key(fields: "id") {
-            id: ID!
-          }
-
-          type Thing @key(fields: "id") {
-            id: ID!
-          }
-
-          union Entry = Book | Film | Album
-
-          type Book {
-            item: Item
-          }
-
-          type Film {
-            item: Thing
-          }
-
-          type Album {
-            item: Item
-          }
-        "#,
-        inventory: r#"
-          type Item @key(fields: "id") {
-            id: ID!
-            pages: Int!
-          }
-
-          type Thing @key(fields: "id") {
-            id: ID!
-            name: String!
-          }
-        "#,
-    );
-    // validate_correctness = false: the checker requires every branch to
-    // supply every input type, but Book only reaches Item and Film only Thing.
+    // Different entity types merge onto a path keeping both members'
+    // conditions, so Album items aren't asked for pages. The checker requires
+    // every branch to supply every input type, so it can't validate this.
     assert_plan!(
         validate_correctness = false,
         &planner,
         r#"
-          {
-            shelf {
-              entries {
-                ... on Book {
-                  item {
-                    pages
-                  }
-                }
-                ... on Film {
-                  item {
-                    name
-                  }
-                }
-                ... on Album {
-                  item {
-                    __typename
-                    id
-                  }
-                }
-              }
-            }
-          }
+          { shelf { entries { ... on Book { item { pages } } ... on Game { item { name } } ... on Album { item { __typename id } } } } }
         "#,
         @r###"
     QueryPlan {
@@ -3547,7 +3411,7 @@ fn inc_merged_entity_fetch_keeps_union_of_member_conditions() {
                     id
                   }
                 }
-                ... on Film {
+                ... on Game {
                   item {
                     __typename
                     id
@@ -3563,7 +3427,7 @@ fn inc_merged_entity_fetch_keeps_union_of_member_conditions() {
             }
           }
         },
-        Flatten(path: "shelf.entries.@|[Book,Film].item") {
+        Flatten(path: "shelf.entries.@|[Book,Game].item") {
           Fetch(service: "inventory") {
             {
               ... on Item {
@@ -3589,68 +3453,12 @@ fn inc_merged_entity_fetch_keeps_union_of_member_conditions() {
     }
     "###
     );
-}
 
-/// Siblings sending the same entity type with identical selections share one
-/// fetch.
-#[test]
-fn inc_same_entity_type_with_identical_selections_shares_fetch() {
-    let planner = planner!(
-        config = incremental_config(),
-        catalog: r#"
-          type Query {
-            shelf: Shelf
-          }
-
-          type Shelf @key(fields: "id") {
-            id: ID!
-            entries: [Entry]
-          }
-
-          type Item @key(fields: "id") {
-            id: ID!
-          }
-
-          union Entry = Book | Film | Album
-
-          type Book {
-            item: Item
-          }
-
-          type Film {
-            item: Item
-          }
-
-          type Album {
-            item: Item
-          }
-        "#,
-        inventory: r#"
-          type Item @key(fields: "id") {
-            id: ID!
-            pages: Int!
-          }
-        "#,
-    );
+    // The same entity type with identical selections shares one fetch.
     assert_plan!(
         &planner,
         r#"
-          {
-            shelf {
-              entries {
-                ... on Book {
-                  item {
-                    pages
-                  }
-                }
-                ... on Film {
-                  item {
-                    pages
-                  }
-                }
-              }
-            }
-          }
+          { shelf { entries { ... on Book { item { pages } } ... on Film { item { pages } } } } }
         "#,
         @r###"
     QueryPlan {

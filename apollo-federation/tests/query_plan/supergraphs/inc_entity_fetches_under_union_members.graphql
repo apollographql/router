@@ -1,4 +1,4 @@
-# Composed from subgraphs with hash: fd3003ebaf0b1e08d2cff9dc84efb218e37fc062
+# Composed from subgraphs with hash: 7b53bec6a6cfaefc0c0e9462dcdee30dd9124f69
 schema
   @link(url: "https://specs.apollo.dev/link/v1.0")
   @link(url: "https://specs.apollo.dev/join/v0.5", for: EXECUTION)
@@ -25,14 +25,12 @@ directive @link(url: String, as: String, for: link__Purpose, import: [link__Impo
 type Album
   @join__type(graph: CATALOG)
 {
-  label: String
   item: Item
 }
 
 type Book
   @join__type(graph: CATALOG)
 {
-  isbn: String
   item: Item
 }
 
@@ -41,13 +39,19 @@ union Entry
   @join__unionMember(graph: CATALOG, member: "Book")
   @join__unionMember(graph: CATALOG, member: "Film")
   @join__unionMember(graph: CATALOG, member: "Album")
- = Book | Film | Album
+  @join__unionMember(graph: CATALOG, member: "Game")
+ = Book | Film | Album | Game
 
 type Film
   @join__type(graph: CATALOG)
 {
-  studio: String
   item: Item
+}
+
+type Game
+  @join__type(graph: CATALOG)
+{
+  item: Thing
 }
 
 type Item
@@ -105,4 +109,12 @@ type Shelf
 {
   id: ID!
   entries: [Entry]
+}
+
+type Thing
+  @join__type(graph: CATALOG, key: "id")
+  @join__type(graph: INVENTORY, key: "id")
+{
+  id: ID!
+  name: String! @join__field(graph: INVENTORY)
 }
