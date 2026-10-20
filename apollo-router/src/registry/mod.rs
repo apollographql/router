@@ -1678,8 +1678,7 @@ mod tests {
         .expect("url must be valid");
 
         // The graph manifest is discovered once (a GET, never a HEAD) and
-        // never re-read afterward. Count requests to prove this directly,
-        // rather than relying on the mock only ever being asked once.
+        // never re-read afterward.
         let graph_manifest_request_count = Arc::new(AtomicUsize::new(0));
         let graph_manifest_count = graph_manifest_request_count.clone();
         let graph_manifest_body = serde_json::to_vec(&graph_manifest_info.oci_manifest).unwrap();
@@ -1769,9 +1768,8 @@ mod tests {
         let reference = "latest";
         let entitlement_id = "test-entitlement-id";
 
-        // The graph manifest is read once to discover the entitlement id and
-        // never re-read afterward. Count requests to prove this directly,
-        // rather than relying on the mock only ever being asked once.
+        // The graph manifest is discovered once (a GET, never a HEAD) and
+        // never re-read afterward.
         let graph_manifest_info = create_graph_manifest_with_entitlement_id(entitlement_id, None);
         let manifest_url = Url::parse(&format!(
             "{}/v2/{}/manifests/{}",
