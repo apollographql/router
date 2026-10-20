@@ -784,8 +784,15 @@ async fn test_router_oci_pq_served_from_standalone_artifact() -> Result<(), BoxE
         return Ok(());
     }
 
-    let (_schema_server, schema_reference) =
-        setup_mock_oci_server(include_str!("fixtures/oci_initial_schema.graphql")).await;
+    // A tag reference, never moved: the PQ pointer tag below needs --hot-reload, which a
+    // digest-pinned schema reference refuses.
+    let (_schema_server, schema_reference, _schema_requests) = setup_mock_oci_server_with_tag(
+        include_str!("fixtures/oci_initial_schema.graphql"),
+        include_str!("fixtures/oci_initial_schema.graphql"),
+        false,
+        false,
+    )
+    .await;
 
     let chunk = pq_chunk_layer(&[("pq-count", "{ count }")]);
     let artifact = build_pq_artifact(&[&chunk]);
@@ -818,8 +825,15 @@ async fn test_router_oci_pq_pointer_move_hot_swaps() -> Result<(), BoxError> {
         return Ok(());
     }
 
-    let (_schema_server, schema_reference) =
-        setup_mock_oci_server(include_str!("fixtures/oci_initial_schema.graphql")).await;
+    // A tag reference, never moved: the PQ pointer tag below needs --hot-reload, which a
+    // digest-pinned schema reference refuses.
+    let (_schema_server, schema_reference, _schema_requests) = setup_mock_oci_server_with_tag(
+        include_str!("fixtures/oci_initial_schema.graphql"),
+        include_str!("fixtures/oci_initial_schema.graphql"),
+        false,
+        false,
+    )
+    .await;
 
     let chunk_one = pq_chunk_layer(&[("pq-count", "{ count }")]);
     let chunk_two = pq_chunk_layer(&[("pq-hello", "{ hello }")]);
@@ -866,8 +880,15 @@ async fn test_router_oci_pq_emptied_artifact_blocks_operations() -> Result<(), B
         return Ok(());
     }
 
-    let (_schema_server, schema_reference) =
-        setup_mock_oci_server(include_str!("fixtures/oci_initial_schema.graphql")).await;
+    // A tag reference, never moved: the PQ pointer tag below needs --hot-reload, which a
+    // digest-pinned schema reference refuses.
+    let (_schema_server, schema_reference, _schema_requests) = setup_mock_oci_server_with_tag(
+        include_str!("fixtures/oci_initial_schema.graphql"),
+        include_str!("fixtures/oci_initial_schema.graphql"),
+        false,
+        false,
+    )
+    .await;
 
     let chunk = pq_chunk_layer(&[("pq-count", "{ count }")]);
     let v1 = build_pq_artifact(&[&chunk]);
