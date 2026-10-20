@@ -532,18 +532,22 @@ impl FetchGraph {
             .filter(|node| owners[*node] == Owner::Shared)
             .map(|node| levels[node])
             .min();
-        let is_branch = |node: &NodeIndex| {
-            matches!(owners[node], Owner::Front(_))
-                && first_shared_level.is_none_or(|shared| levels[node] < shared)
-        };
+        let mut branches: HashMap<NodeIndex, Vec<NodeIndex>> = HashMap::new();
+        let mut after = Vec::new();
+        for &node in &rest {
+            match owners[&node] {
+                Owner::Front(front_node)
+                    if first_shared_level.is_none_or(|shared| levels[&node] < shared) =>
+                {
+                    branches.entry(front_node).or_default().push(node);
+                }
+                _ => after.push(node),
+            }
+        }
 
         let mut parallel = Vec::new();
         for &front_node in &front {
-            let branch: Vec<NodeIndex> = rest
-                .iter()
-                .copied()
-                .filter(|node| is_branch(node) && owners[node] == Owner::Front(front_node))
-                .collect();
+            let branch = branches.remove(&front_node).unwrap_or_default();
             let mut sequence = Vec::new();
             if let Some(plan_node) = self.materialize(ctx, front_node, scope, cost)? {
                 push_into_sequence(&mut sequence, plan_node);
@@ -556,11 +560,6 @@ impl FetchGraph {
             }
         }
 
-        let after: Vec<NodeIndex> = rest
-            .iter()
-            .copied()
-            .filter(|node| !is_branch(node))
-            .collect();
         let mut sequence = Vec::new();
         if let Some(plan_node) = reduce_parallel(parallel) {
             push_into_sequence(&mut sequence, plan_node);
