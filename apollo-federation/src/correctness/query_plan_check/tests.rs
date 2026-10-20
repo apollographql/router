@@ -1,60 +1,158 @@
 //! Plan-level tests for the checker.
 //!
-//! Each case plans a real operation with the real planner and checks the result, so what is under
-//! test is the whole walk — entity fetches, `@key` and `@requires` matching, and the completeness
-//! comparison — rather than a hand-built plan that may not be a shape the planner emits.
+//! Each case checks a written plan against an operation, with no planner in the loop, so a change
+//! to the planner cannot change what is under test. Most plans are in `testdata/plans/`, each one
+//! the planner's own plan for an operation, checked in as it was produced; the rest are written
+//! inline to reach shapes the planner does not emit. That every plan the planner produces is
+//! accepted is the planner tests' concern: `assert_plan!` checks each one.
 //!
 //! The supergraph beside this file carries the subgraph SDL it was composed from, so the fixture
-//! has a visible source. It is deliberately close to
-//! the shape a corpus graph had when it found a defect here: an entity whose `@requires` field set
-//! wraps its body in a type condition that is already the field's own type.
+//! has a visible source. It is deliberately close to the shape a corpus graph had when it found a
+//! defect here: an entity whose `@requires` field set wraps its body in a type condition that is
+//! already the field's own type.
+
+use std::sync::Arc;
 
 use apollo_compiler::ExecutableDocument;
+use apollo_compiler::collections::IndexMap;
+use apollo_compiler::validation::Valid;
 
 use super::super::CorrectnessError;
 use crate::Supergraph;
+use crate::query_plan::FetchNode;
 use crate::query_plan::PlanNode;
 use crate::query_plan::QueryPlan;
 use crate::query_plan::TopLevelPlanNode;
-use crate::query_plan::query_planner::QueryPlanner;
+use crate::schema::ValidFederationSchema;
 
-const SUPERGRAPH: &str = include_str!("testdata/entity_requires.graphql");
-
-fn planner() -> QueryPlanner {
-    let supergraph = Supergraph::new_with_router_specs(SUPERGRAPH).expect("valid fixture");
-    QueryPlanner::new(&supergraph, Default::default()).expect("planner")
+/// The schemas a plan is checked under, read from a supergraph.
+struct Fixture {
+    supergraph_schema: ValidFederationSchema,
+    api_schema: ValidFederationSchema,
+    subgraphs: IndexMap<Arc<str>, ValidFederationSchema>,
 }
 
-/// Plans `planned` and checks that plan against `checked`. Passing two different operations is how
-/// a wrong plan is produced without hand-editing one: a plan is only correct for what it planned.
-fn check_plan_of(planned: &str, checked: &str) -> Result<(), CorrectnessError> {
-    let planner = planner();
-    let parse = |source: &str| {
+impl Fixture {
+    fn new(supergraph: &str) -> Self {
+        let supergraph = Supergraph::new_with_router_specs(supergraph).expect("valid fixture");
+        let api_schema = supergraph
+            .to_api_schema(Default::default())
+            .expect("api schema");
+        let subgraphs = supergraph
+            .extract_subgraphs()
+            .expect("subgraphs")
+            .into_iter()
+            .map(|(name, subgraph)| (name, subgraph.schema))
+            .collect();
+        Self {
+            supergraph_schema: supergraph.schema.clone(),
+            api_schema,
+            subgraphs,
+        }
+    }
+
+    fn operation(&self, source: &str) -> Valid<ExecutableDocument> {
         ExecutableDocument::parse_and_validate(
-            planner.api_schema().schema(),
+            self.api_schema.schema(),
             source.to_string(),
             "operation.graphql",
         )
         .expect("valid operation")
+    }
+
+    fn check(&self, plan: &QueryPlan, operation: &str) -> Result<(), CorrectnessError> {
+        crate::correctness::check_plan(
+            &self.api_schema,
+            &self.supergraph_schema,
+            &self.subgraphs,
+            &self.operation(operation),
+            plan,
+        )
+    }
+
+    /// Parses every fetch's operation against its own subgraph, which a plan read from JSON has
+    /// not done yet.
+    fn init_operations(&self, node: &mut PlanNode) {
+        match node {
+            PlanNode::Fetch(fetch) => self.init_operation(fetch),
+            PlanNode::Flatten(flatten) => self.init_operations(&mut flatten.node),
+            PlanNode::Sequence(sequence) => sequence
+                .nodes
+                .iter_mut()
+                .for_each(|node| self.init_operations(node)),
+            PlanNode::Parallel(parallel) => parallel
+                .nodes
+                .iter_mut()
+                .for_each(|node| self.init_operations(node)),
+            PlanNode::Defer(defer) => {
+                if let Some(node) = &mut defer.primary.node {
+                    self.init_operations(node);
+                }
+                for block in &mut defer.deferred {
+                    if let Some(node) = &mut block.node {
+                        self.init_operations(node);
+                    }
+                }
+            }
+            PlanNode::Condition(_) => unimplemented!("not needed by the written plans"),
+        }
+    }
+
+    fn init_operation(&self, fetch: &mut FetchNode) {
+        let schema = self.subgraphs[&fetch.subgraph_name].schema();
+        fetch
+            .operation_document
+            .init_parsed(schema)
+            .expect("valid subgraph operation");
+    }
+
+    fn written_plan(&self, json: &str) -> QueryPlan {
+        let node: TopLevelPlanNode = serde_json::from_str(json).expect("valid plan json");
+        let mut node = match node {
+            TopLevelPlanNode::Fetch(node) => PlanNode::Fetch(node),
+            TopLevelPlanNode::Sequence(node) => PlanNode::Sequence(node),
+            TopLevelPlanNode::Parallel(node) => PlanNode::Parallel(node),
+            TopLevelPlanNode::Flatten(node) => PlanNode::Flatten(node),
+            TopLevelPlanNode::Defer(node) => PlanNode::Defer(node),
+            TopLevelPlanNode::Subscription(_) | TopLevelPlanNode::Condition(_) => {
+                unimplemented!("not needed by the written plans")
+            }
+        };
+        self.init_operations(&mut node);
+        let node = match node {
+            PlanNode::Fetch(node) => TopLevelPlanNode::Fetch(node),
+            PlanNode::Sequence(node) => TopLevelPlanNode::Sequence(node),
+            PlanNode::Parallel(node) => TopLevelPlanNode::Parallel(node),
+            PlanNode::Flatten(node) => TopLevelPlanNode::Flatten(node),
+            PlanNode::Defer(node) => TopLevelPlanNode::Defer(node),
+            PlanNode::Condition(_) => unreachable!("only the variants matched above"),
+        };
+        QueryPlan {
+            node: Some(node),
+            statistics: Default::default(),
+        }
+    }
+}
+
+/// A plan from `testdata/plans/`, by file stem.
+macro_rules! plan_json {
+    ($name:literal) => {
+        include_str!(concat!("testdata/plans/", $name, ".json"))
     };
-    let plan = planner
-        .build_query_plan(&parse(planned), None, Default::default())
-        .expect("query plan");
-    crate::correctness::check_plan(
-        planner.api_schema(),
-        planner.supergraph_schema(),
-        planner.subgraph_schemas(),
-        &parse(checked),
-        &plan,
-    )
 }
 
-fn check(operation: &str) -> Result<(), CorrectnessError> {
-    check_plan_of(operation, operation)
+fn fixture() -> Fixture {
+    Fixture::new(include_str!("testdata/entity_requires.graphql"))
 }
 
-fn rejection(planned: &str, checked: &str) -> String {
-    match check_plan_of(planned, checked) {
+/// Checks a plan from `testdata/plans/` against `operation`.
+fn check(plan: &str, operation: &str) -> Result<(), CorrectnessError> {
+    let fixture = fixture();
+    fixture.check(&fixture.written_plan(plan), operation)
+}
+
+fn rejection(plan: &str, operation: &str) -> String {
+    match check(plan, operation) {
         Ok(()) => panic!("expected the check to reject this plan"),
         Err(error) => error.to_string(),
     }
@@ -66,19 +164,31 @@ fn rejection(planned: &str, checked: &str) -> String {
 // check must still see them as the same requirement.
 #[test]
 fn requires_with_a_vacuous_type_condition_is_accepted() {
-    check("{ locations { id name reviews { comment rating } } }").unwrap();
+    check(
+        plan_json!("locations_reviews"),
+        "{ locations { id name reviews { comment rating } } }",
+    )
+    .unwrap();
 }
 
 // The same requirement reached from the other root, so the entity fetch runs under a flatten path
 // rather than at the query root.
 #[test]
 fn requires_reached_through_an_entity_is_accepted() {
-    check("{ latestReviews { id location { id name reviews { rating } } } }").unwrap();
+    check(
+        plan_json!("latest_reviews"),
+        "{ latestReviews { id location { id name reviews { rating } } } }",
+    )
+    .unwrap();
 }
 
 #[test]
 fn entity_fetch_across_subgraphs_is_accepted() {
-    check("{ locations { id name overallRating } }").unwrap();
+    check(
+        plan_json!("locations_overall_rating"),
+        "{ locations { id name overallRating } }",
+    )
+    .unwrap();
 }
 
 // A query plan fetches nothing for introspection, so the checker must not ask it to -- including
@@ -86,19 +196,31 @@ fn entity_fetch_across_subgraphs_is_accepted() {
 // operation's own root type.
 #[test]
 fn root_typename_through_a_named_fragment_is_accepted() {
-    check("query { ...Root } fragment Root on Query { __typename locations { id } }").unwrap();
+    check(
+        plan_json!("locations_id"),
+        "query { ...Root } fragment Root on Query { __typename locations { id } }",
+    )
+    .unwrap();
 }
 
 #[test]
 fn root_typename_written_inline_is_accepted() {
-    check("{ __typename locations { id } }").unwrap();
+    check(
+        plan_json!("locations_id"),
+        "{ __typename locations { id } }",
+    )
+    .unwrap();
 }
 
 // Wrapping a selection in a type condition that narrows nothing must not change the verdict: the
 // plan is the same plan either way.
 #[test]
 fn a_vacuous_type_condition_in_the_operation_is_accepted() {
-    check("{ locations { ... on Location { id name } } }").unwrap();
+    check(
+        plan_json!("locations_id_name"),
+        "{ locations { ... on Location { id name } } }",
+    )
+    .unwrap();
 }
 
 // One entity fetch over two types whose `@key` field sets name different fields, so the requires
@@ -110,27 +232,43 @@ fn a_vacuous_type_condition_in_the_operation_is_accepted() {
 // fails, which the planner does not emit -- see the note in `mod.rs` on what still has no test.
 #[test]
 fn entity_cases_with_different_keys_are_accepted() {
-    check("{ feed { ... on Book { blurb } ... on Film { summary } } }").unwrap();
+    check(
+        plan_json!("feed_blurb_summary"),
+        "{ feed { ... on Book { blurb } ... on Film { summary } } }",
+    )
+    .unwrap();
 }
 
 #[test]
 fn a_single_entity_case_is_accepted() {
-    check("{ feed { ... on Book { blurb } } }").unwrap();
-    check("{ feed { ... on Film { summary } } }").unwrap();
+    check(
+        plan_json!("feed_blurb"),
+        "{ feed { ... on Book { blurb } } }",
+    )
+    .unwrap();
+    check(
+        plan_json!("feed_summary"),
+        "{ feed { ... on Film { summary } } }",
+    )
+    .unwrap();
 }
 
 // The interface field alongside the entity cases, so the fetch carries a selection that is not
 // under any type condition as well as the two that are.
 #[test]
 fn entity_cases_beside_an_interface_field_are_accepted() {
-    check("{ feed { id ... on Book { blurb isbn } ... on Film { summary minutes } } }").unwrap();
+    check(
+        plan_json!("feed_beside_interface_field"),
+        "{ feed { id ... on Book { blurb isbn } ... on Film { summary minutes } } }",
+    )
+    .unwrap();
 }
 
 #[test]
 fn a_requires_driven_field_the_plan_never_fetches_is_reported() {
     insta::assert_snapshot!(
         rejection(
-            "{ feed { ... on Book { blurb } } }",
+            plan_json!("feed_blurb"),
             "{ feed { ... on Book { blurb } ... on Film { summary } } }",
         ),
         @r###"
@@ -150,7 +288,7 @@ fn a_requires_driven_field_the_plan_never_fetches_is_reported() {
 #[test]
 fn a_field_the_plan_never_fetches_is_reported() {
     insta::assert_snapshot!(
-        rejection("{ locations { id } }", "{ locations { id name } }"),
+        rejection(plan_json!("locations_id"), "{ locations { id name } }"),
         @r###"
     Correctness error found:
     query plan does not fetch everything the operation requests:
@@ -168,7 +306,10 @@ fn a_field_the_plan_never_fetches_is_reported() {
 #[test]
 fn a_requires_field_the_plan_never_fetches_is_reported() {
     insta::assert_snapshot!(
-        rejection("{ locations { id } }", "{ locations { reviews { rating } } }"),
+        rejection(
+            plan_json!("locations_id"),
+            "{ locations { reviews { rating } } }",
+        ),
         @r###"
     Correctness error found:
     query plan does not fetch everything the operation requests:
@@ -186,10 +327,9 @@ fn a_requires_field_the_plan_never_fetches_is_reported() {
 //==================================================================================================
 // Optional checks
 //
-// These report planner defects the planner cannot currently avoid, so they are off unless asked
-// for. No plan the planner produces in these tests carries an empty flatten-path condition, so
-// the FED-516 check is pinned on the path directly; the wiring is the one call in the `Flatten`
-// arm of `walk_node`.
+// These report planner defects the planner cannot currently avoid; both are on by default. No plan
+// in these tests carries an empty flatten-path condition, so the FED-516 check is pinned on the
+// path directly; the wiring is the one call in the `Flatten` arm of `walk_node`.
 
 use apollo_compiler::name;
 
@@ -235,70 +375,16 @@ fn a_path_that_reaches_a_type_is_not_reported() {
     }
 }
 
-/// Parses every fetch's operation against its own subgraph, which a plan read from JSON has not
-/// done yet.
-fn init_operations(planner: &QueryPlanner, node: &mut PlanNode) {
-    match node {
-        PlanNode::Fetch(fetch) => {
-            let schema = planner.subgraph_schemas()[&fetch.subgraph_name].schema();
-            fetch
-                .operation_document
-                .init_parsed(schema)
-                .expect("valid subgraph operation");
-        }
-        PlanNode::Flatten(flatten) => init_operations(planner, &mut flatten.node),
-        PlanNode::Sequence(sequence) => sequence
-            .nodes
-            .iter_mut()
-            .for_each(|node| init_operations(planner, node)),
-        PlanNode::Parallel(parallel) => parallel
-            .nodes
-            .iter_mut()
-            .for_each(|node| init_operations(planner, node)),
-        PlanNode::Defer(defer) => {
-            if let Some(node) = &mut defer.primary.node {
-                init_operations(planner, node);
-            }
-            for block in &mut defer.deferred {
-                if let Some(node) = &mut block.node {
-                    init_operations(planner, node);
-                }
-            }
-        }
-        PlanNode::Condition(_) => unimplemented!("not needed by the written plans"),
-    }
-}
-
-fn written_plan(planner: &QueryPlanner, json: &str) -> QueryPlan {
-    let node: TopLevelPlanNode = serde_json::from_str(json).expect("valid plan json");
-    let mut node = match node {
-        TopLevelPlanNode::Sequence(node) => PlanNode::Sequence(node),
-        TopLevelPlanNode::Defer(node) => PlanNode::Defer(node),
-        _ => unimplemented!("not needed by the written plans"),
-    };
-    init_operations(planner, &mut node);
-    let node = match node {
-        PlanNode::Sequence(node) => TopLevelPlanNode::Sequence(node),
-        PlanNode::Defer(node) => TopLevelPlanNode::Defer(node),
-        _ => unreachable!("only the variants matched above"),
-    };
-    QueryPlan {
-        node: Some(node),
-        statistics: Default::default(),
-    }
-}
-
 /// A plan whose `reviews` fetch reads `isbn` under an alias and names it back with an input key
 /// renamer. `locations_selections` is what the first fetch selects on `Book`, and `aliased` is the
 /// field the entry reads under `__require_0_isbn`; varying the two is how these tests separate the
 /// key an entry reads from the field it sends.
 fn aliased_requires_plan(
-    planner: &QueryPlanner,
+    fixture: &Fixture,
     locations_selections: &str,
     aliased: &str,
 ) -> QueryPlan {
-    written_plan(
-        planner,
+    fixture.written_plan(
         &format!(
             r#"{{ "Sequence": {{ "nodes": [
             {{ "Fetch": {{
@@ -339,20 +425,8 @@ fn aliased_requires_plan(
     )
 }
 
-fn check_blurb_plan(planner: &QueryPlanner, plan: &QueryPlan) -> Result<(), CorrectnessError> {
-    let operation = ExecutableDocument::parse_and_validate(
-        planner.api_schema().schema(),
-        "{ feed { ... on Book { blurb } } }",
-        "operation.graphql",
-    )
-    .expect("valid operation");
-    crate::correctness::check_plan(
-        planner.api_schema(),
-        planner.supergraph_schema(),
-        planner.subgraph_schemas(),
-        &operation,
-        plan,
-    )
+fn check_blurb_plan(fixture: &Fixture, plan: &QueryPlan) -> Result<(), CorrectnessError> {
+    fixture.check(plan, "{ feed { ... on Book { blurb } } }")
 }
 
 // A planner may alias a `@requires` input, for example when two fetches need the same field with
@@ -360,9 +434,9 @@ fn check_blurb_plan(planner: &QueryPlanner, plan: &QueryPlan) -> Result<(), Corr
 // rewrites to each representation before sending it, so `reviews` still receives `isbn`.
 #[test]
 fn an_aliased_requires_input_renamed_by_an_input_rewrite_is_accepted() {
-    let planner = planner();
-    let plan = aliased_requires_plan(&planner, "__typename id __require_0_isbn: isbn", "isbn");
-    check_blurb_plan(&planner, &plan).unwrap();
+    let fixture = fixture();
+    let plan = aliased_requires_plan(&fixture, "__typename id __require_0_isbn: isbn", "isbn");
+    check_blurb_plan(&fixture, &plan).unwrap();
 }
 
 // The subgraph is sent `isbn`, and the renamer says it is read from `__require_0_isbn`, so that is
@@ -370,9 +444,9 @@ fn an_aliased_requires_input_renamed_by_an_input_rewrite_is_accepted() {
 // nothing to carry.
 #[test]
 fn an_entry_reading_a_key_the_plan_never_fetched_is_rejected() {
-    let planner = planner();
-    let plan = aliased_requires_plan(&planner, "__typename id isbn", "isbn");
-    let error = check_blurb_plan(&planner, &plan).expect_err("`__require_0_isbn` is never fetched");
+    let fixture = fixture();
+    let plan = aliased_requires_plan(&fixture, "__typename id isbn", "isbn");
+    let error = check_blurb_plan(&fixture, &plan).expect_err("`__require_0_isbn` is never fetched");
     assert!(
         error
             .to_string()
@@ -386,9 +460,9 @@ fn an_entry_reading_a_key_the_plan_never_fetched_is_rejected() {
 // `id`, and the rewrites and the entry disagree.
 #[test]
 fn a_renamed_key_naming_a_different_field_is_rejected() {
-    let planner = planner();
-    let plan = aliased_requires_plan(&planner, "__typename id __require_0_isbn: id", "id");
-    let error = check_blurb_plan(&planner, &plan).expect_err("`isbn` would carry `id`'s value");
+    let fixture = fixture();
+    let plan = aliased_requires_plan(&fixture, "__typename id __require_0_isbn: id", "id");
+    let error = check_blurb_plan(&fixture, &plan).expect_err("`isbn` would carry `id`'s value");
     assert!(
         error
             .to_string()
@@ -408,7 +482,7 @@ fn a_renamed_key_naming_a_different_field_is_rejected() {
 /// The primary block fetches each book's `id` (fetch 0) and then its `isbn` from that `id` (fetch
 /// 1), beside the root's `__typename` (fetch 2). The deferred block fetches `blurb`, which
 /// requires `isbn` and resolves a `Book` by `id`. `depends` is the deferred block's list.
-fn defer_plan(planner: &QueryPlanner, depends: &[u64]) -> QueryPlan {
+fn defer_plan(fixture: &Fixture, depends: &[u64]) -> QueryPlan {
     let depends = depends
         .iter()
         .map(|id| format!(r#"{{ "id": "{id}" }}"#))
@@ -466,10 +540,8 @@ fn defer_plan(planner: &QueryPlanner, depends: &[u64]) -> QueryPlan {
         &book_entry(&["__typename", "id", "isbn"]),
         &entities("blurb"),
     );
-    written_plan(
-        planner,
-        &format!(
-            r#"{{ "Defer": {{
+    fixture.written_plan(&format!(
+        r#"{{ "Defer": {{
                 "primary": {{
                     "sub_selection": null,
                     "node": {{ "Parallel": {{ "nodes": [
@@ -488,26 +560,13 @@ fn defer_plan(planner: &QueryPlanner, depends: &[u64]) -> QueryPlan {
                     "node": {{ "Flatten": {{ "path": {feed}, "node": {blurb_fetch} }} }}
                 }}]
             }} }}"#
-        ),
-    )
+    ))
 }
 
 fn check_deferred_blurbs(depends: &[u64]) -> Result<(), CorrectnessError> {
-    let planner = planner();
-    let plan = defer_plan(&planner, depends);
-    let operation = ExecutableDocument::parse_and_validate(
-        planner.api_schema().schema(),
-        "{ feed { ... on Book { blurb } } }",
-        "operation.graphql",
-    )
-    .expect("valid operation");
-    crate::correctness::check_plan(
-        planner.api_schema(),
-        planner.supergraph_schema(),
-        planner.subgraph_schemas(),
-        &operation,
-        &plan,
-    )
+    let fixture = fixture();
+    let plan = defer_plan(&fixture, depends);
+    check_blurb_plan(&fixture, &plan)
 }
 
 // FED-1007: the deferred block lists fetch 1 but not fetch 0, which fetch 1 depended on. The
@@ -547,11 +606,8 @@ fn a_deferred_block_naming_no_dependency_waits_for_the_primary() {
 //==================================================================================================
 // An interface object's demand
 
-const INTERFACE_OBJECT: &str = include_str!("testdata/interface_object_requires.graphql");
-
-fn interface_object_planner() -> QueryPlanner {
-    let supergraph = Supergraph::new_with_router_specs(INTERFACE_OBJECT).expect("valid supergraph");
-    QueryPlanner::new(&supergraph, Default::default()).expect("planner")
+fn interface_object_fixture() -> Fixture {
+    Fixture::new(include_str!("testdata/interface_object_requires.graphql"))
 }
 
 // `C` declares `I` as an interface object, so its `@requires` on `I.data` is written at `I` and
@@ -564,24 +620,11 @@ fn interface_object_planner() -> QueryPlanner {
 // hand.
 #[test]
 fn an_interface_object_plan_is_accepted() {
-    let planner = interface_object_planner();
-    let operation = ExecutableDocument::parse_and_validate(
-        planner.api_schema().schema(),
-        "{ start { ... on P { data } } }",
-        "operation.graphql",
-    )
-    .expect("valid operation");
-    let plan = planner
-        .build_query_plan(&operation, None, Default::default())
-        .expect("query plan");
-    crate::correctness::check_plan(
-        planner.api_schema(),
-        planner.supergraph_schema(),
-        planner.subgraph_schemas(),
-        &operation,
-        &plan,
-    )
-    .unwrap();
+    let fixture = interface_object_fixture();
+    let plan = fixture.written_plan(plan_json!("interface_object_data"));
+    fixture
+        .check(&plan, "{ start { ... on P { data } } }")
+        .unwrap();
 }
 
 // The subgraph oracle answers in the subgraph's own terms, and `A` declares `I` as an interface
@@ -590,34 +633,15 @@ fn an_interface_object_plan_is_accepted() {
 // that fetches nothing for `data` was accepted. Both checkers share the oracle, so both were
 // blind; `SubgraphConstraint` grounds the name back now.
 //
-// `data` requires `required`, so a plan for `data` fetches both: the operation planned here is
-// the smaller one, and `data` is what the plan genuinely lacks.
+// `data` requires `required`, so the plan for `data` fetches both: the plan here is the planner's
+// for `{ start { ... on P { required } } }`, and `data` is what it genuinely lacks.
 #[test]
 fn a_field_returning_an_interface_object_is_still_checked() {
-    let planner = interface_object_planner();
-    let planned = ExecutableDocument::parse_and_validate(
-        planner.api_schema().schema(),
-        "{ start { ... on P { required } } }",
-        "planned.graphql",
-    )
-    .expect("valid operation");
-    let plan = planner
-        .build_query_plan(&planned, None, Default::default())
-        .expect("query plan");
-    let checked = ExecutableDocument::parse_and_validate(
-        planner.api_schema().schema(),
-        "{ start { ... on P { required data } } }",
-        "checked.graphql",
-    )
-    .expect("valid operation");
-    let error = crate::correctness::check_plan(
-        planner.api_schema(),
-        planner.supergraph_schema(),
-        planner.subgraph_schemas(),
-        &checked,
-        &plan,
-    )
-    .expect_err("the plan never fetches `data`");
+    let fixture = interface_object_fixture();
+    let plan = fixture.written_plan(plan_json!("interface_object_required"));
+    let error = fixture
+        .check(&plan, "{ start { ... on P { required data } } }")
+        .expect_err("the plan never fetches `data`");
     assert!(
         error.to_string().contains("does not select `data`"),
         "{error}"
