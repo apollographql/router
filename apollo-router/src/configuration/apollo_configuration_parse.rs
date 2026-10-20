@@ -568,20 +568,13 @@ fn upgrade_would_change(file: &Value) -> bool {
     upgrade_configuration_silently(file, UpgradeMode::Major).is_ok_and(|upgraded| upgraded != *file)
 }
 
-/// Parses the typed configuration, then the expanded document, with the same options. The retained
-/// document shows `plugins: null` as `{}`, which means the same.
+/// Parses the typed configuration, then the expanded document, with the same options.
 ///
 /// apollo-configuration returns the typed value only, not the expanded document it validated, so
 /// the document is read by a second parser that shares the first's provider snapshot.
 fn parse_document(text: &str, parser: &ConfigurationParser) -> Result<Configuration, ConfigError> {
     let ParsedConfiguration { mut config, .. } = parser.config.parse_yaml(text)?;
-    let ExpandedDocument(mut document) = parser.document.parse_yaml(text)?;
-    if let Some(plugins) = document
-        .get_mut("plugins")
-        .filter(|plugins| plugins.is_null())
-    {
-        *plugins = json!({});
-    }
+    let ExpandedDocument(document) = parser.document.parse_yaml(text)?;
     config.validated_yaml = Some(document);
     Ok(config)
 }
@@ -761,26 +754,19 @@ mod tests {
         }
     }
 
+    /// An empty `plugins:` key is YAML `null`, which is not a map of plugin sections. The error
+    /// points at the key in the file as written, whether or not startup migration runs.
     #[test]
-    fn null_plugins_mean_no_user_plugins() {
-        let config = parse("plugins: null\n").expect("null plugin config is accepted");
-
-        assert_eq!(config.plugins.iter().count(), 0);
-        assert_eq!(config.validated_yaml, Some(json!({ "plugins": {} })));
-    }
-
-    /// Empty `plugins:` is parsed as written, so an error elsewhere in the file is located in the
-    /// file, whether or not startup migration runs.
-    #[test]
-    fn errors_beside_null_plugins_refer_to_the_file_as_written() {
-        let text = "# every plugin commented out\nplugins:\nsupergraph:\n  listen: 12\n";
+    fn null_plugins_are_rejected() {
+        let text = "# every plugin commented out\nplugins:\n";
         for migration in [Migration::WithinMajor, Migration::None] {
             let error = parse_configuration(text, ExternalValues::default(), migration)
-                .expect_err("the listen address is invalid")
+                .expect_err("null is not a map of plugin sections")
                 .to_string();
 
-            // The comment makes `listen` line 4 of the file; a re-serialized copy has no comment.
-            assert!(error.contains("[4:"), "{error}");
+            assert!(error.contains("null is not of type \"object\""), "{error}");
+            // The comment makes `plugins` line 2 of the file; a re-serialized copy has no comment.
+            assert!(error.contains("[2:"), "{error}");
         }
     }
 

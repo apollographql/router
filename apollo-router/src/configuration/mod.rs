@@ -226,7 +226,7 @@ pub struct Configuration {
 
     /// Plugin configuration
     #[serde(default)]
-    #[schemars(extend("default" = null))]
+    #[schemars(extend("default" = {}))]
     pub(crate) plugins: UserPlugins,
 
     /// Built-in plugin configuration. Built in plugins are pushed to the top level of config.
@@ -775,10 +775,7 @@ impl JsonSchema for UserPlugins {
             .filter(|factory| !factory.name.starts_with(APOLLO_PLUGIN_PREFIX))
             .map(|factory| (factory.name.to_string(), factory.create_schema(generator)))
             .collect();
-        let mut schema = gen_schema(plugins, None);
-        // `plugins: null` means no user plugins, as in earlier releases.
-        schema.insert("type".to_string(), serde_json::json!(["object", "null"]));
-        schema
+        gen_schema(plugins, None)
     }
 }
 

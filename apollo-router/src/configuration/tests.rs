@@ -996,11 +996,9 @@ fn from_str_reads_environment_variables_on_every_parse() {
     unsafe { std::env::remove_var(NAME) };
 }
 
-#[rstest::rstest]
-#[case("")]
-#[case("plugins:")]
-fn unusual_configs_validate(#[case] input: &str) {
-    parse_without_inputs(input, Migration::None).expect("should be valid configuration");
+#[test]
+fn empty_config_validates() {
+    parse_without_inputs("", Migration::None).expect("should be valid configuration");
 }
 
 fn visit_schema(path: &str, schema: &Value, errors: &mut Vec<String>) {
