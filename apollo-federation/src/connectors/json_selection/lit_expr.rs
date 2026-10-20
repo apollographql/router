@@ -140,7 +140,7 @@ impl LitOp {
 impl LitExpr {
     // LitExpr ::= LitOpChain | LitPath | LitPrimitive | LitObject | LitArray | PathSelection
     pub(crate) fn parse(input: Span) -> ParseResult<WithRange<Self>> {
-        let _depth = DepthGuard::increment(&input)?;
+        let _guard = DepthGuard::increment(&input)?;
         match input.extra.spec {
             ConnectSpec::V0_1 | ConnectSpec::V0_2 => {
                 let (input, _) = spaces_or_comments(input)?;

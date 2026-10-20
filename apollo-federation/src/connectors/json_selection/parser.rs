@@ -1273,7 +1273,7 @@ impl PathList {
     }
 
     pub(super) fn parse_with_depth(input: Span, depth: usize) -> ParseResult<WithRange<Self>> {
-        let _depth = DepthGuard::increment(&input)?;
+        let _guard = DepthGuard::increment(&input)?;
         let spec = get_connect_spec(&input);
 
         // If the input is empty (i.e. this method will end up returning
@@ -1738,7 +1738,7 @@ impl SubSelection {
         // This is called speculatively, so it only counts toward the recursion
         // limit once it finds a `{`.
         let (input, (_, open_brace)) = (spaces_or_comments, ranged_span("{")).parse(input)?;
-        let _depth = DepthGuard::increment(&input)?;
+        let _guard = DepthGuard::increment(&input)?;
         match (Self::parse_naked, spaces_or_comments, ranged_span("}")).parse(input) {
             Ok((remainder, (sub, _, close_brace))) => {
                 let range = merge_ranges(open_brace.range(), close_brace.range());
@@ -5327,10 +5327,16 @@ mod tests {
     }
 
     #[rstest]
+    #[case::v0_2(ConnectSpec::V0_2)]
+    #[case::v0_3(ConnectSpec::V0_3)]
     #[case::v0_4(ConnectSpec::V0_4)]
     #[case::v0_5(ConnectSpec::V0_5)]
     fn deep_nesting_is_a_parse_error(#[case] spec: ConnectSpec) {
         for shape in NESTINGS {
+            // Some shapes, like arrays, are not valid syntax in older specs.
+            if JSONSelection::parse_with_spec(&nested(shape, 1), spec).is_err() {
+                continue;
+            }
             let err = on_default_stack(move || {
                 JSONSelection::parse_with_spec(&nested(shape, 300), spec).map(|_| ())
             })
