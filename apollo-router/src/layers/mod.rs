@@ -473,14 +473,17 @@ pub(crate) trait InternalServiceBuilderExt<L>: Sized {
 
     /// Apply the layer of a *mandatory* plugin to a service stack.
     ///
-    /// Same as [`Self::apply_plugin_layer`], except that a missing plugin is treated as a
-    /// bug rather than a supported configuration: the miss panics instead of quietly
-    /// reducing the stack to a no-op.
+    /// Unlike [`Self::apply_plugin_layer`], the layer is applied as the getter returns it,
+    /// never skipped.
+    ///
+    /// # Panics
+    ///
+    /// If the plugin is missing from the registry.
     fn apply_required_plugin_layer<P, OutLayer>(
         self,
         plugins: &Plugins,
         get_layer: impl FnOnce(&P) -> OutLayer,
-    ) -> ServiceBuilder<Stack<OptionLayer<OutLayer>, L>>
+    ) -> ServiceBuilder<Stack<OutLayer, L>>
     where
         P: PluginPrivate;
 }
@@ -522,18 +525,18 @@ impl<L> InternalServiceBuilderExt<L> for ServiceBuilder<L> {
         self,
         plugins: &Plugins,
         get_layer: impl FnOnce(&P) -> OutLayer,
-    ) -> ServiceBuilder<Stack<OptionLayer<OutLayer>, L>>
+    ) -> ServiceBuilder<Stack<OutLayer, L>>
     where
         P: PluginPrivate,
     {
-        if find_plugin::<P>(plugins).is_none() && !plugins.is_empty() {
+        let plugin = find_plugin::<P>(plugins).unwrap_or_else(|| {
             panic!(
                 "mandatory plugin {} is missing from the plugin registry, so its layer will not \
                  be applied to the pipeline; this is a router bug",
                 std::any::type_name::<P>()
-            );
-        }
-        self.apply_plugin_layer(plugins, get_layer)
+            )
+        });
+        self.layer(get_layer(plugin))
     }
 }
 
@@ -545,13 +548,6 @@ mod tests {
     use crate::plugins::headers::Headers;
     use crate::services::Plugins;
     use crate::test_harness::MockedSubgraphs;
-
-    #[test]
-    fn apply_required_plugin_layer_skips_empty_registry() {
-        let plugins = Plugins::default();
-        let _ = ServiceBuilder::new()
-            .apply_required_plugin_layer(&plugins, Headers::router_masking_layer);
-    }
 
     #[test]
     #[should_panic(expected = "mandatory plugin")]

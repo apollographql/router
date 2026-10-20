@@ -1,4 +1,3 @@
-use derivative::Derivative;
 use opentelemetry::Value;
 use schemars::JsonSchema;
 use serde::Deserialize;
@@ -58,9 +57,8 @@ pub(crate) enum SubgraphQuery {
 pub(crate) struct SubgraphRequestBodySize(pub u64);
 pub(crate) struct SubgraphResponseBodySize(pub u64);
 
-#[derive(Deserialize, JsonSchema, Clone, Derivative)]
+#[derive(Deserialize, JsonSchema, Clone, derive_more::Debug, derive_more::PartialEq)]
 #[serde(deny_unknown_fields, rename_all = "snake_case", untagged)]
-#[derivative(Debug, PartialEq)]
 pub(crate) enum SubgraphSelector {
     SubgraphOperationName {
         /// The operation name from the subgraph query.
@@ -97,7 +95,8 @@ pub(crate) enum SubgraphSelector {
     SubgraphResponseData {
         /// The subgraph response body json path.
         #[schemars(with = "String")]
-        #[derivative(Debug = "ignore", PartialEq = "ignore")]
+        #[debug(skip)]
+        #[partial_eq(skip)]
         #[serde(deserialize_with = "deserialize_jsonpath")]
         subgraph_response_data: JsonPathInst,
         /// Optional default value.
@@ -106,7 +105,8 @@ pub(crate) enum SubgraphSelector {
     SubgraphResponseErrors {
         /// The subgraph response body json path.
         #[schemars(with = "String")]
-        #[derivative(Debug = "ignore", PartialEq = "ignore")]
+        #[debug(skip)]
+        #[partial_eq(skip)]
         #[serde(deserialize_with = "deserialize_jsonpath")]
         subgraph_response_errors: JsonPathInst,
         /// Optional default value.

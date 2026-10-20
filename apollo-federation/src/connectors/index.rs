@@ -1,3 +1,4 @@
+use std::borrow::Cow;
 use std::collections::HashMap;
 use std::collections::HashSet;
 use std::sync::Arc;
@@ -7,8 +8,11 @@ use apollo_compiler::Node;
 use apollo_compiler::Schema;
 use apollo_compiler::ast::Argument;
 use apollo_compiler::ast::Value;
+use apollo_compiler::executable::FieldSet;
 use apollo_compiler::name;
 use apollo_compiler::schema::ExtendedType;
+use apollo_compiler::validation::Valid;
+use indexmap::IndexMap;
 use shape::Shape;
 use shape::ShapeCase;
 
@@ -19,7 +23,10 @@ use super::models::EntityResolver;
 use super::spec::ConnectSpec;
 use crate::error::FederationError;
 use crate::operation::FragmentSpreadCache;
+use crate::operation::Selection;
+use crate::operation::SelectionMap;
 use crate::operation::SelectionSet;
+use crate::operation::TYPENAME_FIELD;
 use crate::schema::FederationSchema;
 use crate::schema::ValidFederationSchema;
 use crate::supergraph::extract_subgraphs_from_supergraph;
@@ -52,6 +59,10 @@ pub struct ConnectorIndex {
     entity_resolvers: HashMap<Name, Vec<Arc<IndexedConnector>>>,
     /// connector coordinate -> static output shape of its `selection`.
     output_shapes: HashMap<Arc<str>, Shape>,
+    /// connector coordinate -> the field an `Implicit` (field-level) entity
+    /// resolver provides. Its `selection` describes that field's value, not
+    /// the entity.
+    implicit_fields: HashMap<Arc<str>, Name>,
     /// connector coordinate -> parent-data key condition for entering the
     /// connector, parsed against its subgraph schema. Present only for
     /// entity-resolver connectors with a resolvable key.
@@ -110,24 +121,18 @@ impl ConnectorIndex {
                 // synthetic @key. resolvable_key derives it from the
                 // connector's variable references per resolver kind
                 // ($args / $this / $batch).
-                if connector.entity_resolver.is_some() {
-                    let field_set = connector.resolvable_key(schema.schema()).map_err(|e| {
-                        FederationError::internal(format!(
-                            "invalid key for connector {}: {e}",
-                            entry.coordinate
-                        ))
-                    })?;
-                    if let Some(field_set) = field_set {
-                        let selection_set = SelectionSet::from_selection_set(
-                            &field_set.selection_set,
-                            &FragmentSpreadCache::default(),
-                            schema,
-                            &|| Ok(()),
-                        )?;
-                        index
-                            .key_conditions
-                            .insert(entry.coordinate.clone(), Arc::new(selection_set));
-                    }
+                if connector.entity_resolver.is_some()
+                    && let Some(field_set) = connector_entity_key(connector, schema.schema())?
+                {
+                    let selection_set = SelectionSet::from_selection_set(
+                        &field_set.selection_set,
+                        &FragmentSpreadCache::default(),
+                        schema,
+                        &|| Ok(()),
+                    )?;
+                    index
+                        .key_conditions
+                        .insert(entry.coordinate.clone(), Arc::new(selection_set));
                 }
 
                 // Entity resolvers, keyed by the entity type they resolve.
@@ -140,6 +145,11 @@ impl ConnectorIndex {
                 }
 
                 if let ConnectorPosition::Field(pos) = &connector.id.directive {
+                    if matches!(connector.entity_resolver, Some(EntityResolver::Implicit)) {
+                        index
+                            .implicit_fields
+                            .insert(entry.coordinate.clone(), pos.field.field_name().clone());
+                    }
                     index
                         .by_field
                         .entry((
@@ -182,18 +192,42 @@ impl ConnectorIndex {
         self.key_conditions.get(coordinate)
     }
 
-    /// Whether a connector's `selection` returns `field` at the top level of
-    /// its (object-shaped) output. `__typename` is always available. False
-    /// for non-object output shapes — a scalar connector resolves no entity
-    /// fields beyond its own.
-    pub(crate) fn resolver_provides(&self, coordinate: &str, field: &str) -> bool {
-        if field == "__typename" {
+    /// Whether an entity-resolver connector returns every field of the
+    /// entity's `selection`.
+    pub(crate) fn resolver_provides(&self, coordinate: &str, selection: &Selection) -> bool {
+        self.resolver_returns(coordinate, selection, shape_provides)
+    }
+
+    /// Whether an entity-resolver connector returns some field of the
+    /// entity's `selection`; see [`shape_provides_any`].
+    pub(crate) fn resolver_provides_any(&self, coordinate: &str, selection: &Selection) -> bool {
+        self.resolver_returns(coordinate, selection, shape_provides_any)
+    }
+
+    /// `__typename` is always available. A field-level (`Implicit`) resolver
+    /// returns only its own field, whose value its `selection` describes.
+    /// Otherwise the `selection` describes the entity. A resolver whose
+    /// output isn't an object returns nothing of it.
+    fn resolver_returns(
+        &self,
+        coordinate: &str,
+        selection: &Selection,
+        returns: fn(&Shape, &Selection) -> bool,
+    ) -> bool {
+        if selection.is_typename_field() {
             return true;
         }
-        match self.output_shapes.get(coordinate).map(|s| s.case()) {
-            Some(ShapeCase::Object { fields, .. }) => fields.contains_key(field),
-            _ => false,
+        let Some(shape) = self.output_shapes.get(coordinate) else {
+            return false;
+        };
+        if let Some(own_field) = self.implicit_fields.get(coordinate) {
+            let entity = Shape::closed_record(
+                IndexMap::from_iter([(own_field.to_string(), shape.clone())]),
+                [],
+            );
+            return returns(&entity, selection);
         }
+        object_fields(shape).is_some() && returns(shape, selection)
     }
 
     /// Whether `subgraph` is backed by connectors (and therefore has no
@@ -215,6 +249,133 @@ impl ConnectorIndex {
     }
 }
 
+/// Strip array wrappers off a shape: a selection set on a list-typed field
+/// is checked against the element shape.
+pub(crate) fn unwrap_list_shape(shape: &Shape) -> &Shape {
+    let mut shape = shape;
+    while let ShapeCase::Array { tail, .. } = shape.case() {
+        shape = tail;
+    }
+    shape
+}
+
+/// Split `selections` into the top-level selections `provides` accepts and
+/// the rest; `None` stands for an empty part.
+pub(crate) fn split_selections(
+    selections: &SelectionSet,
+    provides: impl Fn(&Selection) -> bool,
+) -> (Option<SelectionSet>, Option<SelectionSet>) {
+    let mut provided = SelectionMap::new();
+    let mut missing = SelectionMap::new();
+    for selection in selections.selections.values() {
+        if provides(selection) {
+            provided.insert(selection.clone());
+        } else {
+            missing.insert(selection.clone());
+        }
+    }
+    let part = |map: SelectionMap| {
+        (!map.is_empty()).then(|| SelectionSet {
+            schema: selections.schema.clone(),
+            type_position: selections.type_position.clone(),
+            selections: Arc::new(map),
+        })
+    };
+    (part(provided), part(missing))
+}
+
+/// The fields `shape` returns as an object, list wrappers stripped. A union
+/// of shapes (e.g. a `->match`) returns the fields every object member
+/// returns, each shaped as the union of the members' shapes for it; null
+/// and non-object members don't constrain it. `None` for shapes the planner
+/// can't inspect (scalars, unknown JSON), which count as returning
+/// everything.
+pub(crate) fn object_fields(shape: &Shape) -> Option<Cow<'_, IndexMap<String, Shape>>> {
+    match unwrap_list_shape(shape).case() {
+        ShapeCase::Object { fields, .. } => Some(Cow::Borrowed(fields)),
+        ShapeCase::One(members) => {
+            let mut objects = members.iter().filter_map(object_fields);
+            let first = objects.next()?;
+            let others: Vec<_> = objects.collect();
+            let fields = first
+                .iter()
+                .filter_map(|(name, shape)| {
+                    let mut shapes = vec![shape.clone()];
+                    for other in &others {
+                        shapes.push(other.get(name)?.clone());
+                    }
+                    Some((name.clone(), Shape::one(shapes, [])))
+                })
+                .collect();
+            Some(Cow::Owned(fields))
+        }
+        _ => None,
+    }
+}
+
+/// Whether `shape` returns every field of `selection`.
+pub(crate) fn shape_provides(shape: &Shape, selection: &Selection) -> bool {
+    let Some(fields) = object_fields(shape) else {
+        return true;
+    };
+    let provides_all = |shape: &Shape, selections: &SelectionSet| {
+        selections
+            .selections
+            .values()
+            .all(|selection| shape_provides(shape, selection))
+    };
+    match selection {
+        Selection::Field(field_sel) => {
+            let name = field_sel.field.name();
+            if *name == TYPENAME_FIELD {
+                return true;
+            }
+            let Some(child) = fields.get(name.as_str()) else {
+                return false;
+            };
+            field_sel
+                .selection_set
+                .as_ref()
+                .is_none_or(|child_ss| provides_all(child, child_ss))
+        }
+        Selection::InlineFragment(fragment_sel) => provides_all(shape, &fragment_sel.selection_set),
+    }
+}
+
+/// Whether `shape` returns some field of `selection` other than
+/// `__typename`: a leaf field itself, or some field below a composite one.
+/// A sub-selection of only `__typename` counts as returned with its field.
+pub(crate) fn shape_provides_any(shape: &Shape, selection: &Selection) -> bool {
+    let Some(fields) = object_fields(shape) else {
+        return true;
+    };
+    let provides_any = |shape: &Shape, selections: &SelectionSet| {
+        let mut selections = selections
+            .selections
+            .values()
+            .filter(|selection| !selection.is_typename_field())
+            .peekable();
+        selections.peek().is_none()
+            || selections.any(|selection| shape_provides_any(shape, selection))
+    };
+    match selection {
+        Selection::Field(field_sel) => {
+            let name = field_sel.field.name();
+            if *name == TYPENAME_FIELD {
+                return true;
+            }
+            let Some(child) = fields.get(name.as_str()) else {
+                return false;
+            };
+            field_sel
+                .selection_set
+                .as_ref()
+                .is_none_or(|child_ss| provides_any(child, child_ss))
+        }
+        Selection::InlineFragment(fragment_sel) => provides_any(shape, &fragment_sel.selection_set),
+    }
+}
+
 /// The entity type an entity-resolver connector produces: the type itself for
 /// type-level connectors, the field's type for `Explicit` resolvers, and the
 /// parent type for `Implicit` resolvers.
@@ -227,6 +388,48 @@ fn resolver_entity_type(connector: &Connector, schema: &Schema) -> Option<Name> 
         (ConnectorPosition::Field(_), Some(_)) => connector.id.directive.parent_type_name(),
         (ConnectorPosition::Field(_), None) => None,
     }
+}
+
+/// The key guarding entry into an entity-resolver connector. A field
+/// connector that references no `$this` (only `$args` or constants) gets the
+/// singleton key `__typename` (see [`has_singleton_key`]).
+fn connector_entity_key(
+    connector: &Connector,
+    schema: &Schema,
+) -> Result<Option<Valid<FieldSet>>, FederationError> {
+    let invalid_key = |e: String| {
+        FederationError::internal(format!(
+            "invalid key for connector {}: {e}",
+            connector.id.coordinate()
+        ))
+    };
+    if let Some(field_set) = connector.resolvable_key(schema).map_err(invalid_key)? {
+        return Ok(Some(field_set));
+    }
+    if !has_singleton_key(connector) {
+        return Ok(None);
+    }
+    let parent_type = connector
+        .id
+        .directive
+        .parent_type_name()
+        .ok_or_else(|| invalid_key("missing parent type".to_string()))?;
+    FieldSet::parse_and_validate(
+        Valid::assume_valid_ref(schema),
+        parent_type,
+        TYPENAME_FIELD.as_str(),
+        "",
+    )
+    .map(Some)
+    .map_err(|e| invalid_key(e.to_string()))
+}
+
+/// Whether a field connector without a resolvable key is entered through the
+/// singleton key `__typename`. Connector expansion gives that key only from
+/// connect v0.4 on; before v0.4 such a connector has no key.
+fn has_singleton_key(connector: &Connector) -> bool {
+    connector.spec >= ConnectSpec::V0_4
+        && matches!(connector.entity_resolver, Some(EntityResolver::Implicit))
 }
 
 /// Adds to the supergraph the `@key` that connector expansion synthesizes for
@@ -260,6 +463,9 @@ pub(crate) fn add_connector_entity_keys(
     }
 
     let mut keys: Vec<(Name, Name, String)> = Vec::new();
+    // Singleton `__typename` keys apply only to types no other connector
+    // gives a key.
+    let mut typename_keys: Vec<(Name, Name, String)> = Vec::new();
     for (subgraph_name, subgraph) in extract_subgraphs_from_supergraph(supergraph, Some(false))? {
         let schema = subgraph.schema.schema();
         let Some(graph) = graph_enum_values.get(subgraph_name.as_ref()) else {
@@ -269,20 +475,33 @@ pub(crate) fn add_connector_entity_keys(
             let Some(entity_type) = resolver_entity_type(&connector, schema) else {
                 continue;
             };
-            let Ok(Some(field_set)) = connector.resolvable_key(schema) else {
-                continue;
+            let field_set = match connector.resolvable_key(schema) {
+                Ok(Some(field_set)) => field_set,
+                Ok(None) if has_singleton_key(&connector) => {
+                    typename_keys.push((graph.clone(), entity_type, TYPENAME_FIELD.to_string()));
+                    continue;
+                }
+                _ => continue,
             };
+            let fields = field_set.serialize().no_indent().to_string();
             // Extraction rejects a key whose fields the subgraph doesn't define.
             let fields_defined = field_set.selection_set.selections.iter().all(|selection| {
                 selection
                     .as_field()
                     .is_some_and(|field| schema.type_field(&entity_type, &field.name).is_ok())
             });
-            let fields = field_set.serialize().no_indent().to_string();
             let known = keys.iter().any(|(g, t, _)| g == graph && *t == entity_type);
             if fields_defined && !known {
                 keys.push((graph.clone(), entity_type, fields));
             }
+        }
+    }
+    for (graph, entity_type, fields) in typename_keys {
+        if !keys
+            .iter()
+            .any(|(g, t, _)| *g == graph && *t == entity_type)
+        {
+            keys.push((graph, entity_type, fields));
         }
     }
     if keys.is_empty() {
@@ -376,15 +595,109 @@ mod tests {
         );
     }
 
+    /// `field_set` on `type_name`, parsed against `subgraph`'s schema.
+    fn subgraph_selection(
+        sdl: &str,
+        subgraph: &str,
+        type_name: &str,
+        field_set: &str,
+    ) -> Selection {
+        let supergraph = Supergraph::new_with_router_specs(sdl).expect("supergraph parses");
+        let subgraphs = supergraph.extract_subgraphs().expect("subgraphs extract");
+        let subgraph = subgraphs.get(subgraph).expect("subgraph exists");
+        crate::schema::field_set::parse_field_set(
+            &subgraph.schema,
+            Name::new(type_name).expect("valid type name"),
+            field_set,
+            true,
+        )
+        .expect("field set parses")
+        .selections
+        .values()
+        .next()
+        .expect("one selection")
+        .clone()
+    }
+
     #[test]
     fn resolver_provides_selected_fields_and_typename() {
         let index = index_from_supergraph(ENTITY_RESOLVER_SCHEMA).expect("index builds");
         let coordinate = "connectors:Query.user[0]";
-        assert!(index.resolver_provides(coordinate, "name"));
-        assert!(index.resolver_provides(coordinate, "id"));
-        assert!(index.resolver_provides(coordinate, "__typename"));
-        assert!(!index.resolver_provides(coordinate, "email"));
+        let provides = |subgraph, field| {
+            index.resolver_provides(
+                coordinate,
+                &subgraph_selection(ENTITY_RESOLVER_SCHEMA, subgraph, "User", field),
+            )
+        };
+        assert!(provides("connectors", "name"));
+        assert!(provides("connectors", "id"));
+        assert!(provides("connectors", "__typename"));
+        assert!(!provides("graphql", "email"));
         assert!(index.output_shape(coordinate).is_some());
+    }
+
+    /// A field-level resolver's selection describes its field's value
+    /// (`User.posts` returns `id title body` per post), so it provides only
+    /// its own field of the entity.
+    #[test]
+    fn field_resolver_provides_only_its_own_field() {
+        let index = index_from_supergraph(include_str!(
+            "../query_plan/incremental_planner/fixtures/connector_join_directive_link.graphql"
+        ))
+        .expect("index builds");
+        let coordinate = "connectors:User.posts[0]";
+        let provides = |field| {
+            index.resolver_provides(
+                coordinate,
+                &subgraph_selection(
+                    include_str!(
+                        "../query_plan/incremental_planner/fixtures/connector_join_directive_link.graphql"
+                    ),
+                    "connectors",
+                    "User",
+                    field,
+                ),
+            )
+        };
+        assert!(provides("posts { id title }"));
+        assert!(!provides("posts { author { id } }"));
+        assert!(provides("__typename"));
+        assert!(!provides("id"));
+    }
+
+    /// A field connector that references no `$this` is keyed on
+    /// `__typename`, as connector expansion keys it from connect v0.4 on.
+    #[test]
+    fn field_resolver_without_this_keyed_on_typename() {
+        let index = index_from_supergraph(include_str!(
+            "../query_plan/incremental_planner/fixtures/connector_field_without_this.graphql"
+        ))
+        .expect("index builds");
+        for coordinate in ["products:Product.banner[0]", "products:Product.related[0]"] {
+            let key = index
+                .key_conditions(coordinate)
+                .expect("singleton key indexed");
+            assert_eq!(
+                key.to_string().split_whitespace().collect::<String>(),
+                "{__typename}",
+                "{coordinate}"
+            );
+        }
+    }
+
+    /// Before connect v0.4, expansion gives a field connector that references
+    /// no `$this` no key, so the index doesn't either.
+    #[test]
+    fn field_resolver_without_this_before_v0_4_has_no_key() {
+        let index = index_from_supergraph(include_str!(
+            "../query_plan/incremental_planner/fixtures/connector_output_shape.graphql"
+        ))
+        .expect("index builds");
+        assert!(
+            index
+                .key_conditions("connectors:User.staticAvatar[0]")
+                .is_none()
+        );
     }
 
     #[test]

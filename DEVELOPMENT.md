@@ -173,10 +173,6 @@ Dev and test builds include only line-table debug info. Backtraces show file and
 CARGO_PROFILE_DEV_DEBUG=true cargo build
 ```
 
-### Troubleshoot
-
-* If you have an issue with rust-analyzer reporting an unresolved import about `derivative::Derivative` [check this solution](https://github.com/rust-analyzer/rust-analyzer/issues/7459#issuecomment-876796459) found in a rust-analyzer issue.
-
 ### Code coverage
 
 Code coverage is run in CI nightly, but not done on every commit.  To view coverage from nightly runs visit [our coverage on Codecov](https://codecov.io/gh/apollographql/router).

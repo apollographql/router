@@ -1,4 +1,3 @@
-use derivative::Derivative;
 use opentelemetry::Value;
 use schemars::JsonSchema;
 use serde::Deserialize;
@@ -52,9 +51,8 @@ impl From<&SupergraphValue> for InstrumentValue<SupergraphSelector> {
     }
 }
 
-#[derive(Deserialize, JsonSchema, Clone, Derivative)]
+#[derive(Deserialize, JsonSchema, Clone, derive_more::Debug, derive_more::PartialEq)]
 #[serde(deny_unknown_fields, untagged)]
-#[derivative(Debug, PartialEq)]
 pub(crate) enum SupergraphSelector {
     OperationName {
         /// The operation name from the query.
@@ -116,7 +114,8 @@ pub(crate) enum SupergraphSelector {
     ResponseData {
         /// The supergraph response body json path of the chunks.
         #[schemars(with = "String")]
-        #[derivative(Debug = "ignore", PartialEq = "ignore")]
+        #[debug(skip)]
+        #[partial_eq(skip)]
         #[serde(deserialize_with = "deserialize_jsonpath")]
         response_data: JsonPathInst,
         /// Optional default value.
@@ -125,7 +124,8 @@ pub(crate) enum SupergraphSelector {
     ResponseErrors {
         /// The supergraph response body json path of the chunks.
         #[schemars(with = "String")]
-        #[derivative(Debug = "ignore", PartialEq = "ignore")]
+        #[debug(skip)]
+        #[partial_eq(skip)]
         #[serde(deserialize_with = "deserialize_jsonpath")]
         response_errors: JsonPathInst,
         /// Optional default value.

@@ -991,7 +991,7 @@ impl FieldRoutingSearchSpace {
             self.push_entity_resolver_options(
                 &mut options,
                 type_pos.type_name(),
-                field_selection.field.name(),
+                &pending.selection,
             );
         }
 
@@ -1023,7 +1023,9 @@ impl FieldRoutingSearchSpace {
         // Under a shareable parent returning an inconsistent abstract type,
         // only intersection members may appear as fragment conditions —
         // others would make results depend on which subgraph resolved the
-        // parent.
+        // parent. A condition with no member in the intersection selects
+        // nothing, so it gets the type explosion, which drops it without
+        // counting a dropped field. With no option the site would be doomed.
         if let Some(filter) = &pending.narrowing.intersection_filter
             && let Some(type_cond) = &fragment_selection.inline_fragment.type_condition_position
         {
@@ -1031,7 +1033,7 @@ impl FieldRoutingSearchSpace {
                 .supergraph_schema
                 .possible_runtime_types(type_cond.clone())?;
             if cond_types.iter().all(|t| !filter.contains(&t.type_name)) {
-                return Ok(options);
+                return Ok(vec![RoutingChoice::TypeExplosion]);
             }
         }
 
@@ -1228,12 +1230,13 @@ impl FieldRoutingSearchSpace {
     }
 
     /// Append entity-resolver connector hops for a field no connector serves
-    /// directly.
+    /// directly. A resolver qualifies when it returns some of `selection`;
+    /// what it leaves out is routed again, so each hop makes progress.
     fn push_entity_resolver_options(
         &self,
         options: &mut Vec<RoutingChoice>,
         type_name: &Name,
-        field_name: &Name,
+        selection: &Selection,
     ) {
         // An implementation of an @interfaceObject can also be resolved
         // through the connectors on the interface, which the connector
@@ -1257,7 +1260,7 @@ impl FieldRoutingSearchSpace {
         for entry in &resolvers {
             if !self
                 .connector_index
-                .resolver_provides(&entry.coordinate, field_name.as_str())
+                .resolver_provides_any(&entry.coordinate, selection)
             {
                 continue;
             }
