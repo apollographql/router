@@ -8,16 +8,20 @@ use schemars::generate::SchemaSettings;
 use super::Configuration;
 pub(crate) use crate::configuration::upgrade::generate_upgrade;
 
+/// The settings the configuration schema is generated with: JSON Schema draft 2020-12, with
+/// named types kept as definitions under `$defs` rather than inlined.
+fn schema_settings() -> SchemaSettings {
+    SchemaSettings::draft2020_12().with(|s| {
+        s.inline_subschemas = false;
+    })
+}
+
 /// Generate a JSON schema for the configuration.
 pub(crate) fn generate_config_schema() -> Schema {
-    let settings = SchemaSettings::draft07().with(|s| {
-        s.inline_subschemas = false;
-    });
-
     // Manually patch up the schema
     // We don't want to allow unknown fields, but serde doesn't work if we put the annotation on Configuration as the struct has a flattened type.
     // It's fine to just add it here.
-    let generator = settings.into_generator();
+    let generator = schema_settings().into_generator();
     let mut schema = generator.into_root_schema_for::<Configuration>();
     schema.insert("additionalProperties".to_string(), false.into());
     schema
@@ -47,13 +51,20 @@ pub(crate) mod advertised_defaults {
     use serde_json::Value;
 
     use super::router_config_schema;
+    use super::schema_settings;
+
+    /// The generated schema's definition called `name`, wherever its dialect keeps definitions.
+    fn named_definition(name: &str) -> &'static Value {
+        let definitions = schema_settings().definitions_path;
+        router_config_schema()
+            .pointer(&format!("{definitions}/{name}"))
+            .unwrap_or_else(|| panic!("the schema has no {name} definition"))
+    }
 
     /// The `default` the generated schema advertises for `property` of `definition`.
     pub(crate) fn of_property(definition: &str, property: &str) -> Value {
-        router_config_schema()
-            .pointer(&format!(
-                "/definitions/{definition}/properties/{property}/default"
-            ))
+        named_definition(definition)
+            .pointer(&format!("/properties/{property}/default"))
             .cloned()
             .unwrap_or_else(|| panic!("{definition}.{property} advertises no default"))
     }
@@ -61,8 +72,8 @@ pub(crate) mod advertised_defaults {
     /// An object built from the `default` the generated schema advertises for every property of
     /// `definition`. Fails if any property advertises none.
     pub(crate) fn of_every_property(definition: &str) -> Value {
-        let properties = router_config_schema()
-            .pointer(&format!("/definitions/{definition}/properties"))
+        let properties = named_definition(definition)
+            .get("properties")
             .and_then(Value::as_object)
             .unwrap_or_else(|| panic!("{definition} declares no properties"));
         properties
