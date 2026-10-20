@@ -688,7 +688,7 @@ fn interpret_plan_node_for_matching_conditions(
     let mut response_defs = PossibleDefinitions::default();
     if let Some(type_cond) = normalized_type_cond
         .as_ref()
-        .filter(|type_cond| spans_several_state_conditions(state_defs, type_cond))
+        .filter(|type_cond| covered_only_in_parts(state_defs, type_cond))
     {
         // A merged fetch's path can carry the union of several branches'
         // conditions. Each branch keeps its own state, so interpret the node
@@ -741,23 +741,17 @@ fn interpret_plan_node_for_matching_conditions(
     Ok(response_defs)
 }
 
-/// Whether no single state condition covers `type_cond`, but several state
-/// conditions fall within it.
-fn spans_several_state_conditions(
+/// Whether no state condition covers `type_cond`, but some fall within it.
+fn covered_only_in_parts(
     state_defs: &PossibleDefinitions,
     type_cond: &NormalizedTypeCondition,
 ) -> bool {
-    if state_defs
+    !state_defs
         .iter()
         .any(|(state_cond, _)| type_cond.implies(state_cond))
-    {
-        return false;
-    }
-    state_defs
-        .iter()
-        .filter(|(state_cond, _)| state_cond.implies(type_cond))
-        .nth(1)
-        .is_some()
+        && state_defs
+            .iter()
+            .any(|(state_cond, _)| state_cond.implies(type_cond))
 }
 
 fn normalize_type_condition(
