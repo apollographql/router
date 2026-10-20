@@ -841,7 +841,8 @@ impl FetchGraph {
     /// offering extra candidate objects that the `requires` representations
     /// (still gated by `__typename`) reject. Without this, deeply nested
     /// polymorphic queries fragment into one fetch per concrete-type
-    /// combination.
+    /// combination. Siblings sending the same entity type from different
+    /// type conditions still stay apart (see `bucket_by_merge_compatibility`).
     ///
     /// Transitively dependent nodes are NOT merged — that would create
     /// cycles (multi-hop @requires chains can revisit a subgraph at
@@ -939,12 +940,16 @@ impl FetchGraph {
     /// incompatible when their selections assign different field signatures
     /// to the same response path (e.g. `value` vs `value(scale: 100)`) or
     /// when their input conditions disagree for the same source type — the
-    /// merged entity representation cannot satisfy both branches.
+    /// merged entity representation cannot satisfy both branches. Nodes
+    /// sending the same source type from differently conditioned paths are
+    /// also incompatible: the merged fetch would ask each of those entities
+    /// for the other branch's fields.
     fn bucket_by_merge_compatibility(&self, mergeable: Vec<NodeIndex>) -> Vec<Vec<NodeIndex>> {
         struct Bucket {
             signatures: HashMap<Vec<String>, String>,
             merge_at: Option<Vec<FetchDataPathElement>>,
             input_conditions: HashMap<Name, BTreeSet<String>>,
+            merge_at_by_source_type: HashMap<Name, Vec<FetchDataPathElement>>,
             nodes: Vec<NodeIndex>,
         }
         let mut buckets: Vec<Bucket> = Vec::new();
@@ -973,6 +978,10 @@ impl FetchGraph {
                         .input_conditions
                         .get(ty)
                         .is_none_or(|taken| taken == conditions)
+                        && bucket
+                            .merge_at_by_source_type
+                            .get(ty)
+                            .is_none_or(|taken| *taken == merge_at)
                 })
             }) {
                 Some(bucket) => {
@@ -981,6 +990,9 @@ impl FetchGraph {
                         bucket.merge_at = None;
                     }
                     for (ty, conditions) in input_conditions {
+                        bucket
+                            .merge_at_by_source_type
+                            .insert(ty.clone(), merge_at.clone());
                         bucket
                             .input_conditions
                             .entry(ty)
@@ -991,6 +1003,10 @@ impl FetchGraph {
                 }
                 None => buckets.push(Bucket {
                     signatures,
+                    merge_at_by_source_type: input_conditions
+                        .keys()
+                        .map(|ty| (ty.clone(), merge_at.clone()))
+                        .collect(),
                     merge_at: Some(merge_at),
                     input_conditions,
                     nodes: vec![n],

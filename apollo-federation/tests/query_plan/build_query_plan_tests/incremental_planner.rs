@@ -3021,6 +3021,127 @@ fn inc_partial_overlap_explodes_abstract_type() {
     );
 }
 
+/// Entity fetches reached through different union members that select
+/// different fields stay separate, so each product is only asked for the
+/// field selected under its own member.
+#[test]
+fn inc_union_member_entity_fetches_stay_type_conditioned() {
+    let planner = planner!(
+        config = incremental_config(),
+        card: r#"
+          type Query {
+            card: Card
+          }
+
+          type Card @key(fields: "id") {
+            id: ID!
+            components: [Component]
+          }
+
+          type Product @key(fields: "id") {
+            id: ID!
+          }
+
+          union Component = ComponentA | ComponentB
+
+          type ComponentA {
+            product: Product
+          }
+
+          type ComponentB {
+            product: Product
+          }
+        "#,
+        product: r#"
+          type Product @key(fields: "id") {
+            id: ID!
+            a: String!
+            b: String!
+          }
+        "#,
+    );
+    assert_plan!(
+        &planner,
+        r#"
+          {
+            card {
+              components {
+                ... on ComponentA {
+                  product {
+                    a
+                  }
+                }
+                ... on ComponentB {
+                  product {
+                    b
+                  }
+                }
+              }
+            }
+          }
+        "#,
+        @r###"
+        QueryPlan {
+          Sequence {
+            Fetch(service: "card") {
+              {
+                card {
+                  components {
+                    __typename
+                    ... on ComponentA {
+                      product {
+                        __typename
+                        id
+                      }
+                    }
+                    ... on ComponentB {
+                      product {
+                        __typename
+                        id
+                      }
+                    }
+                  }
+                }
+              }
+            },
+            Parallel {
+              Flatten(path: "card.components.@|[ComponentB].product") {
+                Fetch(service: "product") {
+                  {
+                    ... on Product {
+                      __typename
+                      id
+                    }
+                  } =>
+                  {
+                    ... on Product {
+                      b
+                    }
+                  }
+                },
+              },
+              Flatten(path: "card.components.@|[ComponentA].product") {
+                Fetch(service: "product") {
+                  {
+                    ... on Product {
+                      __typename
+                      id
+                    }
+                  } =>
+                  {
+                    ... on Product {
+                      a
+                    }
+                  }
+                },
+              },
+            },
+          },
+        }
+        "###
+    );
+}
+
 // ---------------------------------------------------------------------------
 // @defer: a deferred named fragment spread whose fields live in another
 // subgraph. The primary block stays a single root fetch, the deferred block
