@@ -11,7 +11,6 @@ use apollo_compiler::ExecutableDocument;
 use apollo_compiler::Name;
 use apollo_compiler::executable;
 use apollo_compiler::schema::ExtendedType;
-use derivative::Derivative;
 use indexmap::IndexSet;
 use serde::Deserialize;
 use serde::Serialize;
@@ -59,29 +58,20 @@ pub(crate) const ERROR_CODE_RESPONSE_VALIDATION: &str = "RESPONSE_VALIDATION_FAI
 pub(crate) const EXTENSIONS_VALUE_COMPLETION_KEY: &str = "valueCompletion";
 
 /// A GraphQL query.
-#[derive(Derivative, Serialize, Deserialize)]
-#[derivative(PartialEq, Hash, Eq, Debug)]
+#[derive(Debug, Serialize, Deserialize)]
 pub(crate) struct Query {
     pub(crate) string: String,
-    #[derivative(PartialEq = "ignore", Hash = "ignore")]
     pub(crate) fragments: Fragments,
-    #[derivative(PartialEq = "ignore", Hash = "ignore")]
     pub(crate) operation: Operation,
-    #[derivative(PartialEq = "ignore", Hash = "ignore")]
     pub(crate) subselections: HashMap<SubSelectionKey, SubSelectionValue>,
-    #[derivative(PartialEq = "ignore", Hash = "ignore")]
     pub(crate) unauthorized: UnauthorizedPaths,
-    #[derivative(PartialEq = "ignore", Hash = "ignore")]
     pub(crate) filtered_query: Option<Arc<Query>>,
-    #[derivative(PartialEq = "ignore", Hash = "ignore")]
     pub(crate) defer_stats: DeferStats,
-    #[derivative(PartialEq = "ignore", Hash = "ignore")]
     pub(crate) is_original: bool,
 
     /// This is a hash that depends on:
     /// - the query itself
     /// - the schema
-    #[derivative(PartialEq = "ignore", Hash = "ignore")]
     pub(crate) schema_aware_hash: QueryHash,
 }
 

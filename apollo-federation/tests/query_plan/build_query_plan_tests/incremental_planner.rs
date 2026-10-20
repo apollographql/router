@@ -5752,3 +5752,101 @@ fn inc_fragment_outside_every_route_is_dropped() {
     "###
     );
 }
+
+// s2's key needs k2, which only s2 has, so every route into s2 needs a route into s2 first. Key
+// conditions on that cycle used to nest down to the condition depth limit, branching at each
+// level, and planning ran out of memory. The final s1 hop through the `k3` key is redundant, but
+// the planner picks it with or without s2.
+#[test]
+fn inc_key_condition_cycle_does_not_recurse_to_the_depth_limit() {
+    let planner = planner!(
+        config = incremental_config(),
+        s0: r#"
+          type Query { t: T }
+          type T @key(fields: "k4") { k4: ID! @shareable k1: ID! @shareable }
+        "#,
+        s1: r#"
+          type T @key(fields: "k3") @key(fields: "f { a }") { k3: ID! @shareable f: U @shareable }
+          type U { a: Int @shareable }
+        "#,
+        s2: r#"
+          type T @key(fields: "k1 k2") {
+            k1: ID! @shareable
+            k2: ID! @shareable @inaccessible
+            k4: ID! @shareable
+          }
+        "#,
+        s3: r#"
+          type T @key(fields: "k4") { k4: ID! @shareable f: U @shareable }
+          type U { a: Int @shareable }
+        "#,
+    );
+    assert_plan!(
+        &planner,
+        "{ t { k3 } }",
+        @r###"
+    QueryPlan {
+      Sequence {
+        Fetch(service: "s0") {
+          {
+            t {
+              __typename
+              k4
+            }
+          }
+        },
+        Flatten(path: "t") {
+          Fetch(service: "s3") {
+            {
+              ... on T {
+                __typename
+                k4
+              }
+            } =>
+            {
+              ... on T {
+                __typename
+                f {
+                  a
+                }
+              }
+            }
+          },
+        },
+        Flatten(path: "t") {
+          Fetch(service: "s1") {
+            {
+              ... on T {
+                __typename
+                f {
+                  a
+                }
+              }
+            } =>
+            {
+              ... on T {
+                k3
+              }
+            }
+          },
+        },
+        Flatten(path: "t") {
+          Fetch(service: "s1") {
+            {
+              ... on T {
+                __typename
+                k3
+              }
+            } =>
+            {
+              ... on T {
+                k3
+              }
+            }
+          },
+        },
+      },
+    }
+    "###
+    );
+}

@@ -2,7 +2,6 @@ use std::path::PathBuf;
 use std::pin::Pin;
 use std::time::Duration;
 
-use derivative::Derivative;
 use derive_more::Display;
 use derive_more::From;
 use futures::prelude::*;
@@ -21,8 +20,7 @@ use crate::uplink::stream_from_uplink;
 type SchemaStream = Pin<Box<dyn Stream<Item = String> + Send>>;
 
 /// The user supplied schema. Either a static string or a stream for hot reloading.
-#[derive(From, Display, Derivative)]
-#[derivative(Debug)]
+#[derive(From, Display, derive_more::Debug)]
 #[non_exhaustive]
 pub enum SchemaSource {
     /// A static schema.
@@ -31,7 +29,7 @@ pub enum SchemaSource {
 
     /// A stream of schema.
     #[display("Stream")]
-    Stream(#[derivative(Debug = "ignore")] SchemaStream),
+    Stream(#[debug(skip)] SchemaStream),
 
     /// A YAML file that may be watched for changes.
     #[display("File")]

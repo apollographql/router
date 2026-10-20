@@ -1201,7 +1201,6 @@ fn all_subgraphs_disabled_root_typename_fails_planning() {
 
 use apollo_compiler::name;
 
-use super::state::ConditionScope;
 use super::test_support;
 use super::*;
 
@@ -1240,12 +1239,11 @@ fn t_pending(
         .next()
         .expect("field selection")
         .clone();
-    let mut pending = PendingSelection::root(field_sel, t_node(space, "a"), fetch_node);
-    pending.condition = dependent.map(|dependent| ConditionScope {
-        dependent,
-        depth: 1,
-    });
-    pending
+    let pending = PendingSelection::root(field_sel, t_node(space, "a"), fetch_node);
+    match dependent {
+        Some(dependent) => pending.into_condition_for(dependent),
+        None => pending,
+    }
 }
 
 /// The search enumerates options through cached_routing_options, so a fork
