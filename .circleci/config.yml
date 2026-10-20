@@ -521,9 +521,6 @@ jobs:
       coverage:
         type: boolean
         default: false
-      tracing_unstable:
-        type: boolean
-        default: false
     executor: << parameters.platform >>
     steps:
       - checkout
@@ -532,12 +529,12 @@ jobs:
       - xtask_test
       # Native plugin builds may set `--cfg tracing_unstable`, which compiles code paths (such as
       # structured `valuable` log fields) that the default build excludes. Exercise them on one
-      # platform, since changing RUSTFLAGS forces a full rebuild.
+      # platform, since changing RUSTFLAGS forces a full rebuild. Don't gate this on a job
+      # parameter: if workflows expanded `test-amd_linux_test` differently, CircleCI would rename
+      # one of them `test-amd_linux_test-1`, and the required status check would never report.
       - when:
           condition:
-            and:
-              - equal: [true, << parameters.tracing_unstable >>]
-              - equal: [*amd_linux_test_executor, << parameters.platform >>]
+            equal: [*amd_linux_test_executor, << parameters.platform >>]
           steps:
             - run:
                 name: Run tracing_unstable telemetry tests
@@ -1153,7 +1150,6 @@ workflows:
       - test:
           # this should be changed back to true on dev after release
           fuzz: false
-          tracing_unstable: true
           requires:
             - fmt_check
           matrix:
@@ -1195,7 +1191,6 @@ workflows:
             parameters:
               platform: [amd_linux_build]
       - test:
-          tracing_unstable: true
           requires:
             - lint
           matrix:
