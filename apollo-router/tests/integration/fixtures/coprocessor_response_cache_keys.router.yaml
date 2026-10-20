@@ -15,7 +15,7 @@ response_cache:
         ttl: 60s
 
 coprocessor:
-  url: "<replace>"
+  url: "${env.TEST_CONFIG_COPROCESSOR_URL}"
   supergraph:
     response:
       body: true
