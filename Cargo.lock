@@ -198,9 +198,9 @@ dependencies = [
 
 [[package]]
 name = "apollo-configuration"
-version = "0.8.0"
+version = "0.9.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "461999f6a3d8916d83490c985c1ac50fb42a9944f0cd0f18e732e34792349670"
+checksum = "910ca9d18c0f9a69f9c35dffc3989ee26b0eb5544327fb82f441db3b96cbd310"
 dependencies = [
  "apollo-configuration-macros",
  "apollo-errors",
@@ -212,36 +212,8 @@ dependencies = [
  "miette",
  "referencing 0.58.6",
  "regex",
- "saphyr 0.1.0",
- "saphyr-parser 0.1.0",
- "schemars",
- "serde",
- "serde_json",
- "serde_path_to_error",
- "serde_yaml 0.9.34+deprecated",
- "shellexpand",
- "tonic",
- "url",
-]
-
-[[package]]
-name = "apollo-configuration"
-version = "0.9.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "910ca9d18c0f9a69f9c35dffc3989ee26b0eb5544327fb82f441db3b96cbd310"
-dependencies = [
- "apollo-configuration-macros",
- "apollo-errors",
- "apollo-redaction",
- "derive_more",
- "http 1.5.0",
- "humantime-serde",
- "jsonschema",
- "miette",
- "referencing",
- "regex",
- "saphyr 0.2.2",
- "saphyr-parser 0.2.2",
+ "saphyr",
+ "saphyr-parser",
  "schemars",
  "serde",
  "serde_json",
@@ -370,11 +342,11 @@ dependencies = [
 
 [[package]]
 name = "apollo-opentelemetry"
-version = "0.12.1"
+version = "0.12.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "c5bf81a82af450cc607742809bad56453430ba8e235b26a79293571e36472b2f"
+checksum = "3fda389ca9c02364c5afd51f75642434ed203dd7d4b08ca72396a8f755190f8d"
 dependencies = [
- "apollo-configuration 0.8.0",
+ "apollo-configuration",
  "apollo-errors",
  "apollo-opentelemetry-macros",
  "apollo-opentelemetry-stdout",
@@ -406,9 +378,9 @@ dependencies = [
 
 [[package]]
 name = "apollo-opentelemetry-macros"
-version = "0.4.1"
+version = "0.4.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "3cf699ecf4a17c7a00e7a60be56e1f82c726a8659a013488853e9da19338fa82"
+checksum = "40d2a4bf6b99bd690d2e705da27d8d83f22be1205dfdf2a1f309fbd825522a55"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -441,11 +413,11 @@ dependencies = [
 
 [[package]]
 name = "apollo-qos"
-version = "0.10.1"
+version = "0.10.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "76c698bdc7b5740d472eff0125e72e2f1c635ab72eb13d44c2bdc1b92503177b"
+checksum = "7c7ef1803b3e6340e4e49aafef365f6c5ed9c2a9ed1539aff06563cd9ae8c63d"
 dependencies = [
- "apollo-configuration 0.8.0",
+ "apollo-configuration",
  "apollo-errors",
  "apollo-opentelemetry",
  "bytes",
@@ -480,7 +452,7 @@ dependencies = [
  "ahash",
  "anyhow",
  "apollo-compiler",
- "apollo-configuration 0.9.0",
+ "apollo-configuration",
  "apollo-environment-detector",
  "apollo-federation",
  "apollo-qos",
@@ -766,7 +738,7 @@ name = "async-allow-client-id"
 version = "0.1.0"
 dependencies = [
  "anyhow",
- "apollo-configuration 0.9.0",
+ "apollo-configuration",
  "apollo-router",
  "async-trait",
  "http 1.5.0",
@@ -2850,7 +2822,7 @@ name = "external-subgraph"
 version = "0.1.0"
 dependencies = [
  "anyhow",
- "apollo-configuration 0.9.0",
+ "apollo-configuration",
  "apollo-router",
  "async-trait",
  "bytes",
@@ -3622,7 +3594,7 @@ name = "hello-world"
 version = "0.1.0"
 dependencies = [
  "anyhow",
- "apollo-configuration 0.9.0",
+ "apollo-configuration",
  "apollo-router",
  "async-trait",
  "serde",
@@ -5953,7 +5925,7 @@ name = "propagate-status-code"
 version = "0.1.0"
 dependencies = [
  "anyhow",
- "apollo-configuration 0.9.0",
+ "apollo-configuration",
  "apollo-router",
  "async-trait",
  "http 1.5.0",
@@ -6974,19 +6946,6 @@ dependencies = [
 
 [[package]]
 name = "saphyr"
-version = "0.1.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "79830a82cc4eeea33aa46346f910d7cc1e576249a6fbe2fefab6ba89eba8a203"
-dependencies = [
- "encoding_rs 0.7.2",
- "hashlink",
- "ordered-float",
- "saphyr-parser 0.1.0",
- "thiserror 2.0.21",
-]
-
-[[package]]
-name = "saphyr"
 version = "0.2.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "0662b098655e5e779a80041b640702e341cf3ede4560ecc103cf0ef098c8e33e"
@@ -6994,17 +6953,7 @@ dependencies = [
  "encoding_rs 0.7.2",
  "hashlink",
  "ordered-float",
- "saphyr-parser 0.2.2",
- "thiserror 2.0.21",
-]
-
-[[package]]
-name = "saphyr-parser"
-version = "0.1.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "7429158804c36e705d9423b7848018e535b3e92d439a763e364ee12670ef473b"
-dependencies = [
- "arraydeque",
+ "saphyr-parser",
  "thiserror 2.0.21",
 ]
 
