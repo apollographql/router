@@ -5893,6 +5893,8 @@ fn inc_multi_parent_fetch_does_not_wait_for_unrelated_branch() {
         "#,
     );
 
+    // validate_correctness = false: the correctness checker does not follow
+    // aliased @requires inputs (`__require_0_c: c`), so it rejects this plan.
     assert_plan!(
         validate_correctness = false,
         &planner,
@@ -6069,6 +6071,8 @@ fn inc_private_chain_nests_under_its_fetch_until_the_shared_level() {
         "#,
     );
 
+    // validate_correctness = false: the correctness checker does not follow
+    // aliased @requires inputs (`__require_0_c: c`), so it rejects this plan.
     assert_plan!(
         validate_correctness = false,
         &planner,

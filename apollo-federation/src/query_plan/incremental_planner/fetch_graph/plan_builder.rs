@@ -103,9 +103,9 @@ fn stamp_fetch_id(plan_node: &mut PlanNode, id: u64) {
     }
 }
 
-/// Which front fetch's branch a fetch belongs to: the one front fetch it
-/// depends on (by position in the front), or none when it depends on
-/// several.
+/// Which wavefront fetch's branch a fetch belongs to: the one wavefront
+/// fetch it depends on (by position in the wavefront), or none when it
+/// depends on several.
 #[derive(Clone, Copy, PartialEq)]
 enum BranchAssignment {
     Branch(usize),
@@ -490,9 +490,9 @@ impl FetchGraph {
         Ok(reduce_parallel(parallel))
     }
 
-    /// Run a connected part's lowest-level fetches, each followed by its
-    /// branch, then plan the rest after them all. See `assign_branches` for
-    /// which fetches go in a branch.
+    /// Run a connected part's wavefront (its lowest-level fetches), each
+    /// followed by its branch, then plan the rest after them all. See
+    /// `assign_branches` for which fetches go in a branch.
     fn plan_component(
         &self,
         ctx: &mut PlanBuildContext<'_>,
@@ -501,20 +501,20 @@ impl FetchGraph {
         scope: &PlanScope<'_>,
         cost: &mut QueryPlanCost,
     ) -> Result<Option<PlanNode>, FederationError> {
-        let front_level = component
+        let wavefront_level = component
             .iter()
             .map(|node| levels[node])
             .min()
             .unwrap_or_default();
-        let (front, rest): (Vec<NodeIndex>, Vec<NodeIndex>) = component
+        let (wavefront, rest): (Vec<NodeIndex>, Vec<NodeIndex>) = component
             .iter()
-            .partition(|node| levels[*node] == front_level);
-        let (branches, after) = self.assign_branches(&front, &rest, levels);
+            .partition(|node| levels[*node] == wavefront_level);
+        let (branches, after) = self.assign_branches(&wavefront, &rest, levels);
 
         let mut parallel = Vec::new();
-        for (&front_node, branch) in front.iter().zip(&branches) {
+        for (&wavefront_node, branch) in wavefront.iter().zip(&branches) {
             let mut sequence = Vec::new();
-            if let Some(plan_node) = self.materialize(ctx, front_node, scope, cost)? {
+            if let Some(plan_node) = self.materialize(ctx, wavefront_node, scope, cost)? {
                 push_into_sequence(&mut sequence, plan_node);
             }
             if let Some(plan_node) = self.plan_by_level(ctx, branch, levels, scope, cost)? {
@@ -535,23 +535,26 @@ impl FetchGraph {
         Ok(reduce_sequence(sequence))
     }
 
-    /// Split a connected part's non-front fetches into one branch per front
-    /// fetch plus the fetches that run after every branch. A fetch goes in a
-    /// front fetch's branch when that is the only front fetch it depends on,
-    /// so it can start as soon as that fetch is done instead of waiting for
-    /// its siblings. Branches stop below the level of the first fetch that
-    /// depends on several front fetches. Anything deeper would delay the
-    /// join that fetch waits on, so it runs after the join instead.
+    /// Assign each fetch after the wavefront to the branch of the one
+    /// wavefront fetch it depends on, or run it after every branch.
+    ///
+    /// ```text
+    /// fetches:  w1 -> p1 -> p2    w2 -> q1    p1, q1 -> s
+    /// plan:     Parallel(w1 -> p1, w2 -> q1) -> Parallel(s, p2)
+    /// ```
+    ///
+    /// `s` needs both wavefront fetches, so it is shared. Branches stop
+    /// below its level, so `p2` waits for the join rather than delaying it.
     fn assign_branches(
         &self,
-        front: &[NodeIndex],
+        wavefront: &[NodeIndex],
         rest: &[NodeIndex],
         levels: &HashMap<NodeIndex, u32>,
     ) -> (Vec<Vec<NodeIndex>>, Vec<NodeIndex>) {
         // `rest` is in dependency order, so a fetch's parents in the part
         // are assigned before it is. Parents outside the part are already
         // done and do not constrain it.
-        let mut assignments: HashMap<NodeIndex, BranchAssignment> = front
+        let mut assignments: HashMap<NodeIndex, BranchAssignment> = wavefront
             .iter()
             .enumerate()
             .map(|(i, node)| (*node, BranchAssignment::Branch(i)))
@@ -576,7 +579,7 @@ impl FetchGraph {
             .filter(|node| assignments[*node] == BranchAssignment::Shared)
             .map(|node| levels[node])
             .min();
-        let mut branches = vec![Vec::new(); front.len()];
+        let mut branches = vec![Vec::new(); wavefront.len()];
         let mut after = Vec::new();
         for &node in rest {
             match assignments[&node] {
