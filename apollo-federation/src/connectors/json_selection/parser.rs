@@ -1,4 +1,3 @@
-use std::cell::Cell;
 use std::fmt::Display;
 use std::hash::Hash;
 use std::str::FromStr;
@@ -26,13 +25,14 @@ use super::helpers::spaces_or_comments;
 use super::helpers::vec_push;
 use super::known_var::KnownVariable;
 use super::lit_expr::LitExpr;
+use super::location::DepthCounter;
 use super::location::OffsetRange;
 use super::location::Ranged;
 use super::location::Span;
 use super::location::SpanExtra;
 use super::location::WithRange;
 use super::location::merge_ranges;
-use super::location::new_span_with_spec;
+use super::location::new_span_with_depth;
 use super::location::ranged_span;
 use crate::connectors::ConnectSpec;
 use crate::connectors::Namespace;
@@ -101,43 +101,33 @@ const DEFAULT_RECURSION_LIMIT: usize = 32;
 
 const RECURSION_LIMIT_MESSAGE: &str = "Selection nested too deeply";
 
-thread_local! {
-    // Kept per thread rather than on SpanExtra, because spans are cloned
-    // constantly while parsing and a shared counter there made every clone
-    // pay for a reference count. Parsing never yields, so one parse owns the
-    // thread's counter until it returns, and the depth drops back to zero as
-    // guards drop, including on errors and unwinding.
-    static DEPTH: Cell<usize> = const { Cell::new(0) };
-}
+/// Decrements the parse's depth when dropped.
+pub(super) struct DepthGuard<'a>(&'a DepthCounter);
 
-/// Decrements the depth when dropped.
-pub(super) struct DepthGuard(());
-
-impl DepthGuard {
+impl<'a> DepthGuard<'a> {
     /// Marks that the parser is recursing, failing once the limit is reached.
-    pub(super) fn increment<'a>(
+    pub(super) fn increment(
         input: &Span<'a>,
     ) -> Result<Self, nom::Err<nom::error::Error<Span<'a>>>> {
-        DEPTH.with(|depth| {
-            if depth.get() >= DEFAULT_RECURSION_LIMIT {
-                return Err(
-                    nom_fail_message(input.clone(), RECURSION_LIMIT_MESSAGE).map(|error| {
-                        nom::error::Error {
-                            code: nom::error::ErrorKind::TooLarge,
-                            ..error
-                        }
-                    }),
-                );
-            }
-            depth.set(depth.get() + 1);
-            Ok(Self(()))
-        })
+        let depth = input.extra.depth;
+        if depth.0.get() >= DEFAULT_RECURSION_LIMIT {
+            return Err(
+                nom_fail_message(input.clone(), RECURSION_LIMIT_MESSAGE).map(|error| {
+                    nom::error::Error {
+                        code: nom::error::ErrorKind::TooLarge,
+                        ..error
+                    }
+                }),
+            );
+        }
+        depth.0.set(depth.0.get() + 1);
+        Ok(Self(depth))
     }
 }
 
-impl Drop for DepthGuard {
+impl Drop for DepthGuard<'_> {
     fn drop(&mut self) {
-        DEPTH.with(|depth| depth.set(depth.get() - 1));
+        self.0.0.set(self.0.0.get() - 1);
     }
 }
 
@@ -325,7 +315,8 @@ impl JSONSelection {
         input: &str,
         spec: ConnectSpec,
     ) -> Result<Self, JSONSelectionParseError> {
-        let span = new_span_with_spec(input, spec);
+        let depth = DepthCounter::default();
+        let span = new_span_with_depth(input, spec, &depth);
 
         match JSONSelection::parse_span(span) {
             Ok((remainder, selection)) => {
@@ -345,8 +336,8 @@ impl JSONSelection {
                     // Use offset and fragment from first error if available
                     let (error_offset, error_fragment) =
                         if let Some((_, first_error_offset)) = remainder.extra.errors.first() {
-                            let error_span =
-                                new_span_with_spec(input, spec).take_from(*first_error_offset);
+                            let error_span = new_span_with_depth(input, spec, &depth)
+                                .take_from(*first_error_offset);
                             (
                                 error_span.location_offset(),
                                 error_span.fragment().to_string(),
@@ -2101,8 +2092,9 @@ impl Display for Key {
 
 pub(super) fn is_identifier(input: &str) -> bool {
     // TODO Don't use the whole parser for this?
+    let depth = DepthCounter::default();
     all_consuming(parse_identifier_no_space)
-        .parse(new_span_with_spec(input, ConnectSpec::latest()))
+        .parse(new_span_with_depth(input, ConnectSpec::latest(), &depth))
         .is_ok()
 }
 
@@ -2279,6 +2271,7 @@ mod tests {
     use crate::connectors::json_selection::lit_expr::KEYWORD_PREFIXED_KEYS;
     use crate::connectors::json_selection::lit_expr::NUMBER_ROOTED_PATHS;
     use crate::connectors::json_selection::location::new_span;
+    use crate::connectors::json_selection::location::new_span_with_spec;
     use crate::selection;
 
     #[test]
@@ -3301,6 +3294,7 @@ mod tests {
                             spec,
                             errors: vec![(expected_message, expected_offset)],
                             local_vars: Vec::new(),
+                            depth: &DepthCounter::default(),
                         }
                     );
                 }
@@ -5374,16 +5368,5 @@ mod tests {
                 deepest + 1,
             );
         }
-    }
-
-    #[test]
-    fn reaching_the_limit_does_not_affect_the_next_parse() {
-        let deep = nested(NESTINGS[0], 300);
-        let shallow = nested(NESTINGS[0], 5);
-        on_default_stack(move || {
-            JSONSelection::parse(&deep).expect_err("deep nesting should be rejected");
-            assert_eq!(DEPTH.with(Cell::get), 0);
-            JSONSelection::parse(&shallow).expect("the next parse should start from zero");
-        });
     }
 }
