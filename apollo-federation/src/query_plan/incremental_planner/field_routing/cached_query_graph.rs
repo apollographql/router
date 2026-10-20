@@ -12,6 +12,7 @@ use petgraph::graph::EdgeIndex;
 use petgraph::graph::NodeIndex;
 use petgraph::visit::EdgeRef;
 
+use crate::error::FederationError;
 use crate::operation::Field;
 use crate::operation::InlineFragment;
 use crate::operation::SelectionSet;
@@ -74,9 +75,9 @@ impl CachedQueryGraph {
     /// Key-resolution edges out of `node` into other nodes, in edge order.
     /// Chained key-hop search walks these for every field it routes, and
     /// scanning all of a node's out edges for them each time dominated it.
-    pub(super) fn key_exits(&self, node: NodeIndex) -> Arc<[KeyExit]> {
+    pub(super) fn key_exits(&self, node: NodeIndex) -> Result<Arc<[KeyExit]>, FederationError> {
         if let Some(cached) = self.key_exits.borrow().get(&node) {
-            return cached.clone();
+            return Ok(cached.clone());
         }
         let exits: Arc<[KeyExit]> = self
             .query_graph
@@ -88,19 +89,19 @@ impl CachedQueryGraph {
                     QueryGraphEdgeTransition::KeyResolution
                 )
             })
-            .filter_map(|edge| {
+            .map(|edge| {
                 let target = edge.target();
-                let source = &self.query_graph.node_weight(target).ok()?.source;
-                Some(KeyExit {
+                let source = &self.query_graph.node_weight(target)?.source;
+                Ok(KeyExit {
                     target,
                     subgraph: self.subgraph_index(source),
                     subgraph_name: source.clone(),
                     conditions: edge.weight().conditions.clone(),
                 })
             })
-            .collect();
+            .collect::<Result<_, FederationError>>()?;
         self.key_exits.borrow_mut().insert(node, exits.clone());
-        exits
+        Ok(exits)
     }
 
     /// Cached lookup: which edge from `node` resolves `field`?
