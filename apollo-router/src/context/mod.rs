@@ -11,7 +11,6 @@ use apollo_compiler::validation::Valid;
 use dashmap::DashMap;
 use dashmap::mapref::multiple::RefMulti;
 use dashmap::mapref::multiple::RefMutMulti;
-use derivative::Derivative;
 use extensions::sync::ExtensionsMutex;
 use serde::Deserialize;
 use serde::Serialize;
@@ -63,9 +62,8 @@ pub(crate) type Entries = Arc<DashMap<String, Value>>;
 /// [`crate::services::SubgraphResponse`] processing. At such times,
 /// plugins should restrict themselves to the [`Context::get`] and [`Context::upsert`]
 /// functions to minimise the possibility of mis-sequenced updates.
-#[derive(Clone, Deserialize, Serialize, Derivative)]
+#[derive(Clone, Deserialize, Serialize, derive_more::Debug)]
 #[serde(default)]
-#[derivative(Debug)]
 pub struct Context {
     // Allows adding custom entries to the context.
     entries: Entries,

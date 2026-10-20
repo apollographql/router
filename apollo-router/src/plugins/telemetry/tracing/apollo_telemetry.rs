@@ -7,7 +7,6 @@ use std::time::SystemTime;
 
 use base64::Engine as _;
 use base64::prelude::BASE64_STANDARD;
-use derivative::Derivative;
 use lru::LruCache;
 use opentelemetry::Key;
 use opentelemetry::Value;
@@ -252,13 +251,12 @@ impl LightSpanData {
 ///
 /// [`SpanExporter`]: super::SpanExporter
 /// [`Reporter`]: crate::plugins::telemetry::Reporter
-#[derive(Derivative)]
-#[derivative(Debug)]
+#[derive(derive_more::Debug)]
 pub(crate) struct Exporter {
     span_cache: Mutex<SpanCache>,
     /// An externally updateable gauge for "apollo.router.exporter.span.lru.size".
     span_lru_size_instrument: LruSizeInstrument,
-    #[derivative(Debug = "ignore")]
+    #[debug(skip)]
     otlp_exporter: ApolloOtlpExporter,
     include_attr_names: HashSet<Key>,
     include_attr_event_names: HashSet<Key>,

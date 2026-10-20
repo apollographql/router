@@ -1,4 +1,3 @@
-use derivative::Derivative;
 use http_body::Body;
 use schemars::JsonSchema;
 use serde::Deserialize;
@@ -47,9 +46,8 @@ impl From<&RouterValue> for InstrumentValue<RouterSelector> {
     }
 }
 
-#[derive(Derivative, Deserialize, JsonSchema, Clone)]
+#[derive(derive_more::Debug, derive_more::PartialEq, Deserialize, JsonSchema, Clone)]
 #[serde(deny_unknown_fields, untagged)]
-#[derivative(Debug, PartialEq)]
 pub(crate) enum RouterSelector {
     /// A value from baggage.
     Baggage {
@@ -113,7 +111,8 @@ pub(crate) enum RouterSelector {
     ResponseErrors {
         /// The router response body json path of the chunks.
         #[schemars(with = "String")]
-        #[derivative(Debug = "ignore", PartialEq = "ignore")]
+        #[debug(skip)]
+        #[partial_eq(skip)]
         #[serde(deserialize_with = "deserialize_jsonpath")]
         response_errors: JsonPathInst,
     },
@@ -121,7 +120,8 @@ pub(crate) enum RouterSelector {
     ResponseErrorsCount {
         /// JSONPath filter for response errors. Use "$[*]" to count all errors.
         #[schemars(with = "String")]
-        #[derivative(Debug = "ignore", PartialEq = "ignore")]
+        #[debug(skip)]
+        #[partial_eq(skip)]
         #[serde(deserialize_with = "deserialize_jsonpath")]
         response_errors_count: JsonPathInst,
     },
@@ -129,7 +129,8 @@ pub(crate) enum RouterSelector {
     ResponseErrorsField {
         /// JSONPath to extract from each error. E.g., "$.message" or "$.extensions.code"
         #[schemars(with = "String")]
-        #[derivative(Debug = "ignore", PartialEq = "ignore")]
+        #[debug(skip)]
+        #[partial_eq(skip)]
         #[serde(deserialize_with = "deserialize_jsonpath")]
         response_errors_field: JsonPathInst,
     },
