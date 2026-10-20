@@ -500,7 +500,6 @@ impl IntegrationTest {
             &current_config,
             &self._subgraph_overrides,
             &self._apollo_otlp_server.uri().to_string(),
-            None, // Don't override bind address here
             &self.redis_namespace,
             Some(&self.port_replacements),
         );
@@ -850,7 +849,6 @@ impl IntegrationTest {
             &config,
             &subgraph_overrides,
             &apollo_otlp_endpoint,
-            None,
             &redis_namespace,
             None,
         );
@@ -1329,7 +1327,6 @@ impl IntegrationTest {
             yaml,
             &self._subgraph_overrides,
             &self._apollo_otlp_server.uri().to_string(),
-            None,
             &self.redis_namespace,
             Some(&self.port_replacements),
         );
@@ -2330,13 +2327,11 @@ fn merge_overrides(
     yaml: &str,
     subgraph_overrides: &HashMap<String, String>,
     apollo_otlp_endpoint: &str,
-    bind_addr: Option<SocketAddr>,
     redis_namespace: &str,
     port_replacements: Option<&HashMap<String, u16>>,
 ) -> Value {
-    let bind_addr = bind_addr
-        .map(|a| a.to_string())
-        .unwrap_or_else(|| "127.0.0.1:0".into());
+    /// Any free port, so concurrent tests don't collide.
+    const HARNESS_LISTEN_ADDRESS: &str = "127.0.0.1:0";
 
     // Apply port replacements to the YAML string first
     let mut yaml_with_ports = yaml.to_string();
@@ -2392,8 +2387,9 @@ fn merge_overrides(
         }
     }
 
-    // Override the listening address always since we spawn the router on a
-    // random port. However, don't override Unix socket paths.
+    // Listen on a random port unless the config chooses its own address.
+    // Tests find the address the router actually bound from its startup log
+    // (see `bind_address`), so either way they reach the right listener.
     //
     // Also inject a bounded `connection_shutdown_timeout` default for every
     // integration test. The production default is 60 s (see
@@ -2431,53 +2427,24 @@ fn merge_overrides(
     // small_connection_shutdown_timeout tests that exercise the feature
     // itself) keep their configured value.
     const HARNESS_CONNECTION_SHUTDOWN_TIMEOUT: &str = "5s";
-    match config
+    let supergraph_conf = config
         .as_object_mut()
-        .and_then(|o| o.get_mut("supergraph"))
-        .and_then(|o| o.as_object_mut())
-    {
-        None => {
-            if let Some(o) = config.as_object_mut() {
-                o.insert(
-                    "supergraph".to_string(),
-                    serde_json::json!({
-                        "listen": bind_addr.to_string(),
-                        "connection_shutdown_timeout": HARNESS_CONNECTION_SHUTDOWN_TIMEOUT,
-                    }),
-                );
-            }
-        }
-        Some(supergraph_conf) => {
-            // check if the listen address is a Unix socket path (ie, starts with /)
-            let is_unix_socket = supergraph_conf
-                .get("listen")
-                .and_then(|v| v.as_str())
-                .map(|s| s.starts_with('/'))
-                .unwrap_or(false);
+        .expect("config should be an object")
+        .entry("supergraph")
+        .or_insert_with(|| json!({}))
+        .as_object_mut()
+        .expect("supergraph config should be an object");
+    let supergraph_listen = supergraph_conf
+        .entry("listen")
+        .or_insert_with(|| HARNESS_LISTEN_ADDRESS.into())
+        .clone();
+    supergraph_conf
+        .entry("connection_shutdown_timeout")
+        .or_insert_with(|| HARNESS_CONNECTION_SHUTDOWN_TIMEOUT.into());
 
-            // only override if it's not a Unix socket
-            if !is_unix_socket {
-                supergraph_conf.insert(
-                    "listen".to_string(),
-                    serde_json::Value::String(bind_addr.to_string()),
-                );
-            }
-
-            // Only inject the shutdown timeout if the fixture hasn't set one.
-            // Tests in integration::lifecycle deliberately configure this
-            // setting to exercise its behavior and must not have their value
-            // clobbered.
-            if !supergraph_conf.contains_key("connection_shutdown_timeout") {
-                supergraph_conf.insert(
-                    "connection_shutdown_timeout".to_string(),
-                    serde_json::Value::String(HARNESS_CONNECTION_SHUTDOWN_TIMEOUT.to_string()),
-                );
-            }
-        }
-    }
-
-    // Override the metrics listening address always since we spawn the router on a
-    // random port.
+    // Serve Prometheus metrics on the supergraph listener unless the config
+    // chooses its own address, so `get_metrics_response` finds them at
+    // `bind_address`.
     if let Some(prom_config) = config
         .as_object_mut()
         .and_then(|o| o.get_mut("telemetry"))
@@ -2489,10 +2456,7 @@ fn merge_overrides(
         .and_then(|o| o.get_mut("prometheus"))
         .and_then(|o| o.as_object_mut())
     {
-        prom_config.insert(
-            "listen".to_string(),
-            serde_json::Value::String(bind_addr.to_string()),
-        );
+        prom_config.entry("listen").or_insert(supergraph_listen);
     }
 
     // Pin every Apollo Studio reporting endpoint to the per-test wiremock at
@@ -2540,7 +2504,7 @@ fn merge_overrides(
         .expect("config should be an object")
         .insert(
             "health_check".to_string(),
-            json!({"listen": bind_addr.to_string()}),
+            json!({"listen": HARNESS_LISTEN_ADDRESS}),
         );
 
     let insert_redis_namespace = |v: Option<&mut Value>| {

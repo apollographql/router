@@ -329,7 +329,6 @@ async fn test_sigv4_does_not_leak_to_unconfigured_subgraph() {
               exporters:
                 metrics:
                   prometheus:
-                    listen: 127.0.0.1:4000
                     enabled: true
                     path: /metrics
             include_subgraph_errors:
