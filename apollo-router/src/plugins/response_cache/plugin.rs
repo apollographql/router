@@ -3800,7 +3800,7 @@ async fn insert_entities_in_result(
 /// such an error is attributed only when a single entity is being reassembled, with the index
 /// inserted into its path. Everything else is unattributed.
 #[allow(clippy::type_complexity)]
-pub(crate) fn attribute_errors_to_entities(
+fn attribute_errors_to_entities(
     errors: Vec<Error>,
     attributable_entity_count: usize,
 ) -> (HashMap<usize, Vec<(usize, Error)>>, Vec<(usize, Error)>) {
@@ -3840,7 +3840,7 @@ pub(crate) fn attribute_errors_to_entities(
 }
 
 /// Whether the error's path points into the `_entities` field.
-pub(crate) fn error_targets_entities(error: &Error) -> bool {
+fn error_targets_entities(error: &Error) -> bool {
     matches!(
         error.path.as_ref().and_then(|path| path.0.first()),
         Some(PathElement::Key(key, None)) if key == ENTITIES
@@ -3860,7 +3860,7 @@ fn entity_index_from_error_path(error: &Error) -> Option<usize> {
 }
 
 /// Puts errors paired with their original positions back in that order.
-pub(crate) fn errors_in_original_order(mut errors: Vec<(usize, Error)>) -> Vec<Error> {
+fn errors_in_original_order(mut errors: Vec<(usize, Error)>) -> Vec<Error> {
     errors.sort_unstable_by_key(|(error_idx, _)| *error_idx);
     errors.into_iter().map(|(_, error)| error).collect()
 }
