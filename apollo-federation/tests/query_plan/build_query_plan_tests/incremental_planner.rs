@@ -3021,9 +3021,8 @@ fn inc_partial_overlap_explodes_abstract_type() {
     );
 }
 
-/// Union members that each lead to the same entity type but select different
-/// fields on it get separate, type-conditioned entity fetches. A merged fetch
-/// would ask every entity for every member's fields.
+/// Union members reaching the same entity type with different selections get
+/// one type-conditioned fetch each, so no entity gets another member's fields.
 #[test]
 fn inc_same_entity_type_under_union_members_fetched_per_member() {
     let planner = planner!(
@@ -3455,9 +3454,8 @@ fn inc_same_entity_type_under_union_members_fetched_per_member() {
     );
 }
 
-/// Siblings sending different entity types merge, but the merged fetch keeps
-/// both members' type conditions. Without them, the path also reaches the
-/// `Album` items, which would be asked for `pages`.
+/// Siblings sending different entity types merge onto a path keeping both
+/// members' conditions, so `Album` items aren't asked for `pages`.
 #[test]
 fn inc_merged_entity_fetch_keeps_union_of_member_conditions() {
     let planner = planner!(
@@ -3506,9 +3504,8 @@ fn inc_merged_entity_fetch_keeps_union_of_member_conditions() {
           }
         "#,
     );
-    // validate_correctness = false: the checker interprets the merged fetch
-    // per branch and requires each branch to supply every input type, but
-    // the Book branch only reaches Item and the Film branch only Thing.
+    // validate_correctness = false: the checker requires every branch to
+    // supply every input type, but Book only reaches Item and Film only Thing.
     assert_plan!(
         validate_correctness = false,
         &planner,
@@ -3594,9 +3591,8 @@ fn inc_merged_entity_fetch_keeps_union_of_member_conditions() {
     );
 }
 
-/// Siblings sending the same entity type with identical selections can share
-/// one fetch, since no entity is asked for fields its own member didn't
-/// select.
+/// Siblings sending the same entity type with identical selections share one
+/// fetch.
 #[test]
 fn inc_same_entity_type_with_identical_selections_shares_fetch() {
     let planner = planner!(
