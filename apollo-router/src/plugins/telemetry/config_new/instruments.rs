@@ -1286,15 +1286,17 @@ pub(crate) enum DefaultedStandardInstrument<T> {
     },
 }
 
-// The configuration attribute doesn't support generic types, so this forwards validation to the
-// instrument's attributes. The enum is untagged, so they sit directly under the instrument's key.
+// The configuration attribute doesn't support generic types, so this forwards validation to every
+// field. The enum is untagged, so its fields sit directly under the instrument's key.
 impl<T> apollo_configuration::Validate for DefaultedStandardInstrument<T>
 where
     T: apollo_configuration::Validate,
 {
     fn validate(&self, mut errors: apollo_configuration::ErrorCollector<'_>) {
-        if let Self::Extendable { attributes } = self {
-            attributes.validate(errors.nest("attributes"));
+        match self {
+            Self::Unset => {}
+            Self::Bool(enabled) => enabled.validate(errors),
+            Self::Extendable { attributes } => attributes.validate(errors.nest("attributes")),
         }
     }
 }
@@ -1441,8 +1443,8 @@ where
     }
 }
 
-// The configuration attribute doesn't support generic types, so this forwards validation to the
-// instrument's value, attributes and condition. Its other fields are scalars.
+// The configuration attribute doesn't support generic types, so this forwards validation to every
+// field. Destructuring makes a new field a compile error until it is validated here.
 impl<A, E, V> apollo_configuration::Validate for Instrument<A, E, V>
 where
     A: Default + Debug + apollo_configuration::Validate,
@@ -1451,9 +1453,20 @@ where
     for<'a> &'a V: Into<InstrumentValue<E>>,
 {
     fn validate(&self, mut errors: apollo_configuration::ErrorCollector<'_>) {
-        self.value.validate(errors.nest("value"));
-        self.attributes.validate(errors.nest("attributes"));
-        self.condition.validate(errors.nest("condition"));
+        let Self {
+            ty,
+            value,
+            description,
+            unit,
+            attributes,
+            condition,
+        } = self;
+        ty.validate(errors.nest("type"));
+        value.validate(errors.nest("value"));
+        description.validate(errors.nest("description"));
+        unit.validate(errors.nest("unit"));
+        attributes.validate(errors.nest("attributes"));
+        condition.validate(errors.nest("condition"));
     }
 }
 
@@ -1515,15 +1528,15 @@ pub(crate) enum Field<T> {
     Custom(T),
 }
 
-// The configuration attribute doesn't support generic types, so this forwards validation to the
-// custom selector. The enum is untagged, so each value keeps its own path.
+// The configuration attribute doesn't support generic types, so this forwards validation to each
+// variant's value. The enum is untagged, so each value keeps its own path.
 impl<T> apollo_configuration::Validate for InstrumentValue<T>
 where
     T: apollo_configuration::Validate,
 {
     fn validate(&self, errors: apollo_configuration::ErrorCollector<'_>) {
         match self {
-            InstrumentValue::Standard(_) => {}
+            InstrumentValue::Standard(standard) => standard.validate(errors),
             InstrumentValue::Chunked(event) => event.validate(errors),
             InstrumentValue::Field(field) => field.validate(errors),
             InstrumentValue::Custom(selector) => selector.validate(errors),

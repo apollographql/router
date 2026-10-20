@@ -197,8 +197,9 @@ where
     E: apollo_configuration::Validate,
 {
     fn validate(&self, mut errors: apollo_configuration::ErrorCollector<'_>) {
-        self.attributes.validate(errors.inner());
-        self.custom.validate(errors.inner());
+        let Self { attributes, custom } = self;
+        attributes.validate(errors.inner());
+        custom.validate(errors.inner());
     }
 }
 

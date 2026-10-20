@@ -179,15 +179,19 @@ pub(crate) enum StandardEventConfig<T> {
     },
 }
 
-// The configuration attribute doesn't support generic types, so this forwards validation to the
-// condition. The enum is untagged, so the condition sits directly under the event's key.
+// The configuration attribute doesn't support generic types, so this forwards validation to every
+// field. The enum is untagged, so its fields sit directly under the event's key.
 impl<T> apollo_configuration::Validate for StandardEventConfig<T>
 where
     T: apollo_configuration::Validate,
 {
     fn validate(&self, mut errors: apollo_configuration::ErrorCollector<'_>) {
-        if let Self::Conditional { condition, .. } = self {
-            condition.validate(errors.nest("condition"));
+        match self {
+            Self::Level(level) => level.validate(errors),
+            Self::Conditional { level, condition } => {
+                level.validate(errors.nest("level"));
+                condition.validate(errors.nest("condition"));
+            }
         }
     }
 }
@@ -288,16 +292,26 @@ where
     pub(super) condition: Condition<E>,
 }
 
-// The configuration attribute doesn't support generic types, so this forwards validation to the
-// event's attributes and condition. Its other fields are scalars.
+// The configuration attribute doesn't support generic types, so this forwards validation to every
+// field. Destructuring makes a new field a compile error until it is validated here.
 impl<A, E> apollo_configuration::Validate for Event<A, E>
 where
     A: Default + Debug + apollo_configuration::Validate,
     E: Debug + apollo_configuration::Validate,
 {
     fn validate(&self, mut errors: apollo_configuration::ErrorCollector<'_>) {
-        self.attributes.validate(errors.nest("attributes"));
-        self.condition.validate(errors.nest("condition"));
+        let Self {
+            level,
+            message,
+            on,
+            attributes,
+            condition,
+        } = self;
+        level.validate(errors.nest("level"));
+        message.validate(errors.nest("message"));
+        on.validate(errors.nest("on"));
+        attributes.validate(errors.nest("attributes"));
+        condition.validate(errors.nest("condition"));
     }
 }
 
