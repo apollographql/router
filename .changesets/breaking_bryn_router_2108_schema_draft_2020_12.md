@@ -1,6 +1,6 @@
 ### The configuration JSON Schema is now draft 2020-12
 
-`router config schema` now prints a JSON Schema that declares draft 2020-12 (`"$schema": "https://json-schema.org/draft/2020-12/schema"`) instead of draft 7. Its definitions move from `definitions` to `$defs`, so references read `#/$defs/Name`. A description or default now sits beside its `$ref` instead of inside a one-item `allOf`. The configuration the router accepts doesn't change, and neither do its error messages.
+`router config schema` now prints a JSON Schema that declares [draft 2020-12](https://json-schema.org/draft/2020-12) instead of draft 7. The configuration the router accepts doesn't change, and neither do its error messages.
 
 What to do:
 
