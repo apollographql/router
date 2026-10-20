@@ -597,7 +597,7 @@ impl FieldRoutingSearchSpace {
         visited: &mut [bool],
     ) -> Result<Vec<IntermediateKeyHop>, FederationError> {
         let mut exits = Vec::new();
-        for exit in self.cached_query_graph.key_exits(current).iter() {
+        for exit in self.cached_query_graph.key_exits(current)?.iter() {
             if visited[exit.subgraph] || self.disabled_subgraphs.contains(&exit.subgraph_name) {
                 continue;
             }
@@ -1650,7 +1650,7 @@ mod tests {
         let s1_t = test_support::node_for(&space, "S1", "T");
         let s2_t = test_support::node_for(&space, "S2", "T");
 
-        let exits = qg.key_exits(s1_t);
+        let exits = qg.key_exits(s1_t).expect("key exits");
         assert_eq!(exits.len(), 1);
         assert_eq!(exits[0].target, s2_t);
         assert_eq!(exits[0].subgraph_name.as_ref(), "S2");
@@ -1664,7 +1664,7 @@ mod tests {
                 .to_string(),
             "{ k }",
         );
-        assert!(Arc::ptr_eq(&exits, &qg.key_exits(s1_t)));
+        assert!(Arc::ptr_eq(&exits, &qg.key_exits(s1_t).expect("key exits")));
     }
 
     fn key_selection(space: &FieldRoutingSearchSpace, text: &str) -> Arc<SelectionSet> {
