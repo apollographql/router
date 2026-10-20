@@ -1803,16 +1803,43 @@ impl SubSelection {
             }
         }
 
-        // Merge all the selection shapes at once: Shape::merge merges every object shape into a
-        // single object in one pass, whereas folding them pairwise rebuilds (and rehashes) the
-        // accumulated object for every named selection, which is quadratic in the selection size.
-        let merged_shape = Shape::merge(selection_shapes, locations.clone());
+        let merged_shape = if Self::merges_in_one_call(&selection_shapes) {
+            // Merge in one call so object shapes are combined once instead of
+            // rebuilt for every named selection.
+            Shape::merge(selection_shapes, locations.clone())
+        } else {
+            // Shape::merge only drops impossible combinations of union members
+            // when it expands them, so merging all the shapes in one call can
+            // produce a different shape than merging them one at a time.
+            let mut merged_shape = Shape::unknown([]);
+            for shape in selection_shapes {
+                merged_shape = Shape::merge([merged_shape, shape], locations.clone());
+                if merged_shape.is_null() {
+                    break;
+                }
+            }
+            merged_shape
+        };
 
         if merged_shape.is_unknown() {
             Shape::empty_object(locations)
         } else {
             merged_shape
         }
+    }
+
+    /// Whether merging `shapes` in one [`Shape::merge`] call produces the same
+    /// shape as merging them one at a time. That holds when every shape is an
+    /// object and no field appears in more than one of them, since then no
+    /// shapes other than the objects themselves are merged together.
+    fn merges_in_one_call(shapes: &[Shape]) -> bool {
+        let mut field_names = IndexSet::default();
+        shapes.iter().all(|shape| match shape.case() {
+            ShapeCase::Object { fields, .. } => {
+                fields.keys().all(|name| field_names.insert(name.as_str()))
+            }
+            _ => false,
+        })
     }
 }
 
@@ -4465,6 +4492,33 @@ mod tests {
 
         assert_eq!(wide.pretty_print(), pairwise.pretty_print());
         assert!(wide.pretty_print().contains("field299: $root.*.field299"));
+    }
+
+    // Spreads whose shapes are unions, and fields that more than one spread
+    // outputs, must still be merged one at a time.
+    #[rstest]
+    #[case::union_spreads(&[
+        "... a->match([1, 1], [@, 'x'])",
+        "... b->match([1, true], [@, 2.5])",
+        "c",
+    ], "All<1, { c: $root.*.c }>")]
+    #[case::repeated_field(&[
+        "x: a->match([1, 1], [@, 'x'])",
+        "... b { x: c->match([1, true], [@, 2.5]) }",
+        "... d { x: $(true) }",
+    ], "{ x: All<1, true> }")]
+    fn test_compute_output_shape_matches_pairwise_merge(
+        #[case] parts: &[&str],
+        #[case] expected: &str,
+    ) {
+        let spec = ConnectSpec::V0_4;
+        let pairwise = parts.iter().fold(Shape::unknown([]), |acc, part| {
+            Shape::merge([acc, selection!(part, spec).shape()], [])
+        });
+        let shape = selection!(&parts.join(" "), spec).shape();
+
+        assert_eq!(shape.pretty_print(), pairwise.pretty_print());
+        assert_eq!(shape.pretty_print(), expected);
     }
 
     #[test]
