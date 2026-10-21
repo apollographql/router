@@ -565,12 +565,7 @@ fn build_execution_service(
         Arc::new(configuration.experimental_hoist_orphan_errors.clone()),
     );
 
-    let metrics_reference_mode = plugins
-        .iter()
-        .find(|i| i.0.as_str() == "apollo.telemetry")
-        .and_then(|plugin| (*plugin.1).as_any().downcast_ref::<Telemetry>())
-        .map(|t| t.config.apollo.metrics_reference_mode)
-        .unwrap_or_default();
+    let metrics_reference_mode = response_enum_reference_mode(&plugins);
 
     ServiceBuilder::new()
         .layer(BatchQueryPlanAnalysisLayer::new())
@@ -593,6 +588,21 @@ fn build_execution_service(
             .boxed_clone(),
         )
         .boxed_clone()
+}
+
+/// The reference mode the execution service uses for enum values in responses.
+///
+/// Only Apollo usage reports read those enum values, so this is
+/// [`ApolloMetricsReferenceMode::Standard`], which collects none, unless the router exports to
+/// Apollo.
+fn response_enum_reference_mode(plugins: &Plugins) -> ApolloMetricsReferenceMode {
+    plugins
+        .iter()
+        .find(|i| i.0.as_str() == "apollo.telemetry")
+        .and_then(|plugin| (*plugin.1).as_any().downcast_ref::<Telemetry>())
+        .filter(|t| t.config.apollo.exports_to_apollo())
+        .map(|t| t.config.apollo.metrics_reference_mode)
+        .unwrap_or(ApolloMetricsReferenceMode::Standard)
 }
 
 /// Builds the supergraph service stack, which plans GraphQL requests and dispatches
@@ -645,10 +655,11 @@ pub(crate) fn build_router_service(
 ) -> router::BoxCloneService {
     let enable_authorization_directives =
         AuthorizationPlugin::enable_directives(configuration, &schema);
+    // Extended references only go into Apollo usage reports.
     let extended_references = matches!(
         TelemetryConfig::metrics_reference_mode(configuration),
         ApolloMetricsReferenceMode::Extended
-    );
+    ) && TelemetryConfig::exports_to_apollo(configuration);
 
     ServiceBuilder::new()
         .layer(StaticPageLayer::new(configuration))
@@ -713,5 +724,119 @@ mod boxed_type_names {
             IndexMap::from([("s.a".to_string(), http.boxed_clone())]),
             &required_stage_plugins().await,
         );
+    }
+}
+
+#[cfg(test)]
+mod extended_references {
+    use serde_json::json;
+
+    use super::*;
+    use crate::apollo_studio_interop::ExtendedReferenceStats;
+    use crate::pipeline::tests::stage_stack::required_stage_plugins;
+    use crate::plugin::DynPlugin;
+    use crate::plugin::PluginInit;
+    use crate::plugin::PluginPrivate;
+
+    const SUPERGRAPH_SCHEMA: &str = include_str!("../../tests/fixtures/supergraph.graphql");
+
+    /// Whether a query through the router stack built from `configuration` reaches the
+    /// supergraph service with its extended references computed.
+    async fn computes_extended_references(configuration: Configuration) -> bool {
+        let configuration = Arc::new(configuration);
+        let schema = Arc::new(Schema::parse(SUPERGRAPH_SCHEMA, &configuration).unwrap());
+        let (supergraph_service, mut handle) =
+            tower_test::mock::pair::<supergraph::Request, supergraph::Response>();
+        let driver = tokio::spawn(async move {
+            let (req, responder) = handle.next_request().await.unwrap();
+            let computed = req
+                .context
+                .extensions()
+                .with_lock(|lock| lock.contains_key::<ExtendedReferenceStats>());
+            responder.send_response(
+                supergraph::Response::fake_builder()
+                    .context(req.context)
+                    .build()
+                    .unwrap(),
+            );
+            computed
+        });
+        let router_service = build_router_service(
+            supergraph_service.boxed_clone(),
+            build_apq_expander(&configuration, None),
+            Arc::new(PersistedQueryExpander::new(&configuration).await.unwrap()),
+            build_query_parsing_service(schema.clone(), configuration.clone()),
+            schema,
+            &configuration,
+            required_stage_plugins().await,
+        );
+
+        let request = supergraph::Request::fake_builder()
+            .query("query { me { id } }")
+            .build()
+            .unwrap();
+        router_service
+            .oneshot(request.try_into().unwrap())
+            .await
+            .unwrap();
+        driver.await.unwrap()
+    }
+
+    #[tokio::test]
+    async fn are_not_computed_without_apollo() {
+        assert!(!computes_extended_references(Configuration::default()).await);
+    }
+
+    #[tokio::test]
+    async fn are_computed_when_exporting_to_apollo() {
+        // Router YAML can't carry an Apollo key or graph ref, and setting the `APOLLO_KEY` and
+        // `APOLLO_GRAPH_REF` globals would leak into other tests.
+        let mut configuration = Configuration::default();
+        configuration
+            .add_apollo_plugin_if_absent("telemetry", || {
+                json!({
+                    "apollo": {
+                        "apollo_key": "test-key",
+                        "apollo_graph_ref": "test@current",
+                    }
+                })
+            })
+            .unwrap();
+
+        assert!(computes_extended_references(configuration).await);
+    }
+
+    fn telemetry_plugins(telemetry: Box<dyn DynPlugin>) -> Plugins {
+        Plugins::from_iter([("apollo.telemetry".to_string(), telemetry)])
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn response_enums_are_not_collected_without_apollo() {
+        let init = PluginInit::fake_builder()
+            .config(json!({}))
+            .full_config(json!({}))
+            .build()
+            .with_deserialized_config()
+            .unwrap();
+        let telemetry = <Telemetry as PluginPrivate>::new(init).await.unwrap();
+
+        assert!(matches!(
+            response_enum_reference_mode(&telemetry_plugins(Box::new(telemetry))),
+            ApolloMetricsReferenceMode::Standard
+        ));
+        assert!(matches!(
+            response_enum_reference_mode(&Plugins::default()),
+            ApolloMetricsReferenceMode::Standard
+        ));
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn response_enums_are_collected_when_exporting_to_apollo() {
+        let telemetry = crate::plugins::telemetry::telemetry_exporting_to_apollo("").await;
+
+        assert!(matches!(
+            response_enum_reference_mode(&telemetry_plugins(Box::new(telemetry))),
+            ApolloMetricsReferenceMode::Extended
+        ));
     }
 }

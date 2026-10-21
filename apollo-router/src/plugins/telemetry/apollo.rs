@@ -161,6 +161,14 @@ pub(crate) struct Config {
     pub(crate) sampler: Option<SamplerOption>,
 }
 
+impl Config {
+    /// Whether the router sends usage reports and traces to Apollo, which needs both an Apollo
+    /// key and a graph ref. Without them, telemetry collected only for Apollo goes nowhere.
+    pub(crate) fn exports_to_apollo(&self) -> bool {
+        self.apollo_key.is_some() && self.apollo_graph_ref.is_some()
+    }
+}
+
 #[apollo_configuration::configuration]
 #[derive(PartialEq)]
 pub(crate) struct TracingConfiguration {
