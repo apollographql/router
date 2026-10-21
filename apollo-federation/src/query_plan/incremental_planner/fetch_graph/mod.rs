@@ -279,9 +279,13 @@ enum GroupKey {
 }
 
 /// Whether an entity-level connector `shape` returns everything a fetch
-/// selection entry selects. An intermediate shape the planner can't inspect
-/// counts as not covering it.
+/// selection entry selects. As in routing, a connector whose output isn't an
+/// object returns nothing of the entity. An intermediate shape the planner
+/// can't inspect counts as not covering it.
 fn shape_covers_entry(shape: &Shape, entry: &SelectionEntry) -> bool {
+    if object_fields(shape).is_none() {
+        return false;
+    }
     let mut shape = shape.clone();
     for element in entry.path().iter() {
         let OpPathElement::Field(field) = element.as_ref() else {
@@ -874,15 +878,22 @@ impl FetchGraph {
     /// beside a narrower one, `{ name reviews }` would otherwise call both.
     /// Called once post-search, before `merge_sibling_entities`.
     ///
-    /// Only entity-level resolvers (type-level and `entity: true`) with the
-    /// same key and the same parents qualify: the representations each fetch
-    /// receives must carry what the connector it moves to reads.
+    /// Only entity-level resolvers (type-level and `entity: true`) for the
+    /// same entity type, with the same key and the same parents, qualify: the
+    /// representations each fetch receives must carry what the connector it
+    /// moves to reads.
+    ///
+    /// The absorbing connector is picked only from connectors that already
+    /// have a fetch in the group, and each group gets at most one. With A
+    /// `{ id name }`, B `{ id reviews }` and C `{ id name reviews }`,
+    /// `{ name reviews }` still calls A and B when routing picked those.
     pub(crate) fn absorb_covered_connector_fetches(&mut self, index: &ConnectorIndex) {
         type Siblings = (
             Arc<str>,
             Option<String>,
             Vec<FetchDataPathElement>,
             Vec<NodeIndex>,
+            Name,
             String,
         );
         let mut groups: IndexMap<Siblings, Vec<(NodeIndex, Arc<crate::connectors::Connector>)>> =
@@ -913,11 +924,16 @@ impl FetchGraph {
                 .collect();
             parents.sort();
             parents.dedup();
+            // The key renders without its type (`Book` and `Movie` keys are
+            // both `{ id }`) and `merge_at` is compared without its type
+            // conditions, so the entity type keeps union and interface
+            // members apart.
             let siblings = (
                 node.subgraph.clone(),
                 node.defer_ref.clone(),
                 strip_merge_at_conditions(merge_at),
                 parents,
+                key.type_position.type_name().clone(),
                 key.to_string(),
             );
             groups
