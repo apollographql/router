@@ -1849,3 +1849,256 @@ fn a_context_on_a_union_reads_its_typename_and_is_accepted() {
         )
         .unwrap();
 }
+
+//==================================================================================================
+// A contextual value read off the object the fetch runs on
+//
+// The router applies an entity fetch's `requires` selection to each object the flatten path
+// selects and sends a representation only where it yields a non-empty object, so the fetch runs on
+// the objects of the types its `requires` entries are written at and no other, and a contextual
+// value it reads off the object it runs on is owed for those objects alone. Each test below is the
+// port of a theorem of the model's `OwnPosition` tests, named in its comment, over the world
+// `own_position.graphql` describes: an accepted plan is the planner's, and a rejected one the
+// planner's edited as its comment says, each negative reaching the availability or the reading
+// obligation with formation, bindings and the client's completeness otherwise satisfied.
+
+fn own_position_fixture() -> Fixture {
+    Fixture::new(include_str!("testdata/own_position.graphql"))
+}
+
+/// Where the planner's plans for the own-position world keep the first fetch's operation, from
+/// `catalog`.
+const CATALOG_OPERATION: &str = "/Sequence/nodes/0/Fetch/operation_document";
+
+const ITEM_PRODUCT_LABEL: &str = "{ item { ... on Product { details { label } } } }";
+
+const ITEM_MEMBERS_LABEL: &str =
+    "{ item { ... on Product { details { label } } ... on Other { details { label } } } }";
+
+/// The planner's plan for the product's `label` at `item`, with `catalog`'s selection of the
+/// product's `title` written as `title`.
+fn product_title_as(fixture: &Fixture, title: &str) -> QueryPlan {
+    edited_plan(fixture, plan_json!("item_product_details_label"), |plan| {
+        replace_once(
+            plan,
+            CATALOG_OPERATION,
+            "... on Product { __typename id title }",
+            &format!("... on Product {{ __typename id {title}}}"),
+        );
+    })
+}
+
+// The fetch is sent the products alone, each of which `catalog` answered with `title` under
+// `... on Product`, and reads it off the object it runs on. The planner's plan. The model's
+// `valueOffTheObjectTheFetchRunsOnIsAccepted`; the axes case `outlet-own-object`.
+//
+// A control of changed behaviour: the fetch's position stopped at the value `item` holds, so it had
+// no level for the item, and the value, narrowed to `Product` there, served no configuration.
+#[test]
+fn a_value_off_the_object_the_fetch_runs_on_is_accepted() {
+    let fixture = own_position_fixture();
+    let plan = fixture.written_plan(plan_json!("item_product_details_label"));
+    fixture.check(&plan, ITEM_PRODUCT_LABEL).unwrap();
+}
+
+// The same over a list of items: the level the fetch runs on holds an `Other` too, which is sent no
+// representation and owes no value. The planner's plan. The model's
+// `valueOffTheObjectsTheFetchRunsOnInAListIsAccepted`; the axes case `outlets-own-object`. Whether
+// the router answers such a list correctly is shown by no run: it collects each object's context
+// values before it filters and deduplicates the representations.
+//
+// A control of changed behaviour: the level was there but not narrowed to the types the fetch is
+// sent, so an `Other` asked for the product's value.
+#[test]
+fn a_value_off_the_objects_the_fetch_runs_on_in_a_list_is_accepted() {
+    let fixture = own_position_fixture();
+    let plan = fixture.written_plan(plan_json!("items_product_details_label"));
+    fixture
+        .check(&plan, "{ items { ... on Product { details { label } } } }")
+        .unwrap();
+}
+
+// `catalog` fetched no `title` for the products, so the value is missing where the fetch runs. The
+// planner's plan with the products' `title` dropped. The model's
+// `valueUnfetchedForTheObjectTheFetchRunsOnIsRejected`; the axes case `own-object-unfetched`.
+//
+// A control of preserved behaviour.
+#[test]
+fn a_value_unfetched_for_the_object_the_fetch_runs_on_is_rejected() {
+    let fixture = own_position_fixture();
+    let plan = product_title_as(&fixture, "");
+    assert_rejected_for(&fixture, &plan, ITEM_PRODUCT_LABEL, NOT_FETCHED);
+}
+
+// The `requires` written at both members, with `title` fetched under each: every object the fetch
+// is sent has its value. The planner's plan. The model's
+// `valueFetchedUnderEachMemberSentIsAccepted`.
+//
+// A control of changed behaviour: each copy was narrowed past the one level the position had.
+#[test]
+fn a_value_fetched_under_each_member_sent_is_accepted() {
+    let fixture = own_position_fixture();
+    let plan = fixture.written_plan(plan_json!("item_members_details_label"));
+    fixture.check(&plan, ITEM_MEMBERS_LABEL).unwrap();
+}
+
+// The same over a list of items. The planner's plan. The model's
+// `valueFetchedUnderEachMemberSentInAListIsAccepted`.
+//
+// A control of preserved behaviour.
+#[test]
+fn a_value_fetched_under_each_member_sent_in_a_list_is_accepted() {
+    let fixture = own_position_fixture();
+    let plan = fixture.written_plan(plan_json!("items_members_details_label"));
+    fixture
+        .check(
+            &plan,
+            "{ items { ... on Product { details { label } } ... on Other { details { label } } } }",
+        )
+        .unwrap();
+}
+
+// The `requires` written at both members, with `title` fetched under the product alone: an `Other`
+// the fetch is sent has no value. The planner's plan with the other's `title` dropped. The model's
+// `valueMissingUnderOneMemberSentIsRejected`.
+//
+// A control of preserved behaviour.
+#[test]
+fn a_value_missing_under_one_member_sent_is_rejected() {
+    let fixture = own_position_fixture();
+    let plan = edited_plan(&fixture, plan_json!("item_members_details_label"), |plan| {
+        replace_once(
+            plan,
+            CATALOG_OPERATION,
+            "... on Other { __typename id title }",
+            "... on Other { __typename id }",
+        );
+    });
+    assert_rejected_for(&fixture, &plan, ITEM_MEMBERS_LABEL, NOT_FETCHED);
+}
+
+// `catalog` fetched `otherTitle` under the key `title` for the products: the value is there where
+// the fetch runs, and it is the wrong field, which the reading, judged on the same configurations,
+// tells. The planner's plan with the products' `title` fetched as `title: otherTitle`. The model's
+// `wrongFieldOffTheObjectTheFetchRunsOnIsRejected`.
+//
+// The verdict is preserved and the asserted clause changed: before, availability rejected the
+// plan, the fetch's position having no level for the item; the reading, quantifying over the same
+// positions, had no configuration to judge the copy in.
+#[test]
+fn a_wrong_field_off_the_object_the_fetch_runs_on_is_rejected() {
+    let fixture = own_position_fixture();
+    let plan = product_title_as(&fixture, "title: otherTitle ");
+    assert_rejected_for(
+        &fixture,
+        &plan,
+        ITEM_PRODUCT_LABEL,
+        &format!("on `Product` holds `otherTitle`, {NOT_A_LEAF}"),
+    );
+}
+
+const CONCRETE_SUMMARY: &str = "{ concrete { details { summary } } }";
+
+// `note` fetched under `... on Detail`: narrowed at a level below the levels the two paths share,
+// which the fetch's path says nothing about, it serves nothing, since the product's `info` may be a
+// `Summary`. The planner's plan with the `note` fetched under the fragment. The model's
+// `valueNarrowedBelowTheSharedLevelsIsRejected`.
+//
+// A control of preserved behaviour.
+#[test]
+fn a_value_narrowed_below_the_shared_levels_is_rejected() {
+    let fixture = own_position_fixture();
+    let plan = edited_plan(&fixture, plan_json!("concrete_details_summary"), |plan| {
+        replace_once(
+            plan,
+            CATALOG_OPERATION,
+            "info { __typename note }",
+            "info { __typename ... on Detail { note } }",
+        );
+    });
+    assert_rejected_for(&fixture, &plan, CONCRETE_SUMMARY, NOT_FETCHED);
+}
+
+// `note` fetched on the interface serves every `info`. The planner's plan. The model's
+// `valueUnnarrowedBelowTheSharedLevelsIsAccepted`.
+//
+// A control of preserved behaviour.
+#[test]
+fn a_value_unnarrowed_below_the_shared_levels_is_accepted() {
+    let fixture = own_position_fixture();
+    let plan = fixture.written_plan(plan_json!("concrete_details_summary"));
+    fixture.check(&plan, CONCRETE_SUMMARY).unwrap();
+}
+
+/// `catalog`'s fetch from the planner's plan for the product's `label` at `item`, which selects
+/// each product's `title`, followed by a fetch to `details` at `item` under the path condition
+/// `condition`, asking for the product's `summary`, whose `info { note }` no fetch selects.
+fn summary_fetch_under(fixture: &Fixture, condition: serde_json::Value) -> QueryPlan {
+    let operation = "query($representations: [_Any!]!, $note: String) { _entities(representations: \
+                     $representations) { ... on Product { details { summary(note: $note) } } } }";
+    let summary = serde_json::json!({ "Flatten": {
+        "path": [{ "Key": ["item", condition] }],
+        "node": { "Fetch": {
+            "subgraph_name": "details",
+            "variable_usages": ["note"],
+            "requires": [{
+                "kind": "InlineFragment",
+                "typeCondition": "Product",
+                "selections": [
+                    { "kind": "Field", "name": "__typename" },
+                    { "kind": "Field", "name": "id" }
+                ]
+            }],
+            "operation_document": operation,
+            "operation_kind": "query",
+            "input_rewrites": [],
+            "output_rewrites": [],
+            "context_rewrites": [{ "KeyRenamer": {
+                "path": [{ "Key": ["info", null] }, { "Key": ["note", null] }],
+                "rename_key_to": "note"
+            } }]
+        } }
+    } });
+    edited_plan(fixture, plan_json!("item_product_details_label"), |plan| {
+        set(plan, "/Sequence/nodes/1", summary);
+    })
+}
+
+/// What the client asks for here: each product's `title`, which `catalog` fetches, so that no
+/// fetch to `details` is needed for the client's demand.
+const ITEM_PRODUCT_TITLE: &str = "{ item { ... on Product { title } } }";
+
+/// The availability clause of the `summary` fetch's `note`.
+const NOTE_NOT_FETCHED: &str =
+    "the contextual value for `$note` is not always fetched where the fetch runs";
+
+// A fetch whose flatten path ends at `item|[]` runs on no object: its own position, read to the
+// object with the path's last condition narrowing it, reaches nothing, so no contextual value is
+// owed for it, and the plan is accepted with the report of an empty condition off, though the
+// `info { note }` the fetch's rewrite reads was never fetched. The client's `title` is
+// `catalog`'s. The control of § Differences from the model's statement on a flatten path written
+// to reach no type.
+//
+// A control of changed behaviour: the position was read to the value `item` holds, without that
+// key's condition, and the value was owed there.
+#[test]
+fn a_fetch_reaching_no_object_owes_no_contextual_value() {
+    let fixture = own_position_fixture();
+    let plan = summary_fetch_under(&fixture, serde_json::json!([]));
+    fixture
+        .check_without_dead_fetch_report(&plan, ITEM_PRODUCT_TITLE)
+        .unwrap();
+}
+
+// The same fetch at `item`, where it runs on the product: the value it reads was never fetched.
+//
+// A control of preserved behaviour.
+#[test]
+fn the_same_fetch_on_a_live_path_owes_its_contextual_value() {
+    let fixture = own_position_fixture();
+    let plan = summary_fetch_under(&fixture, serde_json::Value::Null);
+    let error = fixture
+        .check_without_dead_fetch_report(&plan, ITEM_PRODUCT_TITLE)
+        .expect_err("the value is missing where the fetch runs");
+    assert!(error.to_string().contains(NOTE_NOT_FETCHED), "{error}");
+}
