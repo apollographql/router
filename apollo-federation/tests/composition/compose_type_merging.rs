@@ -1,5 +1,9 @@
 use apollo_compiler::coord;
+use apollo_federation::composition::CompositionFailure;
+use apollo_federation::supergraph::Satisfiable;
+use apollo_federation::supergraph::Supergraph;
 use insta::assert_snapshot;
+use itertools::Itertools;
 use test_log::test;
 
 use super::ServiceDefinition;
@@ -928,4 +932,148 @@ fn handle_extension_with_empty_base() {
       test: MyScalar
     }
     "###);
+}
+
+// =============================================================================
+// SUBGRAPH ORDER INDEPENDENCE - Type reference merging must not depend on the
+// order in which subgraphs are listed
+// =============================================================================
+
+type CompositionResult = Result<Supergraph<Satisfiable>, CompositionFailure>;
+
+/// Composes three subgraphs that each define `T.f` with the given field type (or argument type, if
+/// `as_argument` is true), once per permutation of subgraph order, and returns the result of each
+/// composition along with the order of types that produced it.
+fn compose_type_permutations(
+    types: [&'static str; 3],
+    as_argument: bool,
+) -> Vec<(Vec<&'static str>, CompositionResult)> {
+    let names = ["subgraphA", "subgraphB", "subgraphC"];
+    types
+        .iter()
+        .permutations(3)
+        .map(|ordered_types| {
+            let type_defs: Vec<String> = ordered_types
+                .iter()
+                .enumerate()
+                .map(|(i, ty)| {
+                    let query = if i == 0 {
+                        "type Query {\n  T: T!\n}\n"
+                    } else {
+                        ""
+                    };
+                    let field = if as_argument {
+                        format!("f(x: {ty}): String @shareable")
+                    } else {
+                        format!("f: {ty} @shareable")
+                    };
+                    format!("{query}\ntype T @key(fields: \"id\") {{\n  id: ID!\n  {field}\n}}\n")
+                })
+                .collect();
+            let subgraphs: Vec<ServiceDefinition<'_>> = names
+                .iter()
+                .zip(type_defs.iter())
+                .map(|(name, type_defs)| ServiceDefinition { name, type_defs })
+                .collect();
+            let result = compose_as_fed2_subgraphs(&subgraphs);
+            (ordered_types.into_iter().copied().collect(), result)
+        })
+        .collect()
+}
+
+#[test]
+fn field_types_merges_to_supertype_regardless_of_subgraph_order() {
+    // `[String!]` and `[String]!` are incomparable, but `[String]` is a supertype of both, so the
+    // merged (output) type should be `[String]` no matter which subgraph is listed first.
+    for (order, result) in compose_type_permutations(["[String!]", "[String]!", "[String]"], false)
+    {
+        let supergraph = result.unwrap_or_else(|e| {
+            panic!("Expected composition to succeed for order {order:?}: {e:?}")
+        });
+        let api_schema = supergraph
+            .to_api_schema(Default::default())
+            .expect("Expected API schema generation to succeed");
+        let f = coord!(T.f)
+            .lookup_field(api_schema.schema())
+            .expect("Expected T.f to be present in API schema");
+        assert_eq!(f.ty.to_string(), "[String]", "for order {order:?}");
+    }
+}
+
+#[test]
+fn field_types_errors_without_supertype_regardless_of_subgraph_order() {
+    // `[String!]!` is a subtype of both `[String!]` and `[String]!`, but those two are
+    // incomparable and neither is a supertype of the other, so there is no valid merged (output)
+    // type. This must be an error no matter which subgraph is listed first.
+    for (order, result) in
+        compose_type_permutations(["[String!]!", "[String!]", "[String]!"], false)
+    {
+        let errors = &result
+            .as_ref()
+            .err()
+            .unwrap_or_else(|| panic!("Expected composition to fail for order {order:?}"))
+            .errors;
+        let codes: Vec<&str> = errors
+            .iter()
+            .map(|e| e.code().definition().code())
+            .collect();
+        assert_eq!(codes, ["FIELD_TYPE_MISMATCH"], "for order {order:?}");
+        let message = errors[0].to_string();
+        assert!(
+            message.starts_with(r#"Type of field "T.f" is incompatible across subgraphs: it has "#),
+            "for order {order:?}: {message}"
+        );
+    }
+}
+
+#[test]
+fn arguments_merges_to_subtype_regardless_of_subgraph_order() {
+    // `[String!]` and `[String]!` are incomparable, but `[String!]!` is a subtype of both, so the
+    // merged (input) type should be `[String!]!` no matter which subgraph is listed first.
+    for (order, result) in compose_type_permutations(["[String!]", "[String]!", "[String!]!"], true)
+    {
+        let supergraph = result.unwrap_or_else(|e| {
+            panic!("Expected composition to succeed for order {order:?}: {e:?}")
+        });
+        let api_schema = supergraph
+            .to_api_schema(Default::default())
+            .expect("Expected API schema generation to succeed");
+        let f = coord!(T.f)
+            .lookup_field(api_schema.schema())
+            .expect("Expected T.f to be present in API schema");
+        let x = f
+            .argument_by_name("x")
+            .expect("Expected T.f(x:) to be present in API schema");
+        assert_eq!(x.ty.to_string(), "[String!]!", "for order {order:?}");
+    }
+}
+
+#[test]
+fn arguments_errors_without_subtype_regardless_of_subgraph_order() {
+    // `[String]` is a supertype of both `[String!]` and `[String]!`, but those two are
+    // incomparable and neither is a subtype of the other, so there is no valid merged (input)
+    // type. This must be an error no matter which subgraph is listed first.
+    for (order, result) in compose_type_permutations(["[String!]", "[String]!", "[String]"], true) {
+        let errors = &result
+            .as_ref()
+            .err()
+            .unwrap_or_else(|| panic!("Expected composition to fail for order {order:?}"))
+            .errors;
+        let codes: Vec<&str> = errors
+            .iter()
+            .map(|e| e.code().definition().code())
+            .collect();
+        assert_eq!(
+            codes,
+            ["FIELD_ARGUMENT_TYPE_MISMATCH"],
+            "for order {order:?}"
+        );
+        let message = errors[0].to_string();
+        assert!(
+            message.starts_with(
+                r#"Type of argument "T.f(x:)" is incompatible across subgraphs: it has "#
+            ),
+            "for order {order:?}: {message}"
+        );
+    }
 }

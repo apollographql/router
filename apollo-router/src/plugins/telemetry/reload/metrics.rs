@@ -30,7 +30,6 @@ use opentelemetry_sdk::metrics::InstrumentKind;
 use opentelemetry_sdk::metrics::MeterProviderBuilder;
 use opentelemetry_sdk::metrics::SdkMeterProvider;
 use opentelemetry_sdk::metrics::Stream;
-use prometheus::Registry;
 use tower::BoxError;
 
 use crate::_private::telemetry::ConfigResource;
@@ -41,6 +40,10 @@ use crate::plugins::telemetry::config::Conf;
 use crate::plugins::telemetry::config::InstrumentNameMatcher;
 use crate::plugins::telemetry::config::MetricView;
 use crate::plugins::telemetry::config::MetricsCommon;
+use crate::plugins::telemetry::metrics::OverflowCounting;
+use crate::plugins::telemetry::metrics::OverflowMetricExporter;
+use crate::plugins::telemetry::metrics::OverflowTracker;
+use crate::plugins::telemetry::metrics::prometheus::PrometheusEndpoint;
 
 /// Trait for metric exporters to contribute to meter provider construction
 pub(crate) trait MetricsConfigurator {
@@ -61,7 +64,10 @@ pub(crate) struct MetricsBuilder<'a> {
     /// when observable instruments are registered with providers that have no readers.
     providers_with_readers: HashSet<MeterProviderType>,
     apollo_metrics_sender: Sender,
-    prometheus_registry: Option<Registry>,
+    prometheus_registry: Option<PrometheusEndpoint>,
+    /// Whether a push exporter counts cardinality overflow for the public meter provider. The
+    /// first one does; Prometheus scrapes count only when there is none.
+    has_push_overflow_counter: bool,
     metrics_common: &'a MetricsCommon,
     resource: Resource,
 }
@@ -70,12 +76,22 @@ impl<'a> MetricsBuilder<'a> {
     pub(crate) fn build(
         self,
     ) -> (
-        Option<Registry>,
+        Option<PrometheusEndpoint>,
         HashMap<MeterProviderType, FilterMeterProvider>,
         Sender,
     ) {
+        // Count each overflow on the public meter provider once. The first push exporter counts;
+        // Prometheus scrapes count only when Prometheus is the provider's only exporter. Both
+        // label the counter with OpenTelemetry metric names, so it doesn't change with the
+        // exporters configured.
+        let mut prometheus_registry = self.prometheus_registry;
+        if self.has_push_overflow_counter
+            && let Some(prometheus_registry) = &mut prometheus_registry
+        {
+            prometheus_registry.overflow_tracker = None;
+        }
         (
-            self.prometheus_registry,
+            prometheus_registry,
             self.meter_provider_builders
                 .into_iter()
                 .map(|(k, v)| {
@@ -118,15 +134,29 @@ impl<'a> MetricsBuilder<'a> {
             resource,
             apollo_metrics_sender: Sender::default(),
             prometheus_registry: None,
+            has_push_overflow_counter: false,
             metrics_common: &config.exporters.metrics.common,
         }
     }
     pub(crate) fn metrics_common(&self) -> &MetricsCommon {
         self.metrics_common
     }
-    pub(crate) fn with_prometheus_registry(&mut self, prometheus_registry: Registry) -> &mut Self {
+    pub(crate) fn with_prometheus_registry(
+        &mut self,
+        prometheus_registry: PrometheusEndpoint,
+    ) -> &mut Self {
         self.prometheus_registry = Some(prometheus_registry);
         self
+    }
+    /// Wrap a push exporter for the public meter provider in cardinality overflow detection.
+    /// Only the first one counts, so that each overflow is counted once.
+    pub(crate) fn public_overflow_exporter<T>(&mut self, exporter: T) -> OverflowMetricExporter<T> {
+        let counting = if std::mem::replace(&mut self.has_push_overflow_counter, true) {
+            OverflowCounting::Off
+        } else {
+            OverflowCounting::EveryOverflowStart(OverflowTracker::default())
+        };
+        OverflowMetricExporter::new(exporter, counting)
     }
     pub(crate) fn with_apollo_metrics_sender(
         &mut self,
@@ -233,7 +263,11 @@ fn resolve_view(
     cardinality_limit: Option<NonZeroU32>,
 ) -> Option<Stream> {
     let is_histogram = instrument.kind() == InstrumentKind::Histogram;
-    let histogram_buckets = is_histogram.then(|| bucket_boundaries.to_vec());
+    let histogram_buckets = is_histogram.then(|| {
+        instrument_default_buckets(instrument.name())
+            .unwrap_or(bucket_boundaries)
+            .to_vec()
+    });
     // First match wins: earlier views take precedence over later wildcards.
     let user_view = user_views
         .iter()
@@ -251,6 +285,75 @@ fn resolve_view(
         None => default_view,
     };
     Some(view.into_stream())
+}
+
+/// Buckets for histograms that don't measure durations, where the global
+/// buckets would put nearly every sample in the overflow bucket.
+fn instrument_default_buckets(name: &str) -> Option<&'static [f64]> {
+    match name {
+        "apollo.router.query_planning.plan.fuel_consumed"
+        | "apollo.router.query_planning.plan.fuel_remaining" => {
+            Some(crate::query_planner::FUEL_BUCKETS)
+        }
+        _ => None,
+    }
+}
+
+#[cfg(test)]
+mod overflow_counting_tests {
+    use opentelemetry_sdk::metrics::InMemoryMetricExporter;
+
+    use super::*;
+    use crate::plugins::telemetry::metrics::prometheus;
+
+    fn prometheus_config() -> prometheus::Config {
+        prometheus::Config {
+            enabled: true,
+            ..Default::default()
+        }
+    }
+
+    #[test]
+    fn first_public_push_exporter_counts() {
+        let conf = Conf::default();
+        let mut builder = MetricsBuilder::new(&conf);
+        let first = builder.public_overflow_exporter(InMemoryMetricExporter::default());
+        let second = builder.public_overflow_exporter(InMemoryMetricExporter::default());
+        builder.build();
+
+        assert!(first.is_counting());
+        assert!(!second.is_counting());
+    }
+
+    #[test]
+    fn push_exporter_counts_instead_of_prometheus() {
+        // Configuration order must not matter.
+        for prometheus_first in [true, false] {
+            let conf = Conf::default();
+            let mut builder = MetricsBuilder::new(&conf);
+            if prometheus_first {
+                builder.configure(&prometheus_config()).unwrap();
+            }
+            let push = builder.public_overflow_exporter(InMemoryMetricExporter::default());
+            if !prometheus_first {
+                builder.configure(&prometheus_config()).unwrap();
+            }
+            let (prometheus_registry, _, _) = builder.build();
+
+            assert!(push.is_counting());
+            assert!(prometheus_registry.unwrap().overflow_tracker.is_none());
+        }
+    }
+
+    #[test]
+    fn prometheus_counts_when_it_is_the_only_exporter() {
+        let conf = Conf::default();
+        let mut builder = MetricsBuilder::new(&conf);
+        builder.configure(&prometheus_config()).unwrap();
+        let (prometheus_registry, _, _) = builder.build();
+
+        assert!(prometheus_registry.unwrap().overflow_tracker.is_some());
+    }
 }
 
 #[cfg(test)]
@@ -387,6 +490,60 @@ mod view_selection_tests {
                 .unwrap_or_default();
             assert_eq!(bounds, BUCKETS);
         });
+    }
+
+    fn u64_histogram_bounds(exporter: &InMemoryMetricExporter, name: &str) -> Vec<f64> {
+        with_metric(exporter, name, |data| {
+            let AggregatedMetrics::U64(MetricData::Histogram(hist)) = data else {
+                panic!("expected Histogram aggregation, got {data:?}")
+            };
+            hist.data_points()
+                .next()
+                .map(|dp| dp.bounds().collect())
+                .unwrap_or_default()
+        })
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn fuel_histograms_default_to_fuel_buckets() {
+        let exporter = InMemoryMetricExporter::default();
+        let provider = meter_provider_with(exporter.clone(), vec![], None);
+
+        for name in [
+            "apollo.router.query_planning.plan.fuel_consumed",
+            "apollo.router.query_planning.plan.fuel_remaining",
+        ] {
+            let histogram = provider.meter("t").u64_histogram(name).build();
+            histogram.record(42, &[]);
+        }
+        provider.force_flush().unwrap();
+
+        for name in [
+            "apollo.router.query_planning.plan.fuel_consumed",
+            "apollo.router.query_planning.plan.fuel_remaining",
+        ] {
+            assert_eq!(
+                u64_histogram_bounds(&exporter, name),
+                crate::query_planner::FUEL_BUCKETS
+            );
+        }
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn user_view_buckets_override_fuel_buckets() {
+        let exporter = InMemoryMetricExporter::default();
+        let mut view = empty_view("apollo.router.query_planning.plan.fuel_*");
+        view.aggregation = Some(MetricAggregation::Histogram {
+            buckets: vec![10.0, 100.0],
+        });
+        let provider = meter_provider_with(exporter.clone(), vec![view], None);
+
+        let name = "apollo.router.query_planning.plan.fuel_consumed";
+        let histogram = provider.meter("t").u64_histogram(name).build();
+        histogram.record(42, &[]);
+        provider.force_flush().unwrap();
+
+        assert_eq!(u64_histogram_bounds(&exporter, name), vec![10.0, 100.0]);
     }
 
     #[tokio::test(flavor = "multi_thread")]

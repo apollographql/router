@@ -23,13 +23,12 @@ use tower::ServiceExt;
 use tower_service::Service;
 
 use crate::Configuration;
-use crate::Notify;
 use crate::plugin;
 use crate::plugin::DynPlugin;
 use crate::plugin::PluginInit;
 use crate::plugin::PluginPrivate;
+use crate::plugins::subscription::notification::Notify;
 use crate::query_planner::QueryPlannerService;
-use crate::services::connector;
 use crate::services::execution;
 use crate::services::http;
 use crate::services::router;
@@ -101,8 +100,7 @@ impl<T: Into<Box<dyn DynPlugin + 'static>> + 'static> PluginTestHarness<T> {
             .find(|factory| factory.type_id == TypeId::of::<T>())
             .expect("plugin not registered");
 
-        let config = Configuration::from_str(config.unwrap_or_default())
-            .expect("valid config required for test");
+        let config = Configuration::from_str(config.unwrap_or_default())?;
 
         let name = &factory.name.replace("apollo.", "");
         let config_for_plugin = config
@@ -125,10 +123,9 @@ impl<T: Into<Box<dyn DynPlugin + 'static>> + 'static> PluginTestHarness<T> {
             let schema = Schema::parse(schema, &config).unwrap();
             let sdl = schema.raw_sdl.clone();
             let supergraph = schema.supergraph_schema().clone();
-            let planner = QueryPlannerService::new(schema.into(), Arc::new(config))
-                .await
-                .unwrap();
-            (sdl, supergraph, planner.subgraph_schemas())
+            let qp_arc = QueryPlannerService::create_planner(&schema, &config).unwrap();
+            let subgraph_schemas = crate::query_planner::build_subgraph_schemas(&qp_arc);
+            (sdl, supergraph, subgraph_schemas)
         } else {
             (
                 "".to_string().into(),
@@ -142,12 +139,7 @@ impl<T: Into<Box<dyn DynPlugin + 'static>> + 'static> PluginTestHarness<T> {
             .supergraph_schema_id(crate::spec::Schema::schema_id(&supergraph_sdl).into_inner())
             .supergraph_sdl(supergraph_sdl)
             .supergraph_schema(Arc::new(parsed_schema))
-            .subgraph_schemas(Arc::new(
-                subgraph_schemas
-                    .iter()
-                    .map(|(k, v)| (k.clone(), v.schema.clone()))
-                    .collect(),
-            ))
+            .subgraph_schemas(subgraph_schemas)
             .notify(Notify::default())
             .license(Arc::new(license.unwrap_or_default()))
             .full_config(full_config)
@@ -164,11 +156,11 @@ impl<T: Into<Box<dyn DynPlugin + 'static>> + 'static> PluginTestHarness<T> {
     pub(crate) fn router_service<F>(
         &self,
         response_fn: impl Fn(router::Request) -> F + Send + Sync + Clone + 'static,
-    ) -> ServiceHandle<router::Request, router::BoxService>
+    ) -> ServiceHandle<router::Request, router::BoxCloneService>
     where
         F: Future<Output = Result<router::Response, BoxError>> + Send + 'static,
     {
-        let service: router::BoxService = router::BoxService::new(
+        let service: router::BoxCloneService = router::BoxCloneService::new(
             ServiceBuilder::new().service_fn(move |req: router::Request| {
                 let response_fn = response_fn.clone();
                 async move { (response_fn)(req).await }
@@ -181,11 +173,11 @@ impl<T: Into<Box<dyn DynPlugin + 'static>> + 'static> PluginTestHarness<T> {
     pub(crate) fn supergraph_service<F>(
         &self,
         response_fn: impl Fn(supergraph::Request) -> F + Send + Sync + Clone + 'static,
-    ) -> ServiceHandle<supergraph::Request, supergraph::BoxService>
+    ) -> ServiceHandle<supergraph::Request, supergraph::BoxCloneService>
     where
         F: Future<Output = Result<supergraph::Response, BoxError>> + Send + 'static,
     {
-        let service: supergraph::BoxService = supergraph::BoxService::new(
+        let service: supergraph::BoxCloneService = supergraph::BoxCloneService::new(
             ServiceBuilder::new().service_fn(move |req: supergraph::Request| {
                 let response_fn = response_fn.clone();
                 async move { (response_fn)(req).await }
@@ -199,11 +191,11 @@ impl<T: Into<Box<dyn DynPlugin + 'static>> + 'static> PluginTestHarness<T> {
     pub(crate) fn execution_service<F>(
         &self,
         response_fn: impl Fn(execution::Request) -> F + Send + Sync + Clone + 'static,
-    ) -> ServiceHandle<execution::Request, execution::BoxService>
+    ) -> ServiceHandle<execution::Request, execution::BoxCloneService>
     where
         F: Future<Output = Result<execution::Response, BoxError>> + Send + 'static,
     {
-        let service: execution::BoxService = execution::BoxService::new(
+        let service: execution::BoxCloneService = execution::BoxCloneService::new(
             ServiceBuilder::new().service_fn(move |req: execution::Request| {
                 let response_fn = response_fn.clone();
                 async move { (response_fn)(req).await }
@@ -218,11 +210,11 @@ impl<T: Into<Box<dyn DynPlugin + 'static>> + 'static> PluginTestHarness<T> {
         &self,
         subgraph: &str,
         response_fn: impl Fn(subgraph::Request) -> F + Send + Sync + Clone + 'static,
-    ) -> ServiceHandle<subgraph::Request, subgraph::BoxService>
+    ) -> ServiceHandle<subgraph::Request, subgraph::BoxCloneService>
     where
         F: Future<Output = Result<subgraph::Response, BoxError>> + Send + 'static,
     {
-        let service: subgraph::BoxService = subgraph::BoxService::new(
+        let service: subgraph::BoxCloneService = subgraph::BoxCloneService::new(
             ServiceBuilder::new().service_fn(move |req: subgraph::Request| {
                 let response_fn = response_fn.clone();
                 async move { (response_fn)(req).await }
@@ -236,44 +228,18 @@ impl<T: Into<Box<dyn DynPlugin + 'static>> + 'static> PluginTestHarness<T> {
         &self,
         subgraph: &str,
         response_fn: impl Fn(http::HttpRequest) -> F + Send + Sync + Clone + 'static,
-    ) -> ServiceHandle<http::HttpRequest, http::BoxService>
+    ) -> ServiceHandle<http::HttpRequest, http::BoxCloneService>
     where
         F: Future<Output = Result<http::HttpResponse, BoxError>> + Send + 'static,
     {
-        let service: http::BoxService = http::BoxService::new(ServiceBuilder::new().service_fn(
-            move |req: http::HttpRequest| {
+        let service: http::BoxCloneService = http::BoxCloneService::new(
+            ServiceBuilder::new().service_fn(move |req: http::HttpRequest| {
                 let response_fn = response_fn.clone();
                 async move { (response_fn)(req).await }
-            },
-        ));
+            }),
+        );
 
         ServiceHandle::new(self.plugin.http_client_service(subgraph, service))
-    }
-
-    #[allow(dead_code)]
-    pub(crate) async fn call_connector_request_service(
-        &self,
-        request: connector::request_service::Request,
-        response_fn: impl Fn(
-            connector::request_service::Request,
-        ) -> connector::request_service::Response
-        + Send
-        + Sync
-        + Clone
-        + 'static,
-    ) -> Result<connector::request_service::Response, BoxError> {
-        let service: connector::request_service::BoxService =
-            connector::request_service::BoxService::new(ServiceBuilder::new().service_fn(
-                move |req: connector::request_service::Request| {
-                    let response_fn = response_fn.clone();
-                    async move { Ok((response_fn)(req)) }
-                },
-            ));
-
-        self.plugin
-            .connector_request_service(service, "my_connector".to_string())
-            .call(request)
-            .await
     }
 }
 
@@ -299,7 +265,7 @@ where
     service: Arc<tokio::sync::Mutex<S>>,
 }
 
-impl Clone for ServiceHandle<router::Request, router::BoxService> {
+impl Clone for ServiceHandle<router::Request, router::BoxCloneService> {
     fn clone(&self) -> Self {
         Self {
             _phantom: Default::default(),
@@ -452,8 +418,6 @@ mod test_for_harness {
     use ::http::HeaderMap;
     use ::http::HeaderValue;
     use async_trait::async_trait;
-    use schemars::JsonSchema;
-    use serde::Deserialize;
     use tokio::join;
 
     use super::*;
@@ -462,11 +426,11 @@ mod test_for_harness {
     use crate::metrics::FutureMetricsExt;
     use crate::plugin::Plugin;
     use crate::services::router;
-    use crate::services::router::BoxService;
+    use crate::services::router::BoxCloneService;
     use crate::services::router::body;
 
     /// Config for the test plugin
-    #[derive(JsonSchema, Deserialize)]
+    #[apollo_configuration::configuration]
     struct MyTestPluginConfig {}
 
     struct MyTestPlugin {}
@@ -481,20 +445,23 @@ mod test_for_harness {
             Ok(Self {})
         }
 
-        fn router_service(&self, service: BoxService) -> BoxService {
+        fn router_service(&self, service: BoxCloneService) -> BoxCloneService {
             ServiceBuilder::new()
                 .load_shed()
                 .concurrency_limit(1)
                 .service(service)
-                .boxed()
+                .boxed_clone()
         }
 
-        fn supergraph_service(&self, service: supergraph::BoxService) -> supergraph::BoxService {
+        fn supergraph_service(
+            &self,
+            service: supergraph::BoxCloneService,
+        ) -> supergraph::BoxCloneService {
             // This purposely does not use load_shed to allow us to test readiness.
             ServiceBuilder::new()
                 .concurrency_limit(1)
                 .service(service)
-                .boxed()
+                .boxed_clone()
         }
     }
     register_plugin!("apollo_testing", "my_test_plugin", MyTestPlugin);

@@ -2910,6 +2910,7 @@ impl FetchDependencyGraphNode {
                     ty: ty.clone(),
                     default_value: None,
                     directives: Default::default(),
+                    description: None,
                 })
             })
         });
@@ -2973,33 +2974,53 @@ impl FetchDependencyGraphNode {
                 &operation_name,
             )?
         };
-        let operation_document = operation_compression.compress(operation)?;
+        let operation_document = operation_compression.compress(operation, false)?;
 
-        // this function removes unnecessary pieces of the query plan requires selection set.
+        // This function removes unnecessary pieces of the query plan requires selection set:
+        // aliases, arguments, and directives other than `@skip`/`@include`. Those two are kept
+        // because the inputs of a fetch may be conditional (e.g. the fields required by a field
+        // that is itself under `@include`), and the router evaluates them when building entity
+        // representations.
         // PORT NOTE: this function was called trimSelectioNodes in the JS implementation
         fn trim_requires_selection_set(
             selection_set: &executable::SelectionSet,
-        ) -> Vec<requires_selection::Selection> {
+        ) -> Result<Vec<requires_selection::Selection>, FederationError> {
             selection_set
                 .selections
                 .iter()
                 .filter_map(|s| match s {
                     executable::Selection::Field(field) => Some(
-                        requires_selection::Selection::Field(requires_selection::Field {
-                            alias: None,
-                            name: field.name.clone(),
-                            selections: trim_requires_selection_set(&field.selection_set),
+                        trim_requires_selection_set(&field.selection_set).map(|selections| {
+                            requires_selection::Selection::Field(requires_selection::Field {
+                                alias: None,
+                                name: field.name.clone(),
+                                selections,
+                            })
                         }),
                     ),
                     executable::Selection::InlineFragment(inline_fragment) => {
-                        Some(requires_selection::Selection::InlineFragment(
-                            requires_selection::InlineFragment {
-                                type_condition: inline_fragment.type_condition.clone(),
-                                selections: trim_requires_selection_set(
-                                    &inline_fragment.selection_set,
-                                ),
-                            },
-                        ))
+                        let conditions = inline_fragment
+                            .directives
+                            .iter()
+                            .filter_map(|directive| {
+                                requires_selection::Condition::from_directive(directive)
+                                    .map_err(FederationError::internal)
+                                    .transpose()
+                            })
+                            .collect::<Result<Vec<_>, _>>();
+                        let selections =
+                            trim_requires_selection_set(&inline_fragment.selection_set);
+                        Some(conditions.and_then(|conditions| {
+                            selections.map(|selections| {
+                                requires_selection::Selection::InlineFragment(
+                                    requires_selection::InlineFragment {
+                                        type_condition: inline_fragment.type_condition.clone(),
+                                        conditions,
+                                        selections,
+                                    },
+                                )
+                            })
+                        }))
                     }
                     executable::Selection::FragmentSpread(_) => None,
                 })
@@ -3007,6 +3028,7 @@ impl FetchDependencyGraphNode {
         }
         let node = super::PlanNode::Fetch(Box::new(super::FetchNode {
             subgraph_name: self.subgraph_name.clone(),
+            protocol: Default::default(),
             id: self.id.get().copied(),
             variable_usages,
             requires: input_nodes
@@ -3014,6 +3036,7 @@ impl FetchDependencyGraphNode {
                 .map(executable::SelectionSet::try_from)
                 .transpose()?
                 .map(|selection_set| trim_requires_selection_set(&selection_set))
+                .transpose()?
                 .unwrap_or_default(),
             operation_document: SerializableDocument::from_parsed(operation_document),
             operation_name,
@@ -3350,7 +3373,7 @@ fn to_toposorted_adjacency_list<N, E>(
     Some((adj, tred_index_of))
 }
 
-fn operation_for_entities_fetch(
+pub(crate) fn operation_for_entities_fetch(
     subgraph_schema: &ValidFederationSchema,
     selection_set: SelectionSet,
     mut variable_definitions: Vec<Node<VariableDefinition>>,
@@ -3420,11 +3443,12 @@ fn operation_for_entities_fetch(
         name: operation_name.clone(),
         variables: Arc::new(variable_definitions),
         directives: operation_directives.clone(),
+        description: None,
         selection_set,
     })
 }
 
-fn operation_for_query_fetch(
+pub(crate) fn operation_for_query_fetch(
     subgraph_schema: &ValidFederationSchema,
     root_kind: SchemaRootDefinitionKind,
     selection_set: SelectionSet,
@@ -3438,6 +3462,7 @@ fn operation_for_query_fetch(
         name: operation_name.clone(),
         variables: Arc::new(variable_definitions),
         directives: operation_directives.clone(),
+        description: None,
         selection_set,
     })
 }
@@ -3456,6 +3481,7 @@ fn representations_variable_definition(
         ty: Type::Named(any_name).non_null().list().non_null().into(),
         default_value: None,
         directives: Default::default(),
+        description: None,
     }
     .into())
 }
@@ -4322,11 +4348,16 @@ fn compute_nodes_for_op_path_element<'a>(
             // This edge needs the conditions just fetched, to be provided via _entities (@requires
             // or fake interface object downcast). So we create the post-@requires group, adding the
             // subgraph jump (if it isn't optimized away).
+            //
+            // The inputs of the post-@requires node must be conditioned on the `@skip`/`@include`
+            // applications of the element itself (the required fields are only required when the
+            // requiring field is selected), so we use the context updated with that element.
+            let updated_context = stack_item.context.with_context_of(operation_element)?;
             let (required_node_id, require_path) = create_post_requires_node(
                 dependency_graph,
                 edge_id,
                 (stack_item.node_id, &stack_item.node_path),
-                stack_item.context,
+                &updated_context,
                 conditions_node_data,
                 created_nodes,
             )?;
@@ -4633,7 +4664,7 @@ fn wrap_selection_with_type_and_conditions<T>(
     })
 }
 
-fn wrap_input_selections(
+pub(crate) fn wrap_input_selections(
     supergraph_schema: &ValidFederationSchema,
     wrapping_type: &CompositeTypeDefinitionPosition,
     selections: SelectionSet,
@@ -4686,7 +4717,7 @@ fn create_fetch_initial_path(
     )))
 }
 
-fn compute_input_rewrites_on_key_fetch(
+pub(crate) fn compute_input_rewrites_on_key_fetch(
     input_type_name: &Name,
     dest_type: &CompositeTypeDefinitionPosition,
     dest_schema: &ValidFederationSchema,
@@ -5086,6 +5117,18 @@ fn create_post_requires_node(
     if conditions_node_data.is_fully_local_requires {
         return Ok((fetch_node_id, fetch_node_path.clone()));
     }
+
+    // The `@skip`/`@include` applications in force at this point are not necessarily all in
+    // `context`: `OpGraphPathContext` is only populated when taking non-collecting (subgraph jump)
+    // edges, while conditionals met on operation elements walked within the current subgraph are
+    // recorded in the node path instead. A @requires edge is a collecting edge, so when e.g. a
+    // conditional fragment and the @requires live in the same subgraph, the context here is
+    // missing that fragment's conditions, and `for_new_key_fetch()` below would replace
+    // `path_in_node` (where those conditions live) with a path built from the context, losing
+    // them. So we fold the node path's conditionals into the context first. Conditions that are
+    // already handled by an enclosing `ConditionNode` are later stripped during node processing,
+    // so this does not double up.
+    let context = &context.with_context_of_path(&fetch_node_path.path_in_node)?;
 
     // NOTE: The code paths diverge below similar to handle_conditions_tree(), checking whether we
     // tried optimizing based on whether there's a single parent and whether the path in the node is

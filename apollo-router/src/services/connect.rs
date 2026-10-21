@@ -10,11 +10,13 @@ use static_assertions::assert_impl_all;
 use tower::BoxError;
 
 use crate::Context;
+use crate::batching::BatchQuery;
 use crate::graphql;
 use crate::graphql::Request as GraphQLRequest;
 use crate::query_planner::fetch::Variables;
 
-pub(crate) type BoxService = tower::util::BoxService<Request, Response, BoxError>;
+pub(crate) type BoxCloneService = tower::util::BoxCloneService<Request, Response, BoxError>;
+pub(crate) type ServiceResult = Result<Response, BoxError>;
 
 #[non_exhaustive]
 pub(crate) struct Request {
@@ -67,5 +69,13 @@ impl Request {
             variables,
             keys,
         }
+    }
+}
+
+impl Request {
+    pub(crate) fn is_part_of_batch(&self) -> bool {
+        self.context
+            .extensions()
+            .with_lock(|lock| lock.contains_key::<BatchQuery>())
     }
 }

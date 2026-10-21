@@ -93,6 +93,26 @@ where
     }
 }
 
+// The configuration attribute doesn't support generic types, and Conditional's hand-written
+// Deserialize separates the condition from the selector's keys. This forwards validation to both.
+impl<Att> apollo_configuration::Validate for Conditional<Att>
+where
+    Att: apollo_configuration::Validate,
+{
+    fn validate(&self, mut errors: apollo_configuration::ErrorCollector<'_>) {
+        // `value` holds the selected value at runtime; it isn't configuration.
+        let Self {
+            selector,
+            condition,
+            value: _,
+        } = self;
+        selector.validate(errors.inner());
+        if let Some(condition) = condition {
+            condition.lock().validate(errors.nest("condition"));
+        }
+    }
+}
+
 impl<Att> DefaultForLevel for Conditional<Att>
 where
     Att: DefaultForLevel,
@@ -110,9 +130,9 @@ impl<Att, Request, Response, EventResponse> Conditional<Att>
 where
     Att: Selector<Request = Request, Response = Response, EventResponse = EventResponse>,
 {
-    pub(crate) fn validate(&self) -> Result<(), String> {
+    pub(crate) fn validate_selectors(&self) -> Result<(), String> {
         match &self.condition {
-            Some(cond) => cond.lock().validate(None),
+            Some(cond) => cond.lock().validate_selectors(None),
             None => Ok(()),
         }
     }
@@ -359,16 +379,13 @@ where
                     value: Arc::new(Default::default()),
                 })
             }
-            fn visit_str<E>(self, v: &str) -> Result<Self::Value, E>
+            fn visit_str<E>(self, _v: &str) -> Result<Self::Value, E>
             where
                 E: Error,
             {
-                Ok(Conditional {
-                    selector: Att::deserialize(Value::String(v.to_string()))
-                        .map_err(|e| Error::custom(e.to_string()))?,
-                    condition: None,
-                    value: Arc::new(Default::default()),
-                })
+                Err(E::custom(
+                    "plain string selectors are not supported in Router 3.x; use '{ static: \"<value>\" }' instead",
+                ))
             }
         }
 
@@ -628,14 +645,17 @@ mod test {
     }
 
     #[test]
-    fn test_simple_value() {
+    fn test_simple_value_no_longer_supported() {
         let config = r#"
             "foo"
         "#;
 
-        let result = serde_yaml::from_str::<super::Conditional<RouterSelector>>(config)
-            .expect("should have parsed");
-        assert!(result.condition.is_none());
-        assert!(matches!(result.selector, RouterSelector::Static(_)));
+        let result = serde_yaml::from_str::<super::Conditional<RouterSelector>>(config);
+        assert!(
+            result
+                .expect_err("should have got error")
+                .to_string()
+                .contains("plain string selectors are not supported"),
+        )
     }
 }

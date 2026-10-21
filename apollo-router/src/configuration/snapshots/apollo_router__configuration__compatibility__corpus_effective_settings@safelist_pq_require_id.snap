@@ -1,0 +1,11 @@
+---
+source: apollo-router/src/configuration/compatibility.rs
+description: documented persisted-query safelist configuration
+expression: changed_settings(&config)
+---
+{
+  "/apq/enabled": false,
+  "/persisted_queries/enabled": true,
+  "/persisted_queries/safelist/enabled": true,
+  "/persisted_queries/safelist/require_id": true
+}

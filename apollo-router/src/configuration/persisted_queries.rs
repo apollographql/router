@@ -19,7 +19,6 @@ pub struct PersistedQueries {
     pub experimental_prewarm_query_plan_cache: PersistedQueriesPrewarmQueryPlanCache,
 
     /// Enables using a local copy of the persisted query manifest to safelist operations
-    #[serde(alias = "experimental_local_manifests")]
     pub local_manifests: Option<Vec<String>>,
 
     /// Enables hot reloading of the local persisted query manifests

@@ -1,0 +1,15 @@
+---
+source: apollo-federation/src/connectors/validation/mod.rs
+expression: errors
+input_file: apollo-federation/src/connectors/validation/test_data/first_on_object/unnamed.graphql
+---
+[
+    Message {
+        code: InvalidSelection,
+        message: "Method ->first requires an array or string input",
+        locations: [
+            14:34..14:38,
+            14:42..14:47,
+        ],
+    },
+]

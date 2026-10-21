@@ -22,7 +22,21 @@
         '(#|<!--)\\s*renovate-automation: rustc version\\s*(?:-->)?\\n[^.]*?(?<currentValue>[0-9]+\\.[0-9]+\\.[0-9]+)\\b',
       ],
       depNameTemplate: 'rust',
-      datasourceTemplate: 'docker',
+      // Same datasource as the `mise` and `rust-toolchain` managers, so every
+      // Rust pin clears `minimumReleaseAge` together.  `docker` doesn't work
+      // here: Docker Hub re-pushes the `rust` tags every few days, which keeps
+      // resetting their release age.
+      datasourceTemplate: 'rust-version',
+    },
+    // The mise that CircleCI installs.  It needs to stay current so CI resolves
+    // tools from the same mise registry backends as local dev and GitHub Actions.
+    {
+      customType: 'regex',
+      managerFilePatterns: ['/^\\.circleci/config\\.yml$/'],
+      matchStrings: ['MISE_VERSION:\\s*(?<currentValue>v[0-9]+\\.[0-9]+\\.[0-9]+)'],
+      depNameTemplate: 'mise',
+      packageNameTemplate: 'jdx/mise',
+      datasourceTemplate: 'github-releases',
     },
   ],
   packageRules: [
@@ -76,21 +90,25 @@
 
     // Put all the rustc dependencies in a single PR.
     //
-    // Note the two `matchPackageNames` entries: the `mise` manager reports
-    // rust as `rust-lang/rust` (its upstream `packageName`), while the other
-    // three managers report it as just `rust`.  Renovate's `matchPackageNames`
-    // only matches against `packageName` — not `depName` — so we have to list
-    // both to catch every manager's view of the Rust release.
-    //
-    // The `minimumReleaseAge` here aligns the soak window across all four
-    // managers: otherwise `dockerfile` / `custom.regex` / `rust-release-channel`
-    // open their PR immediately while `mise` waits out its own 5-day soak
-    // (set below), and the two halves never meet in the same PR.
+    // Never auto-merged: a partial group (e.g. mise bumped, `rust-toolchain.toml`
+    // not) still passes CI on a warm toolchain cache, but breaks `mise install`
+    // on a cold one.  Rust bumps usually need lint fixes anyway.
     {
-      matchPackageNames: ['rust', 'rust-lang/rust'],
-      matchManagers: ['custom.regex', 'dockerfile', 'mise', 'rust-release-channel'],
+      matchPackageNames: ['rust'],
+      matchManagers: ['custom.regex', 'dockerfile', 'mise', 'rust-toolchain'],
       groupName: 'rustc',
       minimumReleaseAge: '5 days',
+      automerge: false,
+    },
+
+    // mise releases almost daily; monthly is plenty.  Not auto-merged, since a
+    // new mise can change which backend installs a tool.
+    {
+      matchManagers: ['custom.regex'],
+      matchPackageNames: ['jdx/mise'],
+      schedule: ['* 0-3 1 * *'],
+      minimumReleaseAge: '5 days',
+      automerge: false,
     },
 
     // Keep serde_yaml at 0.8.x - version 0.9.x has breaking changes and the

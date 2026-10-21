@@ -31,7 +31,10 @@ impl Plugin for SupergraphSDL {
         })
     }
 
-    fn supergraph_service(&self, service: supergraph::BoxService) -> supergraph::BoxService {
+    fn supergraph_service(
+        &self,
+        service: supergraph::BoxCloneService,
+    ) -> supergraph::BoxCloneService {
         // Clone our parsed schema for use in map_request
         let schema = self.schema.clone();
         // `ServiceBuilder` provides us with `map_request` and `map_response` methods.
@@ -57,7 +60,7 @@ impl Plugin for SupergraphSDL {
                 req
             })
             .service(service)
-            .boxed()
+            .boxed_clone()
     }
 }
 

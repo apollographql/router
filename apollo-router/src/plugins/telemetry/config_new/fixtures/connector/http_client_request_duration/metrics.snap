@@ -30,9 +30,21 @@ info:
               custom.supergraph.operation.kind:
                 supergraph_operation_kind: string
               custom.has_error:
-                error: boolean
-snapshot_kind: text
+                connector_on_response_error: true
 ---
+- name: apollo.router.operations.fetch.duration
+  description: Duration of a subgraph fetch.
+  unit: s
+  data:
+    datapoints:
+      - sum: 0.1
+        count: 1
+        attributes:
+          connector.source: posts_api
+          graphql.operation.name: Test
+          graphql.operation.type: query
+          has_errors: false
+          subgraph.name: posts
 - name: http.client.request.duration
   description: Duration of HTTP client requests.
   unit: s

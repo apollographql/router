@@ -94,6 +94,7 @@ pub(super) fn parse_and_expand(
         schema,
         &Default::default(),
         &never_cancel,
+        true,
     )
 }
 
@@ -218,6 +219,7 @@ fn can_remove_introspection_selections() {
             &schema,
             &IndexSet::default(),
             &never_cancel,
+            true,
         )
         .unwrap();
 
@@ -936,6 +938,7 @@ scalar FieldSet
             &schema,
             &interface_objects,
             &never_cancel,
+            true,
         )
         .unwrap();
         let expected = r#"query TestQuery {
@@ -1071,6 +1074,7 @@ mod make_selection_tests {
             &schema,
             &Default::default(),
             &never_cancel,
+            true,
         )
         .unwrap();
 
@@ -1170,6 +1174,7 @@ mod lazy_map_tests {
             &schema,
             &Default::default(),
             &never_cancel,
+            true,
         )
         .unwrap();
 
@@ -1229,6 +1234,7 @@ mod lazy_map_tests {
             &schema,
             &Default::default(),
             &never_cancel,
+            true,
         )
         .unwrap();
 
@@ -1435,6 +1441,7 @@ fn test_expand_all_fragments1() {
             &schema,
             &IndexSet::default(),
             &never_cancel,
+            true,
         )
         .unwrap();
         insta::assert_snapshot!(normalized_operation, @r###"
@@ -1975,4 +1982,289 @@ fn fragments_with_non_intersecting_types() {
           }
         }
     "###);
+}
+
+/// A concrete object's field must not rebase onto an unrelated interface
+/// that happens to declare a same-named field; that would let planners
+/// merge concrete-typed selections to interface positions without
+/// narrowing. Only @interfaceObject targets accept this cross-type rebase
+/// (can_rebase_on case 3).
+#[test]
+fn field_does_not_rebase_onto_unrelated_interface() {
+    let src = r#"
+query TestQuery { cat { name } }
+
+type Query { cat: Cat }
+type Cat { name: String }
+"#;
+    let (schema, mut executable_document) = parse_schema_and_operation(src);
+    let operation = executable_document
+        .operations
+        .named
+        .get_mut("TestQuery")
+        .expect("operation");
+    let normalized = normalize_operation(
+        operation,
+        &executable_document.fragments,
+        &schema,
+        &IndexSet::default(),
+        &never_cancel,
+        true,
+    )
+    .expect("normalizes");
+    let Selection::Field(cat_sel) = normalized
+        .selection_set
+        .selections
+        .values()
+        .next()
+        .expect("cat selection")
+    else {
+        panic!("expected field selection");
+    };
+    let Selection::Field(name_sel) = cat_sel
+        .selection_set
+        .as_ref()
+        .expect("cat sub-selections")
+        .selections
+        .values()
+        .next()
+        .expect("name selection")
+    else {
+        panic!("expected field selection");
+    };
+
+    let target = Schema::parse_and_validate(
+        r#"
+type Query { animals: [Animal] }
+interface Animal { name: String }
+type Dog implements Animal { name: String }
+"#,
+        "target.graphql",
+    )
+    .expect("target schema parses");
+    let target = ValidFederationSchema::new(target).expect("valid federation schema");
+    let animal: crate::schema::position::CompositeTypeDefinitionPosition = target
+        .get_type(&name!("Animal"))
+        .expect("Animal exists")
+        .try_into()
+        .expect("composite type");
+
+    let result = name_sel.field.rebase_on(&animal, &target);
+    assert!(
+        result.is_err(),
+        "Cat.name must not rebase onto unrelated interface Animal: {result:?}"
+    );
+}
+
+mod generated_document_validation_tests {
+    use apollo_compiler::ExecutableDocument;
+    use apollo_compiler::Schema;
+
+    use crate::operation::assume_generated_document_valid;
+
+    fn invalid_document() -> (
+        apollo_compiler::validation::Valid<Schema>,
+        ExecutableDocument,
+    ) {
+        let schema =
+            Schema::parse_and_validate("type Query { f(arg: Int): Int }", "schema.graphql")
+                .expect("schema is valid");
+        // `$v` is never declared, which only validation catches.
+        let document = ExecutableDocument::parse(&schema, "{ f(arg: $v) }", "op.graphql")
+            .expect("document parses");
+        (schema, document)
+    }
+
+    #[test]
+    fn release_path_passes_invalid_document_through() {
+        let (schema, document) = invalid_document();
+        let valid = assume_generated_document_valid(document, &schema, false, "test")
+            .expect("release builds do not validate");
+        assert_eq!(valid.to_string().trim(), "{\n  f(arg: $v)\n}");
+    }
+
+    #[test]
+    fn debug_path_rejects_invalid_document() {
+        let (schema, document) = invalid_document();
+        let err = assume_generated_document_valid(document, &schema, true, "test")
+            .expect_err("debug builds validate");
+        assert!(
+            err.to_string().contains("test produced invalid document"),
+            "unexpected error: {err}"
+        );
+    }
+}
+
+/// An inline fragment without a type condition adds no element to alias paths, so aliases
+/// computed for fields inside it must be applied inside it as well; otherwise the subgraph
+/// operation keeps two incompatible selections under one response name.
+#[test]
+fn add_aliases_for_non_merging_fields_inside_untyped_inline_fragment() {
+    let schema = parse_schema(
+        r#"
+        directive @dir on INLINE_FRAGMENT
+        type Query { u: [U!]! }
+        union U = A | B
+        type A { x: Int! }
+        type B { x: Int y: String }
+        "#,
+    );
+    let aliased = |query: &str| {
+        // The input selects incompatible types under one response name, as the planner's
+        // internal fetch selections can before aliasing; so it's parsed without validation.
+        let document =
+            ExecutableDocument::parse(schema.schema(), query, "query.graphql").expect("parses");
+        let operation = normalize_operation(
+            document.operations.iter().next().expect("has an operation"),
+            &document.fragments,
+            &schema,
+            &Default::default(),
+            &never_cancel,
+            true,
+        )
+        .expect("normalizes");
+        let (selection_set, rewrites) = operation
+            .selection_set
+            .add_aliases_for_non_merging_fields()
+            .expect("aliases can be computed");
+        let rewrites = rewrites
+            .iter()
+            .map(|rewrite| match rewrite.as_ref() {
+                crate::query_plan::FetchDataRewrite::KeyRenamer(renamer) => format!(
+                    "{} -> {}",
+                    renamer
+                        .path
+                        .iter()
+                        .map(|element| element.to_string())
+                        .collect::<Vec<_>>()
+                        .join("/"),
+                    renamer.rename_key_to
+                ),
+                other => panic!("unexpected rewrite {other:?}"),
+            })
+            .collect::<Vec<_>>();
+        format!("{selection_set}\n{}", rewrites.join("\n"))
+    };
+
+    // The untyped fragment wraps the whole conflicting selection.
+    insta::assert_snapshot!(
+        aliased("{ ... @dir { u { ... on A { x } ... on B { x } } } }"),
+        @"
+    { ... @dir { u { ... on A { x } ... on B { x__alias_0: x } } } }
+    u/... on B/x__alias_0 -> x
+    "
+    );
+    // The untyped fragment sits at the level where the alias is applied.
+    insta::assert_snapshot!(
+        aliased("{ u { ... on A { x } ... on B { ... @dir { x } } } }"),
+        @"
+    { u { ... on A { x } ... on B { ... @dir { x__alias_0: x } } } }
+    u/... on B/x__alias_0 -> x
+    "
+    );
+    // Fields inside and outside the untyped fragment share a path, so only the occurrence that
+    // conflicts may be aliased, in either order.
+    insta::assert_snapshot!(
+        aliased("{ u { ... on B { x ... @dir { x: y } } } }"),
+        @"
+    { u { ... on B { x ... @dir { x__alias_0: y } } } }
+    u/... on B/x__alias_0 -> x
+    "
+    );
+    insta::assert_snapshot!(
+        aliased("{ u { ... on B { ... @dir { x: y } x } } }"),
+        @"
+    { u { ... on B { ... @dir { x: y } x__alias_0: x } } }
+    u/... on B/x__alias_0 -> x
+    "
+    );
+}
+
+fn aliased(schema_doc: &str, type_name: &str, selection: &str) -> String {
+    let schema = parse_schema(schema_doc);
+    let type_position: crate::schema::position::CompositeTypeDefinitionPosition = schema
+        .get_type(&Name::new(type_name).expect("valid name"))
+        .expect("type exists")
+        .try_into()
+        .expect("composite type");
+    let selection_set =
+        SelectionSet::parse(schema, type_position, selection).expect("selection parses");
+    let (aliased, rewrites) = selection_set
+        .add_aliases_for_non_merging_fields()
+        .expect("aliases computed");
+    let rewrites = rewrites
+        .iter()
+        .map(|rewrite| format!("{rewrite:?}"))
+        .collect::<Vec<_>>()
+        .join("\n");
+    format!("{aliased}\n{rewrites}")
+}
+
+const ALIAS_SCHEMA: &str = r#"
+    type Query { i: I }
+    interface I { id: ID o: O }
+    type A implements I { id: ID v: Int o: O }
+    type B implements I { id: ID v: String o: O }
+    type C implements I { id: ID w: Int o: O }
+    type O { p: Int q: Int r: P }
+    type P { s: Int }
+"#;
+
+#[test]
+fn aliases_fields_whose_types_differ_across_fragments() {
+    insta::assert_snapshot!(
+        aliased(ALIAS_SCHEMA, "I", "... on A { v } ... on B { v } ... on C { w }"),
+        @r###"
+    { ... on A { v } ... on B { v__alias_0: v } ... on C { w } }
+    KeyRenamer(FetchDataKeyRenamer { path: [TypenameEquals("B"), Key("v__alias_0", None)], rename_key_to: "v" })
+    "###
+    );
+}
+
+#[test]
+fn aliases_nested_conflicts_under_merged_fields() {
+    insta::assert_snapshot!(
+        aliased(
+            ALIAS_SCHEMA,
+            "I",
+            "... on A { o { r { s } } v } ... on B { o { r: p } v id } ... on C { o { r { s } q } }",
+        ),
+        @r###"
+    { ... on A { o { r { s } } v } ... on B { o { r__alias_0: p } v__alias_0: v id } ... on C { o { r { s } q } } }
+    KeyRenamer(FetchDataKeyRenamer { path: [TypenameEquals("B"), Key("v__alias_0", None)], rename_key_to: "v" })
+    KeyRenamer(FetchDataKeyRenamer { path: [TypenameEquals("B"), Key("o", None), Key("r__alias_0", None)], rename_key_to: "r" })
+    "###
+    );
+}
+
+#[test]
+fn aliases_nothing_when_fields_merge() {
+    insta::assert_snapshot!(
+        aliased(ALIAS_SCHEMA, "I", "id o { p } ... on A { id o { q } } ... on C { w }"),
+        @"{ id o { p } ... on A { id o { q } } ... on C { w } }"
+    );
+}
+
+#[test]
+fn aliases_conflicts_found_after_merging_parent_fields() {
+    insta::assert_snapshot!(
+        aliased(
+            r#"
+            type Query { i: I }
+            interface I { o: O }
+            type A implements I { o: O }
+            type B implements I { o: O }
+            type O { t: T }
+            interface T { id: ID }
+            type X implements T { id: ID n: Int }
+            type Y implements T { id: ID n: String }
+            "#,
+            "I",
+            "... on A { o { t { ... on X { n } } } } ... on B { o { t { id ... on Y { n } } } }",
+        ),
+        @r###"
+    { ... on A { o { t { ... on X { n } } } } ... on B { o { t { id ... on Y { n__alias_0: n } } } } }
+    KeyRenamer(FetchDataKeyRenamer { path: [TypenameEquals("B"), Key("o", None), Key("t", None), TypenameEquals("Y"), Key("n__alias_0", None)], rename_key_to: "n" })
+    "###
+    );
 }

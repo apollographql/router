@@ -3,6 +3,11 @@ use std::collections::HashMap;
 use std::path::PathBuf;
 use std::time::Duration;
 
+use opentelemetry_proto::tonic::collector::metrics::v1::ExportMetricsServiceRequest;
+use opentelemetry_proto::tonic::common::v1::any_value;
+use opentelemetry_proto::tonic::metrics::v1::metric;
+use opentelemetry_proto::tonic::metrics::v1::number_data_point;
+use prost::Message;
 use regex::Regex;
 use serde_json::json;
 use wiremock::Mock;
@@ -13,12 +18,41 @@ use wiremock::matchers::method;
 use crate::integration::IntegrationTest;
 use crate::integration::common::Query;
 use crate::integration::common::graph_os_enabled;
+use crate::integration::telemetry::otlp::mock_otlp_server;
 
 const PROMETHEUS_CONFIG: &str = include_str!("fixtures/prometheus.router.yaml");
 const PROMETHEUS_RESPONSE_BODY_SIZE_CONFIG: &str =
     include_str!("fixtures/prometheus_response_body_size.router.yaml");
 const SUBGRAPH_AUTH_CONFIG: &str = include_str!("fixtures/subgraph_auth.router.yaml");
 const RESPONSE_CACHE_CONFIG: &str = include_str!("fixtures/response_cache.router.yaml");
+
+/// Prometheus, a connector pointed at the local wiremock, and subgraph errors
+/// included so declared errors are not redacted away.
+const CONNECTOR_DECLARED_ERROR_CONFIG: &str = r#"
+telemetry:
+  exporters:
+    metrics:
+      prometheus:
+        enabled: true
+        path: /metrics
+include_subgraph_errors:
+  all: true
+connectors:
+  sources: {}
+"#;
+
+/// The same without `include_subgraph_errors`, which is the default and
+/// redacts a connector's declared errors out of the response.
+const CONNECTOR_REDACTED_CONFIG: &str = r#"
+telemetry:
+  exporters:
+    metrics:
+      prometheus:
+        enabled: true
+        path: /metrics
+connectors:
+  sources: {}
+"#;
 
 #[tokio::test(flavor = "multi_thread")]
 async fn test_metrics_reloading() {
@@ -43,7 +77,18 @@ async fn test_metrics_reloading() {
     let mut config_value: serde_yaml::Value =
         serde_yaml::from_str(PROMETHEUS_CONFIG).expect("fixture is valid YAML");
     let apollo_block: serde_yaml::Value = serde_yaml::from_str(
-        "field_level_instrumentation_sampler: always_on\nexperimental_otlp_tracing_protocol: http\nexperimental_otlp_metrics_protocol: http\nbatch_processor:\n  scheduled_delay: 100ms\n",
+        r#"
+        field_level_instrumentation_sampler: always_on
+        otlp_tracing_protocol: http
+        otlp_metrics_protocol: http
+        tracing:
+          batch_processor:
+            scheduled_delay: 100ms
+        metrics:
+          usage_reports:
+            batch_processor:
+              scheduled_delay: 100ms
+        "#,
     )
     .unwrap();
     config_value
@@ -74,7 +119,7 @@ async fn test_metrics_reloading() {
     //     also fine for this test, which just asserts the License
     //     poller's success counter increments.
     //   * Both `telemetry.apollo.endpoint` and
-    //     `telemetry.apollo.experimental_otlp_endpoint` pinned to the
+    //     `telemetry.apollo.otlp_endpoint` pinned to the
     //     per-test `apollo_otlp_server` mock with a catch-all
     //     `POST → 200` route, so all four reporting paths
     //     (`studio_reports_total{report_type=metrics|traces}` ×
@@ -121,14 +166,14 @@ async fn test_metrics_reloading() {
 
     check_metrics_contains(
         &metrics,
-        r#"apollo_router_cache_hit_time_count{kind="query planner",storage="memory",otel_scope_name="apollo/router"} 4"#,
+        r#"apollo_router_cache_hit_time_seconds_count{kind="query planner",storage="memory",otel_scope_name="apollo/router"} 4"#,
     );
     check_metrics_contains(
         &metrics,
-        r#"apollo_router_cache_miss_time_count{kind="query planner",storage="memory",otel_scope_name="apollo/router"} 2"#,
+        r#"apollo_router_cache_miss_time_seconds_count{kind="query planner",storage="memory",otel_scope_name="apollo/router"} 2"#,
     );
-    check_metrics_contains(&metrics, r#"apollo_router_cache_hit_time"#);
-    check_metrics_contains(&metrics, r#"apollo_router_cache_miss_time"#);
+    check_metrics_contains(&metrics, r#"apollo_router_cache_hit_time_seconds"#);
+    check_metrics_contains(&metrics, r#"apollo_router_cache_miss_time_seconds"#);
 
     router
         .assert_metrics_does_not_contain(r#"_total_total{"#)
@@ -136,7 +181,7 @@ async fn test_metrics_reloading() {
 
     // Studio + Uplink metrics. With both Apollo Studio and Apollo Uplink
     // pointed at local wiremocks (Studio via the harness's per-test mock at
-    // `experimental_otlp_endpoint`, Uplink via `APOLLO_UPLINK_ENDPOINTS`), all
+    // `otlp_endpoint`, Uplink via `APOLLO_UPLINK_ENDPOINTS`), all
     // four reporting paths complete successfully and deterministically — no
     // public-Internet dependency, no batch-timer race.
     //
@@ -295,7 +340,6 @@ async fn test_sigv4_does_not_leak_to_unconfigured_subgraph() {
               exporters:
                 metrics:
                   prometheus:
-                    listen: 127.0.0.1:4000
                     enabled: true
                     path: /metrics
             include_subgraph_errors:
@@ -537,18 +581,22 @@ async fn test_gauges_on_reload() {
     router
         .assert_metrics_contains(r#"apollo_router_cache_storage_estimated_size{kind="query planner",type="memory",otel_scope_name="apollo/router"} "#, None)
         .await;
+
+    // APQ cache should contain the persisted query
     router
         .assert_metrics_contains(
             r#"apollo_router_cache_size{kind="APQ",type="memory",otel_scope_name="apollo/router"} 1"#,
             None,
         )
         .await;
+    // Query plan cache should contain the regular query + the persisted query
     router
         .assert_metrics_contains(
-            r#"apollo_router_cache_size{kind="query planner",type="memory",otel_scope_name="apollo/router"} 1"#,
+            r#"apollo_router_cache_size{kind="query planner",type="memory",otel_scope_name="apollo/router"} 2"#,
             None,
         )
         .await;
+    // Introspection cache should contain the introspection query
     router
         .assert_metrics_contains(
             r#"apollo_router_cache_size{kind="introspection",type="memory",otel_scope_name="apollo/router"} 1"#,
@@ -922,4 +970,387 @@ async fn test_is_primary_response_fires_on_deferred_chunks() {
         &metrics,
         r#"deferred_chunks_total{otel_scope_name="apollo/router"}"#,
     );
+}
+
+/// A connector mapping's `->withError` reaches the client in
+/// `extensions.connectorErrors` and increments `apollo.router.graphql_error`
+/// under the author's code.
+///
+/// Prometheus rather than the Apollo pipeline so this runs without GraphOS
+/// credentials. `apollo.router.operations.error` is denied on public
+/// exporters, and its attributes are covered by the `error_counter` unit
+/// tests.
+///
+/// `include_subgraph_errors: all: true` is not decoration: the default redacts
+/// subgraph errors and takes declared errors with them. `connectors: sources:
+/// {}` points the connector at the local wiremock rather than the schema's
+/// real baseURL.
+#[tokio::test(flavor = "multi_thread")]
+async fn test_declared_connector_error_is_reported_and_counted() {
+    let mut router = IntegrationTest::builder()
+        .config(CONNECTOR_DECLARED_ERROR_CONFIG)
+        .supergraph(PathBuf::from_iter([
+            "tests",
+            "fixtures",
+            "connectors",
+            "with_error.graphql",
+        ]))
+        // No `body`, so the mapping's `body ?? $("")->withError(...)` declares
+        // its error and the field still resolves.
+        .responder(ResponseTemplate::new(200).set_body_json(json!([{
+            "id": 1,
+            "title": "Awesome post",
+            "userId": 1
+        }])))
+        .http_method("GET")
+        .build()
+        .await;
+
+    router.start().await;
+    router.assert_started().await;
+
+    let (_trace_id, response) = router
+        .execute_query(
+            Query::builder()
+                .body(json!({"query":"query ExampleQuery {posts{id body}}","variables":{}}))
+                .build(),
+        )
+        .await;
+
+    // The data is returned *and* the defect is reported, alongside each other.
+    let response = response.text().await.unwrap();
+    assert!(
+        response.contains("connectorErrors"),
+        "expected the declared error in extensions, got: {response}"
+    );
+    assert!(
+        response.contains("POST_BODY_MISSING"),
+        "expected the author's error code, got: {response}"
+    );
+
+    router
+        .assert_metrics_contains(
+            r#"apollo_router_graphql_error_total{code="POST_BODY_MISSING"<any>} 1"#,
+            None,
+        )
+        .await;
+
+    router.graceful_shutdown().await;
+}
+
+/// Counted at the connector, so redaction cannot suppress the metric.
+///
+/// The two halves are decided in different places: `include_subgraph_errors`
+/// governs what a client receives, telemetry config governs what is counted.
+/// Without `include_subgraph_errors` (the default, asserted here by its
+/// absence) an operator would otherwise have no way to know these happened.
+#[tokio::test(flavor = "multi_thread")]
+async fn test_declared_connector_error_is_counted_even_when_redacted() {
+    let mut router = IntegrationTest::builder()
+        .config(CONNECTOR_REDACTED_CONFIG)
+        .supergraph(PathBuf::from_iter([
+            "tests",
+            "fixtures",
+            "connectors",
+            "with_error.graphql",
+        ]))
+        .responder(ResponseTemplate::new(200).set_body_json(json!([{
+            "id": 1,
+            "title": "Awesome post",
+            "userId": 1
+        }])))
+        .http_method("GET")
+        .build()
+        .await;
+
+    router.start().await;
+    router.assert_started().await;
+
+    let (_trace_id, response) = router
+        .execute_query(
+            Query::builder()
+                .body(json!({"query":"query ExampleQuery {posts{id body}}","variables":{}}))
+                .build(),
+        )
+        .await;
+
+    // Redacted out of the response entirely, not replaced by a placeholder.
+    let response = response.text().await.unwrap();
+    assert!(
+        !response.contains("POST_BODY_MISSING"),
+        "a redacted subgraph's declared errors must not reach the client, got: {response}"
+    );
+
+    // And counted anyway.
+    router
+        .assert_metrics_contains(
+            r#"apollo_router_graphql_error_total{code="POST_BODY_MISSING"<any>} 1"#,
+            None,
+        )
+        .await;
+
+    router.graceful_shutdown().await;
+}
+
+/// `->withWarning` reaches neither the client nor the error counters.
+///
+/// The negative case is the one that can regress invisibly: a warning that
+/// started counting as an error would break the promise the method exists for
+/// without breaking any assertion about `->withError`.
+///
+/// The responder omits `title` and supplies `body`, so the fixture's
+/// `->withWarning` fires and its `->withError` does not.
+#[tokio::test(flavor = "multi_thread")]
+async fn test_connector_mapping_warning_is_not_reported_or_counted() {
+    let mut router = IntegrationTest::builder()
+        .config(CONNECTOR_DECLARED_ERROR_CONFIG)
+        .supergraph(PathBuf::from_iter([
+            "tests",
+            "fixtures",
+            "connectors",
+            "with_error.graphql",
+        ]))
+        .responder(ResponseTemplate::new(200).set_body_json(json!([{
+            "id": 1,
+            "body": "This is a really great post",
+            "userId": 1
+        }])))
+        .http_method("GET")
+        .build()
+        .await;
+
+    router.start().await;
+    router.assert_started().await;
+
+    let (_trace_id, response) = router
+        .execute_query(
+            Query::builder()
+                .body(json!({"query":"query ExampleQuery {posts{id title}}","variables":{}}))
+                .build(),
+        )
+        .await;
+
+    let response = response.text().await.unwrap();
+    assert!(
+        !response.contains("connectorErrors"),
+        "a warning must not be reported to the client, got: {response}"
+    );
+    assert!(
+        !response.contains("Post title was missing"),
+        "a warning's message must not reach the client, got: {response}"
+    );
+
+    // The whole counter, not just this code: the query succeeds with no
+    // errors of any kind, so any increment at all is a regression. Asserted
+    // after scraping an unrelated counter, so this is "absent once metrics
+    // were flowing" rather than "nothing had arrived yet".
+    router
+        .assert_metrics_contains(r#"apollo_router_operations_total"#, None)
+        .await;
+    router
+        .assert_metrics_does_not_contain(r#"apollo_router_graphql_error_total"#)
+        .await;
+
+    router.graceful_shutdown().await;
+}
+
+fn cardinality_overflow_lines(metrics: &str) -> Vec<&str> {
+    metrics
+        .lines()
+        .filter(|l| l.starts_with("apollo_router_telemetry_metrics_cardinality_overflow"))
+        .collect()
+}
+
+/// Sends a successful and a failed request, which is enough to push
+/// `http.server.request.duration` past the fixtures' `cardinality_limit: 1`.
+async fn overflow_request_duration(router: &mut IntegrationTest) {
+    router.execute_default_query().await;
+    router
+        .execute_query(Query::default().with_bad_query())
+        .await;
+}
+
+/// The value of the single `cardinality_overflow` series in a scrape, which must be labelled
+/// `metric_name`.
+async fn scraped_overflow_count(router: &IntegrationTest, metric_name: &str) -> u64 {
+    let metrics = router
+        .get_metrics_response()
+        .await
+        .expect("failed to fetch metrics")
+        .text()
+        .await
+        .unwrap();
+    let counter = cardinality_overflow_lines(&metrics);
+    assert_eq!(
+        counter.len(),
+        1,
+        "expected one counter series in:\n{metrics}"
+    );
+    let (series, value) = counter[0].rsplit_once(' ').unwrap();
+    assert!(
+        series.contains(&format!(r#"metric_name="{metric_name}""#)),
+        "{series}"
+    );
+    value.parse().unwrap()
+}
+
+/// With only the Prometheus exporter, an overflowed instrument is reported by
+/// `apollo.router.telemetry.metrics.cardinality_overflow`, labelled with its OpenTelemetry name,
+/// as with the other exporters. The start of the overflow counts once, however many times the
+/// endpoint is scraped.
+#[tokio::test(flavor = "multi_thread")]
+async fn test_prometheus_cardinality_overflow_counter() {
+    let mut router = IntegrationTest::builder()
+        .config(include_str!(
+            "fixtures/prometheus_cardinality_overflow.router.yaml"
+        ))
+        .build()
+        .await;
+
+    router.start().await;
+    router.assert_started().await;
+    overflow_request_duration(&mut router).await;
+
+    router
+        .assert_metrics_contains_multiple(
+            vec![
+                r#"http_server_request_duration_seconds_count{otel_metric_overflow="true""#,
+                r#"apollo_router_telemetry_metrics_cardinality_overflow_total{metric_name="http.server.request.duration",otel_scope_name="apollo/router"} 1"#,
+            ],
+            None,
+        )
+        .await;
+    // More scrapes, including from a second client, don't count the same overflow again.
+    let second_scraper = reqwest::Client::new();
+    for _ in 0..3 {
+        second_scraper
+            .get(format!("http://{}/metrics", router.bind_address()))
+            .send()
+            .await
+            .expect("second scraper failed");
+        assert_eq!(
+            scraped_overflow_count(&router, "http.server.request.duration").await,
+            1
+        );
+    }
+
+    router.graceful_shutdown().await;
+}
+
+async fn otlp_metric_exports(collector: &MockServer) -> Vec<ExportMetricsServiceRequest> {
+    collector
+        .received_requests()
+        .await
+        .unwrap_or_default()
+        .iter()
+        .filter(|request| request.url.path() == "/metrics")
+        .map(|request| {
+            ExportMetricsServiceRequest::decode(request.body.as_slice())
+                .expect("OTLP metrics export")
+        })
+        .collect()
+}
+
+async fn wait_for_otlp_metric_exports(collector: &MockServer, exports: usize) {
+    let target = otlp_metric_exports(collector).await.len() + exports;
+    tokio::time::timeout(Duration::from_secs(15), async {
+        while otlp_metric_exports(collector).await.len() < target {
+            tokio::time::sleep(Duration::from_millis(50)).await;
+        }
+    })
+    .await
+    .expect("OTLP exporter did not export");
+}
+
+/// The value of the `cardinality_overflow` series for `http.server.request.duration` in the most
+/// recent OTLP export that carries it. With cumulative temporality that is its running total.
+async fn exported_overflow_count(collector: &MockServer) -> Option<i64> {
+    otlp_metric_exports(collector)
+        .await
+        .iter()
+        .flat_map(|export| &export.resource_metrics)
+        .flat_map(|resource| &resource.scope_metrics)
+        .flat_map(|scope| &scope.metrics)
+        .filter(|metric| metric.name == "apollo.router.telemetry.metrics.cardinality_overflow")
+        .filter_map(|metric| match &metric.data {
+            Some(metric::Data::Sum(sum)) => Some(&sum.data_points),
+            _ => None,
+        })
+        .flatten()
+        .filter(|point| {
+            point.attributes.iter().any(|attribute| {
+                attribute.key == "metric.name"
+                    && attribute
+                        .value
+                        .as_ref()
+                        .and_then(|value| value.value.as_ref())
+                        == Some(&any_value::Value::StringValue(
+                            "http.server.request.duration".to_string(),
+                        ))
+            })
+        })
+        .filter_map(|point| match point.value {
+            Some(number_data_point::Value::AsInt(value)) => Some(value),
+            _ => None,
+        })
+        .next_back()
+}
+
+/// With OTLP, alone or with Prometheus, the OTLP exporter counts the start of an overflow once,
+/// with the dotted metric name, however many exports follow.
+async fn assert_counted_once_by_otlp(collector: &MockServer) {
+    tokio::time::timeout(Duration::from_secs(15), async {
+        while exported_overflow_count(collector).await.is_none() {
+            tokio::time::sleep(Duration::from_millis(50)).await;
+        }
+    })
+    .await
+    .expect("OTLP never exported the overflow counter");
+    wait_for_otlp_metric_exports(collector, 3).await;
+    assert_eq!(exported_overflow_count(collector).await, Some(1));
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn test_otlp_cardinality_overflow_counted_once() {
+    let collector = mock_otlp_server(0..).await;
+    let mut router = IntegrationTest::builder()
+        .config(include_str!(
+            "fixtures/otlp_cardinality_overflow.router.yaml"
+        ))
+        .env_entry("TEST_CONFIG_COLLECTOR_ENDPOINT", collector.uri())
+        .build()
+        .await;
+
+    router.start().await;
+    router.assert_started().await;
+    overflow_request_duration(&mut router).await;
+    assert_counted_once_by_otlp(&collector).await;
+
+    router.graceful_shutdown().await;
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn test_prometheus_and_otlp_cardinality_overflow_counted_once() {
+    let collector = mock_otlp_server(0..).await;
+    let mut router = IntegrationTest::builder()
+        .config(include_str!(
+            "fixtures/prometheus_otlp_cardinality_overflow.router.yaml"
+        ))
+        .env_entry("TEST_CONFIG_COLLECTOR_ENDPOINT", collector.uri())
+        .build()
+        .await;
+
+    router.start().await;
+    router.assert_started().await;
+    overflow_request_duration(&mut router).await;
+    assert_counted_once_by_otlp(&collector).await;
+    // Scrapes don't count as well: the endpoint shows OTLP's single dotted series.
+    for _ in 0..3 {
+        assert_eq!(
+            scraped_overflow_count(&router, "http.server.request.duration").await,
+            1
+        );
+    }
+
+    router.graceful_shutdown().await;
 }

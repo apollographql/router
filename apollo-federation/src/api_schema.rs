@@ -1,5 +1,6 @@
 //! Implements API schema generation.
 use apollo_compiler::Node;
+use apollo_compiler::collections::IndexSet;
 use apollo_compiler::name;
 use apollo_compiler::schema::DirectiveDefinition;
 use apollo_compiler::schema::DirectiveLocation;
@@ -176,10 +177,10 @@ fn defer_definition() -> Node<DirectiveDefinition> {
             }),
         ],
         repeatable: false,
-        locations: vec![
+        locations: IndexSet::from_iter([
             DirectiveLocation::FragmentSpread,
             DirectiveLocation::InlineFragment,
-        ],
+        ]),
     })
 }
 
@@ -211,6 +212,6 @@ fn stream_definition() -> Node<DirectiveDefinition> {
             }),
         ],
         repeatable: false,
-        locations: vec![DirectiveLocation::Field],
+        locations: IndexSet::from_iter([DirectiveLocation::Field]),
     })
 }

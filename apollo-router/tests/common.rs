@@ -1,5 +1,4 @@
 use std::collections::HashMap;
-use std::collections::hash_map::Entry;
 use std::ffi::OsString;
 use std::fs;
 use std::net::SocketAddr;
@@ -8,11 +7,12 @@ use std::path::PathBuf;
 use std::process::Stdio;
 use std::sync::Arc;
 use std::sync::LazyLock;
-use std::sync::OnceLock;
 use std::time::Duration;
 use std::time::SystemTime;
 use std::time::UNIX_EPOCH;
 
+use apollo_router::_private::telemetry::DatadogPropagator;
+use apollo_router::_private::telemetry::datadog_pipeline;
 use buildstructor::buildstructor;
 use flate2::read::GzDecoder;
 use fred::clients::Client as RedisClient;
@@ -21,6 +21,7 @@ use fred::interfaces::KeysInterface;
 use fred::prelude::Config as RedisConfig;
 use fred::types::scan::Scanner;
 use futures::StreamExt;
+use futures::TryStreamExt;
 use http::header::ACCEPT;
 use http::header::CONTENT_TYPE;
 use mime::APPLICATION_JSON;
@@ -85,6 +86,12 @@ pub(crate) fn redact_cache_debug_query_hash(key: &str) -> String {
     REDACT_HASH_RE
         .replace(key, ":hash:[query-hash]")
         .into_owned()
+}
+
+/// Isolate tests from each other by adding a random redis key prefix
+#[allow(dead_code)] // used by integration/response_cache and integration/redis test binaries
+pub(crate) fn namespace() -> String {
+    Uuid::new_v4().simple().to_string()
 }
 
 /// Default test license JWT served by `mock_license_uplink()` and
@@ -179,6 +186,34 @@ pub fn mint_license_jwt(
     jsonwebtoken::encode(&header, &claims, &key).expect("sign test license JWT")
 }
 
+/// Mint a test license JWT, signed with the same bundled HS256 test secret as
+/// [`mint_license_jwt`], that omits the required `haltAt` claim.
+/// `License::from_str`'s `set_required_spec_claims` rejects this with
+/// `jsonwebtoken::errors::ErrorKind::MissingRequiredClaim`, which
+/// `Error::is_version_incompatible()` classifies as a version-incompatible
+/// license (the router doesn't understand this license's shape) rather than a
+/// generically invalid/corrupt one.
+#[allow(dead_code)]
+pub fn mint_version_incompatible_license_jwt() -> String {
+    use base64::Engine;
+    use base64::engine::general_purpose::URL_SAFE_NO_PAD;
+
+    let secret_bytes = URL_SAFE_NO_PAD
+        .decode(TEST_LICENSE_JWKS_SECRET_BASE64URL)
+        .expect("test JWKS secret is valid base64url");
+    let key = jsonwebtoken::EncodingKey::from_secret(&secret_bytes);
+    let header = jsonwebtoken::Header::new(jsonwebtoken::Algorithm::HS256);
+    let claims = serde_json::json!({
+        "exp": 10000000000_u64,
+        "iss": "https://www.apollographql.com/",
+        "sub": "apollo",
+        "aud": "SELF_HOSTED",
+        "warnAt": 10000000000_u64,
+        // haltAt is deliberately omitted.
+    });
+    jsonwebtoken::encode(&header, &claims, &key).expect("sign test license JWT")
+}
+
 /// Stand up a per-test wiremock that stands in for
 /// `uplink.api.apollographql.com`. The harness wires this server's URL
 /// into the spawned router as `APOLLO_UPLINK_ENDPOINTS` whenever the
@@ -253,10 +288,6 @@ async fn mock_license_uplink() -> wiremock::MockServer {
     server
 }
 
-/// Global registry to keep track of allocated ports across all tests
-/// This helps avoid port conflicts between concurrent tests
-static ALLOCATED_PORTS: OnceLock<Arc<Mutex<HashMap<u16, String>>>> = OnceLock::new();
-
 /// Global endpoint for JWKS used in testing. If you need to mint a test key, refer to the internal
 /// router team's documentation for a script
 #[allow(dead_code)]
@@ -267,35 +298,6 @@ pub static TEST_JWKS_ENDPOINT: LazyLock<PathBuf> = LazyLock::new(|| {
         .join("testdata")
         .join("license.jwks.json")
 });
-
-fn get_allocated_ports() -> &'static Arc<Mutex<HashMap<u16, String>>> {
-    ALLOCATED_PORTS.get_or_init(|| Arc::new(Mutex::new(HashMap::new())))
-}
-
-/// Allocate a port that's currently available
-/// The port is not actually bound, just marked as allocated to avoid conflicts
-fn allocate_port(name: &str) -> std::io::Result<u16> {
-    let ports_registry = get_allocated_ports();
-
-    // Try to find an available port
-    for _ in 0..100 {
-        // Try up to 100 times to find a port
-        let listener = TcpListener::bind("127.0.0.1:0")?;
-        let port = listener.local_addr()?.port();
-        drop(listener); // Release the port immediately
-
-        let mut ports = ports_registry.lock();
-        if let Entry::Vacant(e) = ports.entry(port) {
-            e.insert(name.to_string());
-            return Ok(port);
-        }
-    }
-
-    Err(std::io::Error::new(
-        std::io::ErrorKind::AddrInUse,
-        "Could not find available port after 100 attempts",
-    ))
-}
 
 #[derive(Clone)]
 pub struct Query {
@@ -380,7 +382,11 @@ pub struct IntegrationTest {
     router_location: PathBuf,
     stdio_tx: tokio::sync::mpsc::Sender<String>,
     stdio_rx: tokio::sync::mpsc::Receiver<String>,
-    stderr_tx: tokio::sync::mpsc::Sender<String>,
+    /// Lines the most recently started router process wrote to stderr (e.g. a
+    /// top-level `anyhow::Error` from `main()`, printed via `eprintln!` rather
+    /// than through the tracing logger that stdout carries). Replaced on each
+    /// `start()`; see `stderr_log_contains` / `wait_for_stderr_message`.
+    stderr_logs: Arc<Mutex<Vec<String>>>,
     apollo_otlp_metrics_rx: tokio::sync::mpsc::Receiver<ExportMetricsServiceRequest>,
     collect_stdio: Option<(tokio::sync::oneshot::Sender<String>, regex::Regex)>,
     _subgraphs: wiremock::MockServer,
@@ -419,9 +425,11 @@ pub struct IntegrationTest {
     log: String,
     subgraph_context: Arc<Mutex<Option<SpanContext>>>,
     logs: Vec<String>,
+    /// Exit status of the router process, or `None` until the router has exited.
+    exit_status: Option<std::process::ExitStatus>,
     port_replacements: HashMap<String, u16>,
     jwt: Option<String>,
-    env: Option<HashMap<String, OsString>>,
+    env: HashMap<String, OsString>,
     hot_reload: bool,
     reqwest_client: reqwest::Client,
     /// When `true`, the harness forwards the host's `TEST_APOLLO_KEY`
@@ -435,7 +443,7 @@ pub struct IntegrationTest {
     /// **Note:** Studio reporting (`usage-reporting.api.apollographql.com`)
     /// is NOT reached even in the opt-in branch. `merge_overrides()`
     /// unconditionally pins `telemetry.apollo.endpoint` and
-    /// `telemetry.apollo.experimental_otlp_endpoint` in the YAML config
+    /// `telemetry.apollo.otlp_endpoint` in the YAML config
     /// to the per-test `apollo_otlp_server` mock, regardless of this
     /// flag. That pinning is load-bearing for keeping CI off the
     /// public Internet. If a future test genuinely needs real Studio
@@ -454,17 +462,6 @@ impl IntegrationTest {
         self.bind_address
             .lock()
             .expect("no bind address set, router must be started first.")
-    }
-
-    /// Reserve a port for use in the test and return it
-    /// The port placeholder will be immediately replaced in the config file
-    /// Panics if the placeholder is not found in the config
-    /// This helps avoid port conflicts between concurrent tests
-    #[allow(dead_code)]
-    pub fn reserve_address(&mut self, placeholder_name: &str) -> u16 {
-        let port = allocate_port(placeholder_name).expect("Failed to allocate port");
-        self.set_address(placeholder_name, port);
-        port
     }
 
     /// Reserve a specific port for use in the test
@@ -499,7 +496,6 @@ impl IntegrationTest {
             &current_config,
             &self._subgraph_overrides,
             &self._apollo_otlp_server.uri().to_string(),
-            None, // Don't override bind address here
             &self.redis_namespace,
             Some(&self.port_replacements),
         );
@@ -514,7 +510,7 @@ impl IntegrationTest {
     /// Set environment variables for the router subprocess
     #[allow(dead_code)]
     pub fn set_env(&mut self, env: HashMap<String, OsString>) {
-        self.env.get_or_insert_with(HashMap::new).extend(env);
+        self.env.extend(env);
     }
 
     /// Path to the temp file holding this test's supergraph schema. Tests
@@ -535,6 +531,19 @@ impl IntegrationTest {
     #[allow(dead_code)]
     pub fn apollo_uplink_endpoint(&self) -> String {
         self._apollo_uplink_server.uri()
+    }
+
+    /// Number of `LicenseQuery` requests the per-test Uplink mock has
+    /// received so far.
+    #[allow(dead_code)]
+    pub async fn uplink_license_query_count(&self) -> usize {
+        self._apollo_uplink_server
+            .received_requests()
+            .await
+            .expect("the Uplink mock records requests")
+            .iter()
+            .filter(|request| String::from_utf8_lossy(&request.body).contains("LicenseQuery"))
+            .count()
     }
 
     /// Set an address placeholder using a URI, extracting the port automatically
@@ -611,7 +620,6 @@ pub enum Telemetry {
         endpoint: Option<String>,
     },
     Datadog,
-    Zipkin,
     #[default]
     None,
 }
@@ -648,28 +656,11 @@ impl Telemetry {
                 .with_resource(resource)
                 .with_span_processor(
                     BatchSpanProcessor::builder(
-                        opentelemetry_datadog::new_pipeline()
+                        datadog_pipeline()
                             .with_service_name(service_name)
+                            .with_http_client(reqwest::Client::new())
                             .build_exporter()
                             .expect("datadog pipeline failed"),
-                        runtime::Tokio,
-                    )
-                    .with_batch_config(
-                        BatchConfigBuilder::default()
-                            .with_scheduled_delay(Duration::from_millis(10))
-                            .build(),
-                    )
-                    .build(),
-                )
-                .build(),
-            Telemetry::Zipkin => SdkTracerProvider::builder()
-                .with_resource(resource)
-                .with_span_processor(
-                    BatchSpanProcessor::builder(
-                        opentelemetry_zipkin::ZipkinExporter::builder()
-                            .with_collector_endpoint("http://127.0.0.1:9411/api/v2/spans")
-                            .build()
-                            .expect("zipkin pipeline failed"),
                         runtime::Tokio,
                     )
                     .with_batch_config(
@@ -698,7 +689,7 @@ impl Telemetry {
                     .headers()
                     .get("x-datadog-sampling-priority")
                     .cloned();
-                let propagator = opentelemetry_datadog::DatadogPropagator::new();
+                let propagator = DatadogPropagator::new();
                 propagator.inject_context(
                     &ctx,
                     &mut opentelemetry_http::HeaderInjector(request.headers_mut()),
@@ -712,13 +703,6 @@ impl Telemetry {
             }
             Telemetry::Otlp { .. } => {
                 let propagator = opentelemetry_sdk::propagation::TraceContextPropagator::default();
-                propagator.inject_context(
-                    &ctx,
-                    &mut opentelemetry_http::HeaderInjector(request.headers_mut()),
-                )
-            }
-            Telemetry::Zipkin => {
-                let propagator = opentelemetry_zipkin::Propagator::new();
                 propagator.inject_context(
                     &ctx,
                     &mut opentelemetry_http::HeaderInjector(request.headers_mut()),
@@ -751,7 +735,7 @@ impl Telemetry {
             Telemetry::Datadog => {
                 let span_ref = context.span();
                 let original_span_context = span_ref.span_context();
-                let propagator = opentelemetry_datadog::DatadogPropagator::new();
+                let propagator = DatadogPropagator::new();
                 let mut context = propagator.extract_with_context(context, &headers);
                 // We're going to override the sampled so that we can test sampling priority
                 if let Some(psr) = headers.get("x-datadog-sampling-priority") {
@@ -781,10 +765,6 @@ impl Telemetry {
                 let propagator = opentelemetry_sdk::propagation::TraceContextPropagator::default();
                 propagator.extract_with_context(context, &headers)
             }
-            Telemetry::Zipkin => {
-                let propagator = opentelemetry_zipkin::Propagator::new();
-                propagator.extract_with_context(context, &headers)
-            }
             _ => context.clone(),
         }
     }
@@ -805,7 +785,7 @@ impl IntegrationTest {
         subgraph_callback: Option<Box<dyn Fn() + Send + Sync>>,
         http_method: Option<String>,
         jwt: Option<String>,
-        env: Option<HashMap<String, OsString>>,
+        env: HashMap<String, OsString>,
         redis_namespace: Option<String>,
         hot_reload: Option<bool>,
         reqwest_client: Option<reqwest::Client>,
@@ -849,7 +829,6 @@ impl IntegrationTest {
             &config,
             &subgraph_overrides,
             &apollo_otlp_endpoint,
-            None,
             &redis_namespace,
             None,
         );
@@ -912,16 +891,6 @@ impl IntegrationTest {
         fs::copy(&supergraph, &test_schema_location).expect("could not write schema");
 
         let (stdio_tx, stdio_rx) = tokio::sync::mpsc::channel(2000);
-        // we separate stderr and stdio (previously they were both just handled by a single
-        // channel) to avoid congestion in one to contend the other
-
-        let (stderr_tx, mut stderr_rx) = tokio::sync::mpsc::channel::<String>(2000);
-        // we want to continually drain stderr, not let it build up backpressure
-        task::spawn(async move {
-            while stderr_rx.recv().await.is_some() {
-                // we discard stderr to prevent backpressure
-            }
-        });
         let collect_stdio = collect_stdio.map(|sender| {
             let version_line_re = regex::Regex::new("Apollo Router v[^ ]+ ").unwrap();
             (sender, version_line_re)
@@ -993,7 +962,7 @@ impl IntegrationTest {
             test_schema_location,
             stdio_tx,
             stdio_rx,
-            stderr_tx,
+            stderr_logs: Default::default(),
             apollo_otlp_metrics_rx,
             collect_stdio,
             _subgraphs: subgraphs,
@@ -1011,6 +980,7 @@ impl IntegrationTest {
             log: log.unwrap_or_else(|| "error,apollo_router=info".to_owned()),
             subgraph_context,
             logs: vec![],
+            exit_status: None,
             port_replacements: HashMap::new(),
             jwt,
             env,
@@ -1129,15 +1099,13 @@ impl IntegrationTest {
         // explicit `.env(...)` builder call wins over the defaults
         // (eg. for a test that wants to override `APOLLO_UPLINK_ENDPOINTS`
         // to its own custom mock).
-        if let Some(env) = &self.env {
-            for (key, val) in env {
-                // If env vars are used to configure which schema to load, do not
-                // override later with the --supergraph cli arg
-                if non_file_startup_env.iter().any(|x| x == key) {
-                    needs_supergraph_cli_arg = false;
-                }
-                router.env(key, val);
+        for (key, val) in &self.env {
+            // If env vars are used to configure which schema to load, do not
+            // override later with the --supergraph cli arg
+            if non_file_startup_env.iter().any(|x| x == key) {
+                needs_supergraph_cli_arg = false;
             }
+            router.env(key, val);
         }
 
         // Opt-in real Studio credentials. Reads `TEST_APOLLO_KEY` and
@@ -1285,14 +1253,14 @@ impl IntegrationTest {
             }
         });
 
-        // we separate out stderr to avoid congestion there affecting stdout; previous to this, we
-        // had both stdout and stderr in the same channel, allowing one's congestion to swamp the other
-        let stderr_tx = self.stderr_tx.clone();
+        // Each start gets a fresh buffer, so lines from an earlier router process can't satisfy a
+        // wait meant for this one.
+        let stderr_logs = Arc::new(Mutex::new(Vec::new()));
+        self.stderr_logs = stderr_logs.clone();
         task::spawn(async move {
             let mut lines = stderr_reader.lines();
             while let Ok(Some(line)) = lines.next_line().await {
-                // try_send to never block - if the channel is full, just drop the line
-                let _ = stderr_tx.try_send(line);
+                stderr_logs.lock().push(line);
             }
         });
         self.router = Some(router);
@@ -1301,6 +1269,56 @@ impl IntegrationTest {
     #[allow(dead_code)]
     pub async fn assert_started(&mut self) {
         self.wait_for_log_message("GraphQL endpoint exposed").await;
+    }
+
+    /// Waits until the router answers an HTTP request on its GraphQL address.
+    ///
+    /// `assert_started` only waits for the `GraphQL endpoint exposed` log line. The router
+    /// prints it before its accept loop is running and before it binds its other listeners,
+    /// so a request sent straight after it can fail. Any HTTP response counts as ready.
+    ///
+    /// # Panics
+    ///
+    /// - At once, with the exit status and the router's logs, if the router process exits.
+    /// - With the router's logs, if the router hasn't answered within `deadline`.
+    #[allow(dead_code)]
+    pub async fn wait_for_router_ready(&mut self, deadline: Duration) {
+        let url = format!("http://{}/", self.bind_address());
+        let client = reqwest::Client::builder()
+            .timeout(Duration::from_millis(200))
+            .build()
+            .expect("build reqwest client");
+        let start = Instant::now();
+        while start.elapsed() < deadline {
+            let router = self.router.as_mut().expect("router must have been started");
+            if let Some(status) = router.try_wait().expect("check router process") {
+                self.drain_logs_until_quiet().await;
+                panic!(
+                    "router exited ({status}) before accepting HTTP requests. Log dump below:\n\n{logs}",
+                    logs = self.logs.join("\n")
+                );
+            }
+            if client.head(&url).send().await.is_ok() {
+                return;
+            }
+            tokio::time::sleep(Duration::from_millis(20)).await;
+        }
+        self.read_logs();
+        panic!(
+            "router at {url} did not accept HTTP requests within {deadline:?}. Log dump below:\n\n{logs}",
+            logs = self.logs.join("\n")
+        );
+    }
+
+    /// Collects log lines until none arrives for a second. The stdout reader task can still
+    /// be delivering a just-exited router's last lines, which usually hold the error.
+    #[allow(dead_code)]
+    async fn drain_logs_until_quiet(&mut self) {
+        while let Ok(Some(line)) =
+            tokio::time::timeout(Duration::from_secs(1), self.stdio_rx.recv()).await
+        {
+            self.logs.push(line);
+        }
     }
 
     #[allow(dead_code)]
@@ -1330,7 +1348,6 @@ impl IntegrationTest {
             yaml,
             &self._subgraph_overrides,
             &self._apollo_otlp_server.uri().to_string(),
-            None,
             &self.redis_namespace,
             Some(&self.port_replacements),
         );
@@ -1445,11 +1462,17 @@ impl IntegrationTest {
     }
 
     /// Make a raw multipart request to the router.
+    ///
+    /// By default the form is streamed part by part. With `buffered`, it is collected first and
+    /// sent as a single body with a `Content-Length`. Use this when the router rejects the request
+    /// after reading only the first parts: if the rest of a streamed body is still arriving, the
+    /// router closes the connection and the client can hit a reset before it reads the response.
     #[allow(dead_code)]
     pub fn execute_multipart_request(
         &self,
         request: reqwest::multipart::Form,
         transform: Option<fn(reqwest::Request) -> reqwest::Request>,
+        buffered: bool,
     ) -> impl std::future::Future<Output = (String, reqwest::Response)> + use<> {
         assert!(
             self.router.is_some(),
@@ -1464,14 +1487,26 @@ impl IntegrationTest {
             let span_id = span.context().span().span_context().trace_id().to_string();
 
             async move {
-                let mut request = client
+                let builder = client
                     .post(url)
                     .header("apollographql-client-name", "custom_name")
                     .header("apollographql-client-version", "1.0")
-                    .header("apollo-require-preflight", "test")
-                    .multipart(request)
-                    .build()
-                    .unwrap();
+                    .header("apollo-require-preflight", "test");
+                let builder = if buffered {
+                    let content_type =
+                        format!("multipart/form-data; boundary={}", request.boundary());
+                    let chunks: Vec<bytes::Bytes> = request
+                        .into_stream()
+                        .try_collect()
+                        .await
+                        .expect("multipart form can be buffered");
+                    builder
+                        .header(CONTENT_TYPE, content_type)
+                        .body(chunks.concat())
+                } else {
+                    builder.multipart(request)
+                };
+                let mut request = builder.build().unwrap();
 
                 // Optionally transform the request if needed
                 let transformer = transform.unwrap_or(core::convert::identity);
@@ -1718,16 +1753,52 @@ impl IntegrationTest {
     }
 
     #[allow(dead_code)]
-    pub fn assert_log_contained(&self, msg: &str) {
+    pub fn log_contains(&self, msg: &str) -> bool {
         for line in &self.logs {
             if line.contains(msg) {
-                return;
+                return true;
             }
         }
+        false
+    }
 
+    #[allow(dead_code)]
+    pub fn assert_log_contained(&self, msg: &str) {
+        if !self.log_contains(msg) {
+            panic!(
+                "'{msg}' not detected in logs. Log dump below:\n\n{logs}",
+                logs = self.logs.join("\n")
+            );
+        }
+    }
+
+    /// Like `log_contains`, but for stderr — where a top-level `anyhow::Error`
+    /// from `main()` lands (printed via `eprintln!`), not the tracing logger
+    /// that stdout carries.
+    #[allow(dead_code)]
+    pub fn stderr_log_contains(&self, msg: &str) -> bool {
+        self.stderr_logs
+            .lock()
+            .iter()
+            .any(|line| line.contains(msg))
+    }
+
+    /// Like `wait_for_log_message`, but for stderr.
+    #[allow(dead_code)]
+    pub async fn wait_for_stderr_message(&mut self, msg: &str) {
+        let deadline = Instant::now() + Duration::from_secs(30);
+        loop {
+            if self.stderr_log_contains(msg) {
+                return;
+            }
+            if Instant::now() >= deadline {
+                break;
+            }
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        }
         panic!(
-            "'{msg}' not detected in logs. Log dump below:\n\n{logs}",
-            logs = self.logs.join("\n")
+            "'{msg}' not detected in stderr. Log dump below:\n\n{logs}",
+            logs = self.stderr_logs.lock().join("\n")
         );
     }
 
@@ -2102,7 +2173,8 @@ impl IntegrationTest {
         let now = Instant::now();
         while now.elapsed() < deadline {
             match router.try_wait() {
-                Ok(Some(_)) => {
+                Ok(Some(status)) => {
+                    self.exit_status = Some(status);
                     self.router = None;
                     return;
                 }
@@ -2113,6 +2185,24 @@ impl IntegrationTest {
 
         self.dump_stack_traces().await;
         panic!("unable to shutdown router, this probably means a hang and should be investigated");
+    }
+
+    /// Asserts the router process exited successfully.
+    ///
+    /// `assert_shutdown` only waits for the process to be reaped and deliberately ignores the
+    /// exit code, so a router that panics on its way out still looks like a clean shutdown to
+    /// it. Call this after `graceful_shutdown()` when a test cares that SIGTERM produced an
+    /// orderly exit rather than just an exit.
+    #[allow(dead_code)]
+    pub fn assert_clean_exit(&self) {
+        let status = self
+            .exit_status
+            .expect("router has not been shut down yet - call graceful_shutdown() first");
+        assert!(
+            status.success(),
+            "router exited with {status}, expected a clean exit. Log dump below:\n\n{logs}",
+            logs = self.logs.join("\n")
+        );
     }
 
     #[allow(dead_code)]
@@ -2313,13 +2403,11 @@ fn merge_overrides(
     yaml: &str,
     subgraph_overrides: &HashMap<String, String>,
     apollo_otlp_endpoint: &str,
-    bind_addr: Option<SocketAddr>,
     redis_namespace: &str,
     port_replacements: Option<&HashMap<String, u16>>,
 ) -> Value {
-    let bind_addr = bind_addr
-        .map(|a| a.to_string())
-        .unwrap_or_else(|| "127.0.0.1:0".into());
+    /// Any free port, so concurrent tests don't collide.
+    const HARNESS_LISTEN_ADDRESS: &str = "127.0.0.1:0";
 
     // Apply port replacements to the YAML string first
     let mut yaml_with_ports = yaml.to_string();
@@ -2375,8 +2463,9 @@ fn merge_overrides(
         }
     }
 
-    // Override the listening address always since we spawn the router on a
-    // random port. However, don't override Unix socket paths.
+    // Listen on a random port unless the config chooses its own address.
+    // Tests find the address the router actually bound from its startup log
+    // (see `bind_address`), so either way they reach the right listener.
     //
     // Also inject a bounded `connection_shutdown_timeout` default for every
     // integration test. The production default is 60 s (see
@@ -2414,53 +2503,24 @@ fn merge_overrides(
     // small_connection_shutdown_timeout tests that exercise the feature
     // itself) keep their configured value.
     const HARNESS_CONNECTION_SHUTDOWN_TIMEOUT: &str = "5s";
-    match config
+    let supergraph_conf = config
         .as_object_mut()
-        .and_then(|o| o.get_mut("supergraph"))
-        .and_then(|o| o.as_object_mut())
-    {
-        None => {
-            if let Some(o) = config.as_object_mut() {
-                o.insert(
-                    "supergraph".to_string(),
-                    serde_json::json!({
-                        "listen": bind_addr.to_string(),
-                        "connection_shutdown_timeout": HARNESS_CONNECTION_SHUTDOWN_TIMEOUT,
-                    }),
-                );
-            }
-        }
-        Some(supergraph_conf) => {
-            // check if the listen address is a Unix socket path (ie, starts with /)
-            let is_unix_socket = supergraph_conf
-                .get("listen")
-                .and_then(|v| v.as_str())
-                .map(|s| s.starts_with('/'))
-                .unwrap_or(false);
+        .expect("config should be an object")
+        .entry("supergraph")
+        .or_insert_with(|| json!({}))
+        .as_object_mut()
+        .expect("supergraph config should be an object");
+    let supergraph_listen = supergraph_conf
+        .entry("listen")
+        .or_insert_with(|| HARNESS_LISTEN_ADDRESS.into())
+        .clone();
+    supergraph_conf
+        .entry("connection_shutdown_timeout")
+        .or_insert_with(|| HARNESS_CONNECTION_SHUTDOWN_TIMEOUT.into());
 
-            // only override if it's not a Unix socket
-            if !is_unix_socket {
-                supergraph_conf.insert(
-                    "listen".to_string(),
-                    serde_json::Value::String(bind_addr.to_string()),
-                );
-            }
-
-            // Only inject the shutdown timeout if the fixture hasn't set one.
-            // Tests in integration::lifecycle deliberately configure this
-            // setting to exercise its behavior and must not have their value
-            // clobbered.
-            if !supergraph_conf.contains_key("connection_shutdown_timeout") {
-                supergraph_conf.insert(
-                    "connection_shutdown_timeout".to_string(),
-                    serde_json::Value::String(HARNESS_CONNECTION_SHUTDOWN_TIMEOUT.to_string()),
-                );
-            }
-        }
-    }
-
-    // Override the metrics listening address always since we spawn the router on a
-    // random port.
+    // Serve Prometheus metrics on the supergraph listener unless the config
+    // chooses its own address, so `get_metrics_response` finds them at
+    // `bind_address`.
     if let Some(prom_config) = config
         .as_object_mut()
         .and_then(|o| o.get_mut("telemetry"))
@@ -2472,10 +2532,7 @@ fn merge_overrides(
         .and_then(|o| o.get_mut("prometheus"))
         .and_then(|o| o.as_object_mut())
     {
-        prom_config.insert(
-            "listen".to_string(),
-            serde_json::Value::String(bind_addr.to_string()),
-        );
+        prom_config.entry("listen").or_insert(supergraph_listen);
     }
 
     // Pin every Apollo Studio reporting endpoint to the per-test wiremock at
@@ -2486,7 +2543,7 @@ fn merge_overrides(
     // tests only did so if the request landed within the assertion deadline).
     //
     // We override two distinct keys:
-    //   * `experimental_otlp_endpoint` is consumed by the OTLP exporter
+    //   * `otlp_endpoint` is consumed by the OTLP exporter
     //     (`apollo_otlp_exporter.rs`).
     //   * `endpoint` is consumed by the legacy Apollo-protocol exporter
     //     (`apollo_exporter.rs`).
@@ -2507,7 +2564,7 @@ fn merge_overrides(
             .or_insert_with(|| serde_json::Value::Object(Default::default()));
         if let Some(apollo_config) = apollo_entry.as_object_mut() {
             apollo_config.insert(
-                "experimental_otlp_endpoint".to_string(),
+                "otlp_endpoint".to_string(),
                 serde_json::Value::String(apollo_otlp_endpoint.to_string()),
             );
             apollo_config.insert(
@@ -2523,7 +2580,7 @@ fn merge_overrides(
         .expect("config should be an object")
         .insert(
             "health_check".to_string(),
-            json!({"listen": bind_addr.to_string()}),
+            json!({"listen": HARNESS_LISTEN_ADDRESS}),
         );
 
     let insert_redis_namespace = |v: Option<&mut Value>| {
@@ -2534,19 +2591,13 @@ fn merge_overrides(
 
     insert_redis_namespace(config.pointer_mut("/supergraph/query_planning/cache/redis"));
     insert_redis_namespace(config.pointer_mut("/apq/router/cache/redis"));
-    insert_redis_namespace(config.pointer_mut("/preview_entity_cache/subgraph/all/redis"));
     insert_redis_namespace(config.pointer_mut("/response_cache/subgraph/all/redis"));
-    for per_subgraph_path in [
-        "/response_cache/subgraph/subgraphs",
-        "/preview_entity_cache/subgraph/subgraphs",
-    ] {
-        if let Some(subgraphs) = config
-            .pointer_mut(per_subgraph_path)
-            .and_then(|o| o.as_object_mut())
-        {
-            for subgraph_config in subgraphs.values_mut() {
-                insert_redis_namespace(subgraph_config.pointer_mut("/redis"));
-            }
+    if let Some(subgraphs) = config
+        .pointer_mut("/response_cache/subgraph/subgraphs")
+        .and_then(|o| o.as_object_mut())
+    {
+        for subgraph_config in subgraphs.values_mut() {
+            insert_redis_namespace(subgraph_config.pointer_mut("/redis"));
         }
     }
 
@@ -2565,7 +2616,6 @@ fn get_redis_urls(config: &Value) -> Option<Vec<String>> {
     let top_level_paths = [
         "/supergraph/query_planning/cache/redis/urls",
         "/apq/router/cache/redis/urls",
-        "/preview_entity_cache/subgraph/all/redis/urls",
         "/response_cache/subgraph/all/redis/urls",
     ];
     for path in top_level_paths {
@@ -2574,19 +2624,16 @@ fn get_redis_urls(config: &Value) -> Option<Vec<String>> {
         }
     }
 
-    let per_subgraph_sections = [
-        "/response_cache/subgraph/subgraphs",
-        "/preview_entity_cache/subgraph/subgraphs",
-    ];
-    for section in per_subgraph_sections {
-        if let Some(subgraphs) = config.pointer(section).and_then(|o| o.as_object()) {
-            for subgraph_config in subgraphs.values() {
-                if let Some(urls) = subgraph_config
-                    .pointer("/redis/urls")
-                    .and_then(|o| o.as_array())
-                {
-                    return Some(convert_urls(urls));
-                }
+    if let Some(subgraphs) = config
+        .pointer("/response_cache/subgraph/subgraphs")
+        .and_then(|o| o.as_object())
+    {
+        for subgraph_config in subgraphs.values() {
+            if let Some(urls) = subgraph_config
+                .pointer("/redis/urls")
+                .and_then(|o| o.as_array())
+            {
+                return Some(convert_urls(urls));
             }
         }
     }

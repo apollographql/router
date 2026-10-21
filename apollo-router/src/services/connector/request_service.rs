@@ -1,7 +1,6 @@
 //! Service which makes individual requests to Apollo Connectors over some transport
 
 use std::collections::HashMap;
-use std::collections::HashSet;
 use std::sync::Arc;
 use std::task::Poll;
 
@@ -11,16 +10,13 @@ use apollo_federation::connectors::Connector;
 use apollo_federation::connectors::runtime::debug::ConnectorContext;
 use apollo_federation::connectors::runtime::errors::Error;
 use apollo_federation::connectors::runtime::errors::RuntimeError;
-#[cfg(test)]
 use apollo_federation::connectors::runtime::http_json_transport::HttpResponse;
 use apollo_federation::connectors::runtime::http_json_transport::TransportRequest;
-use apollo_federation::connectors::runtime::http_json_transport::TransportResponse;
 use apollo_federation::connectors::runtime::key::ResponseKey;
 use apollo_federation::connectors::runtime::mapping::Problem;
 use apollo_federation::connectors::runtime::responses::MappedResponse;
 use apollo_federation::connectors::runtime::responses::handle_mapping_only_response;
 use futures::future::BoxFuture;
-use indexmap::IndexMap;
 use opentelemetry::KeyValue;
 use opentelemetry_semantic_conventions::trace::HTTP_REQUEST_METHOD;
 use parking_lot::Mutex;
@@ -31,12 +27,11 @@ use tower::BoxError;
 use tower::ServiceExt;
 
 use crate::Context;
+use crate::batching::BatchQuery;
 use crate::error::FetchError;
 use crate::graphql;
-use crate::layers::DEFAULT_BUFFER_SIZE;
 use crate::layers::unconstrained_buffer::UnconstrainedBuffer;
 use crate::plugins::connectors::handle_responses::process_response;
-use crate::plugins::connectors::request_limit::RequestLimits;
 use crate::plugins::connectors::tracing::CONNECTOR_TYPE_HTTP;
 use crate::plugins::telemetry::config_new::attributes::HTTP_REQUEST_BODY;
 use crate::plugins::telemetry::config_new::attributes::HTTP_REQUEST_HEADERS;
@@ -45,15 +40,10 @@ use crate::plugins::telemetry::config_new::attributes::HTTP_REQUEST_VERSION;
 use crate::plugins::telemetry::config_new::connector::events::ConnectorEventRequest;
 use crate::plugins::telemetry::config_new::events::EventLevel;
 use crate::plugins::telemetry::config_new::events::log_event;
-use crate::services::Plugins;
-use crate::services::http::HttpClientServiceFactory;
 use crate::services::router;
 
-/// A boxed service making a single connector request. This is what
-/// [`PluginUnstable::connector_request_service`](crate::plugin::PluginUnstable::connector_request_service)
-/// receives and returns, so a plugin wraps this type to customize connector traffic.
-pub type BoxService = tower::util::BoxService<Request, Response, BoxError>;
-
+/// A boxed service for making connector requests.
+pub type BoxCloneService = tower::util::BoxCloneService<Request, Response, BoxError>;
 /// The result of a single connector request.
 pub type ServiceResult = Result<Response, BoxError>;
 
@@ -104,6 +94,71 @@ pub struct Request {
 }
 
 impl Request {
+    /// A request to a `Query.hello` connector on the `test_subgraph.test_sourcename` source.
+    #[cfg(test)]
+    pub(crate) fn test_new() -> Self {
+        use apollo_compiler::name;
+        use apollo_federation::connectors::ConnectId;
+        use apollo_federation::connectors::ConnectSpec;
+        use apollo_federation::connectors::HttpJsonTransport;
+        use apollo_federation::connectors::JSONSelection;
+        use apollo_federation::connectors::SourceName;
+        use apollo_federation::connectors::runtime::http_json_transport::HttpRequest;
+
+        let connector = Connector {
+            spec: ConnectSpec::V0_1,
+            schema_subtypes_map: Default::default(),
+            id: ConnectId::new(
+                "test_subgraph".into(),
+                Some(SourceName::cast("test_sourcename")),
+                name!(Query),
+                name!(hello),
+                None,
+                0,
+            ),
+            transport: Some(HttpJsonTransport {
+                source_template: "http://localhost/api".parse().ok(),
+                connect_template: "/path".parse().unwrap(),
+                ..Default::default()
+            }),
+            selection: JSONSelection::parse("$.data").unwrap(),
+            entity_resolver: None,
+            config: Default::default(),
+            max_requests: None,
+            batch_settings: None,
+            request_headers: Default::default(),
+            response_headers: Default::default(),
+            request_variable_keys: Default::default(),
+            response_variable_keys: Default::default(),
+            error_settings: Default::default(),
+            output_type: None,
+            label: "test label".into(),
+        };
+        let http_request = HttpRequest {
+            inner: http::Request::new("testing".to_string()),
+            debug: Default::default(),
+        };
+        Self {
+            context: Context::default(),
+            connector: Arc::new(connector),
+            transport_request: http_request.into(),
+            key: ResponseKey::RootField {
+                name: "hello".to_string(),
+                inputs: Default::default(),
+                selection: Arc::new(JSONSelection::parse("$.data").unwrap()),
+            },
+            mapping_problems: Default::default(),
+            supergraph_request: Default::default(),
+            operation: Default::default(),
+        }
+    }
+
+    pub(crate) fn is_part_of_batch(&self) -> bool {
+        self.context
+            .extensions()
+            .with_lock(|lock| lock.contains_key::<BatchQuery>())
+    }
+
     /// The original request made to the router, which produced this connector request.
     ///
     /// Read-only on purpose. `ConnectorRequestService::call` and its callees read this
@@ -122,8 +177,11 @@ impl Request {
     /// from the `ConnectorRequest` stage: the connector call is not made, and `message`,
     /// `code`, and `extensions` are reported to the client as a GraphQL error at this
     /// connector's path (an entry for `code` in `extensions` is ignored). Use it to fail
-    /// a connector request deliberately, for example to circuit break on an upstream a
+    /// a connector request deliberately, for example to stop calling an upstream the
     /// plugin knows to be unhealthy.
+    ///
+    /// The connector source is never called, so the router's own circuit breaker records no
+    /// outcome for the response.
     ///
     /// The error's remaining fields are derived from the request and are not settable,
     /// for the same reason the coprocessor does not let a coprocessor set them: the
@@ -146,6 +204,23 @@ impl Request {
     }
 }
 
+/// What happened at the transport layer for a single connector call.
+#[derive(Debug)]
+pub enum TransportOutcome {
+    /// The connector call was made over HTTP and the upstream responded. This is the only
+    /// state that carries a status and headers.
+    Response(HttpResponse),
+
+    /// The connector is mapping-only: it produced a response by applying its selection to an
+    /// empty object, without any transport at all. Like a cache hit there is no status and no
+    /// headers, but for an entirely different reason — this connector never has a transport,
+    /// whereas a cache hit skipped one it normally makes.
+    MappingOnly,
+
+    /// The connector call was attempted and failed at the transport level.
+    Error(Error),
+}
+
 /// Response type for a connector
 #[derive(Debug)]
 pub struct Response {
@@ -159,7 +234,7 @@ pub struct Response {
     /// connector calls don't race when resolving per-subgraph response rules.
     pub(crate) subgraph_name: String,
 
-    /// The result of the transport request.
+    /// What happened at the transport layer for this connector call.
     ///
     /// This is the raw transport outcome: HTTP status, headers and transport-level
     /// errors. Telemetry and downstream plugins read it, but the data returned to the
@@ -167,13 +242,18 @@ pub struct Response {
     /// changes. Rewriting the status or headers here therefore makes telemetry
     /// disagree with what the client actually receives unless you make the
     /// corresponding change through the mapped-response accessors.
-    pub transport_result: Result<TransportResponse, Error>,
+    pub transport_outcome: TransportOutcome,
 
     /// The mapped response, including any mapping problems encountered when processing
     /// the response. This is what is merged into the GraphQL response returned to the
     /// client. Kept private so that only the parts a customization may safely change
     /// are reachable; see the accessors on [`Response`].
     pub(crate) mapped_response: MappedResponse,
+
+    /// Whether the router produced this response without calling the source: a coprocessor or
+    /// plugin broke the request, or the response cache answered it. The circuit breaker records
+    /// no outcome for such a response. Without this, a break would look like a transport error.
+    pub(crate) answered_by_router: bool,
 }
 
 impl Response {
@@ -192,7 +272,7 @@ impl Response {
     /// customization cannot turn a failed connector call into a successful one, which
     /// is also true of the coprocessor `ConnectorResponse` stage.
     ///
-    /// This does not touch [`Response::transport_result`], so telemetry continues to
+    /// This does not touch [`Response::transport_outcome`], so telemetry continues to
     /// report the status and headers actually received from the upstream.
     pub fn set_data(&mut self, data: serde_json_bytes::Value) -> bool {
         match &mut self.mapped_response {
@@ -262,8 +342,9 @@ impl Response {
         Self {
             context,
             subgraph_name,
-            transport_result: Err(error),
+            transport_outcome: TransportOutcome::Error(error),
             mapped_response,
+            answered_by_router: false,
         }
     }
 
@@ -289,12 +370,13 @@ impl Response {
         Response {
             context: request_context,
             subgraph_name,
-            transport_result: Err(Error::TransportFailure(message)),
+            transport_outcome: TransportOutcome::Error(Error::TransportFailure(message)),
             mapped_response: MappedResponse::Error {
                 error,
                 key: request_key,
                 problems: Vec::new(),
             },
+            answered_by_router: true,
         }
     }
 
@@ -310,6 +392,7 @@ impl Response {
             data: data.clone(),
             problems,
             key: response_key,
+            declared_errors: vec![],
         };
 
         let mut response_builder = http::Response::builder();
@@ -324,53 +407,32 @@ impl Response {
         Self {
             context,
             subgraph_name: String::new(),
-            transport_result: Ok(http_response.into()),
+            transport_outcome: TransportOutcome::Response(http_response),
             mapped_response,
+            answered_by_router: false,
         }
     }
 }
 
+/// The pre-built request service stack for each connector source, keyed by
+/// `source_config_key()`. Stacks are built once; [`Self::get`] hands out cheap clones.
 #[derive(Clone)]
-pub(crate) struct ConnectorRequestServiceFactory {
+pub(crate) struct ConnectorRequestServices {
     pub(crate) services:
         Arc<HashMap<String, UnconstrainedBuffer<Request, BoxFuture<'static, ServiceResult>>>>,
 }
 
-impl ConnectorRequestServiceFactory {
-    pub(crate) fn new(
-        http_client_service_factory: Arc<IndexMap<String, HttpClientServiceFactory>>,
-        plugins: Arc<Plugins>,
-        connector_sources: Arc<HashSet<String>>,
-    ) -> Self {
-        let mut map = HashMap::with_capacity(connector_sources.len());
-        for source in connector_sources.iter() {
-            let service = UnconstrainedBuffer::new(
-                plugins
-                    .iter()
-                    .rev()
-                    .fold(
-                        ConnectorRequestService {
-                            http_client_service_factory: http_client_service_factory.clone(),
-                        }
-                        .boxed(),
-                        |acc, (_, e)| e.connector_request_service(acc, source.clone()),
-                    )
-                    .boxed(),
-                DEFAULT_BUFFER_SIZE,
-            );
-            map.insert(source.clone(), service);
-        }
-
-        Self {
-            services: Arc::new(map), //connector_sources,
-        }
-    }
-
-    pub(crate) fn create(&self, source_name: String) -> BoxService {
+impl ConnectorRequestServices {
+    /// Retrieves the pre-built request service for `source_name`: a cheap clone of an
+    /// entry built once.
+    ///
+    /// # Panics
+    /// Panics if no service exists for `source_name`.
+    pub(crate) fn get(&self, source_name: String) -> BoxCloneService {
         // Note: We have to box our cloned service to erase the type of the Buffer.
         self.services
             .get(&source_name)
-            .map(|svc| svc.clone().boxed())
+            .map(|svc| svc.clone().boxed_clone())
             .expect("We should always get a service, even if it is a blank/default one")
     }
 }
@@ -378,7 +440,11 @@ impl ConnectorRequestServiceFactory {
 /// A service for executing individual requests to Apollo Connectors
 #[derive(Clone)]
 pub(crate) struct ConnectorRequestService {
-    pub(crate) http_client_service_factory: Arc<IndexMap<String, HttpClientServiceFactory>>,
+    /// Pre-built HTTP client service for this service's source, with all
+    /// plugin layers already folded in. Each `ConnectorRequestService`
+    /// instance only handles requests for a single source, so we store
+    /// just the one client it needs.
+    pub(crate) http_client: crate::services::http::BoxCloneService,
 }
 
 impl tower::Service<Request> for ConnectorRequestService {
@@ -386,30 +452,22 @@ impl tower::Service<Request> for ConnectorRequestService {
     type Error = BoxError;
     type Future = BoxFuture<'static, Result<Self::Response, Self::Error>>;
 
-    fn poll_ready(&mut self, _cx: &mut std::task::Context<'_>) -> Poll<Result<(), Self::Error>> {
-        Poll::Ready(Ok(()))
+    fn poll_ready(&mut self, cx: &mut std::task::Context<'_>) -> Poll<Result<(), Self::Error>> {
+        self.http_client.poll_ready(cx)
     }
 
     fn call(&mut self, request: Request) -> Self::Future {
         let original_subgraph_name = request.connector.id.subgraph_name.to_string();
-        let http_client_service_factory = self.http_client_service_factory.clone();
+        let fresh_client = self.http_client.clone();
+        let mut http_client = std::mem::replace(&mut self.http_client, fresh_client);
 
         // Load the information needed from the context
-        let (debug, connector_request_event, request_limit) =
-            request.context.extensions().with_lock(|lock| {
-                (
-                    lock.get::<Arc<Mutex<ConnectorContext>>>().cloned(),
-                    lock.get::<ConnectorEventRequest>().cloned(),
-                    lock.get::<Arc<RequestLimits>>()
-                        .map(|limits| {
-                            limits.get(
-                                request.connector.as_ref().into(),
-                                request.connector.max_requests,
-                            )
-                        })
-                        .unwrap_or(None),
-                )
-            });
+        let (debug, connector_request_event) = request.context.extensions().with_lock(|lock| {
+            (
+                lock.get::<Arc<Mutex<ConnectorContext>>>().cloned(),
+                lock.get::<ConnectorEventRequest>().cloned(),
+            )
+        });
 
         let log_request_level = connector_request_event.and_then(|s| {
             if s.condition.lock().evaluate_request(&request) == Some(true) {
@@ -445,64 +503,47 @@ impl tower::Service<Request> for ConnectorRequestService {
                     Ok(Response {
                         context: request.context,
                         subgraph_name: original_subgraph_name,
-                        transport_result: Ok(TransportResponse::MappingOnly),
+                        transport_outcome: TransportOutcome::MappingOnly,
                         mapped_response: mapped,
+                        answered_by_router: false,
                     })
                 }
 
                 TransportRequest::Http(http_request) => {
-                    let mut debug_request = (None, Default::default());
-                    let result = if request_limit
-                        .is_some_and(|request_limit| !request_limit.allow())
-                    {
-                        Err(Error::RequestLimitExceeded)
-                    } else {
-                        debug_request = http_request.debug;
+                    let debug_request = http_request.debug;
 
-                        log_request(
-                            &http_request.inner,
-                            log_request_level,
-                            request.connector.label.as_ref(),
-                            &request.context,
-                            &original_subgraph_name,
+                    log_request(
+                        &http_request.inner,
+                        log_request_level,
+                        request.connector.label.as_ref(),
+                        &request.context,
+                        &original_subgraph_name,
+                    );
+
+                    let (parts, body) = http_request.inner.into_parts();
+                    let http_request =
+                        http::Request::from_parts(parts, router::body::from_bytes(body));
+
+                    let result = http_client
+                        .call(crate::services::http::HttpRequest {
+                            http_request,
+                            context: request.context.clone(),
+                        })
+                        .await
+                        .map(|result| result.http_response)
+                        .map_err(|e|
+                            // Note: this previously used `#[from] BoxError` but when we moved `Error` into the
+                            // `apollo-federation` crate, we could longer reference `BoxError` from there.
+                            Error::TransportFailure((replace_subgraph_name(e, &request.connector)).to_string())
                         );
 
-                        let source_name = request.connector.source_config_key();
-
-                        let result = if let Some(http_client_service_factory) =
-                            http_client_service_factory.get(&source_name).cloned()
-                        {
-                            let (parts, body) = http_request.inner.into_parts();
-                            let http_request =
-                                http::Request::from_parts(parts, router::body::from_bytes(body));
-
-                            http_client_service_factory
-                                    .create(&original_subgraph_name)
-                                    .oneshot(crate::services::http::HttpRequest {
-                                        http_request,
-                                        context: request.context.clone(),
-                                    })
-                                    .await
-                                    .map(|result| result.http_response)
-                                    .map_err(|e|
-                                        // Note: this previously used `#[from] BoxError` but when we moved `Error` into the
-                                        // `apollo-federation` crate, we could longer reference `BoxError` from there.
-                                        Error::TransportFailure((replace_subgraph_name(e, &request.connector)).to_string())
-                                    )
-                        } else {
-                            Err(Error::TransportFailure("no http client found".into()))
-                        };
-
-                        u64_counter!(
-                            "apollo.router.operations.connectors",
-                            "Total number of requests to connectors",
-                            1,
-                            "connector.type" = CONNECTOR_TYPE_HTTP,
-                            "subgraph.name" = original_subgraph_name
-                        );
-
-                        result
-                    };
+                    u64_counter!(
+                        "apollo.router.operations.connectors",
+                        "Total number of requests to connectors",
+                        1,
+                        "connector.type" = CONNECTOR_TYPE_HTTP,
+                        "subgraph.name" = original_subgraph_name
+                    );
 
                     Ok(process_response(
                         result,

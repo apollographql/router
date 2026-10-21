@@ -12,6 +12,8 @@ use shape::Shape;
 use shape::ShapeCase;
 use shape::location::Location;
 use shape::location::SourceId;
+use shape::name::Name;
+use shape::name::NameCase;
 
 use super::Ref;
 use super::helpers::json_merge;
@@ -24,8 +26,10 @@ use super::location::OffsetRange;
 use super::location::Ranged;
 use super::location::WithRange;
 use super::methods::ArrowMethod;
+use super::methods::common::with_arg_errors;
 use super::parser::*;
 use super::selection_trie::SelectionTrie;
+use crate::connectors::json_selection::helpers::missing_as_null;
 use crate::connectors::spec::ConnectSpec;
 
 pub(super) type VarsWithPathsMap<'a> = IndexMap<KnownVariable, (&'a JSON, InputPath<JSON>)>;
@@ -175,8 +179,14 @@ pub(super) trait ApplyToInternal {
 
         for (i, element) in data_array.iter().enumerate() {
             let input_path_with_index = input_path.append(json!(i));
-            let (applied, apply_errors) =
+            let (applied, mut apply_errors) =
                 self.apply_to_path(element, vars, &input_path_with_index, spec);
+            // Auto-mapping over an array is index-preserving (a missing element
+            // becomes null below rather than being dropped), so the input index
+            // is also the output index.
+            for error in &mut apply_errors {
+                error.prepend_output_segment(json!(i));
+            }
             errors.extend(apply_errors);
             // When building an Object, we can simply omit missing properties
             // and report an error, but when building an Array, we need to
@@ -226,6 +236,19 @@ pub(crate) struct ShapeContext {
     /// the *same* trie — each step of the recursion appends into one place.
     /// Inspectable with [`ShapeContext::consumption`] after recursion ends.
     consumption: Ref<RefCell<SelectionTrie>>,
+
+    /// The `->` method call whose shape is being computed with this context,
+    /// if any, which records the shapes its arguments produce. Each call gets
+    /// a child context of its own. See [`ShapeContext::compute_method_shape`].
+    method_call: Option<Ref<MethodCall>>,
+}
+
+/// The arguments of one `->` method call, identified by their source ranges,
+/// and the shapes they produced while the method's shape was computed.
+#[derive(Debug)]
+struct MethodCall {
+    arg_ranges: Vec<std::ops::Range<usize>>,
+    arg_shapes: RefCell<Vec<Shape>>,
 }
 
 impl ShapeContext {
@@ -241,6 +264,86 @@ impl ShapeContext {
             named_shapes: IndexMap::default(),
             source_id,
             consumption,
+            method_call: None,
+        }
+    }
+
+    /// Computes the result shape of a `->` method call with `compute`, then
+    /// carries over any errors in the shapes its arguments produced.
+    ///
+    /// At runtime, an error in an argument is reported whether or not the
+    /// method's result includes the argument's value, like the condition of
+    /// `->filter` or the separator of `->joinNotNull`. Shape errors are
+    /// metadata on the shape instead, so an error in an argument shape would
+    /// be lost whenever a method builds its result without it.
+    ///
+    /// `compute` gets a child context for this call, which records the shape
+    /// of each argument the method computes with it (see
+    /// [`Self::record_method_arg_shape`]). That keeps argument errors without
+    /// every method having to, and follows the method's own choice of which
+    /// arguments to evaluate and what `@` is bound to while it does. A nested
+    /// call gets its own child context, so each call only records its own
+    /// arguments.
+    ///
+    /// An error inside a union member, like one `->match` branch, may not
+    /// happen at runtime, but validation already rejects a union with an
+    /// error member, so it is carried over too.
+    ///
+    /// Anything this misses keeps the behavior from before it existed, with
+    /// the error dropped: an argument with no source range, parts of an
+    /// argument a method computes separately (see `ArrowMethodImpl::shape`),
+    /// and `->as`, whose variables carry their own errors to where they are
+    /// used.
+    pub(crate) fn compute_method_shape(
+        &self,
+        method_args: Option<&MethodArgs>,
+        compute: impl FnOnce(&ShapeContext) -> Shape,
+    ) -> Shape {
+        let arg_ranges: Vec<_> = method_args
+            .map(|args| args.args.iter().filter_map(|arg| arg.range()).collect())
+            .unwrap_or_default();
+        if arg_ranges.is_empty() {
+            // Nothing to record, so no child context is needed.
+            return compute(self);
+        }
+
+        // RefCell is not Sync, so Clippy flags this Arc, as in `Self::new`.
+        // The context never crosses threads, and `Ref` follows the shape-rs
+        // convention of `Ref<T> = Arc<T>`.
+        #[allow(clippy::arc_with_non_send_sync)]
+        let method_call = Ref::new(MethodCall {
+            arg_ranges,
+            arg_shapes: RefCell::new(Vec::new()),
+        });
+        let call_context = Self {
+            method_call: Some(method_call.clone()),
+            ..self.clone()
+        };
+        let result = compute(&call_context);
+        with_arg_errors(method_call.arg_shapes.borrow().iter(), result)
+    }
+
+    /// Records the shape `arg` produced, if `arg` is an argument of the method
+    /// call this context was created for by [`Self::compute_method_shape`].
+    fn record_method_arg_shape(&self, arg: &WithRange<LitExpr>, shape: &Shape) {
+        if let Some(method_call) = &self.method_call
+            && let Some(range) = arg.range()
+            && method_call.arg_ranges.contains(&range)
+        {
+            method_call.arg_shapes.borrow_mut().push(shape.clone());
+        }
+    }
+
+    /// Returns a clone of this context that shares the consumption trie but
+    /// is not the child of any method call, so shapes computed with it are
+    /// not recorded as method argument shapes. For computing an argument's
+    /// shape only for its consumption side effects, when the argument is
+    /// never evaluated at runtime (a short-circuited `->and`/`->or`), so its
+    /// errors must not be carried into the method's result shape.
+    pub(crate) fn without_method_call(&self) -> Self {
+        Self {
+            method_call: None,
+            ..self.clone()
         }
     }
 
@@ -326,12 +429,92 @@ impl ShapeContext {
     }
 }
 
+/// Who asked for an [`ApplyToError`], which decides how far it travels.
+///
+/// The two kinds share one channel — every method returns a single
+/// `Vec<ApplyToError>` — but they are not interchangeable at the far end of
+/// it. A [`Self::Diagnostic`] is the language telling on itself ("Property
+/// .nope not found in object"): useful to the mapping author in the debugger
+/// and in telemetry, and never something to hand a client, because it
+/// describes the mapping's internals rather than the request's outcome. A
+/// [`Self::Declared`] is a sentence the schema author wrote on purpose with
+/// `->withError`, addressed to the client, and it is the only kind eligible
+/// to be reported in the client's response, under its `extensions`.
+///
+/// The distinction has to live on the error itself rather than being inferred
+/// at the point of collection: by the time a `Vec<ApplyToError>` reaches the
+/// response mapper, the two kinds are thoroughly interleaved (a single
+/// `->withError` call can emit both, when an argument fails), and nothing
+/// about a message's text or path distinguishes them.
+#[derive(Debug, Eq, PartialEq, Clone, Copy, Hash, Default)]
+pub enum ApplyToErrorKind {
+    /// Reported by the mapping language about the mapping. Debugger and
+    /// telemetry only.
+    #[default]
+    Diagnostic,
+    /// Declared by the schema author via `->withError`, addressed to the
+    /// client.
+    Declared,
+}
+
+/// Drop the diagnostics from a set of accumulated errors, keeping only what the
+/// schema author declared.
+///
+/// Used where the coalescing operators discard the errors of operands they
+/// stepped over. Discarding a diagnostic there is the point — "this path
+/// produced nothing" is precisely the condition the fallback exists to handle,
+/// so reporting it would make every defaulted field noisy. A declared error is
+/// the opposite: the author wrote `->withError` to say something to the client,
+/// and it must survive being on the losing side of a `??`.
+fn retain_declared(errors: &mut Vec<ApplyToError>) {
+    errors.retain(|error| error.kind() == ApplyToErrorKind::Declared);
+}
+
+/// The parts of an error that only an author-declared one carries.
+///
+/// Boxed behind [`ApplyToError::declared`] rather than inlined, for two
+/// reasons. `ApplyToError` is returned by every method in the language, often
+/// in a `Result<_, ApplyToError>`, so its size is on a hot path that
+/// diagnostics dominate; inlining these fields grew it from ~80 to 192 bytes
+/// and tripped `clippy::result_large_err`. And keeping them here makes the
+/// invariant structural: a diagnostic *cannot* carry extensions or an output
+/// path, because it has no place to put them.
+#[derive(Debug, Eq, PartialEq, Clone, Hash)]
+struct DeclaredParts {
+    /// Structured fields for the GraphQL error's `extensions`, when the author
+    /// supplied them.
+    ///
+    /// Held as a [`JSON`] rather than a `Map` so this struct keeps the `Eq` and
+    /// `Hash` it derives, and because the value arrives as a `JSON` from
+    /// evaluating the author's expression either way. Constructors guarantee it
+    /// is `Some(JSON::Object(_))` or `None`.
+    extensions: Option<JSON>,
+    /// Where this error belongs in the mapping's *output*, as opposed to
+    /// [`ApplyToError::path`], which says where the mapping was reading in its
+    /// input.
+    ///
+    /// The two differ under any rename: `balance: amount->withError(...)`
+    /// reads `amount` and writes `balance`. Only this one can be handed to a
+    /// client, because only this one resolves against the data the client
+    /// received.
+    ///
+    /// Built by prepending on the way *out* rather than threading a parameter
+    /// on the way in: every construction site already reports `input_path`, and
+    /// the output name is known only by the enclosing [`NamedSelection`], which
+    /// sees the error on its way back up. See
+    /// [`ApplyToError::prepend_output_segment`].
+    output_path: Vec<JSON>,
+}
+
 #[derive(Debug, Eq, PartialEq, Clone, Hash)]
 pub struct ApplyToError {
     message: String,
     path: Vec<JSON>,
     range: OffsetRange,
     spec: ConnectSpec,
+    /// `Some` exactly when the schema author declared this error with
+    /// `->withError`, which is also what [`Self::kind`] reports.
+    declared: Option<Box<DeclaredParts>>,
 }
 
 impl ApplyToError {
@@ -346,6 +529,30 @@ impl ApplyToError {
             path,
             range,
             spec,
+            declared: None,
+        }
+    }
+
+    /// An error the schema author declared with `->withError`, eligible to
+    /// reach the client. `extensions` is ignored unless it is an object, so a
+    /// caller cannot smuggle a scalar into a position the GraphQL spec says is
+    /// a map.
+    pub(crate) fn declared(
+        message: String,
+        path: Vec<JSON>,
+        range: OffsetRange,
+        spec: ConnectSpec,
+        extensions: Option<JSON>,
+    ) -> Self {
+        Self {
+            message,
+            path,
+            range,
+            spec,
+            declared: Some(Box::new(DeclaredParts {
+                extensions: extensions.filter(|value| matches!(value, JSON::Object(_))),
+                output_path: Vec::new(),
+            })),
         }
     }
 
@@ -379,11 +586,79 @@ impl ApplyToError {
                 None
             },
             spec,
+            // Absent keys mean "a plain diagnostic", so the many existing tests
+            // that spell out only message/path/range keep passing unchanged and
+            // only tests about declared errors have to say so.
+            declared: (error.get("declared").and_then(JSON::as_bool) == Some(true)).then(|| {
+                Box::new(DeclaredParts {
+                    extensions: error
+                        .get("extensions")
+                        .filter(|value| matches!(value, JSON::Object(_)))
+                        .cloned(),
+                    output_path: error
+                        .get("output_path")
+                        .and_then(JSON::as_array)
+                        .cloned()
+                        .unwrap_or_default(),
+                })
+            }),
         }
     }
 
     pub fn message(&self) -> &str {
         self.message.as_str()
+    }
+
+    pub fn kind(&self) -> ApplyToErrorKind {
+        match self.declared {
+            Some(_) => ApplyToErrorKind::Declared,
+            None => ApplyToErrorKind::Diagnostic,
+        }
+    }
+
+    /// Where this error belongs in the mapping's *output*, as opposed to
+    /// [`Self::path`], which says where the mapping was reading in its input.
+    ///
+    /// The two differ under any rename: `balance: amount->withError(...)` reads
+    /// `amount` and writes `balance`. Only this one resolves against the data a
+    /// client received, so only this one belongs in a GraphQL error's `path`.
+    ///
+    /// Always empty for a diagnostic, which carries no output path because it
+    /// is addressed to the mapping author rather than to a client.
+    pub fn output_path(&self) -> &[JSON] {
+        self.declared
+            .as_ref()
+            .map_or(&[], |declared| declared.output_path.as_slice())
+    }
+
+    /// Record that this error came from inside `segment` of the enclosing
+    /// output structure — an object key, or an array index.
+    ///
+    /// Called while unwinding, so the innermost enclosing name is prepended
+    /// first and the outermost last, leaving the segments in reading order.
+    ///
+    /// Only [`ApplyToErrorKind::Declared`] errors accumulate an output path,
+    /// because only they are reported to the client, which is the one thing an
+    /// output path is for. A diagnostic is addressed to the mapping
+    /// author, who wants [`Self::path`] — where the mapping was reading when it
+    /// went wrong — and would be misled by a path naming the field it was
+    /// writing. Restricting it this way also keeps every existing diagnostic
+    /// byte-identical, so the many tests that assert on whole `ApplyToError`
+    /// values keep testing what they were written to test. Here that
+    /// restriction is not a check but the shape of the data: a diagnostic has
+    /// no `DeclaredParts` to record into.
+    pub(crate) fn prepend_output_segment(&mut self, segment: JSON) {
+        if let Some(declared) = self.declared.as_mut() {
+            declared.output_path.insert(0, segment);
+        }
+    }
+
+    /// The author-supplied `extensions` object, present only on a
+    /// [`ApplyToErrorKind::Declared`] error whose author supplied one.
+    pub fn extensions(&self) -> Option<&JSON> {
+        self.declared
+            .as_ref()
+            .and_then(|declared| declared.extensions.as_ref())
     }
 
     pub fn path(&self) -> &[JSON] {
@@ -546,6 +821,17 @@ impl ApplyToInternal for NamedSelection {
             }
         }
 
+        // Everything reported from beneath this selection belongs under the key
+        // this selection writes, so record that on the way out. A spread
+        // (`NamingPrefix::Spread`) contributes no key: its fields are inlined
+        // into the enclosing object, so its errors already sit at the right
+        // depth.
+        if let Some(output_key) = self.get_single_key() {
+            for error in &mut errors {
+                error.prepend_output_segment(JSON::String(output_key.as_string().into()));
+            }
+        }
+
         (output, errors)
     }
 
@@ -562,7 +848,7 @@ impl ApplyToInternal for NamedSelection {
         if let Some(single_output_key) = self.get_single_key() {
             let mut map = Shape::empty_map();
             map.insert(single_output_key.as_string(), path_shape);
-            Shape::record(map, self.shape_location(context.source_id()))
+            Shape::closed_record(map, self.shape_location(context.source_id()))
         } else {
             path_shape
         }
@@ -804,38 +1090,61 @@ impl ApplyToInternal for WithRange<PathList> {
         input_shape: Shape,
         dollar_shape: Shape,
     ) -> Shape {
+        // Errors are now stored as metadata on `input_shape` rather than as a
+        // `ShapeCase::Error` variant wrapping a partial. Capture them up-front
+        // so they can be reapplied to whatever the structural recursion below
+        // produces. A pure error (case == Unknown carrying error metadata) has
+        // no partial structure to drive shape computation, so we short-circuit
+        // and return it as-is. Note: this collapses the distinction between
+        // error_with_partial(msg, Unknown) and error(msg) — both early-return
+        // here — so if a future call site constructs the former and expects
+        // tail computation through the Unknown partial, this path will need
+        // refinement.
+        let pending_errors: Vec<(String, Vec<Location>)> = if input_shape.has_own_errors() {
+            if matches!(input_shape.case(), ShapeCase::Unknown) {
+                return input_shape;
+            }
+            let locations: Vec<Location> = input_shape.locations().cloned().collect();
+            input_shape
+                .own_errors()
+                .map(|e| (e.message.clone(), locations.clone()))
+                .collect()
+        } else {
+            Vec::new()
+        };
+
         match input_shape.case() {
             ShapeCase::One(shapes) => {
-                return Shape::one(
+                let distributed = Shape::one(
                     shapes.iter().map(|shape| {
                         self.compute_output_shape(context, shape.clone(), dollar_shape.clone())
                     }),
                     input_shape.locations().cloned(),
                 );
+                return pending_errors
+                    .into_iter()
+                    .fold(distributed, |acc, (msg, locs)| {
+                        Shape::error_with_partial(msg, acc, locs)
+                    });
             }
             ShapeCase::All(shapes) => {
-                return Shape::all(
+                let distributed = Shape::all(
                     shapes.iter().map(|shape| {
                         self.compute_output_shape(context, shape.clone(), dollar_shape.clone())
                     }),
                     input_shape.locations().cloned(),
                 );
-            }
-            ShapeCase::Error(error) => {
-                return match error.partial.as_ref() {
-                    Some(partial) => Shape::error_with_partial(
-                        error.message.clone(),
-                        self.compute_output_shape(context, partial.clone(), dollar_shape),
-                        input_shape.locations().cloned(),
-                    ),
-                    None => input_shape.clone(),
-                };
+                return pending_errors
+                    .into_iter()
+                    .fold(distributed, |acc, (msg, locs)| {
+                        Shape::error_with_partial(msg, acc, locs)
+                    });
             }
             _ => {}
         };
 
-        // Given the base cases above, we can assume below that input_shape is
-        // neither ::One, ::All, nor ::Error.
+        // Below, input_shape is neither ::One nor ::All; any pending_errors
+        // captured above will be reapplied at the bottom of this function.
 
         let mut extra_vars_opt: Option<Shape> = None;
         let (current_shape, tail_opt) = match self.as_ref() {
@@ -947,13 +1256,23 @@ impl ApplyToInternal for WithRange<PathList> {
                             None,
                         )
                     } else {
-                        let result_shape = method.shape(
-                            context,
-                            method_name,
-                            method_args.as_ref(),
-                            input_shape.clone(),
-                            dollar_shape.clone(),
-                        );
+                        let compute = |context: &ShapeContext| {
+                            method.shape(
+                                context,
+                                method_name,
+                                method_args.as_ref(),
+                                input_shape.clone(),
+                                dollar_shape.clone(),
+                            )
+                        };
+                        let result_shape = if method == ArrowMethod::As {
+                            // The result of `->as` is the shape of the bound
+                            // variables, which carry any errors in their own
+                            // shapes to where they are used.
+                            compute(context)
+                        } else {
+                            context.compute_method_shape(method_args.as_ref(), compute)
+                        };
 
                         // We special-case ArrowMethod::As in apply_to_path, so
                         // it makes sense to do so here as well.
@@ -1025,12 +1344,45 @@ impl ApplyToInternal for WithRange<PathList> {
                 // children. Subsequent recursion into `selection` records
                 // additional consumption (e.g. the subselection's own
                 // fields) on top.
-                context.record_consumption(&input_shape, true);
+                //
+                // The one exception is a subselection applied directly to a
+                // bare variable, with no key navigation in between, as in
+                // `price: { amount: $args.amount }`, whose input is the
+                // enclosing `@` (`$root`, or `$root.*`). Marking that input
+                // as a leaf would claim the whole variable was consumed, so
+                // it is marked only if the subselection read something under
+                // it. To tell, the subselection records into a fresh trie,
+                // which is then merged back into the shared one.
+                let bare_variable = match input_shape.case() {
+                    ShapeCase::Name(name, _) if !name_navigates(name) => Some(name.clone()),
+                    _ => None,
+                };
 
-                (
-                    selection.compute_output_shape(context, input_shape, dollar_shape.clone()),
-                    None,
-                )
+                if let Some(name) = bare_variable {
+                    let outer = context.consumption().replace(SelectionTrie::new());
+                    let output_shape = selection.compute_output_shape(
+                        context,
+                        input_shape.clone(),
+                        dollar_shape.clone(),
+                    );
+                    let inner = context.consumption().replace(outer);
+                    let read_under_input = inner.contains_name(&name);
+                    context.consumption().borrow_mut().extend(&inner);
+                    // Release `inner` before recording more, so the subtrees
+                    // it shares with the merged trie are uniquely owned again
+                    // and `Ref::make_mut` can update them in place.
+                    drop(inner);
+                    if read_under_input {
+                        context.record_consumption(&input_shape, true);
+                    }
+                    (output_shape, None)
+                } else {
+                    context.record_consumption(&input_shape, true);
+                    (
+                        selection.compute_output_shape(context, input_shape, dollar_shape.clone()),
+                        None,
+                    )
+                }
             }
 
             PathList::Empty => {
@@ -1042,7 +1394,7 @@ impl ApplyToInternal for WithRange<PathList> {
             }
         };
 
-        if let Some(tail) = tail_opt {
+        let tail_result = if let Some(tail) = tail_opt {
             // Recurses over extra_vars_opt, which is usually None, but could be
             // Some(object_shape) (when handling ArrowMethod::As), and might
             // sometimes be Some(error_shape) with an object partial shape.
@@ -1053,7 +1405,13 @@ impl ApplyToInternal for WithRange<PathList> {
                 input_shape: Shape,
                 dollar_shape: Shape,
             ) -> Shape {
-                match extra_vars_opt.as_ref().map(|s| s.case()) {
+                let pending_messages: Vec<String> = extra_vars_opt
+                    .as_ref()
+                    .map(|s| s.own_errors().map(|e| e.message.clone()).collect())
+                    .unwrap_or_default();
+                let tail_location = tail.shape_location(context.source_id());
+
+                let inner_shape = match extra_vars_opt.as_ref().map(|s| s.case()) {
                     Some(ShapeCase::Object { fields, .. }) => {
                         // TODO Refactor the internal ShapeContext
                         // representation to make this cloning
@@ -1066,28 +1424,26 @@ impl ApplyToInternal for WithRange<PathList> {
                         tail.compute_output_shape(&new_context, input_shape, dollar_shape)
                     }
 
-                    Some(ShapeCase::Error(shape::Error { message, partial })) => {
-                        if partial.is_some() {
-                            let tail_shape = compute_tail_shape(
-                                tail,
-                                partial,
-                                context,
-                                input_shape,
-                                dollar_shape,
-                            );
-
-                            Shape::error_with_partial(
-                                message.clone(),
-                                tail_shape,
-                                tail.shape_location(context.source_id()),
-                            )
-                        } else {
-                            Shape::error(message.clone(), tail.shape_location(context.source_id()))
-                        }
+                    // A pure error (case == Unknown carrying error metadata) has
+                    // no partial structure to drive name installation; emit a
+                    // fresh error shape carrying the same messages.
+                    Some(ShapeCase::Unknown) if !pending_messages.is_empty() => {
+                        let mut iter = pending_messages.into_iter();
+                        let first = iter.next().unwrap_or_default();
+                        return iter.fold(Shape::error(first, tail_location), |acc, msg| {
+                            acc.with_error(shape::Error { message: msg })
+                        });
                     }
 
                     _ => tail.compute_output_shape(context, input_shape, dollar_shape),
-                }
+                };
+
+                // Reattach any error metadata that was sitting on
+                // extra_vars_opt, so the structural recursion's output still
+                // surfaces the original error messages.
+                pending_messages.into_iter().fold(inner_shape, |acc, msg| {
+                    Shape::error_with_partial(msg, acc, tail_location.clone())
+                })
             }
 
             compute_tail_shape(
@@ -1101,7 +1457,16 @@ impl ApplyToInternal for WithRange<PathList> {
             )
         } else {
             current_shape
-        }
+        };
+
+        // Reapply any pending errors that were attached to the original
+        // input_shape, so callers see the same error metadata they would have
+        // seen when errors were a dedicated `ShapeCase::Error` variant.
+        pending_errors
+            .into_iter()
+            .fold(tail_result, |acc, (msg, locs)| {
+                Shape::error_with_partial(msg, acc, locs)
+            })
     }
 }
 
@@ -1178,8 +1543,17 @@ impl ApplyToInternal for WithRange<LitExpr> {
                                     continue;
                                 }
                                 Some(value) => {
-                                    // Found a non-null/non-None value, return it (ignoring accumulated errors)
-                                    return (Some(value), errors);
+                                    // Found a non-null/non-None value. Earlier
+                                    // operands' diagnostics are dropped: a path
+                                    // that produced nothing is exactly what the
+                                    // fallback is for, so reporting it would be
+                                    // noise. Declared errors are kept, because
+                                    // the author asked for those explicitly and
+                                    // dropping them would silently discard a
+                                    // message meant for the client.
+                                    retain_declared(&mut accumulated_errors);
+                                    accumulated_errors.extend(errors);
+                                    return (Some(value), accumulated_errors);
                                 }
                             }
                         }
@@ -1194,11 +1568,15 @@ impl ApplyToInternal for WithRange<LitExpr> {
                             // with all accumulated errors.
                             (None, accumulated_errors)
                         } else {
-                            // If the last operand evaluated to null (or
-                            // anything else except None), that counts as a
-                            // successful evaluation, so we do not return any
-                            // earlier accumulated_errors.
-                            (last_value, Vec::new())
+                            // The last operand evaluated to null, which counts
+                            // as a successful evaluation, so earlier operands'
+                            // diagnostics are not reported. Declared errors
+                            // still are: `x ?? $(null)->withError("...")` is a
+                            // deliberate "default to null and say why", and
+                            // dropping the message would make that spelling
+                            // silently do nothing.
+                            retain_declared(&mut accumulated_errors);
+                            (last_value, accumulated_errors)
                         }
                     }
 
@@ -1217,9 +1595,14 @@ impl ApplyToInternal for WithRange<LitExpr> {
                                     accumulated_errors.extend(errors);
                                     continue;
                                 }
-                                // If we get any value (including null), return it
+                                // If we get any value (including null), return
+                                // it. As with `??`, earlier operands'
+                                // diagnostics are dropped as expected noise
+                                // while declared errors are kept.
                                 Some(value) => {
-                                    return (Some(value), errors);
+                                    retain_declared(&mut accumulated_errors);
+                                    accumulated_errors.extend(errors);
+                                    return (Some(value), accumulated_errors);
                                 }
                             }
                         }
@@ -1240,7 +1623,7 @@ impl ApplyToInternal for WithRange<LitExpr> {
     ) -> Shape {
         let locations = self.shape_location(context.source_id());
 
-        match self.as_ref() {
+        let shape = match self.as_ref() {
             LitExpr::Null => Shape::null(locations),
             LitExpr::Bool(value) => Shape::bool_value(*value, locations),
             LitExpr::String(value) => Shape::string_value(value.as_str(), locations),
@@ -1280,10 +1663,14 @@ impl ApplyToInternal for WithRange<LitExpr> {
             LitExpr::Array(vec) => {
                 let mut shapes = Vec::with_capacity(vec.len());
                 for value in vec {
-                    shapes.push(value.compute_output_shape(
+                    // Elements with no value become null at runtime.
+                    shapes.push(missing_as_null(
                         context,
-                        input_shape.clone(),
-                        dollar_shape.clone(),
+                        value.compute_output_shape(
+                            context,
+                            input_shape.clone(),
+                            dollar_shape.clone(),
+                        ),
                     ));
                 }
                 Shape::array(shapes, Shape::none(), locations)
@@ -1342,7 +1729,12 @@ impl ApplyToInternal for WithRange<LitExpr> {
                     }
                 }
             }
-        }
+        };
+
+        // How `->` method calls keep the errors of their arguments. See
+        // `ShapeContext::compute_method_shape`.
+        context.record_method_arg_shape(self, &shape);
+        shape
     }
 }
 
@@ -1383,7 +1775,7 @@ impl SubSelection {
     }
 
     /// Shape counterpart of [`Self::apply_selections_no_rebind`]: merge the
-    /// output shapes of each [`NamedSelection`] with [`Shape::all`] without
+    /// output shapes of each [`NamedSelection`] with [`Shape::merge`] without
     /// rebinding `$`. Callers pass the `dollar_shape` they want threaded.
     fn compute_selections_shape_no_rebind(
         &self,
@@ -1392,16 +1784,16 @@ impl SubSelection {
         dollar_shape: Shape,
     ) -> Shape {
         let locations = self.shape_location(context.source_id());
-        let mut all_shape = Shape::unknown([]);
+        let mut merged_shape = Shape::unknown([]);
 
         for named_selection in self.selections.iter() {
-            // Simplifying as we go with Shape::all keeps all_shape relatively
+            // Simplifying as we go with Shape::merge keeps merged_shape relatively
             // small in the common case when all named_selection items return an
             // object shape, since those object shapes can all be merged
             // together into one object.
-            all_shape = Shape::all(
+            merged_shape = Shape::merge(
                 [
-                    all_shape,
+                    merged_shape,
                     named_selection.compute_output_shape(
                         context,
                         input_shape.clone(),
@@ -1414,15 +1806,15 @@ impl SubSelection {
             // If any named_selection item returns null instead of an object,
             // that nullifies the whole object and allows shape computation to
             // bail out early.
-            if all_shape.is_null() {
+            if merged_shape.is_null() {
                 break;
             }
         }
 
-        if all_shape.is_unknown() {
+        if merged_shape.is_unknown() {
             Shape::empty_object(locations)
         } else {
-            all_shape
+            merged_shape
         }
     }
 }
@@ -1528,6 +1920,18 @@ impl WithRange<PathList> {
             .cloned()
             .unwrap_or_else(SelectionTrie::new)
     }
+}
+
+/// Whether a shape name navigates into its base variable through a field or
+/// item step, as opposed to naming the variable itself (`$root`, or
+/// `$root.*` when only array iteration markers follow the base).
+fn name_navigates(name: &Name) -> bool {
+    name.iter().any(|part| {
+        matches!(
+            part.case(),
+            NameCase::Field(..) | NameCase::Item(..) | NameCase::AnyField(_)
+        )
+    })
 }
 
 /// Helper to get the field from a shape or error if the object doesn't have that field.
@@ -3420,7 +3824,7 @@ mod tests {
         named_shapes.insert(
             "$batch".to_string(),
             Shape::list(
-                Shape::record(
+                Shape::closed_record(
                     {
                         let mut map = Shape::empty_map();
                         map.insert("id".to_string(), Shape::int([]));
@@ -3439,7 +3843,7 @@ mod tests {
 
         let computed_batch_id =
             selection!("$batch.id", spec).compute_output_shape(&shape_context, root_shape.clone());
-        assert_eq!(computed_batch_id.pretty_print(), "List<Int>");
+        assert_eq!(computed_batch_id.pretty_print(), "[...Int]");
 
         let computed_first = selection!("$batch.id->first", spec)
             .compute_output_shape(&shape_context, root_shape.clone());
@@ -3522,7 +3926,7 @@ mod tests {
         named_shapes.insert(
             "$batch".to_string(),
             Shape::list(
-                Shape::record(
+                Shape::closed_record(
                     {
                         let mut map = Shape::empty_map();
                         map.insert("id".to_string(), Shape::int([]));
@@ -3541,7 +3945,7 @@ mod tests {
 
         let computed_batch_id =
             selection!("$batch.id", spec).compute_output_shape(&shape_context, root_shape.clone());
-        assert_eq!(computed_batch_id.pretty_print(), "List<Int>");
+        assert_eq!(computed_batch_id.pretty_print(), "[...Int]");
 
         let computed_first = selection!("$batch.id->first", spec)
             .compute_output_shape(&shape_context, root_shape.clone());
@@ -3569,35 +3973,35 @@ mod tests {
             selection!("$batch.id->map(@)->echo(@)", spec)
                 .shape()
                 .pretty_print(),
-            "List<$batch.id.*>",
+            "[...$batch.id.*]",
         );
 
         assert_eq!(
             selection!("$batch.id->map(@)->echo([@])", spec)
                 .shape()
                 .pretty_print(),
-            "[List<$batch.id.*>]",
+            "[[...$batch.id.*]]",
         );
 
         assert_eq!(
             selection!("$batch.id->map([@])->echo(@)", spec)
                 .shape()
                 .pretty_print(),
-            "List<[$batch.id.*]>",
+            "[...[$batch.id.*]]",
         );
 
         assert_eq!(
             selection!("$batch.id->map([@])->echo([@])", spec)
                 .shape()
                 .pretty_print(),
-            "[List<[$batch.id.*]>]",
+            "[[...[$batch.id.*]]]",
         );
 
         assert_eq!(
             selection!("$batch.id->map([@])->echo([@])", spec)
                 .compute_output_shape(&shape_context, root_shape,)
                 .pretty_print(),
-            "[List<[Int]>]",
+            "[[...[Int]]]",
         );
     }
 
@@ -4083,10 +4487,10 @@ mod tests {
             .pretty_print(),
             // This output shape is wrong if $root.friend_ids turns out to be an
             // array, and it's tricky to see how to transform the shape to what
-            // it would have been if we knew that, where friends: List<{ id:
-            // $root.friend_ids.* }> (note the * meaning any array index),
+            // it would have been if we knew that, where friends: [...{ id:
+            // $root.friend_ids.* }] (note the * meaning any array index),
             // because who's to say it's not the id field that should become the
-            // List, rather than the friends field?
+            // array, rather than the friends field?
             r#"{
   alias: {
     x: $root.*.arrayOfArrays.*.x,
@@ -4118,7 +4522,7 @@ mod tests {
     x: $root.*.arrayOfArrays.*.x,
     y: $root.*.arrayOfArrays.*.y,
   },
-  friends: List<{ id: $root.*.friend_ids.* }>,
+  friends: [...{ id: $root.*.friend_ids.* }],
   id: $root.*.id,
   name: $root.*.name,
   xs: $root.*.arrayOfArrays.x,
@@ -4567,14 +4971,14 @@ mod tests {
             .with_spec(spec)
             .with_named_shapes([(
                 "$root".to_string(),
-                Shape::record(
+                Shape::closed_record(
                     {
                         let mut map = Shape::empty_map();
                         map.insert(
                             "unreliableAuthor".to_string(),
                             Shape::one(
                                 [
-                                    Shape::record(
+                                    Shape::closed_record(
                                         {
                                             let mut map = Shape::empty_map();
                                             map.insert("age".to_string(), Shape::int([]));
@@ -5809,7 +6213,7 @@ mod tests {
 
             named_shapes.insert(
                 "$root".to_string(),
-                Shape::record(
+                Shape::closed_record(
                     {
                         let mut map = Shape::empty_map();
                         map.insert(
@@ -5877,7 +6281,7 @@ mod tests {
         let shape_context = {
             let mut named_shapes = IndexMap::default();
 
-            let person_shape = Shape::record(
+            let person_shape = Shape::closed_record(
                 {
                     let mut map = Shape::empty_map();
                     map.insert("name".to_string(), Shape::string([]));
@@ -5889,7 +6293,7 @@ mod tests {
 
             named_shapes.insert(
                 "$root".to_string(),
-                Shape::record(
+                Shape::closed_record(
                     {
                         let mut map = Shape::empty_map();
                         map.insert("person".to_string(), person_shape);
@@ -5945,7 +6349,7 @@ mod tests {
 
             named_shapes.insert(
                 "$root".to_string(),
-                Shape::record(
+                Shape::closed_record(
                     {
                         let mut map = Shape::empty_map();
                         map.insert(
@@ -5985,7 +6389,7 @@ mod tests {
 
             named_shapes.insert(
                 "$root".to_string(),
-                Shape::record(
+                Shape::closed_record(
                     {
                         let mut map = Shape::empty_map();
                         map.insert(
@@ -6024,7 +6428,7 @@ mod tests {
 
             named_shapes.insert(
                 "$root".to_string(),
-                Shape::record(
+                Shape::closed_record(
                     {
                         let mut map = Shape::empty_map();
                         map.insert(
@@ -6054,7 +6458,7 @@ mod tests {
         );
 
         // The question mark should be applied recursively to the partial shape within the error
-        assert!(result_shape.pretty_print().contains("Error"));
+        assert!(result_shape.pretty_print().contains("(err "));
         assert!(result_shape.pretty_print().contains("None"));
     }
 
@@ -6067,7 +6471,7 @@ mod tests {
 
             named_shapes.insert(
                 "$root".to_string(),
-                Shape::record(
+                Shape::closed_record(
                     {
                         let mut map = Shape::empty_map();
                         map.insert(
@@ -6093,7 +6497,7 @@ mod tests {
                     shape_context.named_shapes()["$root"].clone()
                 )
                 .pretty_print(),
-            "Error<\"Something went wrong\">",
+            "Unknown (err \"Something went wrong\")",
         );
     }
 
@@ -6106,7 +6510,7 @@ mod tests {
 
             named_shapes.insert(
                 "$root".to_string(),
-                Shape::record(
+                Shape::closed_record(
                     {
                         let mut map = Shape::empty_map();
                         map.insert(
@@ -6152,7 +6556,7 @@ mod tests {
 
             named_shapes.insert(
                 "$root".to_string(),
-                Shape::record(
+                Shape::closed_record(
                     {
                         let mut map = Shape::empty_map();
                         map.insert(
@@ -6191,7 +6595,7 @@ mod tests {
 
             named_shapes.insert(
                 "$root".to_string(),
-                Shape::record(
+                Shape::closed_record(
                     {
                         let mut map = Shape::empty_map();
                         map.insert("nonNullString".to_string(), Shape::string([]));
@@ -6248,17 +6652,17 @@ mod tests {
 
             named_shapes.insert(
                 "$root".to_string(),
-                Shape::record(
+                Shape::closed_record(
                     {
                         let mut map = Shape::empty_map();
                         map.insert(
                             "level1".to_string(),
-                            Shape::record(
+                            Shape::closed_record(
                                 {
                                     let mut inner_map = Shape::empty_map();
                                     inner_map.insert(
                                         "level2".to_string(),
-                                        Shape::record(
+                                        Shape::closed_record(
                                             {
                                                 let mut inner_inner_map = Shape::empty_map();
                                                 inner_inner_map
@@ -6351,7 +6755,7 @@ mod tests {
         let mut named_shapes = IndexMap::default();
         named_shapes.insert(
             "$root".to_string(),
-            Shape::record(
+            Shape::closed_record(
                 {
                     let mut map = Shape::empty_map();
                     map.insert(
@@ -6392,7 +6796,7 @@ mod tests {
         let mut named_shapes = IndexMap::default();
         named_shapes.insert(
             "$root".to_string(),
-            Shape::record(
+            Shape::closed_record(
                 {
                     let mut map = Shape::empty_map();
                     map.insert(
@@ -6432,7 +6836,7 @@ mod tests {
             .with_spec(spec)
             .with_named_shapes([(
                 "$root".to_string(),
-                Shape::record(
+                Shape::closed_record(
                     {
                         let mut map = Shape::empty_map();
                         map.insert(

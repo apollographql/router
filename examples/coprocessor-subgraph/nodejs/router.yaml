@@ -13,9 +13,9 @@ coprocessor:
   timeout: 2s # optional timeout (2 seconds in this example). If not set, defaults to 1 second
   subgraph:
     all:
-      request: 
+      request:
         headers: true
-        context: true
+        context: all
         uri: true
         service_name: true
         body: true

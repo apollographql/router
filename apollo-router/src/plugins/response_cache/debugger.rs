@@ -42,6 +42,14 @@ pub(super) struct CacheKeyContext {
     pub(super) subgraph_request: graphql::Request,
     pub(super) source: CacheKeySource,
     pub(super) cache_control: CacheControl,
+    /// Whether an error in the response kept this entry out of the cache. Not serialized; like
+    /// `has_tags`, it only adds a warning. Callers fold it into `should_store` themselves.
+    #[serde(skip)]
+    pub(super) has_errors: bool,
+    /// For data fetched by this request, the cache's decision to store it; this is not
+    /// confirmation that the storage write succeeded. For a cache hit, whether its
+    /// `Cache-Control` allows storing. Callers set what the router's own rules allow, and
+    /// `update_metadata` applies the `Cache-Control` rules on top.
     pub(super) should_store: bool,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub(super) hashed_private_id: Option<String>,
@@ -87,6 +95,8 @@ pub(crate) enum CacheKeySource {
     Subgraph,
     /// Data fetched from cache
     Cache,
+    /// Data fetched from connector
+    Connector,
 }
 
 /// Debug info for the CDN `Cache-Tag` header, once per response — the piece the per-entry
@@ -154,6 +164,14 @@ impl CacheKeyContext {
                 message: "Either the request or the subgraph response contained a Cache-Control header with no-store, so the data was not cached".to_string(),
             });
         }
+        // Not cached because the response contained an error affecting this entry
+        if self.has_errors {
+            self.warnings.push(Warning {
+                code: "SUBGRAPH_ERRORS".to_string(),
+                links: vec![Link { url: String::from("https://www.apollographql.com/docs/graphos/routing/performance/caching/response-caching"), title: "Response caching in the Router".to_string() }],
+                message: "The subgraph returned an error for this entry, or an error the router could not match to a single entity, so the data was not cached.".to_string(),
+            });
+        }
         // Not cached because private in cache-control header and no private_id found in the context
         if self.cache_control.private() && self.hashed_private_id.is_none() {
             self.warnings.push(Warning {
@@ -203,7 +221,13 @@ impl CacheKeyContext {
             // consume per-tag values for this subgraph — the Redis cache_tag index or CDN
             // invalidation; otherwise the operator has intentionally opted out of both and
             // missing @cacheTag directives are the expected, configured state.
-            if !self.has_tags && (self.indexes.cache_tag || self.cdn_invalidation_enabled) {
+            // `root_fields` is empty on placeholder entries recorded for requests that bypass
+            // the cache entirely (a known-private query with no `private_id`, for instance):
+            // no root field was identified, so there is nothing to say about its cache tags.
+            if !self.has_tags
+                && !root_fields.is_empty()
+                && (self.indexes.cache_tag || self.cdn_invalidation_enabled)
+            {
                 self.warnings.push(Warning {
                     code: "NO_CACHE_TAG_ON_ROOT_FIELD".to_string(),
                     links: vec![Link { url: String::from("https://www.apollographql.com/docs/graphos/routing/performance/caching/response-caching/invalidation#invalidation-methods"), title: "Add '@cacheTag' in your schema".to_string() }],
@@ -225,8 +249,11 @@ impl CacheKeyContext {
         self
     }
 
+    /// Narrows the caller's `should_store` with the `Cache-Control` rules, so an entry the router
+    /// skipped for its own reasons (the request bypassed the cache, or the response had errors)
+    /// is never reported as stored.
     fn compute_should_store(mut self) -> Self {
-        self.should_store = self.cache_control.should_store();
+        self.should_store &= self.cache_control.should_store();
         // If it's private data but we don't have a private id to add into the primary cache key we won't cache it
         if self.cache_control.private() && self.hashed_private_id.is_none() {
             self.should_store = false;
@@ -294,6 +321,7 @@ mod tests {
             subgraph_request: graphql::Request::default(),
             source: CacheKeySource::Subgraph,
             cache_control: clean_cache_control(),
+            has_errors: false,
             should_store: false,
             hashed_private_id: None,
             data: serde_json_bytes::Value::default(),

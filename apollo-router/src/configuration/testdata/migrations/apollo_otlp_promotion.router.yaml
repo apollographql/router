@@ -1,0 +1,5 @@
+telemetry:
+  apollo:
+    experimental_otlp_endpoint: "https://custom.example.com/otlp"
+    experimental_otlp_tracing_protocol: grpc
+    experimental_otlp_metrics_protocol: http

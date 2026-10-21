@@ -9,6 +9,7 @@ use crate::connectors::json_selection::VarsWithPathsMap;
 use crate::connectors::json_selection::immutable::InputPath;
 use crate::connectors::json_selection::location::Ranged;
 use crate::connectors::json_selection::location::WithRange;
+use crate::connectors::json_selection::methods::common::could_satisfy;
 use crate::impl_arrow_method;
 
 impl_arrow_method!(NotMethod, not_method, not_shape);
@@ -76,8 +77,8 @@ fn not_shape(
         );
     }
 
-    // We will accept anything bool-like OR unknown/named
-    if !(Shape::bool([]).accepts(&input_shape) || input_shape.accepts(&Shape::unknown([]))) {
+    // Accept anything that could be a boolean at runtime.
+    if !could_satisfy(&Shape::bool([]), &input_shape) {
         return Shape::error(
             format!(
                 "Method ->{} can only be applied to boolean values. Got {input_shape}.",
@@ -194,11 +195,8 @@ mod shape_tests {
     #[test]
     fn not_shape_should_error_on_non_boolean_input() {
         assert_eq!(
-            get_shape(None, Shape::string([])),
-            Shape::error(
-                "Method ->not can only be applied to boolean values. Got String.".to_string(),
-                [get_location()]
-            )
+            get_shape(None, Shape::string([])).pretty_print(),
+            r#"Unknown (err "Method ->not can only be applied to boolean values. Got String.")"#,
         );
     }
 
@@ -211,11 +209,9 @@ mod shape_tests {
                     range: None
                 }),
                 Shape::bool([])
-            ),
-            Shape::error(
-                "Method ->not does not take any arguments".to_string(),
-                [get_location()]
             )
+            .pretty_print(),
+            r#"Unknown (err "Method ->not does not take any arguments")"#,
         );
     }
 

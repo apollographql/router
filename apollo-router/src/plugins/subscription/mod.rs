@@ -44,7 +44,6 @@ pub(crate) use execution::SubscriptionTaskParams;
 pub(crate) use fetch::fetch_service_handle_subscription;
 
 pub(crate) const APOLLO_SUBSCRIPTION_PLUGIN: &str = "apollo.subscription";
-pub(crate) const APOLLO_SUBSCRIPTION_PLUGIN_NAME: &str = "subscription";
 pub(crate) const SUBSCRIPTION_ERROR_EXTENSION_KEY: &str = "apollo::subscriptions::fatal_error";
 pub(crate) const SUBSCRIPTION_WS_CUSTOM_CONNECTION_PARAMS: &str =
     "apollo.subscription.custom_connection_params";
@@ -59,23 +58,25 @@ pub(crate) struct Subscription {
 }
 
 /// Subscriptions configuration
-#[derive(Debug, Clone, Deserialize, Serialize, JsonSchema)]
-#[serde(deny_unknown_fields, default)]
+#[apollo_configuration::configuration]
+#[derive(Serialize)]
 pub(crate) struct SubscriptionConfig {
     /// Enable subscription
+    #[config(default = true)]
     pub(crate) enabled: bool,
     /// Select a subscription mode (callback or passthrough)
     pub(crate) mode: SubscriptionModeConfig,
     /// Configure subgraph subscription deduplication
+    // Generic with a hand-written merging Deserialize, which the macro can't express.
+    #[config(skip_validate)]
     pub(crate) deduplication: SubgraphConfiguration<DeduplicationConfig>,
     /// This is a limit to only have maximum X opened subscriptions at the same time. By default if it's not set there is no limit.
     pub(crate) max_opened_subscriptions: Option<usize>,
     /// It represent the capacity of the in memory queue to know how many events we can keep in a buffer
     pub(crate) queue_capacity: Option<usize>,
     /// Maximum lifetime of a subscription. After this duration the subscription will be closed. Accepts durations like '10m', '1h', '30s'. By default there is no limit.
-    #[serde(deserialize_with = "humantime_serde::deserialize", default)]
     #[schemars(with = "Option<String>", default)]
-    pub(crate) max_lifetime: Option<Duration>,
+    pub(crate) max_lifetime: Option<apollo_configuration::types::Duration>,
 }
 
 /// Subscription deduplication configuration
@@ -110,21 +111,8 @@ impl Default for DeduplicationConfig {
     }
 }
 
-impl Default for SubscriptionConfig {
-    fn default() -> Self {
-        Self {
-            enabled: true,
-            mode: Default::default(),
-            deduplication: SubgraphConfiguration::default(),
-            max_opened_subscriptions: None,
-            queue_capacity: None,
-            max_lifetime: None,
-        }
-    }
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize, Default, JsonSchema)]
-#[serde(deny_unknown_fields)]
+#[apollo_configuration::configuration]
+#[derive(PartialEq, Eq, Serialize)]
 pub(crate) struct SubscriptionModeConfig {
     /// Enable callback mode for subgraph(s)
     pub(crate) callback: Option<CallbackMode>,
@@ -160,8 +148,8 @@ impl SubscriptionModeConfig {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize, Default, JsonSchema)]
-#[serde(deny_unknown_fields, default)]
+#[apollo_configuration::configuration]
+#[derive(PartialEq, Eq, Serialize)]
 pub(crate) struct SubgraphPassthroughMode {
     /// Configuration for all subgraphs
     pub(crate) all: Option<WebSocketConfiguration>,
@@ -178,18 +166,21 @@ pub(crate) enum SubscriptionMode {
 }
 
 /// Using a callback url
-#[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize, JsonSchema)]
-#[serde(deny_unknown_fields)]
+#[apollo_configuration::configuration]
+#[derive(PartialEq, Eq, Serialize)]
 pub(crate) struct CallbackMode {
     #[schemars(with = "String")]
     /// URL used to access this router instance, including the path configured on the Router
-    pub(crate) public_url: url::Url,
+    #[config(required)]
+    pub(crate) public_url: apollo_configuration::types::Url,
 
     /// Heartbeat interval for callback mode (default: 5secs)
-    #[serde(default = "HeartbeatInterval::new_enabled")]
+    #[config(default = HeartbeatInterval::new_enabled())]
     pub(crate) heartbeat_interval: HeartbeatInterval,
     // `skip_serializing` We don't need it in the context
     /// Listen address on which the callback must listen (default: 127.0.0.1:4000)
+    // ListenAddr's UnixSocket variant holds a PathBuf, which has no Validate impl.
+    #[config(skip_validate)]
     #[serde(skip_serializing)]
     pub(crate) listen: Option<ListenAddr>,
     // `skip_serializing` We don't need it in the context
@@ -199,21 +190,22 @@ pub(crate) struct CallbackMode {
 
     /// Specify on which subgraph we enable the callback mode for subscription
     /// If empty it applies to all subgraphs (passthrough mode takes precedence)
-    #[serde(default)]
+    // HashSet has no Validate impl.
+    #[config(skip_validate)]
     pub(crate) subgraphs: HashSet<String>,
 }
 
-#[derive(Debug, Copy, Clone, PartialEq, Eq, Deserialize, Serialize, JsonSchema)]
-#[serde(rename_all = "snake_case", untagged)]
+#[apollo_configuration::configuration]
+#[derive(Copy, PartialEq, Eq, Serialize)]
+#[serde(untagged)]
 pub(crate) enum HeartbeatInterval {
     /// disable heartbeat
     Disabled(Disabled),
     /// enable with default interval of 5s
     Enabled(Enabled),
     /// enable with custom interval, e.g. '100ms', '10s' or '1m'
-    #[serde(with = "humantime_serde")]
     #[schemars(with = "String")]
-    Duration(Duration),
+    Duration(apollo_configuration::types::Duration),
 }
 
 impl HeartbeatInterval {
@@ -227,44 +219,40 @@ impl HeartbeatInterval {
         match self {
             Self::Disabled(_) => None,
             Self::Enabled(_) => Some(Duration::from_secs(5)),
-            Self::Duration(duration) => Some(duration),
+            Self::Duration(duration) => Some(*duration),
         }
     }
 }
 
-#[derive(Debug, Copy, Clone, PartialEq, Eq, Deserialize, Serialize, JsonSchema)]
-#[serde(rename_all = "snake_case")]
+#[apollo_configuration::configuration]
+#[derive(Copy, PartialEq, Eq, Serialize)]
 pub(crate) enum Disabled {
     Disabled,
 }
 
-#[derive(Debug, Copy, Clone, PartialEq, Eq, Deserialize, Serialize, JsonSchema)]
-#[serde(rename_all = "snake_case")]
+#[apollo_configuration::configuration]
+#[derive(Copy, PartialEq, Eq, Serialize)]
 pub(crate) enum Enabled {
     Enabled,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize, JsonSchema)]
-#[serde(deny_unknown_fields)]
+#[apollo_configuration::configuration]
+#[derive(PartialEq, Eq, Serialize)]
 /// WebSocket configuration for a specific subgraph
 pub(crate) struct WebSocketConfiguration {
     /// Path on which WebSockets are listening
-    #[serde(default)]
     pub(crate) path: Option<String>,
     /// Which WebSocket GraphQL protocol to use for this subgraph possible values are: 'graphql_ws' | 'graphql_transport_ws' (default: graphql_ws)
-    #[serde(default)]
     pub(crate) protocol: WebSocketProtocol,
     /// Heartbeat interval for graphql-ws protocol (default: disabled)
-    #[serde(default = "HeartbeatInterval::new_disabled")]
+    #[config(default = HeartbeatInterval::new_disabled())]
     pub(crate) heartbeat_interval: HeartbeatInterval,
     /// Maximum number of times to attempt to reconnect a dropped WebSocket subscription connection.
     /// The default is 0 (no reconnection attempts).
-    #[serde(default)]
     pub(crate) max_reconnect_attempts: u32,
     /// Delay before each WebSocket reconnection attempt. Accepts durations like '1s', '500ms'. When unset (null) the default is 1 second; use '0s' for no delay.
-    #[serde(deserialize_with = "humantime_serde::deserialize", default)]
     #[schemars(with = "Option<String>", default)]
-    pub(crate) reconnect_delay: Option<Duration>,
+    pub(crate) reconnect_delay: Option<apollo_configuration::types::Duration>,
 }
 
 fn default_callback_path() -> String {
@@ -305,12 +293,12 @@ impl Plugin for Subscription {
     fn subgraph_service(
         &self,
         _subgraph_name: &str,
-        service: crate::services::subgraph::BoxService,
-    ) -> crate::services::subgraph::BoxService {
+        service: crate::services::subgraph::BoxCloneService,
+    ) -> crate::services::subgraph::BoxCloneService {
         let enabled = self.config.enabled
             && (self.config.mode.callback.is_some() || self.config.mode.passthrough.is_some());
         ServiceBuilder::new()
-            .checkpoint(move |req: SubgraphRequest| {
+            .checkpoint_async(move |req: SubgraphRequest| async move {
                 if req.operation_kind == OperationKind::Subscription && !enabled {
                     Ok(ControlFlow::Break(
                         SubgraphResponse::builder()
@@ -323,14 +311,15 @@ impl Plugin for Subscription {
                                     .build(),
                             )
                             .extensions(Object::default())
-                            .build(),
+                            .build()
+                            .answered_by_router(),
                     ))
                 } else {
                     Ok(ControlFlow::Continue(req))
                 }
             })
             .service(service)
-            .boxed()
+            .boxed_clone()
     }
 
     fn web_endpoints(&self) -> MultiMap<ListenAddr, Endpoint> {
@@ -346,7 +335,7 @@ impl Plugin for Subscription {
             let endpoint = Endpoint::from_router_service(
                 format!("{path}/{{callback}}"),
                 CallbackService::new(self.notify.clone(), path.to_string(), callback_hmac_key)
-                    .boxed(),
+                    .boxed_clone(),
             );
             map.insert(listen.clone().unwrap_or_else(default_listen_addr), endpoint);
         }
@@ -366,14 +355,15 @@ mod tests {
     use serde_json::Value;
     use tower::Service;
     use tower::ServiceExt;
+    use tower::util::BoxCloneService;
 
     use super::*;
-    use crate::Notify;
     use crate::assert_response_eq_ignoring_error_id;
     use crate::graphql::Request;
     use crate::http_ext;
     use crate::plugin::DynPlugin;
     use crate::plugins::subscription::callback::create_verifier;
+    use crate::plugins::subscription::notification::Notify;
     use crate::services::SubgraphRequest;
     use crate::services::SubgraphResponse;
     use crate::services::router;
@@ -800,7 +790,8 @@ mod tests {
         // The subscription plugin intercepts this request and never calls the inner service.
         let (mock, handle) = tower_test::mock::pair::<SubgraphRequest, SubgraphResponse>();
 
-        let mut subgraph_service = dyn_plugin.subgraph_service("my_subgraph_name", mock.boxed());
+        let mut subgraph_service =
+            dyn_plugin.subgraph_service("my_subgraph_name", BoxCloneService::new(mock));
         let subgraph_req = SubgraphRequest::fake_builder()
             .subgraph_request(
                 http_ext::Request::fake_builder()
@@ -1137,7 +1128,7 @@ mod tests {
         }))
         .unwrap();
 
-        assert_eq!(config.max_lifetime, Some(Duration::from_secs(600)));
+        assert_eq!(config.max_lifetime, Some(Duration::from_secs(600).into()));
 
         let config_no_lifetime: SubscriptionConfig = serde_json::from_value(serde_json::json!({
             "enabled": true,
@@ -1182,7 +1173,7 @@ mod tests {
             other => panic!("expected passthrough config, got {other:?}"),
         };
         assert_eq!(all_cfg.max_reconnect_attempts, 5);
-        assert_eq!(all_cfg.reconnect_delay, Some(Duration::from_secs(2)));
+        assert_eq!(all_cfg.reconnect_delay, Some(Duration::from_secs(2).into()));
 
         // A subgraph that doesn't set the fields falls back to their defaults (no reconnection).
         let no_reconnect_cfg = match config.mode.get_subgraph_config("no_reconnect") {
@@ -1191,6 +1182,32 @@ mod tests {
         };
         assert_eq!(no_reconnect_cfg.max_reconnect_attempts, 0);
         assert!(no_reconnect_cfg.reconnect_delay.is_none());
+    }
+
+    /// The error for a subscription sent while subscriptions are disabled is the router's own
+    /// answer, so the subgraph's circuit records nothing for it.
+    #[tokio::test]
+    async fn a_subscription_turned_away_while_disabled_records_no_circuit_outcome() {
+        use crate::plugins::circuit_breaker::test_support::assert_router_answers_record_nothing;
+        use crate::plugins::circuit_breaker::test_support::subgraph_request;
+
+        let plugin: Box<dyn DynPlugin> = crate::plugin::plugins()
+            .find(|factory| factory.name == APOLLO_SUBSCRIPTION_PLUGIN)
+            .expect("Plugin not found")
+            .create_instance_without_schema(&serde_json::json!({ "enabled": false }))
+            .await
+            .unwrap();
+
+        assert_router_answers_record_nothing(
+            async |subgraph| plugin.subgraph_service("products", subgraph),
+            || subgraph_request("Query"),
+            || {
+                let mut request = subgraph_request("Subscription");
+                request.operation_kind = OperationKind::Subscription;
+                request
+            },
+        )
+        .await;
     }
 }
 

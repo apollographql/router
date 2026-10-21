@@ -1,18 +1,12 @@
-use derivative::Derivative;
 use opentelemetry::Value;
-use schemars::JsonSchema;
-use serde::Deserialize;
 use serde_json_bytes::ByteString;
-use serde_json_bytes::path::JsonPathInst;
 use sha2::Digest;
 
 use super::attributes::SubgraphRequestResendCountKey;
 use crate::Context;
 use crate::context::OPERATION_KIND;
 use crate::context::OPERATION_NAME;
-use crate::plugin::serde::deserialize_jsonpath;
-use crate::plugins::cache::entity::CacheSubgraph;
-use crate::plugins::cache::metrics::CacheMetricContextKey;
+use crate::plugins::limits::operation_limits::OperationLimits;
 use crate::plugins::response_cache;
 use crate::plugins::telemetry::config::AttributeValue;
 use crate::plugins::telemetry::config_new::Selector;
@@ -31,11 +25,11 @@ use crate::plugins::telemetry::config_new::selectors::OperationKind;
 use crate::plugins::telemetry::config_new::selectors::OperationName;
 use crate::plugins::telemetry::config_new::selectors::Query;
 use crate::plugins::telemetry::config_new::selectors::ResponseStatus;
+use crate::plugins::telemetry::config_new::selectors::SelectorJsonPath;
 use crate::services::subgraph;
-use crate::spec::operation_limits::OperationLimits;
 
-#[derive(Deserialize, JsonSchema, Clone, Debug)]
-#[serde(deny_unknown_fields, rename_all = "snake_case", untagged)]
+#[apollo_configuration::configuration]
+#[serde(untagged)]
 pub(crate) enum SubgraphValue {
     Standard(Standard),
     Custom(Box<SubgraphSelector>),
@@ -50,8 +44,8 @@ impl From<&SubgraphValue> for InstrumentValue<SubgraphSelector> {
     }
 }
 
-#[derive(Deserialize, JsonSchema, Clone, Debug, PartialEq)]
-#[serde(deny_unknown_fields, rename_all = "snake_case")]
+#[apollo_configuration::configuration]
+#[derive(PartialEq)]
 pub(crate) enum SubgraphQuery {
     /// The raw query kind.
     String,
@@ -60,12 +54,13 @@ pub(crate) enum SubgraphQuery {
 pub(crate) struct SubgraphRequestBodySize(pub u64);
 pub(crate) struct SubgraphResponseBodySize(pub u64);
 
-#[derive(Deserialize, JsonSchema, Clone, Derivative)]
-#[serde(deny_unknown_fields, rename_all = "snake_case", untagged)]
-#[derivative(Debug, PartialEq)]
+#[apollo_configuration::configuration]
+#[derive(PartialEq)]
+#[serde(untagged)]
 pub(crate) enum SubgraphSelector {
     SubgraphOperationName {
         /// The operation name from the subgraph query.
+        #[config(required)]
         subgraph_operation_name: OperationName,
         /// Optional default value.
         default: Option<String>,
@@ -74,48 +69,50 @@ pub(crate) enum SubgraphSelector {
         /// The kind of the subgraph operation (query|mutation|subscription).
         // Allow dead code is required because there is only one variant in OperationKind and we need to avoid the dead code warning.
         #[allow(dead_code)]
+        #[config(required)]
         subgraph_operation_kind: OperationKind,
     },
     SubgraphName {
         /// The subgraph name
+        #[config(required)]
         subgraph_name: bool,
     },
     IsDeferred {
         /// Set to `true` to emit whether this subgraph fetch is part of the deferred portion of an `@defer` query plan.
+        #[config(required)]
         is_deferred: bool,
     },
     SubgraphQuery {
         /// The graphql query to the subgraph.
+        #[config(required)]
         subgraph_query: SubgraphQuery,
         /// Optional default value.
         default: Option<String>,
     },
     SubgraphQueryVariable {
         /// The name of a subgraph query variable.
+        #[config(required)]
         subgraph_query_variable: String,
         /// Optional default value.
         default: Option<AttributeValue>,
     },
     SubgraphResponseData {
         /// The subgraph response body json path.
-        #[schemars(with = "String")]
-        #[derivative(Debug = "ignore", PartialEq = "ignore")]
-        #[serde(deserialize_with = "deserialize_jsonpath")]
-        subgraph_response_data: JsonPathInst,
+        #[config(required)]
+        subgraph_response_data: SelectorJsonPath,
         /// Optional default value.
         default: Option<AttributeValue>,
     },
     SubgraphResponseErrors {
         /// The subgraph response body json path.
-        #[schemars(with = "String")]
-        #[derivative(Debug = "ignore", PartialEq = "ignore")]
-        #[serde(deserialize_with = "deserialize_jsonpath")]
-        subgraph_response_errors: JsonPathInst,
+        #[config(required)]
+        subgraph_response_errors: SelectorJsonPath,
         /// Optional default value.
         default: Option<AttributeValue>,
     },
     SubgraphRequestHeader {
         /// The name of a subgraph request header.
+        #[config(required)]
         subgraph_request_header: String,
         /// Optional redaction pattern.
         redact: Option<crate::services::header_masking::RedactMode>,
@@ -124,10 +121,12 @@ pub(crate) enum SubgraphSelector {
     },
     SubgraphRequestBodySize {
         /// The subgraph request body size.
+        #[config(required)]
         subgraph_request_body_size: bool,
     },
     SubgraphResponseHeader {
         /// The name of a subgraph response header.
+        #[config(required)]
         subgraph_response_header: String,
         /// Optional redaction pattern.
         redact: Option<crate::services::header_masking::RedactMode>,
@@ -136,20 +135,24 @@ pub(crate) enum SubgraphSelector {
     },
     SubgraphResponseStatus {
         /// The subgraph http response status code.
+        #[config(required)]
         subgraph_response_status: ResponseStatus,
     },
     SubgraphResponseBodySize {
         /// The subgraph response body size.
+        #[config(required)]
         subgraph_response_body_size: bool,
     },
     SubgraphResendCount {
         /// The subgraph http resend count
+        #[config(required)]
         subgraph_resend_count: bool,
         /// Optional default value.
         default: Option<AttributeValue>,
     },
     SupergraphOperationName {
         /// The supergraph query operation name.
+        #[config(required)]
         supergraph_operation_name: OperationName,
         /// Optional default value.
         default: Option<String>,
@@ -158,22 +161,26 @@ pub(crate) enum SubgraphSelector {
         /// The supergraph query operation kind (query|mutation|subscription).
         // Allow dead code is required because there is only one variant in OperationKind and we need to avoid the dead code warning.
         #[allow(dead_code)]
+        #[config(required)]
         supergraph_operation_kind: OperationKind,
     },
     SupergraphQuery {
         /// The supergraph query to the subgraph.
+        #[config(required)]
         supergraph_query: Query,
         /// Optional default value.
         default: Option<String>,
     },
     SupergraphQueryVariable {
         /// The supergraph query variable name.
+        #[config(required)]
         supergraph_query_variable: String,
         /// Optional default value.
         default: Option<AttributeValue>,
     },
     SupergraphRequestHeader {
         /// The supergraph request header name.
+        #[config(required)]
         supergraph_request_header: String,
         /// Optional redaction pattern.
         redact: Option<crate::services::header_masking::RedactMode>,
@@ -182,28 +189,33 @@ pub(crate) enum SubgraphSelector {
     },
     RequestContext {
         /// The request context key.
+        #[config(required)]
         request_context: String,
         /// Optional default value.
         default: Option<AttributeValue>,
     },
     ResponseContext {
         /// The response context key.
+        #[config(required)]
         response_context: String,
         /// Optional default value.
         default: Option<AttributeValue>,
     },
     OnGraphQLError {
         /// Boolean set to true if the response body contains graphql error
+        #[config(required)]
         subgraph_on_graphql_error: bool,
     },
     Baggage {
         /// The name of the baggage item.
+        #[config(required)]
         baggage: String,
         /// Optional default value.
         default: Option<AttributeValue>,
     },
     Env {
         /// The name of the environment variable
+        #[config(required)]
         env: String,
         /// Optional default value.
         default: Option<String>,
@@ -212,41 +224,39 @@ pub(crate) enum SubgraphSelector {
         #[serde(skip)]
         mocked_env_var: Option<String>,
     },
-    /// Deprecated, should not be used anymore, use static field instead
-    Static(String),
     StaticField {
         /// A static value
+        #[config(required)]
         r#static: AttributeValue,
     },
     Error {
         /// Critical error if it happens
+        #[config(required)]
         error: ErrorRepr,
-    },
-    Cache {
-        /// Select if you want to get cache hit or cache miss
-        cache: CacheKind,
-        /// Specify the entity type on which you want the cache data. (default: all)
-        entity_type: Option<EntityType>,
     },
     ResponseCache {
         /// Select if you want to get response cache hit or response cache miss
+        #[config(required)]
         response_cache: CacheKind,
         /// Specify the entity type on which you want the cache data. (default: all)
         entity_type: Option<EntityType>,
     },
     ResponseCacheStatus {
         /// Select if you want to know if it's a cache hit (all data coming from cache), miss (all data coming from subgraph) or partial_hit (not all entities are coming from cache for example)
+        #[config(required)]
         response_cache_status: CacheStatus,
         /// Specify the entity type on which you want the cache data status. (default: all)
         entity_type: Option<EntityType>,
     },
     ResponseCacheControl {
         /// Select data you want from the computed cache control from response caching
+        #[config(required)]
         response_cache_control: CacheControlSelector,
     },
     /// The context ID of the request (unique per request).
     ContextId {
         /// The context ID
+        #[config(required)]
         context_id: bool,
     },
 }
@@ -459,7 +469,6 @@ impl Selector for SubgraphSelector {
                     .or_else(|| default.clone())
                     .map(opentelemetry::Value::from)
             }
-            SubgraphSelector::Static(val) => Some(val.clone().into()),
             SubgraphSelector::StaticField { r#static } => Some(r#static.clone().into()),
             SubgraphSelector::ContextId { context_id } if *context_id => {
                 Some(opentelemetry::Value::from(request.context.id.clone()))
@@ -608,45 +617,7 @@ impl Selector for SubgraphSelector {
                     .map(|v| opentelemetry::Value::from(v as i64))
             }
             .or_else(|| default.maybe_to_otel_value()),
-            SubgraphSelector::Static(val) => Some(val.clone().into()),
             SubgraphSelector::StaticField { r#static } => Some(r#static.clone().into()),
-            SubgraphSelector::Cache { cache, entity_type } => {
-                let cache_info: CacheSubgraph = response
-                    .context
-                    .get(CacheMetricContextKey::new(response.subgraph_name.clone()))
-                    .ok()
-                    .flatten()?;
-
-                match entity_type {
-                    Some(EntityType::All(All::All)) | None => Some(
-                        (cache_info
-                            .0
-                            .iter()
-                            .fold(0usize, |acc, (_entity_type, cache_hit_miss)| match cache {
-                                CacheKind::Hit => acc + cache_hit_miss.hit,
-                                CacheKind::Miss => acc + cache_hit_miss.miss,
-                            }) as i64)
-                            .into(),
-                    ),
-                    Some(EntityType::Named(entity_type_name)) => {
-                        let res = cache_info.0.iter().fold(
-                            0usize,
-                            |acc, (entity_type, cache_hit_miss)| {
-                                if entity_type == entity_type_name {
-                                    match cache {
-                                        CacheKind::Hit => acc + cache_hit_miss.hit,
-                                        CacheKind::Miss => acc + cache_hit_miss.miss,
-                                    }
-                                } else {
-                                    acc
-                                }
-                            },
-                        );
-
-                        (res != 0).then_some((res as i64).into())
-                    }
-                }
-            }
             SubgraphSelector::ResponseCache {
                 response_cache: cache,
                 entity_type,
@@ -797,7 +768,6 @@ impl Selector for SubgraphSelector {
                 .map(opentelemetry::Value::from)
             }
             SubgraphSelector::Error { .. } => Some(error.to_string().into()),
-            SubgraphSelector::Static(val) => Some(val.clone().into()),
             SubgraphSelector::StaticField { r#static } => Some(r#static.clone().into()),
             SubgraphSelector::ResponseContext {
                 response_context,
@@ -817,7 +787,6 @@ impl Selector for SubgraphSelector {
 
     fn on_drop(&self) -> Option<Value> {
         match self {
-            SubgraphSelector::Static(val) => Some(val.clone().into()),
             SubgraphSelector::StaticField { r#static } => Some(r#static.clone().into()),
             _ => None,
         }
@@ -842,7 +811,6 @@ impl Selector for SubgraphSelector {
                     | SubgraphSelector::RequestContext { .. }
                     | SubgraphSelector::Baggage { .. }
                     | SubgraphSelector::Env { .. }
-                    | SubgraphSelector::Static(_)
                     | SubgraphSelector::StaticField { .. }
                     | SubgraphSelector::ContextId { .. }
             ),
@@ -858,9 +826,7 @@ impl Selector for SubgraphSelector {
                     | SubgraphSelector::SubgraphResponseErrors { .. }
                     | SubgraphSelector::ResponseContext { .. }
                     | SubgraphSelector::OnGraphQLError { .. }
-                    | SubgraphSelector::Static(_)
                     | SubgraphSelector::StaticField { .. }
-                    | SubgraphSelector::Cache { .. }
                     | SubgraphSelector::ResponseCache { .. }
                     | SubgraphSelector::ResponseCacheControl { .. }
                     | SubgraphSelector::ContextId { .. }
@@ -873,15 +839,11 @@ impl Selector for SubgraphSelector {
                     | SubgraphSelector::SupergraphOperationKind { .. }
                     | SubgraphSelector::SupergraphOperationName { .. }
                     | SubgraphSelector::Error { .. }
-                    | SubgraphSelector::Static(_)
                     | SubgraphSelector::StaticField { .. }
                     | SubgraphSelector::ResponseContext { .. }
                     | SubgraphSelector::ContextId { .. }
             ),
-            Stage::Drop => matches!(
-                self,
-                SubgraphSelector::Static(_) | SubgraphSelector::StaticField { .. }
-            ),
+            Stage::Drop => matches!(self, SubgraphSelector::StaticField { .. }),
         }
     }
 }
@@ -906,7 +868,6 @@ mod test {
     use opentelemetry::trace::TraceFlags;
     use opentelemetry::trace::TraceId;
     use opentelemetry::trace::TraceState;
-    use serde_json_bytes::path::JsonPathInst;
     use tower::BoxError;
     use tracing::span;
     use tracing::subscriber;
@@ -915,9 +876,6 @@ mod test {
     use crate::context::OPERATION_KIND;
     use crate::context::OPERATION_NAME;
     use crate::graphql;
-    use crate::plugins::cache::entity::CacheHitMiss;
-    use crate::plugins::cache::entity::CacheSubgraph;
-    use crate::plugins::cache::metrics::CacheMetricContextKey;
     use crate::plugins::response_cache;
     use crate::plugins::response_cache::plugin::CacheControls;
     use crate::plugins::telemetry::config::AttributeValue;
@@ -931,6 +889,7 @@ mod test {
     use crate::plugins::telemetry::config_new::selectors::OperationName;
     use crate::plugins::telemetry::config_new::selectors::Query;
     use crate::plugins::telemetry::config_new::selectors::ResponseStatus;
+    use crate::plugins::telemetry::config_new::selectors::SelectorJsonPath;
     use crate::plugins::telemetry::config_new::subgraph::attributes::SubgraphRequestResendCountKey;
     use crate::plugins::telemetry::config_new::subgraph::selectors::SubgraphQuery;
     use crate::plugins::telemetry::config_new::subgraph::selectors::SubgraphRequestBodySize;
@@ -939,26 +898,6 @@ mod test {
     use crate::services::SubgraphRequest;
     use crate::services::SubgraphResponse;
     use crate::services::subgraph::SubgraphRequestId;
-
-    #[test]
-    fn subgraph_static() {
-        let selector = SubgraphSelector::Static("test_static".to_string());
-        assert_eq!(
-            selector
-                .on_request(
-                    &crate::services::SubgraphRequest::fake_builder()
-                        .supergraph_request(Arc::new(
-                            http::Request::builder()
-                                .body(graphql::Request::builder().build())
-                                .unwrap()
-                        ))
-                        .build()
-                )
-                .unwrap(),
-            "test_static".into()
-        );
-        assert_eq!(selector.on_drop().unwrap(), "test_static".into());
-    }
 
     #[test]
     fn subgraph_static_field() {
@@ -1560,44 +1499,6 @@ mod test {
     }
 
     #[test]
-    fn entity_cache_hit_all_entities() {
-        let selector = SubgraphSelector::Cache {
-            cache: CacheKind::Hit,
-            entity_type: Some(EntityType::All(All::All)),
-        };
-        let context = crate::context::Context::new();
-        assert_eq!(
-            selector.on_response(
-                &crate::services::SubgraphResponse::fake_builder()
-                    .subgraph_name("test".to_string())
-                    .context(context.clone())
-                    .build(),
-            ),
-            None
-        );
-        let cache_info = CacheSubgraph(
-            [
-                ("Products".to_string(), CacheHitMiss { hit: 3, miss: 0 }),
-                ("Reviews".to_string(), CacheHitMiss { hit: 2, miss: 0 }),
-            ]
-            .into_iter()
-            .collect(),
-        );
-        let _ = context
-            .insert(CacheMetricContextKey::new("test".to_string()), cache_info)
-            .unwrap();
-        assert_eq!(
-            selector.on_response(
-                &crate::services::SubgraphResponse::fake_builder()
-                    .subgraph_name("test".to_string())
-                    .context(context.clone())
-                    .build(),
-            ),
-            Some(opentelemetry::Value::I64(5))
-        );
-    }
-
-    #[test]
     fn response_cache_status_all() {
         let selector = SubgraphSelector::ResponseCacheStatus {
             response_cache_status: CacheStatus::Status,
@@ -1903,44 +1804,6 @@ mod test {
     }
 
     #[test]
-    fn response_cache_hit_one_entity() {
-        let selector = SubgraphSelector::Cache {
-            cache: CacheKind::Hit,
-            entity_type: Some(EntityType::Named("Reviews".to_string())),
-        };
-        let context = crate::context::Context::new();
-        assert_eq!(
-            selector.on_response(
-                &crate::services::SubgraphResponse::fake_builder()
-                    .subgraph_name("test".to_string())
-                    .context(context.clone())
-                    .build(),
-            ),
-            None
-        );
-        let cache_info = CacheSubgraph(
-            [
-                ("Products".to_string(), CacheHitMiss { hit: 3, miss: 0 }),
-                ("Reviews".to_string(), CacheHitMiss { hit: 2, miss: 0 }),
-            ]
-            .into_iter()
-            .collect(),
-        );
-        let _ = context
-            .insert(CacheMetricContextKey::new("test".to_string()), cache_info)
-            .unwrap();
-        assert_eq!(
-            selector.on_response(
-                &crate::services::SubgraphResponse::fake_builder()
-                    .subgraph_name("test".to_string())
-                    .context(context.clone())
-                    .build(),
-            ),
-            Some(opentelemetry::Value::I64(2))
-        );
-    }
-
-    #[test]
     fn response_cache_control() {
         let mut header_map = HeaderMap::new();
         header_map.insert(CACHE_CONTROL, HeaderValue::from_static("public,max-age=60"));
@@ -2192,7 +2055,7 @@ mod test {
     #[test]
     fn subgraph_subgraph_response_data() {
         let selector = SubgraphSelector::SubgraphResponseData {
-            subgraph_response_data: JsonPathInst::from_str("$.hello").unwrap(),
+            subgraph_response_data: SelectorJsonPath::from_str("$.hello").unwrap(),
             default: None,
         };
         assert_eq!(
@@ -2241,7 +2104,7 @@ mod test {
         );
 
         let selector = SubgraphSelector::SubgraphResponseData {
-            subgraph_response_data: JsonPathInst::from_str("$.hello.*.greeting").unwrap(),
+            subgraph_response_data: SelectorJsonPath::from_str("$.hello.*.greeting").unwrap(),
             default: None,
         };
         assert_eq!(

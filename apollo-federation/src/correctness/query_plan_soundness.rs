@@ -166,11 +166,19 @@ fn convert_requires_selections(
                 result.push(converted.into());
             }
             requires_selection::Selection::InlineFragment(inline) => {
-                let converted = if let Some(type_condition) = &inline.type_condition {
+                let mut converted = if let Some(type_condition) = &inline.type_condition {
                     executable::InlineFragment::with_type_condition(type_condition.clone())
                 } else {
                     executable::InlineFragment::without_type_condition(ty.clone())
                 };
+                // Conditional inputs only apply when their `@skip`/`@include` conditions hold, so
+                // carry those over for the response shape computation to pick up.
+                converted.directives.extend(
+                    inline
+                        .conditions
+                        .iter()
+                        .map(|condition| Node::new(condition.to_directive())),
+                );
                 let sub_ty = converted.selection_set.ty.clone();
                 let sub_selections =
                     convert_requires_selections(schema, &sub_ty, &inline.selections)?;
@@ -192,7 +200,7 @@ fn get_field_definition(
     let field_def_pos = parent_type_pos.field(field_name.clone())?;
     field_def_pos
         .get(schema.schema())
-        .map(|component| component.node.clone())
+        .cloned()
         .map_err(|err| err.into())
 }
 
@@ -432,6 +440,74 @@ fn check_require(
     }
 }
 
+/// At execution time, an entity's representation is built by merging every top-level `requires`
+/// item whose type condition matches the entity. So, several items on the same type condition
+/// describe a single entity case, not several. This typically happens when some of the inputs are
+/// conditional (e.g. the fields required by a field under `@include`): the conditional inputs are
+/// in their own item carrying the `@include`. This function merges such items into one item per
+/// type condition, nesting the conditional ones so that their conditions are preserved.
+fn group_requires_by_type_condition(
+    requires: &[requires_selection::Selection],
+) -> Vec<requires_selection::Selection> {
+    let mut grouped: Vec<requires_selection::Selection> = Vec::new();
+    for item in requires {
+        let requires_selection::Selection::InlineFragment(inline) = item else {
+            grouped.push(item.clone());
+            continue;
+        };
+        let group = grouped.iter_mut().find_map(|existing| match existing {
+            requires_selection::Selection::InlineFragment(existing)
+                if existing.type_condition == inline.type_condition =>
+            {
+                Some(existing)
+            }
+            _ => None,
+        });
+        match group {
+            None if inline.conditions.is_empty() => grouped.push(item.clone()),
+            None => grouped.push(requires_selection::Selection::InlineFragment(
+                requires_selection::InlineFragment {
+                    type_condition: inline.type_condition.clone(),
+                    conditions: vec![],
+                    selections: vec![item.clone()],
+                },
+            )),
+            Some(group) if inline.conditions.is_empty() => {
+                group.selections.extend(inline.selections.iter().cloned())
+            }
+            Some(group) => group.selections.push(item.clone()),
+        }
+    }
+    grouped
+}
+
+/// At execution time, every top-level inline fragment of the entity fetch operation applies to
+/// the entities matching its type condition. So, several fragments on the same type condition
+/// describe a single entity case (typically, one per `@skip`/`@include` condition). This function
+/// merges the response shapes of such fragments into one per type condition.
+fn group_response_shapes_by_type_condition(
+    response_shapes: &[ResponseShape],
+) -> Result<Vec<ResponseShape>, FederationError> {
+    let mut grouped: Vec<ResponseShape> = Vec::new();
+    for rs in response_shapes {
+        match grouped
+            .iter_mut()
+            .find(|existing| existing.default_type_condition() == rs.default_type_condition())
+        {
+            Some(existing) => existing.merge_with(rs)?,
+            None => grouped.push(rs.clone()),
+        }
+    }
+    Ok(grouped)
+}
+
+fn requires_type_condition(require: &requires_selection::Selection) -> Option<&Name> {
+    match require {
+        requires_selection::Selection::InlineFragment(inline) => inline.type_condition.as_ref(),
+        requires_selection::Selection::Field(_) => None,
+    }
+}
+
 /// Check subgraph requirements for all entity fetches
 /// - `state`: the input state
 /// - `boolean_clause`: the fetch node's Boolean conditions
@@ -445,66 +521,83 @@ pub(crate) fn check_requires(
     response_shapes: &[ResponseShape],
     requires: &[requires_selection::Selection],
 ) -> Result<(), AnalysisError> {
-    // The `requires` array and `response_shape` array should match. So, usually they are 1:1.
-    // However, the entity fetch operation may be simplified by merging identical entity fetches.
-    // In that case, the `requires` array may have more items than the `response_shape` array and
-    // we need to find a corresponding entity response shape item for each `requires` item.
-    match requires.len().cmp(&response_shapes.len()) {
-        std::cmp::Ordering::Less => Err(
-            "check_requires: Fewer number of requires items than entity fetch cases"
-                .to_string()
-                .into(),
-        ),
-        std::cmp::Ordering::Equal => {
-            // 1:1 match
-            for (rs, require) in response_shapes.iter().zip(requires.iter()) {
-                check_require(
-                    context,
-                    subgraph_schema,
-                    state,
-                    boolean_clause,
-                    rs,
-                    require,
-                )
-                .map_err(|e| {
-                    e.with_context(format!(
-                        "check_requires: Subgraph require check failed for type condition: {type_condition}",
-                        type_condition = rs.default_type_condition()
-                    ))
-                })?;
-            }
-            Ok(())
+    // Both the `requires` items and the entity fetch cases are grouped per type condition, since
+    // that is how they apply at execution time (see `group_requires_by_type_condition`).
+    let requires = group_requires_by_type_condition(requires);
+    let response_shapes = group_response_shapes_by_type_condition(response_shapes)
+        .map_err(|e| format!("check_requires: failed to merge entity fetch cases: {e}"))?;
+
+    // Every entity fetch case must have a matching `requires` item. We first try the items on the
+    // same type condition, and fall back to all items otherwise (the `requires` item may be on a
+    // more specific type than the entity's type when that type is an interface object).
+    for rs in &response_shapes {
+        if rs.is_empty() {
+            // Nothing can be selected for this entity case (e.g. its conditions are
+            // contradictory), so nothing is required for it either.
+            continue;
         }
-        std::cmp::Ordering::Greater => {
-            // 1:many => check if each `requires` item has a matching entity fetch case
-            requires.iter().try_for_each(|require| {
-                let mut errors = Vec::new();
-                let has_any = response_shapes.iter().any(|rs| {
-                    match check_require(
-                        context,
-                        subgraph_schema,
-                        state,
-                        boolean_clause,
-                        rs,
-                        require,
-                    ) {
-                        Ok(_) => true,
-                        Err(e) => { errors.push(e); false }
-                    }
-                });
-                if has_any {
-                    Ok(())
-                } else {
-                    Err(format!(
-                        "check_requires: Subgraph require check failed to find a matching entity fetch for the requires item: {require}\nErrors:\n{errors}",
-                        errors = errors.iter().enumerate().map(|(i, e)|
-                            format!("[{index}/{bound}] {e}", index=i+1, bound=errors.len())
-                        ).join("\n"),
-                    ).into())
+        let same_type_condition: Vec<_> = requires
+            .iter()
+            .filter(|require| requires_type_condition(require) == Some(rs.default_type_condition()))
+            .collect();
+        let candidates = if same_type_condition.is_empty() {
+            requires.iter().collect()
+        } else {
+            same_type_condition
+        };
+        let mut errors = Vec::new();
+        let has_any = candidates.iter().any(|require| {
+            match check_require(context, subgraph_schema, state, boolean_clause, rs, require) {
+                Ok(_) => true,
+                Err(e) => {
+                    errors.push(e);
+                    false
                 }
-            })
+            }
+        });
+        if !has_any {
+            let error: AnalysisError = if errors.len() == 1 {
+                errors.pop().unwrap()
+            } else {
+                format!(
+                    "Errors:\n{errors}",
+                    errors = errors
+                        .iter()
+                        .enumerate()
+                        .map(|(i, e)| format!(
+                            "[{index}/{bound}] {e}",
+                            index = i + 1,
+                            bound = errors.len()
+                        ))
+                        .join("\n"),
+                )
+                .into()
+            };
+            return Err(error.with_context(format!(
+                "check_requires: Subgraph require check failed for type condition: {type_condition}",
+                type_condition = rs.default_type_condition()
+            )));
         }
     }
+
+    // Conversely, every `requires` item must correspond to some entity fetch case (or to one that
+    // is statically impossible, in which case the item is never used).
+    for require in &requires {
+        let has_any = response_shapes.iter().any(|rs| {
+            if rs.is_empty() {
+                requires_type_condition(require) == Some(rs.default_type_condition())
+            } else {
+                check_require(context, subgraph_schema, state, boolean_clause, rs, require).is_ok()
+            }
+        });
+        if !has_any {
+            return Err(format!(
+                "check_requires: Subgraph require check failed to find a matching entity fetch for the requires item: {require}",
+            )
+            .into());
+        }
+    }
+    Ok(())
 }
 
 //==================================================================================================
@@ -512,8 +605,8 @@ pub(crate) fn check_requires(
 // - This is used to verify that each `requires` item on the fetch node represents the actual
 //   subgraph constraints specified in the subgraph schema's `@key/@requires` directives.
 // - The `requires` items on FetchNode only have the response key name (field name) without
-//   arguments, directives nor aliases.
-//   * Thus, their definitions (and response shapes) won't have Boolean conditions.
+//   arguments, nor aliases. Their inline fragments may carry `@skip`/`@include` conditions (for
+//   conditional inputs), which are ignored by this comparison.
 // - `@key/@requires` directive's field set selections can't have aliases nor directives.
 //   * Note: `@requires` response shape inherits the Boolean condition from their individual entity
 //           fetch selections. Thus, Boolean conditions can be different and one response key
@@ -589,19 +682,17 @@ mod key_only_response_shape_compare {
         this: &PossibleDefinitionsPerTypeCondition,
         other: &PossibleDefinitionsPerTypeCondition,
     ) -> bool {
-        // The `this` should have exactly one variant with no Boolean conditions, since the
-        // `requires` item won't have this detail.
-        // On the other hand, the `other` can have variants with Boolean conditions. But, the
-        // variants are merged since their Boolean conditions are ignored.
-        if this.conditional_variants().len() != 1 {
+        // Both sides can have variants with Boolean conditions: the `requires` item because its
+        // inputs may be conditional, and the `other` because `@requires` field sets inherit the
+        // conditions of the fields requiring them. The variants are merged on both sides since
+        // their Boolean conditions are ignored here.
+        let (Some(this_def), Some(other_def)) = (
+            merge_variants_ignoring_boolean_conditions(this),
+            merge_variants_ignoring_boolean_conditions(other),
+        ) else {
             return false;
-        }
-        this.conditional_variants().iter().all(|this_def| {
-            let Some(merged_def) = merge_variants_ignoring_boolean_conditions(other) else {
-                return false;
-            };
-            key_only_compare_definition_variant(this_def, &merged_def)
-        })
+        };
+        key_only_compare_definition_variant(&this_def, &other_def)
     }
 
     fn merge_variants_ignoring_boolean_conditions(

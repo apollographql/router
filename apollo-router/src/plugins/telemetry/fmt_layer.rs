@@ -274,13 +274,15 @@ mod tests {
     use apollo_federation::connectors::runtime::http_json_transport::HttpRequest;
     use apollo_federation::connectors::runtime::http_json_transport::HttpResponse;
     use apollo_federation::connectors::runtime::http_json_transport::TransportRequest;
-    use apollo_federation::connectors::runtime::http_json_transport::TransportResponse;
     use apollo_federation::connectors::runtime::key::ResponseKey;
     use apollo_federation::connectors::runtime::mapping::Problem;
     use apollo_federation::connectors::runtime::responses::MappedResponse;
     use http::HeaderValue;
     use http::header::CONTENT_LENGTH;
+    use opentelemetry::InstrumentationScope;
+    use opentelemetry::trace::TracerProvider as _;
     use opentelemetry_sdk::Resource;
+    use opentelemetry_sdk::trace::SdkTracerProvider;
     use parking_lot::Mutex;
     use parking_lot::MutexGuard;
     use tests::events::EventLevel;
@@ -302,6 +304,7 @@ mod tests {
     use crate::plugins::telemetry::otel;
     use crate::services::connector::request_service::Request;
     use crate::services::connector::request_service::Response;
+    use crate::services::connector::request_service::TransportOutcome;
     use crate::services::router;
     use crate::services::router::body;
     use crate::services::subgraph;
@@ -452,6 +455,24 @@ connector:
         }
     }
 
+    fn make_tracer() -> opentelemetry_sdk::trace::Tracer {
+        SdkTracerProvider::default()
+            .tracer_with_scope(InstrumentationScope::builder("test").build())
+    }
+
+    /// Return insta filters that redact non-deterministic values from JSON log snapshots.
+    ///
+    /// The JSON formatter emits real timestamps and OTel trace/span IDs whose values change
+    /// every run.  Applying these filters in tests keeps the snapshots hermetic without
+    /// changing the formatter's behaviour in production.
+    fn json_snapshot_filters() -> Vec<(&'static str, &'static str)> {
+        vec![
+            (r#""timestamp":"[^"]*""#, r#""timestamp":"[timestamp]""#),
+            (r#""trace_id":"[0-9a-f]{32}""#, r#""trace_id":"[trace_id]""#),
+            (r#""span_id":"[0-9a-f]{16}""#, r#""span_id":"[span_id]""#),
+        ]
+    }
+
     fn generate_simple_span() {
         let test_span = info_span!(
             "test",
@@ -557,6 +578,146 @@ connector:
         );
     }
 
+    /// Fields recorded with `tracing::field::valuable` only exist in builds that set
+    /// `--cfg tracing_unstable`; the nightly CI run exercises these tests.
+    #[cfg(tracing_unstable)]
+    mod valuable_fields {
+        use super::*;
+
+        #[derive(valuable::Valuable)]
+        struct Entitlements {
+            bypass: Option<bool>,
+        }
+
+        #[derive(valuable::Valuable)]
+        struct AccessLog {
+            client_id: String,
+            entitlements: Entitlements,
+            persisted_query_id: Option<String>,
+        }
+
+        fn access_log() -> AccessLog {
+            AccessLog {
+                client_id: "test-client-id".to_string(),
+                entitlements: Entitlements { bypass: Some(true) },
+                persisted_query_id: None,
+            }
+        }
+
+        /// Formats the single event emitted by `emit` and returns the raw JSON line.
+        fn json_log_line(emit: impl FnOnce()) -> String {
+            let buff = LogBuffer::default();
+            let json_format = JsonFormat {
+                display_timestamp: false,
+                display_span_list: false,
+                display_current_span: false,
+                display_resource: false,
+                ..Default::default()
+            };
+            let format = Json::new(Resource::builder_empty().build(), json_format);
+            let fmt_layer = FmtLayer::new(format, buff.clone()).boxed();
+
+            ::tracing::subscriber::with_default(fmt::Subscriber::new().with(fmt_layer), emit);
+
+            buff.to_string().trim().to_string()
+        }
+
+        #[test]
+        fn test_json_logging_valuable_is_nested_json() {
+            let log = access_log();
+            let raw = json_log_line(|| {
+                info!(log = ::tracing::field::valuable(&log), "request finished");
+            });
+            let parsed: serde_json::Value =
+                serde_json::from_str(&raw).expect("output should be valid JSON");
+
+            assert_eq!(
+                parsed["log"],
+                serde_json::json!({
+                    "client_id": "test-client-id",
+                    "entitlements": { "bypass": true },
+                    "persisted_query_id": null,
+                }),
+                "`log` should be a nested object, not a Debug string; got: {raw}"
+            );
+        }
+
+        #[test]
+        fn test_json_logging_valuable_keeps_empty_message_deduplication() {
+            // `otel_error!` style: an explicit `message` field plus a trailing empty format string.
+            let log = access_log();
+            let raw = json_log_line(|| {
+                error!(
+                    log = ::tracing::field::valuable(&log),
+                    message = "explicit error message",
+                    ""
+                );
+            });
+            let parsed: serde_json::Value =
+                serde_json::from_str(&raw).expect("output should be valid JSON");
+
+            assert!(parsed["log"].is_object(), "got: {raw}");
+            assert_eq!(parsed["message"], "explicit error message");
+            assert_eq!(
+                raw.matches(r#""message":"#).count(),
+                1,
+                "empty-string message should be dropped; got: {raw}"
+            );
+        }
+
+        #[test]
+        fn test_json_logging_valuable_unserializable_falls_back_to_debug() {
+            // JSON object keys must be strings, so a map keyed by a list cannot be converted.
+            let keyed_by_list = std::collections::BTreeMap::from([(vec![1, 2], true)]);
+            let raw = json_log_line(|| {
+                info!(
+                    keys = ::tracing::field::valuable(&keyed_by_list),
+                    code = 43,
+                    "still logged"
+                );
+            });
+            let parsed: serde_json::Value =
+                serde_json::from_str(&raw).expect("output should be valid JSON");
+
+            assert_eq!(parsed["keys"], "{[1, 2]: true}");
+            // Only check that a reason is present: its wording belongs to serde_json.
+            let errors = parsed["serialization_errors"]
+                .as_object()
+                .unwrap_or_else(|| panic!("expected a serialization_errors object; got: {raw}"));
+            assert_eq!(errors.len(), 1, "got: {raw}");
+            assert!(
+                errors["keys"]
+                    .as_str()
+                    .is_some_and(|reason| !reason.is_empty()),
+                "the fallback should record why conversion failed; got: {raw}"
+            );
+            assert_eq!(parsed["code"], 43);
+            assert_eq!(parsed["message"], "still logged");
+        }
+
+        #[test]
+        fn test_json_logging_valuable_own_serialization_errors_field_wins() {
+            let keyed_by_list = std::collections::BTreeMap::from([(vec![1, 2], true)]);
+            let raw = json_log_line(|| {
+                info!(
+                    keys = ::tracing::field::valuable(&keyed_by_list),
+                    serialization_errors = "from the plugin",
+                    "still logged"
+                );
+            });
+            let parsed: serde_json::Value =
+                serde_json::from_str(&raw).expect("output should be valid JSON");
+
+            assert_eq!(
+                raw.matches(r#""serialization_errors":"#).count(),
+                1,
+                "the key must not be duplicated; got: {raw}"
+            );
+            assert_eq!(parsed["serialization_errors"], "from the plugin");
+            assert_eq!(parsed["keys"], "{[1, 2]: true}");
+        }
+    }
+
     #[tokio::test]
     async fn test_json_logging_attributes() {
         let buff = LogBuffer::default();
@@ -567,7 +728,9 @@ connector:
             fmt::Subscriber::new().with(fmt_layer),
             generate_simple_span,
         );
-        insta::assert_snapshot!(buff);
+        insta::with_settings!({ filters => json_snapshot_filters() }, {
+            insta::assert_snapshot!(buff.to_string());
+        });
     }
 
     #[tokio::test]
@@ -581,7 +744,9 @@ connector:
             generate_nested_spans,
         );
 
-        insta::assert_snapshot!(buff.to_string());
+        insta::with_settings!({ filters => json_snapshot_filters() }, {
+            insta::assert_snapshot!(buff.to_string());
+        });
     }
 
     #[tokio::test]
@@ -601,7 +766,9 @@ connector:
             generate_nested_spans,
         );
 
-        insta::assert_snapshot!(buff.to_string());
+        insta::with_settings!({ filters => json_snapshot_filters() }, {
+            insta::assert_snapshot!(buff.to_string());
+        });
     }
 
     #[tokio::test]
@@ -637,7 +804,7 @@ connector:
 
         ::tracing::subscriber::with_default(
             fmt::Subscriber::new()
-                .with(otel::layer().force_sampling())
+                .with(otel::layer().with_tracer(make_tracer()))
                 .with(fmt_layer),
             || {
                 let test_span = info_span!(
@@ -686,7 +853,7 @@ connector:
 
         ::tracing::subscriber::with_default(
             fmt::Subscriber::new()
-                .with(otel::layer().force_sampling())
+                .with(otel::layer().with_tracer(make_tracer()))
                 .with(fmt_layer),
             || {
                 let test_span = info_span!(
@@ -718,7 +885,9 @@ connector:
             },
         );
 
-        insta::assert_snapshot!(buff.to_string());
+        insta::with_settings!({ filters => json_snapshot_filters() }, {
+            insta::assert_snapshot!(buff.to_string());
+        });
     }
 
     #[tokio::test]
@@ -737,7 +906,7 @@ connector:
 
         ::tracing::subscriber::with_default(
             fmt::Subscriber::new()
-                .with(otel::layer().force_sampling())
+                .with(otel::layer().with_tracer(make_tracer()))
                 .with(fmt_layer),
             move || {
                 let test_span = info_span!(
@@ -928,7 +1097,7 @@ connector:
                 let connector_response = Response {
                     context: context.clone(),
                     subgraph_name: String::new(),
-                    transport_result: Ok(TransportResponse::Http(HttpResponse {
+                    transport_outcome: TransportOutcome::Response(HttpResponse {
                         inner: http::Response::builder()
                             .status(200)
                             .header("x-log-response", HeaderValue::from_static("log"))
@@ -936,7 +1105,7 @@ connector:
                             .expect("expecting valid response")
                             .into_parts()
                             .0,
-                    })),
+                    }),
                     mapped_response: MappedResponse::Data {
                         data: serde_json::json!({})
                             .try_into()
@@ -962,13 +1131,17 @@ connector:
                                 location: ProblemLocation::Selection,
                             },
                         ],
+                        declared_errors: vec![],
                     },
+                    answered_by_router: false,
                 };
                 connector_events.on_response(&connector_response);
             },
         );
 
-        insta::assert_snapshot!(buff.to_string());
+        insta::with_settings!({ filters => json_snapshot_filters() }, {
+            insta::assert_snapshot!(buff.to_string());
+        });
     }
 
     #[tokio::test]
@@ -986,7 +1159,7 @@ connector:
 
         ::tracing::subscriber::with_default(
             fmt::Subscriber::new()
-                .with(otel::layer().force_sampling())
+                .with(otel::layer().with_tracer(make_tracer()))
                 .with(fmt_layer),
             || {
                 let span = info_span!("test_expand_json");
@@ -1074,14 +1247,15 @@ subgraph:
     on: response
     attributes:
       subgraph.name: true
-      static: foo # This shows up twice without attribute deduplication
+      static:
+        static: foo # This shows up twice without attribute deduplication
         "#,
         )
         .unwrap();
 
         ::tracing::subscriber::with_default(
             fmt::Subscriber::new()
-                .with(otel::layer().force_sampling())
+                .with(otel::layer().with_tracer(make_tracer()))
                 .with(fmt_layer),
             move || {
                 let test_span = info_span!("test");
@@ -1148,7 +1322,9 @@ subgraph:
             },
         );
 
-        insta::assert_snapshot!(buff.to_string());
+        insta::with_settings!({ filters => json_snapshot_filters() }, {
+            insta::assert_snapshot!(buff.to_string());
+        });
     }
 
     #[tokio::test]
@@ -1168,7 +1344,7 @@ subgraph:
 
         ::tracing::subscriber::with_default(
             fmt::Subscriber::new()
-                .with(otel::layer().force_sampling())
+                .with(otel::layer().with_tracer(make_tracer()))
                 .with(fmt_layer),
             move || {
                 let test_span = info_span!(
@@ -1365,7 +1541,7 @@ subgraph:
                 let connector_response = Response {
                     context: context.clone(),
                     subgraph_name: String::new(),
-                    transport_result: Ok(TransportResponse::Http(HttpResponse {
+                    transport_outcome: TransportOutcome::Response(HttpResponse {
                         inner: http::Response::builder()
                             .status(200)
                             .header("x-log-response", HeaderValue::from_static("log"))
@@ -1373,7 +1549,7 @@ subgraph:
                             .expect("expecting valid response")
                             .into_parts()
                             .0,
-                    })),
+                    }),
                     mapped_response: MappedResponse::Data {
                         data: serde_json::json!({})
                             .try_into()
@@ -1399,13 +1575,114 @@ subgraph:
                                 location: ProblemLocation::Selection,
                             },
                         ],
+                        declared_errors: vec![],
                     },
+                    answered_by_router: false,
                 };
                 connector_events.on_response(&connector_response);
             },
         );
 
         insta::assert_snapshot!(buff.to_string());
+    }
+
+    #[tokio::test]
+    async fn test_json_logging_supergraph_response_event_per_deferred_chunk() {
+        use tower::ServiceExt;
+        use tracing::Instrument;
+        use tracing::instrument::WithSubscriber;
+
+        use crate::TestHarness;
+        use crate::plugin::test::MockSubgraph;
+        use crate::plugins::telemetry::config_new::conditions::Condition;
+        use crate::plugins::telemetry::config_new::supergraph::events::SupergraphEventResponse;
+        use crate::services::router::ClientRequestAccepts;
+        use crate::test_harness::MockedSubgraphs;
+
+        let subgraphs = MockedSubgraphs([
+            ("user", MockSubgraph::builder().with_json(
+                    serde_json::json!{{"query":"{currentUser{__typename id}}"}},
+                    serde_json::json!{{"data": {"currentUser": { "__typename": "User", "id": "0" }}}}
+                )
+                .with_json(
+                    serde_json::json!{{
+                        "query":"query($representations:[_Any!]!){_entities(representations:$representations){...on User{name}}}",
+                        "variables": {"representations":[{"__typename": "User", "id":"0"}]}
+                    }},
+                    serde_json::json!{{"data": {"_entities": [{ "name": "deferred name" }]}}}
+                ).build()),
+            ("orga", MockSubgraph::default())
+        ].into_iter().collect());
+
+        let service = TestHarness::builder()
+            .schema(include_str!("../../testdata/orga_supergraph.graphql"))
+            .extra_plugin(subgraphs)
+            .build_supergraph()
+            .await
+            .unwrap();
+
+        let context = crate::Context::new();
+        context.extensions().with_lock(|lock| {
+            lock.insert(ClientRequestAccepts {
+                multipart_defer: true,
+                ..Default::default()
+            });
+            // What the telemetry plugin inserts for `events.supergraph.response: info`.
+            lock.insert(SupergraphEventResponse {
+                level: EventLevel::Info,
+                condition: Arc::new(Condition::True),
+            });
+        });
+        let request = supergraph::Request::fake_builder()
+            .context(context)
+            .query("query { currentUser { id  ...@defer { name } } }")
+            .build()
+            .unwrap();
+
+        let buff = LogBuffer::default();
+        let format = Json::new(
+            Resource::builder_empty().build(),
+            JsonFormat {
+                display_span_list: false,
+                display_current_span: false,
+                display_resource: false,
+                ..Default::default()
+            },
+        );
+        let fmt_layer = FmtLayer::new(format, buff.clone()).boxed();
+        let subscriber = fmt::Subscriber::new()
+            .with(otel::layer().with_tracer(make_tracer()))
+            .with(fmt_layer);
+
+        let chunks: Vec<String> = async move {
+            // Events attach their attributes to the current span, which must be created
+            // once the subscriber is installed.
+            async move {
+                let mut stream = service.oneshot(request).await.unwrap();
+                let mut chunks = Vec::new();
+                while let Some(chunk) = stream.next_response().await {
+                    chunks.push(serde_json::to_string(&chunk).unwrap());
+                }
+                chunks
+            }
+            .instrument(info_span!("test"))
+            .await
+        }
+        .with_subscriber(subscriber)
+        .await;
+
+        let logs = buff.to_string();
+        let events: Vec<&str> = logs
+            .lines()
+            .filter(|line| line.contains(r#""kind":"supergraph.response""#))
+            .collect();
+        assert_eq!(chunks.len(), 2, "expected a primary and a deferred chunk");
+        assert_eq!(events.len(), chunks.len());
+        for (event, chunk) in events.iter().zip(&chunks) {
+            assert_eq!(event.matches(r#""http.response.body""#).count(), 1);
+            let event: serde_json::Value = serde_json::from_str(event).unwrap();
+            assert_eq!(event["http.response.body"].as_str(), Some(chunk.as_str()));
+        }
     }
 
     // TODO add test using on_request/on_reponse/on_error

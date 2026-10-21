@@ -12,6 +12,8 @@ use crate::connectors::json_selection::helpers::vec_push;
 use crate::connectors::json_selection::immutable::InputPath;
 use crate::connectors::json_selection::location::Ranged;
 use crate::connectors::json_selection::location::WithRange;
+use crate::connectors::json_selection::methods::common::could_satisfy;
+use crate::connectors::json_selection::methods::common::present_part;
 use crate::connectors::spec::ConnectSpec;
 use crate::impl_arrow_method;
 
@@ -218,20 +220,17 @@ enum CheckNumericResult {
 }
 
 fn check_numeric_shape(shape: &Shape) -> Option<CheckNumericResult> {
+    // An argument with no value at runtime is an error, but a call is only
+    // denied when no value of the shape could be numeric.
+    let shape = present_part(shape)?;
     // Using the `Shape::accepts` method automatically handles cases like shape
     // being a union or intersection.
-    if Shape::int([]).accepts(shape) {
+    if Shape::int([]).accepts(&shape) {
         Some(CheckNumericResult::IntForSure)
-    } else if Shape::float([]).accepts(shape)
-        // The only shapes that accept Unknown are Unknown and ShapeCase::Name
-        // shapes, since their shape is logically unknown. It is otherwise
-        // tricky to express a shape that accepts any ::Name shape, without
-        // knowing the possible names in advance.
-        || shape.accepts(&Shape::unknown([]))
-    {
-        // If shape meets the requirements of Float, or is an Unknown/Name shape
-        // that might resolve to a numeric value, math_shape returns Float
-        // (which is the same as saying "any numeric JSON value").
+    } else if could_satisfy(&Shape::float([]), &shape) {
+        // If shape could be a number at runtime, including Unknown and Name
+        // shapes, math_shape returns Float (which is the same as saying "any
+        // numeric JSON value").
         Some(CheckNumericResult::FloatPossible)
     } else {
         // If there's no chance the shape could be a number (because we know
@@ -917,11 +916,9 @@ mod shape_tests {
                 "add",
                 vec![WithRange::new(LitExpr::Number(Number::from(1)), None)],
                 Shape::string([]),
-            ),
-            Shape::error(
-                "Method ->add received non-numeric input".to_string(),
-                [get_location()]
             )
+            .pretty_print(),
+            r#"Unknown (err "Method ->add received non-numeric input")"#,
         );
     }
 
@@ -935,11 +932,9 @@ mod shape_tests {
                     None,
                 )],
                 Shape::int([]),
-            ),
-            Shape::error(
-                "Method ->add received non-numeric argument 0".to_string(),
-                [get_location()]
             )
+            .pretty_print(),
+            r#"Unknown (err "Method ->add received non-numeric argument 0")"#,
         );
     }
 
@@ -1058,11 +1053,9 @@ mod shape_tests {
                 "mul",
                 vec![WithRange::new(LitExpr::Number(Number::from(1)), None)],
                 Shape::string([]),
-            ),
-            Shape::error(
-                "Method ->mul received non-numeric input".to_string(),
-                [get_location()]
             )
+            .pretty_print(),
+            r#"Unknown (err "Method ->mul received non-numeric input")"#,
         );
     }
 
@@ -1073,11 +1066,9 @@ mod shape_tests {
                 "div",
                 vec![WithRange::new(LitExpr::String("invalid".to_string()), None)],
                 Shape::int([]),
-            ),
-            Shape::error(
-                "Method ->div received non-numeric argument 0".to_string(),
-                [get_location()]
             )
+            .pretty_print(),
+            r#"Unknown (err "Method ->div received non-numeric argument 0")"#,
         );
     }
 }

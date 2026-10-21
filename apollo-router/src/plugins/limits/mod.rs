@@ -1,5 +1,8 @@
 mod layer;
 mod limited;
+pub(crate) mod operation_limits;
+pub(crate) mod operation_limits_layer;
+pub(crate) mod response_size_limit;
 
 use std::error::Error;
 
@@ -25,30 +28,34 @@ use crate::plugin::PluginInit;
 use crate::plugin::PluginPrivate;
 use crate::plugins::limits::layer::RequestBodyLimitLayer;
 use crate::plugins::limits::layer::RequestSizeLimitError;
+use crate::plugins::limits::response_size_limit::SubgraphResponseSizeLimit;
 use crate::services::SubgraphRequest;
 use crate::services::connector;
 use crate::services::router;
-use crate::services::router::BoxService;
 use crate::services::subgraph;
 
 /// Configuration for operation limits, parser limits, HTTP limits, etc.
-#[derive(Debug, Clone, Default, Deserialize, Serialize, JsonSchema)]
-#[serde(deny_unknown_fields, default)]
+#[apollo_configuration::configuration]
+#[derive(Serialize)]
 #[schemars(rename = "LimitsConfig")]
 pub(crate) struct Config {
     /// Limits that apply to inbound requests to the router.
     pub(crate) router: RouterLimitsConfig,
 
     /// Limits that apply to outbound subgraph responses.
+    // Generic with a hand-written merging Deserialize, which the macro can't express.
+    #[config(skip_validate)]
     pub(crate) subgraph: SubgraphConfiguration<SubgraphLimits>,
 
     /// Limits that apply to outbound connector responses.
+    // Generic with a hand-written merging Deserialize, which the macro can't express.
+    #[config(skip_validate)]
     pub(crate) connector: ConnectorConfiguration<ConnectorLimits>,
 }
 
 /// Limits that apply to inbound requests to the router.
-#[derive(Debug, Clone, Deserialize, Serialize, JsonSchema)]
-#[serde(deny_unknown_fields, default)]
+#[apollo_configuration::configuration]
+#[derive(Serialize)]
 #[schemars(rename = "RouterLimitsConfig")]
 pub(crate) struct RouterLimitsConfig {
     /// If set, requests with operations deeper than this maximum
@@ -109,6 +116,7 @@ pub(crate) struct RouterLimitsConfig {
     /// fragment spreads in an operation. This protects against extremely large or
     /// deeply nested operations that could consume excessive resources during
     /// query planning. Default: 10000000 (10 million).
+    #[config(default = 10_000_000)]
     pub(crate) max_recursive_selections: u32,
 
     /// If set to true (which is the default is dev mode),
@@ -118,13 +126,19 @@ pub(crate) struct RouterLimitsConfig {
 
     /// Limit recursion in the GraphQL parser to protect against stack overflow.
     /// default: 500
+    // This is `apollo-parser`'s default, which protects against stack overflow
+    // but is still very high for "reasonable" queries.
+    // https://github.com/apollographql/apollo-rs/blob/apollo-parser%400.7.3/crates/apollo-parser/src/parser/mod.rs#L93-L104
+    #[config(default = 500)]
     pub(crate) parser_max_recursion: usize,
 
     /// Limit the number of tokens the GraphQL parser processes before aborting.
+    #[config(default = 15_000)]
     pub(crate) parser_max_tokens: usize,
 
     /// Limit the size of incoming HTTP requests read from the network,
     /// to protect against running out of memory. Default: 2000000 (2 MB)
+    #[config(default = 2_000_000)]
     pub(crate) http_max_request_bytes: usize,
 
     /// Limit the maximum number of headers of incoming HTTP1 requests. Default is 100.
@@ -136,6 +150,8 @@ pub(crate) struct RouterLimitsConfig {
     /// Limit the maximum buffer size for the HTTP1 connection.
     ///
     /// Default is ~400kib.
+    // ByteSize has no Validate impl.
+    #[config(skip_validate)]
     #[schemars(with = "Option<String>", default)]
     pub(crate) http1_max_request_buf_size: Option<ByteSize>,
 
@@ -143,6 +159,8 @@ pub(crate) struct RouterLimitsConfig {
     ///
     /// If router receives more headers than allowed size of the header list, it responds to the client with
     /// "431 Request Header Fields Too Large".
+    // ByteSize has no Validate impl.
+    #[config(skip_validate)]
     #[schemars(with = "Option<String>", default)]
     pub(crate) http2_max_headers_list_bytes: Option<ByteSize>,
 
@@ -151,34 +169,8 @@ pub(crate) struct RouterLimitsConfig {
     /// error with `{ message: "Maximum introspection depth exceeded" }`
     /// when nested fields exceed the limit.
     /// Default: true
+    #[config(default = true)]
     pub(crate) introspection_max_depth: bool,
-}
-
-impl Default for RouterLimitsConfig {
-    fn default() -> Self {
-        Self {
-            // These limits are opt-in
-            max_depth: None,
-            max_height: None,
-            max_root_fields: None,
-            max_aliases: None,
-
-            max_recursive_selections: 10_000_000,
-            warn_only: false,
-            http_max_request_bytes: 2_000_000,
-            http1_max_request_headers: None,
-            http1_max_request_buf_size: None,
-            http2_max_headers_list_bytes: None,
-            parser_max_tokens: 15_000,
-
-            // This is `apollo-parser`'s default, which protects against stack overflow
-            // but is still very high for "reasonable" queries.
-            // https://github.com/apollographql/apollo-rs/blob/apollo-parser%400.7.3/crates/apollo-parser/src/parser/mod.rs#L93-L104
-            parser_max_recursion: 500,
-
-            introspection_max_depth: true,
-        }
-    }
 }
 
 /// Per-subgraph response size limits.
@@ -191,10 +183,6 @@ pub(crate) struct SubgraphLimits {
     #[schemars(with = "Option<String>", default)]
     pub(crate) http_max_response_size: Option<ByteSize>,
 }
-
-/// Extension type placed on the request context to signal the subgraph response size limit.
-#[derive(Clone, Copy, Debug, Ord, PartialOrd, PartialEq, Eq)]
-pub(crate) struct SubgraphResponseSizeLimit(pub usize);
 
 /// Per-connector-source response size limits.
 #[derive(Debug, Clone, Default, Deserialize, Serialize, JsonSchema)]
@@ -262,7 +250,7 @@ impl PluginPrivate for LimitsPlugin {
         })
     }
 
-    fn router_service(&self, service: BoxService) -> BoxService {
+    fn router_service(&self, service: router::BoxCloneService) -> router::BoxCloneService {
         ServiceBuilder::new()
             .map_future_with_request_data(
                 |r: &router::Request| r.context.clone(),
@@ -277,10 +265,14 @@ impl PluginPrivate for LimitsPlugin {
             .map_request(Into::into)
             .map_response(Into::into)
             .service(service)
-            .boxed()
+            .boxed_clone()
     }
 
-    fn subgraph_service(&self, name: &str, service: subgraph::BoxService) -> subgraph::BoxService {
+    fn subgraph_service(
+        &self,
+        name: &str,
+        service: subgraph::BoxCloneService,
+    ) -> subgraph::BoxCloneService {
         match self.config.subgraph_response_size_limit(name) {
             None => service,
             Some(limit) => ServiceBuilder::new()
@@ -289,15 +281,15 @@ impl PluginPrivate for LimitsPlugin {
                     req
                 })
                 .service(service)
-                .boxed(),
+                .boxed_clone(),
         }
     }
 
     fn connector_request_service(
         &self,
-        service: connector::request_service::BoxService,
+        service: connector::request_service::BoxCloneService,
         source_name: String,
-    ) -> connector::request_service::BoxService {
+    ) -> connector::request_service::BoxCloneService {
         match self.config.connector_response_size_limit(&source_name) {
             None => service,
             Some(limit) => ServiceBuilder::new()
@@ -306,7 +298,7 @@ impl PluginPrivate for LimitsPlugin {
                     req
                 })
                 .service(service)
-                .boxed(),
+                .boxed_clone(),
         }
     }
 }
@@ -402,12 +394,17 @@ impl From<ConnectorConfiguration<ConnectorLimits>> for Config {
 mod test {
     use http::StatusCode;
     use tower::BoxError;
+    use tower::Service as _;
+    use tower::ServiceExt as _;
 
     use crate::Context;
+    use crate::plugin::PluginPrivate;
     use crate::plugins::limits::LimitsPlugin;
-    use crate::plugins::limits::SubgraphResponseSizeLimit;
     use crate::plugins::limits::layer::BodyLimitControl;
+    use crate::plugins::limits::response_size_limit::SubgraphResponseSizeLimit;
     use crate::plugins::test::PluginTestHarness;
+    use crate::services::connector;
+    use crate::services::connector::request_service::TransportOutcome;
     use crate::services::router;
 
     async fn body_to_string(resp: router::Response) -> String {
@@ -708,7 +705,7 @@ mod test {
         use crate::configuration::subgraph::SubgraphConfiguration;
         use crate::plugins::limits::Config;
         use crate::plugins::limits::SubgraphLimits;
-        use crate::plugins::limits::SubgraphResponseSizeLimit;
+        use crate::plugins::limits::response_size_limit::SubgraphResponseSizeLimit;
 
         #[test]
         fn get_response_limit_no_config() {
@@ -936,7 +933,6 @@ mod test {
         req: &crate::services::connector::request_service::Request,
     ) -> crate::services::connector::request_service::Response {
         use apollo_federation::connectors::runtime::http_json_transport::HttpResponse;
-        use apollo_federation::connectors::runtime::http_json_transport::TransportResponse;
         use apollo_federation::connectors::runtime::responses::MappedResponse;
         use serde_json_bytes::Value;
 
@@ -944,12 +940,14 @@ mod test {
         crate::services::connector::request_service::Response {
             context: req.context.clone(),
             subgraph_name: req.connector.id.subgraph_name.to_string(),
-            transport_result: Ok(TransportResponse::Http(HttpResponse { inner: parts })),
+            transport_outcome: TransportOutcome::Response(HttpResponse { inner: parts }),
             mapped_response: MappedResponse::Data {
                 data: Value::Null,
                 key: req.key.clone(),
                 problems: vec![],
+                declared_errors: vec![],
             },
+            answered_by_router: false,
         }
     }
 
@@ -963,25 +961,36 @@ mod test {
             .await
             .expect("test harness");
 
-        let result = plugin
-            .call_connector_request_service(
-                make_connector_request(Context::new()),
-                |req: crate::services::connector::request_service::Request| {
-                    let limit = req
-                        .context
-                        .extensions()
-                        .with_lock(|e| e.get::<ConnectorResponseSizeLimit>().copied());
-                    assert_eq!(
-                        limit.map(|l| l.0),
-                        Some(2048),
-                        "limit should be set on context"
-                    );
-                    make_stub_connector_response(&req)
-                },
-            )
+        let (mock_service, mut handle) = tower_test::mock::pair::<
+            connector::request_service::Request,
+            connector::request_service::Response,
+        >();
+        let driver = tokio::spawn(async move {
+            let (req, responder) = handle.next_request().await.unwrap();
+            let limit = req
+                .context
+                .extensions()
+                .with_lock(|e| e.get::<ConnectorResponseSizeLimit>().copied());
+            assert_eq!(
+                limit.map(|l| l.0),
+                Some(2048),
+                "limit should be set on context"
+            );
+            responder.send_response(make_stub_connector_response(&req));
+        });
+
+        let mut service = plugin
+            .connector_request_service(mock_service.boxed_clone(), "my_connector".to_string());
+
+        let result = service
+            .ready()
+            .await
+            .unwrap()
+            .call(make_connector_request(Context::new()))
             .await;
 
         assert!(result.is_ok());
+        crate::plugin::test::await_mock_driver(driver).await;
     }
 
     #[tokio::test]
@@ -994,21 +1003,32 @@ mod test {
             .await
             .expect("test harness");
 
-        let result = plugin
-            .call_connector_request_service(
-                make_connector_request(Context::new()),
-                |req: crate::services::connector::request_service::Request| {
-                    let limit = req
-                        .context
-                        .extensions()
-                        .with_lock(|e| e.get::<ConnectorResponseSizeLimit>().copied());
-                    assert!(limit.is_none(), "no limit should be set on context");
-                    make_stub_connector_response(&req)
-                },
-            )
+        let (mock_service, mut handle) = tower_test::mock::pair::<
+            connector::request_service::Request,
+            connector::request_service::Response,
+        >();
+        let driver = tokio::spawn(async move {
+            let (req, responder) = handle.next_request().await.unwrap();
+            let limit = req
+                .context
+                .extensions()
+                .with_lock(|e| e.get::<ConnectorResponseSizeLimit>().copied());
+            assert!(limit.is_none(), "no limit should be set on context");
+            responder.send_response(make_stub_connector_response(&req));
+        });
+
+        let mut service = plugin
+            .connector_request_service(mock_service.boxed_clone(), "my_connector".to_string());
+
+        let result = service
+            .ready()
+            .await
+            .unwrap()
+            .call(make_connector_request(Context::new()))
             .await;
 
         assert!(result.is_ok());
+        crate::plugin::test::await_mock_driver(driver).await;
     }
 
     // --- LimitsPlugin::subgraph_service ---

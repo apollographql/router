@@ -1,7 +1,7 @@
 ---
 source: apollo-router/src/configuration/tests.rs
+assertion_line: 684
 expression: new_config
 ---
 ---
-traffic_shaping:
-  deduplicate_variables: false
+traffic_shaping: {}

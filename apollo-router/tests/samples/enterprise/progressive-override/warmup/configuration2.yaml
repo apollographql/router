@@ -15,5 +15,4 @@ telemetry:
 #   scripts: "tests/samples/enterprise/progressive-override/rhai"
 #   main: "main.rhai"
 
-plugins:
-  experimental.expose_query_plan: true
+expose_query_plan: true

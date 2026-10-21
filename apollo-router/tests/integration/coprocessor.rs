@@ -84,10 +84,8 @@ async fn test_coprocessor_limit_payload() -> Result<(), BoxError> {
         .await;
 
     let mut router = IntegrationTest::builder()
-        .config(
-            include_str!("fixtures/coprocessor_body_limit.router.yaml")
-                .replace("<replace>", &coprocessor_address),
-        )
+        .config(include_str!("fixtures/coprocessor_body_limit.router.yaml"))
+        .env_entry("TEST_CONFIG_COPROCESSOR_URL", &coprocessor_address)
         .build()
         .await;
 
@@ -155,12 +153,12 @@ async fn test_coprocessor_trace_context_parented_under_http_request_span() -> Re
         .mount(&otlp)
         .await;
 
-    let config = include_str!("fixtures/coprocessor_trace_context_propagation.router.yaml")
-        .replace("<coprocessor-address>", &coprocessor.uri())
-        .replace("<otel-collector-endpoint>", &otlp.uri());
-
     let mut router = IntegrationTest::builder()
-        .config(config)
+        .config(include_str!(
+            "fixtures/coprocessor_trace_context_propagation.router.yaml"
+        ))
+        .env_entry("TEST_CONFIG_COPROCESSOR_URL", coprocessor.uri())
+        .env_entry("TEST_CONFIG_COLLECTOR_ENDPOINT", otlp.uri())
         .telemetry(Telemetry::Otlp {
             endpoint: Some(format!("{}/v1/traces", otlp.uri())),
         })
@@ -325,10 +323,8 @@ async fn test_full_pipeline(
         .await;
 
     let mut router = IntegrationTest::builder()
-        .config(
-            include_str!("fixtures/coprocessor.router.yaml")
-                .replace("<replace>", &coprocessor_address),
-        )
+        .config(include_str!("fixtures/coprocessor.router.yaml"))
+        .env_entry("TEST_CONFIG_COPROCESSOR_URL", &coprocessor_address)
         .reqwest_client(no_keepalive_reqwest_client())
         .build()
         .await;
@@ -403,10 +399,10 @@ async fn test_coprocessor_demand_control_access() -> Result<(), BoxError> {
         .await;
 
     let mut router = IntegrationTest::builder()
-        .config(
-            include_str!("fixtures/coprocessor_demand_control.router.yaml")
-                .replace("<replace>", &coprocessor_address),
-        )
+        .config(include_str!(
+            "fixtures/coprocessor_demand_control.router.yaml"
+        ))
+        .env_entry("TEST_CONFIG_COPROCESSOR_URL", &coprocessor_address)
         .build()
         .await;
 
@@ -440,10 +436,8 @@ async fn test_coprocessor_proxying_error_response() -> Result<(), BoxError> {
         .await;
 
     let mut router = IntegrationTest::builder()
-        .config(
-            include_str!("fixtures/coprocessor.router.yaml")
-                .replace("<replace>", &coprocessor_address),
-        )
+        .config(include_str!("fixtures/coprocessor.router.yaml"))
+        .env_entry("TEST_CONFIG_COPROCESSOR_URL", &coprocessor_address)
         .responder(ResponseTemplate::new(200).set_body_json(json!({
             "errors": [{ "message": "subgraph error", "path": [] }],
             "data": null
@@ -560,10 +554,8 @@ mod on_graphql_error_selector {
             .await;
 
         let mut router = IntegrationTest::builder()
-            .config(
-                include_str!("fixtures/coprocessor_conditional.router.yaml")
-                    .replace("<replace>", &mock_coprocessor.uri()),
-            )
+            .config(include_str!("fixtures/coprocessor_conditional.router.yaml"))
+            .env_entry("TEST_CONFIG_COPROCESSOR_URL", mock_coprocessor.uri())
             .subgraph_override("products", mock_products.uri())
             .subgraph_override("inventory", mock_inventory.uri())
             .build()
@@ -718,10 +710,8 @@ async fn test_coprocessor_context_key_deletion() -> Result<(), BoxError> {
         .await;
 
     let mut router = IntegrationTest::builder()
-        .config(
-            include_str!("fixtures/coprocessor_context.router.yaml")
-                .replace("<replace>", &coprocessor_address),
-        )
+        .config(include_str!("fixtures/coprocessor_context.router.yaml"))
+        .env_entry("TEST_CONFIG_COPROCESSOR_URL", &coprocessor_address)
         .build()
         .await;
 
@@ -825,10 +815,8 @@ async fn test_coprocessor_context_keys_survive_parallel_fanout() -> Result<(), B
         .await;
 
     let mut router = IntegrationTest::builder()
-        .config(
-            include_str!("fixtures/coprocessor_context.router.yaml")
-                .replace("<replace>", &coprocessor_address),
-        )
+        .config(include_str!("fixtures/coprocessor_context.router.yaml"))
+        .env_entry("TEST_CONFIG_COPROCESSOR_URL", &coprocessor_address)
         .build()
         .await;
 
@@ -938,10 +926,10 @@ async fn test_coprocessor_receives_response_cache_keys() -> Result<(), BoxError>
     // NOTE: this config has `debug: true` enabled for response caching, that's an important part
     // of getting the cache key data into a coprocessor
     let mut router = IntegrationTest::builder()
-        .config(
-            include_str!("fixtures/coprocessor_response_cache_keys.router.yaml")
-                .replace("<replace>", &coprocessor_address),
-        )
+        .config(include_str!(
+            "fixtures/coprocessor_response_cache_keys.router.yaml"
+        ))
+        .env_entry("TEST_CONFIG_COPROCESSOR_URL", &coprocessor_address)
         .responder(subgraph_response)
         .build()
         .await;
@@ -1059,7 +1047,8 @@ async fn test_coprocessor_unix_domain_socket() -> Result<(), tower::BoxError> {
     // Configure router to use the unix:// coprocessor URL
     let uds_url = format!("unix://{}", sock_path.display());
     let mut router = crate::integration::IntegrationTest::builder()
-        .config(include_str!("fixtures/coprocessor.router.yaml").replace("<replace>", &uds_url))
+        .config(include_str!("fixtures/coprocessor.router.yaml"))
+        .env_entry("TEST_CONFIG_COPROCESSOR_URL", &uds_url)
         .build()
         .await;
 
@@ -1156,7 +1145,8 @@ async fn test_coprocessor_unix_domain_socket_with_path() -> Result<(), tower::Bo
 
     let uds_url = format!("unix://{}?path={}", sock_path.display(), expected_path);
     let mut router = crate::integration::IntegrationTest::builder()
-        .config(include_str!("fixtures/coprocessor.router.yaml").replace("<replace>", &uds_url))
+        .config(include_str!("fixtures/coprocessor.router.yaml"))
+        .env_entry("TEST_CONFIG_COPROCESSOR_URL", &uds_url)
         .build()
         .await;
 
@@ -1311,13 +1301,13 @@ coprocessor:
   router:
     request:
       headers: true
-      context: true
+      context: all
       url: {}  # Override for router stage
   supergraph:
     request:
       headers: true
       body: true
-      context: true
+      context: all
       url: {}  # Override for supergraph stage
 "#,
         router_uds_url, supergraph_uds_url
@@ -1456,13 +1446,13 @@ coprocessor:
   router:
     request:
       headers: true
-      context: true
+      context: all
       url: {}  # Unix socket for router stage
   supergraph:
     request:
       headers: true
       body: true
-      context: true
+      context: all
       url: {}  # HTTP for supergraph stage
 "#,
         router_uds_url, supergraph_http_url
@@ -1652,10 +1642,10 @@ async fn test_coprocessor_metrics_logged_on_success() -> Result<(), BoxError> {
         .await;
 
     let mut router = IntegrationTest::builder()
-        .config(
-            include_str!("fixtures/coprocessor_metrics_no_timeout.router.yaml")
-                .replace("<replace>", &coprocessor_address),
-        )
+        .config(include_str!(
+            "fixtures/coprocessor_metrics_no_timeout.router.yaml"
+        ))
+        .env_entry("TEST_CONFIG_COPROCESSOR_URL", &coprocessor_address)
         .build()
         .await;
 
@@ -1667,7 +1657,7 @@ async fn test_coprocessor_metrics_logged_on_success() -> Result<(), BoxError> {
     assert_eq!(response.status(), 200);
 
     // Specifically checking for 1 result in the "<= 5 sec" bucket here
-    router.assert_metrics_contains(r#"apollo_router_operations_coprocessor_duration_bucket{coprocessor_stage="RouterRequest",otel_scope_name="apollo/router",le="5"} 1"#, None).await;
+    router.assert_metrics_contains(r#"apollo_router_operations_coprocessor_duration_seconds_bucket{coprocessor_stage="RouterRequest",otel_scope_name="apollo/router",le="5"} 1"#, None).await;
 
     router.graceful_shutdown().await;
 
@@ -1695,10 +1685,10 @@ async fn test_coprocessor_metrics_logged_on_timeout() -> Result<(), BoxError> {
         .await;
 
     let mut router = IntegrationTest::builder()
-        .config(
-            include_str!("fixtures/coprocessor_metrics_with_timeout.router.yaml")
-                .replace("<replace>", &coprocessor_address),
-        )
+        .config(include_str!(
+            "fixtures/coprocessor_metrics_with_timeout.router.yaml"
+        ))
+        .env_entry("TEST_CONFIG_COPROCESSOR_URL", &coprocessor_address)
         .build()
         .await;
 
@@ -1711,7 +1701,7 @@ async fn test_coprocessor_metrics_logged_on_timeout() -> Result<(), BoxError> {
     assert_eq!(response.status(), 504);
 
     // Specifically checking for 1 result in the "<= 5 sec" bucket here
-    router.assert_metrics_contains(r#"apollo_router_operations_coprocessor_duration_bucket{coprocessor_stage="RouterRequest",otel_scope_name="apollo/router",le="5"} 1"#, None).await;
+    router.assert_metrics_contains(r#"apollo_router_operations_coprocessor_duration_seconds_bucket{coprocessor_stage="RouterRequest",otel_scope_name="apollo/router",le="5"} 1"#, None).await;
 
     router.graceful_shutdown().await;
 
@@ -2013,8 +2003,8 @@ mod coprocessor_selectors_on_potentially_deferred_responses {
     }
 
     /// Core helper: starts mock servers for the coprocessor and four subgraphs,
-    /// runs the router with the given `config_template` (which must contain
-    /// `<replace>` where the coprocessor URL should go), executes `query`, and
+    /// runs the router with the given `config_template` (which must read
+    /// the coprocessor URL from `${env.TEST_CONFIG_COPROCESSOR_URL}`), executes `query`, and
     /// returns the list of response chunks and a map of coprocessor hit counts
     /// keyed by stage name.
     async fn send_query_with_config(
@@ -2074,7 +2064,8 @@ mod coprocessor_selectors_on_potentially_deferred_responses {
             .await;
 
         let mut router = IntegrationTest::builder()
-            .config(config_template.replace("<replace>", &mock_coprocessor.uri()))
+            .config(config_template)
+            .env_entry("TEST_CONFIG_COPROCESSOR_URL", mock_coprocessor.uri())
             .subgraph_override("products", mock_products.uri())
             .subgraph_override("inventory", mock_inventory.uri())
             .subgraph_override("reviews", mock_reviews.uri())

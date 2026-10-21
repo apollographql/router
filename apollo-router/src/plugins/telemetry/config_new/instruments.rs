@@ -22,9 +22,9 @@ use tower::BoxError;
 
 use super::DefaultForLevel;
 use super::Selector;
-use super::cache::CACHE_METRIC;
 use super::cache::CacheInstruments;
 use super::cache::CacheInstrumentsConfig;
+use super::cache::ConnectorCacheInstruments;
 use super::cache::attributes::CacheAttributes;
 use super::graphql::FIELD_EXECUTION;
 use super::graphql::FIELD_LENGTH;
@@ -77,8 +77,7 @@ use crate::services::supergraph;
 
 pub(crate) const METER_NAME: &str = "apollo/router";
 
-#[derive(Clone, Deserialize, JsonSchema, Debug, Default)]
-#[serde(deny_unknown_fields, default)]
+#[apollo_configuration::configuration]
 pub(crate) struct InstrumentsConfig {
     /// The attributes and instruments to include by default in instruments based on their level as specified in the otel semantic conventions and Apollo documentation.
     pub(crate) default_requirement_level: DefaultAttributeRequirementLevel,
@@ -115,7 +114,7 @@ pub(crate) struct InstrumentsConfig {
     >,
 }
 
-const HTTP_SERVER_REQUEST_DURATION_METRIC: &str = "http.server.request.duration";
+pub(crate) const HTTP_SERVER_REQUEST_DURATION_METRIC: &str = "http.server.request.duration";
 const HTTP_SERVER_REQUEST_BODY_SIZE_METRIC: &str = "http.server.request.body.size";
 const HTTP_SERVER_RESPONSE_BODY_SIZE_METRIC: &str = "http.server.response.body.size";
 const HTTP_SERVER_ACTIVE_REQUESTS: &str = "http.server.active_requests";
@@ -131,34 +130,34 @@ pub(super) const APOLLO_ROUTER_OPERATIONS_SUBSCRIPTIONS_TERMINATED: &str =
     "apollo.router.operations.subscriptions.terminated.client";
 
 impl InstrumentsConfig {
-    pub(crate) fn validate(&self) -> Result<(), String> {
+    pub(crate) fn validate_selectors(&self) -> Result<(), String> {
         for (name, custom) in &self.router.custom {
-            custom.condition.validate(None).map_err(|err| {
+            custom.condition.validate_selectors(None).map_err(|err| {
                 format!("error for custom router instrument {name:?} in condition: {err}")
             })?;
         }
         for (name, custom) in &self.supergraph.custom {
-            custom.condition.validate(None).map_err(|err| {
+            custom.condition.validate_selectors(None).map_err(|err| {
                 format!("error for custom supergraph instrument {name:?} in condition: {err}")
             })?;
         }
         for (name, custom) in &self.subgraph.custom {
-            custom.condition.validate(None).map_err(|err| {
+            custom.condition.validate_selectors(None).map_err(|err| {
                 format!("error for custom subgraph instrument {name:?} in condition: {err}")
             })?;
         }
         for (name, custom) in &self.graphql.custom {
-            custom.condition.validate(None).map_err(|err| {
+            custom.condition.validate_selectors(None).map_err(|err| {
                 format!("error for custom graphql instrument {name:?} in condition: {err}")
             })?;
         }
         for (name, custom) in &self.cache.custom {
-            custom.condition.validate(None).map_err(|err| {
+            custom.condition.validate_selectors(None).map_err(|err| {
                 format!("error for custom cache instrument {name:?} in condition: {err}")
             })?;
         }
         for (name, custom) in &self.connector.custom {
-            custom.condition.validate(None).map_err(|err| {
+            custom.condition.validate_selectors(None).map_err(|err| {
                 format!("error for custom connector instrument {name:?} in condition: {err}")
             })?;
         }
@@ -990,20 +989,6 @@ impl InstrumentsConfig {
     pub(crate) fn new_builtin_cache_instruments(&self) -> HashMap<String, StaticInstrument> {
         let meter = metrics::meter_provider().meter(METER_NAME);
         let mut static_instruments: HashMap<String, StaticInstrument> = HashMap::new();
-        if self.cache.attributes.cache.is_enabled() {
-            static_instruments.insert(
-                CACHE_METRIC.to_string(),
-                StaticInstrument::CounterF64(
-                    meter
-                        .f64_counter(CACHE_METRIC)
-                        .with_unit("ops")
-                        .with_description(
-                            "Entity cache hit/miss operations at the subgraph level (deprecated)",
-                        )
-                        .build(),
-                ),
-            );
-        }
         if self.cache.attributes.response_cache.is_enabled() {
             static_instruments.insert(
                 RESPONSE_CACHE_METRIC.to_string(),
@@ -1027,43 +1012,6 @@ impl InstrumentsConfig {
         static_instruments: Arc<HashMap<String, StaticInstrument>>,
     ) -> CacheInstruments {
         CacheInstruments {
-            cache_hit: self.cache.attributes.cache.is_enabled().then(|| {
-                let mut nb_attributes = 0;
-                let selectors = match &self.cache.attributes.cache {
-                    DefaultedStandardInstrument::Bool(_) | DefaultedStandardInstrument::Unset => {
-                        None
-                    }
-                    DefaultedStandardInstrument::Extendable { attributes } => {
-                        nb_attributes = attributes.custom.len();
-                        Some(attributes.clone())
-                    }
-                };
-                CustomCounter {
-                    inner: Mutex::new(CustomCounterInner {
-                        increment: Increment::Custom(None),
-                        condition: Condition::True,
-                        counter: Some(static_instruments
-                            .get(CACHE_METRIC)
-                            .expect(
-                                "cannot get static instrument for cache; this should not happen",
-                            )
-                            .as_counter_f64()
-                            .cloned()
-                            .expect(
-                                "cannot convert instrument to counter for cache; this should not happen",
-                            )
-                        ),
-                        attributes: Vec::with_capacity(nb_attributes),
-                        selector: Some(Arc::new(SubgraphSelector::Cache {
-                            cache: CacheKind::Hit,
-                            entity_type: None,
-                        })),
-                        selectors,
-                        incremented: false,
-                        _phantom: PhantomData,
-                    }),
-                }
-            }),
             cache_hit_response_cache: self.cache.attributes.response_cache.is_enabled().then(|| {
                 let mut nb_attributes = 0;
                 let selectors = match &self.cache.attributes.response_cache {
@@ -1091,8 +1039,8 @@ impl InstrumentsConfig {
                             )
                         ),
                         attributes: Vec::with_capacity(nb_attributes),
-                        selector: Some(Arc::new(SubgraphSelector::Cache {
-                            cache: CacheKind::Hit,
+                        selector: Some(Arc::new(SubgraphSelector::ResponseCache {
+                            response_cache: CacheKind::Hit,
                             entity_type: None,
                         })),
                         selectors,
@@ -1102,6 +1050,21 @@ impl InstrumentsConfig {
                 }
             }),
         }
+    }
+
+    pub(crate) fn new_connector_cache_instruments(
+        &self,
+        static_instruments: Arc<HashMap<String, StaticInstrument>>,
+        source_name: String,
+    ) -> ConnectorCacheInstruments {
+        let counter = if self.cache.attributes.response_cache.is_enabled() {
+            static_instruments
+                .get(RESPONSE_CACHE_METRIC)
+                .and_then(|s| s.as_counter_f64().cloned())
+        } else {
+            None
+        };
+        ConnectorCacheInstruments::new(counter, source_name)
     }
 }
 
@@ -1141,8 +1104,7 @@ impl StaticInstrument {
     }
 }
 
-#[derive(Clone, Deserialize, JsonSchema, Debug, Default)]
-#[serde(deny_unknown_fields, default)]
+#[apollo_configuration::configuration]
 pub(crate) struct ActiveRequestsAttributes {
     /// The HTTP request method
     #[serde(rename = "http.request.method")]
@@ -1175,8 +1137,7 @@ impl DefaultForLevel for ActiveRequestsAttributes {
     }
 }
 
-#[derive(Clone, Deserialize, JsonSchema, Debug, Default)]
-#[serde(deny_unknown_fields, default)]
+#[apollo_configuration::configuration]
 pub(crate) struct SubscriptionsTerminatedAttributes {
     /// The reason the subscription terminated
     reason: Option<bool>,
@@ -1210,11 +1171,6 @@ impl SubscriptionsTerminatedAttributes {
                 .get::<_, String>(CLIENT_NAME)
                 .ok()
                 .flatten()
-                .or_else(|| {
-                    ctx.get::<_, String>(crate::context::deprecated::DEPRECATED_CLIENT_NAME)
-                        .ok()
-                        .flatten()
-                })
                 .unwrap_or_default();
             attrs.push(KeyValue::new("client.name", client_name));
         }
@@ -1328,6 +1284,21 @@ pub(crate) enum DefaultedStandardInstrument<T> {
     Extendable {
         attributes: Arc<T>,
     },
+}
+
+// The configuration attribute doesn't support generic types, so this forwards validation to every
+// field. The enum is untagged, so its fields sit directly under the instrument's key.
+impl<T> apollo_configuration::Validate for DefaultedStandardInstrument<T>
+where
+    T: apollo_configuration::Validate,
+{
+    fn validate(&self, mut errors: apollo_configuration::ErrorCollector<'_>) {
+        match self {
+            Self::Unset => {}
+            Self::Bool(enabled) => enabled.validate(errors),
+            Self::Extendable { attributes } => attributes.validate(errors.nest("attributes")),
+        }
+    }
 }
 
 impl<T> DefaultedStandardInstrument<T> {
@@ -1472,8 +1443,34 @@ where
     }
 }
 
-#[derive(Clone, Deserialize, JsonSchema, Debug)]
-#[serde(deny_unknown_fields, rename_all = "snake_case")]
+// The configuration attribute doesn't support generic types, so this forwards validation to every
+// field. Destructuring makes a new field a compile error until it is validated here.
+impl<A, E, V> apollo_configuration::Validate for Instrument<A, E, V>
+where
+    A: Default + Debug + apollo_configuration::Validate,
+    E: Debug + apollo_configuration::Validate,
+    V: apollo_configuration::Validate,
+    for<'a> &'a V: Into<InstrumentValue<E>>,
+{
+    fn validate(&self, mut errors: apollo_configuration::ErrorCollector<'_>) {
+        let Self {
+            ty,
+            value,
+            description,
+            unit,
+            attributes,
+            condition,
+        } = self;
+        ty.validate(errors.nest("type"));
+        value.validate(errors.nest("value"));
+        description.validate(errors.nest("description"));
+        unit.validate(errors.nest("unit"));
+        attributes.validate(errors.nest("attributes"));
+        condition.validate(errors.nest("condition"));
+    }
+}
+
+#[apollo_configuration::configuration]
 pub(crate) enum InstrumentType {
     /// A monotonic counter https://opentelemetry.io/docs/specs/otel/metrics/data-model/#sums
     Counter,
@@ -1495,14 +1492,12 @@ pub(crate) enum InstrumentValue<T> {
     Custom(T),
 }
 
-#[derive(Clone, Deserialize, JsonSchema, Debug)]
-#[serde(deny_unknown_fields, rename_all = "snake_case")]
+#[apollo_configuration::configuration]
 pub(crate) enum StandardUnit {
     Unit,
 }
 
-#[derive(Clone, Deserialize, JsonSchema, Debug)]
-#[serde(deny_unknown_fields, rename_all = "snake_case")]
+#[apollo_configuration::configuration]
 pub(crate) enum Standard {
     Duration,
     Unit,
@@ -1531,6 +1526,50 @@ pub(crate) enum Field<T> {
     /// For every field
     #[serde(rename = "field_custom")]
     Custom(T),
+}
+
+// The configuration attribute doesn't support generic types, so this forwards validation to each
+// variant's value. The enum is untagged, so each value keeps its own path.
+impl<T> apollo_configuration::Validate for InstrumentValue<T>
+where
+    T: apollo_configuration::Validate,
+{
+    fn validate(&self, errors: apollo_configuration::ErrorCollector<'_>) {
+        match self {
+            InstrumentValue::Standard(standard) => standard.validate(errors),
+            InstrumentValue::Chunked(event) => event.validate(errors),
+            InstrumentValue::Field(field) => field.validate(errors),
+            InstrumentValue::Custom(selector) => selector.validate(errors),
+        }
+    }
+}
+
+// The configuration attribute doesn't support generic types, so this forwards validation to the
+// custom selector.
+impl<T> apollo_configuration::Validate for Event<T>
+where
+    T: apollo_configuration::Validate,
+{
+    fn validate(&self, mut errors: apollo_configuration::ErrorCollector<'_>) {
+        match self {
+            Event::Duration | Event::Unit => {}
+            Event::Custom(selector) => selector.validate(errors.nest("event_custom")),
+        }
+    }
+}
+
+// The configuration attribute doesn't support generic types, so this forwards validation to the
+// custom selector.
+impl<T> apollo_configuration::Validate for Field<T>
+where
+    T: apollo_configuration::Validate,
+{
+    fn validate(&self, mut errors: apollo_configuration::ErrorCollector<'_>) {
+        match self {
+            Field::Unit => {}
+            Field::Custom(selector) => selector.validate(errors.nest("field_custom")),
+        }
+    }
 }
 
 pub(crate) trait Instrumented {
@@ -1666,35 +1705,28 @@ where
                             }
                         },
                     };
-                    match static_instruments
+                    let counter = static_instruments
                         .get(instrument_name)
                         .expect(
                             "cannot get static instrument for supergraph; this should not happen",
                         )
                         .as_counter_f64()
                         .cloned()
-                    {
-                        Some(counter) => {
-                            let counter = CustomCounterInner {
-                                increment,
-                                condition: instrument.condition.clone(),
-                                counter: Some(counter),
-                                attributes: Vec::new(),
-                                selector,
-                                selectors: Some(instrument.attributes.clone()),
-                                incremented: false,
-                                _phantom: PhantomData,
-                            };
-                            counters.push(CustomCounter {
-                                inner: Mutex::new(counter),
-                            })
-                        }
-                        None => {
-                            failfast_debug!(
-                                "cannot convert static instrument into a counter, this is an error; please fill an issue on GitHub"
-                            );
-                        }
-                    }
+                        .expect("cannot convert static instrument into a counter, this is a bug");
+
+                    let counter = CustomCounterInner {
+                        increment,
+                        condition: instrument.condition.clone(),
+                        counter: Some(counter),
+                        attributes: Vec::new(),
+                        selector,
+                        selectors: Some(instrument.attributes.clone()),
+                        incremented: false,
+                        _phantom: PhantomData,
+                    };
+                    counters.push(CustomCounter {
+                        inner: Mutex::new(counter),
+                    })
                 }
                 InstrumentType::Histogram => {
                     let (selector, increment) = match (&instrument.value).into() {
@@ -1728,36 +1760,29 @@ where
                         },
                     };
 
-                    match static_instruments
+                    let histogram = static_instruments
                         .get(instrument_name)
                         .expect(
                             "cannot get static instrument for supergraph; this should not happen",
                         )
                         .as_histogram()
                         .cloned()
-                    {
-                        Some(histogram) => {
-                            let histogram = CustomHistogramInner {
-                                increment,
-                                condition: instrument.condition.clone(),
-                                histogram: Some(histogram),
-                                attributes: Vec::new(),
-                                selector,
-                                selectors: Some(instrument.attributes.clone()),
-                                updated: false,
-                                _phantom: PhantomData,
-                            };
+                        .expect("cannot convert static instrument into a histogram, this is a bug");
 
-                            histograms.push(CustomHistogram {
-                                inner: Mutex::new(histogram),
-                            });
-                        }
-                        None => {
-                            failfast_debug!(
-                                "cannot convert static instrument into a histogram, this is an error; please fill an issue on GitHub"
-                            );
-                        }
-                    }
+                    let histogram = CustomHistogramInner {
+                        increment,
+                        condition: instrument.condition.clone(),
+                        histogram: Some(histogram),
+                        attributes: Vec::new(),
+                        selector,
+                        selectors: Some(instrument.attributes.clone()),
+                        updated: false,
+                        _phantom: PhantomData,
+                    };
+
+                    histograms.push(CustomHistogram {
+                        inner: Mutex::new(histogram),
+                    });
                 }
             }
         }
@@ -1987,8 +2012,8 @@ where
                 Increment::EventCustom(None) => Increment::EventCustom(Some(selected_value)),
                 Increment::Custom(None) => Increment::Custom(Some(selected_value)),
                 other => {
-                    failfast_error!(
-                        "this is a bug and should not happen, the increment should only be Custom or EventCustom, please open an issue: {other:?}"
+                    tracing::error!(
+                        "this is a bug and should not happen, the increment should only be Custom or EventCustom: {other:?}"
                     );
                     return;
                 }
@@ -2029,8 +2054,8 @@ where
                 Increment::EventCustom(None) => Increment::Custom(Some(selected_value)),
                 Increment::Custom(None) => Increment::Custom(Some(selected_value)),
                 other => {
-                    failfast_error!(
-                        "this is a bug and should not happen, the increment should only be Custom or EventCustom, please open an issue: {other:?}"
+                    tracing::error!(
+                        "this is a bug and should not happen, the increment should only be Custom or EventCustom: {other:?}"
                     );
                     return;
                 }
@@ -2080,8 +2105,8 @@ where
                 Increment::EventCustom(None) => Increment::EventCustom(Some(selected_value)),
                 Increment::Custom(None) => Increment::EventCustom(Some(selected_value)),
                 other => {
-                    failfast_error!(
-                        "this is a bug and should not happen, the increment should only be Custom or EventCustom, please open an issue: {other:?}"
+                    tracing::error!(
+                        "this is a bug and should not happen, the increment should only be Custom or EventCustom: {other:?}"
                     );
                     return;
                 }
@@ -2168,8 +2193,8 @@ where
                 Increment::FieldCustom(None) => Increment::FieldCustom(Some(selected_value)),
                 Increment::Custom(None) => Increment::FieldCustom(Some(selected_value)),
                 other => {
-                    failfast_error!(
-                        "this is a bug and should not happen, the increment should only be Custom or FieldCustom, please open an issue: {other:?}"
+                    tracing::error!(
+                        "this is a bug and should not happen, the increment should only be Custom or FieldCustom: {other:?}"
                     );
                     return;
                 }
@@ -2414,8 +2439,8 @@ where
                 Increment::FieldCustom(None) => Increment::FieldCustom(Some(selected_value)),
                 Increment::Custom(None) => Increment::Custom(Some(selected_value)),
                 other => {
-                    failfast_error!(
-                        "this is a bug and should not happen, the increment should only be Custom or EventCustom, please open an issue: {other:?}"
+                    tracing::error!(
+                        "this is a bug and should not happen, the increment should only be Custom or EventCustom: {other:?}"
                     );
                     return;
                 }
@@ -2455,8 +2480,8 @@ where
                 Increment::FieldCustom(None) => Increment::FieldCustom(Some(selected_value)),
                 Increment::Custom(None) => Increment::Custom(Some(selected_value)),
                 other => {
-                    failfast_error!(
-                        "this is a bug and should not happen, the increment should only be Custom or EventCustom, please open an issue: {other:?}"
+                    tracing::error!(
+                        "this is a bug and should not happen, the increment should only be Custom or EventCustom: {other:?}"
                     );
                     return;
                 }
@@ -2507,8 +2532,8 @@ where
                 Increment::EventCustom(None) => Increment::EventCustom(Some(selected_value)),
                 Increment::Custom(None) => Increment::EventCustom(Some(selected_value)),
                 other => {
-                    failfast_error!(
-                        "this is a bug and should not happen, the increment should only be Custom or EventCustom, please open an issue: {other:?}"
+                    tracing::error!(
+                        "this is a bug and should not happen, the increment should only be Custom or EventCustom: {other:?}"
                     );
                     return;
                 }
@@ -2592,8 +2617,8 @@ where
                 Increment::FieldCustom(None) => Increment::FieldCustom(Some(selected_value)),
                 Increment::Custom(None) => Increment::FieldCustom(Some(selected_value)),
                 other => {
-                    failfast_error!(
-                        "this is a bug and should not happen, the increment should only be Custom or FieldCustom, please open an issue: {other:?}"
+                    tracing::error!(
+                        "this is a bug and should not happen, the increment should only be Custom or FieldCustom: {other:?}"
                     );
                     return;
                 }
@@ -2700,7 +2725,6 @@ mod tests {
     use apollo_federation::connectors::runtime::http_json_transport::HttpRequest;
     use apollo_federation::connectors::runtime::http_json_transport::HttpResponse;
     use apollo_federation::connectors::runtime::http_json_transport::TransportRequest;
-    use apollo_federation::connectors::runtime::http_json_transport::TransportResponse;
     use apollo_federation::connectors::runtime::key::ResponseKey;
     use apollo_federation::connectors::runtime::mapping::Problem;
     use apollo_federation::connectors::runtime::responses::MappedResponse;
@@ -2727,6 +2751,7 @@ mod tests {
     use crate::http_ext::TryIntoHeaderValue;
     use crate::json_ext::Path;
     use crate::metrics::FutureMetricsExt;
+    use crate::plugins::limits::operation_limits::OperationLimits;
     use crate::plugins::telemetry::APOLLO_PRIVATE_QUERY_ALIASES;
     use crate::plugins::telemetry::APOLLO_PRIVATE_QUERY_DEPTH;
     use crate::plugins::telemetry::APOLLO_PRIVATE_QUERY_HEIGHT;
@@ -2743,7 +2768,7 @@ mod tests {
     use crate::services::RouterResponse;
     use crate::services::connector::request_service::Request;
     use crate::services::connector::request_service::Response;
-    use crate::spec::operation_limits::OperationLimits;
+    use crate::services::connector::request_service::TransportOutcome;
 
     type JsonMap = serde_json_bytes::Map<ByteString, Value>;
 
@@ -3176,10 +3201,13 @@ mod tests {
                                     subgraph_instruments = Some(config.new_subgraph_instruments(
                                         Arc::new(config.new_builtin_subgraph_instruments()),
                                     ));
-                                    apollo_subgraph_instruments = Some(config.new_apollo_subgraph_instruments(
-                                        Arc::new(config.new_builtin_apollo_subgraph_instruments()),
-                                        apollo_config.clone()
-                                    ));
+                                    apollo_subgraph_instruments =
+                                        Some(config.new_apollo_subgraph_instruments(
+                                            Arc::new(
+                                                config.new_builtin_apollo_subgraph_instruments(),
+                                            ),
+                                            apollo_config.clone(),
+                                        ));
                                     cache_instruments = Some(config.new_cache_instruments(
                                         Arc::new(config.new_builtin_cache_instruments()),
                                     ));
@@ -3192,22 +3220,27 @@ mod tests {
                                     let mut http_request = http::Request::new(graphql_request);
                                     *http_request.headers_mut() = convert_http_headers(headers);
 
-                                    let request = crate::plugins::telemetry::subgraph::Request::fake_builder()
-                                        .context(context.clone())
-                                        .subgraph_name(subgraph_name)
-                                        .and_operation_kind(operation_kind)
-                                        .subgraph_request(http_request)
-                                        .build();
+                                    let request =
+                                        crate::services::subgraph::Request::fake_builder()
+                                            .context(context.clone())
+                                            .subgraph_name(subgraph_name)
+                                            .and_operation_kind(operation_kind)
+                                            .subgraph_request(http_request)
+                                            .build();
 
-                                    let body = serde_json::to_string(request.subgraph_request.body()).expect("failed to serialize subgraph request body");
+                                    let body =
+                                        serde_json::to_string(request.subgraph_request.body())
+                                            .expect("failed to serialize subgraph request body");
                                     let body_size = body.len();
-                                    request.context.extensions()
-                                        .with_lock(|lock| {
-                                            lock.insert(SubgraphRequestBodySize(body_size as u64));
-                                        });
+                                    request.context.extensions().with_lock(|lock| {
+                                        lock.insert(SubgraphRequestBodySize(body_size as u64));
+                                    });
 
                                     subgraph_instruments.as_mut().unwrap().on_request(&request);
-                                    apollo_subgraph_instruments.as_mut().unwrap().on_request(&request);
+                                    apollo_subgraph_instruments
+                                        .as_mut()
+                                        .unwrap()
+                                        .on_request(&request);
                                     cache_instruments.as_mut().unwrap().on_request(&request);
                                 }
                                 Event::SubgraphResponse {
@@ -3218,23 +3251,26 @@ mod tests {
                                     errors,
                                     headers,
                                 } => {
-                                    let response = crate::plugins::telemetry::subgraph::Response::fake2_builder()
-                                        .context(context.clone())
-                                        .and_subgraph_name(subgraph_name)
-                                        .status_code(StatusCode::from_u16(status).expect("status"))
-                                        .and_data(data)
-                                        .errors(errors)
-                                        .extensions(extensions)
-                                        .headers(convert_headers(headers))
-                                        .build()
-                                        .unwrap();
+                                    let response =
+                                        crate::services::subgraph::Response::fake2_builder()
+                                            .context(context.clone())
+                                            .and_subgraph_name(subgraph_name)
+                                            .status_code(
+                                                StatusCode::from_u16(status).expect("status"),
+                                            )
+                                            .and_data(data)
+                                            .errors(errors)
+                                            .extensions(extensions)
+                                            .headers(convert_headers(headers))
+                                            .build()
+                                            .unwrap();
 
-                                    let body = serde_json::to_string(response.response.body()).expect("failed to serialize subgraph response body");
+                                    let body = serde_json::to_string(response.response.body())
+                                        .expect("failed to serialize subgraph response body");
                                     let body_size = body.len();
-                                    response.context.extensions()
-                                        .with_lock(|lock| {
-                                            lock.insert(SubgraphResponseBodySize(body_size as u64));
-                                        });
+                                    response.context.extensions().with_lock(|lock| {
+                                        lock.insert(SubgraphResponseBodySize(body_size as u64));
+                                    });
 
                                     subgraph_instruments
                                         .take()
@@ -3382,7 +3418,11 @@ mod tests {
                                         name: "hello".to_string(),
                                         inputs: Default::default(),
                                         selection: Arc::new(
-                                            JSONSelection::parse_with_spec("$.data", DEFAULT_CONNECT_SPEC).unwrap(),
+                                            JSONSelection::parse_with_spec(
+                                                "$.data",
+                                                DEFAULT_CONNECT_SPEC,
+                                            )
+                                            .unwrap(),
                                         ),
                                     };
                                     let request = Request {
@@ -3405,7 +3445,10 @@ mod tests {
                                     apollo_connector_instruments = Some({
                                         let apollo_connector_instruments = config
                                             .new_apollo_connector_instruments(
-                                                Arc::new(config.new_builtin_apollo_connector_instruments()),
+                                                Arc::new(
+                                                    config
+                                                        .new_builtin_apollo_connector_instruments(),
+                                                ),
                                                 apollo_config.clone(),
                                             );
                                         apollo_connector_instruments.on_request(&request);
@@ -3423,7 +3466,11 @@ mod tests {
                                         name: "hello".to_string(),
                                         inputs: Default::default(),
                                         selection: Arc::new(
-                                            JSONSelection::parse_with_spec("$.data", DEFAULT_CONNECT_SPEC).unwrap(),
+                                            JSONSelection::parse_with_spec(
+                                                "$.data",
+                                                DEFAULT_CONNECT_SPEC,
+                                            )
+                                            .unwrap(),
                                         ),
                                     };
                                     let mut http_response = http::Response::builder()
@@ -3434,18 +3481,20 @@ mod tests {
                                     let response = Response {
                                         context: context.clone(),
                                         subgraph_name: String::new(),
-                                        transport_result: Ok(TransportResponse::Http(
+                                        transport_outcome: TransportOutcome::Response(
                                             HttpResponse {
                                                 inner: http_response.into_parts().0,
                                             },
-                                        )),
+                                        ),
                                         mapped_response: MappedResponse::Data {
                                             data: json!({})
                                                 .try_into()
                                                 .expect("expecting valid JSON"),
                                             key: response_key,
                                             problems: mapping_problems,
+                                            declared_errors: vec![],
                                         },
+                                        answered_by_router: false,
                                     };
                                     connector_instruments
                                         .take()
@@ -4111,7 +4160,7 @@ mod tests {
     /// Verify that the `RouterInstruments::on_response` dispatch to `subscriptions_terminated`
     /// is wired up end-to-end. If the delegation were removed or mis-wired, `stashed_attributes`
     /// would be empty and the `subgraph.name`/`client.name` labels would silently disappear from
-    /// the metric — exactly the regression this PR guards against.
+    /// the metric.
     #[tokio::test]
     async fn test_router_instruments_on_response_wires_subscriptions_terminated() {
         async {

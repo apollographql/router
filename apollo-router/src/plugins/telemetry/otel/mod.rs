@@ -2,26 +2,28 @@
 pub(crate) mod layer;
 /// Span extension which enables OpenTelemetry context management.
 pub(crate) mod span_ext;
-/// Protocols for OpenTelemetry Tracers that are compatible with Tracing
-pub(crate) mod tracer;
 
 pub(crate) use layer::OpenTelemetryLayer;
 pub(crate) use layer::layer;
 use opentelemetry::Key;
+use opentelemetry::KeyValue;
 use opentelemetry::Value;
+use opentelemetry::trace::TraceContextExt;
 pub(crate) use span_ext::OpenTelemetrySpanExt;
-pub(crate) use tracer::PreSampledTracer;
 
-/// Per-span OpenTelemetry data tracked by this crate.
-///
-/// Useful for implementing [PreSampledTracer] in alternate otel SDKs.
+use super::utils::upsert_attribute;
+
+/// OpenTelemetry span data attached to a tracing span by this crate's layer.
 #[derive(Debug, Clone, Default)]
 pub(crate) struct OtelData {
-    /// The parent otel `Context` for the current tracing span.
-    pub(crate) parent_cx: opentelemetry::Context,
+    /// The otel span and its propagation context.
+    pub(crate) current_cx: opentelemetry::Context,
 
-    /// The otel span data recorded during the current tracing span.
-    pub(crate) builder: opentelemetry::trace::SpanBuilder,
+    /// Every attribute set on this span, kept accessible for downstream readers.
+    pub(crate) attributes: Vec<KeyValue>,
+
+    /// The span's original name, before any `forced_span_name` override.
+    pub(crate) original_name: &'static str,
 
     /// Attributes gathered for the next event
     #[cfg(not(test))]
@@ -34,4 +36,37 @@ pub(crate) struct OtelData {
 
     /// Forced span name in case it's coming from the custom attributes
     pub(crate) forced_span_name: Option<String>,
+}
+
+impl OtelData {
+    /// Adds `kv` to the span, replacing any existing value for the same key in
+    /// `attributes`. The live span receives an additional `set_attribute` call
+    /// regardless; backends typically resolve duplicate-key attributes as
+    /// last-value-wins.
+    pub(crate) fn upsert_attribute(&mut self, kv: KeyValue) {
+        upsert_attribute(&mut self.attributes, kv.clone());
+        // `Span::set_attribute` is an unconditional push with no replace-by-key
+        // primitive, so setting the same key twice results in both values being
+        // exported. Backends are expected to resolve this as last-value-wins
+        // (standard OTel practice), so the duplicate is harmless in practice.
+        self.current_cx.span().set_attribute(kv);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn upsert_attribute_replaces_same_key() {
+        let mut otel_data = OtelData::default();
+
+        otel_data.upsert_attribute(KeyValue::new("cache.status", "MISS"));
+        otel_data.upsert_attribute(KeyValue::new("cache.status", "HIT"));
+
+        assert_eq!(
+            otel_data.attributes,
+            vec![KeyValue::new("cache.status", "HIT")]
+        );
+    }
 }

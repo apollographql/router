@@ -3,20 +3,18 @@ use std::sync::Arc;
 
 use apollo_compiler::ExecutableDocument;
 use apollo_compiler::ast;
-use apollo_compiler::collections::HashMap;
 use apollo_compiler::validation::Valid;
 use apollo_federation::query_plan::requires_selection;
 use apollo_federation::query_plan::serializable_document::SerializableDocument;
 use indexmap::IndexSet;
 use serde::Deserialize;
 use serde::Serialize;
-use serde_json_bytes::ByteString;
-use serde_json_bytes::Map;
 use tokio::sync::broadcast::Sender;
 use tower::ServiceExt;
 use tracing::Instrument;
 use tracing::instrument;
 
+use super::log::SubfetchTrace;
 use super::rewrites;
 use super::selection::execute_selection_set;
 use super::subgraph_context::ContextualArguments;
@@ -33,12 +31,14 @@ use crate::json_ext::Value;
 use crate::json_ext::ValueExt;
 use crate::plugins::authorization::AuthorizationPlugin;
 use crate::plugins::authorization::CacheKeyMetadata;
+use crate::query_planner::HashedSubgraphSchemas;
+use crate::query_planner::SubgraphSchemas;
 use crate::services::SubgraphRequest;
 use crate::services::fetch::ErrorMapping;
-use crate::services::subgraph::BoxService;
+use crate::services::subgraph::BoxCloneService;
+use crate::spec::Query;
 use crate::spec::QueryHash;
 use crate::spec::Schema;
-use crate::spec::SchemaHash;
 
 /// GraphQL operation type.
 #[derive(Copy, Clone, Debug, Default, PartialEq, Eq, Hash, Deserialize, Serialize)]
@@ -93,24 +93,6 @@ impl From<ast::OperationType> for OperationKind {
             ast::OperationType::Query => OperationKind::Query,
             ast::OperationType::Mutation => OperationKind::Mutation,
             ast::OperationType::Subscription => OperationKind::Subscription,
-        }
-    }
-}
-
-pub(crate) type SubgraphSchemas = HashMap<String, SubgraphSchema>;
-
-pub(crate) struct SubgraphSchema {
-    pub(crate) schema: Arc<Valid<apollo_compiler::Schema>>,
-    // TODO: Ideally should have separate nominal type for subgraph's schema hash
-    pub(crate) hash: SchemaHash,
-}
-
-impl SubgraphSchema {
-    pub(crate) fn new(schema: Valid<apollo_compiler::Schema>) -> Self {
-        let sdl = schema.serialize().no_indent().to_string();
-        Self {
-            schema: Arc::new(schema),
-            hash: SchemaHash::new(&sdl),
         }
     }
 }
@@ -177,6 +159,7 @@ impl Variables {
         data: &Value,
         current_dir: &Path,
         request: &Arc<http::Request<Request>>,
+        query: &Query,
         schema: &Schema,
         input_rewrites: &Option<Vec<rewrites::DataRewrite>>,
         context_rewrites: &Option<Vec<rewrites::DataRewrite>>,
@@ -184,6 +167,13 @@ impl Variables {
         let body = request.body();
         let mut subgraph_context = SubgraphContext::new(data, schema, context_rewrites);
         if !requires.is_empty() {
+            // Resolves the boolean variables that `@skip`/`@include` conditions on the `requires`
+            // selections may refer to, taking the operation's variable defaults into account.
+            let boolean_variable = |name: &str| {
+                query
+                    .variable_value(name, &body.variables)
+                    .and_then(Value::as_bool)
+            };
             let mut variables = Object::with_capacity(1 + variable_usages.len());
 
             variables.extend(variable_usages.iter().filter_map(|key| {
@@ -200,7 +190,8 @@ impl Variables {
                     context.execute_on_path(path);
                 }
 
-                let mut value = execute_selection_set(value, requires, schema, None);
+                let mut value =
+                    execute_selection_set(value, requires, schema, None, &boolean_variable);
                 if value.as_object().map(|o| !o.is_empty()).unwrap_or(false) {
                     rewrites::apply_rewrites(schema, &mut value, input_rewrites);
                     match values.get_index_of(&value) {
@@ -267,13 +258,12 @@ impl FetchNode {
     #[allow(clippy::too_many_arguments)]
     pub(crate) async fn subgraph_fetch(
         &self,
-        service: BoxService,
+        service: BoxCloneService,
         subgraph_request: SubgraphRequest,
         current_dir: &Path,
         schema: &Schema,
         paths: Vec<Vec<Path>>,
-        operation_str: &str,
-        variables: Map<ByteString, Value>,
+        subfetch_trace: Option<SubfetchTrace>,
         hoist_orphan_errors: bool,
     ) -> (Value, Vec<Error>) {
         let (_parts, response) = match service
@@ -288,7 +278,9 @@ impl FetchNode {
             Ok(res) => res.response.into_parts(),
         };
 
-        super::log::trace_subfetch(&self.service_name, operation_str, &variables, &response);
+        if let Some(subfetch_trace) = &subfetch_trace {
+            super::log::trace_subfetch(&self.service_name, subfetch_trace, &response);
+        }
 
         if !response.is_primary() {
             return (
@@ -390,21 +382,21 @@ impl FetchNode {
                                 for values_path in
                                     inverted_paths.get(*i).iter().flat_map(|v| v.iter())
                                 {
-                                    errors.push(
-                                        Error::builder()
-                                            .locations(error.locations.clone())
-                                            // append to the entity's path the error's path without
-                                            //`_entities` and the index
-                                            .path(Path::from_iter(
-                                                values_path.0.iter().chain(&path.0[2..]).cloned(),
-                                            ))
-                                            .message(error.message.clone())
-                                            .and_extension_code(error.extension_code())
-                                            .extensions(error.extensions.clone())
-                                            // re-use the original ID so we don't double count this error
-                                            .apollo_id(error.apollo_id())
-                                            .build(),
-                                    )
+                                    let mut new_error = Error::builder()
+                                        .locations(error.locations.clone())
+                                        // append to the entity's path the error's path without
+                                        //`_entities` and the index
+                                        .path(Path::from_iter(
+                                            values_path.0.iter().chain(&path.0[2..]).cloned(),
+                                        ))
+                                        .message(error.message.clone())
+                                        .and_extension_code(error.extension_code())
+                                        .extensions(error.extensions.clone())
+                                        // re-use the original ID so we don't double count this error
+                                        .apollo_id(error.apollo_id())
+                                        .build();
+                                    new_error.set_span_event_emitted(error.span_event_emitted());
+                                    errors.push(new_error)
                                 }
                             }
                             _ => {
@@ -483,14 +475,16 @@ impl FetchNode {
                         })
                         .unwrap_or_else(|| current_dir.clone());
 
-                    Error::builder()
+                    let mut new_error = Error::builder()
                         .locations(error.locations.clone())
                         .path(path)
                         .message(error.message.clone())
                         .and_extension_code(error.extension_code())
                         .extensions(error.extensions.clone())
                         .apollo_id(error.apollo_id())
-                        .build()
+                        .build();
+                    new_error.set_span_event_emitted(error.span_event_emitted());
+                    new_error
                 })
                 .collect();
             let mut data = response.data.unwrap_or_default();
@@ -513,17 +507,17 @@ impl FetchNode {
         subgraph_schemas: &SubgraphSchemas,
     ) -> Result<(), ValidationErrors> {
         let schema = &subgraph_schemas[self.service_name.as_ref()];
-        self.operation.init_parsed(&schema.schema)?;
+        self.operation.init_parsed(schema)?;
         Ok(())
     }
 
-    pub(crate) fn init_parsed_operation_and_hash_subquery(
+    pub(super) fn init_parsed_operation_and_hash_subquery(
         &mut self,
-        subgraph_schemas: &SubgraphSchemas,
+        subgraph_schemas: &HashedSubgraphSchemas,
     ) -> Result<(), ValidationErrors> {
-        let schema = &subgraph_schemas[self.service_name.as_ref()];
-        self.operation.init_parsed(&schema.schema)?;
-        self.schema_aware_hash = Arc::new(schema.hash.operation_hash(
+        let subgraph_schema = &subgraph_schemas[self.service_name.as_ref()];
+        self.operation.init_parsed(&subgraph_schema.schema)?;
+        self.schema_aware_hash = Arc::new(subgraph_schema.hash.operation_hash(
             self.operation.as_serialized(),
             self.operation_name.as_deref(),
         ));
@@ -568,6 +562,9 @@ mod tests {
 
     use super::*;
     use crate::Configuration;
+    use crate::Context;
+    use crate::plugins::connectors::declared_errors::ConnectorDeclaredErrors;
+    use crate::plugins::connectors::declared_errors::DECLARED_ERROR_MARKER;
 
     fn test_schema() -> Schema {
         let sdl = r#"
@@ -618,6 +615,7 @@ mod tests {
         vec![requires_selection::Selection::InlineFragment(
             requires_selection::InlineFragment {
                 type_condition: Some(name!("T")),
+                conditions: vec![],
                 selections: vec![requires_selection::Selection::Field(
                     requires_selection::Field {
                         alias: None,
@@ -933,6 +931,67 @@ mod tests {
             .unwrap();
         assert_eq!(arr[0], json!({"name": "Alice"}));
         assert_eq!(arr[2], json!({"name": "Alice"}));
+    }
+
+    /// A connector declares an error at a connector-local path, like
+    /// `_entities/0/balance`. Only this rewrite turns that into paths a client
+    /// can resolve, one per place the entity was fetched for. That is why
+    /// declared errors ride in the `errors` array this far before the fetch
+    /// service lifts them into the response `extensions`.
+    ///
+    /// Asserted here rather than in the connectors plugin because the rewrite
+    /// belongs to the fetch node. If the entity branch ever stopped copying
+    /// extensions, it would strip the marker that identifies these errors, and
+    /// they would stay in `errors` where the spec says they must not be.
+    #[test]
+    fn entity_fetch_rewrites_paths_of_connector_declared_errors() {
+        let schema = test_schema();
+        let node = make_fetch_node(make_requires());
+        let current_dir = Path(vec![key("accounts"), flatten()]);
+        let inverted_paths = vec![vec![
+            Path(vec![key("accounts"), index(0)]),
+            Path(vec![key("accounts"), index(2)]),
+        ]];
+        let response = graphql::Response::builder()
+            .data(json!({ "_entities": [{ "balance": 0 }] }))
+            .error(
+                graphql::Error::builder()
+                    .message("balance unavailable")
+                    .path(Path::from("_entities/0/balance"))
+                    .extension_code("CONNECTORS_MAPPING_ERROR")
+                    .extension(DECLARED_ERROR_MARKER, Value::Bool(true))
+                    .build(),
+            )
+            .build();
+
+        let (_value, mut errors) =
+            node.response_at_path(&schema, &current_dir, inverted_paths, response, false);
+
+        // One error per path the entity landed at, each naming that path...
+        assert_eq!(errors.len(), 2);
+        assert_eq!(
+            errors
+                .iter()
+                .map(|error| error.path.as_ref().map(ToString::to_string))
+                .collect::<Vec<_>>(),
+            vec![
+                Some("/accounts/0/balance".to_string()),
+                Some("/accounts/2/balance".to_string()),
+            ],
+        );
+
+        // ...and the marker survived the rebuild, so the hand-off still
+        // recognizes them.
+        let context = Context::new();
+        ConnectorDeclaredErrors::take_marked(&context, &mut errors);
+        assert!(errors.is_empty());
+        assert_eq!(
+            ConnectorDeclaredErrors::drain(&context)
+                .as_ref()
+                .and_then(Value::as_array)
+                .map(Vec::len),
+            Some(2),
+        );
     }
 
     #[test]
@@ -1360,5 +1419,61 @@ mod tests {
         );
         assert_eq!(errors[1].path.as_ref().unwrap(), &Path(vec![key("users")]));
         assert_eq!(errors[2].path.as_ref().unwrap(), &Path(vec![key("users")]));
+    }
+
+    /// Regression test for the representation dedup that connector `$batch`
+    /// (and plain `_entities` fetches) rely on: identical representations
+    /// collapse to one entry in `representations`, in order of first
+    /// appearance, and `inverted_paths` remembers every path that produced
+    /// each entry so the single returned entity can be fanned back out.
+    #[test]
+    fn variables_dedupe_identical_representations_and_track_all_paths() {
+        let schema = test_schema();
+        let request = Arc::new(
+            http::Request::builder()
+                .body(graphql::Request::builder().build())
+                .unwrap(),
+        );
+        let data = json!({
+            "t": [
+                { "__typename": "T", "id": "1", "extra": "ignored" },
+                { "__typename": "T", "id": "2" },
+                { "__typename": "T", "id": "1", "extra": "also ignored" },
+            ]
+        });
+        let current_dir = Path(vec![key("t"), flatten()]);
+
+        let variables = Variables::new(
+            &make_requires(),
+            &[],
+            &data,
+            &current_dir,
+            &request,
+            &Query::empty_for_tests(),
+            &schema,
+            &None,
+            &None,
+        )
+        .expect("at least one representation");
+
+        // Three entities in the parent data, two distinct keys. Fields outside
+        // the `requires` selection (`extra`) play no part in equality.
+        assert_eq!(
+            variables.variables.get("representations"),
+            Some(&json!([{ "id": "1" }, { "id": "2" }])),
+        );
+
+        // Representation 0 (`id: 1`) came from t/0 and t/2; representation 1
+        // (`id: 2`) came from t/1 alone.
+        assert_eq!(
+            variables.inverted_paths,
+            vec![
+                vec![
+                    Path(vec![key("t"), index(0)]),
+                    Path(vec![key("t"), index(2)]),
+                ],
+                vec![Path(vec![key("t"), index(1)])],
+            ],
+        );
     }
 }

@@ -630,7 +630,8 @@ pub(crate) fn precompute_non_local_selection_metadata(
                 let target = edge_ref
                     .weight()
                     .override_condition
-                    .clone()
+                    .as_deref()
+                    .cloned()
                     .map(|condition| FieldTarget::Override(edge_ref.target(), condition))
                     .unwrap_or_else(|| FieldTarget::NonOverride(edge_ref.target()));
                 metadata
@@ -836,7 +837,7 @@ pub(crate) fn precompute_non_local_selection_metadata(
                             type_
                                 .implements_interfaces
                                 .iter()
-                                .map(|interface_name| interface_name.name.clone()),
+                                .map(|interface_name| Name::clone(interface_name)),
                         );
                     }
                 }
@@ -870,7 +871,7 @@ pub(crate) fn precompute_non_local_selection_metadata(
                     // For each member, record the union type as an implementing type.
                     for member_name in &type_.members {
                         object_types_to_implementing_composite_types
-                            .entry(member_name.name.clone())
+                            .entry(Name::clone(member_name))
                             .or_default()
                             .insert(type_name.clone());
                     }

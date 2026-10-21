@@ -1,7 +1,7 @@
 ---
 title: Router Tracing
 subtitle: Collect tracing information from the router
-description: Collect and export tracing information from the Apollo GraphOS Router or Apollo Router Core. Supports OpenTelemetry Protocol (OTLP), Datadog, New Relic, Jaeger, Zipkin.
+description: Collect and export tracing information from the Apollo GraphOS Router or Apollo Router Core. Supports OpenTelemetry Protocol (OTLP), Datadog, New Relic, Jaeger.
 context:
   - telemetry
 redirectFrom:
@@ -15,7 +15,6 @@ Apollo Router supports a collection of tracing exporters:
 * [Dynatrace (via OTLP configuration)](/router/configuration/telemetry/exporters/tracing/dynatrace)
 * [Jaeger (via OTLP configuration)](/router/configuration/telemetry/exporters/tracing/jaeger)
 * [New Relic (via OTLP configuration)](/router/configuration/telemetry/exporters/tracing/new-relic)
-* [Zipkin](/router/configuration/telemetry/exporters/tracing/zipkin).
 
 The router generates [**spans**](/router/configuration/telemetry/instrumentation/spans) that include the various phases of serving a request and associated dependencies. This is useful for showing how response time is affected by:
 
@@ -137,7 +136,7 @@ telemetry:
     sampler: 0.1           # 10% reach Apollo Studio (matches common)
 ```
 
-The per-exporter `sampler` is available on `telemetry.exporters.tracing.otlp`, `telemetry.exporters.tracing.zipkin`, `telemetry.exporters.tracing.datadog`, and `telemetry.apollo`.
+The per-exporter `sampler` is available on `telemetry.exporters.tracing.otlp`, `telemetry.exporters.tracing.datadog`, and `telemetry.apollo`.
 
 The value uses the same trace-ID-based algorithm as `telemetry.exporters.tracing.common.sampler`, so the rate is an absolute fraction of all requests — not a fraction of already-sampled spans. Setting `sampler: 0.02` means 2% of all requests, not "2% of the 10% that pass the common sampler."
 
@@ -195,14 +194,8 @@ telemetry:
          # https://www.datadoghq.com/
          datadog: false
    
-         # https://www.jaegertracing.io/ (compliant with opentracing)
-         jaeger: false
-   
          # https://www.w3.org/TR/trace-context/
          trace_context: false
-   
-         # https://zipkin.io/ (compliant with opentracing)
-         zipkin: false
    
          # https://aws.amazon.com/xray/ (compliant with opentracing)
          aws_xray: false
@@ -279,7 +272,7 @@ Spans may have events that describe something that happened in the context of a 
 
 Spans may link to other spans in the same or different trace. For example, a span may link to a parent span, or a span may link to a span in a different trace to represent that trace's parent. The number of links per span can be limited to prevent spans becoming very large.
 
-### `experimental_response_trace_id`
+### `response_trace_id`
 
 <ExperimentalFeatureBadge />
 
@@ -289,13 +282,13 @@ If you want to expose in response headers the generated trace ID or the one you 
 telemetry:
   exporters:
      tracing:
-       experimental_response_trace_id:
+       response_trace_id:
          enabled: true # default: false
          header_name: "my-trace-id" # default: "apollo-trace-id"
 ```
 Using this configuration you will have a response header called `my-trace-id` containing the trace ID. It could help you to debug a specific query if you want to grep your log with this trace id to have more context.
 
-#### `experimental_response_trace_id` reference
+#### `response_trace_id` reference
 
 | Attribute      | Default           | Description                                           |
 |----------------|-------------------|-------------------------------------------------------|
@@ -315,7 +308,7 @@ Using this configuration you will have a response header called `my-trace-id` co
 | `service_name`                   | `unknown_service:router` | The OpenTelemetry service name.                  |
 | `service_namespace`              |                          | The OpenTelemetry namespace.                     |
 | `resource`                       |                          | The OpenTelemetry resource to attach to traces.  |
-| `experimental_response_trace_id` |                          | Return the trace ID in a response header.        |
+| `response_trace_id` |                          | Return the trace ID in a response header.        |
 | `max_attributes_per_event`       | 128                      | The maximum number of attributes per event.      |
 | `max_attributes_per_link`        | 128                      | The maximum number of attributes per link.       |
 | `max_attributes_per_span`        | 128                      | The maximum number of attributes per span.       |

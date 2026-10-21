@@ -30,6 +30,12 @@ members = [
     "xtask",
 ]
 
+# Line tables keep file:line in backtraces while making rebuilds and the build output smaller.
+# For full debug info (e.g. inspecting locals in a debugger), build with
+# CARGO_PROFILE_DEV_DEBUG=true.
+[profile.dev]
+debug = "line-tables-only"
+
 # this makes build scripts and proc macros faster to compile
 [profile.dev.build-override]
 # If you un-comment the next line with 1.60.0, compile fails on circle-ci linux
@@ -48,22 +54,24 @@ debug = 1
 # https://doc.rust-lang.org/cargo/reference/workspaces.html#the-dependencies-table
 [workspace.dependencies]
 ahash = "0.8.11"
-apollo-compiler = "1.33.0"
-apollo-parser = "0.8.6"
-apollo-smith = "0.16.0"
+apollo-compiler = "=2.0.0-beta.1"
+apollo-configuration = "0.9.0"
+apollo-parser = "=0.9.0-beta.0"
+apollo-smith = "=0.17.0-beta.1"
 async-trait = "0.1.77"
 encoding_rs = "0.8"
 heck = "0.5.0"
 hex = { version = "0.4.3", features = ["serde"] }
 http = "1.4.0"
 insta = { version = "1.38.0", features = [
+    "filters",
     "json",
     "redactions",
     "yaml",
     "glob",
 ] }
 once_cell = "1.19.0"
-reqwest = { version = "0.12.0", default-features = false }
+reqwest = { version = "0.13.0", default-features = false }
 
 schemars = { version = "1.0.0", features = ["url2"] }
 serde = { version = "1.0.198", features = ["derive", "rc"] }
@@ -73,7 +81,7 @@ serde_json = { version = "1.0.114", features = [
 ] }
 serde_json_bytes = { version = "0.2.6", features = ["preserve_order"] }
 similar = { version = "3.0.0", features = ["inline"] }
-sha1 = "0.10.6"
+sha1 = "0.11.0"
 tempfile = "3.10.1"
 tokio = { version = "1.36.0", features = ["full"] }
 tower = { version = "0.5.1", features = ["full"] }

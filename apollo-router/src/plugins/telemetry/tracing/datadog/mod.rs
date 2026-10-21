@@ -23,8 +23,6 @@ use opentelemetry_sdk::trace::SpanExporter;
 use opentelemetry_sdk::trace::span_processor_with_async_runtime::BatchSpanProcessor;
 use opentelemetry_semantic_conventions::resource::SERVICE_NAME;
 use opentelemetry_semantic_conventions::resource::SERVICE_VERSION;
-use schemars::JsonSchema;
-use serde::Deserialize;
 pub(crate) use span_processor::DatadogSpanProcessor;
 use tower::BoxError;
 
@@ -41,12 +39,12 @@ use crate::plugins::telemetry::consts::SUBGRAPH_REQUEST_SPAN_NAME;
 use crate::plugins::telemetry::consts::SUBGRAPH_SPAN_NAME;
 use crate::plugins::telemetry::consts::SUPERGRAPH_SPAN_NAME;
 use crate::plugins::telemetry::endpoint::UriEndpoint;
+use crate::plugins::telemetry::metrics::BlockingSafeTokioRuntime;
 use crate::plugins::telemetry::reload::tracing::TracingBuilder;
 use crate::plugins::telemetry::reload::tracing::TracingConfigurator;
 use crate::plugins::telemetry::resource::ConfigResource;
 use crate::plugins::telemetry::tracing::BatchProcessorConfig;
 use crate::plugins::telemetry::tracing::NamedSpanExporter;
-use crate::plugins::telemetry::tracing::NamedTokioRuntime;
 use crate::plugins::telemetry::tracing::SpanProcessorExt;
 use crate::plugins::telemetry::tracing::datadog_exporter;
 use crate::plugins::telemetry::tracing::datadog_exporter::DatadogTraceState;
@@ -72,27 +70,26 @@ const DD_TRACE_AGENT_URL: &str = "DD_TRACE_AGENT_URL";
 const DD_AGENT_HOST: &str = "DD_AGENT_HOST";
 const DD_TRACE_AGENT_PORT: &str = "DD_TRACE_AGENT_PORT";
 
-#[derive(Debug, Clone, Deserialize, JsonSchema, serde_derive_default::Default, PartialEq)]
-#[serde(deny_unknown_fields)]
+#[apollo_configuration::configuration]
+#[derive(serde_derive_default::Default, PartialEq)]
 #[schemars(rename = "DatadogConfig")]
 pub(crate) struct Config {
     /// Enable datadog
+    #[config(required)]
     pub(crate) enabled: bool,
 
     /// The endpoint to send to
-    #[serde(default)]
     endpoint: UriEndpoint,
 
     /// batch processor configuration
-    #[serde(default)]
     batch_processor: BatchProcessorConfig,
 
     /// Enable datadog span mapping for span name and resource name.
-    #[serde(default = "default_true")]
+    #[config(default = true)]
     enable_span_mapping: bool,
 
     /// Fixes the span names, this means that the APM view will show the original span names in the operation dropdown.
-    #[serde(default = "default_true")]
+    #[config(default = true)]
     fixed_span_names: bool,
 
     /// Custom mapping to be used as the resource field in spans, defaults to:
@@ -102,12 +99,11 @@ pub(crate) struct Config {
     /// subgraph -> subgraph.name
     /// subgraph_request -> subgraph.name
     /// http_request -> http.route
-    #[serde(default)]
     resource_mapping: HashMap<String, String>,
 
     /// Which spans will be eligible for span stats to be collected for viewing in the APM view.
     /// Defaults to true for `request`, `router`, `query_parsing`, `supergraph`, `execution`, `query_planning`, `subgraph`, `subgraph_request`, `connect`, `connect_request` and `http_request`.
-    #[serde(default = "default_span_metrics")]
+    #[config(default = default_span_metrics())]
     span_metrics: HashMap<String, bool>,
 
     /// Per-exporter sampler.
@@ -122,7 +118,7 @@ pub(crate) struct Config {
     ///
     /// Ignored when `preview_datadog_agent_sampling` is enabled — in that mode the Datadog agent
     /// controls sampling via `sampling.priority` and all spans must be forwarded unfiltered.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub(crate) sampler: Option<SamplerOption>,
 }
 
@@ -132,10 +128,6 @@ fn default_span_metrics() -> HashMap<String, bool> {
         map.insert(name.to_string(), true);
     }
     map
-}
-
-fn default_true() -> bool {
-    true
 }
 
 impl Config {
@@ -274,11 +266,13 @@ impl TracingConfigurator for Config {
         };
         let named_exporter = NamedSpanExporter::new(wrapper, "datadog");
 
-        let batch_processor =
-            BatchSpanProcessor::builder(named_exporter, NamedTokioRuntime::new("datadog-tracing"))
-                .with_batch_config(self.batch_processor.clone().with_env_overrides()?.into())
-                .build()
-                .filtered();
+        let batch_processor = BatchSpanProcessor::builder(
+            named_exporter,
+            BlockingSafeTokioRuntime::new_for_tracing("datadog-tracing"),
+        )
+        .with_batch_config(self.batch_processor.clone().with_env_overrides()?.into())
+        .build()
+        .filtered();
 
         let common = builder.tracing_common();
 
@@ -365,10 +359,10 @@ impl SpanExporter for ExporterWrapper {
         }
         self.delegate.export(batch)
     }
-    fn shutdown(&mut self) -> OTelSdkResult {
+    fn shutdown(&self) -> OTelSdkResult {
         self.delegate.shutdown()
     }
-    fn force_flush(&mut self) -> OTelSdkResult {
+    fn force_flush(&self) -> OTelSdkResult {
         self.delegate.force_flush()
     }
     fn set_resource(&mut self, resource: &Resource) {

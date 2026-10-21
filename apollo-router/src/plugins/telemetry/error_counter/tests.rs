@@ -1,6 +1,12 @@
 use std::collections::HashMap;
 use std::collections::HashSet;
+use std::sync::Arc;
 
+use apollo_federation::connectors::JSONSelection;
+use apollo_federation::connectors::runtime::errors::RuntimeError;
+use apollo_federation::connectors::runtime::http_json_transport::HttpResponse;
+use apollo_federation::connectors::runtime::key::ResponseKey;
+use apollo_federation::connectors::runtime::responses::MappedResponse;
 use http::Method;
 use http::StatusCode;
 use http::Uri;
@@ -9,6 +15,9 @@ use mime::APPLICATION_JSON;
 use opentelemetry::KeyValue;
 use serde_json_bytes::Value;
 use serde_json_bytes::json;
+use tower::Service as _;
+use tower::ServiceBuilder;
+use tower::ServiceExt as _;
 use uuid::Uuid;
 
 use crate::Context;
@@ -26,6 +35,7 @@ use crate::plugins::telemetry::apollo::ErrorRedactionPolicy;
 use crate::plugins::telemetry::apollo::ErrorsConfiguration;
 use crate::plugins::telemetry::apollo::ExtendedErrorMetricsMode;
 use crate::plugins::telemetry::apollo::SubgraphErrorConfig;
+use crate::plugins::telemetry::error_counter::count_connector_errors;
 use crate::plugins::telemetry::error_counter::count_execution_errors;
 use crate::plugins::telemetry::error_counter::count_operation_errors;
 use crate::plugins::telemetry::error_counter::count_router_errors;
@@ -38,6 +48,8 @@ use crate::services::ExecutionResponse;
 use crate::services::RouterResponse;
 use crate::services::SubgraphResponse;
 use crate::services::SupergraphResponse;
+use crate::services::connector;
+use crate::services::connector::request_service::TransportOutcome;
 use crate::services::execution;
 use crate::services::router;
 use crate::services::subgraph;
@@ -49,7 +61,7 @@ use crate::spec::query::EXTENSIONS_VALUE_COMPLETION_KEY;
 async fn test_count_supergraph_errors_with_no_previously_counted_errors() {
     async {
         let config = ErrorsConfiguration {
-            preview_extended_error_metrics: ExtendedErrorMetricsMode::Enabled,
+            extended_error_metrics: ExtendedErrorMetricsMode::Enabled,
             ..Default::default()
         };
 
@@ -109,10 +121,260 @@ async fn test_count_supergraph_errors_with_no_previously_counted_errors() {
 }
 
 #[tokio::test]
+async fn test_count_connector_errors_counts_declared_errors() {
+    async {
+        let config = ErrorsConfiguration {
+            extended_error_metrics: ExtendedErrorMetricsMode::Enabled,
+            ..Default::default()
+        };
+
+        let context = Context::default();
+        let _ = context.insert(APOLLO_OPERATION_ID, "some-id".to_string());
+        let _ = context.insert(OPERATION_NAME, "SomeOperation".to_string());
+        let _ = context.insert(OPERATION_KIND, "query".to_string());
+        let _ = context.insert(CLIENT_NAME, "client-1".to_string());
+        let _ = context.insert(CLIENT_VERSION, "version-1".to_string());
+
+        let mut declared = RuntimeError::new(
+            "balance unavailable",
+            &ResponseKey::RootField {
+                name: "account".to_string(),
+                inputs: Default::default(),
+                selection: Arc::new(JSONSelection::parse("$").unwrap()),
+            },
+        )
+        .with_code("CONNECTORS_MAPPING_ERROR");
+        declared.subgraph_name = Some("accounts".into());
+        declared.path = "account/balance".to_string();
+
+        // Counted straight off the mapped response, before the client-facing
+        // payload — and so before `include_subgraph_errors` has any say in
+        // whether the error reaches a client at all.
+        count_connector_errors(
+            &connector::request_service::Response {
+                context,
+                subgraph_name: "accounts".to_string(),
+                transport_outcome: TransportOutcome::Response(HttpResponse {
+                    inner: http::Response::builder()
+                        .status(200)
+                        .body(())
+                        .unwrap()
+                        .into_parts()
+                        .0,
+                }),
+                answered_by_router: false,
+                mapped_response: MappedResponse::Data {
+                    data: json!({ "account": { "balance": 0 } }),
+                    key: ResponseKey::RootField {
+                        name: "account".to_string(),
+                        inputs: Default::default(),
+                        selection: Arc::new(JSONSelection::parse("$").unwrap()),
+                    },
+                    problems: vec![],
+                    declared_errors: vec![declared],
+                },
+            },
+            &config,
+        );
+
+        assert_counter!(
+            "apollo.router.operations.error",
+            1,
+            "apollo.operation.id" = "some-id",
+            "graphql.operation.name" = "SomeOperation",
+            "graphql.operation.type" = "query",
+            "apollo.client.name" = "client-1",
+            "apollo.client.version" = "version-1",
+            "graphql.error.extensions.code" = "CONNECTORS_MAPPING_ERROR",
+            "graphql.error.extensions.severity" = "ERROR",
+            "graphql.error.path" = "/account/balance",
+            "apollo.router.error.service" = "accounts"
+        );
+
+        // And in `graphql_error`, the counter nothing gates, which is the
+        // only one a router with no telemetry config would show this on.
+        assert_counter!(
+            "apollo.router.graphql_error",
+            1,
+            code = "CONNECTORS_MAPPING_ERROR"
+        );
+    }
+    .with_metrics()
+    .await;
+}
+
+/// What keeps a declared error from being counted twice, and what does not.
+///
+/// [`count_operation_errors`] skips errors whose `apollo_id` is already in the
+/// context's `COUNTED_ERRORS` set, and every other counting layer writes its
+/// errors back into that set afterwards. `count_connector_errors` does not, so
+/// the dedup set offers a declared error no protection at all: this test counts
+/// one at the connector and then hands the very same error to
+/// [`count_operation_errors`] again, and it is counted a second time.
+///
+/// That is safe today for a structural reason rather than a defensive one. A
+/// declared error rides in the connector subgraph response's `errors` array
+/// only as far as the fetch service, where `ConnectorDeclaredErrors::take_marked`
+/// lifts it out immediately after `FetchNode::response_at_path`. No later layer
+/// ever sees it in `errors`, so no later layer counts it.
+///
+/// The test exists to make that dependency executable. If declared errors are
+/// ever left in `errors` past the fetch service (a declared error at a null
+/// position is an ordinary execution error and could legally stay there), the
+/// lift stops protecting them and `count_connector_errors` must start writing
+/// `COUNTED_ERRORS` back. Read this before deleting it: a failure here means
+/// the travel path changed, not that the assertion went stale.
+#[tokio::test]
+async fn declared_errors_are_protected_from_double_counting_by_the_lift_not_the_dedup_set() {
+    async {
+        let config = ErrorsConfiguration {
+            extended_error_metrics: ExtendedErrorMetricsMode::Enabled,
+            ..Default::default()
+        };
+
+        let context = Context::default();
+        let _ = context.insert(APOLLO_OPERATION_ID, "some-id".to_string());
+        let _ = context.insert(OPERATION_NAME, "SomeOperation".to_string());
+        let _ = context.insert(OPERATION_KIND, "query".to_string());
+        let _ = context.insert(CLIENT_NAME, "client-1".to_string());
+        let _ = context.insert(CLIENT_VERSION, "version-1".to_string());
+
+        let mut declared = RuntimeError::new(
+            "balance unavailable",
+            &ResponseKey::RootField {
+                name: "account".to_string(),
+                inputs: Default::default(),
+                selection: Arc::new(JSONSelection::parse("$").unwrap()),
+            },
+        )
+        .with_code("CONNECTORS_MAPPING_ERROR");
+        declared.subgraph_name = Some("accounts".into());
+        declared.path = "account/balance".to_string();
+
+        count_connector_errors(
+            &connector::request_service::Response {
+                context: context.clone(),
+                subgraph_name: "accounts".to_string(),
+                transport_outcome: TransportOutcome::Response(HttpResponse {
+                    inner: http::Response::builder()
+                        .status(200)
+                        .body(())
+                        .unwrap()
+                        .into_parts()
+                        .0,
+                }),
+                answered_by_router: false,
+                mapped_response: MappedResponse::Data {
+                    data: json!({ "account": { "balance": 0 } }),
+                    key: ResponseKey::RootField {
+                        name: "account".to_string(),
+                        inputs: Default::default(),
+                        selection: Arc::new(JSONSelection::parse("$").unwrap()),
+                    },
+                    problems: vec![],
+                    declared_errors: vec![declared.clone()],
+                },
+            },
+            &config,
+        );
+
+        // Nothing was recorded as counted, which is the direct answer to "does
+        // this need to refresh the context the way `count_subgraph_errors`
+        // does": no, because nothing downstream will ask.
+        assert_eq!(
+            unwrap_from_context::<HashSet<Uuid>>(&context, COUNTED_ERRORS),
+            HashSet::new(),
+        );
+
+        // And so the dedup set does not stop a second count. Only the fetch
+        // service lift does.
+        let same_error: graphql::Error = declared.into();
+        count_operation_errors(std::iter::once(&same_error), &context, &config);
+
+        // The doubling shows in `operations.error`: nothing stopped the
+        // second count.
+        assert_counter!(
+            "apollo.router.operations.error",
+            2,
+            "apollo.operation.id" = "some-id",
+            "graphql.operation.name" = "SomeOperation",
+            "graphql.operation.type" = "query",
+            "apollo.client.name" = "client-1",
+            "apollo.client.version" = "version-1",
+            "graphql.error.extensions.code" = "CONNECTORS_MAPPING_ERROR",
+            "graphql.error.extensions.severity" = "ERROR",
+            "graphql.error.path" = "/account/balance",
+            "apollo.router.error.service" = "accounts"
+        );
+
+        // And in `graphql_error`, for the same reason. Which is why the
+        // lift matters: this second count cannot happen in a real request.
+        assert_counter!(
+            "apollo.router.graphql_error",
+            2,
+            code = "CONNECTORS_MAPPING_ERROR"
+        );
+    }
+    .with_metrics()
+    .await;
+}
+
+/// A connector response that *failed* declares nothing: the one error
+/// explaining the failure is counted at the execution layer, where every other
+/// connector error is, so counting it here too would double count it.
+#[tokio::test]
+async fn test_count_connector_errors_ignores_failed_responses() {
+    async {
+        let config = ErrorsConfiguration {
+            extended_error_metrics: ExtendedErrorMetricsMode::Enabled,
+            ..Default::default()
+        };
+
+        let key = ResponseKey::RootField {
+            name: "account".to_string(),
+            inputs: Default::default(),
+            selection: Arc::new(JSONSelection::parse("$").unwrap()),
+        };
+        let mut error = RuntimeError::new("Request failed", &key).with_code("CONNECTORS_FETCH");
+        error.subgraph_name = Some("accounts".into());
+
+        count_connector_errors(
+            &connector::request_service::Response {
+                context: Context::default(),
+                subgraph_name: "accounts".to_string(),
+                transport_outcome: TransportOutcome::Response(HttpResponse {
+                    inner: http::Response::builder()
+                        .status(500)
+                        .body(())
+                        .unwrap()
+                        .into_parts()
+                        .0,
+                }),
+                answered_by_router: false,
+                mapped_response: MappedResponse::Error {
+                    error,
+                    key,
+                    problems: vec![],
+                },
+            },
+            &config,
+        );
+
+        assert_counter_not_exists!(
+            "apollo.router.graphql_error",
+            u64,
+            code = "CONNECTORS_FETCH"
+        );
+    }
+    .with_metrics()
+    .await;
+}
+
+#[tokio::test]
 async fn test_count_supergraph_errors_with_previously_counted_errors() {
     async {
         let config = ErrorsConfiguration {
-            preview_extended_error_metrics: ExtendedErrorMetricsMode::Enabled,
+            extended_error_metrics: ExtendedErrorMetricsMode::Enabled,
             ..Default::default()
         };
 
@@ -202,7 +464,7 @@ async fn test_count_supergraph_errors_with_previously_counted_errors() {
 async fn test_count_subgraph_errors_with_include_subgraphs_enabled() {
     async {
         let config = ErrorsConfiguration {
-            preview_extended_error_metrics: ExtendedErrorMetricsMode::Enabled,
+            extended_error_metrics: ExtendedErrorMetricsMode::Enabled,
             subgraph: SubgraphErrorConfig {
                 subgraphs: HashMap::from([(
                     "some-subgraph".to_string(),
@@ -276,7 +538,7 @@ async fn test_count_subgraph_errors_with_include_subgraphs_enabled() {
 async fn test_count_subgraph_errors_with_include_subgraphs_disabled() {
     async {
         let config = ErrorsConfiguration {
-            preview_extended_error_metrics: ExtendedErrorMetricsMode::Enabled,
+            extended_error_metrics: ExtendedErrorMetricsMode::Enabled,
             subgraph: SubgraphErrorConfig {
                 subgraphs: HashMap::from([(
                     "some-subgraph".to_string(),
@@ -346,7 +608,7 @@ async fn test_count_subgraph_errors_emits_span_event_with_error_code() {
     let _guard = crate::test_harness::tracing_test::dispatcher_guard();
 
     let config = ErrorsConfiguration {
-        preview_extended_error_metrics: ExtendedErrorMetricsMode::Enabled,
+        extended_error_metrics: ExtendedErrorMetricsMode::Enabled,
         ..Default::default()
     };
 
@@ -388,7 +650,7 @@ async fn test_count_subgraph_errors_emits_span_event_with_error_code() {
 async fn test_count_execution_errors() {
     async {
         let config = ErrorsConfiguration {
-            preview_extended_error_metrics: ExtendedErrorMetricsMode::Enabled,
+            extended_error_metrics: ExtendedErrorMetricsMode::Enabled,
             ..Default::default()
         };
 
@@ -454,7 +716,7 @@ async fn test_count_operation_errors_skips_span_event_when_marker_is_set() {
         let _guard = crate::test_harness::tracing_test::dispatcher_guard();
 
         let config = ErrorsConfiguration {
-            preview_extended_error_metrics: ExtendedErrorMetricsMode::Enabled,
+            extended_error_metrics: ExtendedErrorMetricsMode::Enabled,
             ..Default::default()
         };
 
@@ -512,7 +774,7 @@ async fn test_count_execution_errors_emits_span_event_with_error_code() {
     let _guard = crate::test_harness::tracing_test::dispatcher_guard();
 
     let config = ErrorsConfiguration {
-        preview_extended_error_metrics: ExtendedErrorMetricsMode::Enabled,
+        extended_error_metrics: ExtendedErrorMetricsMode::Enabled,
         ..Default::default()
     };
 
@@ -555,7 +817,7 @@ async fn test_count_execution_errors_emits_span_event_with_error_code() {
 async fn test_count_router_errors() {
     async {
         let config = ErrorsConfiguration {
-            preview_extended_error_metrics: ExtendedErrorMetricsMode::Enabled,
+            extended_error_metrics: ExtendedErrorMetricsMode::Enabled,
             ..Default::default()
         };
 
@@ -619,7 +881,7 @@ async fn test_count_router_errors() {
 async fn test_count_operation_errors_with_extended_config_enabled() {
     async {
         let config = ErrorsConfiguration {
-            preview_extended_error_metrics: ExtendedErrorMetricsMode::Enabled,
+            extended_error_metrics: ExtendedErrorMetricsMode::Enabled,
             ..Default::default()
         };
 
@@ -664,7 +926,7 @@ async fn test_count_operation_errors_with_extended_config_enabled() {
 async fn test_count_operation_errors_with_all_json_types_and_extended_config_enabled() {
     async {
         let config = ErrorsConfiguration {
-            preview_extended_error_metrics: ExtendedErrorMetricsMode::Enabled,
+            extended_error_metrics: ExtendedErrorMetricsMode::Enabled,
             ..Default::default()
         };
 
@@ -759,7 +1021,7 @@ async fn test_count_operation_errors_with_all_json_types_and_extended_config_ena
 async fn test_count_operation_errors_with_duplicate_errors_and_extended_config_enabled() {
     async {
         let config = ErrorsConfiguration {
-            preview_extended_error_metrics: ExtendedErrorMetricsMode::Enabled,
+            extended_error_metrics: ExtendedErrorMetricsMode::Enabled,
             ..Default::default()
         };
 
@@ -862,7 +1124,7 @@ async fn test_subgraph_error_counting() {
             "telemetry":{
                 "apollo": {
                     "errors": {
-                        "preview_extended_error_metrics": "enabled",
+                        "extended_error_metrics": "enabled",
                         "subgraph": {
                             "subgraphs": {
                                 "myIgnoredSubgraph": {
@@ -881,18 +1143,20 @@ async fn test_subgraph_error_counting() {
             .await
             .expect("test harness");
 
-        let router_service = test_harness.subgraph_service(subgraph_name, move |req| {
-            let subgraph_response = example_response.clone();
-            let subgraph_request_id = subgraph_request_id.clone();
-            async move {
-                Ok(SubgraphResponse::new_from_response(
-                    http::Response::new(subgraph_response.clone()),
-                    req.context,
-                    subgraph_name.to_string(),
-                    subgraph_request_id,
-                ))
-            }
+        let (mock, mut handle) = tower_test::mock::pair::<subgraph::Request, SubgraphResponse>();
+        let driver = tokio::task::spawn(async move {
+            let (req, responder) = handle.next_request().await.unwrap();
+            responder.send_response(SubgraphResponse::new_from_response(
+                http::Response::new(example_response.clone()),
+                req.context,
+                subgraph_name.to_string(),
+                subgraph_request_id.clone(),
+            ));
         });
+
+        let mut service = ServiceBuilder::new()
+            .layer(test_harness.instrument_subgraph_layer())
+            .service(mock);
 
         let context = Context::new();
         context.insert_json_value(APOLLO_OPERATION_ID, operation_id.into());
@@ -906,7 +1170,9 @@ async fn test_subgraph_error_counting() {
             .subgraph_name(subgraph_name)
             .context(context)
             .build();
-        router_service.call(request).await.unwrap();
+        service.ready().await.unwrap().call(request).await.unwrap();
+
+        crate::plugin::test::await_mock_driver(driver).await;
 
         assert_counter!(
             "apollo.router.operations.error",
@@ -977,7 +1243,7 @@ async fn test_execution_error_counting() {
             "telemetry":{
                 "apollo": {
                     "errors": {
-                        "preview_extended_error_metrics": "enabled",
+                        "extended_error_metrics": "enabled",
                         "subgraph": {
                             "subgraphs": {
                                 "myIgnoredSubgraph": {
@@ -996,15 +1262,19 @@ async fn test_execution_error_counting() {
             .await
             .expect("test harness");
 
-        let router_service = test_harness.execution_service(move |req| {
-            let execution_response = example_response.clone();
-            async move {
-                Ok(ExecutionResponse::new_from_graphql_response(
-                    execution_response.clone(),
-                    req.context,
-                ))
-            }
+        let (mock, mut handle) =
+            tower_test::mock::pair::<execution::Request, execution::Response>();
+        let driver = tokio::task::spawn(async move {
+            let (request, responder) = handle.next_request().await.unwrap();
+            responder.send_response(ExecutionResponse::new_from_graphql_response(
+                example_response.clone(),
+                request.context,
+            ));
         });
+
+        let mut service = ServiceBuilder::new()
+            .layer(test_harness.instrument_execution_layer())
+            .service(mock);
 
         let context = Context::new();
         context.insert_json_value(APOLLO_OPERATION_ID, operation_id.into());
@@ -1014,10 +1284,15 @@ async fn test_execution_error_counting() {
         context.insert_json_value(CLIENT_VERSION, client_version.into());
         let _ = context.insert(COUNTED_ERRORS, HashSet::from([previously_counted_error_id]));
 
-        router_service
+        service
+            .ready()
+            .await
+            .unwrap()
             .call(execution::Request::fake_builder().context(context).build())
             .await
             .unwrap();
+
+        crate::plugin::test::await_mock_driver(driver).await;
 
         assert_counter!(
             "apollo.router.operations.error",
@@ -1089,7 +1364,7 @@ async fn test_supergraph_error_counting() {
             "telemetry":{
                 "apollo": {
                     "errors": {
-                        "preview_extended_error_metrics": "enabled",
+                        "extended_error_metrics": "enabled",
                         "subgraph": {
                             "subgraphs": {
                                 "myIgnoredSubgraph": {
@@ -1108,15 +1383,19 @@ async fn test_supergraph_error_counting() {
             .await
             .expect("test harness");
 
-        let router_service = test_harness.supergraph_service(move |req| {
-            let supergraph_response = example_response.clone();
-            async move {
-                Ok(SupergraphResponse::new_from_graphql_response(
-                    supergraph_response.clone(),
-                    req.context,
-                ))
-            }
+        let (mock_service, mut handle) =
+            tower_test::mock::pair::<supergraph::Request, supergraph::Response>();
+        let driver = tokio::spawn(async move {
+            let (req, responder) = handle.next_request().await.unwrap();
+            responder.send_response(SupergraphResponse::new_from_graphql_response(
+                example_response.clone(),
+                req.context,
+            ));
         });
+
+        let mut router_service = ServiceBuilder::new()
+            .layer(test_harness.instrument_supergraph_layer())
+            .service(mock_service);
 
         let context = Context::new();
         context.insert_json_value(APOLLO_OPERATION_ID, operation_id.into());
@@ -1127,6 +1406,9 @@ async fn test_supergraph_error_counting() {
         let _ = context.insert(COUNTED_ERRORS, HashSet::from([previously_counted_error_id]));
 
         router_service
+            .ready()
+            .await
+            .unwrap()
             .call(
                 supergraph::Request::builder()
                     .query(query)
@@ -1140,6 +1422,8 @@ async fn test_supergraph_error_counting() {
             )
             .await
             .unwrap();
+
+        crate::plugin::test::await_mock_driver(driver).await;
 
         assert_counter!(
             "apollo.router.operations.error",
@@ -1193,7 +1477,7 @@ async fn test_router_error_counting() {
             "telemetry":{
                 "apollo": {
                     "errors": {
-                        "preview_extended_error_metrics": "enabled",
+                        "extended_error_metrics": "enabled",
                         "subgraph": {
                             "subgraphs": {
                                 "myIgnoredSubgraph": {
@@ -1212,26 +1496,36 @@ async fn test_router_error_counting() {
             .await
             .expect("test harness");
 
-        let router_service = test_harness.router_service(move |req| async move {
-            RouterResponse::fake_builder()
-                .errors(vec![
-                    graphql::Error::builder()
-                        .message("previously counted error")
-                        .extension_code("ERROR_CODE")
-                        .extension("service", subgraph_name)
-                        .path(Path::from("obj/field"))
-                        .apollo_id(previously_counted_error_id)
-                        .build(),
-                    graphql::Error::builder()
-                        .message("error in supergraph layer")
-                        .extension_code("SUPERGRAPH_CODE")
-                        .extension("service", subgraph_name)
-                        .path(Path::from("obj/field"))
-                        .build(),
-                ])
-                .context(req.context)
-                .build()
+        let (mock_service, mut handle) =
+            tower_test::mock::pair::<router::Request, router::Response>();
+        let driver = tokio::spawn(async move {
+            let (req, responder) = handle.next_request().await.unwrap();
+            responder.send_response(
+                RouterResponse::fake_builder()
+                    .errors(vec![
+                        graphql::Error::builder()
+                            .message("previously counted error")
+                            .extension_code("ERROR_CODE")
+                            .extension("service", subgraph_name)
+                            .path(Path::from("obj/field"))
+                            .apollo_id(previously_counted_error_id)
+                            .build(),
+                        graphql::Error::builder()
+                            .message("error in supergraph layer")
+                            .extension_code("SUPERGRAPH_CODE")
+                            .extension("service", subgraph_name)
+                            .path(Path::from("obj/field"))
+                            .build(),
+                    ])
+                    .context(req.context)
+                    .build()
+                    .expect("expecting valid response"),
+            );
         });
+
+        let mut router_service = ServiceBuilder::new()
+            .layer(test_harness.instrument_router_layer())
+            .service(mock_service);
 
         let context = Context::new();
         context.insert_json_value(APOLLO_OPERATION_ID, operation_id.into());
@@ -1242,6 +1536,9 @@ async fn test_router_error_counting() {
         let _ = context.insert(COUNTED_ERRORS, HashSet::from([previously_counted_error_id]));
 
         router_service
+            .ready()
+            .await
+            .unwrap()
             .call(
                 router::Request::fake_builder()
                     .context(context)
@@ -1250,6 +1547,8 @@ async fn test_router_error_counting() {
             )
             .await
             .unwrap();
+
+        crate::plugin::test::await_mock_driver(driver).await;
 
         assert_counter!(
             "apollo.router.operations.error",
@@ -1302,7 +1601,7 @@ async fn test_operation_errors_emitted_when_config_is_enabled() {
             "telemetry":{
                 "apollo": {
                     "errors": {
-                        "preview_extended_error_metrics": "enabled",
+                        "extended_error_metrics": "enabled",
                         "subgraph": {
                             "subgraphs": {
                                 "myIgnoredSubgraph": {
@@ -1322,8 +1621,11 @@ async fn test_operation_errors_emitted_when_config_is_enabled() {
             .await
             .expect("test harness");
 
-        let router_service =
-            test_harness.supergraph_service(|req| async {
+        let (mock_service, mut handle) =
+            tower_test::mock::pair::<supergraph::Request, supergraph::Response>();
+        let driver =
+            tokio::spawn(async move {
+                let (req, responder) = handle.next_request().await.unwrap();
                 let example_response = graphql::Response::builder()
                 .data(json!({"data": null}))
                 .extension(EXTENSIONS_VALUE_COMPLETION_KEY, json!([{
@@ -1351,11 +1653,15 @@ async fn test_operation_errors_emitted_when_config_is_enabled() {
                         .build(),
                 ])
                 .build();
-                Ok(SupergraphResponse::new_from_graphql_response(
+                responder.send_response(SupergraphResponse::new_from_graphql_response(
                     example_response,
                     req.context,
-                ))
+                ));
             });
+
+        let mut router_service = ServiceBuilder::new()
+            .layer(test_harness.instrument_supergraph_layer())
+            .service(mock_service);
 
         let context = Context::new();
         context.insert_json_value(APOLLO_OPERATION_ID, operation_id.into());
@@ -1365,6 +1671,9 @@ async fn test_operation_errors_emitted_when_config_is_enabled() {
         context.insert_json_value(CLIENT_VERSION, client_version.into());
 
         router_service
+            .ready()
+            .await
+            .unwrap()
             .call(
                 supergraph::Request::builder()
                     .query(query)
@@ -1378,6 +1687,8 @@ async fn test_operation_errors_emitted_when_config_is_enabled() {
             )
             .await
             .unwrap();
+
+        crate::plugin::test::await_mock_driver(driver).await;
 
         assert_counter!(
             "apollo.router.operations.error",

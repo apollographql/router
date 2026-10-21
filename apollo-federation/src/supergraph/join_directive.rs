@@ -6,7 +6,6 @@ use apollo_compiler::Node;
 use apollo_compiler::ast::Argument;
 use apollo_compiler::ast::Directive;
 use apollo_compiler::collections::IndexMap;
-use apollo_compiler::schema::Component;
 use itertools::Itertools;
 
 use super::get_subgraph;
@@ -67,10 +66,8 @@ pub(super) fn extract(
                     &subgraph_enum_value,
                 )?;
 
-                schema_def_pos.insert_directive(
-                    &mut subgraph.schema,
-                    Component::new(link_directive.clone()),
-                )?;
+                schema_def_pos
+                    .insert_directive(&mut subgraph.schema, Node::new(link_directive.clone()))?;
 
                 if let Some(spec) = ConnectSpecDefinition::from_directive(&link_directive)? {
                     spec.add_elements_to_schema(&mut subgraph.schema)?;
@@ -88,7 +85,7 @@ pub(super) fn extract(
                 )?;
 
                 schema_def_pos
-                    .insert_directive(&mut subgraph.schema, Component::new(directive.clone()))?;
+                    .insert_directive(&mut subgraph.schema, Node::new(directive.clone()))?;
             }
         }
     }
@@ -114,6 +111,13 @@ pub(super) fn extract(
                     graph_enum_value_name_to_subgraph_name,
                     &subgraph_enum_value,
                 )?;
+
+                // Skip if the field doesn't exist in this subgraph (e.g. expanded
+                // connector subgraphs where graphs: includes all synthetic subgraphs
+                // but only one owns the field)
+                if object_field_pos.try_get(subgraph.schema.schema()).is_none() {
+                    continue;
+                }
 
                 object_field_pos
                     .insert_directive(&mut subgraph.schema, Node::new(directive.clone()))?;
@@ -149,19 +153,15 @@ pub(super) fn extract(
                     .map(|t| matches!(t, TypeDefinitionPosition::Interface(_)))
                     .unwrap_or_default()
                 {
-                    intf_pos.insert_directive(
-                        &mut subgraph.schema,
-                        Component::new(directive.clone()),
-                    )?;
+                    intf_pos
+                        .insert_directive(&mut subgraph.schema, Node::new(directive.clone()))?;
                 } else {
                     // In the subgraph it's defined as an object with @interfaceObject
                     let object_field_pos = ObjectTypeDefinitionPosition {
                         type_name: intf_pos.type_name.clone(),
                     };
-                    object_field_pos.insert_directive(
-                        &mut subgraph.schema,
-                        Component::new(directive.clone()),
-                    )?;
+                    object_field_pos
+                        .insert_directive(&mut subgraph.schema, Node::new(directive.clone()))?;
                 }
             }
         }
@@ -195,6 +195,10 @@ pub(super) fn extract(
                     .map(|t| matches!(t, TypeDefinitionPosition::Interface(_)))
                     .unwrap_or_default()
                 {
+                    // Skip if the field doesn't exist in this subgraph
+                    if intf_field_pos.try_get(subgraph.schema.schema()).is_none() {
+                        continue;
+                    }
                     intf_field_pos
                         .insert_directive(&mut subgraph.schema, Node::new(directive.clone()))?;
                 } else {
@@ -203,6 +207,10 @@ pub(super) fn extract(
                         type_name: intf_field_pos.type_name.clone(),
                         field_name: intf_field_pos.field_name.clone(),
                     };
+                    // Skip if the field doesn't exist in this subgraph
+                    if object_field_pos.try_get(subgraph.schema.schema()).is_none() {
+                        continue;
+                    }
                     object_field_pos
                         .insert_directive(&mut subgraph.schema, Node::new(directive.clone()))?;
                 }
@@ -238,10 +246,7 @@ pub(super) fn extract(
                     .map(|t| matches!(t, TypeDefinitionPosition::Object(_)))
                     .unwrap_or_default()
                 {
-                    obj_pos.insert_directive(
-                        &mut subgraph.schema,
-                        Node::new(directive.clone()).into(),
-                    )?;
+                    obj_pos.insert_directive(&mut subgraph.schema, Node::new(directive.clone()))?;
                 }
             }
         }
