@@ -599,6 +599,13 @@ async fn test_gauges_on_reload() {
     // Introspection cache should contain the introspection query
     router
         .assert_metrics_contains(
+            r#"apollo_platform_cache_memory_size{cache_name="introspection",cache_type="memory",otel_scope_name="apollo-cache-memory",otel_scope_version="0.3.0"} 1"#,
+            None,
+        )
+        .await;
+    // ...legacy metric... should we keep this?
+    router
+        .assert_metrics_contains(
             r#"apollo_router_cache_size{kind="introspection",type="memory",otel_scope_name="apollo/router"} 1"#,
             None,
         )
