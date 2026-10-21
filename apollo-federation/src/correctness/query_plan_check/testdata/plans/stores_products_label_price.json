@@ -1,0 +1,98 @@
+{
+  "Sequence": {
+    "nodes": [
+      {
+        "Fetch": {
+          "subgraph_name": "catalog",
+          "id": null,
+          "variable_usages": [],
+          "operation_document": "{ stores { __typename owner { __typename label } products { __typename id } } }",
+          "operation_name": null,
+          "operation_kind": "query",
+          "input_rewrites": [],
+          "output_rewrites": [],
+          "context_rewrites": []
+        }
+      },
+      {
+        "Flatten": {
+          "path": [
+            {
+              "Key": [
+                "stores",
+                null
+              ]
+            },
+            {
+              "AnyIndex": null
+            },
+            {
+              "Key": [
+                "products",
+                null
+              ]
+            },
+            {
+              "AnyIndex": null
+            }
+          ],
+          "node": {
+            "Fetch": {
+              "subgraph_name": "catalog",
+              "id": null,
+              "variable_usages": [
+                "contextualArgument_1_0"
+              ],
+              "requires": [
+                {
+                  "kind": "InlineFragment",
+                  "typeCondition": "Product",
+                  "selections": [
+                    {
+                      "kind": "Field",
+                      "name": "__typename"
+                    },
+                    {
+                      "kind": "Field",
+                      "name": "id"
+                    }
+                  ]
+                }
+              ],
+              "operation_document": "query($representations: [_Any!]!, $contextualArgument_1_0: String) { _entities(representations: $representations) { ... on Product { price(label: $contextualArgument_1_0) } } }",
+              "operation_name": null,
+              "operation_kind": "query",
+              "input_rewrites": [],
+              "output_rewrites": [],
+              "context_rewrites": [
+                {
+                  "KeyRenamer": {
+                    "path": [
+                      "Parent",
+                      {
+                        "TypenameEquals": "Store"
+                      },
+                      {
+                        "Key": [
+                          "owner",
+                          null
+                        ]
+                      },
+                      {
+                        "Key": [
+                          "label",
+                          null
+                        ]
+                      }
+                    ],
+                    "rename_key_to": "contextualArgument_1_0"
+                  }
+                }
+              ]
+            }
+          }
+        }
+      }
+    ]
+  }
+}
