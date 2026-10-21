@@ -54,12 +54,58 @@ pub(crate) enum SelectorOrValue<T> {
     Selector(T),
 }
 
+// The configuration attribute doesn't support generic types, so this forwards validation to the
+// selected condition's operands.
+impl<T> apollo_configuration::Validate for Condition<T>
+where
+    T: apollo_configuration::Validate,
+{
+    fn validate(&self, mut errors: apollo_configuration::ErrorCollector<'_>) {
+        match self {
+            Condition::Eq(operands) => validate_operands(operands, errors.nest("eq")),
+            Condition::Gt(operands) => validate_operands(operands, errors.nest("gt")),
+            Condition::Lt(operands) => validate_operands(operands, errors.nest("lt")),
+            Condition::Exists(selector) => selector.validate(errors.nest("exists")),
+            Condition::All(conditions) => conditions.validate(errors.nest("all")),
+            Condition::Any(conditions) => conditions.validate(errors.nest("any")),
+            Condition::Not(condition) => condition.validate(errors.nest("not")),
+            Condition::True | Condition::False => {}
+        }
+    }
+}
+
+// apollo-configuration has no Validate impl for arrays, so this validates each operand by index.
+fn validate_operands<T>(
+    operands: &[SelectorOrValue<T>; 2],
+    mut errors: apollo_configuration::ErrorCollector<'_>,
+) where
+    T: apollo_configuration::Validate,
+{
+    for (index, operand) in operands.iter().enumerate() {
+        apollo_configuration::Validate::validate(operand, errors.nest(index));
+    }
+}
+
+// The configuration attribute doesn't support generic types, so this forwards validation to the
+// selector. The enum is untagged, so the operand keeps its own path.
+impl<T> apollo_configuration::Validate for SelectorOrValue<T>
+where
+    T: apollo_configuration::Validate,
+{
+    fn validate(&self, errors: apollo_configuration::ErrorCollector<'_>) {
+        match self {
+            SelectorOrValue::Value(value) => value.validate(errors),
+            SelectorOrValue::Selector(selector) => selector.validate(errors),
+        }
+    }
+}
+
 impl<T> Condition<T>
 where
     T: Selector,
 {
     /// restricted_stage is Some if this condition will only applies at a specific stage like for events for example
-    pub(crate) fn validate(&self, restricted_stage: Option<Stage>) -> Result<(), String> {
+    pub(crate) fn validate_selectors(&self, restricted_stage: Option<Stage>) -> Result<(), String> {
         match self {
             Condition::Eq(arr) | Condition::Gt(arr) | Condition::Lt(arr) => {
                 match (&arr[0], &arr[1]) {
@@ -114,19 +160,19 @@ where
             },
             Condition::All(all) => {
                 for cond in all {
-                    cond.validate(restricted_stage)?;
+                    cond.validate_selectors(restricted_stage)?;
                 }
 
                 Ok(())
             }
             Condition::Any(any) => {
                 for cond in any {
-                    cond.validate(restricted_stage)?;
+                    cond.validate_selectors(restricted_stage)?;
                 }
 
                 Ok(())
             }
-            Condition::Not(cond) => cond.validate(restricted_stage),
+            Condition::Not(cond) => cond.validate_selectors(restricted_stage),
             Condition::True | Condition::False => Ok(()),
         }
     }
@@ -878,25 +924,53 @@ mod test {
 
     #[test]
     fn test_condition_validate() {
-        assert!(eq(Req, 1).validate(Some(Stage::Request)).is_ok());
-        assert!(eq(Req, 1).validate(Some(Stage::Response)).is_ok());
-        assert!(eq(1, Req).validate(Some(Stage::Request)).is_ok());
-        assert!(eq(1, Req).validate(Some(Stage::Response)).is_ok());
-        assert!(eq(Resp, 1).validate(Some(Stage::Request)).is_err());
-        assert!(eq(Resp, 1).validate(None).is_ok());
-        assert!(eq(1, Resp).validate(None).is_ok());
-        assert!(eq(1, Resp).validate(Some(Stage::Request)).is_err());
-        assert!(exists(Resp).validate(Some(Stage::Request)).is_err());
-        assert!(exists(Req).validate(None).is_ok());
-        assert!(exists(Req).validate(Some(Stage::Request)).is_ok());
-        assert!(exists(Resp).validate(None).is_ok());
+        assert!(eq(Req, 1).validate_selectors(Some(Stage::Request)).is_ok());
+        assert!(eq(Req, 1).validate_selectors(Some(Stage::Response)).is_ok());
+        assert!(eq(1, Req).validate_selectors(Some(Stage::Request)).is_ok());
+        assert!(eq(1, Req).validate_selectors(Some(Stage::Response)).is_ok());
+        assert!(
+            eq(Resp, 1)
+                .validate_selectors(Some(Stage::Request))
+                .is_err()
+        );
+        assert!(eq(Resp, 1).validate_selectors(None).is_ok());
+        assert!(eq(1, Resp).validate_selectors(None).is_ok());
+        assert!(
+            eq(1, Resp)
+                .validate_selectors(Some(Stage::Request))
+                .is_err()
+        );
+        assert!(
+            exists(Resp)
+                .validate_selectors(Some(Stage::Request))
+                .is_err()
+        );
+        assert!(exists(Req).validate_selectors(None).is_ok());
+        assert!(exists(Req).validate_selectors(Some(Stage::Request)).is_ok());
+        assert!(exists(Resp).validate_selectors(None).is_ok());
         // Request-stage selectors are valid in Exists conditions for response-stage events
         // because evaluate_request() pre-resolves them before response-time evaluation.
-        assert!(exists(Req).validate(Some(Stage::Response)).is_ok());
-        assert!(exists(Req).validate(Some(Stage::ResponseEvent)).is_ok());
+        assert!(
+            exists(Req)
+                .validate_selectors(Some(Stage::Response))
+                .is_ok()
+        );
+        assert!(
+            exists(Req)
+                .validate_selectors(Some(Stage::ResponseEvent))
+                .is_ok()
+        );
         // Response-stage selectors still work at response stage
-        assert!(exists(Resp).validate(Some(Stage::Response)).is_ok());
-        assert!(exists(Resp).validate(Some(Stage::ResponseEvent)).is_ok());
+        assert!(
+            exists(Resp)
+                .validate_selectors(Some(Stage::Response))
+                .is_ok()
+        );
+        assert!(
+            exists(Resp)
+                .validate_selectors(Some(Stage::ResponseEvent))
+                .is_ok()
+        );
     }
 
     #[test]
