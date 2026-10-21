@@ -8,12 +8,12 @@
 //!
 //! Plans as a whole are not covered here, only the fetch-level machinery.
 
-use apollo_compiler::ExecutableDocument;
 use apollo_compiler::executable;
 use apollo_compiler::executable::Selection;
 use apollo_compiler::name;
 use apollo_compiler::schema::Schema;
 
+use super::super::test_support::selections;
 use super::*;
 use crate::query_plan::FetchDataKeyRenamer;
 use crate::query_plan::serializable_document::SerializableDocument;
@@ -53,19 +53,6 @@ const SCHEMA_STR: &str = r#"
 fn schema() -> ValidFederationSchema {
     let schema = Schema::parse_and_validate(SCHEMA_STR, "schema.graphql").unwrap();
     ValidFederationSchema::new(schema).unwrap()
-}
-
-/// The selections of an operation against the test schema, which is how every fixture here is
-/// written: the checker reads `available` rooted at the query type.
-fn selections(schema: &ValidFederationSchema, operation: &str) -> Vec<Selection> {
-    ExecutableDocument::parse_and_validate(schema.schema(), operation, "op.graphql")
-        .unwrap()
-        .operations
-        .get(None)
-        .unwrap()
-        .selection_set
-        .selections
-        .clone()
 }
 
 fn key(name: Name) -> FetchDataPathElement {
