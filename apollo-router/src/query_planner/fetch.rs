@@ -36,6 +36,7 @@ use crate::plugins::authorization::CacheKeyMetadata;
 use crate::services::SubgraphRequest;
 use crate::services::fetch::ErrorMapping;
 use crate::services::subgraph::BoxService;
+use crate::spec::Query;
 use crate::spec::QueryHash;
 use crate::spec::Schema;
 use crate::spec::SchemaHash;
@@ -177,6 +178,7 @@ impl Variables {
         data: &Value,
         current_dir: &Path,
         request: &Arc<http::Request<Request>>,
+        query: &Query,
         schema: &Schema,
         input_rewrites: &Option<Vec<rewrites::DataRewrite>>,
         context_rewrites: &Option<Vec<rewrites::DataRewrite>>,
@@ -184,6 +186,13 @@ impl Variables {
         let body = request.body();
         let mut subgraph_context = SubgraphContext::new(data, schema, context_rewrites);
         if !requires.is_empty() {
+            // Resolves the boolean variables that `@skip`/`@include` conditions on the `requires`
+            // selections may refer to, taking the operation's variable defaults into account.
+            let boolean_variable = |name: &str| {
+                query
+                    .variable_value(name, &body.variables)
+                    .and_then(Value::as_bool)
+            };
             let mut variables = Object::with_capacity(1 + variable_usages.len());
 
             variables.extend(variable_usages.iter().filter_map(|key| {
@@ -200,7 +209,8 @@ impl Variables {
                     context.execute_on_path(path);
                 }
 
-                let mut value = execute_selection_set(value, requires, schema, None);
+                let mut value =
+                    execute_selection_set(value, requires, schema, None, &boolean_variable);
                 if value.as_object().map(|o| !o.is_empty()).unwrap_or(false) {
                     rewrites::apply_rewrites(schema, &mut value, input_rewrites);
                     match values.get_index_of(&value) {
@@ -568,6 +578,9 @@ mod tests {
 
     use super::*;
     use crate::Configuration;
+    use crate::Context;
+    use crate::plugins::connectors::declared_errors::ConnectorDeclaredErrors;
+    use crate::plugins::connectors::declared_errors::DECLARED_ERROR_MARKER;
 
     fn test_schema() -> Schema {
         let sdl = r#"
@@ -618,6 +631,7 @@ mod tests {
         vec![requires_selection::Selection::InlineFragment(
             requires_selection::InlineFragment {
                 type_condition: Some(name!("T")),
+                conditions: vec![],
                 selections: vec![requires_selection::Selection::Field(
                     requires_selection::Field {
                         alias: None,
@@ -933,6 +947,67 @@ mod tests {
             .unwrap();
         assert_eq!(arr[0], json!({"name": "Alice"}));
         assert_eq!(arr[2], json!({"name": "Alice"}));
+    }
+
+    /// A connector declares an error at a connector-local path, like
+    /// `_entities/0/balance`. Only this rewrite turns that into paths a client
+    /// can resolve, one per place the entity was fetched for. That is why
+    /// declared errors ride in the `errors` array this far before the fetch
+    /// service lifts them into the response `extensions`.
+    ///
+    /// Asserted here rather than in the connectors plugin because the rewrite
+    /// belongs to the fetch node. If the entity branch ever stopped copying
+    /// extensions, it would strip the marker that identifies these errors, and
+    /// they would stay in `errors` where the spec says they must not be.
+    #[test]
+    fn entity_fetch_rewrites_paths_of_connector_declared_errors() {
+        let schema = test_schema();
+        let node = make_fetch_node(make_requires());
+        let current_dir = Path(vec![key("accounts"), flatten()]);
+        let inverted_paths = vec![vec![
+            Path(vec![key("accounts"), index(0)]),
+            Path(vec![key("accounts"), index(2)]),
+        ]];
+        let response = graphql::Response::builder()
+            .data(json!({ "_entities": [{ "balance": 0 }] }))
+            .error(
+                graphql::Error::builder()
+                    .message("balance unavailable")
+                    .path(Path::from("_entities/0/balance"))
+                    .extension_code("CONNECTORS_MAPPING_ERROR")
+                    .extension(DECLARED_ERROR_MARKER, Value::Bool(true))
+                    .build(),
+            )
+            .build();
+
+        let (_value, mut errors) =
+            node.response_at_path(&schema, &current_dir, inverted_paths, response, false);
+
+        // One error per path the entity landed at, each naming that path...
+        assert_eq!(errors.len(), 2);
+        assert_eq!(
+            errors
+                .iter()
+                .map(|error| error.path.as_ref().map(ToString::to_string))
+                .collect::<Vec<_>>(),
+            vec![
+                Some("/accounts/0/balance".to_string()),
+                Some("/accounts/2/balance".to_string()),
+            ],
+        );
+
+        // ...and the marker survived the rebuild, so the hand-off still
+        // recognizes them.
+        let context = Context::new();
+        ConnectorDeclaredErrors::take_marked(&context, &mut errors);
+        assert!(errors.is_empty());
+        assert_eq!(
+            ConnectorDeclaredErrors::drain(&context)
+                .as_ref()
+                .and_then(Value::as_array)
+                .map(Vec::len),
+            Some(2),
+        );
     }
 
     #[test]
@@ -1390,6 +1465,7 @@ mod tests {
             &data,
             &current_dir,
             &request,
+            &Query::empty_for_tests(),
             &schema,
             &None,
             &None,
