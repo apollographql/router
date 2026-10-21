@@ -91,13 +91,13 @@ pub(super) fn nom_fail_message(
 
 // Counts each PathList step, SubSelection and LitExpr the parser enters, which
 // are the points every recursive cycle passes through. One `a { ... }` level
-// spends three, one `.key` or `->method` step spends one. Chosen experimentally
-// with Rust 1.99.0 on aarch64-apple-darwin, unoptimized (default test
-// profile), on a 2MB thread stack, the default for test threads and tokio
-// workers. Nested arrays, the most expensive levels, overflowed past 55, so 32
-// is about 60% of that. Real selections rarely nest more than a handful of
-// levels.
-const DEFAULT_RECURSION_LIMIT: usize = 32;
+// spends three, one `.key` or `->method` step spends one. Chosen
+// experimentally for release builds, which is how the router runs, with Rust
+// 1.99.0 on aarch64-apple-darwin on a 2MB thread stack, the default for tokio
+// workers. Nested groups, the most expensive levels there, overflowed past
+// 310, so 128 is about 40% of that. Debug builds use several times more stack
+// per level and can overflow a 2MB stack below this limit.
+const DEFAULT_RECURSION_LIMIT: usize = 128;
 
 const RECURSION_LIMIT_MESSAGE: &str = "Selection nested too deeply";
 
@@ -530,7 +530,7 @@ impl JSONSelection {
         fn lit_expr_top_level(input: Span) -> ParseResult<JSONSelection> {
             let spec = get_connect_spec(&input);
             let (input, _) = spaces_or_comments(input)?;
-            let (remainder, lit) = LitExpr::parse(input)?;
+            let (remainder, lit) = LitExpr::parse_uncounted(input)?;
             // Backtrack (non-fatal error) if the LitExpr did not consume the
             // rest of the input (modulo trailing whitespace/comments), so
             // `alt` can fall through to `naked_named` for multi-entry naked
@@ -5296,14 +5296,14 @@ mod tests {
     // last column is the deepest nesting the limit accepts, which differs by
     // shape because each level passes through a different number of guards.
     const NESTINGS: [Nesting; 8] = [
-        ("subselection", "", "a { ", "b", " }", 9),
-        ("group", "", "a: { ", "b", " }", 30),
-        ("path", "a: b", ".c", "", "", 29),
-        ("method", "a: b", "->first", "", "", 29),
-        ("method arg", "a: ", "b->echo(", "1", ")", 10),
-        ("expr", "a: ", "$(", "1", ")", 15),
-        ("array", "a: ", "[", "1", "]", 30),
-        ("mixed", "", "{ a: [", "1", "] }", 10),
+        ("subselection", "", "a { ", "b", " }", 42),
+        ("group", "", "a: { ", "b", " }", 126),
+        ("path", "a: b", ".c", "", "", 125),
+        ("method", "a: b", "->first", "", "", 125),
+        ("method arg", "a: ", "b->echo(", "1", ")", 42),
+        ("expr", "a: ", "$(", "1", ")", 63),
+        ("array", "a: ", "[", "1", "]", 126),
+        ("mixed", "", "{ a: [", "1", "] }", 42),
     ];
 
     fn nested(shape: Nesting, levels: usize) -> String {
@@ -5315,11 +5315,11 @@ mod tests {
         )
     }
 
-    // Test threads and tokio workers both default to a 2MB stack, so the
-    // limit has to keep parsing and printing within that budget.
-    fn on_default_stack<T: Send + 'static>(f: impl FnOnce() -> T + Send + 'static) -> T {
+    // The limit is chosen for release builds, and debug builds use several
+    // times more stack per level, so tests parse on a larger stack.
+    fn on_large_stack<T: Send + 'static>(f: impl FnOnce() -> T + Send + 'static) -> T {
         std::thread::Builder::new()
-            .stack_size(2 * 1024 * 1024)
+            .stack_size(16 * 1024 * 1024)
             .spawn(f)
             .expect("spawn parser thread")
             .join()
@@ -5337,7 +5337,7 @@ mod tests {
             if JSONSelection::parse_with_spec(&nested(shape, 1), spec).is_err() {
                 continue;
             }
-            let err = on_default_stack(move || {
+            let err = on_large_stack(move || {
                 JSONSelection::parse_with_spec(&nested(shape, 300), spec).map(|_| ())
             })
             .expect_err("deep nesting should be rejected");
@@ -5355,7 +5355,7 @@ mod tests {
     fn limit_accepts_up_to_the_deepest_nesting(#[case] spec: ConnectSpec) {
         for shape in NESTINGS {
             let (name, .., deepest) = shape;
-            let (at_limit, past_limit) = on_default_stack(move || {
+            let (at_limit, past_limit) = on_large_stack(move || {
                 let parse = |levels| {
                     JSONSelection::parse_with_spec(&nested(shape, levels), spec)
                         .map(|_| ())
@@ -5375,5 +5375,47 @@ mod tests {
                 deepest + 1,
             );
         }
+    }
+
+    #[rstest]
+    #[case::v0_4(ConnectSpec::V0_4)]
+    #[case::v0_5(ConnectSpec::V0_5)]
+    fn neighboring_items_do_not_change_the_limit(#[case] spec: ConnectSpec) {
+        for shape in NESTINGS {
+            let (name, .., deepest) = shape;
+            if !matches!(name, "subselection" | "group") {
+                continue;
+            }
+            for levels in [deepest, deepest + 1] {
+                let results = on_large_stack(move || {
+                    let selection = nested(shape, levels);
+                    [
+                        selection.clone(),
+                        format!("x {selection}"),
+                        format!("{selection} x"),
+                    ]
+                    .map(|input| JSONSelection::parse_with_spec(&input, spec).is_ok())
+                });
+                assert_eq!(
+                    results, [results[0]; 3],
+                    "{name} at {levels} levels under {spec:?}, alone, after x and before x",
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn empty_method_arguments_do_not_count_toward_the_limit() {
+        let deepest = |call: &'static str| {
+            on_large_stack(move || {
+                (1..)
+                    .take_while(|steps| {
+                        JSONSelection::parse(&format!("a: b{}", call.repeat(*steps))).is_ok()
+                    })
+                    .last()
+                    .expect("one method call should parse")
+            })
+        };
+        assert_eq!(deepest("->first()"), deepest("->first"));
     }
 }

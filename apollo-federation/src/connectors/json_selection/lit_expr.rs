@@ -140,7 +140,20 @@ impl LitOp {
 impl LitExpr {
     // LitExpr ::= LitOpChain | LitPath | LitPrimitive | LitObject | LitArray | PathSelection
     pub(crate) fn parse(input: Span) -> ParseResult<WithRange<Self>> {
-        let _guard = DepthGuard::increment(&input)?;
+        // Callers try this speculatively before a closing delimiter, which
+        // can never start an expression, so those attempts do not count
+        // toward the recursion limit.
+        let _guard = if input.fragment().trim_start().starts_with([')', ']', '}']) {
+            None
+        } else {
+            Some(DepthGuard::increment(&input)?)
+        };
+        Self::parse_uncounted(input)
+    }
+
+    // Parses without counting a level toward the recursion limit, for a
+    // caller whose alternative parse covers the same nesting and counts it.
+    pub(crate) fn parse_uncounted(input: Span) -> ParseResult<WithRange<Self>> {
         match input.extra.spec {
             ConnectSpec::V0_1 | ConnectSpec::V0_2 => {
                 let (input, _) = spaces_or_comments(input)?;
