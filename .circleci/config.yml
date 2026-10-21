@@ -540,6 +540,40 @@ jobs:
       - setup_environment:
           platform: << parameters.platform >>
       - xtask_check_compliance
+      # build_release requires this job and alerts only when it runs, so a nightly
+      # compliance failure would otherwise go unnoticed.
+      - when:
+          condition: << pipeline.parameters.nightly >>
+          steps:
+            - slack/notify:
+                event: fail
+                channel: "#ii-router-ci-notifications"
+                custom: |
+                  {
+                    "blocks": [
+                      {
+                        "type": "section",
+                        "text": {
+                          "type": "mrkdwn",
+                          "text": ":x: The `nightly` compliance check has *failed* on `${CIRCLE_PROJECT_REPONAME}`'s `${CIRCLE_BRANCH}`, so no nightly was built. Release tags fail the same check until it is fixed."
+                        }
+                      },
+                      {
+                        "type": "actions",
+                        "elements": [
+                          {
+                            "type": "button",
+                            "action_id": "success_tagged_deploy_view",
+                            "text": {
+                              "type": "plain_text",
+                              "text": "View Job"
+                            },
+                            "url": "${CIRCLE_BUILD_URL}"
+                          }
+                        ]
+                      }
+                    ]
+                  }
 
   # Reports every security advisory on PRs. No ruleset requires it, so it can fail
   # without blocking a merge; check_compliance blocks only on advisories a PR introduces.
@@ -1260,6 +1294,10 @@ workflows:
             parameters:
               platform: [amd_linux_helm]
       - check_compliance:
+          # The same contexts as the nightly test job, for the Slack failure alert.
+          context:
+            - router
+            - orb-publishing
           matrix:
             parameters:
               platform: [amd_linux_build]
