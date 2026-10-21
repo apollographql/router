@@ -14,7 +14,9 @@ subscription:
   mode:
     callback:
       public_url: "http://localhost:{{CALLBACK_RECEIVER_PORT}}/callback"
-      listen: "127.0.0.1:{{CALLBACK_LISTENER_PORT}}"
+      # The tests never call this listener. Let the router pick its port: a port
+      # chosen in advance can be taken by another process before the router binds it.
+      listen: "127.0.0.1:0"
       path: "/callback" 
       heartbeat_interval: 5s
       subgraphs: ["accounts"]
