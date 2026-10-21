@@ -22,6 +22,16 @@ pub(crate) enum SelectionOrSet {
 }
 
 impl Selection {
+    fn ptr_eq(&self, other: &Selection) -> bool {
+        match (self, other) {
+            (Selection::Field(left), Selection::Field(right)) => Arc::ptr_eq(left, right),
+            (Selection::InlineFragment(left), Selection::InlineFragment(right)) => {
+                Arc::ptr_eq(left, right)
+            }
+            _ => false,
+        }
+    }
+
     fn flatten_unnecessary_fragments(
         &self,
         parent_type: &CompositeTypeDefinitionPosition,
@@ -38,7 +48,7 @@ impl Selection {
 
 impl FieldSelection {
     fn flatten_unnecessary_fragments(
-        &self,
+        self: &Arc<Self>,
         parent_type: &CompositeTypeDefinitionPosition,
         schema: &ValidFederationSchema,
     ) -> Result<Option<SelectionOrSet>, FederationError> {
@@ -49,19 +59,30 @@ impl FieldSelection {
                 parent_type.field(self.field.name().clone())?
             };
 
-        let field_element =
-            if self.field.schema() == schema && self.field.field_position == field_position {
-                self.field.clone()
-            } else {
-                self.field
-                    .with_updated_position(schema.clone(), field_position)
-            };
+        let element_unchanged =
+            self.field.schema() == schema && self.field.field_position == field_position;
+        let field_element = if element_unchanged {
+            self.field.clone()
+        } else {
+            self.field
+                .with_updated_position(schema.clone(), field_position)
+        };
 
         if let Some(selection_set) = &self.selection_set {
             let field_composite_type_position: CompositeTypeDefinitionPosition =
                 field_element.output_base_type()?.try_into()?;
             let mut normalized_selection: SelectionSet = selection_set
                 .flatten_unnecessary_fragments(&field_composite_type_position, schema)?;
+            // An empty set comes back shared, but still needs the `__typename`
+            // padding below, so it can't take this shortcut.
+            if element_unchanged
+                && !selection_set.is_empty()
+                && normalized_selection.shares_selections_with(selection_set)
+            {
+                return Ok(Some(SelectionOrSet::Selection(Selection::Field(
+                    Arc::clone(self),
+                ))));
+            }
 
             let mut selection = self.with_updated_element(field_element);
             if normalized_selection.is_empty() {
@@ -94,11 +115,23 @@ impl FieldSelection {
                 selection.selection_set = Some(normalized_selection);
             }
             Ok(Some(SelectionOrSet::Selection(Selection::from(selection))))
+        } else if element_unchanged {
+            Ok(Some(SelectionOrSet::Selection(Selection::Field(
+                Arc::clone(self),
+            ))))
         } else {
             Ok(Some(SelectionOrSet::Selection(Selection::from(
                 self.with_updated_element(field_element),
             ))))
         }
+    }
+}
+
+impl SelectionSet {
+    fn shares_selections_with(&self, other: &SelectionSet) -> bool {
+        Arc::ptr_eq(&self.selections, &other.selections)
+            && self.type_position == other.type_position
+            && self.schema == other.schema
     }
 }
 
@@ -392,24 +425,43 @@ impl SelectionSet {
         parent_type: &CompositeTypeDefinitionPosition,
         schema: &ValidFederationSchema,
     ) -> Result<SelectionSet, FederationError> {
+        let flattened = self
+            .selections
+            .values()
+            .map(|selection| selection.flatten_unnecessary_fragments(parent_type, schema))
+            .collect::<Result<Vec<_>, _>>()?;
+        // When every selection came back as itself, the rebuilt map would be
+        // identical, so share it instead.
+        let unchanged =
+            flattened
+                .iter()
+                .zip(self.selections.values())
+                .all(|(flattened, original)| {
+                    matches!(flattened, Some(SelectionOrSet::Selection(selection))
+                    if selection.ptr_eq(original))
+                });
+        if unchanged {
+            return Ok(Self {
+                schema: schema.clone(),
+                type_position: parent_type.clone(),
+                selections: Arc::clone(&self.selections),
+            });
+        }
+
         let mut normalized_selections = Self {
             schema: schema.clone(),
             type_position: parent_type.clone(),
             selections: Default::default(), // start empty
         };
-        for selection in self.selections.values() {
-            if let Some(selection_or_set) =
-                selection.flatten_unnecessary_fragments(parent_type, schema)?
-            {
-                match selection_or_set {
-                    SelectionOrSet::Selection(normalized_selection) => {
-                        normalized_selections.add_local_selection(&normalized_selection)?;
-                    }
-                    SelectionOrSet::SelectionSet(normalized_set) => {
-                        // Since the `selection` has been expanded/lifted, we use
-                        // `add_selection_set` to make sure it's rebased.
-                        normalized_selections.add_selection_set(&normalized_set)?;
-                    }
+        for selection_or_set in flattened.into_iter().flatten() {
+            match selection_or_set {
+                SelectionOrSet::Selection(normalized_selection) => {
+                    normalized_selections.add_local_selection(&normalized_selection)?;
+                }
+                SelectionOrSet::SelectionSet(normalized_set) => {
+                    // Since the `selection` has been expanded/lifted, we use
+                    // `add_selection_set` to make sure it's rebased.
+                    normalized_selections.add_selection_set(&normalized_set)?;
                 }
             }
         }
@@ -498,5 +550,40 @@ type Query {
               }
             }
         "#);
+    }
+
+    /// Flattening a selection set with nothing to flatten shares its
+    /// selections instead of rebuilding them.
+    #[test]
+    fn flattening_a_flat_selection_set_shares_it() {
+        let schema = Schema::parse_and_validate(
+            r#"
+            type Query { t: T i: I }
+            type T { id: ID u: U }
+            type U { v: Int }
+            interface I { id: ID }
+            type A implements I { id: ID a: Int }
+            "#,
+            "schema.graphql",
+        )
+        .unwrap();
+        let schema = ValidFederationSchema::new(schema).unwrap();
+        let operation = Operation::parse(
+            schema.clone(),
+            "{ t { id u { v } } i { id ... on A { a } } }",
+            "query.graphql",
+        )
+        .unwrap();
+        let selection_set = &operation.selection_set;
+
+        let flattened = selection_set
+            .flatten_unnecessary_fragments(&selection_set.type_position, &schema)
+            .unwrap();
+
+        assert_eq!(&flattened, selection_set);
+        assert!(Arc::ptr_eq(
+            &flattened.selections,
+            &selection_set.selections
+        ));
     }
 }
