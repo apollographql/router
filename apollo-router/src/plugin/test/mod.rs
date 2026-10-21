@@ -23,6 +23,56 @@ pub(crate) async fn await_mock_driver(driver: tokio::task::JoinHandle<()>) {
         .expect("mock driver panicked");
 }
 
+/// Wraps a service and counts every clone of it in a shared counter.
+///
+/// `BoxCloneService::clone` is deep, so a layer that clones its inner service per request clones
+/// everything beneath it too. Placing this at the bottom of a stack counts those clones.
+#[cfg(test)]
+pub(crate) struct CountClones<S> {
+    inner: S,
+    clones: std::sync::Arc<std::sync::atomic::AtomicUsize>,
+}
+
+#[cfg(test)]
+impl<S> CountClones<S> {
+    pub(crate) fn new(inner: S, clones: std::sync::Arc<std::sync::atomic::AtomicUsize>) -> Self {
+        Self { inner, clones }
+    }
+}
+
+#[cfg(test)]
+impl<S: Clone> Clone for CountClones<S> {
+    fn clone(&self) -> Self {
+        self.clones
+            .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+        Self {
+            inner: self.inner.clone(),
+            clones: self.clones.clone(),
+        }
+    }
+}
+
+#[cfg(test)]
+impl<S, Req> tower::Service<Req> for CountClones<S>
+where
+    S: tower::Service<Req>,
+{
+    type Response = S::Response;
+    type Error = S::Error;
+    type Future = S::Future;
+
+    fn poll_ready(
+        &mut self,
+        cx: &mut std::task::Context<'_>,
+    ) -> std::task::Poll<Result<(), Self::Error>> {
+        self.inner.poll_ready(cx)
+    }
+
+    fn call(&mut self, req: Req) -> Self::Future {
+        self.inner.call(req)
+    }
+}
+
 /// Assert that a mock service is never called during the test.
 ///
 /// Waits up to 10 ms after the test action for a request to arrive; if one does,

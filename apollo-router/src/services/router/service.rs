@@ -4,6 +4,7 @@ use std::task::Poll;
 
 use axum::response::*;
 use bytes::Bytes;
+use futures::FutureExt as _;
 use futures::future::BoxFuture;
 use futures::future::ready;
 use futures::stream::StreamExt;
@@ -91,98 +92,101 @@ where
         self.inner.poll_ready(cx)
     }
 
-    fn call(&mut self, mut req: RouterRequest) -> Self::Future {
+    fn call(&mut self, req: RouterRequest) -> Self::Future {
+        // The marker is set by telemetry's router layer before it calls into this one.
+        let Some(level) = req
+            .context
+            .extensions()
+            .with_lock(|ext| ext.get::<DisplayRouterRequest>().cloned())
+            .map(|d| d.0)
+        else {
+            return self.inner.call(req).boxed();
+        };
+
         let inner = self.inner.clone();
         let mut inner = std::mem::replace(&mut self.inner, inner);
 
         Box::pin(async move {
-            if let Some(level) = req
-                .context
-                .extensions()
-                .with_lock(|ext| ext.get::<DisplayRouterRequest>().cloned())
-                .map(|d| d.0)
-            {
-                // XXX(@goto-bus-stop): a better implementation of this might be to wrap the body
-                // type, and log automatically once it is out of data. It also wouldn't require the
-                // `is_fixed_size` workaround below.
-                let RouterRequest {
-                    context,
-                    router_request,
-                } = req;
-                let (parts, body) = router_request.into_parts();
+            // XXX(@goto-bus-stop): a better implementation of this might be to wrap the body
+            // type, and log automatically once it is out of data. It also wouldn't require the
+            // `is_fixed_size` workaround below.
+            let RouterRequest {
+                context,
+                router_request,
+            } = req;
+            let (parts, body) = router_request.into_parts();
 
-                // Only show the "receive_body" span if we haven't received the body yet, to prevent
-                // having multiple of those spans
-                let is_fixed_size = body.size_hint().exact().is_some();
-                let bytes = if is_fixed_size {
-                    router::body::into_bytes(body).await?
-                } else {
-                    router::body::into_bytes(body)
-                        .instrument(tracing::debug_span!("receive_body"))
-                        .await?
-                };
+            // Only show the "receive_body" span if we haven't received the body yet, to prevent
+            // having multiple of those spans
+            let is_fixed_size = body.size_hint().exact().is_some();
+            let bytes = if is_fixed_size {
+                router::body::into_bytes(body).await?
+            } else {
+                router::body::into_bytes(body)
+                    .instrument(tracing::debug_span!("receive_body"))
+                    .await?
+            };
 
-                let mut attrs = Vec::with_capacity(5);
+            let mut attrs = Vec::with_capacity(5);
+            #[cfg(test)]
+            let mut headers: indexmap::IndexMap<String, http::HeaderValue> = parts
+                .headers
+                .clone()
+                .into_iter()
+                .filter_map(|(name, val)| Some((name?.to_string(), val)))
+                .collect();
+            #[cfg(test)]
+            headers.sort_keys();
+            #[cfg(not(test))]
+            let headers = &parts.headers;
+
+            let header_string = {
                 #[cfg(test)]
-                let mut headers: indexmap::IndexMap<String, http::HeaderValue> = parts
-                    .headers
-                    .clone()
-                    .into_iter()
-                    .filter_map(|(name, val)| Some((name?.to_string(), val)))
-                    .collect();
-                #[cfg(test)]
-                headers.sort_keys();
+                {
+                    // Deterministic output for snapshot/log assertions.
+                    format!("{:?}", headers)
+                }
                 #[cfg(not(test))]
-                let headers = &parts.headers;
+                {
+                    crate::services::header_masking::masked_headers_for_log(
+                        &context,
+                        crate::services::header_masking::Direction::Request,
+                        None,
+                        headers,
+                    )
+                }
+            };
+            attrs.push(KeyValue::new(
+                HTTP_REQUEST_HEADERS,
+                opentelemetry::Value::String(header_string.into()),
+            ));
+            attrs.push(KeyValue::new(
+                HTTP_REQUEST_METHOD,
+                opentelemetry::Value::String(format!("{}", parts.method).into()),
+            ));
+            attrs.push(KeyValue::new(
+                HTTP_REQUEST_URI,
+                opentelemetry::Value::String(format!("{}", parts.uri).into()),
+            ));
+            attrs.push(KeyValue::new(
+                HTTP_REQUEST_VERSION,
+                opentelemetry::Value::String(format!("{:?}", parts.version).into()),
+            ));
+            attrs.push(KeyValue::new(
+                HTTP_REQUEST_BODY,
+                opentelemetry::Value::String(
+                    format!("{:?}", String::from_utf8_lossy(&bytes)).into(),
+                ),
+            ));
+            log_event(level, "router.request", attrs, "");
 
-                let header_string = {
-                    #[cfg(test)]
-                    {
-                        // Deterministic output for snapshot/log assertions.
-                        format!("{:?}", headers)
-                    }
-                    #[cfg(not(test))]
-                    {
-                        crate::services::header_masking::masked_headers_for_log(
-                            &context,
-                            crate::services::header_masking::Direction::Request,
-                            None,
-                            headers,
-                        )
-                    }
-                };
-                attrs.push(KeyValue::new(
-                    HTTP_REQUEST_HEADERS,
-                    opentelemetry::Value::String(header_string.into()),
-                ));
-                attrs.push(KeyValue::new(
-                    HTTP_REQUEST_METHOD,
-                    opentelemetry::Value::String(format!("{}", parts.method).into()),
-                ));
-                attrs.push(KeyValue::new(
-                    HTTP_REQUEST_URI,
-                    opentelemetry::Value::String(format!("{}", parts.uri).into()),
-                ));
-                attrs.push(KeyValue::new(
-                    HTTP_REQUEST_VERSION,
-                    opentelemetry::Value::String(format!("{:?}", parts.version).into()),
-                ));
-                attrs.push(KeyValue::new(
-                    HTTP_REQUEST_BODY,
-                    opentelemetry::Value::String(
-                        format!("{:?}", String::from_utf8_lossy(&bytes)).into(),
-                    ),
-                ));
-                log_event(level, "router.request", attrs, "");
-
-                let body = router::body::from_bytes(bytes);
-                req = RouterRequest {
+            let body = router::body::from_bytes(bytes);
+            inner
+                .call(RouterRequest {
                     context,
                     router_request: http::Request::from_parts(parts, body),
-                };
-            }
-
-            inner.call(req).await
+                })
+                .await
         })
     }
 }

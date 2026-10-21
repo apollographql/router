@@ -120,15 +120,9 @@ where
     }
 
     fn call(&mut self, req: SupergraphRequest) -> Self::Future {
-        let inner = self.inner.clone();
-        let mut inner = std::mem::replace(&mut self.inner, inner);
-
-        let wrapped = self.wrapped.clone();
-        Box::pin(async move {
-            match wrapped.supergraph_request_with_analyzed_query(req).await {
-                Ok(req) => inner.call(req).await,
-                Err(res) => Ok(res),
-            }
-        })
+        match self.wrapped.supergraph_request_with_analyzed_query(req) {
+            Ok(req) => self.inner.call(req).boxed(),
+            Err(res) => std::future::ready(Ok(res)).boxed(),
+        }
     }
 }
