@@ -418,7 +418,7 @@ fn reached_under_key(
     for selection in selections {
         match selection {
             Selection::Field(field) => {
-                if field.response_key() != name || reached.current.narrowed.is_empty() {
+                if field.response_name() != name || reached.current.narrowed.is_empty() {
                     continue;
                 }
                 let Some(carried) = reached.under(&field.directives) else {

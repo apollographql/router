@@ -1338,7 +1338,7 @@ fn selection_syntactically_includes(
             let (Selection::Field(left), Selection::Field(right)) = (left, right) else {
                 return false;
             };
-            left.response_key() == right.response_key()
+            left.response_name() == right.response_name()
                 && left.name == right.name
                 && same_arguments(&left.arguments, &right.arguments)
                 && same_directive_list(&left.directives, &right.directives)

@@ -328,7 +328,7 @@ fn selections_under_key(
     for selection in available {
         match selection {
             Selection::Field(field) => {
-                if field.response_key() != name {
+                if field.response_name() != name {
                     continue;
                 }
                 let inner = selections_at(
@@ -520,7 +520,7 @@ fn rename_key_under(
     selections
         .into_iter()
         .map(|selection| match selection {
-            Selection::Field(field) if field.response_key() == name => {
+            Selection::Field(field) if field.response_name() == name => {
                 let mut copy = (*field).clone();
                 copy.selection_set.selections = rename_key_at(
                     schema,
@@ -566,7 +566,7 @@ fn rename_here(
         .into_iter()
         .map(|selection| match selection {
             Selection::Field(field)
-                if field.response_key() == name && applies(schema, type_filter, guards) =>
+                if field.response_name() == name && applies(schema, type_filter, guards) =>
             {
                 let mut copy = (*field).clone();
                 copy.alias = Some(new_key.clone());

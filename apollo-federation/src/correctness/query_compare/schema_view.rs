@@ -114,8 +114,8 @@ impl<'schema> SchemaView<'schema> {
                 .then_some(&self.typename);
         }
         match self.schema.schema().types.get(parent_type)? {
-            ExtendedType::Object(ty) => ty.fields.get(field_name).map(|field| &***field),
-            ExtendedType::Interface(ty) => ty.fields.get(field_name).map(|field| &***field),
+            ExtendedType::Object(ty) => ty.fields.get(field_name).map(|field| &**field),
+            ExtendedType::Interface(ty) => ty.fields.get(field_name).map(|field| &**field),
             _ => None,
         }
     }

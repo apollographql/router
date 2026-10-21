@@ -674,6 +674,16 @@ impl Checker<'_> {
         available: &[Selection],
         readable: &[Selection],
     ) -> Result<(), ComparisonError> {
+        let grouped;
+        let fetch = if fetch.requires.iter().any(has_conditions) {
+            grouped = FetchNode {
+                requires: group_requires_by_type_condition(&fetch.requires),
+                ..fetch.clone()
+            };
+            &grouped
+        } else {
+            fetch
+        };
         let cases = entity_cases(fetch, entity_body)?;
         let require_types = require_types(fetch)?;
         if cases.len() > require_types.len() {
@@ -1044,6 +1054,48 @@ fn require_types(fetch: &FetchNode) -> Result<Vec<&Name>, ComparisonError> {
         .collect()
 }
 
+fn has_conditions(item: &requires_selection::Selection) -> bool {
+    matches!(item, requires_selection::Selection::InlineFragment(inline) if !inline.conditions.is_empty())
+}
+
+/// The router builds one representation per entity from every top-level `requires` item whose
+/// type condition matches it, so items sharing a type condition are one entry. A conditional item
+/// is nested under its group so its conditions are kept.
+fn group_requires_by_type_condition(
+    requires: &[requires_selection::Selection],
+) -> Vec<requires_selection::Selection> {
+    let mut grouped: Vec<requires_selection::Selection> = Vec::new();
+    for item in requires {
+        let requires_selection::Selection::InlineFragment(inline) = item else {
+            grouped.push(item.clone());
+            continue;
+        };
+        let group = grouped.iter_mut().find_map(|existing| match existing {
+            requires_selection::Selection::InlineFragment(existing)
+                if existing.type_condition == inline.type_condition =>
+            {
+                Some(existing)
+            }
+            _ => None,
+        });
+        match group {
+            None if inline.conditions.is_empty() => grouped.push(item.clone()),
+            None => grouped.push(requires_selection::Selection::InlineFragment(
+                requires_selection::InlineFragment {
+                    type_condition: inline.type_condition.clone(),
+                    conditions: Vec::new(),
+                    selections: vec![item.clone()],
+                },
+            )),
+            Some(group) if inline.conditions.is_empty() => {
+                group.selections.extend(inline.selections.iter().cloned())
+            }
+            Some(group) => group.selections.push(item.clone()),
+        }
+    }
+    grouped
+}
+
 /// The entity cases of a fetch: the type condition and selections of each `_entities` inline
 /// fragment, one per entity type the fetch asks about.
 ///
@@ -1051,25 +1103,37 @@ fn require_types(fetch: &FetchNode) -> Result<Vec<&Name>, ComparisonError> {
 fn entity_cases<'a>(
     fetch: &FetchNode,
     entity_body: &'a [Selection],
-) -> Result<Vec<(&'a Name, &'a [Selection])>, ComparisonError> {
-    entity_body
-        .iter()
-        .map(|selection| match selection {
-            Selection::InlineFragment(fragment) => match &fragment.type_condition {
-                Some(entity_type) => {
-                    Ok((entity_type, fragment.selection_set.selections.as_slice()))
-                }
-                None => Err(ComparisonError::new(format!(
-                    "fetch to {}: an `{ENTITIES_FIELD_NAME}` selection must carry a type condition",
-                    fetch.subgraph_name
-                ))),
-            },
-            _ => Err(ComparisonError::new(format!(
+) -> Result<Vec<(&'a Name, Vec<Selection>)>, ComparisonError> {
+    // The router applies every fragment matching an entity, so fragments on one type are one case.
+    // A fragment's own directives are kept around its selections.
+    let mut cases: Vec<(&'a Name, Vec<Selection>)> = Vec::new();
+    for selection in entity_body {
+        let Selection::InlineFragment(fragment) = selection else {
+            return Err(ComparisonError::new(format!(
                 "fetch to {}: `{ENTITIES_FIELD_NAME}` must select only inline fragments",
                 fetch.subgraph_name
-            ))),
-        })
-        .collect()
+            )));
+        };
+        let Some(entity_type) = &fragment.type_condition else {
+            return Err(ComparisonError::new(format!(
+                "fetch to {}: an `{ENTITIES_FIELD_NAME}` selection must carry a type condition",
+                fetch.subgraph_name
+            )));
+        };
+        let selections = selections::under_directives(
+            &fragment.directives,
+            entity_type,
+            fragment.selection_set.selections.clone(),
+        );
+        match cases
+            .iter_mut()
+            .find(|(existing, _)| *existing == entity_type)
+        {
+            Some((_, existing)) => existing.extend(selections),
+            None => cases.push((entity_type, selections)),
+        }
+    }
+    Ok(cases)
 }
 
 //==================================================================================================
@@ -1086,6 +1150,7 @@ impl Checker<'_> {
         // rejects an unused declaration. Only shared declarations are compared, so this is safe.
         let used = variable_usages(&selections);
         let mut built = executable::Operation {
+            description: None,
             operation_type: self.operation.operation_type,
             name: self.operation.name.clone(),
             variables: self.variable_declarations(Some(&used)),
@@ -1137,6 +1202,7 @@ impl Checker<'_> {
                     return variable.clone();
                 }
                 Node::new(ast::VariableDefinition {
+                    description: variable.description.clone(),
                     name: variable.name.clone(),
                     ty: Node::new(ast::Type::NonNullNamed(name!("Boolean"))),
                     default_value: None,

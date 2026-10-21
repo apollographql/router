@@ -211,6 +211,7 @@ fn context_met(
         input_rewrites: Default::default(),
         output_rewrites: Vec::new(),
         context_rewrites: rewrites,
+        protocol: Default::default(),
     };
     // Outside a deferred block, what a fetch can read is everything fetched before it.
     check_context_rewrites(

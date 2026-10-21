@@ -154,10 +154,10 @@ fn lookup_field<'a>(
 ) -> Option<&'a ast::FieldDefinition> {
     match schema.schema().types.get(parent_type)? {
         apollo_compiler::schema::ExtendedType::Object(ty) => {
-            ty.fields.get(field_name).map(|field| &***field)
+            ty.fields.get(field_name).map(|field| &**field)
         }
         apollo_compiler::schema::ExtendedType::Interface(ty) => {
-            ty.fields.get(field_name).map(|field| &***field)
+            ty.fields.get(field_name).map(|field| &**field)
         }
         _ => None,
     }
@@ -508,7 +508,7 @@ fn field_definition(
         .field(field_name.clone())
         .map_err(|_| missing())?
         .get(schema.schema())
-        .map(|component| component.node.clone())
+        .cloned()
         .map_err(|_| missing())
 }
 
@@ -523,7 +523,7 @@ pub(super) fn same_keys(left: &[Selection], right: &[Selection]) -> bool {
     left.iter().zip(right).all(|(left, right)| {
         match (left, right) {
             (Selection::Field(left), Selection::Field(right)) => {
-                left.response_key() == right.response_key()
+                left.response_name() == right.response_name()
                     && same_keys(
                         &left.selection_set.selections,
                         &right.selection_set.selections,
@@ -550,13 +550,14 @@ pub(super) fn to_requires_field_set(
             Selection::Field(field) => Some(requires_selection::Selection::Field(
                 requires_selection::Field {
                     alias: None,
-                    name: field.response_key().clone(),
+                    name: field.response_name().clone(),
                     selections: to_requires_field_set(&field.selection_set.selections),
                 },
             )),
             Selection::InlineFragment(fragment) => Some(
                 requires_selection::Selection::InlineFragment(requires_selection::InlineFragment {
                     type_condition: fragment.type_condition.clone(),
+                    conditions: Vec::new(),
                     selections: to_requires_field_set(&fragment.selection_set.selections),
                 }),
             ),
@@ -640,7 +641,7 @@ fn check_no_conflicting_demands(
 
     let mut keys: Vec<&Name> = Vec::new();
     for demand in &demands {
-        let key = demand.field.response_key();
+        let key = demand.field.response_name();
         if !keys.contains(&key) {
             keys.push(key);
         }
@@ -649,7 +650,7 @@ fn check_no_conflicting_demands(
     for key in keys {
         let here: Vec<&Demand<'_>> = demands
             .iter()
-            .filter(|demand| demand.field.response_key() == key)
+            .filter(|demand| demand.field.response_name() == key)
             .collect();
         for (index, left) in here.iter().enumerate() {
             for right in &here[index + 1..] {

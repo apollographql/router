@@ -347,7 +347,7 @@ pub(crate) struct ConditionedField<'doc> {
 
 impl<'doc> ConditionedField<'doc> {
     pub(crate) fn response_name(&self) -> &'doc Name {
-        self.field.response_key()
+        self.field.response_name()
     }
 }
 
