@@ -3962,6 +3962,375 @@ fn connector_field_without_this_beside_this_connector() {
     "#);
 }
 
+/// Two type-level connectors where one returns a superset of the other:
+/// `{ name reviews }` is served by the superset alone.
+#[test]
+fn connector_superset_type_connector_absorbs_sibling_fetch() {
+    let plan_str = plan_query_with_router_specs(
+        include_str!("../fixtures/connector_superset_type_connector.graphql"),
+        "{ topProducts { name reviews { rating comment } } }",
+    );
+    insta::assert_snapshot!(plan_str, @r#"
+    QueryPlan {
+      Sequence {
+        Fetch(service: "catalog") {
+          {
+            topProducts {
+              __typename
+              id
+            }
+          }
+        },
+        Flatten(path: "topProducts.@") {
+          Fetch(service: "products_Product_1") {
+            {
+              ... on Product {
+                __typename
+                id
+              }
+            } =>
+            {
+              ... on Product {
+                reviews {
+                  rating
+                  comment
+                }
+                name
+              }
+            }
+          },
+        },
+      },
+    }
+    "#);
+}
+
+/// Only `name` requested: the narrower connector is enough, and nothing is
+/// absorbed.
+#[test]
+fn connector_superset_type_connector_not_used_when_unneeded() {
+    let plan_str = plan_query_with_router_specs(
+        include_str!("../fixtures/connector_superset_type_connector.graphql"),
+        "{ topProducts { name } }",
+    );
+    insta::assert_snapshot!(plan_str, @r#"
+    QueryPlan {
+      Sequence {
+        Fetch(service: "catalog") {
+          {
+            topProducts {
+              __typename
+              id
+            }
+          }
+        },
+        Flatten(path: "topProducts.@") {
+          Fetch(service: "products_Product_0") {
+            {
+              ... on Product {
+                __typename
+                id
+              }
+            } =>
+            {
+              ... on Product {
+                name
+              }
+            }
+          },
+        },
+      },
+    }
+    "#);
+}
+
+/// A narrow `entity: true` resolver beside a type-level superset:
+/// `{ name reviews }` is served by the superset alone.
+#[test]
+fn connector_superset_type_connector_absorbs_entity_resolver_fetch() {
+    let plan_str = plan_query_with_router_specs(
+        include_str!("../fixtures/connector_superset_entity_resolver.graphql"),
+        "{ topProducts { name reviews { rating comment } } }",
+    );
+    insta::assert_snapshot!(plan_str, @r#"
+    QueryPlan {
+      Sequence {
+        Fetch(service: "catalog") {
+          {
+            topProducts {
+              __typename
+              id
+            }
+          }
+        },
+        Flatten(path: "topProducts.@") {
+          Fetch(service: "products_Product_0") {
+            {
+              ... on Product {
+                __typename
+                id
+              }
+            } =>
+            {
+              ... on Product {
+                reviews {
+                  rating
+                  comment
+                }
+                name
+              }
+            }
+          },
+        },
+      },
+    }
+    "#);
+}
+
+/// Only connectors that already have a fetch can absorb the others: C
+/// returns both `name` and `reviews`, but routing picked A and B, so both
+/// still run.
+#[test]
+fn connector_superset_not_in_plan_does_not_absorb() {
+    let plan_str = plan_query_with_router_specs(
+        include_str!("../fixtures/connector_superset_not_in_plan.graphql"),
+        "{ topProducts { name reviews { rating } } }",
+    );
+    insta::assert_snapshot!(plan_str, @r#"
+    QueryPlan {
+      Sequence {
+        Fetch(service: "catalog") {
+          {
+            topProducts {
+              __typename
+              id
+            }
+          }
+        },
+        Parallel {
+          Flatten(path: "topProducts.@") {
+            Fetch(service: "products_Product_1") {
+              {
+                ... on Product {
+                  __typename
+                  id
+                }
+              } =>
+              {
+                ... on Product {
+                  reviews {
+                    rating
+                  }
+                }
+              }
+            },
+          },
+          Flatten(path: "topProducts.@") {
+            Fetch(service: "products_Product_0") {
+              {
+                ... on Product {
+                  __typename
+                  id
+                }
+              } =>
+              {
+                ... on Product {
+                  name
+                }
+              }
+            },
+          },
+        },
+      },
+    }
+    "#);
+}
+
+/// `Book` and `Movie` connectors share the key `id` and both return `title`,
+/// but each union member's representations go to its own connector.
+#[test]
+fn connector_same_key_union_members_not_absorbed() {
+    let plan_str = plan_query_with_router_specs(
+        include_str!("../fixtures/connector_same_key_union_members.graphql"),
+        "{ media { ... on Book { title } ... on Movie { title } } }",
+    );
+    insta::assert_snapshot!(plan_str, @r#"
+    QueryPlan {
+      Sequence {
+        Fetch(service: "catalog") {
+          {
+            media {
+              __typename
+              ... on Book {
+                __typename
+                id
+              }
+              ... on Movie {
+                __typename
+                id
+              }
+            }
+          }
+        },
+        Parallel {
+          Flatten(path: "media.@|[Movie]") {
+            Fetch(service: "products_Movie_0") {
+              {
+                ... on Movie {
+                  __typename
+                  id
+                }
+              } =>
+              {
+                ... on Movie {
+                  title
+                }
+              }
+            },
+          },
+          Flatten(path: "media.@|[Book]") {
+            Fetch(service: "products_Book_0") {
+              {
+                ... on Book {
+                  __typename
+                  id
+                }
+              } =>
+              {
+                ... on Book {
+                  title
+                }
+              }
+            },
+          },
+        },
+      },
+    }
+    "#);
+}
+
+/// Like the union case, through an interface's implementations.
+#[test]
+fn connector_same_key_interface_implementations_not_absorbed() {
+    let plan_str = plan_query_with_router_specs(
+        include_str!("../fixtures/connector_same_key_interface_implementations.graphql"),
+        "{ media { ... on Book { title } ... on Movie { title } } }",
+    );
+    insta::assert_snapshot!(plan_str, @r#"
+    QueryPlan {
+      Sequence {
+        Fetch(service: "catalog") {
+          {
+            media {
+              __typename
+              ... on Book {
+                __typename
+                id
+              }
+              ... on Movie {
+                __typename
+                id
+              }
+            }
+          }
+        },
+        Parallel {
+          Flatten(path: "media.@|[Movie]") {
+            Fetch(service: "products_Movie_0") {
+              {
+                ... on Movie {
+                  __typename
+                  id
+                }
+              } =>
+              {
+                ... on Movie {
+                  title
+                }
+              }
+            },
+          },
+          Flatten(path: "media.@|[Book]") {
+            Fetch(service: "products_Book_0") {
+              {
+                ... on Book {
+                  __typename
+                  id
+                }
+              } =>
+              {
+                ... on Book {
+                  title
+                }
+              }
+            },
+          },
+        },
+      },
+    }
+    "#);
+}
+
+/// The `Book` connector returns `title` too, but `Media` representations
+/// from the `@interfaceObject` fetch stay on the `Media` connector.
+#[test]
+fn connector_same_key_interface_object_not_absorbed() {
+    let plan_str = plan_query_with_router_specs(
+        include_str!("../fixtures/connector_same_key_interface_object.graphql"),
+        "{ media { title ... on Book { isbn } } }",
+    );
+    insta::assert_snapshot!(plan_str, @r#"
+    QueryPlan {
+      Sequence {
+        Fetch(service: "catalog") {
+          {
+            media {
+              __typename
+              ... on Book {
+                __typename
+                id
+              }
+              id
+            }
+          }
+        },
+        Parallel {
+          Flatten(path: "media.@") {
+            Fetch(service: "products_Media_0") {
+              {
+                ... on Media {
+                  __typename
+                  id
+                }
+              } =>
+              {
+                ... on Media {
+                  title
+                }
+              }
+            },
+          },
+          Flatten(path: "media.@|[Book]") {
+            Fetch(service: "products_Book_0") {
+              {
+                ... on Book {
+                  __typename
+                  id
+                }
+              } =>
+              {
+                ... on Book {
+                  isbn
+                }
+              }
+            },
+          },
+        },
+      },
+    }
+    "#);
+}
+
 /// The connector returns `author` without its key. Re-fetch `author` from
 /// the `Post` level through `post(id:)`, which returns the key, instead of
 /// sending `User` representations with no `id`.
