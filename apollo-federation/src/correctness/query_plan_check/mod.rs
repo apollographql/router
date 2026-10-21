@@ -15,9 +15,9 @@
 //!   selections at the path it runs at, then ask whether the result includes the client operation.
 //!   That question is [`super::query_compare::includes`], itself a port of the model's
 //!   `includesBool`.
-//! - **Soundness** — every entity fetch's `requires` is matched by its entity cases, checked where
-//!   the fetch is reached, while the state that reached it is in hand. No fetch site is ever
-//!   collected.
+//! - **Soundness** — every fetch's subgraph can resolve what the fetch selects, and every entity
+//!   fetch's `requires` is matched by its entity cases, each checked where the fetch is reached,
+//!   while the state that reached it is in hand. No fetch site is ever collected.
 //!
 //! # What a fetch must already have found
 //!
@@ -33,10 +33,11 @@
 //!
 //! # Differences from the model
 //!
-//! - **The subgraph oracle.** The model has no notion of which subgraphs can resolve a field; the
-//!   legacy checker does, through `SubgraphConstraint`. That oracle is passed to
-//!   `includes_with_constraint` here, so this reaches parity with legacy rather than with the
-//!   model alone.
+//! - **The subgraph oracle.** Every comparison of the composed response, completeness and each
+//!   requirement alike, is restricted by `SubgraphConstraint`, the legacy checker's oracle, which
+//!   narrows the types a field's result can have to the ones the subgraphs declaring the field
+//!   can return; it is passed to `includes_with_constraint` here, so this reaches parity with
+//!   legacy rather than with the model alone, which compares the composed response unrestricted.
 //! - **No fuel.** `conditionMatchesRequirementFuel` carries a budget that is an artifact of Lean's
 //!   termination checker; the model's own notes say an implementation should simply loop.
 //! - **What a deferred block's dependencies sent is recorded, not recomputed.** The model walks
@@ -107,6 +108,7 @@
 
 mod context;
 mod requires;
+mod resolution;
 mod selections;
 mod subgraph;
 #[cfg(test)]
@@ -140,6 +142,7 @@ use self::requires::key_half;
 use self::requires::requires_half;
 use self::requires::same_keys;
 use self::requires::to_requires_field_set;
+use self::resolution::check_fetch_resolves;
 use self::selections::apply_key_renamers;
 use self::selections::inline_fragment_spreads;
 use self::selections::invert_key_renamers;
@@ -321,14 +324,22 @@ fn check_path_reaches_a_type(path: &[FetchDataPathElement]) -> Result<(), Compar
             return Err(ComparisonError::new(format!(
                 "flatten path `{}` narrows `{element}` to no runtime type, \
                  so the fetch under it can never run",
-                path.iter()
-                    .map(|e| e.to_string())
-                    .collect::<Vec<_>>()
-                    .join(".")
+                display_path(path)
             )));
         }
     }
     Ok(())
+}
+
+/// A fetch data path as the checker's explanations write it, its elements joined by `.`.
+fn display_path(path: &[FetchDataPathElement]) -> String {
+    if path.is_empty() {
+        return "the operation root".to_string();
+    }
+    path.iter()
+        .map(|element| element.to_string())
+        .collect::<Vec<_>>()
+        .join(".")
 }
 
 /// Every variable a condition node of a plan branches on.
@@ -584,8 +595,9 @@ impl<'a> Checker<'a> {
 
     /// What one fetch contributes, mounted where it runs.
     ///
-    /// An entity fetch is checked here, while the state that reached it is in hand, so no fetch
-    /// site is ever collected.
+    /// Every fetch is checked here against what its subgraph can resolve, and an entity fetch
+    /// against its requirements too, while the state that reached it is in hand, so no fetch site
+    /// is ever collected.
     fn walk_fetch(
         &self,
         fetch: &FetchNode,
@@ -593,7 +605,10 @@ impl<'a> Checker<'a> {
         available: &[Selection],
         readable: &[Selection],
     ) -> Result<Vec<Selection>, ComparisonError> {
-        let body = self.fetch_body(fetch)?;
+        let subgraph = self.subgraph(fetch)?;
+        let operation = self.fetch_body(fetch)?;
+        check_fetch_resolves(&subgraph, &fetch.subgraph_name, reached.path, &operation)?;
+        let body = operation.selections;
         // A root fetch selects its whole operation and requires nothing; an entity fetch selects
         // what its operation asks of the entities it was given, which are those of a type some
         // `requires` entry is written at: `execute_selection_set` keeps an entry's fragment only
@@ -606,7 +621,7 @@ impl<'a> Checker<'a> {
             body
         } else {
             let entity_body = entity_body(fetch, &body)?;
-            self.check_fetch(fetch, &entity_body, reached, available, readable)?;
+            self.check_fetch(fetch, &subgraph, &entity_body, reached, available, readable)?;
             restrict_to_entry_types(&require_types(fetch)?, entity_body)
         };
         // The entity cases were read off the fetch's own operation above; what it *contributes*
@@ -630,8 +645,23 @@ impl<'a> Checker<'a> {
         ))
     }
 
-    /// A fetch's own operation, its fragment spreads inlined.
-    fn fetch_body(&self, fetch: &FetchNode) -> Result<Vec<Selection>, ComparisonError> {
+    /// The subgraph a fetch is sent to.
+    fn subgraph(&self, fetch: &FetchNode) -> Result<Subgraph<'a>, ComparisonError> {
+        let subgraph_schema = self
+            .subgraphs_by_name
+            .get(fetch.subgraph_name.as_ref())
+            .ok_or_else(|| {
+                ComparisonError::new(format!(
+                    "fetch to unknown subgraph `{}`",
+                    fetch.subgraph_name
+                ))
+            })?;
+        Subgraph::new(subgraph_schema)
+    }
+
+    /// A fetch's own operation's selection set, at the operation's root type in the subgraph, its
+    /// fragment spreads inlined.
+    fn fetch_body(&self, fetch: &FetchNode) -> Result<executable::SelectionSet, ComparisonError> {
         let document = fetch.operation_document.as_parsed().map_err(|e| {
             ComparisonError::new(format!(
                 "fetch to {}: operation document is not parsed: {e}",
@@ -646,7 +676,10 @@ impl<'a> Checker<'a> {
         })?;
         // Spreads go here, at the boundary where this fetch's selections join the shared buffer;
         // see `inline_fragment_spreads`.
-        inline_fragment_spreads(&operation.selection_set.selections, &document.fragments)
+        let mut body = executable::SelectionSet::new(operation.selection_set.ty.clone());
+        body.selections =
+            inline_fragment_spreads(&operation.selection_set.selections, &document.fragments)?;
+        Ok(body)
     }
 }
 
@@ -689,6 +722,7 @@ impl Checker<'_> {
     fn check_fetch(
         &self,
         fetch: &FetchNode,
+        subgraph: &Subgraph<'_>,
         entity_body: &[Selection],
         reached: Reached<'_>,
         available: &[Selection],
@@ -715,17 +749,6 @@ impl Checker<'_> {
             )));
         }
 
-        let subgraph_schema = self
-            .subgraphs_by_name
-            .get(fetch.subgraph_name.as_ref())
-            .ok_or_else(|| {
-                ComparisonError::new(format!(
-                    "fetch to unknown subgraph `{}`",
-                    fetch.subgraph_name
-                ))
-            })?;
-        let subgraph = Subgraph::new(subgraph_schema)?;
-
         // What the fetch can read, which every requirement is compared with. Bound once per
         // fetch, not per entry or per `@key`.
         let readable_doc = self.operation_with(readable.to_vec());
@@ -735,7 +758,7 @@ impl Checker<'_> {
         for (entity_type, entity_selections) in &cases {
             let selections = requires_half(
                 self.supergraph_schema,
-                &subgraph,
+                subgraph,
                 entity_type,
                 entity_selections,
             )?;
@@ -1476,8 +1499,8 @@ pub fn check_plan_with_options(
     let walked = checker.walk_top_level(node)?;
 
     // Completeness: everything the plan fetches, read as one operation, must include the client
-    // operation. The subgraph oracle is what takes this past the model, which knows nothing about
-    // which subgraphs can resolve a field.
+    // operation. `SubgraphConstraint` restricts this comparison of the composed response, which the
+    // model makes unrestricted: the remaining difference § Differences from the model names.
     let plan_doc = checker.operation_with(walked.fetched);
     let operation_doc = checker.without_introspection(operation_doc);
     checker
