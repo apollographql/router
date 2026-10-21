@@ -48,6 +48,7 @@ use apollo_compiler::executable::FragmentMap;
 use apollo_compiler::executable::InlineFragment;
 use apollo_compiler::executable::Selection;
 use apollo_compiler::executable::SelectionSet;
+use apollo_compiler::schema::ExtendedType;
 
 use super::super::query_compare::conditions::BooleanLiteral;
 use super::ComparisonError;
@@ -59,8 +60,10 @@ use crate::schema::ValidFederationSchema;
 // Accumulating fetch selection set
 //==================================================================================================
 
-/// The possible object type names a path element is restricted to, read as a disjunction.
-/// `None` — rather than an empty list — means unrestricted.
+/// The possible object type names a path element is restricted to, read as a disjunction and
+/// compared literally with each object's `__typename`, as the router's `iterate_path` compares
+/// them, so a name that is no object type matches nothing. `None` — rather than an empty list —
+/// means unrestricted.
 ///
 /// The query plan calls these `Conditions`, which invites confusion with the Boolean
 /// `@skip`/`@include` conditions on a condition node. These are *type* conditions.
@@ -115,10 +118,15 @@ pub(super) fn inline_fragment_spreads(
 /// requirement is mounted only where the fetch runs.
 /// - A selection written under a fragment already carries its own condition; this is for the
 ///   unguarded case, where the narrowing would otherwise be lost.
-/// - Several types are a disjunction, so each takes its own copy.
+/// - The condition's names are object names, compared literally with each object's `__typename`
+///   as [`type_condition_admits`] explains, so only a name that is an object type takes a copy,
+///   each its own, a disjunction: an abstract name selects no object, and a condition naming no
+///   object type contributes nothing. An object type the position cannot hold keeps a copy no
+///   object there satisfies, which inclusion credits with nothing.
 /// - An unnarrowed position is returned untouched, which is every position in a plan built
 ///   without `--type-conditioned-fetching`.
 fn under_reached_types(
+    schema: &ValidFederationSchema,
     reached: Option<&TypeCondition>,
     selections: Vec<Selection>,
 ) -> Vec<Selection> {
@@ -130,6 +138,12 @@ fn under_reached_types(
     }
     type_names
         .iter()
+        .filter(|type_name| {
+            matches!(
+                schema.schema().types.get(*type_name),
+                Some(ExtendedType::Object(_))
+            )
+        })
         .map(|type_name| {
             Selection::InlineFragment(Node::new(InlineFragment {
                 type_condition: Some(type_name.clone()),
@@ -209,18 +223,22 @@ fn selection_set(ty: Name, selections: Vec<Selection>) -> SelectionSet {
     set
 }
 
-/// Does `pending` admit a fragment whose runtime types are `reached`?
+/// Does `pending` admit a fragment whose runtime types are `reached` — is one of its names an
+/// object type the fragment reaches?
 ///
-/// An unrestricted pending condition admits everything, and so does a fragment with no type
-/// condition of its own, whose `reached` is `None`.
+/// The condition's names are compared literally with the `__typename` of each object at its
+/// level, as the router's `iterate_path` compares them, so a name that is no object type, an
+/// interface's or a union's, admits nothing, and `[I, A]` admits what `[A]` does. An unrestricted
+/// pending condition admits everything, and so does a fragment with no type condition of its own,
+/// whose `reached` is `None`.
 fn type_condition_admits(pending: Option<&TypeCondition>, reached: Option<&[Name]>) -> bool {
     let (Some(type_names), Some(reached)) = (pending, reached) else {
         return true;
     };
-    // The path's condition names the concrete types the data there is narrowed to; the fragment's
-    // own condition may be abstract. So the question is whether the fragment reaches those types,
-    // not whether they reach it -- asking it the other way admits only a fragment written on the
-    // exact same object type, and skips one written on any interface or union above it.
+    // The fragment's own condition may be abstract. So the question is whether the fragment
+    // reaches the path's types, not whether they reach it -- asking it the other way admits only a
+    // fragment written on the exact same object type, and skips one written on any interface or
+    // union above it.
     type_names
         .iter()
         .any(|type_name| reached.contains(type_name))
@@ -294,10 +312,24 @@ pub(super) fn admitted_types(schema: &ValidFederationSchema, guards: &[Name]) ->
     admitted
 }
 
+/// The intersection of two type conditions. `None` is unrestricted, and so is absorbed.
+pub(super) fn intersect_types(
+    left: Option<Vec<Name>>,
+    right: Option<Vec<Name>>,
+) -> Option<Vec<Name>> {
+    match (left, right) {
+        (None, right) => right,
+        (left, None) => left,
+        (Some(left), Some(right)) => {
+            Some(left.into_iter().filter(|ty| right.contains(ty)).collect())
+        }
+    }
+}
+
 /// The selections that `mounted` becomes when placed at `path` inside `available`.
 ///
 /// `pending` is the type condition carried from the previous path element. It filters *where* the
-/// next key may be found rather than adding a guard of its own.
+/// next key may be found, or what is mounted where the path ends ([`under_type_condition`]).
 pub(super) fn selections_at(
     schema: &ValidFederationSchema,
     available: &[Selection],
@@ -306,7 +338,7 @@ pub(super) fn selections_at(
     mounted: &[Selection],
 ) -> Vec<Selection> {
     let Some((head, rest)) = path.split_first() else {
-        return mounted.to_vec();
+        return under_type_condition(schema, pending, mounted);
     };
     match head {
         FetchDataPathElement::Key(name, type_condition) => selections_under_key(
@@ -318,8 +350,11 @@ pub(super) fn selections_at(
             rest,
             mounted,
         ),
+        // An index consumes no response key: its condition and the one carried from the key
+        // before it are about the same objects, so both hold.
         FetchDataPathElement::AnyIndex(type_condition) => {
-            selections_at(schema, available, type_condition.as_deref(), rest, mounted)
+            let conjoined = intersect_types(pending.map(<[Name]>::to_vec), type_condition.clone());
+            selections_at(schema, available, conjoined.as_deref(), rest, mounted)
         }
         FetchDataPathElement::TypenameEquals(_) | FetchDataPathElement::Parent => Vec::new(),
     }
@@ -375,7 +410,7 @@ fn selections_under_key(
                 );
                 // An unguarded field is selected on every type the path narrowed away, unless the
                 // fragments it was found under state the narrowing and leave no `pending`.
-                out.extend(under_reached_types(pending, reproduced));
+                out.extend(under_reached_types(schema, pending, reproduced));
             }
             Selection::InlineFragment(fragment) => {
                 // The fragment's runtime types, read once for whether it is admitted and for what
@@ -412,6 +447,63 @@ fn selections_under_key(
         }
     }
     out.into_iter().collect()
+}
+
+/// Guards what is mounted where a path ends by the type condition of its last element, as
+/// [`selections_under_key`] guards what it finds below one: a fragment the condition admits is
+/// kept with what is inside it guarded by what the two leave between them ([`pending_inside`]), one
+/// it does not admit is dropped, and an unguarded field takes [`under_reached_types`]'s copies.
+///
+/// The router selects the objects at the end of a path by the same literal comparison as along it,
+/// so a fetch below a condition naming no object of its position never runs, and what it would
+/// have contributed, or been owed, is nothing. An unnarrowed end mounts what it is given, and so
+/// does one whose fragments state the condition, which is how an entity fetch's selections arrive.
+fn under_type_condition(
+    schema: &ValidFederationSchema,
+    pending: Option<&TypeCondition>,
+    selections: &[Selection],
+) -> Vec<Selection> {
+    let Some(type_names) = pending else {
+        return selections.to_vec();
+    };
+    let mut out = Vec::new();
+    for selection in selections {
+        match selection {
+            Selection::Field(_) => out.extend(under_reached_types(
+                schema,
+                Some(type_names),
+                vec![selection.clone()],
+            )),
+            Selection::InlineFragment(fragment) => {
+                let reached = fragment
+                    .type_condition
+                    .as_ref()
+                    .map(|fragment_type| possible_types(schema, fragment_type));
+                if !type_condition_admits(Some(type_names), reached.as_deref()) {
+                    continue;
+                }
+                let inside = pending_inside(Some(type_names), reached.as_deref());
+                let inner = under_type_condition(
+                    schema,
+                    inside.as_deref(),
+                    &fragment.selection_set.selections,
+                );
+                out.extend(wrap_non_empty(
+                    |selections| {
+                        let mut copy = (**fragment).clone();
+                        copy.selection_set =
+                            selection_set(fragment.selection_set.ty.clone(), selections);
+                        Selection::InlineFragment(Node::new(copy))
+                    },
+                    inner,
+                ));
+            }
+            // Unreachable: what is mounted is a fetch's contribution, whose spreads
+            // `inline_fragment_spreads` removed at the mount boundary.
+            Selection::FragmentSpread(_) => {}
+        }
+    }
+    out
 }
 
 //==================================================================================================

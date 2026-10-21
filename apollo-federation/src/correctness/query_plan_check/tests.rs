@@ -17,6 +17,7 @@ use apollo_compiler::ExecutableDocument;
 use apollo_compiler::collections::IndexMap;
 use apollo_compiler::validation::Valid;
 
+use super::super::CheckerOptions;
 use super::super::CorrectnessError;
 use crate::Supergraph;
 use crate::query_plan::FetchNode;
@@ -75,6 +76,26 @@ impl Fixture {
             Ok(()) => panic!("expected the check to reject this plan"),
             Err(error) => error.to_string(),
         }
+    }
+
+    /// [`Self::check`] with the report of a flatten path written to reach no type turned off, so
+    /// that what decides is completeness and soundness alone.
+    fn check_without_dead_fetch_report(
+        &self,
+        plan: &QueryPlan,
+        operation: &str,
+    ) -> Result<(), CorrectnessError> {
+        crate::correctness::check_plan_with_options(
+            &self.api_schema,
+            &self.supergraph_schema,
+            &self.subgraphs,
+            &self.operation(operation),
+            plan,
+            CheckerOptions {
+                check_empty_flatten_path_type_condition: false,
+                ..Default::default()
+            },
+        )
     }
 
     /// Parses every fetch's operation against its own subgraph, which a plan read from JSON has
@@ -797,4 +818,216 @@ fn a_context_value_missing_for_one_owner_type_is_rejected() {
         error.contains("is not always fetched where the fetch runs"),
         "{error}"
     );
+}
+
+//==================================================================================================
+// A path condition's names, compared as the router compares them
+//
+// The router selects the objects a conditioned path element reaches by comparing each name of the
+// condition literally with the object's `__typename` (`iterate_path` in the router's
+// `json_ext.rs`), so a name that is no object type, an interface's or a union's, selects nothing,
+// and a fetch below a condition naming no object of its position never runs. Each plan here is
+// the planner's, with a condition written on the path of the only fetch supplying a field, or on
+// the path a contextual value is read through. The report of a flatten path written to reach no
+// type is off: it reads only whether the written list is empty, and none here is.
+
+fn condition_names_fixture() -> Fixture {
+    Fixture::new(include_str!("testdata/condition_names.graphql"))
+}
+
+/// The planner's plan `plan` with the type condition at the JSON pointer `condition` set to
+/// `names`.
+fn with_condition(fixture: &Fixture, plan: &str, condition: &str, names: &[&str]) -> QueryPlan {
+    let mut plan: serde_json::Value = serde_json::from_str(plan).expect("valid plan json");
+    *plan
+        .pointer_mut(condition)
+        .expect("a type condition at the pointer") = serde_json::json!(names);
+    fixture.written_plan(&plan.to_string())
+}
+
+/// The three places a condition is written, with the operation each plan is for and the field
+/// only the conditioned fetch supplies: on a key with more path below it
+/// (`featured|….author`), on a key ending the path (`featured|…`), and on an index ending it
+/// (`items.@|…`).
+const CONDITION_PLACEMENTS: [(&str, &str, &str, &str); 3] = [
+    (
+        plan_json!("featured_author_name"),
+        "/Sequence/nodes/1/Flatten/path/0/Key/1",
+        "{ featured { author { name } } }",
+        "`name`",
+    ),
+    (
+        plan_json!("featured_blurb"),
+        "/Sequence/nodes/1/Flatten/path/0/Key/1",
+        "{ featured { ... on Book { blurb } ... on Film { blurb } } }",
+        "`blurb`",
+    ),
+    (
+        plan_json!("items_blurb"),
+        "/Sequence/nodes/1/Flatten/path/1/AnyIndex",
+        "{ items { ... on Book { blurb } ... on Film { blurb } } }",
+        "`blurb`",
+    ),
+];
+
+// A condition naming the interface `Item`, in each of the three places. No item's `__typename` is
+// `Item`, so the fetch under it runs for none of them and the plan never fetches what the client
+// asks.
+//
+// A control of changed behaviour: below a key with more path the field `author` was copied under a
+// fragment on `Item`, which inclusion grounds to every item, and the end of a path did not read its
+// condition at all.
+#[test]
+fn a_fetch_under_an_interface_name_is_rejected() {
+    let fixture = condition_names_fixture();
+    for (plan, condition, operation, field) in CONDITION_PLACEMENTS {
+        let plan = with_condition(&fixture, plan, condition, &["Item"]);
+        let error = fixture
+            .check_without_dead_fetch_report(&plan, operation)
+            .expect_err("the fetch under `Item` never runs");
+        assert!(
+            error
+                .to_string()
+                .contains(&format!("does not select {field}")),
+            "{condition}: {error}"
+        );
+    }
+}
+
+// An empty condition ending the path, `featured|[]` and `items.@|[]`: it names no object, so the
+// fetch under it runs for no item, and the plan never fetches the `blurb`s.
+//
+// A control of changed behaviour: the end of a path did not read its condition at all, and with
+// the report of an empty condition off each plan was accepted.
+#[test]
+fn a_fetch_at_an_empty_condition_ending_its_path_is_rejected() {
+    let fixture = condition_names_fixture();
+    for (plan, condition, operation, field) in &CONDITION_PLACEMENTS[1..] {
+        let plan = with_condition(&fixture, plan, condition, &[]);
+        let error = fixture
+            .check_without_dead_fetch_report(&plan, operation)
+            .expect_err("the fetch under `[]` never runs");
+        assert!(
+            error
+                .to_string()
+                .contains(&format!("does not select {field}")),
+            "{condition}: {error}"
+        );
+    }
+}
+
+// A condition naming `Item`, or naming nothing, on the key before an unrestricted index,
+// `items|[Item].@` and `items|[].@`: the index consumes no response key, so the condition still
+// holds of the items below it, none of which it selects, and the plan never fetches their
+// `blurb`. The report of an empty condition, on, reports the second and not the first.
+//
+// A control of changed behaviour: the index replaced the condition carried to it with its own,
+// none, and the fetch was credited as if unconditioned.
+#[test]
+fn a_fetch_under_a_key_condition_before_an_index_is_rejected() {
+    let fixture = condition_names_fixture();
+    let (plan, _, operation, _) = CONDITION_PLACEMENTS[2];
+    let on_key = "/Sequence/nodes/1/Flatten/path/0/Key/1";
+    let item = with_condition(&fixture, plan, on_key, &["Item"]);
+    for result in [
+        fixture.check_without_dead_fetch_report(&item, operation),
+        fixture.check(&item, operation),
+    ] {
+        let error = result.expect_err("the fetch under `items|[Item]` never runs");
+        assert!(
+            error.to_string().contains("does not select `blurb`"),
+            "{error}"
+        );
+    }
+    let empty = with_condition(&fixture, plan, on_key, &[]);
+    let error = fixture
+        .check_without_dead_fetch_report(&empty, operation)
+        .expect_err("the fetch under `items|[]` never runs");
+    assert!(
+        error.to_string().contains("does not select `blurb`"),
+        "{error}"
+    );
+}
+
+// The same three conditions naming the interface's members, as a planner writes them: every item
+// is one of them, and each plan is complete and sound.
+//
+// A control of preserved behaviour.
+#[test]
+fn a_fetch_under_member_names_is_accepted() {
+    let fixture = condition_names_fixture();
+    for (plan, condition, operation, _) in CONDITION_PLACEMENTS {
+        let plan = with_condition(&fixture, plan, condition, &["Book", "Film"]);
+        fixture
+            .check_without_dead_fetch_report(&plan, operation)
+            .unwrap_or_else(|error| panic!("{condition}: {error}"));
+    }
+}
+
+// `Person` is an object type, but no featured item is one, so the fetch below
+// `featured|[Person]` runs nowhere.
+//
+// A control of preserved behaviour at the inclusion boundary: the mounting keeps the author's
+// `name` under a fragment on `Person` inside `featured`, which no item satisfies, and inclusion
+// credits it with nothing.
+#[test]
+fn a_fetch_under_an_object_type_the_position_cannot_hold_is_rejected() {
+    let fixture = condition_names_fixture();
+    let (plan, condition, operation, _) = CONDITION_PLACEMENTS[0];
+    let plan = with_condition(&fixture, plan, condition, &["Person"]);
+    let error = fixture
+        .check_without_dead_fetch_report(&plan, operation)
+        .expect_err("the fetch under `Person` never runs");
+    assert!(
+        error.to_string().contains("does not select `name`"),
+        "{error}"
+    );
+}
+
+const STORES_PRODUCTS_LABEL_PRICE: &str = "{ stores { products { price } } }";
+
+/// The planner's plan for every product's `price`, its `label` read off its store's owner through
+/// `owner|owners`: the condition is on the value's own path past the store, the last level it
+/// shares with the fetch, and the fetch's own path carries none.
+fn price_through(fixture: &Fixture, owners: &[&str]) -> QueryPlan {
+    with_condition(
+        fixture,
+        plan_json!("stores_products_label_price"),
+        "/Sequence/nodes/1/Flatten/node/Fetch/context_rewrites/0/KeyRenamer/path/2/Key/1",
+        owners,
+    )
+}
+
+// The `label` is fetched for every owner, but read through `owner|[Owner]`, which no owner's
+// `__typename` matches: the router binds no value, and every price is asked with none. Everything
+// else the plan needs is there, as the next control shows, so this is the contextual value's
+// availability alone.
+//
+// A control of changed behaviour: read as the types it grounds to, the name left the owner
+// unnarrowed and the value was found.
+#[test]
+fn a_context_value_read_through_an_interface_name_is_rejected() {
+    let fixture = condition_names_fixture();
+    let plan = price_through(&fixture, &["Owner"]);
+    let error = fixture
+        .check_without_dead_fetch_report(&plan, STORES_PRODUCTS_LABEL_PRICE)
+        .expect_err("no owner's `__typename` is `Owner`");
+    assert!(
+        error
+            .to_string()
+            .contains("is not always fetched where the fetch runs"),
+        "{error}"
+    );
+}
+
+// The same read through `owner|[Person,Company]`, which every owner matches.
+//
+// A control of preserved behaviour.
+#[test]
+fn a_context_value_read_through_member_names_is_accepted() {
+    let fixture = condition_names_fixture();
+    let plan = price_through(&fixture, &["Person", "Company"]);
+    fixture
+        .check_without_dead_fetch_report(&plan, STORES_PRODUCTS_LABEL_PRICE)
+        .unwrap();
 }
