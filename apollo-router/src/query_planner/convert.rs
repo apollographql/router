@@ -71,7 +71,7 @@ impl From<&'_ Box<next::FetchNode>> for plan::PlanNode {
             output_rewrites,
             context_rewrites,
         } = &**value;
-        Self::Fetch(super::fetch::FetchNode {
+        Self::Fetch(Arc::new(super::fetch::FetchNode {
             service_name: subgraph_name.clone(),
             requires: requires.clone(),
             variable_usages: variable_usages.iter().map(|v| v.clone().into()).collect(),
@@ -84,7 +84,7 @@ impl From<&'_ Box<next::FetchNode>> for plan::PlanNode {
             context_rewrites: option_vec(context_rewrites),
             schema_aware_hash: Default::default(),
             authorization: Default::default(),
-        })
+        }))
     }
 }
 

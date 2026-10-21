@@ -81,7 +81,7 @@ pub(crate) fn replace_connector_service_names(
             }
             PlanNode::Fetch(node) => {
                 if let Some(service_name) = replacements.get(&node.service_name) {
-                    node.service_name = service_name.clone().into();
+                    Arc::make_mut(node).service_name = service_name.clone().into();
                 }
             }
             PlanNode::Flatten(flatten) => {

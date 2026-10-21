@@ -5,10 +5,10 @@ expression: deferred_response
 {
   "data": {
     "me": {
-      "name": "Ada Lovelace",
-      "username": "@ada",
       "__typename": "User",
-      "id": "1"
+      "id": "1",
+      "name": "Ada Lovelace",
+      "username": "@ada"
     }
   },
   "path": [

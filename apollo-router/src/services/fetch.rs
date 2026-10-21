@@ -35,7 +35,7 @@ pub(crate) type Response = (Value, Vec<Error>);
 #[non_exhaustive]
 pub(crate) struct FetchRequest {
     pub(crate) context: Context,
-    pub(crate) fetch_node: FetchNode,
+    pub(crate) fetch_node: Arc<FetchNode>,
     pub(crate) supergraph_request: Arc<http::Request<GraphQLRequest>>,
     pub(crate) variables: Variables,
     pub(crate) current_dir: Path,
@@ -53,7 +53,7 @@ impl FetchRequest {
     #[builder(visibility = "pub")]
     fn new(
         context: Context,
-        fetch_node: FetchNode,
+        fetch_node: Arc<FetchNode>,
         supergraph_request: Arc<http::Request<GraphQLRequest>>,
         variables: Variables,
         current_dir: Path,

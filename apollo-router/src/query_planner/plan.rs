@@ -108,7 +108,9 @@ pub(crate) enum PlanNode {
     },
 
     /// Fetch some data from a subgraph.
-    Fetch(fetch::FetchNode),
+    ///
+    /// Shared so every execution of the plan can hand it to the fetch service without copying it.
+    Fetch(Arc<fetch::FetchNode>),
 
     /// Merge the current resultset with the response.
     Flatten(FlattenNode),
@@ -241,7 +243,7 @@ impl PlanNode {
     ) -> Result<(), ValidationErrors> {
         match self {
             PlanNode::Fetch(fetch_node) => {
-                fetch_node.init_parsed_operation(subgraph_schemas)?;
+                Arc::make_mut(fetch_node).init_parsed_operation(subgraph_schemas)?;
             }
 
             PlanNode::Sequence { nodes } => {
@@ -293,7 +295,8 @@ impl PlanNode {
     ) -> Result<(), ValidationErrors> {
         match self {
             PlanNode::Fetch(fetch_node) => {
-                fetch_node.init_parsed_operation_and_hash_subquery(subgraph_schemas)?;
+                Arc::make_mut(fetch_node)
+                    .init_parsed_operation_and_hash_subquery(subgraph_schemas)?;
             }
 
             PlanNode::Sequence { nodes } => {
@@ -442,7 +445,7 @@ impl PlanNode {
     ) {
         match self {
             PlanNode::Fetch(fetch_node) => {
-                fetch_node.extract_authorization_metadata(schema, key);
+                Arc::make_mut(fetch_node).extract_authorization_metadata(schema, key);
             }
 
             PlanNode::Sequence { nodes } => {
