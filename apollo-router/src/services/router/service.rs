@@ -323,11 +323,7 @@ where
                         .extensions()
                         .with_lock(|ext| ext.get::<DisplayRouterResponse>().is_some());
 
-                    let (body, body_to_stash) = if display_router_response {
-                        (body.clone(), Some(body))
-                    } else {
-                        (body, None)
-                    };
+                    let body_to_stash = display_router_response.then(|| body.clone());
 
                     router::Response::http_response_builder()
                         .response(Response::from_parts(parts, router::body::from_bytes(body)))
