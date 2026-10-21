@@ -13,6 +13,8 @@ fn validate_reports_automatic_upgrades_instead_of_logging_them() {
     let output = Command::new(IntegrationTest::router_location())
         .args(["config", "validate"])
         .arg(&path)
+        // With RUST_BACKTRACE set, as in CI, the router logs a warning that isn't validate's output.
+        .env_remove("RUST_BACKTRACE")
         .output()
         .expect("router config validate runs");
 
