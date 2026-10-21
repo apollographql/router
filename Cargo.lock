@@ -225,6 +225,34 @@ dependencies = [
 ]
 
 [[package]]
+name = "apollo-configuration"
+version = "0.10.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "1dcbf8f01b72646bfb64ccaaf089157e2e794d2902b5ba6511a0f0f5602135a4"
+dependencies = [
+ "apollo-configuration-macros",
+ "apollo-errors",
+ "apollo-redaction",
+ "derive_more",
+ "http 1.5.0",
+ "humantime-serde",
+ "jsonschema",
+ "miette",
+ "referencing",
+ "regex",
+ "saphyr",
+ "saphyr-parser",
+ "schemars",
+ "serde",
+ "serde_json",
+ "serde_path_to_error",
+ "serde_yaml 0.9.34+deprecated",
+ "shellexpand",
+ "tonic",
+ "url",
+]
+
+[[package]]
 name = "apollo-configuration-macros"
 version = "0.2.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -346,7 +374,7 @@ version = "0.12.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "3fda389ca9c02364c5afd51f75642434ed203dd7d4b08ca72396a8f755190f8d"
 dependencies = [
- "apollo-configuration",
+ "apollo-configuration 0.9.1",
  "apollo-errors",
  "apollo-opentelemetry-macros",
  "apollo-opentelemetry-stdout",
@@ -417,7 +445,7 @@ version = "0.10.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "7c7ef1803b3e6340e4e49aafef365f6c5ed9c2a9ed1539aff06563cd9ae8c63d"
 dependencies = [
- "apollo-configuration",
+ "apollo-configuration 0.9.1",
  "apollo-errors",
  "apollo-opentelemetry",
  "bytes",
@@ -452,7 +480,7 @@ dependencies = [
  "ahash",
  "anyhow",
  "apollo-compiler",
- "apollo-configuration",
+ "apollo-configuration 0.10.0",
  "apollo-environment-detector",
  "apollo-federation",
  "apollo-qos",
@@ -737,7 +765,7 @@ name = "async-allow-client-id"
 version = "0.1.0"
 dependencies = [
  "anyhow",
- "apollo-configuration",
+ "apollo-configuration 0.10.0",
  "apollo-router",
  "async-trait",
  "http 1.5.0",
@@ -2810,7 +2838,7 @@ name = "external-subgraph"
 version = "0.1.0"
 dependencies = [
  "anyhow",
- "apollo-configuration",
+ "apollo-configuration 0.10.0",
  "apollo-router",
  "async-trait",
  "bytes",
@@ -3582,7 +3610,7 @@ name = "hello-world"
 version = "0.1.0"
 dependencies = [
  "anyhow",
- "apollo-configuration",
+ "apollo-configuration 0.10.0",
  "apollo-router",
  "async-trait",
  "serde",
@@ -5891,7 +5919,7 @@ name = "propagate-status-code"
 version = "0.1.0"
 dependencies = [
  "anyhow",
- "apollo-configuration",
+ "apollo-configuration 0.10.0",
  "apollo-router",
  "async-trait",
  "http 1.5.0",
