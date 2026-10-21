@@ -645,10 +645,11 @@ pub(crate) fn build_router_service(
 ) -> router::BoxCloneService {
     let enable_authorization_directives =
         AuthorizationPlugin::enable_directives(configuration, &schema);
+    // Extended references only go into Apollo usage reports.
     let extended_references = matches!(
         TelemetryConfig::metrics_reference_mode(configuration),
         ApolloMetricsReferenceMode::Extended
-    );
+    ) && TelemetryConfig::exports_to_apollo(configuration);
 
     ServiceBuilder::new()
         .layer(StaticPageLayer::new(configuration))
@@ -713,5 +714,82 @@ mod boxed_type_names {
             IndexMap::from([("s.a".to_string(), http.boxed_clone())]),
             &required_stage_plugins().await,
         );
+    }
+}
+
+#[cfg(test)]
+mod extended_references {
+    use serde_json::json;
+
+    use super::*;
+    use crate::apollo_studio_interop::ExtendedReferenceStats;
+    use crate::pipeline::tests::stage_stack::required_stage_plugins;
+
+    const SUPERGRAPH_SCHEMA: &str = include_str!("../../tests/fixtures/supergraph.graphql");
+
+    /// Whether a query through the router stack built from `configuration` reaches the
+    /// supergraph service with its extended references computed.
+    async fn computes_extended_references(configuration: Configuration) -> bool {
+        let configuration = Arc::new(configuration);
+        let schema = Arc::new(Schema::parse(SUPERGRAPH_SCHEMA, &configuration).unwrap());
+        let (supergraph_service, mut handle) =
+            tower_test::mock::pair::<supergraph::Request, supergraph::Response>();
+        let driver = tokio::spawn(async move {
+            let (req, responder) = handle.next_request().await.unwrap();
+            let computed = req
+                .context
+                .extensions()
+                .with_lock(|lock| lock.contains_key::<ExtendedReferenceStats>());
+            responder.send_response(
+                supergraph::Response::fake_builder()
+                    .context(req.context)
+                    .build()
+                    .unwrap(),
+            );
+            computed
+        });
+        let router_service = build_router_service(
+            supergraph_service.boxed_clone(),
+            build_apq_expander(&configuration, None),
+            Arc::new(PersistedQueryExpander::new(&configuration).await.unwrap()),
+            build_query_parsing_service(schema.clone(), configuration.clone()),
+            schema,
+            &configuration,
+            required_stage_plugins().await,
+        );
+
+        let request = supergraph::Request::fake_builder()
+            .query("query { me { id } }")
+            .build()
+            .unwrap();
+        router_service
+            .oneshot(request.try_into().unwrap())
+            .await
+            .unwrap();
+        driver.await.unwrap()
+    }
+
+    #[tokio::test]
+    async fn are_not_computed_without_apollo() {
+        assert!(!computes_extended_references(Configuration::default()).await);
+    }
+
+    #[tokio::test]
+    async fn are_computed_when_exporting_to_apollo() {
+        // Router YAML can't carry an Apollo key or graph ref, and setting the `APOLLO_KEY` and
+        // `APOLLO_GRAPH_REF` globals would leak into other tests.
+        let mut configuration = Configuration::default();
+        configuration
+            .add_apollo_plugin_if_absent("telemetry", || {
+                json!({
+                    "apollo": {
+                        "apollo_key": "test-key",
+                        "apollo_graph_ref": "test@current",
+                    }
+                })
+            })
+            .unwrap();
+
+        assert!(computes_extended_references(configuration).await);
     }
 }

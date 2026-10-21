@@ -43,9 +43,10 @@ use crate::Context;
 use crate::metrics;
 use crate::plugins::subscription::SUBSCRIPTION_SUBGRAPH_NAME_CONTEXT_KEY;
 use crate::plugins::telemetry::CLIENT_NAME;
-use crate::plugins::telemetry::apollo::Config;
 use crate::plugins::telemetry::config_new::Selectors;
+use crate::plugins::telemetry::config_new::apollo::instruments::ApolloConnectorFetchDuration;
 use crate::plugins::telemetry::config_new::apollo::instruments::ApolloConnectorInstruments;
+use crate::plugins::telemetry::config_new::apollo::instruments::ApolloSubgraphFetchDuration;
 use crate::plugins::telemetry::config_new::apollo::instruments::ApolloSubgraphInstruments;
 use crate::plugins::telemetry::config_new::attributes::DefaultAttributeRequirementLevel;
 use crate::plugins::telemetry::config_new::cache::RESPONSE_CACHE_METRIC;
@@ -781,10 +782,9 @@ impl InstrumentsConfig {
 
     pub(crate) fn new_apollo_subgraph_instruments(
         &self,
-        static_instruments: Arc<HashMap<String, StaticInstrument>>,
-        apollo_config: Config,
+        fetch_duration: Option<&ApolloSubgraphFetchDuration>,
     ) -> ApolloSubgraphInstruments {
-        ApolloSubgraphInstruments::new(static_instruments, apollo_config)
+        ApolloSubgraphInstruments::new(fetch_duration)
     }
 
     pub(crate) fn new_connector_instruments(
@@ -838,10 +838,9 @@ impl InstrumentsConfig {
 
     pub(crate) fn new_apollo_connector_instruments(
         &self,
-        static_instruments: Arc<HashMap<String, StaticInstrument>>,
-        apollo_config: Config,
+        fetch_duration: Option<&ApolloConnectorFetchDuration>,
     ) -> ApolloConnectorInstruments {
-        ApolloConnectorInstruments::new(static_instruments, apollo_config)
+        ApolloConnectorInstruments::new(fetch_duration)
     }
 
     pub(crate) fn new_builtin_graphql_instruments(&self) -> HashMap<String, StaticInstrument> {
@@ -2756,6 +2755,7 @@ mod tests {
     use crate::plugins::telemetry::APOLLO_PRIVATE_QUERY_DEPTH;
     use crate::plugins::telemetry::APOLLO_PRIVATE_QUERY_HEIGHT;
     use crate::plugins::telemetry::APOLLO_PRIVATE_QUERY_ROOT_FIELDS;
+    use crate::plugins::telemetry::apollo::Config;
     use crate::plugins::telemetry::config_new::cache::CacheInstruments;
     use crate::plugins::telemetry::config_new::graphql::GraphQLInstruments;
     use crate::plugins::telemetry::config_new::instruments::Instrumented;
@@ -3201,13 +3201,15 @@ mod tests {
                                     subgraph_instruments = Some(config.new_subgraph_instruments(
                                         Arc::new(config.new_builtin_subgraph_instruments()),
                                     ));
-                                    apollo_subgraph_instruments =
-                                        Some(config.new_apollo_subgraph_instruments(
-                                            Arc::new(
-                                                config.new_builtin_apollo_subgraph_instruments(),
-                                            ),
-                                            apollo_config.clone(),
-                                        ));
+                                    apollo_subgraph_instruments = Some(
+                                        config.new_apollo_subgraph_instruments(
+                                            ApolloSubgraphInstruments::fetch_duration(
+                                                &config.new_builtin_apollo_subgraph_instruments(),
+                                                &apollo_config,
+                                            )
+                                            .as_ref(),
+                                        ),
+                                    );
                                     cache_instruments = Some(config.new_cache_instruments(
                                         Arc::new(config.new_builtin_cache_instruments()),
                                     ));
@@ -3445,11 +3447,12 @@ mod tests {
                                     apollo_connector_instruments = Some({
                                         let apollo_connector_instruments = config
                                             .new_apollo_connector_instruments(
-                                                Arc::new(
-                                                    config
+                                                ApolloConnectorInstruments::fetch_duration(
+                                                    &config
                                                         .new_builtin_apollo_connector_instruments(),
-                                                ),
-                                                apollo_config.clone(),
+                                                    &apollo_config,
+                                                )
+                                                .as_ref(),
                                             );
                                         apollo_connector_instruments.on_request(&request);
                                         apollo_connector_instruments

@@ -47,16 +47,19 @@ pub(crate) fn create_supergraph(
     request: &SupergraphRequest,
     field_level_instrumentation_ratio: f64,
 ) -> ::tracing::span::Span {
-    let send_variable_values = config.send_variable_values.clone();
+    // Only Apollo traces read the variables, and other exporters drop `apollo_private` fields.
+    let variables = config.exports_to_apollo().then(|| {
+        Telemetry::filter_variables_values(
+            &request.supergraph_request.body().variables,
+            &config.send_variable_values,
+        )
+    });
     info_span!(
         SUPERGRAPH_SPAN_NAME,
         "otel.kind" = "INTERNAL",
         apollo_private.field_level_instrumentation_ratio = field_level_instrumentation_ratio,
         apollo_private.operation_signature = ::tracing::field::Empty,
-        apollo_private.graphql.variables = Telemetry::filter_variables_values(
-            &request.supergraph_request.body().variables,
-            &send_variable_values,
-        ),
+        apollo_private.graphql.variables = variables.as_deref(),
     )
 }
 
@@ -86,7 +89,63 @@ mod tests {
     use tracing_mock::expect;
     use tracing_mock::subscriber;
 
+    use crate::plugins::telemetry::apollo;
     use crate::plugins::telemetry::consts::ROUTER_SPAN_NAME;
+    use crate::plugins::telemetry::consts::SUPERGRAPH_SPAN_NAME;
+    use crate::services::SupergraphRequest;
+
+    /// Creates a supergraph span for a request with one variable, expecting `expected_fields`
+    /// and no others.
+    fn assert_supergraph_span_fields(
+        config: &apollo::Config,
+        expected_fields: tracing_mock::field::ExpectedFields,
+    ) {
+        let request = SupergraphRequest::fake_builder()
+            .query("query($a: Int) { me { id } }")
+            .variable("a", 1)
+            .build()
+            .unwrap();
+        let (subscriber, handle) = subscriber::mock()
+            .new_span(
+                expect::span()
+                    .named(SUPERGRAPH_SPAN_NAME)
+                    .with_fields(expected_fields.only()),
+            )
+            .run_with_handle();
+        tracing::subscriber::with_default(subscriber, || {
+            super::create_supergraph(config, &request, 0.5);
+        });
+        handle.assert_finished();
+    }
+
+    #[test]
+    fn supergraph_span_skips_variables_without_apollo() {
+        assert_supergraph_span_fields(
+            &apollo::Config::default(),
+            expect::field("otel.kind").with_value(&"INTERNAL").and(
+                expect::field("apollo_private.field_level_instrumentation_ratio").with_value(&0.5),
+            ),
+        );
+    }
+
+    #[test]
+    fn supergraph_span_records_variables_when_exporting_to_apollo() {
+        let config = apollo::Config {
+            apollo_key: Some("test-key".to_string()),
+            apollo_graph_ref: Some("test@current".to_string()),
+            ..Default::default()
+        };
+        assert_supergraph_span_fields(
+            &config,
+            expect::field("otel.kind")
+                .with_value(&"INTERNAL")
+                .and(
+                    expect::field("apollo_private.field_level_instrumentation_ratio")
+                        .with_value(&0.5),
+                )
+                .and(expect::field("apollo_private.graphql.variables").with_value(&r#"{"a":""}"#)),
+        );
+    }
 
     #[test]
     fn test_specific_span() {
