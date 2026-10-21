@@ -331,6 +331,7 @@ dependencies = [
  "fred",
  "futures",
  "futures-test",
+ "globset",
  "graphql_client",
  "h2",
  "heck",
