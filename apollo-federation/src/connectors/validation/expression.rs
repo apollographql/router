@@ -585,11 +585,16 @@ fn resolve_shape(
             // later in the subpath chain, so .skip(1) handles it reliably.
             // Inside a schema type, expand the references `shape_lookup` uses for
             // nested composite fields as the path reaches them, so errors name the
-            // full path from that type. Variables keep their references, which
-            // resolve (and report) from the referenced type instead.
+            // full path from that type. `$this` and `$batch` do the same for the
+            // references `SchemaTypeRef::shape` leaves at cycles: where a memoized
+            // shape was cut depends on which path built it first, and expanding
+            // here keeps errors naming the full `$this` path regardless. Other
+            // variables keep their references, which resolve (and report) from
+            // the referenced type instead.
             let is_schema_name = !base_shape_name.starts_with('$');
+            let expands_refs = is_schema_name || matches!(base_shape_name, "$this" | "$batch");
             for key in name.iter().skip(1) {
-                let child = if is_schema_name {
+                let child = if expands_refs {
                     expand_schema_refs(&resolved, context, resolving)
                 } else {
                     resolved
@@ -1536,6 +1541,61 @@ mod tests {
             )),
             "The relevant piece of the expression wasn't included in {:?}",
             err.locations
+        );
+    }
+
+    /// `T.a` is walked first, so `SchemaTypeRef::shape` memoizes `B` with its `a`
+    /// field cut to a reference while `A` is on the path, and `T.b` reuses it.
+    /// Errors must still name the full `$this` path, as they do for `T.a`, and
+    /// for paths that go around the cycle more than once.
+    #[rstest]
+    #[case::through_reused_type("$this.b.a")]
+    #[case::through_first_built_type("$this.a.b")]
+    #[case::around_cycle_twice("$this.b.a.b.a")]
+    fn this_path_error_names_full_path_through_cycle(#[case] path: &str) {
+        let sdl = format!(
+            r#"
+            extend schema
+              @link(url: "https://specs.apollo.dev/federation/v2.11")
+              @link(url: "https://specs.apollo.dev/connect/v0.4", import: ["@connect"])
+
+            type Query {{
+              t: T @connect(http: {{GET: "http://127.0.0.1/t"}}, selection: "id a {{ id b {{ id }} }} b {{ id a {{ id }} }}")
+            }}
+
+            type T {{
+              id: ID
+              a: A
+              b: B
+              via: String @connect(http: {{GET: "http://127.0.0.1/x/{{{path}.missing}}"}}, selection: "$")
+            }}
+
+            type A {{ id: ID b: B }}
+            type B {{ id: ID a: A }}
+            "#
+        );
+        let subgraph = crate::subgraph::typestate::Subgraph::parse("s", "http://test", &sdl)
+            .unwrap()
+            .expand_links()
+            .unwrap();
+        let messages = crate::connectors::validation::validate(&subgraph);
+        let message = messages
+            .iter()
+            .find(|m| m.message.contains("T.via"))
+            .expect("T.via reports the missing field");
+        assert!(
+            message
+                .message
+                .contains(&format!("`{path}` doesn't have a field named `missing`")),
+            "{}",
+            message.message
+        );
+        // One location per path segment, plus `missing`.
+        assert_eq!(
+            message.locations.len(),
+            path.split('.').count() + 1,
+            "{:?}",
+            message.locations
         );
     }
 

@@ -43,7 +43,9 @@ impl Eq for SchemaTypeRef<'_> {}
 /// keeps a type reachable through many fields from being rebuilt once per path,
 /// which is exponential in depth. A memoized shape may carry a cycle reference
 /// cut where it was first built rather than where it is reused; those
-/// references resolve through `shape_lookup` like any other.
+/// references resolve through `shape_lookup` like any other, and
+/// `validation::expression` expands them along `$this`/`$batch` paths so
+/// errors still name the full path.
 #[derive(Default)]
 struct ShapeWalk {
     visited: IndexSet<String>,
