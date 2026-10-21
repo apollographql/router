@@ -4618,7 +4618,9 @@ fn connector_entity_fetch_gated_by_include_under_defer() {
 }
 
 /// Entity fetches gated on different conditions merge into one ungated
-/// fetch, each keeping its condition and its own gated key inputs.
+/// fetch, each keeping its condition, its own gated key inputs, and a
+/// representation built under its condition: with both conditions false,
+/// the fetch reads no keys.
 #[test]
 fn connector_entity_fetches_with_different_conditions_merge_ungated() {
     let plan_str = plan_query_with_router_specs(
@@ -4647,7 +4649,11 @@ fn connector_entity_fetches_with_different_conditions_merge_ungated() {
         Flatten(path: "posts.@.author") {
           Fetch(service: "blog_User_0") {
             {
-              ... on User {
+              ... on User @include(if: $b) {
+                __typename
+                id
+              }
+              ... on User @include(if: $a) {
                 __typename
                 id
               }

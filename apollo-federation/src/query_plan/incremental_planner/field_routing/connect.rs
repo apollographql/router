@@ -21,6 +21,7 @@ use super::commit::field_response_elements;
 use super::requires::condition_directives;
 use super::requires::gated_input_path;
 use super::requires::trailing_condition_fragments;
+use super::requires::trailing_conditions_context;
 use super::requires::unconditioned_input_path;
 use super::routing::IntermediateKeyHop;
 use super::routing::RoutingChoice;
@@ -176,7 +177,9 @@ impl FieldRoutingSearchSpace {
                 let (local_key, routed_key) =
                     self.split_anchor_key(state, pending, key_conditions, key_locally_resolvable)?;
                 // The connector fetch is gated on the trailing conditions
-                // (`with_trailing_conditions` below), so its inputs keep them.
+                // (`with_trailing_conditions` below), so its inputs keep them,
+                // and so does its representation, in case the fetch merges
+                // with a differently gated one.
                 self.append_entity_inputs_at(
                     state,
                     pending.fetch_node,
@@ -184,6 +187,7 @@ impl FieldRoutingSearchSpace {
                     local_key.as_ref(),
                     &source,
                 );
+                let needed_under = trailing_conditions_context(&pending.op_path)?;
 
                 let merge_at = self.pending_merge_at(state, pending);
 
@@ -204,6 +208,7 @@ impl FieldRoutingSearchSpace {
                         dest_type: entity_type.clone(),
                         dest_subgraph: source_subgraph.clone(),
                     },
+                    needed_under: needed_under.clone(),
                 }];
                 state
                     .graph

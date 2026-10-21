@@ -32,6 +32,7 @@ use crate::connectors::index::shape_provides;
 use crate::error::FederationError;
 use crate::operation::SelectionSet;
 use crate::operation::TYPENAME_FIELD;
+use crate::query_graph::graph_path::operation::OpGraphPathContext;
 use crate::query_graph::graph_path::operation::OpPathElement;
 use crate::query_plan::FetchDataKeyRenamer;
 use crate::query_plan::FetchDataPathElement;
@@ -90,6 +91,11 @@ pub(crate) enum InputContribution {
         conditions: Arc<SelectionSet>,
         /// Destination type and subgraph, for building the input rewrites.
         rewrite_info: InputRewriteInfo,
+        /// The @skip/@include the parent selects the key fields under. The
+        /// representation is built under them too, so a fetch merged from
+        /// differently gated branches reads only the keys the active branches
+        /// selected.
+        needed_under: OpGraphPathContext,
     },
     /// @requires condition fields riding an existing edge.
     Requires {
@@ -121,6 +127,13 @@ impl InputContribution {
     pub(crate) fn conditions(&self) -> &Arc<SelectionSet> {
         match self {
             Self::Key { conditions, .. } | Self::Requires { conditions, .. } => conditions,
+        }
+    }
+
+    pub(crate) fn needed_under(&self) -> Option<&OpGraphPathContext> {
+        match self {
+            Self::Key { needed_under, .. } => Some(needed_under),
+            Self::Requires { .. } => None,
         }
     }
 

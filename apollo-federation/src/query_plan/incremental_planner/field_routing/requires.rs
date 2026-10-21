@@ -25,6 +25,7 @@ use crate::operation::Selection;
 use crate::operation::SelectionId;
 use crate::operation::SelectionMap;
 use crate::operation::SelectionSet;
+use crate::query_graph::graph_path::operation::OpGraphPathContext;
 use crate::query_graph::graph_path::operation::OpPathElement;
 use crate::schema::position::CompositeTypeDefinitionPosition;
 
@@ -213,9 +214,12 @@ pub(super) fn unconditioned_input_path(
 /// `op_path` for appending the key inputs of an entity fetch gated on the
 /// @skip/@include of `trailing_condition_fragments(op_path)`: like
 /// `unconditioned_input_path`, but the conditions the fetch is gated on are
-/// kept. The fetch only runs when they hold, so its inputs are there whenever
-/// it reads them, and a fetch whose selections all sit under one such
-/// condition (a re-fetch lifted under it) can be gated on it as well.
+/// kept, so that a fetch whose selections all sit under one such condition
+/// (a re-fetch lifted under it) can be gated on it as well. The entity
+/// fetch's representation must be built under the same conditions
+/// (`trailing_conditions_context`): it is not gated on them once it merges
+/// with a differently gated fetch, and must then read only the keys of the
+/// branches that hold.
 pub(super) fn gated_input_path(
     op_path: &SharedPath<Arc<OpPathElement>>,
 ) -> SharedPath<Arc<OpPathElement>> {
@@ -227,6 +231,19 @@ pub(super) fn gated_input_path(
         })
         .collect();
     input_path_keeping(op_path, &gate)
+}
+
+/// The @skip/@include of `trailing_condition_fragments(op_path)`, which
+/// `gated_input_path` keeps on the key inputs, as the context to build the
+/// entity representation under.
+pub(super) fn trailing_conditions_context(
+    op_path: &SharedPath<Arc<OpPathElement>>,
+) -> Result<OpGraphPathContext, FederationError> {
+    trailing_condition_fragments(op_path)
+        .iter()
+        .try_fold(OpGraphPathContext::default(), |context, element| {
+            context.with_context_of(element)
+        })
 }
 
 /// `op_path` with the @skip/@include not in `kept` stripped from its

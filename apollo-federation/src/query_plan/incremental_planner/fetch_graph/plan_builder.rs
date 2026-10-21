@@ -746,7 +746,8 @@ impl FetchGraph {
 
         // 3. Materialize entity inputs from incoming edges.
         let (requires_selection, input_rewrites) = if is_entity {
-            let (sel, rewrites) = self.materialize_entity_inputs(ctx, node_idx, &parent_type)?;
+            let (sel, rewrites) =
+                self.materialize_entity_inputs(ctx, node_idx, &parent_type, &group_conditions)?;
             // Without representations the router can fetch nothing; an
             // entity group reachable only through input-less edges is an
             // upstream bug, not a plannable fetch.
@@ -939,6 +940,7 @@ impl FetchGraph {
         ctx: &PlanBuildContext<'_>,
         node_idx: NodeIndex,
         parent_type: &CompositeTypeDefinitionPosition,
+        group_conditions: &Conditions,
     ) -> Result<(SelectionSet, Vec<Arc<FetchDataRewrite>>), FederationError> {
         let mut per_type: IndexMap<CompositeTypeDefinitionPosition, SelectionSet> =
             IndexMap::default();
@@ -959,8 +961,13 @@ impl FetchGraph {
                     ctx.supergraph_schema,
                     &input_type,
                     input_sel,
-                    &OpGraphPathContext::default(),
+                    input
+                        .needed_under()
+                        .unwrap_or(&OpGraphPathContext::default()),
                 );
+                // The fetch is gated on the conditions all its selections are
+                // under, so the representation needn't check them again.
+                let wrapped = remove_conditions_from_selection_set(&wrapped, group_conditions)?;
                 let entry = per_type
                     .entry(wrapped.type_position.clone())
                     .or_insert_with(|| {

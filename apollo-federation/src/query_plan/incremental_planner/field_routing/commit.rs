@@ -369,6 +369,7 @@ impl FieldRoutingSearchSpace {
                     dest_type,
                     dest_subgraph: first_subgraph.clone(),
                 },
+                needed_under: Default::default(),
             })
         } else {
             None
@@ -572,6 +573,7 @@ impl FieldRoutingSearchSpace {
                             dest_type,
                             dest_subgraph: next_subgraph.clone(),
                         },
+                        needed_under: Default::default(),
                     })
                 }
                 None => None,
@@ -1023,6 +1025,7 @@ impl FieldRoutingSearchSpace {
                 dest_type,
                 dest_subgraph: subgraph,
             },
+            needed_under: Default::default(),
         });
 
         let edge = self.wire_key_edge(state, pending.fetch_node, new_group, key_input);
