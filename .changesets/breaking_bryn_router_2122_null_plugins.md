@@ -1,7 +1,7 @@
-### An empty `plugins` key is rejected
+### An empty `plugins` key is an error
 
-Router v2.x treated `plugins: null` the same as `plugins: {}`. YAML reads a `plugins:` key with nothing under it as `null`, for example when every plugin beneath it is commented out. The router now rejects that configuration with `null is not of type "object"` at the `plugins` key, as it does any other value of the wrong type. The configuration JSON Schema no longer allows `null` for `plugins`, and its default is now `{}`.
+Router v2.x ignored a `plugins:` key with nothing under it, which you get when every plugin beneath it is commented out. The router now refuses to load that configuration and reports `null is not of type "object"` at the `plugins` key.
 
 To migrate, delete the empty `plugins:` key or write `plugins: {}`.
 
-By [@BrynCooke](https://github.com/BrynCooke)
+By [@BrynCooke](https://github.com/BrynCooke) in https://github.com/apollographql/router/pull/10602
