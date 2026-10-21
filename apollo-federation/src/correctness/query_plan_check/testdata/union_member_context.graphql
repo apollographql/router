@@ -1,0 +1,170 @@
+# A context set by each member of a union, read below fields only the members declare.
+#
+# `Store` and `Kiosk` are the members of the union `Outlet`, and each sets the context two fields
+# of `Product` read: `price` reads the outlet's `locale` and `delivery` its address's `locale`. A
+# union declares no fields, so `products`, `featured` and `address` are selected inside a fragment
+# on each member: a fetch for `price` runs below `products`, and one for `delivery` at `featured`,
+# with rewrites that descend past `address`.
+#
+# Composed with `apollo_federation::composition::compose` from the two subgraphs below. Recompose
+# it when they change. `plans/outlets_products_price.json` and
+# `plans/outlets_featured_delivery.json` are the planner's plans over it, with default options, for
+#
+#   { outlets { ... on Store { products { price } } ... on Kiosk { products { price } } } }
+#   { outlets { ... on Store { featured { delivery } } ... on Kiosk { featured { delivery } } } }
+#
+# produced by the revision that added them.
+#
+# Subgraph `outlets`:
+#
+#   extend schema
+#     @link(url: "https://specs.apollo.dev/federation/v2.8", import: ["@key", "@shareable"])
+#
+#   type Query {
+#     outlets: [Outlet!]!
+#   }
+#
+#   union Outlet = Store | Kiosk
+#
+#   type Store @key(fields: "id") {
+#     id: ID!
+#     locale: String
+#     address: Address
+#     featured: Product
+#     products: [Product!]!
+#   }
+#
+#   type Kiosk @key(fields: "id") {
+#     id: ID!
+#     locale: String
+#     address: Address
+#     featured: Product
+#     products: [Product!]!
+#   }
+#
+#   type Address @shareable {
+#     locale: String
+#   }
+#
+#   type Product @key(fields: "id") {
+#     id: ID!
+#   }
+#
+# Subgraph `prices`:
+#
+#   extend schema
+#     @link(
+#       url: "https://specs.apollo.dev/federation/v2.8"
+#       import: ["@key", "@external", "@shareable", "@context", "@fromContext"]
+#     )
+#
+#   type Store @key(fields: "id") @context(name: "outlet") {
+#     id: ID!
+#     locale: String @external
+#     address: Address @external
+#   }
+#
+#   type Kiosk @key(fields: "id") @context(name: "outlet") {
+#     id: ID!
+#     locale: String @external
+#     address: Address @external
+#   }
+#
+#   type Address @shareable {
+#     locale: String
+#   }
+#
+#   type Product @key(fields: "id") {
+#     id: ID!
+#     price(locale: String @fromContext(field: "$outlet { locale }")): Int
+#     delivery(locale: String @fromContext(field: "$outlet { address { locale } }")): Int
+#   }
+
+schema @link(url: "https://specs.apollo.dev/link/v1.0") @link(url: "https://specs.apollo.dev/join/v0.5", for: EXECUTION) @link(url: "https://specs.apollo.dev/context/v0.1", for: SECURITY) {
+  query: Query
+}
+
+directive @link(url: String, as: String, for: link__Purpose, import: [link__Import]) repeatable on SCHEMA
+
+directive @join__graph(name: String!, url: String!) on ENUM_VALUE
+
+directive @join__type(graph: join__Graph!, key: join__FieldSet, extension: Boolean! = false, resolvable: Boolean! = true, isInterfaceObject: Boolean! = false) repeatable on OBJECT | INTERFACE | UNION | ENUM | INPUT_OBJECT | SCALAR
+
+directive @join__field(graph: join__Graph, requires: join__FieldSet, provides: join__FieldSet, type: String, external: Boolean, override: String, usedOverridden: Boolean, overrideLabel: String, contextArguments: [join__ContextArgument!]) repeatable on FIELD_DEFINITION | INPUT_FIELD_DEFINITION
+
+directive @join__implements(graph: join__Graph!, interface: String!) repeatable on OBJECT | INTERFACE
+
+directive @join__unionMember(graph: join__Graph!, member: String!) repeatable on UNION
+
+directive @join__enumValue(graph: join__Graph!) repeatable on ENUM_VALUE
+
+directive @join__directive(graphs: [join__Graph!], name: String!, args: join__DirectiveArguments) repeatable on SCHEMA | OBJECT | INTERFACE | FIELD_DEFINITION
+
+directive @context(name: String!) repeatable on INTERFACE | OBJECT | UNION
+
+directive @context__fromContext(field: context__ContextFieldValue) on ARGUMENT_DEFINITION
+
+enum link__Purpose {
+  """
+  `SECURITY` features provide metadata necessary to securely resolve fields.
+  """
+  SECURITY
+  """
+  `EXECUTION` features provide metadata necessary for operation execution.
+  """
+  EXECUTION
+}
+
+scalar link__Import
+
+enum join__Graph {
+  OUTLETS @join__graph(name: "outlets", url: "http://outlets")
+  PRICES @join__graph(name: "prices", url: "http://prices")
+}
+
+scalar join__FieldSet
+
+scalar join__DirectiveArguments
+
+scalar join__FieldValue
+
+input join__ContextArgument {
+  name: String!
+  type: String!
+  context: String!
+  selection: join__FieldValue!
+}
+
+scalar context__ContextFieldValue
+
+type Query @join__type(graph: OUTLETS) @join__type(graph: PRICES) {
+  outlets: [Outlet!]! @join__field(graph: OUTLETS)
+}
+
+union Outlet @join__type(graph: OUTLETS) @join__unionMember(graph: OUTLETS, member: "Store") @join__unionMember(graph: OUTLETS, member: "Kiosk") = Store | Kiosk
+
+type Store @join__type(graph: OUTLETS, key: "id") @join__type(graph: PRICES, key: "id") @context(name: "prices__outlet") {
+  id: ID!
+  locale: String @join__field(graph: OUTLETS) @join__field(graph: PRICES, external: true)
+  address: Address @join__field(graph: OUTLETS) @join__field(graph: PRICES, external: true)
+  featured: Product @join__field(graph: OUTLETS)
+  products: [Product!]! @join__field(graph: OUTLETS)
+}
+
+type Kiosk @join__type(graph: OUTLETS, key: "id") @join__type(graph: PRICES, key: "id") @context(name: "prices__outlet") {
+  id: ID!
+  locale: String @join__field(graph: OUTLETS) @join__field(graph: PRICES, external: true)
+  address: Address @join__field(graph: OUTLETS) @join__field(graph: PRICES, external: true)
+  featured: Product @join__field(graph: OUTLETS)
+  products: [Product!]! @join__field(graph: OUTLETS)
+}
+
+type Address @join__type(graph: OUTLETS) @join__type(graph: PRICES) {
+  locale: String
+}
+
+type Product @join__type(graph: OUTLETS, key: "id") @join__type(graph: PRICES, key: "id") {
+  id: ID!
+  price: Int @join__field(graph: PRICES, contextArguments: [{context: "prices__outlet", name: "locale", type: "String", selection: "{ locale }"}])
+  delivery: Int @join__field(graph: PRICES, contextArguments: [{context: "prices__outlet", name: "locale", type: "String", selection: "{ address { locale } }"}])
+}
