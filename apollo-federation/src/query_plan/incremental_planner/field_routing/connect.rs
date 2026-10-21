@@ -87,6 +87,27 @@ fn deferred_below(
     Ok(below)
 }
 
+/// `selection` re-wrapped in the type conditions and directives of
+/// `fragments` (outermost first), e.g. `email` under `... @include(if: $x)`.
+/// Fragments with neither, such as a stripped `@defer`, are dropped.
+fn wrap_in_fragments(selection: Selection, fragments: &[Arc<OpPathElement>]) -> Selection {
+    fragments
+        .iter()
+        .rev()
+        .fold(selection, |selection, element| match element.as_ref() {
+            OpPathElement::InlineFragment(fragment)
+                if fragment.type_condition_position.is_some()
+                    || !fragment.directives.is_empty() =>
+            {
+                Selection::InlineFragment(Arc::new(InlineFragmentSelection {
+                    inline_fragment: fragment.clone(),
+                    selection_set: SelectionSet::from_selection(fragment.casted_type(), selection),
+                }))
+            }
+            _ => selection,
+        })
+}
+
 /// What a connector fetch returns at a path within it.
 enum ConnectorOutputAt {
     /// The connector's `selection` output at the path.
@@ -425,104 +446,23 @@ impl FieldRoutingSearchSpace {
                                         defer_ref: defer_ref.clone(),
                                     });
                                 }
-                                None => {
-                                    // A selection deferred at the child can
-                                    // only be resolved through a key the
-                                    // connector returns there. Without one,
-                                    // re-fetch the whole field from this level
-                                    // instead, e.g. `author { email }` on
-                                    // `Post` when the connector returns
-                                    // `author` with no `id`.
-                                    let parent_anchor =
-                                        self.connector_landing_node(source_subgraph, parent_type);
-                                    let mut lifted: Vec<(Option<String>, SelectionMap)> =
-                                        Vec::new();
-                                    for item in child_deferred {
-                                        // Fragments between the child and the
-                                        // item (`... @include(if: $x) { email }`)
-                                        // keep it at the child's object level.
-                                        let at_child_level =
-                                            item.op_path.iter().skip(child_op.len()).all(|e| {
-                                                matches!(
-                                                    e.as_ref(),
-                                                    OpPathElement::InlineFragment(_)
-                                                )
-                                            });
-                                        if at_child_level
-                                            && parent_anchor.is_some()
-                                            && !self.shape_provides_some_key(
-                                                &item.parent_type,
-                                                item.anchor_node,
-                                                child_shape,
-                                                &item.selection,
-                                            )
-                                        {
-                                            let mut selection = item.selection;
-                                            let fragments: Vec<_> = item
-                                                .op_path
-                                                .iter()
-                                                .skip(child_op.len())
-                                                .cloned()
-                                                .collect();
-                                            for element in fragments.into_iter().rev() {
-                                                let OpPathElement::InlineFragment(fragment) =
-                                                    element.as_ref()
-                                                else {
-                                                    continue;
-                                                };
-                                                if fragment.type_condition_position.is_none()
-                                                    && fragment.directives.is_empty()
-                                                {
-                                                    continue;
-                                                }
-                                                selection = Selection::InlineFragment(Arc::new(
-                                                    InlineFragmentSelection {
-                                                        inline_fragment: fragment.clone(),
-                                                        selection_set: SelectionSet::from_selection(
-                                                            fragment.casted_type(),
-                                                            selection,
-                                                        ),
-                                                    },
-                                                ));
-                                            }
-                                            match lifted
-                                                .iter_mut()
-                                                .find(|(r, _)| *r == item.defer_ref)
-                                            {
-                                                Some((_, selections)) => {
-                                                    selections.insert(selection)
-                                                }
-                                                None => {
-                                                    let mut selections = SelectionMap::new();
-                                                    selections.insert(selection);
-                                                    lifted.push((item.defer_ref, selections));
-                                                }
-                                            }
-                                        } else {
-                                            deferred.push(item);
-                                        }
-                                    }
-                                    for (lifted_defer_ref, selections) in lifted {
-                                        let Some(anchor_node) = parent_anchor else {
-                                            break;
-                                        };
-                                        deferred.push(DeferredConnectorSelection {
-                                            selection: Selection::Field(Arc::new(FieldSelection {
-                                                field: field_sel.field.clone(),
-                                                selection_set: Some(SelectionSet {
-                                                    schema: child_ss.schema.clone(),
-                                                    type_position: child_ss.type_position.clone(),
-                                                    selections: Arc::new(selections),
-                                                }),
-                                            })),
-                                            parent_type: parent_type.clone(),
-                                            anchor_node,
-                                            op_path: op_path.clone(),
-                                            response_path: response_path.clone(),
-                                            defer_ref: lifted_defer_ref,
-                                        });
-                                    }
-                                }
+                                None => match self
+                                    .connector_landing_node(source_subgraph, parent_type)
+                                {
+                                    Some(parent_anchor) => self.lift_unkeyed_child_selections(
+                                        field_sel,
+                                        child_ss,
+                                        child_shape,
+                                        child_op.len(),
+                                        child_deferred,
+                                        parent_type,
+                                        parent_anchor,
+                                        op_path,
+                                        response_path,
+                                        deferred,
+                                    )?,
+                                    None => deferred.extend(child_deferred),
+                                },
                             }
                             match child_kept {
                                 Some(child_kept) if !child_kept.is_empty() => {
@@ -606,6 +546,79 @@ impl FieldRoutingSearchSpace {
                 selections: Arc::new(kept),
             }))
         }
+    }
+
+    /// Re-fetch `field_sel` from `parent_type` with the `child_deferred`
+    /// selections no key the connector returns at the child can resolve, e.g.
+    /// `author { email }` on `Post` when the connector returns `author` with
+    /// no `id`. One re-fetch per defer label; the other selections stay
+    /// deferred at the child.
+    #[allow(clippy::too_many_arguments)]
+    fn lift_unkeyed_child_selections(
+        &self,
+        field_sel: &FieldSelection,
+        child_ss: &SelectionSet,
+        child_shape: &Shape,
+        child_op_len: usize,
+        child_deferred: Vec<DeferredConnectorSelection>,
+        parent_type: &Name,
+        parent_anchor: NodeIndex,
+        op_path: &SharedPath<Arc<OpPathElement>>,
+        response_path: &SharedPath<FetchDataPathElement>,
+        deferred: &mut Vec<DeferredConnectorSelection>,
+    ) -> Result<(), FederationError> {
+        let mut lifted: Vec<(Option<String>, SelectionSet)> = Vec::new();
+        for item in child_deferred {
+            // Fragments between the child and the item
+            // (`... @include(if: $x) { email }`) keep it at the child's
+            // object level.
+            let fragments: Vec<_> = item.op_path.iter().skip(child_op_len).cloned().collect();
+            let at_child_level = fragments
+                .iter()
+                .all(|element| matches!(element.as_ref(), OpPathElement::InlineFragment(_)));
+            if !at_child_level
+                || self.shape_provides_some_key(
+                    &item.parent_type,
+                    item.anchor_node,
+                    child_shape,
+                    &item.selection,
+                )
+            {
+                deferred.push(item);
+                continue;
+            }
+            let index = match lifted.iter().position(|(r, _)| *r == item.defer_ref) {
+                Some(index) => index,
+                None => {
+                    lifted.push((
+                        item.defer_ref,
+                        SelectionSet::empty(
+                            child_ss.schema.clone(),
+                            child_ss.type_position.clone(),
+                        ),
+                    ));
+                    lifted.len() - 1
+                }
+            };
+            // Merged, so that items under the same fragment share one entry.
+            lifted[index]
+                .1
+                .add_local_selection(&wrap_in_fragments(item.selection, &fragments))?;
+        }
+        for (defer_ref, selection_set) in lifted {
+            deferred.push(DeferredConnectorSelection {
+                selection: Selection::Field(Arc::new(FieldSelection {
+                    field: field_sel.field.clone(),
+                    selection_set: Some(selection_set),
+                })),
+                parent_type: parent_type.clone(),
+                anchor_node: parent_anchor,
+                op_path: op_path.clone(),
+                response_path: response_path.clone(),
+                defer_ref,
+            });
+        }
+        Ok(())
     }
 
     /// What the connector backing `fetch_node` returns at `op_path` (relative
@@ -824,12 +837,15 @@ impl FieldRoutingSearchSpace {
                 .all(|key_selection| shape_provides(shape, key_selection))
         };
         // Only a key into something that resolves the deferred selection
-        // counts.
+        // counts, by the same test `push_entity_resolver_options` routes it
+        // with: a resolver that returns `friend { id }` resolves
+        // `friend { email }` through that key.
         let resolver_key = self
             .entity_resolvers_for(type_name)
             .filter(|entry| {
                 self.connector_index
                     .resolver_provides_any(&entry.coordinate, selection)
+                    || self.resolver_returns_child_key(entry, selection)
             })
             .filter_map(|entry| self.connector_index.key_conditions(&entry.coordinate))
             .any(|key| provides_key(key));
