@@ -325,7 +325,7 @@ Each hook in your Rhai script's [main file](#main-file) is passed a `service` ob
     
 <Note>
 
-**About Currying and performance**: Rhai supports [currying](https://rhai.rs/book/language/fn-curry.html), which binds values into a function pointer. This affects performance in the router: curried callbacks are invoked **without acquiring the global `scope` mutex**, whereas non-curried callbacks lock the `scope` on every call, serializing execution across all concurrent requests. A callback is curried when it has at least one bound value: a closure that captures a variable, or a function pointer bound with `curry`. A closure that captures nothing isn't curried and still locks the `scope`. For this reason, curried callbacks are the recommended default.
+**About Currying and performance**: Rhai supports [currying](https://rhai.rs/book/language/fn-curry.html), which binds values into a function pointer. This affects performance in the router: curried callbacks are invoked **without acquiring the global `scope` mutex**, whereas non-curried callbacks lock the `scope` on every call, serializing execution across all concurrent requests. A callback is curried when it has at least one bound value: a closure that captures a variable, or a function pointer bound with `curry`. A closure that captures nothing isn't curried and still locks the `scope`. For this reason, pass values a callback needs by capturing them in a closure or binding them with `curry`.
 
 See [Curried vs. non-curried callback functions](https://www.apollographql.com/docs/graphos/routing/customization/rhai#curried-vs-non-curried-callback-functions) for examples.
 
