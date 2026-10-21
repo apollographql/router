@@ -4411,6 +4411,115 @@ fn connector_spread_of_unknown_path_provides_no_key() {
     assert_eq!(spread, plain);
 }
 
+/// A spread at the root of the selection (`id title ... $.extra`) provides
+/// only `id` and `title`: `author` is fetched through `post(id:)` rather than
+/// kept in the `posts` fetch, where it would come back `null`.
+#[test]
+fn connector_root_spread_of_unknown_path_provides_only_known_fields() {
+    let schema = include_str!("../fixtures/connector_nested_reference_spread.graphql").replace(
+        "selection: \"id title author: { name: authorName ... authorExtra }\"",
+        "selection: \"id title ... $.extra\"",
+    );
+    let plan_str = plan_query_with_router_specs(&schema, "{ posts { title author { email } } }");
+    insta::assert_snapshot!(plan_str, @r#"
+    QueryPlan {
+      Sequence {
+        Fetch(service: "blog_Query_posts_0") {
+          {
+            posts {
+              __typename
+              title
+              id
+            }
+          }
+        },
+        Flatten(path: "posts.@") {
+          Fetch(service: "blog_Query_post_0") {
+            {
+              ... on Post {
+                __typename
+                id
+              }
+            } =>
+            {
+              ... on Post {
+                author {
+                  __typename
+                  id
+                }
+              }
+            }
+          },
+        },
+        Flatten(path: "posts.@.author") {
+          Fetch(service: "blog_User_0") {
+            {
+              ... on User {
+                __typename
+                id
+              }
+            } =>
+            {
+              ... on User {
+                email
+              }
+            }
+          },
+        },
+      },
+    }
+    "#);
+}
+
+/// A type-level connector whose selection spreads an unknown path
+/// (`id name email ... $.extra`) still resolves its known fields: without
+/// the normalization it returned nothing, and planning `email` failed.
+#[test]
+fn connector_type_spread_of_unknown_path_resolves_known_fields() {
+    let schema = include_str!("../fixtures/connector_nested_reference_spread.graphql")
+        .replace(
+            "selection: \"id title author: { name: authorName ... authorExtra }\"",
+            "selection: \"id title author: { id: authorId }\"",
+        )
+        .replace(
+            "selection: \"id name email\"",
+            "selection: \"id name email ... $.extra\"",
+        );
+    let plan_str = plan_query_with_router_specs(&schema, "{ posts { title author { email } } }");
+    insta::assert_snapshot!(plan_str, @r#"
+    QueryPlan {
+      Sequence {
+        Fetch(service: "blog_Query_posts_0") {
+          {
+            posts {
+              title
+              author {
+                __typename
+                id
+              }
+            }
+          }
+        },
+        Flatten(path: "posts.@.author") {
+          Fetch(service: "blog_User_0") {
+            {
+              ... on User {
+                __typename
+                id
+              }
+            } =>
+            {
+              ... on User {
+                email
+              }
+            }
+          },
+        },
+      },
+    }
+    "#);
+}
+
 /// A no-`$this` connector on `User` gives it a `__typename` key, but that key
 /// does not resolve `email`: the lift must still re-fetch `author` through
 /// `post(id:)` rather than treat any provided key as enough.

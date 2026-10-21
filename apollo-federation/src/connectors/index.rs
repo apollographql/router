@@ -283,16 +283,18 @@ fn normalize_output_shape(shape: &Shape) -> Shape {
         ),
         ShapeCase::One(members) => Shape::one(members.iter().map(normalize_output_shape), []),
         ShapeCase::All(members) => {
-            let mut merged = Shape::empty_map();
-            for member in members.iter() {
-                if let ShapeCase::Object { fields, .. } = normalize_output_shape(member).case() {
-                    merged.extend(fields.clone());
+            let members: Vec<_> = members.iter().map(normalize_output_shape).collect();
+            let mut merged = None;
+            for member in &members {
+                if let ShapeCase::Object { fields, .. } = member.case() {
+                    merged
+                        .get_or_insert_with(Shape::empty_map)
+                        .extend(fields.clone());
                 }
             }
-            if merged.is_empty() && !members.iter().any(Shape::is_object) {
-                shape.clone()
-            } else {
-                Shape::object(merged, Shape::none(), [])
+            match merged {
+                Some(merged) => Shape::object(merged, Shape::none(), []),
+                None => Shape::all(members, []),
             }
         }
         _ => shape.clone(),
@@ -808,5 +810,87 @@ mod tests {
         assert!(index.by_field(&name!("Product"), &name!("name")).is_none());
         assert!(index.entity_resolvers(&name!("Product")).is_none());
         assert!(!index.is_connector_subgraph("connectors"));
+    }
+
+    /// A spread of an unknown path provides only the known fields beside it,
+    /// at any depth and in every `->match` arm. An intersection with no known
+    /// fields stays opaque.
+    #[test]
+    fn normalize_output_shape_keeps_known_fields_of_spreads() {
+        use crate::connectors::json_selection::JSONSelection;
+
+        let normalized = [
+            "author: { name ... authorExtra }",
+            "id ... $.extra",
+            "items: $.items { id ... extra }",
+            "id ... $.k->match([\"a\", { author: { name ... extra } }], [@, { title }])",
+            "id ... $.k->match([\"a\", { title }], [@, { name }]) ... $.extra",
+            "author: { ... a ... b }",
+        ]
+        .map(|selection| {
+            let selection = JSONSelection::parse_with_spec(selection, ConnectSpec::V0_4)
+                .expect("valid selection");
+            let shape = SelectionAnalysis::new(selection.clone()).output_shape();
+            format!(
+                "{selection}\n=> {}",
+                normalize_output_shape(&shape).pretty_print()
+            )
+        })
+        .join("\n\n");
+        insta::assert_snapshot!(normalized, @r#"
+        author: {
+          name
+          ... authorExtra
+        }
+        => { author: { name: $root.*.name } }
+
+        id
+        ... $.extra
+        => { id: $root.*.id }
+
+        items: $.items {
+          id
+          ... extra
+        }
+        => { items: { id: $root.*.items.*.id } }
+
+        id
+        ... $.k->match(
+          ["a", {
+            author: {
+              name
+              ... extra
+            }
+          }],
+          [@, {
+            title
+          }]
+        )
+        => One<
+          { author: { name: $root.*.k.*.name }, id: $root.*.id },
+          { id: $root.*.id, title: $root.*.title },
+        >
+
+        id
+        ... $.k->match(
+          ["a", {
+            title
+          }],
+          [@, {
+            name
+          }]
+        )
+        ... $.extra
+        => One<
+          { id: $root.*.id, title: $root.*.title },
+          { id: $root.*.id, name: $root.*.name },
+        >
+
+        author: {
+          ... a
+          ... b
+        }
+        => { author: All<$root.*.a, $root.*.b> }
+        "#);
     }
 }
