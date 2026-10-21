@@ -1,7 +1,8 @@
+use std::future::Ready;
 use std::sync::Arc;
 
 use futures::StreamExt as _;
-use futures::future::BoxFuture;
+use futures::future::Either;
 use tower::Service;
 
 use crate::graphql;
@@ -52,13 +53,12 @@ pub(crate) struct EnforceOperationLimits<S> {
 
 impl<S> Service<supergraph::Request> for EnforceOperationLimits<S>
 where
-    S: Service<supergraph::Request, Response = supergraph::Response> + Clone + Send + 'static,
-    S::Error: From<http::Error> + Send + 'static,
-    S::Future: Send + 'static,
+    S: Service<supergraph::Request, Response = supergraph::Response>,
+    S::Error: From<http::Error>,
 {
     type Response = S::Response;
     type Error = S::Error;
-    type Future = BoxFuture<'static, Result<Self::Response, Self::Error>>;
+    type Future = Either<Ready<Result<Self::Response, Self::Error>>, S::Future>;
 
     fn poll_ready(
         &mut self,
@@ -68,105 +68,102 @@ where
     }
 
     fn call(&mut self, req: supergraph::Request) -> Self::Future {
-        let config = self.config.clone();
-        let inner = self.inner.clone();
-        let mut inner = std::mem::replace(&mut self.inner, inner);
+        let Some(document) = req
+            .context
+            .extensions()
+            .with_lock(|lock| lock.get::<ParsedDocument>().cloned())
+        else {
+            // We shouldn't ever reach here unless the pipeline was set up
+            // improperly (i.e. programmer error), but do something better than
+            // panicking just in case.
+            return Either::Left(std::future::ready(Ok(supergraph::Response::error_builder(
+            )
+            .status_code(http::StatusCode::INTERNAL_SERVER_ERROR)
+            .context(req.context)
+            .error(
+                graphql::Error::builder()
+                    .message("Cannot find executable document")
+                    .extension_code("MISSING_EXECUTABLE_DOCUMENT")
+                    .build(),
+            )
+            .build()
+            .expect("body is valid"))));
+        };
 
-        Box::pin(async move {
-            let Some(document) = req
-                .context
-                .extensions()
-                .with_lock(|lock| lock.get::<ParsedDocument>().cloned())
-            else {
-                // We shouldn't ever reach here unless the pipeline was set up
-                // improperly (i.e. programmer error), but do something better than
-                // panicking just in case.
-                return Ok(supergraph::Response::error_builder()
-                    .status_code(http::StatusCode::INTERNAL_SERVER_ERROR)
-                    .context(req.context)
-                    .error(
+        let mut query_metrics = OperationLimits::default();
+
+        let max = OperationLimits {
+            depth: self.config.max_depth,
+            height: self.config.max_height,
+            root_fields: self.config.max_root_fields,
+            aliases: self.config.max_aliases,
+        };
+        let result = operation_limits::check(
+            &mut query_metrics,
+            max,
+            &document.executable,
+            document.operation.name.as_deref(),
+        );
+
+        // Stash the measurements in context so they can be used for telemetry.
+        req.context.extensions().with_lock(|lock| {
+            let _ = lock.insert(query_metrics);
+        });
+
+        if let Err(OperationLimits {
+            depth,
+            height,
+            root_fields,
+            aliases,
+        }) = result
+            && !self.config.warn_only
+        {
+            let mut errors = Vec::new();
+            let mut build = |exceeded, code, message| {
+                if exceeded {
+                    errors.push(
                         graphql::Error::builder()
-                            .message("Cannot find executable document")
-                            .extension_code("MISSING_EXECUTABLE_DOCUMENT")
+                            .message(message)
+                            .extension_code(code)
                             .build(),
                     )
-                    .build()
-                    .expect("body is valid"));
+                }
             };
-
-            let mut query_metrics = OperationLimits::default();
-
-            let max = OperationLimits {
-                depth: config.max_depth,
-                height: config.max_height,
-                root_fields: config.max_root_fields,
-                aliases: config.max_aliases,
-            };
-            let result = operation_limits::check(
-                &mut query_metrics,
-                max,
-                &document.executable,
-                document.operation.name.as_deref(),
-            );
-
-            // Stash the measurements in context so they can be used for telemetry.
-            req.context.extensions().with_lock(|lock| {
-                let _ = lock.insert(query_metrics);
-            });
-
-            if let Err(OperationLimits {
+            build(
                 depth,
+                "MAX_DEPTH_LIMIT",
+                "Maximum depth limit exceeded in this operation",
+            );
+            build(
                 height,
+                "MAX_HEIGHT_LIMIT",
+                "Maximum height (field count) limit exceeded in this operation",
+            );
+            build(
                 root_fields,
+                "MAX_ROOT_FIELDS_LIMIT",
+                "Maximum root fields limit exceeded in this operation",
+            );
+            build(
                 aliases,
-            }) = result
-                && !config.warn_only
-            {
-                let mut errors = Vec::new();
-                let mut build = |exceeded, code, message| {
-                    if exceeded {
-                        errors.push(
-                            graphql::Error::builder()
-                                .message(message)
-                                .extension_code(code)
-                                .build(),
-                        )
-                    }
-                };
-                build(
-                    depth,
-                    "MAX_DEPTH_LIMIT",
-                    "Maximum depth limit exceeded in this operation",
-                );
-                build(
-                    height,
-                    "MAX_HEIGHT_LIMIT",
-                    "Maximum height (field count) limit exceeded in this operation",
-                );
-                build(
-                    root_fields,
-                    "MAX_ROOT_FIELDS_LIMIT",
-                    "Maximum root fields limit exceeded in this operation",
-                );
-                build(
-                    aliases,
-                    "MAX_ALIASES_LIMIT",
-                    "Maximum aliases limit exceeded in this operation",
-                );
-                let graphql_response = graphql::Response::builder().errors(errors).build();
+                "MAX_ALIASES_LIMIT",
+                "Maximum aliases limit exceeded in this operation",
+            );
+            let graphql_response = graphql::Response::builder().errors(errors).build();
 
-                return http::Response::builder()
+            return Either::Left(std::future::ready(
+                http::Response::builder()
                     .status(http::StatusCode::BAD_REQUEST)
                     .body(futures::stream::once(std::future::ready(graphql_response)).boxed())
                     .map_err(Self::Error::from)
                     .map(|http_response| supergraph::Response {
                         response: http_response,
                         context: req.context,
-                    });
-            }
+                    }),
+            ));
+        }
 
-            inner.call(req).await
-        })
+        Either::Right(self.inner.call(req))
     }
 }
 

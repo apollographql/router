@@ -6,8 +6,6 @@
 use std::ops::ControlFlow;
 use std::task::Poll;
 
-use futures::FutureExt;
-use futures::future::BoxFuture;
 use http::HeaderMap;
 use http::Method;
 use http::StatusCode;
@@ -26,14 +24,13 @@ use mime::APPLICATION_JSON;
 use tower::BoxError;
 use tower::Layer;
 use tower::Service;
-use tower::ServiceBuilder;
 use tower::ServiceExt;
 
 use crate::error::FetchError;
 use crate::graphql;
-use crate::layers::ServiceBuilderExt;
 use crate::layers::ServiceExt as _;
-use crate::layers::async_checkpoint::AsyncCheckpointService;
+use crate::layers::sync_checkpoint::CheckpointLayer;
+use crate::layers::sync_checkpoint::CheckpointService;
 use crate::services::MULTIPART_DEFER_ACCEPT;
 use crate::services::MULTIPART_DEFER_SPEC_PARAMETER;
 use crate::services::MULTIPART_DEFER_SPEC_VALUE;
@@ -183,22 +180,13 @@ pub(crate) struct RouterContentNegotiationLayer {}
 
 impl<S> Layer<S> for RouterContentNegotiationLayer
 where
-    S: Service<router::Request, Response = router::Response, Error = BoxError>
-        + Send
-        + Clone
-        + 'static,
+    S: Service<router::Request, Response = router::Response, Error = BoxError> + Send + 'static,
     <S as Service<router::Request>>::Future: Send + 'static,
 {
-    type Service = AsyncCheckpointService<
-        S,
-        BoxFuture<'static, Result<ControlFlow<router::Response, router::Request>, BoxError>>,
-        router::Request,
-    >;
+    type Service = CheckpointService<S, router::Request>;
 
     fn layer(&self, service: S) -> Self::Service {
-        ServiceBuilder::new()
-            .checkpoint_async(move |req: router::Request| {
-                async move {
+        CheckpointLayer::new(move |req: router::Request| {
                     if req.router_request.method() != Method::GET
                         && !content_type_is_json(req.router_request.headers())
                     {
@@ -283,10 +271,8 @@ where
 
                         Ok(ControlFlow::Break(response.into()))
                     }
-                }
-                .boxed()
-            })
-            .service(service)
+        })
+        .layer(service)
     }
 }
 

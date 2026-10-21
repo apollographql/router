@@ -5,7 +5,7 @@ use tower::BoxError;
 use tower::ServiceBuilder;
 use tower::ServiceExt;
 
-use crate::layers::ServiceBuilderExt;
+use crate::layers::sync_checkpoint::CheckpointLayer;
 use crate::plugin::Plugin;
 use crate::plugin::PluginInit;
 use crate::plugins::telemetry::CLIENT_LIBRARY_NAME;
@@ -38,7 +38,7 @@ impl Plugin for EnhancedClientAwareness {
         service: supergraph::BoxCloneService,
     ) -> supergraph::BoxCloneService {
         ServiceBuilder::new()
-            .checkpoint_async(|request: supergraph::Request| async move {
+            .layer(CheckpointLayer::new(|request: supergraph::Request| {
                 if let Some(client_library_metadata) = request
                     .supergraph_request
                     .body()
@@ -87,7 +87,7 @@ impl Plugin for EnhancedClientAwareness {
                 }
 
                 Ok(ControlFlow::Continue(request))
-            })
+            }))
             .service(service)
             .boxed_clone()
     }

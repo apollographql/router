@@ -5,6 +5,7 @@
 
 use std::sync::Arc;
 
+use futures::FutureExt as _;
 use futures::future::BoxFuture;
 use tower::BoxError;
 use tower::Service;
@@ -60,6 +61,17 @@ where
     }
 
     fn call(&mut self, req: SupergraphRequest) -> Self::Future {
+        // Without the extension APQ passes the request through untouched, whether it is enabled
+        // or not.
+        if !req
+            .supergraph_request
+            .body()
+            .extensions
+            .contains_key("persistedQuery")
+        {
+            return self.inner.call(req).boxed();
+        }
+
         let inner = self.inner.clone();
         let mut inner = std::mem::replace(&mut self.inner, inner);
 
