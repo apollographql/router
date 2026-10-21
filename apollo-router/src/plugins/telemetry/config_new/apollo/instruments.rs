@@ -1,6 +1,7 @@
 use std::collections::HashMap;
 use std::sync::Arc;
 
+use opentelemetry::metrics::Histogram;
 use opentelemetry::metrics::MeterProvider;
 use tokio::time::Instant;
 use tower::BoxError;
@@ -16,6 +17,9 @@ use crate::plugins::telemetry::CLIENT_NAME;
 use crate::plugins::telemetry::CLIENT_VERSION;
 use crate::plugins::telemetry::GRAPHQL_OPERATION_NAME_ATTRIBUTE;
 use crate::plugins::telemetry::GRAPHQL_OPERATION_TYPE_ATTRIBUTE;
+use crate::plugins::telemetry::apollo::Config;
+use crate::plugins::telemetry::config_new::Selector;
+use crate::plugins::telemetry::config_new::Selectors;
 use crate::plugins::telemetry::config_new::attributes::StandardAttribute;
 use crate::plugins::telemetry::config_new::connector::ConnectorRequest;
 use crate::plugins::telemetry::config_new::connector::ConnectorResponse;
@@ -60,83 +64,124 @@ pub(crate) struct ApolloConnectorInstruments {
     >,
 }
 
-impl ApolloSubgraphInstruments {
-    pub(crate) fn new(
-        static_instruments: Arc<HashMap<String, StaticInstrument>>,
-        subgraph_metrics: bool,
+/// The `apollo.router.operations.fetch.duration` histogram and the selectors for its
+/// attributes. Neither depends on the request, so a layer builds them once and each fetch only
+/// starts its own timer.
+pub(crate) struct ApolloFetchDuration<A, T>
+where
+    A: Default,
+{
+    selectors: Arc<Extendable<A, T>>,
+    histogram: Histogram<f64>,
+}
+
+pub(crate) type ApolloSubgraphFetchDuration =
+    ApolloFetchDuration<SubgraphAttributes, SubgraphSelector>;
+pub(crate) type ApolloConnectorFetchDuration =
+    ApolloFetchDuration<ConnectorAttributes, ConnectorSelector>;
+
+impl<A, T> ApolloFetchDuration<A, T>
+where
+    A: Default,
+{
+    fn new(
+        static_instruments: &HashMap<String, StaticInstrument>,
+        selectors: Extendable<A, T>,
     ) -> Self {
-        let selectors = Extendable {
-            attributes: SubgraphAttributes::builder()
-                .subgraph_name(StandardAttribute::Bool(true))
-                .build(),
-            custom: HashMap::from([
-                (
-                    APOLLO_CLIENT_NAME_ATTRIBUTE.to_string(),
-                    SubgraphSelector::ResponseContext {
-                        response_context: CLIENT_NAME.to_string(),
-                        default: None,
-                    },
-                ),
-                (
-                    APOLLO_CLIENT_VERSION_ATTRIBUTE.to_string(),
-                    SubgraphSelector::ResponseContext {
-                        response_context: CLIENT_VERSION.to_string(),
-                        default: None,
-                    },
-                ),
-                (
-                    GRAPHQL_OPERATION_NAME_ATTRIBUTE.to_string(),
-                    SubgraphSelector::SupergraphOperationName {
-                        supergraph_operation_name: OperationName::String,
-                        default: None,
-                    },
-                ),
-                (
-                    GRAPHQL_OPERATION_TYPE_ATTRIBUTE.to_string(),
-                    SubgraphSelector::SupergraphOperationKind {
-                        supergraph_operation_kind: OperationKind::String,
-                    },
-                ),
-                (
-                    APOLLO_OPERATION_ID_ATTRIBUTE.to_string(),
-                    SubgraphSelector::ResponseContext {
-                        response_context: APOLLO_OPERATION_ID.to_string(),
-                        default: None,
-                    },
-                ),
-                (
-                    APOLLO_HAS_ERRORS_ATTRIBUTE.to_string(),
-                    SubgraphSelector::OnGraphQLError {
-                        subgraph_on_graphql_error: true,
-                    },
-                ),
-            ]),
-        };
-        let attribute_count = selectors.custom.len() + 1; // 1 for subgraph_name on attributes
-
-        let apollo_router_operations_fetch_duration =
-            subgraph_metrics.then(|| {
-                CustomHistogram::builder()
-                    .increment(Increment::Duration(Instant::now(), "s".to_string()))
-                    .attributes(Vec::with_capacity(attribute_count))
-                    .selectors(Arc::new(selectors))
-                    .histogram(static_instruments
-                        .get(APOLLO_ROUTER_OPERATIONS_FETCH_DURATION)
-                        .expect(
-                            "cannot get apollo static instrument for subgraph; this should not happen",
-                        )
-                        .as_histogram()
-                        .cloned()
-                        .expect(
-                            "cannot convert apollo instrument to histogram for subgraph; this should not happen",
-                        )
-                    )
-                    .build()
-            });
-
+        let histogram = static_instruments
+            .get(APOLLO_ROUTER_OPERATIONS_FETCH_DURATION)
+            .expect("cannot get apollo static instrument for subgraph; this should not happen")
+            .as_histogram()
+            .cloned()
+            .expect(
+                "cannot convert apollo instrument to histogram for subgraph; this should not happen",
+            );
         Self {
-            apollo_router_operations_fetch_duration,
+            selectors: Arc::new(selectors),
+            histogram,
         }
+    }
+
+    /// A histogram timing one fetch from now.
+    fn start_histogram<Request, Response>(&self) -> CustomHistogram<Request, Response, (), A, T>
+    where
+        A: Selectors<Request, Response, ()>,
+        T: Selector<Request = Request, Response = Response, EventResponse = ()>,
+    {
+        CustomHistogram::builder()
+            .increment(Increment::Duration(Instant::now(), "s".to_string()))
+            .attributes(Vec::new())
+            .selectors(self.selectors.clone())
+            .histogram(self.histogram.clone())
+            .build()
+    }
+}
+
+impl ApolloSubgraphInstruments {
+    pub(crate) fn new(fetch_duration: Option<&ApolloSubgraphFetchDuration>) -> Self {
+        Self {
+            apollo_router_operations_fetch_duration: fetch_duration
+                .map(ApolloFetchDuration::start_histogram),
+        }
+    }
+
+    /// The fetch duration histogram, when `subgraph_metrics` is on.
+    pub(crate) fn fetch_duration(
+        static_instruments: &HashMap<String, StaticInstrument>,
+        apollo_config: &Config,
+    ) -> Option<ApolloSubgraphFetchDuration> {
+        apollo_config.subgraph_metrics.then(|| {
+            ApolloFetchDuration::new(
+                static_instruments,
+                Extendable {
+                    attributes: SubgraphAttributes::builder()
+                        .subgraph_name(StandardAttribute::Bool(true))
+                        .build(),
+                    custom: HashMap::from([
+                        (
+                            APOLLO_CLIENT_NAME_ATTRIBUTE.to_string(),
+                            SubgraphSelector::ResponseContext {
+                                response_context: CLIENT_NAME.to_string(),
+                                default: None,
+                            },
+                        ),
+                        (
+                            APOLLO_CLIENT_VERSION_ATTRIBUTE.to_string(),
+                            SubgraphSelector::ResponseContext {
+                                response_context: CLIENT_VERSION.to_string(),
+                                default: None,
+                            },
+                        ),
+                        (
+                            GRAPHQL_OPERATION_NAME_ATTRIBUTE.to_string(),
+                            SubgraphSelector::SupergraphOperationName {
+                                supergraph_operation_name: OperationName::String,
+                                default: None,
+                            },
+                        ),
+                        (
+                            GRAPHQL_OPERATION_TYPE_ATTRIBUTE.to_string(),
+                            SubgraphSelector::SupergraphOperationKind {
+                                supergraph_operation_kind: OperationKind::String,
+                            },
+                        ),
+                        (
+                            APOLLO_OPERATION_ID_ATTRIBUTE.to_string(),
+                            SubgraphSelector::ResponseContext {
+                                response_context: APOLLO_OPERATION_ID.to_string(),
+                                default: None,
+                            },
+                        ),
+                        (
+                            APOLLO_HAS_ERRORS_ATTRIBUTE.to_string(),
+                            SubgraphSelector::OnGraphQLError {
+                                subgraph_on_graphql_error: true,
+                            },
+                        ),
+                    ]),
+                },
+            )
+        })
     }
 
     pub(crate) fn new_builtin() -> HashMap<String, StaticInstrument> {
@@ -175,88 +220,76 @@ impl Instrumented for ApolloSubgraphInstruments {
 }
 
 impl ApolloConnectorInstruments {
-    pub(crate) fn new(
-        static_instruments: Arc<HashMap<String, StaticInstrument>>,
-        subgraph_metrics: bool,
-    ) -> Self {
-        let selectors = Extendable {
-            attributes: ConnectorAttributes::builder()
-                .subgraph_name(StandardAttribute::Bool(true))
-                .build(),
-            custom: HashMap::from([
-                (
-                    APOLLO_CLIENT_NAME_ATTRIBUTE.to_string(),
-                    ConnectorSelector::RequestContext {
-                        request_context: CLIENT_NAME.to_string(),
-                        default: None,
-                    },
-                ),
-                (
-                    APOLLO_CLIENT_VERSION_ATTRIBUTE.to_string(),
-                    ConnectorSelector::RequestContext {
-                        request_context: CLIENT_VERSION.to_string(),
-                        default: None,
-                    },
-                ),
-                (
-                    GRAPHQL_OPERATION_NAME_ATTRIBUTE.to_string(),
-                    ConnectorSelector::SupergraphOperationName {
-                        supergraph_operation_name: OperationName::String,
-                        default: None,
-                    },
-                ),
-                (
-                    GRAPHQL_OPERATION_TYPE_ATTRIBUTE.to_string(),
-                    ConnectorSelector::SupergraphOperationKind {
-                        supergraph_operation_kind: OperationKind::String,
-                    },
-                ),
-                (
-                    APOLLO_OPERATION_ID_ATTRIBUTE.to_string(),
-                    ConnectorSelector::RequestContext {
-                        request_context: APOLLO_OPERATION_ID.to_string(),
-                        default: None,
-                    },
-                ),
-                (
-                    APOLLO_HAS_ERRORS_ATTRIBUTE.to_string(),
-                    ConnectorSelector::OnResponseError {
-                        connector_on_response_error: true,
-                    },
-                ),
-                (
-                    APOLLO_CONNECTOR_SOURCE_ATTRIBUTE.to_string(),
-                    ConnectorSelector::ConnectorSource {
-                        connector_source: Name,
-                    },
-                ),
-            ]),
-        };
-        let attribute_count = selectors.custom.len() + 1; // 1 for subgraph_name on attributes
-
-        let apollo_router_operations_fetch_duration =
-            subgraph_metrics.then(|| {
-                CustomHistogram::builder()
-                    .increment(Increment::Duration(Instant::now(), "s".to_string()))
-                    .attributes(Vec::with_capacity(attribute_count))
-                    .selectors(Arc::new(selectors))
-                    .histogram(static_instruments
-                        .get(APOLLO_ROUTER_OPERATIONS_FETCH_DURATION)
-                        .expect(
-                            "cannot get apollo static instrument for subgraph; this should not happen",
-                        )
-                        .as_histogram()
-                        .cloned()
-                        .expect(
-                            "cannot convert apollo instrument to histogram for subgraph; this should not happen",
-                        )
-                    )
-                    .build()
-            });
-
+    pub(crate) fn new(fetch_duration: Option<&ApolloConnectorFetchDuration>) -> Self {
         Self {
-            apollo_router_operations_fetch_duration,
+            apollo_router_operations_fetch_duration: fetch_duration
+                .map(ApolloFetchDuration::start_histogram),
         }
+    }
+
+    /// The fetch duration histogram, when `subgraph_metrics` is on.
+    pub(crate) fn fetch_duration(
+        static_instruments: &HashMap<String, StaticInstrument>,
+        apollo_config: &Config,
+    ) -> Option<ApolloConnectorFetchDuration> {
+        apollo_config.subgraph_metrics.then(|| {
+            ApolloFetchDuration::new(
+                static_instruments,
+                Extendable {
+                    attributes: ConnectorAttributes::builder()
+                        .subgraph_name(StandardAttribute::Bool(true))
+                        .build(),
+                    custom: HashMap::from([
+                        (
+                            APOLLO_CLIENT_NAME_ATTRIBUTE.to_string(),
+                            ConnectorSelector::RequestContext {
+                                request_context: CLIENT_NAME.to_string(),
+                                default: None,
+                            },
+                        ),
+                        (
+                            APOLLO_CLIENT_VERSION_ATTRIBUTE.to_string(),
+                            ConnectorSelector::RequestContext {
+                                request_context: CLIENT_VERSION.to_string(),
+                                default: None,
+                            },
+                        ),
+                        (
+                            GRAPHQL_OPERATION_NAME_ATTRIBUTE.to_string(),
+                            ConnectorSelector::SupergraphOperationName {
+                                supergraph_operation_name: OperationName::String,
+                                default: None,
+                            },
+                        ),
+                        (
+                            GRAPHQL_OPERATION_TYPE_ATTRIBUTE.to_string(),
+                            ConnectorSelector::SupergraphOperationKind {
+                                supergraph_operation_kind: OperationKind::String,
+                            },
+                        ),
+                        (
+                            APOLLO_OPERATION_ID_ATTRIBUTE.to_string(),
+                            ConnectorSelector::RequestContext {
+                                request_context: APOLLO_OPERATION_ID.to_string(),
+                                default: None,
+                            },
+                        ),
+                        (
+                            APOLLO_HAS_ERRORS_ATTRIBUTE.to_string(),
+                            ConnectorSelector::OnResponseError {
+                                connector_on_response_error: true,
+                            },
+                        ),
+                        (
+                            APOLLO_CONNECTOR_SOURCE_ATTRIBUTE.to_string(),
+                            ConnectorSelector::ConnectorSource {
+                                connector_source: Name,
+                            },
+                        ),
+                    ]),
+                },
+            )
+        })
     }
 
     pub(crate) fn new_builtin() -> HashMap<String, StaticInstrument> {

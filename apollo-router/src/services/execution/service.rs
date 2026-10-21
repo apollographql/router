@@ -57,6 +57,8 @@ pub(crate) struct ExecutionService {
     pub(crate) configuration: Arc<Configuration>,
     /// Subscription config if enabled
     pub(crate) subscription_config: Option<SubscriptionConfig>,
+    /// Apollo usage reporting reference mode. `Standard`, which collects no response enum
+    /// values, unless the telemetry plugin is present and the router exports to Apollo.
     pub(crate) metrics_reference_mode: ApolloMetricsReferenceMode,
 }
 
