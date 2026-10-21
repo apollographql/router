@@ -42,6 +42,10 @@ pub(super) struct CacheKeyContext {
     pub(super) subgraph_request: graphql::Request,
     pub(super) source: CacheKeySource,
     pub(super) cache_control: CacheControl,
+    /// Whether an error in the response kept this entry out of the cache. Not serialized; like
+    /// `has_tags`, it only adds a warning. Callers fold it into `should_store` themselves.
+    #[serde(skip)]
+    pub(super) has_errors: bool,
     /// For data fetched by this request, the cache's decision to store it; this is not
     /// confirmation that the storage write succeeded. For a cache hit, whether its
     /// `Cache-Control` allows storing. Callers set what the router's own rules allow, and
@@ -158,6 +162,14 @@ impl CacheKeyContext {
                 code: "CACHE_CONTROL_NO_STORE".to_string(),
                 links: vec![cache_control_mdn_docs.clone()],
                 message: "Either the request or the subgraph response contained a Cache-Control header with no-store, so the data was not cached".to_string(),
+            });
+        }
+        // Not cached because the response contained an error affecting this entry
+        if self.has_errors {
+            self.warnings.push(Warning {
+                code: "SUBGRAPH_ERRORS".to_string(),
+                links: vec![Link { url: String::from("https://www.apollographql.com/docs/graphos/routing/performance/caching/response-caching"), title: "Response caching in the Router".to_string() }],
+                message: "The subgraph returned an error for this entry, or an error the router could not match to a single entity, so the data was not cached.".to_string(),
             });
         }
         // Not cached because private in cache-control header and no private_id found in the context
@@ -309,6 +321,7 @@ mod tests {
             subgraph_request: graphql::Request::default(),
             source: CacheKeySource::Subgraph,
             cache_control: clean_cache_control(),
+            has_errors: false,
             should_store: false,
             hashed_private_id: None,
             data: serde_json_bytes::Value::default(),

@@ -319,6 +319,58 @@ async fn fetch_makes_post_requests() {
 }
 
 #[tokio::test]
+async fn subfetch_trace_logs_operation_and_variables() {
+    let _guard = crate::test_harness::tracing_test::dispatcher_guard();
+
+    let entities_query = "query($representations:[_Any!]!){_entities(representations:$representations){...on User{name}}}";
+    let subgraphs = MockedSubgraphs(
+        [(
+            "user",
+            MockSubgraph::builder()
+                .with_json(
+                    serde_json::json! {{"query":"{currentUser{__typename id}}"}},
+                    serde_json::json! {{"data": {"currentUser": { "__typename": "User", "id": "0" }}}},
+                )
+                .with_json(
+                    serde_json::json! {{
+                        "query": entities_query,
+                        "variables": {"representations":[{"__typename": "User", "id":"0"}]}
+                    }},
+                    serde_json::json! {{"data": {"_entities": [{ "name": "Ada" }]}}},
+                )
+                .build(),
+        )]
+        .into_iter()
+        .collect(),
+    );
+    let service = TestHarness::builder()
+        .schema(include_str!("../testdata/orga_supergraph.graphql"))
+        .extra_plugin(subgraphs)
+        .build_supergraph()
+        .await
+        .unwrap();
+
+    let context = Context::new();
+    context.extensions().with_lock(|lock| {
+        lock.insert(crate::services::router::ClientRequestAccepts {
+            multipart_defer: true,
+            ..Default::default()
+        })
+    });
+    let request = supergraph::Request::fake_builder()
+        .context(context)
+        .query("query { currentUser { id ...@defer { name } } }")
+        .build()
+        .unwrap();
+    let mut stream = service.oneshot(request).await.unwrap();
+    while stream.next_response().await.is_some() {}
+
+    assert!(crate::test_harness::tracing_test::logs_contain(
+        r#"subgraph fetch to user: operation = 'query($representations: [_Any!]!) { _entities(representations: $representations) { ... on User { name } } }', variables = {"representations": Array([Object({"__typename": String("User"), "id": String("0")})])}, response:"#
+    ));
+}
+
+#[tokio::test]
 async fn defer() {
     // plan for { t { x ... @defer { y } }}
     let query_plan: QueryPlan = QueryPlan {
