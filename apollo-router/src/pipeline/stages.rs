@@ -496,7 +496,7 @@ pub(crate) fn build_query_parsing_service(
     let max_recursive_selections = configuration.limits.router.max_recursive_selections;
     let warn_only = configuration.limits.router.warn_only;
 
-    let cache_config = InMemoryConfig::<512> {
+    let cache_config = InMemoryConfig {
         limit: u64::try_from(cache_limit.get()).expect("usize should fit in u64"),
     };
 
