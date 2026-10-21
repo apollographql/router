@@ -117,6 +117,12 @@ impl std::ops::Deref for BulbTwinPlanner {
     }
 }
 
+impl BulbTwinPlanner {
+    pub(crate) fn bulb(&self) -> &QueryPlanner {
+        &self.bulb
+    }
+}
+
 #[track_caller]
 pub(crate) fn test_planner_with_bulb_twin(
     function_path: &'static str,
