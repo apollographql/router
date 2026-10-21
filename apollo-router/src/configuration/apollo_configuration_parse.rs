@@ -680,7 +680,7 @@ mod tests {
     }
 
     #[test]
-    fn diagnostics_redact_typed_secrets_reached_through_draft_7_references() {
+    fn diagnostics_redact_typed_secrets_reached_through_references() {
         let secret = "redis-password-must-not-leak"; // gitleaks:allow
         let text = format!(
             "apq:\n  router:\n    cache:\n      redis:\n        urls: [redis://localhost]\n        password: {secret}\n        unexpected: true\n"

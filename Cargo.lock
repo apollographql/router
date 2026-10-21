@@ -198,9 +198,9 @@ dependencies = [
 
 [[package]]
 name = "apollo-configuration"
-version = "0.8.0"
+version = "0.9.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "461999f6a3d8916d83490c985c1ac50fb42a9944f0cd0f18e732e34792349670"
+checksum = "2aad828a7f8f17711a596fe28340c67c8f22ad0d5f4c33f97547e431972bd58d"
 dependencies = [
  "apollo-configuration-macros",
  "apollo-errors",
@@ -226,9 +226,9 @@ dependencies = [
 
 [[package]]
 name = "apollo-configuration-macros"
-version = "0.2.4"
+version = "0.2.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "9a25a95ce06c35c92764ebe732077e877a4bf085d8b286ca9be07a9a1b691f60"
+checksum = "c2e5ca1c711b00a55a5b8368c53697d69af4aae8028c44887ebd2866e5e98a0c"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -312,7 +312,7 @@ dependencies = [
  "serde",
  "serde_json",
  "serde_json_bytes",
- "sha1 0.10.6",
+ "sha1 0.11.0",
  "shape",
  "similar 3.2.0",
  "strum 0.28.0",
@@ -342,9 +342,9 @@ dependencies = [
 
 [[package]]
 name = "apollo-opentelemetry"
-version = "0.12.1"
+version = "0.12.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "c5bf81a82af450cc607742809bad56453430ba8e235b26a79293571e36472b2f"
+checksum = "3fda389ca9c02364c5afd51f75642434ed203dd7d4b08ca72396a8f755190f8d"
 dependencies = [
  "apollo-configuration",
  "apollo-errors",
@@ -378,9 +378,9 @@ dependencies = [
 
 [[package]]
 name = "apollo-opentelemetry-macros"
-version = "0.4.1"
+version = "0.4.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "3cf699ecf4a17c7a00e7a60be56e1f82c726a8659a013488853e9da19338fa82"
+checksum = "40d2a4bf6b99bd690d2e705da27d8d83f22be1205dfdf2a1f309fbd825522a55"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -413,9 +413,9 @@ dependencies = [
 
 [[package]]
 name = "apollo-qos"
-version = "0.10.1"
+version = "0.10.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "76c698bdc7b5740d472eff0125e72e2f1c635ab72eb13d44c2bdc1b92503177b"
+checksum = "7c7ef1803b3e6340e4e49aafef365f6c5ed9c2a9ed1539aff06563cd9ae8c63d"
 dependencies = [
  "apollo-configuration",
  "apollo-errors",
@@ -482,7 +482,6 @@ dependencies = [
  "crossbeam-channel",
  "ctor 1.0.13",
  "dashmap",
- "derivative",
  "derive_more",
  "dhat",
  "diff",
@@ -490,7 +489,7 @@ dependencies = [
  "docker_credential",
  "ecdsa 0.17.0",
  "encoding_rs 0.8.42",
- "erased-serde",
+ "erased-serde 0.4.10",
  "flate2",
  "fred",
  "futures",
@@ -501,7 +500,7 @@ dependencies = [
  "heck",
  "hex",
  "hickory-resolver",
- "hmac 0.12.1",
+ "hmac 0.13.0",
  "http 1.5.0",
  "http-body 1.1.0",
  "http-body-util",
@@ -579,8 +578,8 @@ dependencies = [
  "serde_regex",
  "serde_urlencoded",
  "serde_yaml 0.8.26",
- "sha1 0.10.6",
- "sha2 0.10.9",
+ "sha1 0.11.0",
+ "sha2 0.11.1",
  "shellexpand",
  "similar 3.2.0",
  "socket2 0.5.10",
@@ -1057,7 +1056,7 @@ dependencies = [
  "http 0.2.12",
  "http 1.5.0",
  "percent-encoding",
- "sha2 0.11.0",
+ "sha2 0.11.1",
  "time",
  "tracing",
 ]
@@ -2376,17 +2375,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "derivative"
-version = "2.2.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "fcc3dd5e9e9c0b295d6e1e4d811fb6f157d5ffd784b8d202fc62eac8035a770b"
-dependencies = [
- "proc-macro2",
- "quote",
- "syn 1.0.109",
-]
-
-[[package]]
 name = "derive_arbitrary"
 version = "1.5.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2776,6 +2764,17 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "6c138974f9d5e7fe373eb04df7cae98833802ae4b11c24ac7039a21d5af4b26c"
 dependencies = [
  "serde",
+]
+
+[[package]]
+name = "erased-serde"
+version = "0.4.10"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "d2add8a07dd6a8d93ff627029c51de145e12686fbc36ecb298ac22e74cf02dec"
+dependencies = [
+ "serde",
+ "serde_core",
+ "typeid",
 ]
 
 [[package]]
@@ -4378,9 +4377,9 @@ dependencies = [
 
 [[package]]
 name = "jsonwebtoken"
-version = "10.4.0"
+version = "11.1.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "eba32bfb4ffdeaca3e34431072faf01745c9b26d25504aa7a6cf5684334fc4fc"
+checksum = "e75fe14a82d81e5f5af639997db37d8b96045938a7ac6ab18cdbe1c7467e05e1"
 dependencies = [
  "base64 0.22.1",
  "ed25519-dalek",
@@ -4580,9 +4579,9 @@ dependencies = [
 
 [[package]]
 name = "lru"
-version = "0.18.5"
+version = "0.19.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "ef9ac18847474e638e3702b76c65d4eb93428471a74778ef0f1be711717f89b5"
+checksum = "4a9f71e3591c7ec44d3e563e87bf14ddc2bada8519dca046e5b0e560cd004e2d"
 dependencies = [
  "hashbrown 0.17.1",
 ]
@@ -5132,7 +5131,7 @@ dependencies = [
  "reqwest",
  "serde",
  "serde_json",
- "sha2 0.11.0",
+ "sha2 0.11.1",
  "thiserror 2.0.21",
  "tokio",
  "tracing",
@@ -5407,7 +5406,7 @@ dependencies = [
  "elliptic-curve 0.14.1",
  "primefield",
  "primeorder 0.14.0",
- "sha2 0.11.0",
+ "sha2 0.11.1",
 ]
 
 [[package]]
@@ -6704,7 +6703,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "0d84e8ba78bd384263e5922f084cbe1b081c3b7e69add59c8fb097b879ba968a"
 dependencies = [
  "globset",
- "sha2 0.11.0",
+ "sha2 0.11.1",
  "walkdir",
 ]
 
@@ -6823,9 +6822,9 @@ checksum = "f87165f0995f63a9fbeea62b64d10b4d9d8e78ec6d7d51fb2125fda7bb36788f"
 
 [[package]]
 name = "rustls-webpki"
-version = "0.103.15"
+version = "0.103.16"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "f3c3cf1d8b1e7d4927e2d154c3fcb02979afb9939629c62cd9048d4f07b60ac2"
+checksum = "4443b1b6d39d7c663139942cc4558262562d2c84123bb6282ef177009ca8b281"
 dependencies = [
  "aws-lc-rs",
  "ring",
@@ -6865,9 +6864,9 @@ dependencies = [
 
 [[package]]
 name = "saphyr"
-version = "0.1.0"
+version = "0.2.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "79830a82cc4eeea33aa46346f910d7cc1e576249a6fbe2fefab6ba89eba8a203"
+checksum = "0662b098655e5e779a80041b640702e341cf3ede4560ecc103cf0ef098c8e33e"
 dependencies = [
  "encoding_rs 0.7.2",
  "hashlink",
@@ -6878,9 +6877,9 @@ dependencies = [
 
 [[package]]
 name = "saphyr-parser"
-version = "0.1.0"
+version = "0.2.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "7429158804c36e705d9423b7848018e535b3e92d439a763e364ee12670ef473b"
+checksum = "6c6220586c3dacac54bfddec87af86ddb31862d29666e7e35cf4baf70a25d387"
 dependencies = [
  "arraydeque",
  "thiserror 2.0.21",
@@ -7179,9 +7178,9 @@ dependencies = [
 
 [[package]]
 name = "sha2"
-version = "0.11.0"
+version = "0.11.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "446ba717509524cb3f22f17ecc096f10f4822d76ab5c0b9822c5f9c284e825f4"
+checksum = "47d7069beb7d6ac7b9acd1039986e73443f24234f41074da099d6f994ac9ad19"
 dependencies = [
  "cfg-if 1.0.4",
  "cpufeatures 0.3.0",
@@ -8469,7 +8468,7 @@ version = "0.1.8"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "4080564c5b2241b5bff53ab610082234e0c57b0417f4bd10596f183001505b8a"
 dependencies = [
- "erased-serde",
+ "erased-serde 0.3.31",
  "inventory",
  "once_cell",
  "serde",
@@ -8860,9 +8859,9 @@ dependencies = [
 
 [[package]]
 name = "webpki-root-certs"
-version = "1.0.9"
+version = "1.0.10"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "b96554aa2acc8ccdb7e1c9a58a7a68dd5d13bccc69cd124cb09406db612a1c9b"
+checksum = "58ec80e73fd8baf57bf0d9615554c75348bda990d6d5bbeab964dd068319fecb"
 dependencies = [
  "rustls-pki-types",
 ]
@@ -8904,7 +8903,7 @@ version = "0.1.10"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "0978bf7171b3d90bac376700cb56d606feb40f251a475a5d6634613564460b22"
 dependencies = [
- "windows-sys 0.60.2",
+ "windows-sys 0.48.0",
 ]
 
 [[package]]

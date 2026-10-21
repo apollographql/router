@@ -1310,7 +1310,7 @@ impl FieldRoutingSearchSpace {
     /// subgraph schema (ignoring routing reachability). @external does not
     /// count as availability: the subgraph cannot resolve the field, so it
     /// creates no fork.
-    fn field_in_multiple_subgraphs(
+    pub(super) fn field_in_multiple_subgraphs(
         &self,
         field_sel: &FieldSelection,
         source_node: NodeIndex,
@@ -1322,6 +1322,10 @@ impl FieldRoutingSearchSpace {
         };
         let parent_type_name = source_pos.type_name();
         let field_name = field_sel.field.field_position.field_name();
+        let key = (parent_type_name.clone(), field_name.clone());
+        if let Some(&cached) = self.caches.fields_in_multiple_subgraphs.borrow().get(&key) {
+            return Ok(cached);
+        }
         let mut count = 0u32;
         for (_source, schema) in self.qg().subgraph_schemas() {
             let Ok(parent_type) = schema.get_type(parent_type_name) else {
@@ -1345,10 +1349,15 @@ impl FieldRoutingSearchSpace {
             }
             count += 1;
             if count > 1 {
-                return Ok(true);
+                break;
             }
         }
-        Ok(false)
+        let in_multiple = count > 1;
+        self.caches
+            .fields_in_multiple_subgraphs
+            .borrow_mut()
+            .insert(key, in_multiple);
+        Ok(in_multiple)
     }
 
     /// Shareable-fork propagation for children: whether some field on this
@@ -1441,6 +1450,21 @@ impl FieldRoutingSearchSpace {
         if anchor.condition_depth() >= CONDITION_DEPTH_LIMIT {
             return Err(FederationError::internal(format!(
                 "condition resolution nested more than {CONDITION_DEPTH_LIMIT} levels deep (circular @requires?)",
+            )));
+        }
+        // A condition the anchor is already resolving can't help resolve
+        // itself: the route that needs it again only recurses until the
+        // depth limit, and every level of a key-hop cycle can branch, so
+        // reaching that limit is exponential. Failing here lets the anchor
+        // try its other routes instead.
+        if let Some(sel) = conditions
+            .selections
+            .values()
+            .find(|sel| anchor.is_resolving_condition(anchor.query_graph_node, sel))
+        {
+            return Err(FederationError::internal(format!(
+                "condition {} already being resolved at this position",
+                selection_label(sel),
             )));
         }
         // Condition data is entity-fetch input: route it unconditionally

@@ -1201,7 +1201,6 @@ fn all_subgraphs_disabled_root_typename_fails_planning() {
 
 use apollo_compiler::name;
 
-use super::state::ConditionScope;
 use super::test_support;
 use super::*;
 
@@ -1240,12 +1239,11 @@ fn t_pending(
         .next()
         .expect("field selection")
         .clone();
-    let mut pending = PendingSelection::root(field_sel, t_node(space, "a"), fetch_node);
-    pending.condition = dependent.map(|dependent| ConditionScope {
-        dependent,
-        depth: 1,
-    });
-    pending
+    let pending = PendingSelection::root(field_sel, t_node(space, "a"), fetch_node);
+    match dependent {
+        Some(dependent) => pending.into_condition_for(dependent),
+        None => pending,
+    }
 }
 
 /// The search enumerates options through cached_routing_options, so a fork
@@ -1284,6 +1282,34 @@ fn restrict_to_filters_enumerated_options() {
         .cached_routing_options(&Arc::new(elsewhere))
         .expect("filtered options enumerate");
     assert!(none.is_empty(), "restrict_to must drop every other option");
+}
+
+/// Shareable-fork detection asks this for every dispatch on a shareable
+/// path, so the per-subgraph schema scan is cached by (type, field).
+#[test]
+fn field_in_multiple_subgraphs_is_cached_per_type_and_field() {
+    let space = search_space();
+    let fetch_node = NodeIndex::new(0);
+    let in_both = t_pending(&space, "z", fetch_node, None);
+    let only_b = t_pending(&space, "y", fetch_node, None);
+    let field = |pending: &PendingSelection| match &pending.selection {
+        Selection::Field(field) => field.clone(),
+        Selection::InlineFragment(_) => panic!("expected a field"),
+    };
+
+    assert!(
+        space
+            .field_in_multiple_subgraphs(&field(&in_both), in_both.query_graph_node)
+            .expect("lookup succeeds")
+    );
+    assert!(
+        !space
+            .field_in_multiple_subgraphs(&field(&only_b), only_b.query_graph_node)
+            .expect("lookup succeeds")
+    );
+    let cache = space.caches.fields_in_multiple_subgraphs.borrow();
+    assert_eq!(cache.get(&(name!("T"), name!("z"))), Some(&true));
+    assert_eq!(cache.get(&(name!("T"), name!("y"))), Some(&false));
 }
 
 /// State with root group A feeding entity group B, so an ordering

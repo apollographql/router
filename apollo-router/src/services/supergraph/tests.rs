@@ -2727,6 +2727,77 @@ async fn aliased_subgraph_data_rewrites_on_non_root_fetch() {
 }
 
 #[tokio::test]
+async fn aliased_subgraph_data_rewrites_nested_under_an_aliased_field() {
+    // `o` is aliased on `T3` and, under both `o` and `o__alias_0`, `x` is aliased on `A`. The
+    // Subgraph2 mock only matches if all of them are renamed back before the representations are
+    // built.
+    let subgraphs = MockedSubgraphs([
+            ("Subgraph1", MockSubgraph::builder()
+                .with_json(
+                    serde_json::json! {{
+                        "query": "{is{__typename ...on T1{g h}...on T2{__typename id o{u{__typename ...on B{x}...on A{x__alias_0:x}}}}...on T3{__typename id o__alias_0:o{u{__typename ...on B{x}...on A{x__alias_0:x}}}}}}",
+                    }},
+                    serde_json::json! {{
+                        "data": {"is": [
+                            {"__typename": "T2", "id": "2", "o": {"u": [
+                                {"__typename": "A", "x__alias_0": 1},
+                                {"__typename": "B", "x": 2},
+                            ]}},
+                            {"__typename": "T3", "id": "3", "o__alias_0": {"u": [
+                                {"__typename": "A", "x__alias_0": 3},
+                                {"__typename": "B", "x": null},
+                            ]}},
+                        ]},
+                    }},
+                )
+                .build()),
+            ("Subgraph2", MockSubgraph::builder()
+                .with_json(
+                    serde_json::json! {{
+                        "query": "query($representations:[_Any!]!){_entities(representations:$representations){...on T2{g h}...on T3{g h}}}",
+                        "variables": {"representations": [
+                            {"__typename": "T2", "id": "2", "o": {"u": [{"x": 1}, {"x": 2}]}},
+                            {"__typename": "T3", "id": "3", "o": {"u": [{"x": 3}, {"x": null}]}},
+                        ]},
+                    }},
+                    serde_json::json! {{
+                        "data": {"_entities": [{"g": 10, "h": 20}, {"g": 30, "h": 40}]},
+                    }},
+                )
+                .build()),
+        ].into_iter().collect());
+
+    let service = TestHarness::builder()
+        .configuration_json(serde_json::json!({
+            "include_subgraph_errors": { "all": true },
+            "supergraph": {
+                "generate_query_fragments": false,
+            }
+        }))
+        .unwrap()
+        .schema(include_str!(
+            "../../testdata/nested_requires_alias_supergraph.graphql"
+        ))
+        .extra_plugin(subgraphs)
+        .build_supergraph()
+        .await
+        .unwrap();
+
+    let request = supergraph::Request::fake_builder()
+        .query("{ is { g h } }")
+        .build()
+        .unwrap();
+
+    let mut stream = service.oneshot(request).await.unwrap();
+    let response = stream.next_response().await.unwrap();
+
+    assert_eq!(
+        serde_json::to_value(&response).unwrap(),
+        serde_json::json!({"data": {"is": [{"g": 10, "h": 20}, {"g": 30, "h": 40}]}}),
+    );
+}
+
+#[tokio::test]
 async fn errors_on_nullified_paths() {
     let schema = r#"
           schema

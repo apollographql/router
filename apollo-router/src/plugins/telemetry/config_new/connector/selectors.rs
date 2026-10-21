@@ -2,7 +2,6 @@ use std::sync::atomic::Ordering;
 
 use apollo_federation::connectors::runtime::http_json_transport::TransportRequest;
 use apollo_federation::connectors::runtime::responses::MappedResponse;
-use derivative::Derivative;
 use opentelemetry::Array;
 use opentelemetry::StringValue;
 use opentelemetry::Value;
@@ -63,9 +62,8 @@ pub(crate) enum MappingProblems {
     Boolean,
 }
 
-#[derive(Deserialize, JsonSchema, Clone, Derivative)]
+#[derive(Deserialize, JsonSchema, Clone, derive_more::Debug, derive_more::PartialEq)]
 #[serde(deny_unknown_fields, rename_all = "snake_case", untagged)]
-#[derivative(Debug, PartialEq)]
 pub(crate) enum ConnectorSelector {
     SubgraphName {
         /// The subgraph name

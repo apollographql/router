@@ -2,7 +2,6 @@ use std::path::PathBuf;
 use std::pin::Pin;
 use std::str::FromStr;
 
-use derivative::Derivative;
 use derive_more::Display;
 use derive_more::From;
 use futures::prelude::*;
@@ -99,8 +98,7 @@ type LicenseStream = Pin<Box<dyn Stream<Item = License> + Send>>;
 
 /// License controls availability of certain features of the Router.
 /// This API experimental and is subject to change outside of semver.
-#[derive(From, Display, Derivative)]
-#[derivative(Debug)]
+#[derive(From, Display, derive_more::Debug)]
 #[non_exhaustive]
 pub enum LicenseSource {
     /// A static license. EXPERIMENTAL and not subject to semver.
@@ -113,7 +111,7 @@ pub enum LicenseSource {
 
     /// A stream of license. EXPERIMENTAL and not subject to semver.
     #[display("Stream")]
-    Stream(#[derivative(Debug = "ignore")] LicenseStream),
+    Stream(#[debug(skip)] LicenseStream),
 
     /// A raw file that may be watched for changes. EXPERIMENTAL and not subject to semver.
     #[display("File")]
