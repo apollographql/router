@@ -378,7 +378,7 @@ async fn defer() {
         root: Some(Arc::new(PlanNode::Defer {
             primary: Primary {
                 subselection: Some("{ t { x } }".to_string()),
-                node: Some(Box::new(PlanNode::Fetch(FetchNode {
+                node: Some(Box::new(PlanNode::Fetch(Arc::new(FetchNode {
                     service_name: "X".into(),
                     requires: vec![],
                     variable_usages: vec![],
@@ -391,7 +391,7 @@ async fn defer() {
                     context_rewrites: None,
                     schema_aware_hash: Default::default(),
                     authorization: Default::default(),
-                }))),
+                })))),
             },
             deferred: vec![DeferredNode {
                 depends: vec![Depends {
@@ -402,7 +402,7 @@ async fn defer() {
                 subselection: Some("{ y }".to_string()),
                 node: Some(Arc::new(PlanNode::Flatten(FlattenNode {
                     path: Path(vec![PathElement::Key("t".to_string(), None)]),
-                    node: Box::new(PlanNode::Fetch(FetchNode {
+                    node: Box::new(PlanNode::Fetch(Arc::new(FetchNode {
                         service_name: "Y".into(),
                         requires: vec![requires_selection::Selection::InlineFragment(
                             requires_selection::InlineFragment {
@@ -438,7 +438,7 @@ async fn defer() {
                         context_rewrites: None,
                         schema_aware_hash: Default::default(),
                         authorization: Default::default(),
-                    })),
+                    }))),
                 }))),
             }],
         })),
@@ -1918,7 +1918,7 @@ fn broken_plan_does_not_panic() {
     let operation = "{ invalid }";
     let subgraph_schema = "type Query { field: Int }";
     let mut plan = QueryPlan {
-        root: Some(Arc::new(PlanNode::Fetch(FetchNode {
+        root: Some(Arc::new(PlanNode::Fetch(Arc::new(FetchNode {
             service_name: "X".into(),
             requires: vec![],
             variable_usages: vec![],
@@ -1931,7 +1931,7 @@ fn broken_plan_does_not_panic() {
             context_rewrites: None,
             schema_aware_hash: Default::default(),
             authorization: Default::default(),
-        }))),
+        })))),
         formatted_query_plan: Default::default(),
         usage_reporting: UsageReporting::Error("this is a test report key".to_string()).into(),
         query: Arc::new(Query::empty_for_tests()),
@@ -1987,7 +1987,7 @@ async fn defer_depends_skips_fetch_when_typename_missing() {
                         // Primary fetch: gets start with inner { __typename, id, sub }
                         // With the planner fix, this fetch gets an id so the deferred
                         // node can depend on it for __typename and id.
-                        PlanNode::Fetch(FetchNode {
+                        PlanNode::Fetch(Arc::new(FetchNode {
                             service_name: "X".into(),
                             requires: vec![],
                             variable_usages: vec![],
@@ -2002,7 +2002,7 @@ async fn defer_depends_skips_fetch_when_typename_missing() {
                             context_rewrites: None,
                             schema_aware_hash: Default::default(),
                             authorization: Default::default(),
-                        }),
+                        })),
                         // Dependency fetch: gets sub.data (the deferred node depends on this)
                         PlanNode::Flatten(FlattenNode {
                             path: Path(vec![
@@ -2010,7 +2010,7 @@ async fn defer_depends_skips_fetch_when_typename_missing() {
                                 PathElement::Key("inner".to_string(), None),
                                 PathElement::Key("sub".to_string(), None),
                             ]),
-                            node: Box::new(PlanNode::Fetch(FetchNode {
+                            node: Box::new(PlanNode::Fetch(Arc::new(FetchNode {
                                 service_name: "Y".into(),
                                 requires: vec![requires_selection::Selection::InlineFragment(
                                     requires_selection::InlineFragment {
@@ -2046,7 +2046,7 @@ async fn defer_depends_skips_fetch_when_typename_missing() {
                                 context_rewrites: None,
                                 schema_aware_hash: Default::default(),
                                 authorization: Default::default(),
-                            })),
+                            }))),
                         }),
                     ],
                 })),
@@ -2071,7 +2071,7 @@ async fn defer_depends_skips_fetch_when_typename_missing() {
                         PathElement::Key("start".to_string(), None),
                         PathElement::Key("inner".to_string(), None),
                     ]),
-                    node: Box::new(PlanNode::Fetch(FetchNode {
+                    node: Box::new(PlanNode::Fetch(Arc::new(FetchNode {
                         service_name: "Z".into(),
                         requires: vec![requires_selection::Selection::InlineFragment(
                             requires_selection::InlineFragment {
@@ -2129,7 +2129,7 @@ async fn defer_depends_skips_fetch_when_typename_missing() {
                         context_rewrites: None,
                         schema_aware_hash: Default::default(),
                         authorization: Default::default(),
-                    })),
+                    }))),
                 }))),
             }],
         })),
@@ -2857,4 +2857,420 @@ async fn conditional_requires_next_to_unconditional_sibling() {
             HashMap::from([("b".into(), 1), ("a".into(), 1)])
         );
     }
+}
+
+/// Supergraph for the nested `Sequence` tests: `products` lists the products, `reviews` adds each
+/// product's review, `users` the review's author, and `prices` the product's price.
+fn nested_sequence_schema() -> Arc<Schema> {
+    let schema = supergraph_schema(
+        r#"
+        enum join__Graph {
+            PRICES @join__graph(name: "prices", url: "http://localhost/prices")
+            PRODUCTS @join__graph(name: "products", url: "http://localhost/products")
+            REVIEWS @join__graph(name: "reviews", url: "http://localhost/reviews")
+            USERS @join__graph(name: "users", url: "http://localhost/users")
+        }
+
+        type Query
+            @join__type(graph: PRICES)
+            @join__type(graph: PRODUCTS)
+            @join__type(graph: REVIEWS)
+            @join__type(graph: USERS)
+        {
+            topProducts: [Product] @join__field(graph: PRODUCTS)
+        }
+
+        type Product
+            @join__type(graph: PRICES, key: "upc")
+            @join__type(graph: PRODUCTS, key: "upc")
+            @join__type(graph: REVIEWS, key: "upc")
+        {
+            upc: String!
+            name: String @join__field(graph: PRODUCTS)
+            price: Int @join__field(graph: PRICES)
+            review: Review @join__field(graph: REVIEWS)
+        }
+
+        type Review
+            @join__type(graph: REVIEWS, key: "id")
+            @join__type(graph: USERS, key: "id")
+        {
+            id: ID!
+            author: String @join__field(graph: USERS)
+        }
+        "#,
+    );
+    Arc::new(Schema::parse(&schema, &Default::default()).unwrap())
+}
+
+/// Mocks that only answer requests carrying the expected representations, so a fetch that runs
+/// against the wrong data gets an error instead of entities.
+fn nested_sequence_fetch_service(schema: &Arc<Schema>) -> FetchService {
+    let entities_query = |type_name: &str, selection: &str| {
+        format!(
+            "query($representations:[_Any!]!){{_entities(representations:$representations){{...on {type_name}{{{selection}}}}}}}"
+        )
+    };
+    let products = MockSubgraph::builder()
+        .with_json(
+            serde_json::json! {{"query": "{topProducts{__typename upc name}}"}},
+            serde_json::json! {{"data": {"topProducts": [
+                {"__typename": "Product", "upc": "1", "name": "Table"},
+                {"__typename": "Product", "upc": "2", "name": "Chair"},
+            ]}}},
+        )
+        .build();
+    let product_representations = serde_json::json!([
+        {"__typename": "Product", "upc": "1"},
+        {"__typename": "Product", "upc": "2"},
+    ]);
+    let reviews = MockSubgraph::builder()
+        .with_json(
+            serde_json::json! {{
+                "query": entities_query("Product", "review{__typename id}"),
+                "variables": {"representations": product_representations},
+            }},
+            serde_json::json! {{"data": {"_entities": [
+                {"review": {"__typename": "Review", "id": "r1"}},
+                {"review": {"__typename": "Review", "id": "r2"}},
+            ]}}},
+        )
+        .build();
+    let users = MockSubgraph::builder()
+        .with_json(
+            serde_json::json! {{
+                "query": entities_query("Review", "author"),
+                "variables": {"representations": [
+                    {"__typename": "Review", "id": "r1"},
+                    {"__typename": "Review", "id": "r2"},
+                ]},
+            }},
+            serde_json::json! {{"data": {"_entities": [{"author": "Ada"}, {"author": "Bob"}]}}},
+        )
+        .build();
+    let prices = MockSubgraph::builder()
+        .with_json(
+            serde_json::json! {{
+                "query": entities_query("Product", "price"),
+                "variables": {"representations": product_representations},
+            }},
+            serde_json::json! {{"data": {"_entities": [{"price": 10}, {"price": 20}]}}},
+        )
+        .build();
+
+    FetchService::new(
+        schema.clone(),
+        Default::default(),
+        Arc::new(subgraph_services(vec![
+            ("products".into(), products.boxed_clone()),
+            ("reviews".into(), reviews.boxed_clone()),
+            ("users".into(), users.boxed_clone()),
+            ("prices".into(), prices.boxed_clone()),
+        ])),
+        Arc::new(ConnectorServices::empty(schema.clone())),
+        None,
+        Arc::new(SubgraphConfiguration::<HoistOrphanErrors>::default()),
+    )
+}
+
+/// A response path where `@` stands for every element of a list.
+fn response_path(elements: &[&str]) -> Path {
+    Path(
+        elements
+            .iter()
+            .map(|element| match *element {
+                "@" => PathElement::Flatten(None),
+                key => PathElement::Key(key.to_string(), None),
+            })
+            .collect(),
+    )
+}
+
+fn products_fetch(id: Option<&str>) -> PlanNode {
+    PlanNode::Fetch(Arc::new(FetchNode {
+        service_name: "products".into(),
+        requires: vec![],
+        variable_usages: vec![],
+        operation: SerializableDocument::from_string("{topProducts{__typename upc name}}"),
+        operation_name: None,
+        operation_kind: OperationKind::Query,
+        id: id.map(Into::into),
+        input_rewrites: None,
+        output_rewrites: None,
+        context_rewrites: None,
+        schema_aware_hash: Default::default(),
+        authorization: Default::default(),
+    }))
+}
+
+/// An `_entities` fetch from `service`, at `path`, for `type_name` objects identified by `key`.
+fn entities_fetch(
+    service: &str,
+    path: &[&str],
+    type_name: &str,
+    key: &str,
+    selection: &str,
+) -> PlanNode {
+    let field = |name: &str| {
+        requires_selection::Selection::Field(requires_selection::Field {
+            alias: None,
+            name: apollo_compiler::Name::new(name).unwrap(),
+            selections: Vec::new(),
+        })
+    };
+    PlanNode::Flatten(FlattenNode {
+        path: response_path(path),
+        node: Box::new(PlanNode::Fetch(Arc::new(FetchNode {
+            service_name: service.into(),
+            requires: vec![requires_selection::Selection::InlineFragment(
+                requires_selection::InlineFragment {
+                    conditions: vec![],
+                    type_condition: Some(apollo_compiler::Name::new(type_name).unwrap()),
+                    selections: vec![field("__typename"), field(key)],
+                },
+            )],
+            variable_usages: vec![],
+            operation: SerializableDocument::from_string(format!(
+                "query($representations:[_Any!]!){{_entities(representations:$representations){{...on {type_name}{{{selection}}}}}}}"
+            )),
+            operation_name: None,
+            operation_kind: OperationKind::Query,
+            id: None,
+            input_rewrites: None,
+            output_rewrites: None,
+            context_rewrites: None,
+            schema_aware_hash: Default::default(),
+            authorization: Default::default(),
+        }))),
+    })
+}
+
+/// The `users` fetch needs the review ids the `reviews` fetch returns.
+fn reviews_then_authors() -> PlanNode {
+    PlanNode::Sequence {
+        nodes: vec![
+            entities_fetch(
+                "reviews",
+                &["topProducts", "@"],
+                "Product",
+                "upc",
+                "review{__typename id}",
+            ),
+            entities_fetch(
+                "users",
+                &["topProducts", "@", "review"],
+                "Review",
+                "id",
+                "author",
+            ),
+        ],
+    }
+}
+
+fn nested_sequence_plan(root: PlanNode) -> QueryPlan {
+    QueryPlan {
+        formatted_query_plan: Default::default(),
+        root: Some(Arc::new(root)),
+        usage_reporting: UsageReporting::Error("this is a test report key".to_string()).into(),
+        query: Arc::new(Query::empty_for_tests()),
+        estimated_size: Default::default(),
+    }
+}
+
+fn products_data() -> serde_json_bytes::Value {
+    json!({"topProducts": [
+        {"__typename": "Product", "upc": "1", "name": "Table"},
+        {"__typename": "Product", "upc": "2", "name": "Chair"},
+    ]})
+}
+
+/// What `reviews_then_authors` fetches on top of `products_data`.
+fn reviews_and_authors_data() -> serde_json_bytes::Value {
+    json!({"topProducts": [
+        {"review": {"__typename": "Review", "id": "r1", "author": "Ada"}},
+        {"review": {"__typename": "Review", "id": "r2", "author": "Bob"}},
+    ]})
+}
+
+fn products_with_reviews_data() -> serde_json::Value {
+    serde_json::json!({"topProducts": [
+        {
+            "__typename": "Product",
+            "upc": "1",
+            "name": "Table",
+            "review": {"__typename": "Review", "id": "r1", "author": "Ada"},
+        },
+        {
+            "__typename": "Product",
+            "upc": "2",
+            "name": "Chair",
+            "review": {"__typename": "Review", "id": "r2", "author": "Bob"},
+        },
+    ]})
+}
+
+#[tokio::test]
+async fn sequence_nested_in_parallel_merges_into_response() {
+    let schema = nested_sequence_schema();
+    let service = nested_sequence_fetch_service(&schema);
+    let plan = nested_sequence_plan(PlanNode::Sequence {
+        nodes: vec![
+            products_fetch(None),
+            PlanNode::Parallel {
+                nodes: vec![
+                    reviews_then_authors(),
+                    entities_fetch("prices", &["topProducts", "@"], "Product", "upc", "price"),
+                ],
+            },
+        ],
+    });
+    let (sender, _receiver) = tokio::sync::mpsc::channel(10);
+
+    let response = plan
+        .execute(
+            &Context::new(),
+            &service,
+            &Default::default(),
+            &schema,
+            &Default::default(),
+            sender,
+            None,
+            &None,
+            None,
+        )
+        .await;
+
+    assert_eq!(
+        serde_json::to_value(&response).unwrap(),
+        serde_json::json!({"data": {"topProducts": [
+            {
+                "__typename": "Product",
+                "upc": "1",
+                "name": "Table",
+                "review": {"__typename": "Review", "id": "r1", "author": "Ada"},
+                "price": 10,
+            },
+            {
+                "__typename": "Product",
+                "upc": "2",
+                "name": "Chair",
+                "review": {"__typename": "Review", "id": "r2", "author": "Bob"},
+                "price": 20,
+            },
+        ]}})
+    );
+}
+
+/// A nested `Sequence` hands back what it fetched, not a copy of the data it ran against, so the
+/// enclosing nodes do not merge the whole response again.
+#[tokio::test]
+async fn sequence_returns_only_what_it_fetched() {
+    let schema = nested_sequence_schema();
+    let service = nested_sequence_fetch_service(&schema);
+    let node = reviews_then_authors();
+    let context = Context::new();
+    let supergraph_request = Default::default();
+    let deferred_fetches = HashMap::new();
+    let query = Arc::new(Query::empty_for_tests());
+    let (sender, _receiver) = tokio::sync::mpsc::channel(10);
+
+    let (value, errors) = node
+        .execute_recursively(
+            &super::execution::ExecutionParameters {
+                context: &context,
+                service: &service,
+                schema: &schema,
+                subgraph_schemas: &Default::default(),
+                supergraph_request: &supergraph_request,
+                deferred_fetches: &deferred_fetches,
+                query: &query,
+                root_node: &node,
+                subscription_handle: &None,
+                subscription_config: &None,
+                is_deferred: false,
+            },
+            &Path::empty(),
+            &products_data(),
+            sender,
+        )
+        .await;
+
+    assert!(errors.is_empty(), "{errors:?}");
+    assert_eq!(value, reviews_and_authors_data());
+}
+
+/// A subscription event's data is the initial value of the rest of the plan, which is a
+/// `Sequence`. The event's data stays in the response next to what the plan fetched.
+#[tokio::test]
+async fn sequence_root_keeps_initial_value() {
+    let schema = nested_sequence_schema();
+    let service = nested_sequence_fetch_service(&schema);
+    let plan = nested_sequence_plan(reviews_then_authors());
+    let (sender, _receiver) = tokio::sync::mpsc::channel(10);
+
+    let response = plan
+        .execute(
+            &Context::new(),
+            &service,
+            &Default::default(),
+            &schema,
+            &Default::default(),
+            sender,
+            None,
+            &None,
+            Some(products_data()),
+        )
+        .await;
+
+    assert_eq!(
+        serde_json::to_value(&response).unwrap(),
+        serde_json::json!({"data": products_with_reviews_data()})
+    );
+}
+
+/// The deferred response carries the primary data its `Sequence` ran against, not only what the
+/// `Sequence` fetched.
+#[tokio::test]
+async fn deferred_sequence_response_keeps_primary_data() {
+    let schema = nested_sequence_schema();
+    let service = nested_sequence_fetch_service(&schema);
+    let plan = nested_sequence_plan(PlanNode::Defer {
+        primary: Primary {
+            subselection: None,
+            node: Some(Box::new(products_fetch(None))),
+        },
+        deferred: vec![DeferredNode {
+            depends: vec![],
+            label: None,
+            query_path: response_path(&["topProducts", "@"]),
+            subselection: None,
+            node: Some(Arc::new(reviews_then_authors())),
+        }],
+    });
+    let (sender, receiver) = tokio::sync::mpsc::channel(10);
+
+    let primary = plan
+        .execute(
+            &Context::new(),
+            &service,
+            &Default::default(),
+            &schema,
+            &Default::default(),
+            sender,
+            None,
+            &None,
+            None,
+        )
+        .await;
+    let deferred = ReceiverStream::new(receiver).next().await.unwrap();
+
+    assert_eq!(
+        serde_json::to_value(&primary).unwrap(),
+        serde_json::json!({"data": products_data()})
+    );
+    assert!(deferred.errors.is_empty(), "{:?}", deferred.errors);
+    assert_eq!(
+        serde_json::to_value(&deferred.data).unwrap(),
+        products_with_reviews_data()
+    );
 }
