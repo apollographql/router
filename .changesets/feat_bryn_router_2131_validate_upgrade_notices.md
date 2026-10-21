@@ -11,4 +11,4 @@ Run `router config upgrade router.yaml` to update the file.
 
 Previously, each upgrade's notice was printed as a log line, which could be a `WARN` or `ERROR` line above a successful result and fail CI jobs that reject error logs. The command still exits successfully for these files. Startup and reload still log the notices as before.
 
-By [@BrynCooke](https://github.com/BrynCooke)
+By [@BrynCooke](https://github.com/BrynCooke) in https://github.com/apollographql/router/pull/10605
