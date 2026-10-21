@@ -400,15 +400,20 @@ fn write_requires_selection(
         }
         requires_selection::Selection::InlineFragment(requires_selection::InlineFragment {
             type_condition,
+            conditions,
             selections,
         }) => {
             if let Some(type_name) = type_condition {
                 state.write("... on ")?;
                 state.write(type_name)?;
-                state.write(" ")?;
             } else {
-                state.write("... ")?;
+                state.write("...")?;
             }
+            for condition in conditions {
+                state.write(" ")?;
+                state.write(condition.to_directive().serialize().no_indent())?;
+            }
+            state.write(" ")?;
             write_requires_selections(state, selections)?;
         }
     }
