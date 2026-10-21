@@ -471,6 +471,7 @@ fn validate_project_config_files() {
                     .mocked_env_var("ZIPKIN_HOST", "http://example.com")
                     .mocked_env_var("TEST_CONFIG_ENDPOINT", "http://example.com")
                     .mocked_env_var("TEST_CONFIG_COLLECTOR_ENDPOINT", "http://example.com")
+                    .mocked_env_var("TEST_CONFIG_COPROCESSOR_URL", "http://example.com")
                     .mocked_env_var("PARSER_MAX_RECURSION", "500")
                     .mocked_env_var("AWS_ROLE_ARN", "arn:aws:iam::12345678:role/SomeRole")
                     .mocked_env_var("INVALIDATION_SHARED_KEY", "invalidation")
@@ -724,6 +725,7 @@ headers:
         .expect_err("old headers config should be rejected when migration is not applied");
 }
 
+/// Sample YAML files that have minor migrations from the 2.x release cycle
 #[derive(RustEmbed)]
 #[folder = "src/configuration/testdata/migrations/minor"]
 struct AssetMinor;
@@ -739,7 +741,7 @@ fn upgrade_old_minor_configuration() {
             let new_config = crate::configuration::upgrade::upgrade_configuration(
                 &serde_yaml::from_str(&input).expect("config must be valid yaml"),
                 true,
-                upgrade::UpgradeMode::Minor,
+                upgrade::UpgradeMode::Minor(2),
             )
             .expect("configuration could not be updated");
             let new_config =

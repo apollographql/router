@@ -30,6 +30,7 @@ use crate::Context;
 use crate::graphql;
 use crate::json_ext::Path;
 use crate::plugins::connectors::declared_errors::DECLARED_ERROR_MARKER;
+use crate::plugins::connectors::declared_errors::HasDeclaredErrors;
 use crate::plugins::include_subgraph_errors::IncludeSubgraphErrors;
 use crate::plugins::include_subgraph_errors::effective_config::EffectiveConfig;
 use crate::plugins::limits::ConnectorResponseSizeLimit;
@@ -402,6 +403,7 @@ pub(crate) fn aggregate_responses(
     // path a client can use: `FetchNode::response_at_path` is what rewrites
     // `_entities/0/balance` into the client paths the entity landed at, and it
     // rewrites nothing else. See `DECLARED_ERROR_MARKER`.
+    let has_declared_errors = HasDeclaredErrors(!declared.is_empty());
     let mut errors: Vec<graphql::Error> = errors.into_iter().map(Into::into).collect();
     errors.extend(
         declared
@@ -411,6 +413,7 @@ pub(crate) fn aggregate_responses(
 
     Ok(Response {
         response: http::Response::builder()
+            .extension(has_declared_errors)
             .body(
                 graphql::Response::builder()
                     .data(data)

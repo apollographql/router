@@ -33,6 +33,7 @@ use crate::plugins::telemetry::apollo_exporter::get_uname;
 use crate::plugins::telemetry::config::ApolloMetricsReferenceMode;
 use crate::plugins::telemetry::config::Conf;
 use crate::plugins::telemetry::metrics::NamedMetricExporter;
+use crate::plugins::telemetry::metrics::OverflowCounting;
 use crate::plugins::telemetry::metrics::OverflowMetricExporter;
 use crate::plugins::telemetry::metrics::RetryMetricExporter;
 use crate::plugins::telemetry::otlp::Protocol;
@@ -192,11 +193,17 @@ impl Config {
 
         // Wrap with retry, then overflow detection, then error prefixing
         let named_exporter = NamedMetricExporter::new(
-            OverflowMetricExporter::new_push(RetryMetricExporter::new(exporter)),
+            OverflowMetricExporter::new(
+                RetryMetricExporter::new(exporter),
+                OverflowCounting::EveryExport,
+            ),
             "apollo",
         );
         let named_realtime_exporter = NamedMetricExporter::new(
-            OverflowMetricExporter::new_push(RetryMetricExporter::new(realtime_exporter)),
+            OverflowMetricExporter::new(
+                RetryMetricExporter::new(realtime_exporter),
+                OverflowCounting::EveryExport,
+            ),
             "apollo",
         );
 
