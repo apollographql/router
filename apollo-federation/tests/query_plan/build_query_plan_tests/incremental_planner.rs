@@ -2994,7 +2994,7 @@ fn inc_partial_overlap_explodes_abstract_type() {
             }
           }
         },
-        Flatten(path: "u") {
+        Flatten(path: "u|[B,C]") {
           Fetch(service: "Subgraph2") {
             {
               ... on B {
@@ -3014,6 +3014,606 @@ fn inc_partial_overlap_explodes_abstract_type() {
                 v
               }
             }
+          },
+        },
+      },
+    }
+    "###
+    );
+}
+
+/// Entity fetches reached through different union members. Members reaching
+/// the same entity type with different selections get one type-conditioned
+/// fetch each, so no entity gets another member's fields.
+#[test]
+fn inc_entity_fetches_under_union_members() {
+    let planner = planner!(
+        config = incremental_config(),
+        catalog: r#"
+          type Query {
+            shelf: Shelf
+          }
+
+          type Shelf @key(fields: "id") {
+            id: ID!
+            entries: [Entry]
+          }
+
+          type Item @key(fields: "id") {
+            id: ID!
+          }
+
+          type Thing @key(fields: "id") {
+            id: ID!
+          }
+
+          union Entry = Book | Film | Album | Game
+
+          type Book {
+            item: Item
+            parts: [Part]
+          }
+
+          type Film {
+            item: Item
+            parts: [Part]
+          }
+
+          type Album {
+            item: Item
+            parts: [Part]
+          }
+
+          union Part = Front | Body | Back
+
+          type Front {
+            item: Item
+          }
+
+          type Body {
+            item: Item
+          }
+
+          type Back {
+            item: Item
+          }
+
+          type Game {
+            item: Thing
+          }
+        "#,
+        inventory: r#"
+          type Item @key(fields: "id") {
+            id: ID!
+            pages: Int!
+            minutes: Int!
+            tracks: Int!
+          }
+
+          type Thing @key(fields: "id") {
+            id: ID!
+            name: String!
+          }
+        "#,
+    );
+
+    // Every member selected, along with the key.
+    assert_plan!(
+        &planner,
+        r#"
+          { shelf { entries { __typename ... on Book { item { id pages } } ... on Film { item { id minutes } } ... on Album { item { id tracks } } } } }
+        "#,
+        @r###"
+    QueryPlan {
+      Sequence {
+        Fetch(service: "catalog") {
+          {
+            shelf {
+              entries {
+                __typename
+                ... on Album {
+                  item {
+                    __typename
+                    id
+                  }
+                }
+                ... on Film {
+                  item {
+                    __typename
+                    id
+                  }
+                }
+                ... on Book {
+                  item {
+                    __typename
+                    id
+                  }
+                }
+              }
+            }
+          }
+        },
+        Parallel {
+          Flatten(path: "shelf.entries.@|[Book].item") {
+            Fetch(service: "inventory") {
+              {
+                ... on Item {
+                  __typename
+                  id
+                }
+              } =>
+              {
+                ... on Item {
+                  pages
+                }
+              }
+            },
+          },
+          Flatten(path: "shelf.entries.@|[Film].item") {
+            Fetch(service: "inventory") {
+              {
+                ... on Item {
+                  __typename
+                  id
+                }
+              } =>
+              {
+                ... on Item {
+                  minutes
+                }
+              }
+            },
+          },
+          Flatten(path: "shelf.entries.@|[Album].item") {
+            Fetch(service: "inventory") {
+              {
+                ... on Item {
+                  __typename
+                  id
+                }
+              } =>
+              {
+                ... on Item {
+                  tracks
+                }
+              }
+            },
+          },
+        },
+      },
+    }
+    "###
+    );
+
+    // No key or __typename in the operation.
+    assert_plan!(
+        &planner,
+        r#"
+          { shelf { entries { ... on Book { item { pages } } ... on Film { item { minutes } } ... on Album { item { tracks } } } } }
+        "#,
+        @r###"
+    QueryPlan {
+      Sequence {
+        Fetch(service: "catalog") {
+          {
+            shelf {
+              entries {
+                __typename
+                ... on Book {
+                  item {
+                    __typename
+                    id
+                  }
+                }
+                ... on Film {
+                  item {
+                    __typename
+                    id
+                  }
+                }
+                ... on Album {
+                  item {
+                    __typename
+                    id
+                  }
+                }
+              }
+            }
+          }
+        },
+        Parallel {
+          Flatten(path: "shelf.entries.@|[Album].item") {
+            Fetch(service: "inventory") {
+              {
+                ... on Item {
+                  __typename
+                  id
+                }
+              } =>
+              {
+                ... on Item {
+                  tracks
+                }
+              }
+            },
+          },
+          Flatten(path: "shelf.entries.@|[Film].item") {
+            Fetch(service: "inventory") {
+              {
+                ... on Item {
+                  __typename
+                  id
+                }
+              } =>
+              {
+                ... on Item {
+                  minutes
+                }
+              }
+            },
+          },
+          Flatten(path: "shelf.entries.@|[Book].item") {
+            Fetch(service: "inventory") {
+              {
+                ... on Item {
+                  __typename
+                  id
+                }
+              } =>
+              {
+                ... on Item {
+                  pages
+                }
+              }
+            },
+          },
+        },
+      },
+    }
+    "###
+    );
+
+    // One member alone has nothing to merge with.
+    assert_plan!(
+        &planner,
+        r#"
+          { shelf { entries { ... on Book { item { id pages } } } } }
+        "#,
+        @r###"
+    QueryPlan {
+      Sequence {
+        Fetch(service: "catalog") {
+          {
+            shelf {
+              entries {
+                __typename
+                ... on Book {
+                  item {
+                    __typename
+                    id
+                  }
+                }
+              }
+            }
+          }
+        },
+        Flatten(path: "shelf.entries.@|[Book].item") {
+          Fetch(service: "inventory") {
+            {
+              ... on Item {
+                __typename
+                id
+              }
+            } =>
+            {
+              ... on Item {
+                pages
+              }
+            }
+          },
+        },
+      },
+    }
+    "###
+    );
+
+    // Different entity types merge onto a path keeping both members'
+    // conditions, so Album items aren't asked for pages. The response shape
+    // checker can't match a path condition spanning several union members,
+    // so it can't validate this or the next case.
+    assert_plan!(
+        validate_correctness = false,
+        &planner,
+        r#"
+          { shelf { entries { ... on Book { item { pages } } ... on Game { item { name } } ... on Album { item { __typename id } } } } }
+        "#,
+        @r###"
+    QueryPlan {
+      Sequence {
+        Fetch(service: "catalog") {
+          {
+            shelf {
+              entries {
+                __typename
+                ... on Book {
+                  item {
+                    __typename
+                    id
+                  }
+                }
+                ... on Game {
+                  item {
+                    __typename
+                    id
+                  }
+                }
+                ... on Album {
+                  item {
+                    __typename
+                    id
+                  }
+                }
+              }
+            }
+          }
+        },
+        Flatten(path: "shelf.entries.@|[Book,Game].item") {
+          Fetch(service: "inventory") {
+            {
+              ... on Item {
+                __typename
+                id
+              }
+              ... on Thing {
+                __typename
+                id
+              }
+            } =>
+            {
+              ... on Item {
+                pages
+              }
+              ... on Thing {
+                name
+              }
+            }
+          },
+        },
+      },
+    }
+    "###
+    );
+
+    // The same entity type with identical selections shares one fetch.
+    assert_plan!(
+        validate_correctness = false,
+        &planner,
+        r#"
+          { shelf { entries { ... on Book { item { pages } } ... on Film { item { pages } } } } }
+        "#,
+        @r###"
+    QueryPlan {
+      Sequence {
+        Fetch(service: "catalog") {
+          {
+            shelf {
+              entries {
+                __typename
+                ... on Book {
+                  item {
+                    __typename
+                    id
+                  }
+                }
+                ... on Film {
+                  item {
+                    __typename
+                    id
+                  }
+                }
+              }
+            }
+          }
+        },
+        Flatten(path: "shelf.entries.@|[Book,Film].item") {
+          Fetch(service: "inventory") {
+            {
+              ... on Item {
+                __typename
+                id
+              }
+            } =>
+            {
+              ... on Item {
+                pages
+              }
+            }
+          },
+        },
+      },
+    }
+    "###
+    );
+    // Nested unions with identical selections share one fetch, since every
+    // combination of the members' conditions is selected.
+    assert_plan!(
+        validate_correctness = false,
+        &planner,
+        r#"
+          { shelf { entries { ... on Book { parts { ... on Front { item { pages } } ... on Body { item { pages } } ... on Back { item { pages } } } } ... on Film { parts { ... on Front { item { pages } } ... on Body { item { pages } } ... on Back { item { pages } } } } ... on Album { parts { ... on Front { item { pages } } ... on Body { item { pages } } ... on Back { item { pages } } } } } } }
+        "#,
+        @r###"
+    QueryPlan {
+      Sequence {
+        Fetch(service: "catalog") {
+          {
+            shelf {
+              entries {
+                __typename
+                ... on Book {
+                  parts {
+                    __typename
+                    ... on Front {
+                      item {
+                        __typename
+                        id
+                      }
+                    }
+                    ... on Body {
+                      item {
+                        __typename
+                        id
+                      }
+                    }
+                    ... on Back {
+                      item {
+                        __typename
+                        id
+                      }
+                    }
+                  }
+                }
+                ... on Film {
+                  parts {
+                    __typename
+                    ... on Front {
+                      item {
+                        __typename
+                        id
+                      }
+                    }
+                    ... on Body {
+                      item {
+                        __typename
+                        id
+                      }
+                    }
+                    ... on Back {
+                      item {
+                        __typename
+                        id
+                      }
+                    }
+                  }
+                }
+                ... on Album {
+                  parts {
+                    __typename
+                    ... on Front {
+                      item {
+                        __typename
+                        id
+                      }
+                    }
+                    ... on Body {
+                      item {
+                        __typename
+                        id
+                      }
+                    }
+                    ... on Back {
+                      item {
+                        __typename
+                        id
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        Flatten(path: "shelf.entries.@|[Album,Book,Film].parts.@|[Back,Body,Front].item") {
+          Fetch(service: "inventory") {
+            {
+              ... on Item {
+                __typename
+                id
+              }
+            } =>
+            {
+              ... on Item {
+                pages
+              }
+            }
+          },
+        },
+      },
+    }
+    "###
+    );
+    // Without every combination selected, the union would also cover Book's
+    // Body parts and Film's Front parts, so these stay apart.
+    assert_plan!(
+        validate_correctness = false,
+        &planner,
+        r#"
+          { shelf { entries { ... on Book { parts { ... on Front { item { pages } } } } ... on Film { parts { ... on Body { item { pages } } } } } } }
+        "#,
+        @r###"
+    QueryPlan {
+      Sequence {
+        Fetch(service: "catalog") {
+          {
+            shelf {
+              entries {
+                __typename
+                ... on Book {
+                  parts {
+                    __typename
+                    ... on Front {
+                      item {
+                        __typename
+                        id
+                      }
+                    }
+                  }
+                }
+                ... on Film {
+                  parts {
+                    __typename
+                    ... on Body {
+                      item {
+                        __typename
+                        id
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        Parallel {
+          Flatten(path: "shelf.entries.@|[Film].parts.@|[Body].item") {
+            Fetch(service: "inventory") {
+              {
+                ... on Item {
+                  __typename
+                  id
+                }
+              } =>
+              {
+                ... on Item {
+                  pages
+                }
+              }
+            },
+          },
+          Flatten(path: "shelf.entries.@|[Book].parts.@|[Front].item") {
+            Fetch(service: "inventory") {
+              {
+                ... on Item {
+                  __typename
+                  id
+                }
+              } =>
+              {
+                ... on Item {
+                  pages
+                }
+              }
+            },
           },
         },
       },
