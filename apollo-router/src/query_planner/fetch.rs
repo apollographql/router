@@ -9,13 +9,12 @@ use apollo_federation::query_plan::serializable_document::SerializableDocument;
 use indexmap::IndexSet;
 use serde::Deserialize;
 use serde::Serialize;
-use serde_json_bytes::ByteString;
-use serde_json_bytes::Map;
 use tokio::sync::broadcast::Sender;
 use tower::ServiceExt;
 use tracing::Instrument;
 use tracing::instrument;
 
+use super::log::SubfetchTrace;
 use super::rewrites;
 use super::selection::execute_selection_set;
 use super::subgraph_context::ContextualArguments;
@@ -254,8 +253,7 @@ impl FetchNode {
         current_dir: &Path,
         schema: &Schema,
         paths: Vec<Vec<Path>>,
-        operation_str: &str,
-        variables: Map<ByteString, Value>,
+        subfetch_trace: Option<SubfetchTrace>,
         hoist_orphan_errors: bool,
     ) -> (Value, Vec<Error>) {
         let (_parts, response) = match service
@@ -270,7 +268,9 @@ impl FetchNode {
             Ok(res) => res.response.into_parts(),
         };
 
-        super::log::trace_subfetch(&self.service_name, operation_str, &variables, &response);
+        if let Some(subfetch_trace) = &subfetch_trace {
+            super::log::trace_subfetch(&self.service_name, subfetch_trace, &response);
+        }
 
         if !response.is_primary() {
             return (

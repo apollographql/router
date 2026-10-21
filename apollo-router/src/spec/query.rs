@@ -3,6 +3,7 @@
 //! Parsing, formatting and manipulation of queries.
 #![allow(clippy::mutable_key_type)]
 
+use std::borrow::Cow;
 use std::collections::HashMap;
 use std::collections::HashSet;
 use std::sync::Arc;
@@ -129,7 +130,7 @@ impl Query {
     pub(crate) fn format_response_filtered_then_original(
         &self,
         response: &mut Response,
-        variables: Object,
+        variables: &Object,
         schema: &ApiSchema,
         defer_conditions: BooleanValues,
         include_coercion_errors: bool,
@@ -138,7 +139,7 @@ impl Query {
         if let Some(filtered_query) = self.filtered_query.as_ref() {
             paths = filtered_query.format_response(
                 response,
-                variables.clone(),
+                variables,
                 schema,
                 defer_conditions,
                 include_coercion_errors,
@@ -157,7 +158,7 @@ impl Query {
     pub(crate) fn format_response(
         &self,
         response: &mut Response,
-        variables: Object,
+        variables: &Object,
         schema: &ApiSchema,
         defer_conditions: BooleanValues,
         include_coercion_errors: bool,
@@ -181,7 +182,7 @@ impl Query {
                             let mut output =
                                 Object::with_capacity(subselection.selection_set.len());
                             let mut parameters = FormatParameters {
-                                variables: &variables,
+                                variables,
                                 schema,
                                 errors: Vec::new(),
                                 coercion_errors: include_coercion_errors.then(Vec::new),
@@ -226,18 +227,27 @@ impl Query {
                 } else {
                     let mut output = Object::with_capacity(self.operation.selection_set.len());
 
-                    let all_variables = if self.operation.variables.is_empty() {
-                        variables
+                    // Without declared defaults the merge below reproduces `variables`
+                    // entry for entry, so borrow it instead.
+                    let has_defaults = self
+                        .operation
+                        .variables
+                        .values()
+                        .any(|variable| variable.default_value.is_some());
+                    let all_variables = if has_defaults {
+                        Cow::Owned(
+                            self.operation
+                                .variables
+                                .iter()
+                                .filter_map(|(k, Variable { default_value, .. })| {
+                                    default_value.as_ref().map(|v| (k, v))
+                                })
+                                .chain(variables.iter())
+                                .map(|(k, v)| (k.clone(), v.clone()))
+                                .collect(),
+                        )
                     } else {
-                        self.operation
-                            .variables
-                            .iter()
-                            .filter_map(|(k, Variable { default_value, .. })| {
-                                default_value.as_ref().map(|v| (k, v))
-                            })
-                            .chain(variables.iter())
-                            .map(|(k, v)| (k.clone(), v.clone()))
-                            .collect()
+                        Cow::Borrowed(variables)
                     };
 
                     let operation_type_name = schema
