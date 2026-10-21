@@ -12329,7 +12329,6 @@ expression: "&schema"
     },
     "plugins": {
       "$ref": "#/$defs/Plugins",
-      "default": {},
       "description": "Plugin configuration"
     },
     "preview_file_uploads": {
