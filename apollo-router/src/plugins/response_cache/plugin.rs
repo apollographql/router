@@ -136,6 +136,35 @@ struct PrivateQueryKey {
     has_private_id: bool,
 }
 
+/// Whether a successful response with this `Cache-Control` adds its query to the known-private
+/// queries: it must be private and allow storing.
+///
+/// Entries stay until they are evicted or the router restarts, so learning from a response the
+/// cache could not store would let a single error response (frameworks often mark those
+/// `private`) turn off caching for the query.
+fn marks_query_private(cache_control: &CacheControl) -> bool {
+    cache_control.private() && cache_control.should_store()
+}
+
+/// Whether a subgraph response has a 2xx status and no GraphQL errors.
+fn succeeded_without_errors(response: &http::Response<graphql::Response>) -> bool {
+    response.status().is_success() && response.body().errors.is_empty()
+}
+
+/// Adds a query to the known-private queries and updates their size gauge.
+async fn remember_private_query(
+    private_queries: &RwLock<LruCache<PrivateQueryKey, ()>>,
+    private_query_key: PrivateQueryKey,
+    lru_size_instrument: &LruSizeInstrument,
+) {
+    let size = {
+        let mut private_queries = private_queries.write().await;
+        private_queries.put(private_query_key, ());
+        private_queries.len()
+    };
+    lru_size_instrument.update(size as u64);
+}
+
 #[derive(Clone, Default)]
 pub(crate) struct StorageInterface {
     all: Option<Arc<OnceLock<Storage>>>,
@@ -1048,25 +1077,34 @@ impl CacheService {
                     cache_control.clone(),
                 );
 
-                if cache_control.private() {
-                    // we did not know in advance that this was a query with a private scope, so we update the cache key
-                    if !is_known_private {
-                        let size = {
-                            let mut private_queries = self.private_queries.write().await;
-                            private_queries.put(private_query_key.clone(), ());
-                            private_queries.len()
-                        };
-                        self.lru_size_instrument.update(size as u64);
-
-                        if let Some(s) = private_id.as_ref() {
-                            root_cache_key = format!("{root_cache_key}:{s}");
-                        }
-                    }
-                }
-
                 // if the request had no_store on it, propagate that to this cache control
                 if let Some(request_cache_control) = request_cache_control {
                     cache_control.merge_no_store(&request_cache_control);
+                }
+
+                let body = response.response.body();
+                // Marking the query private, the debugger's `shouldStore` and the store below must agree,
+                // so all three read this value.
+                let storable_data = body.data.as_ref().filter(|_| {
+                    response.response.status().is_success()
+                        && body.errors.is_empty()
+                        && cache_control.should_store()
+                });
+
+                // we did not know in advance that this was a query with a private scope, so we update the cache key
+                if cache_control.private() && !is_known_private {
+                    if storable_data.is_some() {
+                        remember_private_query(
+                            &self.private_queries,
+                            private_query_key,
+                            &self.lru_size_instrument,
+                        )
+                        .await;
+                    }
+
+                    if let Some(s) = private_id.as_ref() {
+                        root_cache_key = format!("{root_cache_key}:{s}");
+                    }
                 }
 
                 if self.debug {
@@ -1087,7 +1125,7 @@ impl CacheService {
                         data: serde_json_bytes::to_value(response.response.body().clone())
                             .unwrap_or_default(),
                         warnings: Vec::new(),
-                        should_store: true,
+                        should_store: storable_data.is_some(),
                         indexes: *self.indexes,
                     }
                     .update_metadata();
@@ -1098,7 +1136,9 @@ impl CacheService {
                 // users, so we do not store the response in cache
                 let unstorable_private_response = cache_control.private() && private_id.is_none();
 
-                if !unstorable_private_response && cache_control.should_store() {
+                if let Some(data) = storable_data
+                    && !unstorable_private_response
+                {
                     // Prepend the whole-subgraph index entry when that index is active. The
                     // by-type and per-tag entries were already appended in scope by the
                     // cache-lookup and extension-read paths according to the same indexes.
@@ -1108,7 +1148,8 @@ impl CacheService {
                     cache_store_root_from_response(
                         storage,
                         self.subgraph_ttl,
-                        &response,
+                        data,
+                        response.subgraph_name.clone(),
                         cache_control,
                         root_cache_key,
                         cache_tags,
@@ -1176,7 +1217,7 @@ impl CacheService {
                                     "data": serde_json_bytes::to_value(cache_entry.data.clone()).unwrap_or_default()
                                 }),
                             warnings: Vec::new(),
-                            should_store: false,
+                            should_store: true,
                             indexes: *self.indexes,
                         }.update_metadata())
                     });
@@ -1243,11 +1284,16 @@ impl CacheService {
                     cache_control.merge_no_store(&request_cache_control);
                 }
 
-                if !is_known_private && cache_control.private() {
-                    self.private_queries
-                        .write()
-                        .await
-                        .put(private_query_key, ());
+                if !is_known_private
+                    && succeeded_without_errors(&response.response)
+                    && marks_query_private(&cache_control)
+                {
+                    remember_private_query(
+                        &self.private_queries,
+                        private_query_key,
+                        &self.lru_size_instrument,
+                    )
+                    .await;
                 }
 
                 cache_store_entities_from_response(
@@ -1367,7 +1413,7 @@ async fn cache_lookup_root(
                         cache_control: value.control.clone(),
                         data: serde_json_bytes::json!({"data": value.data.clone()}),
                         warnings: Vec::new(),
-                        should_store: false,
+                        should_store: true,
                         indexes: *indexes,
                     }
                     .update_metadata();
@@ -1666,7 +1712,7 @@ async fn cache_lookup_entities(
                         cache_control: cache_entry.control.clone(),
                         data: serde_json_bytes::json!({"data": cache_entry.data.clone()}),
                         warnings: Vec::new(),
-                        should_store: false,
+                        should_store: true,
                         indexes: *indexes,
                     }
                     .update_metadata()
@@ -1729,43 +1775,41 @@ fn save_original_cache_control(
     });
 }
 
+/// Stores a root-field response's data. The caller decides whether the response may be stored.
+#[allow(clippy::too_many_arguments)]
 async fn cache_store_root_from_response(
     cache: Storage,
     default_subgraph_ttl: Duration,
-    response: &subgraph::Response,
+    data: &Value,
+    subgraph_name: String,
     cache_control: CacheControl,
     cache_key: String,
     cache_tags: Vec<CacheTag>,
     debug: bool,
 ) -> Result<(), BoxError> {
-    if let Some(data) = response.response.body().data.as_ref() {
-        let ttl = cache_control
-            .ttl()
-            .map(Duration::from_secs)
-            .unwrap_or(default_subgraph_ttl);
+    let ttl = cache_control
+        .ttl()
+        .map(Duration::from_secs)
+        .unwrap_or(default_subgraph_ttl);
 
-        if response.response.body().errors.is_empty() && cache_control.should_store() {
-            let document = Document {
-                key: cache_key,
-                data: data.clone(),
-                control: cache_control,
-                cache_tags,
-                expire: ttl,
-                debug,
-            };
+    let document = Document {
+        key: cache_key,
+        data: data.clone(),
+        control: cache_control,
+        cache_tags,
+        expire: ttl,
+        debug,
+    };
 
-            let subgraph_name = response.subgraph_name.clone();
-            let span = tracing::info_span!("response_cache.store", "kind" = "root", "subgraph.name" = subgraph_name.clone(), "ttl" = ?ttl);
+    let span = tracing::info_span!("response_cache.store", "kind" = "root", "subgraph.name" = subgraph_name.clone(), "ttl" = ?ttl);
 
-            // Write to cache in a non-awaited task so that it's not on the request’s critical path
-            tokio::spawn(async move {
-                let _ = cache
-                    .insert(document, &subgraph_name)
-                    .instrument(span)
-                    .await;
-            });
-        }
-    }
+    // Write to cache in a non-awaited task so that it's not on the request’s critical path
+    tokio::spawn(async move {
+        let _ = cache
+            .insert(document, &subgraph_name)
+            .instrument(span)
+            .await;
+    });
 
     Ok(())
 }
@@ -2628,7 +2672,7 @@ async fn insert_entities_in_result(
                             cache_control: cache_control.clone(),
                             data: serde_json_bytes::json!({"data": value.clone()}),
                             warnings: Vec::new(),
-                            should_store: false,
+                            should_store: !has_errors,
                             indexes: *indexes,
                         }
                         .update_metadata(),
