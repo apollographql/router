@@ -48,6 +48,7 @@ mod introspection_typename_handling;
 mod merged_abstract_types_handling;
 mod mutations;
 mod named_fragments_expansion;
+mod non_merging_field_aliases;
 mod overrides;
 mod provides;
 mod requires;
