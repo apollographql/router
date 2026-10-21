@@ -1,0 +1,82 @@
+{
+  "Sequence": {
+    "nodes": [
+      {
+        "Fetch": {
+          "subgraph_name": "first",
+          "id": null,
+          "variable_usages": [],
+          "operation_document": "{ parent { child { __typename id seed } } }",
+          "operation_name": null,
+          "operation_kind": "query",
+          "input_rewrites": [],
+          "output_rewrites": [],
+          "context_rewrites": []
+        }
+      },
+      {
+        "Flatten": {
+          "path": [
+            {
+              "Key": [
+                "parent",
+                null
+              ]
+            },
+            {
+              "Key": [
+                "child",
+                null
+              ]
+            }
+          ],
+          "node": {
+            "Fetch": {
+              "subgraph_name": "children",
+              "id": null,
+              "variable_usages": [
+                "contextualArgument_1_0"
+              ],
+              "requires": [
+                {
+                  "kind": "InlineFragment",
+                  "typeCondition": "Child",
+                  "selections": [
+                    {
+                      "kind": "Field",
+                      "name": "__typename"
+                    },
+                    {
+                      "kind": "Field",
+                      "name": "id"
+                    }
+                  ]
+                }
+              ],
+              "operation_document": "query($representations: [_Any!]!, $contextualArgument_1_0: String) { _entities(representations: $representations) { ... on Child { detail { value(context: $contextualArgument_1_0, ordinary: \"keep\") } } } }",
+              "operation_name": null,
+              "operation_kind": "query",
+              "input_rewrites": [],
+              "output_rewrites": [],
+              "context_rewrites": [
+                {
+                  "KeyRenamer": {
+                    "path": [
+                      {
+                        "Key": [
+                          "seed",
+                          null
+                        ]
+                      }
+                    ],
+                    "rename_key_to": "contextualArgument_1_0"
+                  }
+                }
+              ]
+            }
+          }
+        }
+      }
+    ]
+  }
+}

@@ -1,0 +1,105 @@
+# `thing` from two subgraphs that name its result differently: `whole` declares it an `I`, an
+# interface object standing for `A` and `B`, and `objects` an `A`, so the two declarations meet at
+# the supergraph object `A`.
+#
+# Composed with `apollo_federation::composition::compose` from the two subgraphs below. Recompose it
+# when they change.
+#
+# Subgraph `objects`:
+#
+#   extend schema @link(url: "https://specs.apollo.dev/federation/v2.7", import: ["@key", "@shareable", "@external", "@requires", "@provides", "@override", "@interfaceObject"])
+#
+#   type Query {
+#     thing: A @shareable
+#   }
+#
+#   interface I @key(fields: "id") {
+#     id: ID!
+#     value: String
+#   }
+#
+#   type A implements I @key(fields: "id") {
+#     id: ID!
+#     value: String @shareable
+#   }
+#
+#   type B implements I @key(fields: "id") {
+#     id: ID!
+#     value: String @shareable
+#     other: String
+#   }
+#
+# Subgraph `whole`:
+#
+#   extend schema @link(url: "https://specs.apollo.dev/federation/v2.7", import: ["@key", "@shareable", "@external", "@requires", "@provides", "@override", "@interfaceObject"])
+#
+#   type Query {
+#     thing: I @shareable
+#   }
+#
+#   type I @key(fields: "id") @interfaceObject {
+#     id: ID!
+#     value: String @shareable
+#   }
+
+schema @link(url: "https://specs.apollo.dev/link/v1.0") @link(url: "https://specs.apollo.dev/join/v0.4", for: EXECUTION) {
+  query: Query
+}
+
+directive @link(url: String, as: String, for: link__Purpose, import: [link__Import]) repeatable on SCHEMA
+
+directive @join__graph(name: String!, url: String!) on ENUM_VALUE
+
+directive @join__type(graph: join__Graph!, key: join__FieldSet, extension: Boolean! = false, resolvable: Boolean! = true, isInterfaceObject: Boolean! = false) repeatable on OBJECT | INTERFACE | UNION | ENUM | INPUT_OBJECT | SCALAR
+
+directive @join__field(graph: join__Graph, requires: join__FieldSet, provides: join__FieldSet, type: String, external: Boolean, override: String, usedOverridden: Boolean, overrideLabel: String) repeatable on FIELD_DEFINITION | INPUT_FIELD_DEFINITION
+
+directive @join__implements(graph: join__Graph!, interface: String!) repeatable on OBJECT | INTERFACE
+
+directive @join__unionMember(graph: join__Graph!, member: String!) repeatable on UNION
+
+directive @join__enumValue(graph: join__Graph!) repeatable on ENUM_VALUE
+
+directive @join__directive(graphs: [join__Graph!], name: String!, args: join__DirectiveArguments) repeatable on SCHEMA | OBJECT | INTERFACE | FIELD_DEFINITION
+
+enum link__Purpose {
+  """
+  `SECURITY` features provide metadata necessary to securely resolve fields.
+  """
+  SECURITY
+  """
+  `EXECUTION` features provide metadata necessary for operation execution.
+  """
+  EXECUTION
+}
+
+scalar link__Import
+
+enum join__Graph {
+  OBJECTS @join__graph(name: "objects", url: "http://objects")
+  WHOLE @join__graph(name: "whole", url: "http://whole")
+}
+
+scalar join__FieldSet
+
+scalar join__DirectiveArguments
+
+type Query @join__type(graph: OBJECTS) @join__type(graph: WHOLE) {
+  thing: I @join__field(graph: OBJECTS, type: "A") @join__field(graph: WHOLE, type: "I")
+}
+
+interface I @join__type(graph: OBJECTS, key: "id") @join__type(graph: WHOLE, key: "id", isInterfaceObject: true) {
+  id: ID!
+  value: String
+}
+
+type A implements I @join__implements(graph: OBJECTS, interface: "I") @join__type(graph: OBJECTS, key: "id") {
+  id: ID!
+  value: String
+}
+
+type B implements I @join__implements(graph: OBJECTS, interface: "I") @join__type(graph: OBJECTS, key: "id") {
+  id: ID!
+  value: String
+  other: String
+}

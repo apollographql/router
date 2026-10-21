@@ -1,0 +1,245 @@
+{
+  "Sequence": {
+    "nodes": [
+      {
+        "Fetch": {
+          "subgraph_name": "rows",
+          "id": null,
+          "variable_usages": [],
+          "operation_document": "{ rows { __typename ... on A { __typename id } ... on B { __typename id } } }",
+          "operation_name": null,
+          "operation_kind": "query",
+          "input_rewrites": [],
+          "output_rewrites": [],
+          "context_rewrites": []
+        }
+      },
+      {
+        "Parallel": {
+          "nodes": [
+            {
+              "Sequence": {
+                "nodes": [
+                  {
+                    "Flatten": {
+                      "path": [
+                        {
+                          "Key": [
+                            "rows",
+                            null
+                          ]
+                        },
+                        {
+                          "AnyIndex": null
+                        }
+                      ],
+                      "node": {
+                        "Fetch": {
+                          "subgraph_name": "b",
+                          "id": null,
+                          "variable_usages": [],
+                          "requires": [
+                            {
+                              "kind": "InlineFragment",
+                              "typeCondition": "B",
+                              "selections": [
+                                {
+                                  "kind": "Field",
+                                  "name": "__typename"
+                                },
+                                {
+                                  "kind": "Field",
+                                  "name": "id"
+                                }
+                              ]
+                            }
+                          ],
+                          "operation_document": "query($representations: [_Any!]!) { _entities(representations: $representations) { ... on B { datum } } }",
+                          "operation_name": null,
+                          "operation_kind": "query",
+                          "input_rewrites": [],
+                          "output_rewrites": [],
+                          "context_rewrites": []
+                        }
+                      }
+                    }
+                  },
+                  {
+                    "Flatten": {
+                      "path": [
+                        {
+                          "Key": [
+                            "rows",
+                            null
+                          ]
+                        },
+                        {
+                          "AnyIndex": null
+                        }
+                      ],
+                      "node": {
+                        "Fetch": {
+                          "subgraph_name": "consumer",
+                          "id": null,
+                          "variable_usages": [
+                            "contextualArgument_3_0"
+                          ],
+                          "requires": [
+                            {
+                              "kind": "InlineFragment",
+                              "typeCondition": "B",
+                              "selections": [
+                                {
+                                  "kind": "Field",
+                                  "name": "__typename"
+                                },
+                                {
+                                  "kind": "Field",
+                                  "name": "id"
+                                }
+                              ]
+                            }
+                          ],
+                          "operation_document": "query($representations: [_Any!]!, $contextualArgument_3_0: String) { _entities(representations: $representations) { ... on B { info { contextual(input: $contextualArgument_3_0) } } } }",
+                          "operation_name": null,
+                          "operation_kind": "query",
+                          "input_rewrites": [],
+                          "output_rewrites": [],
+                          "context_rewrites": [
+                            {
+                              "KeyRenamer": {
+                                "path": [
+                                  {
+                                    "Key": [
+                                      "datum",
+                                      null
+                                    ]
+                                  }
+                                ],
+                                "rename_key_to": "contextualArgument_3_0"
+                              }
+                            }
+                          ]
+                        }
+                      }
+                    }
+                  }
+                ]
+              }
+            },
+            {
+              "Sequence": {
+                "nodes": [
+                  {
+                    "Flatten": {
+                      "path": [
+                        {
+                          "Key": [
+                            "rows",
+                            null
+                          ]
+                        },
+                        {
+                          "AnyIndex": null
+                        }
+                      ],
+                      "node": {
+                        "Fetch": {
+                          "subgraph_name": "a",
+                          "id": null,
+                          "variable_usages": [],
+                          "requires": [
+                            {
+                              "kind": "InlineFragment",
+                              "typeCondition": "A",
+                              "selections": [
+                                {
+                                  "kind": "Field",
+                                  "name": "__typename"
+                                },
+                                {
+                                  "kind": "Field",
+                                  "name": "id"
+                                }
+                              ]
+                            }
+                          ],
+                          "operation_document": "query($representations: [_Any!]!) { _entities(representations: $representations) { ... on A { datum } } }",
+                          "operation_name": null,
+                          "operation_kind": "query",
+                          "input_rewrites": [],
+                          "output_rewrites": [],
+                          "context_rewrites": []
+                        }
+                      }
+                    }
+                  },
+                  {
+                    "Flatten": {
+                      "path": [
+                        {
+                          "Key": [
+                            "rows",
+                            null
+                          ]
+                        },
+                        {
+                          "AnyIndex": null
+                        }
+                      ],
+                      "node": {
+                        "Fetch": {
+                          "subgraph_name": "consumer",
+                          "id": null,
+                          "variable_usages": [
+                            "contextualArgument_3_0"
+                          ],
+                          "requires": [
+                            {
+                              "kind": "InlineFragment",
+                              "typeCondition": "A",
+                              "selections": [
+                                {
+                                  "kind": "Field",
+                                  "name": "__typename"
+                                },
+                                {
+                                  "kind": "Field",
+                                  "name": "id"
+                                }
+                              ]
+                            }
+                          ],
+                          "operation_document": "query($representations: [_Any!]!, $contextualArgument_3_0: String) { _entities(representations: $representations) { ... on A { info { contextual(input: $contextualArgument_3_0) } } } }",
+                          "operation_name": null,
+                          "operation_kind": "query",
+                          "input_rewrites": [],
+                          "output_rewrites": [],
+                          "context_rewrites": [
+                            {
+                              "KeyRenamer": {
+                                "path": [
+                                  {
+                                    "Key": [
+                                      "datum",
+                                      null
+                                    ]
+                                  }
+                                ],
+                                "rename_key_to": "contextualArgument_3_0"
+                              }
+                            }
+                          ]
+                        }
+                      }
+                    }
+                  }
+                ]
+              }
+            }
+          ]
+        }
+      }
+    ]
+  }
+}

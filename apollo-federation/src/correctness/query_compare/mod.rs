@@ -65,7 +65,7 @@
 
 pub(crate) mod conditions;
 mod error;
-mod schema_view;
+pub(crate) mod schema_view;
 
 #[cfg(test)]
 mod tests;
@@ -1384,7 +1384,7 @@ fn same_resolver_call(left: &Field, right: &Field) -> bool {
         )
 }
 
-fn same_arguments(left: &[Node<ast::Argument>], right: &[Node<ast::Argument>]) -> bool {
+pub(crate) fn same_arguments(left: &[Node<ast::Argument>], right: &[Node<ast::Argument>]) -> bool {
     left.len() == right.len()
         && left.iter().all(|left_argument| {
             right.iter().any(|right_argument| {

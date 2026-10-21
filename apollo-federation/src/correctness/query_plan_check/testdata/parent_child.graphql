@@ -1,0 +1,129 @@
+# A parent and its child, the child's `value` and its `detail` resolved by `id`.
+#
+# `first` serves `parent` and `parents`, each `Parent`'s `child` a `Child` with a `seed` and a
+# shareable `value`. `children` resolves a `Child` by `id`, sets the context `child` on it, and
+# resolves its `detail`, whose `value` takes `seed` from the child as context beside an ordinary
+# argument.
+#
+# Composed with `apollo_federation::composition::compose` from the two subgraphs below. Recompose it
+# when they change. `plans/parent_child_detail.json` is the planner's plan over it, with default
+# options, produced by the revision that added the files, for
+#
+#   { parent { child { detail { value(ordinary: "keep") } } } }
+#
+# Subgraph `children`:
+#
+#   extend schema
+#     @link(
+#       url: "https://specs.apollo.dev/federation/v2.8"
+#       import: ["@key", "@external", "@shareable", "@context", "@fromContext"]
+#     )
+#
+#   type Child @key(fields: "id") @context(name: "child") {
+#     id: ID!
+#     seed: String @external
+#     value: String @shareable
+#     detail: Detail
+#   }
+#
+#   type Detail @key(fields: "id") {
+#     id: ID!
+#     value(context: String @fromContext(field: "$child { seed }"), ordinary: String): String
+#   }
+#
+# Subgraph `first`:
+#
+#   extend schema @link(url: "https://specs.apollo.dev/federation/v2.8", import: ["@key", "@shareable"])
+#
+#   type Query {
+#     parent: Parent
+#     parents: [Parent]
+#   }
+#
+#   type Parent {
+#     child: Child
+#   }
+#
+#   type Child @key(fields: "id") {
+#     id: ID!
+#     seed: String
+#     value: String @shareable
+#   }
+
+schema @link(url: "https://specs.apollo.dev/link/v1.0") @link(url: "https://specs.apollo.dev/join/v0.5", for: EXECUTION) @link(url: "https://specs.apollo.dev/context/v0.1", for: SECURITY) {
+  query: Query
+}
+
+directive @link(url: String, as: String, for: link__Purpose, import: [link__Import]) repeatable on SCHEMA
+
+directive @join__graph(name: String!, url: String!) on ENUM_VALUE
+
+directive @join__type(graph: join__Graph!, key: join__FieldSet, extension: Boolean! = false, resolvable: Boolean! = true, isInterfaceObject: Boolean! = false) repeatable on OBJECT | INTERFACE | UNION | ENUM | INPUT_OBJECT | SCALAR
+
+directive @join__field(graph: join__Graph, requires: join__FieldSet, provides: join__FieldSet, type: String, external: Boolean, override: String, usedOverridden: Boolean, overrideLabel: String, contextArguments: [join__ContextArgument!]) repeatable on FIELD_DEFINITION | INPUT_FIELD_DEFINITION
+
+directive @join__implements(graph: join__Graph!, interface: String!) repeatable on OBJECT | INTERFACE
+
+directive @join__unionMember(graph: join__Graph!, member: String!) repeatable on UNION
+
+directive @join__enumValue(graph: join__Graph!) repeatable on ENUM_VALUE
+
+directive @join__directive(graphs: [join__Graph!], name: String!, args: join__DirectiveArguments) repeatable on SCHEMA | OBJECT | INTERFACE | FIELD_DEFINITION
+
+directive @context(name: String!) repeatable on INTERFACE | OBJECT | UNION
+
+directive @context__fromContext(field: context__ContextFieldValue) on ARGUMENT_DEFINITION
+
+enum link__Purpose {
+  """
+  `SECURITY` features provide metadata necessary to securely resolve fields.
+  """
+  SECURITY
+  """
+  `EXECUTION` features provide metadata necessary for operation execution.
+  """
+  EXECUTION
+}
+
+scalar link__Import
+
+enum join__Graph {
+  CHILDREN @join__graph(name: "children", url: "http://children")
+  FIRST @join__graph(name: "first", url: "http://first")
+}
+
+scalar join__FieldSet
+
+scalar join__DirectiveArguments
+
+scalar join__FieldValue
+
+input join__ContextArgument {
+  name: String!
+  type: String!
+  context: String!
+  selection: join__FieldValue!
+}
+
+scalar context__ContextFieldValue
+
+type Child @join__type(graph: CHILDREN, key: "id") @join__type(graph: FIRST, key: "id") @context(name: "children__child") {
+  id: ID!
+  seed: String @join__field(graph: CHILDREN, external: true) @join__field(graph: FIRST)
+  value: String
+  detail: Detail @join__field(graph: CHILDREN)
+}
+
+type Detail @join__type(graph: CHILDREN, key: "id") {
+  id: ID!
+  value(ordinary: String): String @join__field(graph: CHILDREN, contextArguments: [{context: "children__child", name: "context", type: "String", selection: "{ seed }"}])
+}
+
+type Query @join__type(graph: CHILDREN) @join__type(graph: FIRST) {
+  parent: Parent @join__field(graph: FIRST)
+  parents: [Parent] @join__field(graph: FIRST)
+}
+
+type Parent @join__type(graph: FIRST) {
+  child: Child
+}
