@@ -36,21 +36,25 @@ pub(crate) fn execute_selection_set<'a>(
                 selections,
             }) => {
                 let selection_name = alias.as_ref().map(|a| a.as_str()).unwrap_or(name.as_str());
-                let field_type = current_type.and_then(|t| {
-                    schema
-                        .supergraph_schema()
-                        .types
-                        .get(t)
-                        .and_then(|ty| match ty {
-                            apollo_compiler::schema::ExtendedType::Object(o) => {
-                                o.fields.get(name.as_str()).map(|f| &f.ty)
-                            }
-                            apollo_compiler::schema::ExtendedType::Interface(i) => {
-                                i.fields.get(name.as_str()).map(|f| &f.ty)
-                            }
-                            _ => None,
-                        })
-                });
+                // The field type is only needed for missing fields and for fields with
+                // sub-selections, so it is not looked up for every leaf field
+                let field_type = || {
+                    current_type.and_then(|t| {
+                        schema
+                            .supergraph_schema()
+                            .types
+                            .get(t)
+                            .and_then(|ty| match ty {
+                                apollo_compiler::schema::ExtendedType::Object(o) => {
+                                    o.fields.get(name.as_str()).map(|f| &f.ty)
+                                }
+                                apollo_compiler::schema::ExtendedType::Interface(i) => {
+                                    i.fields.get(name.as_str()).map(|f| &f.ty)
+                                }
+                                _ => None,
+                            })
+                    })
+                };
 
                 match content.get_key_value(selection_name) {
                     None => {
@@ -69,48 +73,42 @@ pub(crate) fn execute_selection_set<'a>(
                         // missing fields. If a field was missing, it should have been nullified,
                         // and if it was non nullable, the parent object would have been nullified.
                         // Unfortunately, we don't validate subgraph responses yet
-                        if field_type
-                            .as_ref()
-                            .map(|ty| !ty.is_non_null())
-                            .unwrap_or(false)
-                        {
+                        if field_type().map(|ty| !ty.is_non_null()).unwrap_or(false) {
                             output.insert(ByteString::from(selection_name.to_owned()), Value::Null);
                         } else {
                             return Value::Null;
                         }
                     }
                     Some((key, value)) => {
-                        if let Some(elements) = value.as_array() {
-                            let selected = elements
-                                .iter()
-                                .map(|element| {
-                                    if !selections.is_empty() {
+                        if selections.is_empty() {
+                            output.insert(key.clone(), value.clone());
+                        } else {
+                            let field_type_name =
+                                field_type().map(|ty| ty.inner_named_type().as_str());
+                            if let Some(elements) = value.as_array() {
+                                let selected = elements
+                                    .iter()
+                                    .map(|element| {
                                         execute_selection_set(
                                             element,
                                             selections,
                                             schema,
-                                            field_type
-                                                .as_ref()
-                                                .map(|ty| ty.inner_named_type().as_str()),
+                                            field_type_name,
                                         )
-                                    } else {
-                                        element.clone()
-                                    }
-                                })
-                                .collect::<Vec<_>>();
-                            output.insert(key.clone(), Value::Array(selected));
-                        } else if !selections.is_empty() {
-                            output.insert(
-                                key.clone(),
-                                execute_selection_set(
-                                    value,
-                                    selections,
-                                    schema,
-                                    field_type.as_ref().map(|ty| ty.inner_named_type().as_str()),
-                                ),
-                            );
-                        } else {
-                            output.insert(key.clone(), value.clone());
+                                    })
+                                    .collect::<Vec<_>>();
+                                output.insert(key.clone(), Value::Array(selected));
+                            } else {
+                                output.insert(
+                                    key.clone(),
+                                    execute_selection_set(
+                                        value,
+                                        selections,
+                                        schema,
+                                        field_type_name,
+                                    ),
+                                );
+                            }
                         }
                     }
                 }
@@ -125,6 +123,11 @@ pub(crate) fn execute_selection_set<'a>(
                         && let Value::Object(selected) =
                             execute_selection_set(input_content, selections, schema, current_type)
                     {
+                        // Nothing to merge into yet, so the selected fields become the output as-is
+                        if output.is_empty() {
+                            output = selected;
+                            continue;
+                        }
                         for (key, value) in selected.into_iter() {
                             match output.entry(key) {
                                 Entry::Vacant(e) => {
