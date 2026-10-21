@@ -1,3 +1,4 @@
+use std::borrow::Cow;
 use std::collections::HashMap;
 use std::sync::Arc;
 
@@ -75,7 +76,8 @@ impl QueryPlan {
 
         let (value, errors) = match self.root.as_deref() {
             Some(root_node) => {
-                root_node
+                let mut value = initial_value.unwrap_or_default();
+                let (v, errors) = root_node
                     .execute_recursively(
                         &ExecutionParameters {
                             context,
@@ -91,10 +93,14 @@ impl QueryPlan {
                             is_deferred: false,
                         },
                         &root,
-                        &initial_value.unwrap_or_default(),
+                        &value,
                         sender,
                     )
-                    .await
+                    .await;
+                // A `Sequence` returns only what it fetched, so put that on top of the
+                // initial data (a subscription event) rather than in place of it.
+                value.type_aware_deep_merge(v, schema);
+                (value, errors)
             }
             None => (Value::Object(Default::default()), vec![]),
         };
@@ -160,21 +166,41 @@ impl PlanNode {
 
             match self {
                 PlanNode::Sequence { nodes } => {
-                    value = parent_value.clone();
+                    // Each node reads what the nodes before it produced, so it runs against
+                    // `parent_value` merged with their output. Only that output is returned: the
+                    // caller already has `parent_value`, and handing a copy of it back would have
+                    // every enclosing node deep-merge the whole response again.
+                    //
+                    // With no parent value, the input is exactly the output so far, so a single
+                    // accumulator serves as both and no node output is cloned.
+                    let has_parent_value = !parent_value.is_null();
+                    let mut input = Cow::Borrowed(parent_value);
+                    value = Value::default();
                     errors = Vec::new();
                     async {
-                        for node in nodes {
+                        let mut nodes = nodes.iter().peekable();
+                        while let Some(node) = nodes.next() {
                             let (v, err) = node
                                 .execute_recursively(
                                     parameters,
                                     current_dir,
-                                    &value,
+                                    &input,
                                     sender.clone(),
                                 )
                                 .in_current_span()
                                 .await;
-                            value.type_aware_deep_merge(v, parameters.schema);
                             errors.extend(err);
+                            if !has_parent_value {
+                                input.to_mut().type_aware_deep_merge(v, parameters.schema);
+                            } else if nodes.peek().is_some() {
+                                value.type_aware_deep_merge(v.clone(), parameters.schema);
+                                input.to_mut().type_aware_deep_merge(v, parameters.schema);
+                            } else {
+                                value.type_aware_deep_merge(v, parameters.schema);
+                            }
+                        }
+                        if !has_parent_value {
+                            value = input.into_owned();
                         }
                     }
                     .instrument(tracing::info_span!(
@@ -313,12 +339,12 @@ impl PlanNode {
                             &fetch_node.context_rewrites,
                         ) {
                             Some(variables) => {
-                                let paths = variables.inverted_paths.clone();
+                                let paths = Arc::clone(&variables.inverted_paths);
                                 let service = parameters.service.clone();
                                 let request = fetch::Request::Fetch(
                                     FetchRequest::builder()
                                         .context(parameters.context.clone())
-                                        .fetch_node(fetch_node.clone())
+                                        .fetch_node(Arc::clone(fetch_node))
                                         .supergraph_request(parameters.supergraph_request.clone())
                                         .variables(variables)
                                         .current_dir(current_dir.clone())
@@ -603,7 +629,7 @@ impl DeferredNode {
             let deferred_fetches = HashMap::new();
 
             if let Some(node) = deferred_inner {
-                let (mut v, err) = node
+                let (v, err) = node
                     .execute_recursively(
                         &ExecutionParameters {
                             context: &ctx,
@@ -630,18 +656,21 @@ impl DeferredNode {
                         "otel.kind" = "INTERNAL"
                     ))
                     .await;
+                // The inner node returns only what it fetched. The deferred response is built
+                // from that plus the data it ran against, which the subselection then filters.
+                value.type_aware_deep_merge(v, &sc);
 
                 if !is_depends_empty {
                     let (primary_value, primary_errors) =
                         primary_receiver.recv().await.unwrap_or_default();
-                    v.type_aware_deep_merge(primary_value, &sc);
+                    value.type_aware_deep_merge(primary_value, &sc);
                     errors.extend(primary_errors)
                 }
 
                 if let Err(e) = tx
                     .send(
                         Response::builder()
-                            .data(v)
+                            .data(value)
                             .errors(err)
                             .and_path(Some(deferred_path.clone()))
                             .and_label(label)

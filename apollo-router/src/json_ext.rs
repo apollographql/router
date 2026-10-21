@@ -214,15 +214,13 @@ impl ValueExt for Value {
         match (self, other) {
             (Value::Object(a), Value::Object(b)) => {
                 for (key, value) in b.into_iter() {
-                    let k = key.clone();
+                    let is_typename = key.as_str() == TYPENAME;
                     match a.entry(key) {
                         Entry::Vacant(e) => {
                             e.insert(value);
                         }
                         Entry::Occupied(e) => match (e.into_mut(), value) {
-                            (Value::String(type1), Value::String(type2))
-                                if k.as_str() == TYPENAME =>
-                            {
+                            (Value::String(type1), Value::String(type2)) if is_typename => {
                                 // If type1 is a subtype of type2, we skip this overwrite to preserve the more specific `__typename`
                                 // in the response. Ideally, we could use `Schema::is_implementation`, but that looks to be buggy
                                 // and does not catch the problem we are trying to resolve.

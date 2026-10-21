@@ -186,7 +186,8 @@ impl Query {
                                 schema,
                                 errors: Vec::new(),
                                 coercion_errors: include_coercion_errors.then(Vec::new),
-                                nullified: Vec::new(),
+                                // Later incremental responses under a nullified path are dropped.
+                                nullified: Some(Vec::new()),
                             };
 
                             response.data = Some(
@@ -217,7 +218,7 @@ impl Query {
                                 response.errors.append(errors);
                             }
 
-                            return parameters.nullified;
+                            return parameters.nullified.unwrap_or_default();
                         }
                         None => {
                             response.data = Some(Value::Object(Object::default()));
@@ -259,7 +260,8 @@ impl Query {
                         schema,
                         errors: Vec::new(),
                         coercion_errors: include_coercion_errors.then(Vec::new),
-                        nullified: Vec::new(),
+                        // Without `@defer` no incremental response follows to be filtered.
+                        nullified: None,
                     };
 
                     response.data = Some(
@@ -289,7 +291,7 @@ impl Query {
                         response.errors.append(errors);
                     }
 
-                    return parameters.nullified;
+                    return parameters.nullified.unwrap_or_default();
                 }
             }
             Some(Value::Null) => {
@@ -408,24 +410,15 @@ impl Query {
         // for every type, if we have an invalid value, we will replace it with null
         // and return Ok(()), because values are optional by default
         match field_type {
-            executable::Type::Named(name) => match name.as_str() {
-                // Scalar formatters return `Err` on coercion failure.  Propagating `Err` here
-                // avoids redundant "Null value found for non-nullable" errors.
-                "Int" => self.format_integer(parameters, path, input, output)?,
-                "Float" => self.format_float(parameters, path, input, output)?,
-                "Boolean" => self.format_boolean(parameters, path, input, output)?,
-                "String" => self.format_string(parameters, path, input, output)?,
-                "Id" => self.format_id(parameters, path, input, output)?,
-                _ => self.format_named_type(
-                    parameters,
-                    field_type,
-                    input,
-                    name,
-                    output,
-                    path,
-                    selection_set,
-                )?,
-            },
+            executable::Type::Named(name) => self.format_named_value(
+                parameters,
+                field_type,
+                name,
+                input,
+                output,
+                path,
+                selection_set,
+            )?,
             // if the list contains nonnullable types, we will receive a Err(InvalidValue)
             // and should replace the entire list with null
             // if the types are nullable, the inner call to filter_errors will take care
@@ -449,6 +442,41 @@ impl Query {
         Ok(())
     }
 
+    /// Format a value of the named type `name`. `field_type` is the field's type, whose
+    /// nullability is not checked here.
+    /// - Returns Err(InvalidValue) if formatting fails and error(s) have been emitted.
+    #[inline]
+    #[allow(clippy::too_many_arguments)]
+    fn format_named_value<'a: 'b, 'b>(
+        &'a self,
+        parameters: &mut FormatParameters,
+        field_type: &executable::Type,
+        name: &Name,
+        input: &mut Value,
+        output: &mut Value,
+        path: &mut Vec<ResponsePathElement<'b>>,
+        selection_set: &'a [Selection],
+    ) -> Result<(), InvalidValue> {
+        match name.as_str() {
+            // Scalar formatters return `Err` on coercion failure.  Propagating `Err` here
+            // avoids redundant "Null value found for non-nullable" errors.
+            "Int" => self.format_integer(parameters, path, input, output),
+            "Float" => self.format_float(parameters, path, input, output),
+            "Boolean" => self.format_boolean(parameters, path, input, output),
+            "String" => self.format_string(parameters, path, input, output),
+            "Id" => self.format_id(parameters, path, input, output),
+            _ => self.format_named_type(
+                parameters,
+                field_type,
+                input,
+                name,
+                output,
+                path,
+                selection_set,
+            ),
+        }
+    }
+
     /// Format a non-null field's value.
     /// - Returns Err(InvalidValue) if formatting fails and error(s) have been emitted.
     #[inline]
@@ -461,9 +489,20 @@ impl Query {
         path: &mut Vec<ResponsePathElement<'b>>,
         selection_set: &'a [Selection],
     ) -> Result<(), InvalidValue> {
-        let inner_type = match field_type {
-            executable::Type::NonNullList(ty) => ty.clone().list(),
-            executable::Type::NonNullNamed(name) => executable::Type::Named(name.clone()),
+        // Format as the nullable inner type, without building that type for every value.
+        let inner_result = match field_type {
+            executable::Type::NonNullList(item_type) => {
+                self.format_list(parameters, input, item_type, output, path, selection_set)
+            }
+            executable::Type::NonNullNamed(name) => self.format_named_value(
+                parameters,
+                field_type,
+                name,
+                input,
+                output,
+                path,
+                selection_set,
+            ),
             // This function should never be called for non-nullable types
             _ => {
                 tracing::error!("`format_non_nullable_value` was called with a nullable type!!");
@@ -472,10 +511,8 @@ impl Query {
             }
         };
 
-        let inner_result =
-            self.format_value(parameters, &inner_type, input, output, path, selection_set);
-
         if output.is_null() {
+            let inner_type = field_type.clone().nullable();
             let message = format!("Null value found for non-nullable type {inner_type}");
             match inner_result {
                 Ok(()) => {
@@ -572,7 +609,7 @@ impl Query {
                     Ok(())
                 })
         {
-            parameters.nullified.push(Path::from_response_slice(path));
+            parameters.insert_nullified(path);
             // Emit only at the innermost list level (when inner_type is not a list).
             // We don't want to emit multiple errors for a nested list type like [[Int!]!]!.
             if !inner_type.is_list() {
@@ -635,7 +672,7 @@ impl Query {
                 let Some(ExtendedType::Object(_) | ExtendedType::Interface(_)) =
                     parameters.schema.types.get(input_type)
                 else {
-                    parameters.nullified.push(Path::from_response_slice(path));
+                    parameters.insert_nullified(path);
                     *output = Value::Null;
                     return Ok(());
                 };
@@ -646,18 +683,17 @@ impl Query {
             }
             let output_object = output.as_object_mut().ok_or(InvalidValue)?;
 
-            let typename = input_object
-                .get(TYPENAME)
-                .and_then(|val| val.as_str())
-                .and_then(|s| apollo_compiler::ast::NamedType::new(s).ok())
-                .map(apollo_compiler::ast::Type::Named);
-
-            let current_type = match parameters.schema.types.get(field_type.inner_named_type()) {
-                Some(ExtendedType::Interface(..) | ExtendedType::Union(..)) => {
-                    typename.as_ref().unwrap_or(field_type)
-                }
-                _ => field_type,
+            // For an abstract field the object's `__typename` is its type. That name was
+            // checked against the schema above, so reuse the schema's copy of it.
+            let typename = match parameters.schema.types.get(field_type.inner_named_type()) {
+                Some(ExtendedType::Interface(..) | ExtendedType::Union(..)) => input_object
+                    .get(TYPENAME)
+                    .and_then(|val| val.as_str())
+                    .and_then(|s| parameters.schema.types.get_key_value(s))
+                    .map(|(name, _)| executable::Type::Named(name.clone())),
+                _ => None,
             };
+            let current_type = typename.as_ref().unwrap_or(field_type);
 
             // The spec's `CollectFields` step 1: "if visitedFragments is not provided,
             // initialize it to the empty set". Each object gets a fresh set, so a
@@ -674,13 +710,13 @@ impl Query {
                 current_type,
                 &mut visited_fragments,
             ) {
-                parameters.nullified.push(Path::from_response_slice(path));
+                parameters.insert_nullified(path);
                 *output = Value::Null;
                 // Propagate the Err, since `apply_selection_set` already emitted an error.
                 return Err(err);
             }
         } else {
-            parameters.nullified.push(Path::from_response_slice(path));
+            parameters.insert_nullified(path);
             *output = Value::Null;
             // We don't emit errors for null object value nor propagate Err.
             // Note: `format_non_nullable_value` will emit an error if this object's type is
@@ -1475,7 +1511,8 @@ struct FormatParameters<'a> {
     variables: &'a Object,
     errors: Vec<Error>,
     coercion_errors: Option<Vec<Error>>,
-    nullified: Vec<Path>,
+    /// Paths of the values formatting replaced with null, collected only when something reads them.
+    nullified: Option<Vec<Path>>,
     schema: &'a ApiSchema,
 }
 
@@ -1483,6 +1520,12 @@ impl FormatParameters<'_> {
     fn insert_coercion_error(&mut self, error: Error) {
         if let Some(errors) = self.coercion_errors.as_mut() {
             errors.push(error)
+        }
+    }
+
+    fn insert_nullified(&mut self, path: &[ResponsePathElement]) {
+        if let Some(nullified) = self.nullified.as_mut() {
+            nullified.push(Path::from_response_slice(path))
         }
     }
 }

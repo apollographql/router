@@ -146,7 +146,9 @@ pub(crate) struct FetchNode {
 #[derive(Default)]
 pub(crate) struct Variables {
     pub(crate) variables: Object,
-    pub(crate) inverted_paths: Vec<Vec<Path>>,
+    /// The paths each entry of `representations` was collected from. Shared so the error mapping
+    /// can keep it after the variables are handed to the fetch.
+    pub(crate) inverted_paths: Arc<Vec<Vec<Path>>>,
     pub(crate) contextual_arguments: Option<ContextualArguments>,
 }
 
@@ -183,7 +185,7 @@ impl Variables {
             }));
 
             let mut inverted_paths: Vec<Vec<Path>> = Vec::new();
-            let mut values: IndexSet<Value> = IndexSet::default();
+            let mut values: IndexSet<Value, ahash::RandomState> = IndexSet::default();
             data.select_values_and_paths(schema, current_dir, |path, value| {
                 // first get contextual values that are required
                 if let Some(context) = subgraph_context.as_mut() {
@@ -194,15 +196,12 @@ impl Variables {
                     execute_selection_set(value, requires, schema, None, &boolean_variable);
                 if value.as_object().map(|o| !o.is_empty()).unwrap_or(false) {
                     rewrites::apply_rewrites(schema, &mut value, input_rewrites);
-                    match values.get_index_of(&value) {
-                        Some(index) => {
-                            inverted_paths[index].push(path.clone());
-                        }
-                        None => {
-                            inverted_paths.push(vec![path.clone()]);
-                            values.insert(value);
-                            debug_assert!(inverted_paths.len() == values.len());
-                        }
+                    let (index, inserted) = values.insert_full(value);
+                    if inserted {
+                        inverted_paths.push(vec![path.clone()]);
+                        debug_assert!(inverted_paths.len() == values.len());
+                    } else {
+                        inverted_paths[index].push(path.clone());
                     }
                 }
             });
@@ -220,7 +219,7 @@ impl Variables {
             variables.insert("representations", representations);
             Some(Variables {
                 variables,
-                inverted_paths,
+                inverted_paths: Arc::new(inverted_paths),
                 contextual_arguments,
             })
         } else {
@@ -247,7 +246,7 @@ impl Variables {
                             .map(|(variable_key, value)| (variable_key.clone(), value.clone()))
                     })
                     .collect::<Object>(),
-                inverted_paths: Vec::new(),
+                inverted_paths: Default::default(),
                 contextual_arguments: None,
             })
         }
@@ -262,7 +261,7 @@ impl FetchNode {
         subgraph_request: SubgraphRequest,
         current_dir: &Path,
         schema: &Schema,
-        paths: Vec<Vec<Path>>,
+        paths: &[Vec<Path>],
         subfetch_trace: Option<SubfetchTrace>,
         hoist_orphan_errors: bool,
     ) -> (Value, Vec<Error>) {
@@ -339,7 +338,7 @@ impl FetchNode {
         &'a self,
         schema: &Schema,
         current_dir: &'a Path,
-        inverted_paths: Vec<Vec<Path>>,
+        inverted_paths: &[Vec<Path>],
         response: graphql::Response,
         hoist_orphan_errors: bool,
     ) -> (Value, Vec<Error>) {
@@ -679,7 +678,7 @@ mod tests {
             data,
             ..Default::default()
         };
-        let (value, errors) = node.response_at_path(&schema, &current_dir, vec![], response, false);
+        let (value, errors) = node.response_at_path(&schema, &current_dir, &[], response, false);
 
         assert!(errors.is_empty());
         assert_eq!(value, expected);
@@ -728,7 +727,7 @@ mod tests {
             .error(make_error(error_path))
             .build();
 
-        let (_, errors) = node.response_at_path(&schema, &current_dir, vec![], response, false);
+        let (_, errors) = node.response_at_path(&schema, &current_dir, &[], response, false);
 
         assert_eq!(errors.len(), 1);
         assert_eq!(errors[0].path.as_ref().unwrap(), &expected_path);
@@ -755,7 +754,7 @@ mod tests {
             .error(graphql::Error::builder().message("error 3").build())
             .build();
 
-        let (_, errors) = node.response_at_path(&schema, &current_dir, vec![], response, false);
+        let (_, errors) = node.response_at_path(&schema, &current_dir, &[], response, false);
 
         assert_eq!(errors.len(), 3);
         assert_eq!(
@@ -784,7 +783,7 @@ mod tests {
             )
             .build();
 
-        let (_, errors) = node.response_at_path(&schema, &current_dir, vec![], response, false);
+        let (_, errors) = node.response_at_path(&schema, &current_dir, &[], response, false);
 
         assert_eq!(errors.len(), 1);
         assert_eq!(errors[0].extension_code().as_deref(), Some("UNAUTHORIZED"));
@@ -834,7 +833,7 @@ mod tests {
             .error(make_error(error_path))
             .build();
 
-        let (_, errors) = node.response_at_path(&schema, &current_dir, vec![], response, true);
+        let (_, errors) = node.response_at_path(&schema, &current_dir, &[], response, true);
 
         assert_eq!(errors.len(), 1);
         assert_eq!(errors[0].path.as_ref().unwrap(), &expected_path);
@@ -869,7 +868,7 @@ mod tests {
             .error(make_error(error_path))
             .build();
 
-        let (_, errors) = node.response_at_path(&schema, &current_dir, vec![], response, false);
+        let (_, errors) = node.response_at_path(&schema, &current_dir, &[], response, false);
 
         assert_eq!(errors.len(), 1);
         assert_eq!(errors[0].path.as_ref().unwrap(), &expected_path);
@@ -894,7 +893,7 @@ mod tests {
             .build();
 
         let (value, errors) =
-            node.response_at_path(&schema, &current_dir, inverted_paths, response, false);
+            node.response_at_path(&schema, &current_dir, &inverted_paths, response, false);
 
         assert!(errors.is_empty());
         let top = value.as_object().unwrap().get("topField").unwrap();
@@ -919,7 +918,7 @@ mod tests {
             .build();
 
         let (value, errors) =
-            node.response_at_path(&schema, &current_dir, inverted_paths, response, false);
+            node.response_at_path(&schema, &current_dir, &inverted_paths, response, false);
 
         assert!(errors.is_empty());
         let arr = value
@@ -965,7 +964,7 @@ mod tests {
             .build();
 
         let (_value, mut errors) =
-            node.response_at_path(&schema, &current_dir, inverted_paths, response, false);
+            node.response_at_path(&schema, &current_dir, &inverted_paths, response, false);
 
         // One error per path the entity landed at, each naming that path...
         assert_eq!(errors.len(), 2);
@@ -1003,7 +1002,7 @@ mod tests {
             .data(json!({"_entities": []}))
             .build();
 
-        let (value, errors) = node.response_at_path(&schema, &current_dir, vec![], response, false);
+        let (value, errors) = node.response_at_path(&schema, &current_dir, &[], response, false);
 
         assert!(errors.is_empty());
         assert_eq!(value, Value::default());
@@ -1026,7 +1025,7 @@ mod tests {
             .build();
 
         let (value, errors) =
-            node.response_at_path(&schema, &current_dir, inverted_paths, response, false);
+            node.response_at_path(&schema, &current_dir, &inverted_paths, response, false);
 
         assert!(errors.is_empty());
         let arr = value
@@ -1059,7 +1058,7 @@ mod tests {
             .build();
 
         let (_, errors) =
-            node.response_at_path(&schema, &current_dir, inverted_paths, response, false);
+            node.response_at_path(&schema, &current_dir, &inverted_paths, response, false);
 
         assert_eq!(errors.len(), 1);
         assert_eq!(
@@ -1088,7 +1087,7 @@ mod tests {
         let (_, errors) = node.response_at_path(
             &schema,
             &current_dir,
-            vec![vec![Path(vec![key("data"), index(0)])]],
+            &[vec![Path(vec![key("data"), index(0)])]],
             response,
             false,
         );
@@ -1117,7 +1116,7 @@ mod tests {
             .build();
 
         let (_, errors) =
-            node.response_at_path(&schema, &current_dir, inverted_paths, response, false);
+            node.response_at_path(&schema, &current_dir, &inverted_paths, response, false);
 
         assert_eq!(errors.len(), 2);
         assert_eq!(
@@ -1145,7 +1144,7 @@ mod tests {
             )
             .build();
 
-        let (_, errors) = node.response_at_path(&schema, &current_dir, vec![], response, false);
+        let (_, errors) = node.response_at_path(&schema, &current_dir, &[], response, false);
 
         assert!(errors.is_empty());
     }
@@ -1168,7 +1167,7 @@ mod tests {
             .build();
 
         let (_, errors) =
-            node.response_at_path(&schema, &current_dir, inverted_paths, response, false);
+            node.response_at_path(&schema, &current_dir, &inverted_paths, response, false);
 
         assert_eq!(errors.len(), 1);
         assert_eq!(errors[0].extension_code().as_deref(), Some("FORBIDDEN"));
@@ -1200,7 +1199,7 @@ mod tests {
             .build();
 
         let (_, errors) =
-            node.response_at_path(&schema, &current_dir, inverted_paths, response, false);
+            node.response_at_path(&schema, &current_dir, &inverted_paths, response, false);
 
         assert_eq!(errors.len(), 1);
         assert_eq!(
@@ -1223,7 +1222,7 @@ mod tests {
             )
             .build();
 
-        let (value, errors) = node.response_at_path(&schema, &current_dir, vec![], response, false);
+        let (value, errors) = node.response_at_path(&schema, &current_dir, &[], response, false);
 
         assert_eq!(value, Value::Null);
         assert_eq!(errors.len(), 1);
@@ -1239,7 +1238,7 @@ mod tests {
             .data(json!({"something": "else"}))
             .build();
 
-        let (value, errors) = node.response_at_path(&schema, &current_dir, vec![], response, false);
+        let (value, errors) = node.response_at_path(&schema, &current_dir, &[], response, false);
 
         assert_eq!(value, Value::Null);
         assert!(errors.is_empty());
@@ -1254,7 +1253,7 @@ mod tests {
             .error(graphql::Error::builder().message("subgraph error").build())
             .build();
 
-        let (value, errors) = node.response_at_path(&schema, &current_dir, vec![], response, false);
+        let (value, errors) = node.response_at_path(&schema, &current_dir, &[], response, false);
 
         assert_eq!(value, Value::Null);
         assert_eq!(errors.len(), 1);
@@ -1282,7 +1281,7 @@ mod tests {
             )
             .build();
 
-        let (value, errors) = node.response_at_path(&schema, &current_dir, vec![], response, true);
+        let (value, errors) = node.response_at_path(&schema, &current_dir, &[], response, true);
 
         assert_eq!(value, Value::Null);
         assert_eq!(errors.len(), 3);
@@ -1317,7 +1316,7 @@ mod tests {
             )
             .build();
 
-        let (value, errors) = node.response_at_path(&schema, &current_dir, vec![], response, true);
+        let (value, errors) = node.response_at_path(&schema, &current_dir, &[], response, true);
 
         assert_eq!(value, Value::Null);
         assert_eq!(errors.len(), 2);
@@ -1340,7 +1339,7 @@ mod tests {
             .data(json!({"_entities": "not_an_array"}))
             .build();
 
-        let (value, errors) = node.response_at_path(&schema, &current_dir, vec![], response, false);
+        let (value, errors) = node.response_at_path(&schema, &current_dir, &[], response, false);
 
         assert_eq!(value, Value::Null);
         assert!(errors.is_empty());
@@ -1357,7 +1356,7 @@ mod tests {
             .error(graphql::Error::builder().message("bad entities").build())
             .build();
 
-        let (value, errors) = node.response_at_path(&schema, &current_dir, vec![], response, true);
+        let (value, errors) = node.response_at_path(&schema, &current_dir, &[], response, true);
 
         assert_eq!(value, Value::Null);
         assert_eq!(errors.len(), 1);
@@ -1376,7 +1375,7 @@ mod tests {
             ..Default::default()
         };
 
-        let (value, errors) = node.response_at_path(&schema, &current_dir, vec![], response, true);
+        let (value, errors) = node.response_at_path(&schema, &current_dir, &[], response, true);
 
         assert_eq!(value, Value::Null);
         assert_eq!(errors.len(), 1);
@@ -1410,7 +1409,7 @@ mod tests {
             .build();
 
         let (_, errors) =
-            node.response_at_path(&schema, &current_dir, inverted_paths, response, true);
+            node.response_at_path(&schema, &current_dir, &inverted_paths, response, true);
 
         assert_eq!(errors.len(), 3);
         assert_eq!(
@@ -1466,7 +1465,7 @@ mod tests {
         // Representation 0 (`id: 1`) came from t/0 and t/2; representation 1
         // (`id: 2`) came from t/1 alone.
         assert_eq!(
-            variables.inverted_paths,
+            *variables.inverted_paths,
             vec![
                 vec![
                     Path(vec![key("t"), index(0)]),

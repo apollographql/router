@@ -91,15 +91,8 @@ impl FetchService {
         &mut self,
         request: FetchRequest,
     ) -> <FetchService as tower::Service<Request>>::Future {
-        let FetchRequest {
-            ref context,
-            fetch_node: FetchNode {
-                ref service_name, ..
-            },
-            ..
-        } = request;
-        let service_name = service_name.clone();
-        let fetch_time_offset = context.created_at.elapsed().as_nanos() as i64;
+        let service_name = request.fetch_node.service_name.clone();
+        let fetch_time_offset = request.context.created_at.elapsed().as_nanos() as i64;
         let hoist_orphan_errors = self.hoist_orphan_errors.get(&service_name).enabled;
 
         if let Some(connector) = self
@@ -153,7 +146,7 @@ impl FetchService {
             ..
         } = request;
 
-        let paths = variables.inverted_paths.clone();
+        let paths = Arc::clone(&variables.inverted_paths);
         let operation = fetch_node.operation.as_parsed().cloned();
         let declared_errors_context = context.clone();
 
@@ -192,7 +185,7 @@ impl FetchService {
             let (value, mut errors) = fetch_node.response_at_path(
                 &schema,
                 &current_dir,
-                paths,
+                &paths,
                 response,
                 hoist_orphan_errors,
             );
@@ -230,7 +223,7 @@ impl FetchService {
             ref operation_kind,
             ref operation_name,
             ..
-        } = fetch_node;
+        } = *fetch_node;
 
         let uri = schema
             .subgraph_url(service_name.as_ref())
@@ -305,7 +298,7 @@ impl FetchService {
                     subgraph_request,
                     &current_dir,
                     &schema,
-                    variables.inverted_paths,
+                    &variables.inverted_paths,
                     subfetch_trace,
                     hoist_orphan_errors,
                 )

@@ -14,6 +14,7 @@ memory-stats = "1.1.0"
 once_cell.workspace = true
 rhai = { version = "1.23.6", features = ["sync", "serde", "internals"] }
 serde_json.workspace = true
+serde_json_bytes.workspace = true
 tokio.workspace = true
 tower.workspace = true
 
@@ -40,4 +41,8 @@ harness = false
 
 [[bench]]
 name = "query_plan_cache_concurrency"
+harness = false
+
+[[bench]]
+name = "nested_sequence"
 harness = false
