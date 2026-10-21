@@ -4,4 +4,4 @@ Since router 2.15.1, a non-cluster Redis deployment with replicas (for example, 
 
 The eager, strictly monitored replica connections that work around a replica round-robin bug now apply only to Redis Cluster. As before 2.15.1, non-cluster connections leave replica connections lazy, so the router never opens connections to replicas it doesn't use, and a replica outage no longer affects the primary.
 
-By [@BrynCooke](https://github.com/BrynCooke)
+By [@BrynCooke](https://github.com/BrynCooke) in https://github.com/apollographql/router/pull/10470
