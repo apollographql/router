@@ -1,0 +1,296 @@
+# A field selected once per member of a union above it, at a copy whose type is an interface:
+# `root` is an `Outer`, the union of `O1` to `O32`, each `O` holds a `leaf`, a `Leaf`, and `Leaf`
+# is implemented by `L1` to `L16`, each with its `v` and a `next` that is a `Leaf` again. A fetch
+# selecting `leaf { v }` under each member's fragment writes one `leaf` copy, whose `v` it
+# supplies under each member it selected and each implementation the copy can be.
+#
+# Composed with `apollo_federation::composition::compose` from the subgraph below, written here
+# with its members elided. Recompose it when it changes.
+#
+# Subgraph `chain`:
+#
+#   extend schema @link(url: "https://specs.apollo.dev/federation/v2.7", import: ["@key"])
+#
+#   type Query {
+#     root: Outer
+#   }
+#
+#   union Outer = O1 | O2 | … | O32
+#
+#   type O1 {
+#     leaf: Leaf
+#   }
+#
+#   … and so on to `O32`
+#
+#   interface Leaf {
+#     v: Int
+#     next: Leaf
+#   }
+#
+#   type L1 implements Leaf {
+#     v: Int
+#     next: Leaf
+#   }
+#
+#   … and so on to `L16`
+
+schema @link(url: "https://specs.apollo.dev/link/v1.0") @link(url: "https://specs.apollo.dev/join/v0.4", for: EXECUTION) {
+  query: Query
+}
+
+directive @link(url: String, as: String, for: link__Purpose, import: [link__Import]) repeatable on SCHEMA
+
+directive @join__graph(name: String!, url: String!) on ENUM_VALUE
+
+directive @join__type(graph: join__Graph!, key: join__FieldSet, extension: Boolean! = false, resolvable: Boolean! = true, isInterfaceObject: Boolean! = false) repeatable on OBJECT | INTERFACE | UNION | ENUM | INPUT_OBJECT | SCALAR
+
+directive @join__field(graph: join__Graph, requires: join__FieldSet, provides: join__FieldSet, type: String, external: Boolean, override: String, usedOverridden: Boolean, overrideLabel: String) repeatable on FIELD_DEFINITION | INPUT_FIELD_DEFINITION
+
+directive @join__implements(graph: join__Graph!, interface: String!) repeatable on OBJECT | INTERFACE
+
+directive @join__unionMember(graph: join__Graph!, member: String!) repeatable on UNION
+
+directive @join__enumValue(graph: join__Graph!) repeatable on ENUM_VALUE
+
+directive @join__directive(graphs: [join__Graph!], name: String!, args: join__DirectiveArguments) repeatable on SCHEMA | OBJECT | INTERFACE | FIELD_DEFINITION
+
+enum link__Purpose {
+  """
+  `SECURITY` features provide metadata necessary to securely resolve fields.
+  """
+  SECURITY
+  """
+  `EXECUTION` features provide metadata necessary for operation execution.
+  """
+  EXECUTION
+}
+
+scalar link__Import
+
+enum join__Graph {
+  CHAIN @join__graph(name: "chain", url: "http://chain")
+}
+
+scalar join__FieldSet
+
+scalar join__DirectiveArguments
+
+type Query @join__type(graph: CHAIN) {
+  root: Outer
+}
+
+union Outer @join__type(graph: CHAIN) @join__unionMember(graph: CHAIN, member: "O1") @join__unionMember(graph: CHAIN, member: "O2") @join__unionMember(graph: CHAIN, member: "O3") @join__unionMember(graph: CHAIN, member: "O4") @join__unionMember(graph: CHAIN, member: "O5") @join__unionMember(graph: CHAIN, member: "O6") @join__unionMember(graph: CHAIN, member: "O7") @join__unionMember(graph: CHAIN, member: "O8") @join__unionMember(graph: CHAIN, member: "O9") @join__unionMember(graph: CHAIN, member: "O10") @join__unionMember(graph: CHAIN, member: "O11") @join__unionMember(graph: CHAIN, member: "O12") @join__unionMember(graph: CHAIN, member: "O13") @join__unionMember(graph: CHAIN, member: "O14") @join__unionMember(graph: CHAIN, member: "O15") @join__unionMember(graph: CHAIN, member: "O16") @join__unionMember(graph: CHAIN, member: "O17") @join__unionMember(graph: CHAIN, member: "O18") @join__unionMember(graph: CHAIN, member: "O19") @join__unionMember(graph: CHAIN, member: "O20") @join__unionMember(graph: CHAIN, member: "O21") @join__unionMember(graph: CHAIN, member: "O22") @join__unionMember(graph: CHAIN, member: "O23") @join__unionMember(graph: CHAIN, member: "O24") @join__unionMember(graph: CHAIN, member: "O25") @join__unionMember(graph: CHAIN, member: "O26") @join__unionMember(graph: CHAIN, member: "O27") @join__unionMember(graph: CHAIN, member: "O28") @join__unionMember(graph: CHAIN, member: "O29") @join__unionMember(graph: CHAIN, member: "O30") @join__unionMember(graph: CHAIN, member: "O31") @join__unionMember(graph: CHAIN, member: "O32") = O1 | O2 | O3 | O4 | O5 | O6 | O7 | O8 | O9 | O10 | O11 | O12 | O13 | O14 | O15 | O16 | O17 | O18 | O19 | O20 | O21 | O22 | O23 | O24 | O25 | O26 | O27 | O28 | O29 | O30 | O31 | O32
+
+type O1 @join__type(graph: CHAIN) {
+  leaf: Leaf
+}
+
+type O2 @join__type(graph: CHAIN) {
+  leaf: Leaf
+}
+
+type O3 @join__type(graph: CHAIN) {
+  leaf: Leaf
+}
+
+type O4 @join__type(graph: CHAIN) {
+  leaf: Leaf
+}
+
+type O5 @join__type(graph: CHAIN) {
+  leaf: Leaf
+}
+
+type O6 @join__type(graph: CHAIN) {
+  leaf: Leaf
+}
+
+type O7 @join__type(graph: CHAIN) {
+  leaf: Leaf
+}
+
+type O8 @join__type(graph: CHAIN) {
+  leaf: Leaf
+}
+
+type O9 @join__type(graph: CHAIN) {
+  leaf: Leaf
+}
+
+type O10 @join__type(graph: CHAIN) {
+  leaf: Leaf
+}
+
+type O11 @join__type(graph: CHAIN) {
+  leaf: Leaf
+}
+
+type O12 @join__type(graph: CHAIN) {
+  leaf: Leaf
+}
+
+type O13 @join__type(graph: CHAIN) {
+  leaf: Leaf
+}
+
+type O14 @join__type(graph: CHAIN) {
+  leaf: Leaf
+}
+
+type O15 @join__type(graph: CHAIN) {
+  leaf: Leaf
+}
+
+type O16 @join__type(graph: CHAIN) {
+  leaf: Leaf
+}
+
+type O17 @join__type(graph: CHAIN) {
+  leaf: Leaf
+}
+
+type O18 @join__type(graph: CHAIN) {
+  leaf: Leaf
+}
+
+type O19 @join__type(graph: CHAIN) {
+  leaf: Leaf
+}
+
+type O20 @join__type(graph: CHAIN) {
+  leaf: Leaf
+}
+
+type O21 @join__type(graph: CHAIN) {
+  leaf: Leaf
+}
+
+type O22 @join__type(graph: CHAIN) {
+  leaf: Leaf
+}
+
+type O23 @join__type(graph: CHAIN) {
+  leaf: Leaf
+}
+
+type O24 @join__type(graph: CHAIN) {
+  leaf: Leaf
+}
+
+type O25 @join__type(graph: CHAIN) {
+  leaf: Leaf
+}
+
+type O26 @join__type(graph: CHAIN) {
+  leaf: Leaf
+}
+
+type O27 @join__type(graph: CHAIN) {
+  leaf: Leaf
+}
+
+type O28 @join__type(graph: CHAIN) {
+  leaf: Leaf
+}
+
+type O29 @join__type(graph: CHAIN) {
+  leaf: Leaf
+}
+
+type O30 @join__type(graph: CHAIN) {
+  leaf: Leaf
+}
+
+type O31 @join__type(graph: CHAIN) {
+  leaf: Leaf
+}
+
+type O32 @join__type(graph: CHAIN) {
+  leaf: Leaf
+}
+
+interface Leaf @join__type(graph: CHAIN) {
+  v: Int
+  next: Leaf
+}
+
+type L1 implements Leaf @join__implements(graph: CHAIN, interface: "Leaf") @join__type(graph: CHAIN) {
+  v: Int
+  next: Leaf
+}
+
+type L2 implements Leaf @join__implements(graph: CHAIN, interface: "Leaf") @join__type(graph: CHAIN) {
+  v: Int
+  next: Leaf
+}
+
+type L3 implements Leaf @join__implements(graph: CHAIN, interface: "Leaf") @join__type(graph: CHAIN) {
+  v: Int
+  next: Leaf
+}
+
+type L4 implements Leaf @join__implements(graph: CHAIN, interface: "Leaf") @join__type(graph: CHAIN) {
+  v: Int
+  next: Leaf
+}
+
+type L5 implements Leaf @join__implements(graph: CHAIN, interface: "Leaf") @join__type(graph: CHAIN) {
+  v: Int
+  next: Leaf
+}
+
+type L6 implements Leaf @join__implements(graph: CHAIN, interface: "Leaf") @join__type(graph: CHAIN) {
+  v: Int
+  next: Leaf
+}
+
+type L7 implements Leaf @join__implements(graph: CHAIN, interface: "Leaf") @join__type(graph: CHAIN) {
+  v: Int
+  next: Leaf
+}
+
+type L8 implements Leaf @join__implements(graph: CHAIN, interface: "Leaf") @join__type(graph: CHAIN) {
+  v: Int
+  next: Leaf
+}
+
+type L9 implements Leaf @join__implements(graph: CHAIN, interface: "Leaf") @join__type(graph: CHAIN) {
+  v: Int
+  next: Leaf
+}
+
+type L10 implements Leaf @join__implements(graph: CHAIN, interface: "Leaf") @join__type(graph: CHAIN) {
+  v: Int
+  next: Leaf
+}
+
+type L11 implements Leaf @join__implements(graph: CHAIN, interface: "Leaf") @join__type(graph: CHAIN) {
+  v: Int
+  next: Leaf
+}
+
+type L12 implements Leaf @join__implements(graph: CHAIN, interface: "Leaf") @join__type(graph: CHAIN) {
+  v: Int
+  next: Leaf
+}
+
+type L13 implements Leaf @join__implements(graph: CHAIN, interface: "Leaf") @join__type(graph: CHAIN) {
+  v: Int
+  next: Leaf
+}
+
+type L14 implements Leaf @join__implements(graph: CHAIN, interface: "Leaf") @join__type(graph: CHAIN) {
+  v: Int
+  next: Leaf
+}
+
+type L15 implements Leaf @join__implements(graph: CHAIN, interface: "Leaf") @join__type(graph: CHAIN) {
+  v: Int
+  next: Leaf
+}
+
+type L16 implements Leaf @join__implements(graph: CHAIN, interface: "Leaf") @join__type(graph: CHAIN) {
+  v: Int
+  next: Leaf
+}

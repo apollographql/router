@@ -1,0 +1,131 @@
+# The neighbour of `nested_requirement.graphql` where `sup` declares both members of `Price`: the
+# two subgraphs resolving `Product.price` agree on nothing narrower than the union, so a `price` can
+# be a `RangePrice` whichever subgraph is asked.
+#
+# Composed with `apollo_federation::composition::compose` from the three subgraphs below. Recompose
+# it when they change.
+#
+# Subgraph `oth`:
+#
+#   extend schema @link(url: "https://specs.apollo.dev/federation/v2.7", import: ["@key", "@shareable"])
+#
+#   type Product @key(fields: "id") {
+#     id: ID!
+#     price: Price @shareable
+#   }
+#
+#   union Price = FixedPrice | RangePrice
+#
+#   type FixedPrice @shareable {
+#     value: Int
+#   }
+#
+#   type RangePrice @shareable {
+#     minValue: Int
+#   }
+#
+# Subgraph `req`:
+#
+#   extend schema @link(url: "https://specs.apollo.dev/federation/v2.7", import: ["@key", "@external", "@requires"])
+#
+#   type Product @key(fields: "id") {
+#     id: ID!
+#     price: Price @external
+#     estimate: String @requires(fields: "price { ... on FixedPrice { value } ... on RangePrice { minValue } }")
+#   }
+#
+#   union Price = FixedPrice | RangePrice
+#
+#   type FixedPrice {
+#     value: Int @external
+#   }
+#
+#   type RangePrice {
+#     minValue: Int @external
+#   }
+#
+# Subgraph `sup`:
+#
+#   extend schema @link(url: "https://specs.apollo.dev/federation/v2.7", import: ["@key", "@shareable", "@external", "@requires", "@provides", "@override", "@interfaceObject"])
+#
+#   type Query {
+#     product: Product
+#   }
+#
+#   type Product @key(fields: "id") {
+#     id: ID!
+#     price: Price @shareable
+#   }
+#
+#   union Price = FixedPrice | RangePrice
+#
+#   type FixedPrice @shareable {
+#     value: Int
+#   }
+#
+#   type RangePrice @shareable {
+#     minValue: Int
+#   }
+
+schema @link(url: "https://specs.apollo.dev/link/v1.0") @link(url: "https://specs.apollo.dev/join/v0.4", for: EXECUTION) {
+  query: Query
+}
+
+directive @link(url: String, as: String, for: link__Purpose, import: [link__Import]) repeatable on SCHEMA
+
+directive @join__graph(name: String!, url: String!) on ENUM_VALUE
+
+directive @join__type(graph: join__Graph!, key: join__FieldSet, extension: Boolean! = false, resolvable: Boolean! = true, isInterfaceObject: Boolean! = false) repeatable on OBJECT | INTERFACE | UNION | ENUM | INPUT_OBJECT | SCALAR
+
+directive @join__field(graph: join__Graph, requires: join__FieldSet, provides: join__FieldSet, type: String, external: Boolean, override: String, usedOverridden: Boolean, overrideLabel: String) repeatable on FIELD_DEFINITION | INPUT_FIELD_DEFINITION
+
+directive @join__implements(graph: join__Graph!, interface: String!) repeatable on OBJECT | INTERFACE
+
+directive @join__unionMember(graph: join__Graph!, member: String!) repeatable on UNION
+
+directive @join__enumValue(graph: join__Graph!) repeatable on ENUM_VALUE
+
+directive @join__directive(graphs: [join__Graph!], name: String!, args: join__DirectiveArguments) repeatable on SCHEMA | OBJECT | INTERFACE | FIELD_DEFINITION
+
+enum link__Purpose {
+  """
+  `SECURITY` features provide metadata necessary to securely resolve fields.
+  """
+  SECURITY
+  """
+  `EXECUTION` features provide metadata necessary for operation execution.
+  """
+  EXECUTION
+}
+
+scalar link__Import
+
+enum join__Graph {
+  OTH @join__graph(name: "oth", url: "http://oth")
+  REQ @join__graph(name: "req", url: "http://req")
+  SUP @join__graph(name: "sup", url: "http://sup")
+}
+
+scalar join__FieldSet
+
+scalar join__DirectiveArguments
+
+type Product @join__type(graph: OTH, key: "id") @join__type(graph: REQ, key: "id") @join__type(graph: SUP, key: "id") {
+  id: ID!
+  price: Price @join__field(graph: OTH) @join__field(graph: REQ, external: true) @join__field(graph: SUP)
+  estimate: String @join__field(graph: REQ, requires: "price { ... on FixedPrice { value } ... on RangePrice { minValue } }")
+}
+
+union Price @join__type(graph: OTH) @join__type(graph: REQ) @join__type(graph: SUP) @join__unionMember(graph: OTH, member: "FixedPrice") @join__unionMember(graph: REQ, member: "FixedPrice") @join__unionMember(graph: SUP, member: "FixedPrice") @join__unionMember(graph: OTH, member: "RangePrice") @join__unionMember(graph: REQ, member: "RangePrice") @join__unionMember(graph: SUP, member: "RangePrice") = FixedPrice | RangePrice
+
+type FixedPrice @join__type(graph: OTH) @join__type(graph: REQ) @join__type(graph: SUP) {
+  value: Int @join__field(graph: OTH) @join__field(graph: REQ, external: true) @join__field(graph: SUP)
+}
+
+type RangePrice @join__type(graph: OTH) @join__type(graph: REQ) @join__type(graph: SUP) {
+  minValue: Int @join__field(graph: OTH) @join__field(graph: REQ, external: true) @join__field(graph: SUP)
+}
+
+type Query @join__type(graph: OTH) @join__type(graph: REQ) @join__type(graph: SUP) {
+  product: Product @join__field(graph: SUP)
+}

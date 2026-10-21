@@ -75,6 +75,11 @@ impl<'schema> SchemaView<'schema> {
         })
     }
 
+    /// The schema this is a view of.
+    pub(crate) fn schema(&self) -> &'schema ValidFederationSchema {
+        self.schema
+    }
+
     /// The refinement of `parent_region` by `conditions`, computed once per distinct input.
     pub(crate) fn cached_regions(
         &self,

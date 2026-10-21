@@ -1,0 +1,100 @@
+# The neighbour of `shared_field_fewer_members.graphql` where `promos` overrides `catalog`'s
+# `sections`: `promos` is the one subgraph resolving it, and a `Promo` is a possible runtime type of
+# its elements.
+#
+# Composed with `apollo_federation::composition::compose` from the two subgraphs below. Recompose it
+# when they change.
+#
+# Subgraph `catalog`:
+#
+#   extend schema @link(url: "https://specs.apollo.dev/federation/v2.3", import: ["@key", "@shareable"])
+#
+#   interface Section {
+#     id: ID!
+#   }
+#
+#   type Hero implements Section @key(fields: "id") {
+#     id: ID!
+#     title: String
+#   }
+#
+#   type Query {
+#     sections: [Section] @shareable
+#   }
+#
+# Subgraph `promos`:
+#
+#   extend schema @link(url: "https://specs.apollo.dev/federation/v2.3", import: ["@key", "@shareable", "@override"])
+#
+#   interface Section {
+#     id: ID!
+#   }
+#
+#   type Hero implements Section @key(fields: "id") {
+#     id: ID!
+#   }
+#
+#   type Promo implements Section {
+#     id: ID!
+#     blurb: String
+#   }
+#
+#   type Query {
+#     sections: [Section] @override(from: "catalog")
+#   }
+
+schema @link(url: "https://specs.apollo.dev/link/v1.0") @link(url: "https://specs.apollo.dev/join/v0.3", for: EXECUTION) {
+  query: Query
+}
+
+directive @link(url: String, as: String, for: link__Purpose, import: [link__Import]) repeatable on SCHEMA
+
+directive @join__graph(name: String!, url: String!) on ENUM_VALUE
+
+directive @join__type(graph: join__Graph!, key: join__FieldSet, extension: Boolean! = false, resolvable: Boolean! = true, isInterfaceObject: Boolean! = false) repeatable on OBJECT | INTERFACE | UNION | ENUM | INPUT_OBJECT | SCALAR
+
+directive @join__field(graph: join__Graph, requires: join__FieldSet, provides: join__FieldSet, type: String, external: Boolean, override: String, usedOverridden: Boolean) repeatable on FIELD_DEFINITION | INPUT_FIELD_DEFINITION
+
+directive @join__implements(graph: join__Graph!, interface: String!) repeatable on OBJECT | INTERFACE
+
+directive @join__unionMember(graph: join__Graph!, member: String!) repeatable on UNION
+
+directive @join__enumValue(graph: join__Graph!) repeatable on ENUM_VALUE
+
+enum link__Purpose {
+  """
+  `SECURITY` features provide metadata necessary to securely resolve fields.
+  """
+  SECURITY
+  """
+  `EXECUTION` features provide metadata necessary for operation execution.
+  """
+  EXECUTION
+}
+
+scalar link__Import
+
+enum join__Graph {
+  CATALOG @join__graph(name: "catalog", url: "http://catalog")
+  PROMOS @join__graph(name: "promos", url: "http://promos")
+}
+
+scalar join__FieldSet
+
+interface Section @join__type(graph: CATALOG) @join__type(graph: PROMOS) {
+  id: ID!
+}
+
+type Hero implements Section @join__implements(graph: CATALOG, interface: "Section") @join__implements(graph: PROMOS, interface: "Section") @join__type(graph: CATALOG, key: "id") @join__type(graph: PROMOS, key: "id") {
+  id: ID!
+  title: String @join__field(graph: CATALOG)
+}
+
+type Query @join__type(graph: CATALOG) @join__type(graph: PROMOS) {
+  sections: [Section] @join__field(graph: PROMOS, override: "catalog")
+}
+
+type Promo implements Section @join__implements(graph: PROMOS, interface: "Section") @join__type(graph: PROMOS) {
+  id: ID!
+  blurb: String
+}
