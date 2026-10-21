@@ -61,20 +61,28 @@ where
     T: apollo_configuration::Validate,
 {
     fn validate(&self, mut errors: apollo_configuration::ErrorCollector<'_>) {
-        let (key, operands) = match self {
-            Condition::Eq(operands) => ("eq", operands),
-            Condition::Gt(operands) => ("gt", operands),
-            Condition::Lt(operands) => ("lt", operands),
-            Condition::Exists(selector) => return selector.validate(errors.nest("exists")),
-            Condition::All(conditions) => return conditions.validate(errors.nest("all")),
-            Condition::Any(conditions) => return conditions.validate(errors.nest("any")),
-            Condition::Not(condition) => return condition.validate(errors.nest("not")),
-            Condition::True | Condition::False => return,
-        };
-        let mut errors = errors.nest(key);
-        for (index, operand) in operands.iter().enumerate() {
-            operand.validate(errors.nest(index));
+        match self {
+            Condition::Eq(operands) => validate_operands(operands, errors.nest("eq")),
+            Condition::Gt(operands) => validate_operands(operands, errors.nest("gt")),
+            Condition::Lt(operands) => validate_operands(operands, errors.nest("lt")),
+            Condition::Exists(selector) => selector.validate(errors.nest("exists")),
+            Condition::All(conditions) => conditions.validate(errors.nest("all")),
+            Condition::Any(conditions) => conditions.validate(errors.nest("any")),
+            Condition::Not(condition) => condition.validate(errors.nest("not")),
+            Condition::True | Condition::False => {}
         }
+    }
+}
+
+// apollo-configuration has no Validate impl for arrays, so this validates each operand by index.
+fn validate_operands<T>(
+    operands: &[SelectorOrValue<T>; 2],
+    mut errors: apollo_configuration::ErrorCollector<'_>,
+) where
+    T: apollo_configuration::Validate,
+{
+    for (index, operand) in operands.iter().enumerate() {
+        apollo_configuration::Validate::validate(operand, errors.nest(index));
     }
 }
 

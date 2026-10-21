@@ -559,8 +559,18 @@ impl AttributeValue {
 }
 
 // f64 has no Validate impl, so the configuration attribute can't derive one for the F64 variant.
-// No variant has a rule to check.
-impl apollo_configuration::Validate for AttributeValue {}
+// This validates every other variant; the enum is untagged, so each value keeps its own path.
+impl apollo_configuration::Validate for AttributeValue {
+    fn validate(&self, errors: apollo_configuration::ErrorCollector<'_>) {
+        match self {
+            AttributeValue::Bool(value) => value.validate(errors),
+            AttributeValue::I64(value) => value.validate(errors),
+            AttributeValue::F64(_) => {}
+            AttributeValue::String(value) => value.validate(errors),
+            AttributeValue::Array(values) => values.validate(errors),
+        }
+    }
+}
 
 impl From<String> for AttributeValue {
     fn from(value: String) -> Self {
@@ -706,6 +716,19 @@ impl std::fmt::Display for AttributeArray {
     }
 }
 
+// f64 has no Validate impl, so the configuration attribute can't derive one for the F64 variant.
+// This validates every other variant; the enum is untagged, so each array keeps its own path.
+impl apollo_configuration::Validate for AttributeArray {
+    fn validate(&self, errors: apollo_configuration::ErrorCollector<'_>) {
+        match self {
+            AttributeArray::Bool(values) => values.validate(errors),
+            AttributeArray::I64(values) => values.validate(errors),
+            AttributeArray::F64(_) => {}
+            AttributeArray::String(values) => values.validate(errors),
+        }
+    }
+}
+
 impl From<AttributeArray> for opentelemetry::Array {
     fn from(array: AttributeArray) -> Self {
         match array {
@@ -739,9 +762,16 @@ pub(crate) enum SamplerOption {
     Always(Sampler),
 }
 
-// The configuration attribute can't validate the TraceIdRatioBased variant because f64 has no
-// Validate impl. Neither variant has nested rules.
-impl apollo_configuration::Validate for SamplerOption {}
+// f64 has no Validate impl, so the configuration attribute can't derive one for the
+// TraceIdRatioBased variant. The enum is untagged, so the sampler keeps its own path.
+impl apollo_configuration::Validate for SamplerOption {
+    fn validate(&self, errors: apollo_configuration::ErrorCollector<'_>) {
+        match self {
+            SamplerOption::TraceIdRatioBased(_) => {}
+            SamplerOption::Always(sampler) => sampler.validate(errors),
+        }
+    }
+}
 
 #[apollo_configuration::configuration]
 #[derive(PartialEq)]

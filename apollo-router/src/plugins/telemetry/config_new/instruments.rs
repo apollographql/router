@@ -1551,8 +1551,9 @@ where
     T: apollo_configuration::Validate,
 {
     fn validate(&self, mut errors: apollo_configuration::ErrorCollector<'_>) {
-        if let Event::Custom(selector) = self {
-            selector.validate(errors.nest("event_custom"));
+        match self {
+            Event::Duration | Event::Unit => {}
+            Event::Custom(selector) => selector.validate(errors.nest("event_custom")),
         }
     }
 }
@@ -1564,8 +1565,9 @@ where
     T: apollo_configuration::Validate,
 {
     fn validate(&self, mut errors: apollo_configuration::ErrorCollector<'_>) {
-        if let Field::Custom(selector) = self {
-            selector.validate(errors.nest("field_custom"));
+        match self {
+            Field::Unit => {}
+            Field::Custom(selector) => selector.validate(errors.nest("field_custom")),
         }
     }
 }
