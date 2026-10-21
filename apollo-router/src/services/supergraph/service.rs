@@ -401,6 +401,8 @@ async fn service_call(
                             Key::from_static_str("http.response.version"),
                             opentelemetry::Value::String(format!("{:?}", parts.version).into()),
                         ));
+                        // Immutable: chunk bodies must not accumulate in this stream-lived list.
+                        let attrs = attrs;
                         let ctx = context.clone();
                         let response_stream = Box::pin(response_stream.inspect(move |resp| {
                             if !supergraph_response_event
@@ -409,8 +411,6 @@ async fn service_call(
                             {
                                 return;
                             }
-                            // `attrs` lives as long as the stream, so each chunk's body goes into
-                            // a per-event copy rather than accumulating in the shared list.
                             let mut event_attrs = attrs.clone();
                             event_attrs.push(KeyValue::new(
                                 Key::from_static_str("http.response.body"),
