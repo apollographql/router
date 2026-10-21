@@ -92,6 +92,8 @@ mod requires;
 mod selections;
 mod subgraph;
 #[cfg(test)]
+mod test_support;
+#[cfg(test)]
 mod tests;
 
 use std::sync::Arc;
