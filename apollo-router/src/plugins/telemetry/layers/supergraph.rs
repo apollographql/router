@@ -18,7 +18,6 @@ use uuid::Uuid;
 use crate::Context;
 use crate::apollo_studio_interop::UsageReporting;
 use crate::context::OPERATION_KIND;
-use crate::context::OPERATION_NAME;
 use crate::graphql::ResponseVisitor;
 use crate::layers::ServiceBuilderExt;
 use crate::plugins::limits::operation_limits::OperationLimits;
@@ -57,19 +56,8 @@ use crate::services::SupergraphResponse;
 use crate::services::supergraph;
 
 fn populate_context(field_level_instrumentation_ratio: f64, req: &SupergraphRequest) {
-    let context = &req.context;
-
-    // List of custom attributes for metrics
-    let mut attributes: HashMap<String, AttributeValue> = HashMap::new();
-    if let Some(operation_name) = &req.supergraph_request.body().operation_name {
-        attributes.insert(
-            OPERATION_NAME.to_string(),
-            AttributeValue::String(operation_name.clone()),
-        );
-    }
-
     if rand::rng().random_bool(field_level_instrumentation_ratio) {
-        context
+        req.context
             .extensions()
             .with_lock(|lock| lock.insert(EnableSubgraphFtv1));
     }
@@ -653,17 +641,9 @@ mod tests {
         .await;
     }
 
-    #[tokio::test(flavor = "multi_thread")]
-    async fn test_field_instrumentation_sampler_with_preview_datadog_agent_sampling() {
-        let plugin = PluginTestHarness::<Telemetry>::builder()
-            .config(include_str!(
-                "../testdata/config.field_instrumentation_sampler.router.yaml"
-            ))
-            .build()
-            .with_metrics()
-            .await
-            .expect("test harness");
-
+    /// Sends 10 requests through `instrument_supergraph_layer` and counts those that ask
+    /// subgraphs for FTV1 traces.
+    async fn ftv1_requests(telemetry: &Telemetry) -> usize {
         let ftv1_counter = Arc::new(AtomicUsize::new(0));
         let ftv1_counter_cloned = ftv1_counter.clone();
 
@@ -691,7 +671,7 @@ mod tests {
             }
         });
         let mut request_supergraph_service = ServiceBuilder::new()
-            .layer(plugin.instrument_supergraph_layer())
+            .layer(telemetry.instrument_supergraph_layer())
             .service(mock_request_service);
 
         for _ in 0..10 {
@@ -714,9 +694,36 @@ mod tests {
                 .await
                 .unwrap();
         }
-        // It should be 100% because when we set preview_datadog_agent_sampling, we only take the value of field_level_instrumentation_sampler
         drop(request_supergraph_service);
         crate::plugin::test::await_mock_driver(driver).await;
-        assert_eq!(ftv1_counter.load(Ordering::Relaxed), 10);
+        ftv1_counter.load(Ordering::Relaxed)
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn test_field_instrumentation_sampler_with_preview_datadog_agent_sampling() {
+        let telemetry = crate::plugins::telemetry::telemetry_exporting_to_apollo(include_str!(
+            "../testdata/config.field_instrumentation_sampler.router.yaml"
+        ))
+        .with_metrics()
+        .await;
+
+        // It should be 100% because when we set preview_datadog_agent_sampling, we only take the value of field_level_instrumentation_sampler
+        assert_eq!(ftv1_requests(&telemetry).await, 10);
+    }
+
+    /// FTV1 traces only feed Apollo, so a router that doesn't export to Apollo doesn't ask
+    /// subgraphs for them, whatever `field_level_instrumentation_sampler` says.
+    #[tokio::test(flavor = "multi_thread")]
+    async fn subgraphs_are_not_asked_for_ftv1_without_apollo() {
+        let test_harness = PluginTestHarness::<Telemetry>::builder()
+            .config(include_str!(
+                "../testdata/config.field_instrumentation_sampler.router.yaml"
+            ))
+            .build()
+            .with_metrics()
+            .await
+            .expect("test harness");
+
+        assert_eq!(ftv1_requests(&test_harness).await, 0);
     }
 }

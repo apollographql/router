@@ -808,7 +808,19 @@ fn sampler_option_to_ratio(s: &SamplerOption) -> f64 {
 }
 
 impl Conf {
+    /// The share of requests that ask subgraphs for FTV1 traces.
     pub(crate) fn calculate_field_level_instrumentation_ratio(&self) -> Result<f64, Error> {
+        let ratio = self.sampled_field_level_instrumentation_ratio()?;
+        // FTV1 traces only feed Apollo usage reports and traces, so without Apollo nothing
+        // reads them.
+        Ok(if self.apollo.exports_to_apollo() {
+            ratio
+        } else {
+            0.0
+        })
+    }
+
+    fn sampled_field_level_instrumentation_ratio(&self) -> Result<f64, Error> {
         // Because when Datadog is enabled the global sampling is overridden to always_on
         if self
             .exporters
@@ -948,6 +960,16 @@ impl Conf {
         Self::configured(configuration)
             .map(|conf| conf.apollo.clone())
             .unwrap_or_default()
+    }
+
+    /// Whether the router sends usage reports and traces to Apollo. Without a `telemetry`
+    /// section the plugin runs on defaults, which take the key and graph ref from the
+    /// environment.
+    pub(crate) fn exports_to_apollo(configuration: &Configuration) -> bool {
+        Self::configured(configuration).map_or_else(
+            || ApolloTelemetryConfig::default().exports_to_apollo(),
+            |conf| conf.apollo.exports_to_apollo(),
+        )
     }
 }
 
