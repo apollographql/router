@@ -1976,3 +1976,96 @@ fn fragments_with_non_intersecting_types() {
         }
     "###);
 }
+
+#[cfg(test)]
+mod selection_map_hash_tests {
+    use std::hash::DefaultHasher;
+    use std::hash::Hash;
+    use std::hash::Hasher;
+    use std::sync::Arc;
+
+    use super::*;
+    use crate::operation::HasSelectionKey;
+
+    fn hash(value: &impl Hash) -> u64 {
+        let mut state = DefaultHasher::new();
+        value.hash(&mut state);
+        state.finish()
+    }
+
+    fn selection_set(schema: &ValidFederationSchema, query: &str) -> SelectionSet {
+        Operation::parse(schema.clone(), query, "query.graphql")
+            .unwrap()
+            .selection_set
+    }
+
+    /// Selections with the same response name but different directives have distinct keys, so
+    /// they coexist in one map. Maps holding them in different orders are equal and must hash
+    /// equally.
+    #[test]
+    fn equal_selection_maps_have_equal_hashes() {
+        let schema = parse_schema("type Query { a: Obj } type Obj { x: Int y: Int }");
+        let left = selection_set(
+            &schema,
+            "{ a @include(if: true) { x } a @include(if: false) { y } }",
+        );
+        let right = selection_set(
+            &schema,
+            "{ a @include(if: false) { y } a @include(if: true) { x } }",
+        );
+        assert_eq!(left.selections.len(), 2);
+        assert_eq!(left, right, "fixture selection sets must be equal");
+        assert_eq!(hash(&left), hash(&right));
+    }
+
+    #[test]
+    fn equal_selection_maps_have_equal_hashes_for_every_insertion_order() {
+        let schema = parse_schema(
+            "type Query { o: Outer } type Outer { a: Obj } type Obj { x: Int y: Int }",
+        );
+        let variants = [
+            "a { x }",
+            "a @include(if: false) { y }",
+            "a @skip(if: true) { x y }",
+        ];
+        let orders = [
+            [0, 1, 2],
+            [0, 2, 1],
+            [1, 0, 2],
+            [1, 2, 0],
+            [2, 0, 1],
+            [2, 1, 0],
+        ];
+        let sets = orders.map(|order| {
+            let body = order.map(|i| variants[i]).join(" ");
+            // Nest the selections so the hash of the enclosing selection also depends on them.
+            selection_set(&schema, &format!("{{ o {{ {body} }} }}"))
+        });
+        for set in &sets {
+            assert_eq!(set, &sets[0]);
+            assert_eq!(hash(set), hash(&sets[0]), "{set} vs {}", sets[0]);
+        }
+    }
+
+    #[test]
+    fn selection_map_hash_is_independent_of_remove_and_reinsert_history() {
+        let schema = parse_schema("type Query { a: Obj b: Obj } type Obj { x: Int y: Int }");
+        let original = selection_set(
+            &schema,
+            "{ b { x } a @include(if: true) { x } a @include(if: false) { y } }",
+        );
+        let mut reinserted = original.clone();
+        let map = Arc::make_mut(&mut reinserted.selections);
+        // Move the first of the two `a` selections behind the second one.
+        let key = map.values().nth(1).unwrap().key().to_owned_key();
+        let (_, selection) = map.remove(key.as_borrowed_key()).unwrap();
+        map.insert(selection);
+        assert_ne!(
+            original.to_string(),
+            reinserted.to_string(),
+            "fixture must change the insertion order"
+        );
+        assert_eq!(original, reinserted);
+        assert_eq!(hash(&original), hash(&reinserted));
+    }
+}

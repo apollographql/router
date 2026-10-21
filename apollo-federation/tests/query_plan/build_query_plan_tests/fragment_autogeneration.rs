@@ -344,6 +344,60 @@ fn it_identifies_and_reuses_equivalent_fragments_that_arent_identical() {
 }
 
 #[test]
+fn it_reuses_equivalent_fragments_with_differently_ordered_conditional_fields() {
+    // `x @include(if: $v)` and `x @skip(if: $v)` share a response name but are distinct
+    // selections. The two sub-selections below only differ in their order, so they are equal and
+    // must be extracted into the same fragment.
+    let planner = planner!(
+        config = generate_fragments_config(),
+        Subgraph1: SUBGRAPH,
+    );
+    assert_plan!(
+        &planner,
+        r#"
+        query ($v: Boolean!) {
+          t {
+            ... on A {
+              x @include(if: $v)
+              x @skip(if: $v)
+            }
+          }
+          t2 {
+            ... on A {
+              x @skip(if: $v)
+              x @include(if: $v)
+            }
+          }
+        }
+      "#,
+        @r###"
+    QueryPlan {
+      Fetch(service: "Subgraph1") {
+        {
+          t {
+            ...b
+          }
+          t2 {
+            ...b
+          }
+        }
+
+        fragment a on A {
+          x @include(if: $v)
+          x @skip(if: $v)
+        }
+
+        fragment b on T {
+          __typename
+          ...a
+        }
+      },
+    }
+    "###
+    );
+}
+
+#[test]
 fn same_as_js_router798() {
     let planner = planner!(
         config = generate_fragments_config(),
