@@ -3614,6 +3614,124 @@ fn inc_entity_fetches_under_union_members() {
     );
 }
 
+/// Union members selecting the same entity field with and without arguments
+/// under one response key. The conditional fragment puts the fetch's
+/// selections below the field, so the field is only a path element there.
+/// Each member's arguments must reach the entity fetch.
+#[test]
+fn inc_same_response_key_with_different_arguments_under_union_members() {
+    let planner = planner!(
+        config = incremental_config(),
+        catalog: r#"
+          type Query {
+            page: Page
+          }
+
+          type Page {
+            blocks: [Block]
+          }
+
+          union Block = Summary | Listing
+
+          type Summary {
+            item: Item
+          }
+
+          type Listing {
+            item: Item
+          }
+
+          type Item @key(fields: "id") {
+            id: ID!
+          }
+        "#,
+        ratings: r#"
+          type Item @key(fields: "id") {
+            id: ID!
+            ratings(first: Int): Ratings
+          }
+
+          type Ratings {
+            total: Int
+          }
+        "#,
+    );
+
+    assert_plan!(
+        &planner,
+        r#"
+          query($f: Boolean!) { page { blocks { ... on Summary { item { ratings { ... @include(if: $f) { total } } } } ... on Listing { item { ratings(first: 2) { ... @include(if: $f) { total } } } } } } }
+        "#,
+        @r###"
+    QueryPlan {
+      Sequence {
+        Fetch(service: "catalog") {
+          {
+            page {
+              blocks {
+                __typename
+                ... on Summary {
+                  item {
+                    __typename
+                    id
+                  }
+                }
+                ... on Listing {
+                  item {
+                    __typename
+                    id
+                  }
+                }
+              }
+            }
+          }
+        },
+        Parallel {
+          Flatten(path: "page.blocks.@|[Listing].item") {
+            Fetch(service: "ratings") {
+              {
+                ... on Item {
+                  __typename
+                  id
+                }
+              } =>
+              {
+                ... on Item {
+                  ratings(first: 2) {
+                    ... @include(if: $f) {
+                      total
+                    }
+                  }
+                }
+              }
+            },
+          },
+          Flatten(path: "page.blocks.@|[Summary].item") {
+            Fetch(service: "ratings") {
+              {
+                ... on Item {
+                  __typename
+                  id
+                }
+              } =>
+              {
+                ... on Item {
+                  ratings {
+                    ... @include(if: $f) {
+                      total
+                    }
+                  }
+                }
+              }
+            },
+          },
+        },
+      },
+    }
+    "###
+    );
+}
+
 // ---------------------------------------------------------------------------
 // @defer: a deferred named fragment spread whose fields live in another
 // subgraph. The primary block stays a single root fetch, the deferred block
