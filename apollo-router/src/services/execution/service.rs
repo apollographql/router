@@ -114,10 +114,12 @@ impl ExecutionService {
     async fn call_inner(&mut self, req: ExecutionRequest) -> ExecutionResponse {
         let context = req.context;
         let ctx = context.clone();
-        let variables = req.supergraph_request.body().variables.clone();
+        let supergraph_request = Arc::new(req.supergraph_request);
 
         let (sender, receiver) = mpsc::channel(10);
-        let is_deferred = req.query_plan.is_deferred(&variables);
+        let is_deferred = req
+            .query_plan
+            .is_deferred(&supergraph_request.body().variables);
         let is_subscription = req.query_plan.is_subscription();
         let mut claims = None;
         if is_deferred {
@@ -142,7 +144,7 @@ impl ExecutionService {
             .execute(
                 &context,
                 &self.fetch_service,
-                &Arc::new(req.supergraph_request),
+                &supergraph_request,
                 &self.schema,
                 &self.subgraph_schemas,
                 sender,
@@ -231,7 +233,7 @@ impl ExecutionService {
                 ready(execution_span.in_scope(|| {
                     Self::process_graphql_response(
                         &query,
-                        &variables,
+                        &supergraph_request.body().variables,
                         is_deferred,
                         &schema,
                         &mut nullified_paths,
