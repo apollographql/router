@@ -7,6 +7,6 @@ Connector validation could use memory and time far out of proportion to a subgra
 - Comparing type references compared entire schemas by value, which made validating fields of interfaces with many implementations slow. An interface with 800 implementations took 560 ms to validate. It now takes 75 ms.
 - Validating deeply nested `->match` selections took time quadratic in the path depth to collect source locations. Nesting 80 deep took 690 ms. It now takes 65 ms.
 
-Validation results and error messages are unchanged.
+Validation results are unchanged. One error message improves: a missing field on a `$this` or `$batch` path that runs through a recursive type, such as `$this.parent.child.missing`, used to be reported from the type where the recursion was cut (`` `Child` doesn't have a field named `missing` ``). It is now reported on the full path (`` `$this.parent.child` doesn't have a field named `missing` ``).
 
 By [@dariuszkuc](https://github.com/dariuszkuc) in https://github.com/apollographql/router/pull/10357
