@@ -18,6 +18,8 @@ use super::super::fetch_graph::InputRewriteInfo;
 use super::super::shared_path::SharedPath;
 use super::FieldRoutingSearchSpace;
 use super::commit::field_response_elements;
+use super::requires::condition_directives;
+use super::requires::gated_input_path;
 use super::requires::trailing_condition_fragments;
 use super::requires::unconditioned_input_path;
 use super::routing::IntermediateKeyHop;
@@ -31,9 +33,12 @@ use crate::connectors::index::object_fields;
 use crate::connectors::index::shape_provides;
 use crate::connectors::index::split_selections;
 use crate::error::FederationError;
+use crate::operation::DirectiveList;
 use crate::operation::FieldSelection;
+use crate::operation::InlineFragment;
 use crate::operation::InlineFragmentSelection;
 use crate::operation::Selection;
+use crate::operation::SelectionId;
 use crate::operation::SelectionMap;
 use crate::operation::SelectionSet;
 use crate::operation::TYPENAME_FIELD;
@@ -119,8 +124,8 @@ enum ConnectorOutputAt {
 }
 
 /// The op path of a connector entity fetch for `pending`: the entity root plus
-/// the `@skip`/`@include` fragments the pending sits under, which a key hop
-/// carries into the entity fetch so that the fetch is gated on them.
+/// the `@skip`/`@include` conditions the pending sits under, so that the
+/// fetch is gated on them.
 fn with_trailing_conditions(
     entity_root: SharedPath<Arc<OpPathElement>>,
     pending: &PendingSelection,
@@ -170,10 +175,12 @@ impl FieldRoutingSearchSpace {
                     self.can_resolve_in_place(pending.query_graph_node, key_conditions, &source)?;
                 let (local_key, routed_key) =
                     self.split_anchor_key(state, pending, key_conditions, key_locally_resolvable)?;
-                self.append_entity_inputs(
+                // The connector fetch is gated on the trailing conditions
+                // (`with_trailing_conditions` below), so its inputs keep them.
+                self.append_entity_inputs_at(
                     state,
                     pending.fetch_node,
-                    &pending.op_path,
+                    &gated_input_path(&pending.op_path),
                     local_key.as_ref(),
                     &source,
                 );
@@ -580,7 +587,9 @@ impl FieldRoutingSearchSpace {
         response_path: &SharedPath<FetchDataPathElement>,
         deferred: &mut Vec<DeferredConnectorSelection>,
     ) -> Result<(), FederationError> {
-        let mut lifted: Vec<(Option<String>, SelectionSet)> = Vec::new();
+        // Per defer label: the lifted selections and the @skip/@include all
+        // of them are under.
+        let mut lifted: Vec<(Option<String>, SelectionSet, DirectiveList)> = Vec::new();
         for item in child_deferred {
             // Fragments between the child and the item
             // (`... @include(if: $x) { email }`) keep it at the child's
@@ -600,8 +609,28 @@ impl FieldRoutingSearchSpace {
                 deferred.push(item);
                 continue;
             }
-            let index = match lifted.iter().position(|(r, _)| *r == item.defer_ref) {
-                Some(index) => index,
+            let item_conditions: DirectiveList = fragments
+                .iter()
+                .flat_map(|element| match element.as_ref() {
+                    OpPathElement::InlineFragment(fragment) => {
+                        condition_directives(&fragment.directives)
+                            .iter()
+                            .cloned()
+                            .collect()
+                    }
+                    OpPathElement::Field(_) => Vec::new(),
+                })
+                .collect();
+            let index = match lifted.iter().position(|(r, ..)| *r == item.defer_ref) {
+                Some(index) => {
+                    let shared = &mut lifted[index].2;
+                    *shared = shared
+                        .iter()
+                        .filter(|condition| item_conditions.iter().any(|c| c == *condition))
+                        .cloned()
+                        .collect();
+                    index
+                }
                 None => {
                     lifted.push((
                         item.defer_ref,
@@ -609,6 +638,7 @@ impl FieldRoutingSearchSpace {
                             child_ss.schema.clone(),
                             child_ss.type_position.clone(),
                         ),
+                        item_conditions,
                     ));
                     lifted.len() - 1
                 }
@@ -618,7 +648,22 @@ impl FieldRoutingSearchSpace {
                 .1
                 .add_local_selection(&wrap_in_fragments(item.selection, &fragments))?;
         }
-        for (defer_ref, selection_set) in lifted {
+        for (defer_ref, selection_set, shared_conditions) in lifted {
+            // The re-fetch is needed only when the @skip/@include every item
+            // is under hold, so the field is lifted under them, and the key
+            // hop gates the re-fetch on them. The items keep their own
+            // fragments, which gate the fetches below the field.
+            let op_path = if shared_conditions.is_empty() {
+                op_path.clone()
+            } else {
+                op_path.pushed(Arc::new(OpPathElement::InlineFragment(InlineFragment {
+                    schema: field_sel.field.schema.clone(),
+                    parent_type_position: field_sel.field.field_position.parent(),
+                    type_condition_position: None,
+                    directives: shared_conditions,
+                    selection_id: SelectionId::new(),
+                })))
+            };
             deferred.push(DeferredConnectorSelection {
                 selection: Selection::Field(Arc::new(FieldSelection {
                     field: field_sel.field.clone(),
@@ -626,7 +671,7 @@ impl FieldRoutingSearchSpace {
                 })),
                 parent_type: parent_type.clone(),
                 anchor_node: parent_anchor,
-                op_path: op_path.clone(),
+                op_path,
                 response_path: response_path.clone(),
                 defer_ref,
             });

@@ -1402,13 +1402,30 @@ impl FieldRoutingSearchSpace {
         key_conditions: Option<&Arc<SelectionSet>>,
         source: &NodeSource,
     ) {
-        let input_path = unconditioned_input_path(op_path);
+        self.append_entity_inputs_at(
+            state,
+            fetch_node,
+            &unconditioned_input_path(op_path),
+            key_conditions,
+            source,
+        );
+    }
+
+    /// Select entity-representation inputs in `fetch_node` at `input_path`.
+    pub(super) fn append_entity_inputs_at(
+        &self,
+        state: &mut PlanState,
+        fetch_node: NodeIndex,
+        input_path: &SharedPath<Arc<OpPathElement>>,
+        key_conditions: Option<&Arc<SelectionSet>>,
+        source: &NodeSource,
+    ) {
         if let Some(key) = key_conditions {
             state
                 .graph
-                .append_selection(fetch_node, &input_path, Some(key));
+                .append_selection(fetch_node, input_path, Some(key));
         }
-        self.append_typename(state, fetch_node, &input_path, source);
+        self.append_typename(state, fetch_node, input_path, source);
     }
 
     /// Handle @fromContext on the routed edge: resolve context values from
