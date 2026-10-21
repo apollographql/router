@@ -3050,13 +3050,30 @@ fn inc_entity_fetches_under_union_members() {
 
           type Book {
             item: Item
+            parts: [Part]
           }
 
           type Film {
             item: Item
+            parts: [Part]
           }
 
           type Album {
+            item: Item
+            parts: [Part]
+          }
+
+          union Part = Front | Body | Back
+
+          type Front {
+            item: Item
+          }
+
+          type Body {
+            item: Item
+          }
+
+          type Back {
             item: Item
           }
 
@@ -3410,6 +3427,192 @@ fn inc_entity_fetches_under_union_members() {
                 pages
               }
             }
+          },
+        },
+      },
+    }
+    "###
+    );
+    // Nested unions with identical selections share one fetch, since every
+    // combination of the members' conditions is selected.
+    assert_plan!(
+        validate_correctness = false,
+        &planner,
+        r#"
+          { shelf { entries { ... on Book { parts { ... on Front { item { pages } } ... on Body { item { pages } } ... on Back { item { pages } } } } ... on Film { parts { ... on Front { item { pages } } ... on Body { item { pages } } ... on Back { item { pages } } } } ... on Album { parts { ... on Front { item { pages } } ... on Body { item { pages } } ... on Back { item { pages } } } } } } }
+        "#,
+        @r###"
+    QueryPlan {
+      Sequence {
+        Fetch(service: "catalog") {
+          {
+            shelf {
+              entries {
+                __typename
+                ... on Book {
+                  parts {
+                    __typename
+                    ... on Front {
+                      item {
+                        __typename
+                        id
+                      }
+                    }
+                    ... on Body {
+                      item {
+                        __typename
+                        id
+                      }
+                    }
+                    ... on Back {
+                      item {
+                        __typename
+                        id
+                      }
+                    }
+                  }
+                }
+                ... on Film {
+                  parts {
+                    __typename
+                    ... on Front {
+                      item {
+                        __typename
+                        id
+                      }
+                    }
+                    ... on Body {
+                      item {
+                        __typename
+                        id
+                      }
+                    }
+                    ... on Back {
+                      item {
+                        __typename
+                        id
+                      }
+                    }
+                  }
+                }
+                ... on Album {
+                  parts {
+                    __typename
+                    ... on Front {
+                      item {
+                        __typename
+                        id
+                      }
+                    }
+                    ... on Body {
+                      item {
+                        __typename
+                        id
+                      }
+                    }
+                    ... on Back {
+                      item {
+                        __typename
+                        id
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        Flatten(path: "shelf.entries.@|[Album,Book,Film].parts.@|[Back,Body,Front].item") {
+          Fetch(service: "inventory") {
+            {
+              ... on Item {
+                __typename
+                id
+              }
+            } =>
+            {
+              ... on Item {
+                pages
+              }
+            }
+          },
+        },
+      },
+    }
+    "###
+    );
+    // Without every combination selected, the union would also cover Book's
+    // Body parts and Film's Front parts, so these stay apart.
+    assert_plan!(
+        validate_correctness = false,
+        &planner,
+        r#"
+          { shelf { entries { ... on Book { parts { ... on Front { item { pages } } } } ... on Film { parts { ... on Body { item { pages } } } } } } }
+        "#,
+        @r###"
+    QueryPlan {
+      Sequence {
+        Fetch(service: "catalog") {
+          {
+            shelf {
+              entries {
+                __typename
+                ... on Book {
+                  parts {
+                    __typename
+                    ... on Front {
+                      item {
+                        __typename
+                        id
+                      }
+                    }
+                  }
+                }
+                ... on Film {
+                  parts {
+                    __typename
+                    ... on Body {
+                      item {
+                        __typename
+                        id
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        Parallel {
+          Flatten(path: "shelf.entries.@|[Film].parts.@|[Body].item") {
+            Fetch(service: "inventory") {
+              {
+                ... on Item {
+                  __typename
+                  id
+                }
+              } =>
+              {
+                ... on Item {
+                  pages
+                }
+              }
+            },
+          },
+          Flatten(path: "shelf.entries.@|[Book].parts.@|[Front].item") {
+            Fetch(service: "inventory") {
+              {
+                ... on Item {
+                  __typename
+                  id
+                }
+              } =>
+              {
+                ... on Item {
+                  pages
+                }
+              }
+            },
           },
         },
       },

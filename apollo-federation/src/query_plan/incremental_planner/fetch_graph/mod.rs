@@ -838,8 +838,9 @@ impl FetchGraph {
     ///
     /// Grouping ignores type conditions on merge_at elements: siblings
     /// differing only in concrete type are merged onto a path carrying the
-    /// union of their conditions. Without this, deeply nested polymorphic
-    /// queries fragment into one fetch per concrete-type combination.
+    /// union of their conditions, when that union reaches no other path.
+    /// Without this, deeply nested polymorphic queries fragment into one
+    /// fetch per concrete-type combination.
     ///
     /// Transitively dependent nodes are NOT merged — that would create
     /// cycles (multi-hop @requires chains can revisit a subgraph at
@@ -920,12 +921,7 @@ impl FetchGraph {
                                 rest.push(member);
                             }
                         }
-                        if safe.len() > 1 {
-                            let survivor = safe[0];
-                            self.union_merge_at_conditions(&safe);
-                            self.merge_nodes_into(survivor, &safe[1..]);
-                            graph_changed = true;
-                        }
+                        graph_changed |= self.merge_exact_union_groups(safe);
                         remaining = rest;
                     }
                 }
@@ -937,17 +933,14 @@ impl FetchGraph {
     /// incompatible when their selections assign different field signatures
     /// to the same response path (e.g. `value` vs `value(scale: 100)`) or
     /// when their input conditions disagree for the same source type — the
-    /// merged entity representation cannot satisfy both branches. Paths may
-    /// differ at one element only, and a source type reached from different
-    /// paths needs identical selections, so no entity gets another branch's
-    /// fields.
+    /// merged entity representation cannot satisfy both branches. A source
+    /// type reached from different paths needs identical selections, so no
+    /// entity gets another branch's fields.
     fn bucket_by_merge_compatibility(&self, mergeable: Vec<NodeIndex>) -> Vec<Vec<NodeIndex>> {
         struct Bucket {
             signatures: HashMap<Vec<String>, String>,
             merge_at: Option<Vec<FetchDataPathElement>>,
             input_conditions: HashMap<Name, BTreeSet<String>>,
-            first_merge_at: Vec<FetchDataPathElement>,
-            differing_position: Option<usize>,
             by_source_type: HashMap<Name, SourceTypeMerge>,
             nodes: Vec<NodeIndex>,
         }
@@ -967,37 +960,23 @@ impl FetchGraph {
             };
             let merge_at = merge_at.clone();
             match buckets.iter_mut().find(|bucket| {
-                let path_fits = match PathDifference::between(&bucket.first_merge_at, &merge_at) {
-                    PathDifference::None => true,
-                    PathDifference::At(position) => bucket
-                        .differing_position
-                        .is_none_or(|taken| taken == position),
-                    PathDifference::Several => false,
-                };
-                path_fits
-                    && signatures.iter().all(|(path, signature)| {
-                        bucket
-                            .signatures
-                            .get(path)
-                            .is_none_or(|taken| taken == signature)
-                    })
-                    && input_conditions.iter().all(|(ty, conditions)| {
-                        bucket
-                            .input_conditions
+                signatures.iter().all(|(path, signature)| {
+                    bucket
+                        .signatures
+                        .get(path)
+                        .is_none_or(|taken| taken == signature)
+                }) && input_conditions.iter().all(|(ty, conditions)| {
+                    bucket
+                        .input_conditions
+                        .get(ty)
+                        .is_none_or(|taken| taken == conditions)
+                        && bucket
+                            .by_source_type
                             .get(ty)
-                            .is_none_or(|taken| taken == conditions)
-                            && bucket
-                                .by_source_type
-                                .get(ty)
-                                .is_none_or(|taken| taken.admits(&merge_at, &signatures))
-                    })
+                            .is_none_or(|taken| taken.admits(&merge_at, &signatures))
+                })
             }) {
                 Some(bucket) => {
-                    if let PathDifference::At(position) =
-                        PathDifference::between(&bucket.first_merge_at, &merge_at)
-                    {
-                        bucket.differing_position = Some(position);
-                    }
                     for ty in input_conditions.keys() {
                         bucket
                             .by_source_type
@@ -1024,8 +1003,6 @@ impl FetchGraph {
                         .map(|ty| (ty.clone(), SourceTypeMerge::new(&merge_at, &signatures)))
                         .collect(),
                     signatures,
-                    first_merge_at: merge_at.clone(),
-                    differing_position: None,
                     merge_at: Some(merge_at),
                     input_conditions,
                     nodes: vec![n],
@@ -1054,6 +1031,51 @@ impl FetchGraph {
             }
         }
         fingerprints
+    }
+
+    /// Merge each exact union group of mutually unreachable `nodes`. Returns
+    /// whether anything merged.
+    fn merge_exact_union_groups(&mut self, nodes: Vec<NodeIndex>) -> bool {
+        let mut merged = false;
+        for group in self.exact_union_groups(nodes) {
+            if group.len() > 1 {
+                self.union_merge_at_conditions(&group);
+                self.merge_nodes_into(group[0], &group[1..]);
+                merged = true;
+            }
+        }
+        merged
+    }
+
+    /// Split mergeable nodes into groups whose merge paths union exactly:
+    /// the whole set when its paths cover every combination of their
+    /// conditions, else groups differing at one path element.
+    fn exact_union_groups(&self, nodes: Vec<NodeIndex>) -> Vec<Vec<NodeIndex>> {
+        let paths: Vec<&[FetchDataPathElement]> = nodes.iter().map(|&n| self.merge_at(n)).collect();
+        if covers_every_combination(&paths) {
+            return vec![nodes];
+        }
+        let mut groups: Vec<(&[FetchDataPathElement], Option<usize>, Vec<NodeIndex>)> = Vec::new();
+        for (&n, &path) in nodes.iter().zip(&paths) {
+            let fits =
+                groups.iter_mut().find_map(
+                    |(base, position, group)| match PathDifference::between(base, path) {
+                        PathDifference::None => Some((position, group, None)),
+                        PathDifference::At(i) if position.is_none_or(|taken| taken == i) => {
+                            Some((position, group, Some(i)))
+                        }
+                        _ => None,
+                    },
+                );
+            match fits {
+                Some((position, group, differing)) => {
+                    *position = position.or(differing);
+                    group.push(n);
+                }
+                None => groups.push((path, None, vec![n])),
+            }
+        }
+        groups.into_iter().map(|(_, _, group)| group).collect()
     }
 
     /// Rewrite the bucket's merge_at paths to the union of the members' type
@@ -1266,6 +1288,20 @@ impl PathDifference {
             (Some(_), Some(_)) => Self::Several,
         }
     }
+}
+
+/// Whether the distinct paths are every combination of their per-element
+/// conditions, so unioning each element's conditions reaches no other path.
+fn covers_every_combination(paths: &[&[FetchDataPathElement]]) -> bool {
+    let distinct: HashSet<&[FetchDataPathElement]> = paths.iter().copied().collect();
+    let Some(first) = paths.first() else {
+        return true;
+    };
+    let combinations = (0..first.len()).try_fold(1usize, |product, i| {
+        let values: HashSet<&FetchDataPathElement> = distinct.iter().map(|path| &path[i]).collect();
+        product.checked_mul(values.len())
+    });
+    combinations == Some(distinct.len())
 }
 
 /// One path with each element's conditions unioned across `paths`.

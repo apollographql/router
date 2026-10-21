@@ -1,4 +1,4 @@
-# Composed from subgraphs with hash: 3b5075afa4b6c50cd4d675860e92a6ad5839242e
+# Composed from subgraphs with hash: 0b82cd3ed72541cc2546a3dd9b06519b77a37d64
 schema
   @link(url: "https://specs.apollo.dev/link/v1.0")
   @link(url: "https://specs.apollo.dev/join/v0.5", for: EXECUTION)
@@ -26,12 +26,26 @@ type Album
   @join__type(graph: CATALOG)
 {
   item: Item
+  parts: [Part]
+}
+
+type Back
+  @join__type(graph: CATALOG)
+{
+  item: Item
+}
+
+type Body
+  @join__type(graph: CATALOG)
+{
+  item: Item
 }
 
 type Book
   @join__type(graph: CATALOG)
 {
   item: Item
+  parts: [Part]
 }
 
 union Entry
@@ -43,6 +57,13 @@ union Entry
  = Book | Film | Album | Game
 
 type Film
+  @join__type(graph: CATALOG)
+{
+  item: Item
+  parts: [Part]
+}
+
+type Front
   @join__type(graph: CATALOG)
 {
   item: Item
@@ -95,6 +116,13 @@ enum link__Purpose {
   """
   EXECUTION
 }
+
+union Part
+  @join__type(graph: CATALOG)
+  @join__unionMember(graph: CATALOG, member: "Front")
+  @join__unionMember(graph: CATALOG, member: "Body")
+  @join__unionMember(graph: CATALOG, member: "Back")
+ = Front | Body | Back
 
 type Query
   @join__type(graph: CATALOG)
