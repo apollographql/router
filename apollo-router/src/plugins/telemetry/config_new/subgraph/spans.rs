@@ -1,6 +1,3 @@
-use schemars::JsonSchema;
-use serde::Deserialize;
-
 use crate::plugins::telemetry::config_new::DefaultForLevel;
 use crate::plugins::telemetry::config_new::attributes::DefaultAttributeRequirementLevel;
 use crate::plugins::telemetry::config_new::conditional::Conditional;
@@ -9,8 +6,7 @@ use crate::plugins::telemetry::config_new::subgraph::attributes::SubgraphAttribu
 use crate::plugins::telemetry::config_new::subgraph::selectors::SubgraphSelector;
 use crate::plugins::telemetry::otlp::TelemetryDataKind;
 
-#[derive(Deserialize, JsonSchema, Clone, Default, Debug)]
-#[serde(deny_unknown_fields, default)]
+#[apollo_configuration::configuration]
 pub(crate) struct SubgraphSpans {
     /// Custom attributes that are attached to the subgraph span.
     pub(crate) attributes: Extendable<SubgraphAttributes, Conditional<SubgraphSelector>>,

@@ -1,15 +1,11 @@
 use opentelemetry::Value;
-use schemars::JsonSchema;
-use serde::Deserialize;
 use serde_json_bytes::ByteString;
-use serde_json_bytes::path::JsonPathInst;
 use sha2::Digest;
 
 use crate::Context;
 use crate::context::CONTAINS_GRAPHQL_ERROR;
 use crate::context::OPERATION_KIND;
 use crate::context::OPERATION_NAME;
-use crate::plugin::serde::deserialize_jsonpath;
 use crate::plugins::limits::operation_limits::OperationLimits;
 use crate::plugins::telemetry::config::AttributeValue;
 use crate::plugins::telemetry::config_new::Selector;
@@ -25,11 +21,12 @@ use crate::plugins::telemetry::config_new::selectors::OperationKind;
 use crate::plugins::telemetry::config_new::selectors::OperationName;
 use crate::plugins::telemetry::config_new::selectors::Query;
 use crate::plugins::telemetry::config_new::selectors::ResponseStatus;
+use crate::plugins::telemetry::config_new::selectors::SelectorJsonPath;
 use crate::services::FIRST_EVENT_CONTEXT_KEY;
 use crate::services::supergraph;
 
-#[derive(Deserialize, JsonSchema, Clone, Debug)]
-#[serde(deny_unknown_fields, rename_all = "snake_case", untagged)]
+#[apollo_configuration::configuration]
+#[serde(untagged)]
 pub(crate) enum SupergraphValue {
     Standard(Standard),
     Event(Event<SupergraphSelector>),
@@ -51,11 +48,13 @@ impl From<&SupergraphValue> for InstrumentValue<SupergraphSelector> {
     }
 }
 
-#[derive(Deserialize, JsonSchema, Clone, derive_more::Debug, derive_more::PartialEq)]
-#[serde(deny_unknown_fields, untagged)]
+#[apollo_configuration::configuration]
+#[derive(PartialEq)]
+#[serde(untagged)]
 pub(crate) enum SupergraphSelector {
     OperationName {
         /// The operation name from the query.
+        #[config(required)]
         operation_name: OperationName,
         /// Optional default value.
         default: Option<String>,
@@ -64,22 +63,26 @@ pub(crate) enum SupergraphSelector {
         /// The operation kind from the query (query|mutation|subscription).
         // Allow dead code is required because there is only one variant in OperationKind and we need to avoid the dead code warning.
         #[allow(dead_code)]
+        #[config(required)]
         operation_kind: OperationKind,
     },
     Query {
         /// The graphql query.
+        #[config(required)]
         query: Query,
         /// Optional default value.
         default: Option<String>,
     },
     QueryVariable {
         /// The name of a graphql query variable.
+        #[config(required)]
         query_variable: String,
         /// Optional default value.
         default: Option<AttributeValue>,
     },
     RequestHeader {
         /// The name of the request header.
+        #[config(required)]
         request_header: String,
         /// Optional redaction pattern.
         redact: Option<crate::services::header_masking::RedactMode>,
@@ -88,6 +91,7 @@ pub(crate) enum SupergraphSelector {
     },
     ResponseHeader {
         /// The name of the response header.
+        #[config(required)]
         response_header: String,
         /// Optional redaction pattern.
         redact: Option<crate::services::header_masking::RedactMode>,
@@ -97,48 +101,47 @@ pub(crate) enum SupergraphSelector {
     /// A status from the response
     ResponseStatus {
         /// The http response status code.
+        #[config(required)]
         response_status: ResponseStatus,
     },
     RequestContext {
         /// The request context key.
+        #[config(required)]
         request_context: String,
         /// Optional default value.
         default: Option<AttributeValue>,
     },
     ResponseContext {
         /// The response context key.
+        #[config(required)]
         response_context: String,
         /// Optional default value.
         default: Option<AttributeValue>,
     },
     ResponseData {
         /// The supergraph response body json path of the chunks.
-        #[schemars(with = "String")]
-        #[debug(skip)]
-        #[partial_eq(skip)]
-        #[serde(deserialize_with = "deserialize_jsonpath")]
-        response_data: JsonPathInst,
+        #[config(required)]
+        response_data: SelectorJsonPath,
         /// Optional default value.
         default: Option<AttributeValue>,
     },
     ResponseErrors {
         /// The supergraph response body json path of the chunks.
-        #[schemars(with = "String")]
-        #[debug(skip)]
-        #[partial_eq(skip)]
-        #[serde(deserialize_with = "deserialize_jsonpath")]
-        response_errors: JsonPathInst,
+        #[config(required)]
+        response_errors: SelectorJsonPath,
         /// Optional default value.
         default: Option<AttributeValue>,
     },
     Baggage {
         /// The name of the baggage item.
+        #[config(required)]
         baggage: String,
         /// Optional default value.
         default: Option<AttributeValue>,
     },
     Env {
         /// The name of the environment variable
+        #[config(required)]
         env: String,
         /// Optional default value.
         default: Option<String>,
@@ -149,30 +152,36 @@ pub(crate) enum SupergraphSelector {
     },
     StaticField {
         /// A static value
+        #[config(required)]
         r#static: AttributeValue,
     },
     OnGraphQLError {
         /// Boolean set to true if the response body contains graphql error
+        #[config(required)]
         on_graphql_error: bool,
     },
     Error {
         #[allow(dead_code)]
         /// Critical error if it happens
+        #[config(required)]
         error: ErrorRepr,
     },
     /// Cost attributes
     Cost {
         /// The cost value to select, one of: estimated, actual, delta.
+        #[config(required)]
         cost: CostValue,
     },
     /// Boolean returning true if it's the primary response and not events like subscription events or deferred responses
     IsPrimaryResponse {
         /// Boolean returning true if it's the primary response and not events like subscription events or deferred responses
+        #[config(required)]
         is_primary_response: bool,
     },
     /// The context ID of the request (unique per request).
     ContextId {
         /// The context ID
+        #[config(required)]
         context_id: bool,
     },
 }

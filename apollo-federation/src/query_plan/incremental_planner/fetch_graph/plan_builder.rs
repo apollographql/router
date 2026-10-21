@@ -1068,6 +1068,15 @@ fn trim_requires(selection_set: &executable::SelectionSet) -> Vec<requires_selec
             executable::Selection::InlineFragment(inline) => Some(
                 requires_selection::Selection::InlineFragment(requires_selection::InlineFragment {
                     type_condition: inline.type_condition.clone(),
+                    conditions: inline
+                        .directives
+                        .iter()
+                        .filter_map(|directive| {
+                            requires_selection::Condition::from_directive(directive)
+                                .ok()
+                                .flatten()
+                        })
+                        .collect(),
                     selections: trim_requires(&inline.selection_set),
                 }),
             ),

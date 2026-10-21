@@ -4,8 +4,6 @@ use attributes::CacheAttributes;
 use opentelemetry::Key;
 use opentelemetry::KeyValue;
 use opentelemetry::metrics::Counter;
-use schemars::JsonSchema;
-use serde::Deserialize;
 use tower::BoxError;
 
 use super::instruments::CustomCounter;
@@ -33,8 +31,7 @@ const CACHE_HIT: Key = Key::from_static_str("cache.hit");
 /// connector path — rather than always emitting this one — is tracked as follow-up work.)
 const CONNECTOR_SOURCE_NAME: Key = Key::from_static_str("subgraph.name");
 
-#[derive(Deserialize, JsonSchema, Clone, Default, Debug)]
-#[serde(deny_unknown_fields, default)]
+#[apollo_configuration::configuration]
 pub(crate) struct CacheInstrumentsConfig {
     /// A counter of times we have a cache hit or cache miss
     #[serde(rename = "apollo.router.response.cache")]
