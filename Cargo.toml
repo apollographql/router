@@ -55,11 +55,7 @@ debug = 1
 [workspace.dependencies]
 ahash = "0.8.11"
 apollo-compiler = "1.33.0"
-<<<<<<< HEAD
-apollo-parser = "0.8.6"
-=======
 apollo-parser = "0.8.7"
->>>>>>> c385d94 (chore(2.16): Bump `apollo-parser` to 0.8.7 (#10573))
 apollo-smith = "0.16.0"
 async-trait = "0.1.77"
 encoding_rs = "0.8"
