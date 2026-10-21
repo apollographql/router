@@ -30,6 +30,7 @@ pub mod instrument;
 pub mod map_first_graphql_response;
 pub mod map_future_with_request_data;
 pub(crate) mod rust_plugins;
+pub(crate) mod sync_checkpoint;
 pub mod unconstrained_buffer;
 
 // Note: We use Buffer in many places throughout the router. 50_000 represents

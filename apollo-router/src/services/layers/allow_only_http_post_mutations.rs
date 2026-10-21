@@ -3,7 +3,6 @@
 use std::ops::ControlFlow;
 
 use apollo_compiler::ast::OperationType;
-use futures::future::BoxFuture;
 use http::HeaderValue;
 use http::Method;
 use http::StatusCode;
@@ -11,12 +10,11 @@ use http::header::HeaderName;
 use tower::BoxError;
 use tower::Layer;
 use tower::Service;
-use tower::ServiceBuilder;
 
 use crate::graphql::Error;
 use crate::json_ext::Object;
-use crate::layers::ServiceBuilderExt;
-use crate::layers::async_checkpoint::AsyncCheckpointService;
+use crate::layers::sync_checkpoint::CheckpointLayer;
+use crate::layers::sync_checkpoint::CheckpointService;
 use crate::services::SupergraphRequest;
 use crate::services::SupergraphResponse;
 use crate::services::query_parsing::ParsedDocument;
@@ -34,110 +32,94 @@ pub(crate) struct AllowOnlyHttpPostMutationsLayer {}
 
 impl<S> Layer<S> for AllowOnlyHttpPostMutationsLayer
 where
-    S: Service<SupergraphRequest, Response = SupergraphResponse, Error = BoxError>
-        + Clone
-        + Send
-        + 'static,
+    S: Service<SupergraphRequest, Response = SupergraphResponse, Error = BoxError> + Send + 'static,
     <S as Service<SupergraphRequest>>::Future: Send + 'static,
 {
-    type Service = AsyncCheckpointService<
-        S,
-        BoxFuture<'static, Result<ControlFlow<SupergraphResponse, SupergraphRequest>, BoxError>>,
-        SupergraphRequest,
-    >;
+    type Service = CheckpointService<S, SupergraphRequest>;
 
     fn layer(&self, service: S) -> Self::Service {
-        ServiceBuilder::new()
-            .checkpoint_async(|req: SupergraphRequest| {
-                Box::pin(async {
-                    if req.supergraph_request.method() == Method::POST {
-                        return Ok(ControlFlow::Continue(req));
+        CheckpointLayer::new(|req: SupergraphRequest| {
+            if req.supergraph_request.method() == Method::POST {
+                return Ok(ControlFlow::Continue(req));
+            }
+
+            let doc = match req
+                .context
+                .extensions()
+                .with_lock(|lock| lock.get::<ParsedDocument>().cloned())
+            {
+                None => {
+                    // We shouldn't ever reach here unless the pipeline was set up
+                    // improperly (i.e. programmer error), but do something better than
+                    // panicking just in case.
+                    let errors = vec![
+                        Error::builder()
+                            .message("Cannot find executable document".to_string())
+                            .extension_code("MISSING_EXECUTABLE_DOCUMENT")
+                            .build(),
+                    ];
+                    let res = SupergraphResponse::infallible_builder()
+                        .errors(errors)
+                        .extensions(Object::default())
+                        .status_code(StatusCode::INTERNAL_SERVER_ERROR)
+                        .context(req.context.clone())
+                        .build();
+
+                    return Ok(ControlFlow::Break(res));
+                }
+                Some(c) => c,
+            };
+
+            let op = doc
+                .executable
+                .operations
+                .get(req.supergraph_request.body().operation_name.as_deref());
+
+            match op {
+                Err(_) => {
+                    // We shouldn't end up here if the request is valid, and validation
+                    // should happen well before this, but do something just in case.
+                    let errors = vec![
+                        Error::builder()
+                            .message("Cannot find operation".to_string())
+                            .extension_code("MISSING_OPERATION")
+                            .build(),
+                    ];
+                    let res = SupergraphResponse::infallible_builder()
+                        .errors(errors)
+                        .extensions(Object::default())
+                        .status_code(StatusCode::METHOD_NOT_ALLOWED)
+                        .context(req.context)
+                        .build();
+
+                    Ok(ControlFlow::Break(res))
+                }
+                Ok(op) => {
+                    if op.operation_type == OperationType::Mutation {
+                        let errors = vec![
+                            Error::builder()
+                                .message("Mutations can only be sent over HTTP POST".to_string())
+                                .extension_code("MUTATION_FORBIDDEN")
+                                .build(),
+                        ];
+                        let mut res = SupergraphResponse::builder()
+                            .errors(errors)
+                            .extensions(Object::default())
+                            .status_code(StatusCode::METHOD_NOT_ALLOWED)
+                            .context(req.context)
+                            .build()?;
+                        res.response.headers_mut().insert(
+                            HeaderName::from_static("allow"),
+                            HeaderValue::from_static("POST"),
+                        );
+                        Ok(ControlFlow::Break(res))
+                    } else {
+                        Ok(ControlFlow::Continue(req))
                     }
-
-                    let doc = match req
-                        .context
-                        .extensions()
-                        .with_lock(|lock| lock.get::<ParsedDocument>().cloned())
-                    {
-                        None => {
-                            // We shouldn't ever reach here unless the pipeline was set up
-                            // improperly (i.e. programmer error), but do something better than
-                            // panicking just in case.
-                            let errors = vec![
-                                Error::builder()
-                                    .message("Cannot find executable document".to_string())
-                                    .extension_code("MISSING_EXECUTABLE_DOCUMENT")
-                                    .build(),
-                            ];
-                            let res = SupergraphResponse::infallible_builder()
-                                .errors(errors)
-                                .extensions(Object::default())
-                                .status_code(StatusCode::INTERNAL_SERVER_ERROR)
-                                .context(req.context.clone())
-                                .build();
-
-                            return Ok(ControlFlow::Break(res));
-                        }
-                        Some(c) => c,
-                    };
-
-                    let op = doc
-                        .executable
-                        .operations
-                        .get(req.supergraph_request.body().operation_name.as_deref());
-
-                    match op {
-                        Err(_) => {
-                            // We shouldn't end up here if the request is valid, and validation
-                            // should happen well before this, but do something just in case.
-                            let errors = vec![
-                                Error::builder()
-                                    .message("Cannot find operation".to_string())
-                                    .extension_code("MISSING_OPERATION")
-                                    .build(),
-                            ];
-                            let res = SupergraphResponse::infallible_builder()
-                                .errors(errors)
-                                .extensions(Object::default())
-                                .status_code(StatusCode::METHOD_NOT_ALLOWED)
-                                .context(req.context)
-                                .build();
-
-                            Ok(ControlFlow::Break(res))
-                        }
-                        Ok(op) => {
-                            if op.operation_type == OperationType::Mutation {
-                                let errors = vec![
-                                    Error::builder()
-                                        .message(
-                                            "Mutations can only be sent over HTTP POST".to_string(),
-                                        )
-                                        .extension_code("MUTATION_FORBIDDEN")
-                                        .build(),
-                                ];
-                                let mut res = SupergraphResponse::builder()
-                                    .errors(errors)
-                                    .extensions(Object::default())
-                                    .status_code(StatusCode::METHOD_NOT_ALLOWED)
-                                    .context(req.context)
-                                    .build()?;
-                                res.response.headers_mut().insert(
-                                    HeaderName::from_static("allow"),
-                                    HeaderValue::from_static("POST"),
-                                );
-                                Ok(ControlFlow::Break(res))
-                            } else {
-                                Ok(ControlFlow::Continue(req))
-                            }
-                        }
-                    }
-                })
-                    as BoxFuture<
-                        'static,
-                        Result<ControlFlow<SupergraphResponse, SupergraphRequest>, BoxError>,
-                    >
-            })
-            .service(service)
+                }
+            }
+        })
+        .layer(service)
     }
 }
 

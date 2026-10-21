@@ -1,5 +1,7 @@
 use std::sync::Arc;
 
+use futures::FutureExt as _;
+use futures::TryFutureExt as _;
 use futures::future::BoxFuture;
 use http::StatusCode;
 use tower::BoxError;
@@ -61,6 +63,16 @@ where
     }
 
     fn call(&mut self, req: execution::Request) -> Self::Future {
+        // `SplitBatchRequestLayer` only adds the batching config to requests that arrived in a
+        // batch.
+        let Some(batching) = req
+            .context
+            .extensions()
+            .with_lock(|lock| lock.get::<crate::configuration::Batching>().cloned())
+        else {
+            return self.inner.call(req).map_err(Into::into).boxed();
+        };
+
         let inner = self.inner.clone();
         let mut inner = std::mem::replace(&mut self.inner, inner);
 
@@ -69,14 +81,6 @@ where
             let variables = &req.supergraph_request.body().variables;
             let is_deferred = plan.is_deferred(variables);
             let is_subscription = plan.is_subscription();
-
-            let Some(batching) = req
-                .context
-                .extensions()
-                .with_lock(|lock| lock.get::<crate::configuration::Batching>().cloned())
-            else {
-                return inner.call(req).await.map_err(Into::into);
-            };
 
             if batching.enabled && (is_deferred || is_subscription) {
                 let code = if is_deferred {

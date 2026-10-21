@@ -96,40 +96,42 @@ where
     }
 
     fn call(&mut self, mut req: ExecutionRequest) -> Self::Future {
+        if !req.query_plan.is_subscription() {
+            return self.inner.call(req).boxed();
+        }
+
         let inner = self.inner.clone();
         let mut inner = std::mem::replace(&mut self.inner, inner);
         let notify = self.notify.clone();
 
         Box::pin(async move {
-            if req.query_plan.is_subscription() {
-                let context = req.context.clone();
-                let (subs_tx, subs_rx) = mpsc::channel(1);
-                let query_plan = req.query_plan.clone();
-                let execution_service_cloned = inner.clone();
-                let supergraph_http_request = req.supergraph_request.clone();
+            let context = req.context.clone();
+            let (subs_tx, subs_rx) = mpsc::channel(1);
+            let query_plan = req.query_plan.clone();
+            let execution_service_cloned = inner.clone();
+            let supergraph_http_request = req.supergraph_request.clone();
 
-                // Subscribe to config and schema changes immediately, so we don't
-                // miss out on any events happening in-between here and when we
-                // actually start responding to changes (which happens asynchronously
-                // inside the subscription task).
-                let configuration_updated_rx = Box::pin(notify.subscribe_configuration());
-                let schema_updated_rx = Box::pin(notify.subscribe_schema());
+            // Subscribe to config and schema changes immediately, so we don't
+            // miss out on any events happening in-between here and when we
+            // actually start responding to changes (which happens asynchronously
+            // inside the subscription task).
+            let configuration_updated_rx = Box::pin(notify.subscribe_configuration());
+            let schema_updated_rx = Box::pin(notify.subscribe_schema());
 
-                // Spawn the side-channel task for subscription.
-                tokio::spawn(async move {
-                    subscription_task(
-                        execution_service_cloned,
-                        context,
-                        query_plan,
-                        subs_rx,
-                        supergraph_http_request,
-                        configuration_updated_rx,
-                        schema_updated_rx,
-                    )
-                    .await;
-                });
-                req.subscription_tx = subs_tx.into();
-            }
+            // Spawn the side-channel task for subscription.
+            tokio::spawn(async move {
+                subscription_task(
+                    execution_service_cloned,
+                    context,
+                    query_plan,
+                    subs_rx,
+                    supergraph_http_request,
+                    configuration_updated_rx,
+                    schema_updated_rx,
+                )
+                .await;
+            });
+            req.subscription_tx = subs_tx.into();
 
             inner.call(req).await
         })
