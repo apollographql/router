@@ -1586,5 +1586,104 @@ subgraph:
         insta::assert_snapshot!(buff.to_string());
     }
 
+    #[tokio::test]
+    async fn test_json_logging_supergraph_response_event_per_deferred_chunk() {
+        use tower::ServiceExt;
+        use tracing::Instrument;
+        use tracing::instrument::WithSubscriber;
+
+        use crate::TestHarness;
+        use crate::plugin::test::MockSubgraph;
+        use crate::plugins::telemetry::config_new::conditions::Condition;
+        use crate::plugins::telemetry::config_new::supergraph::events::SupergraphEventResponse;
+        use crate::services::router::ClientRequestAccepts;
+        use crate::test_harness::MockedSubgraphs;
+
+        let subgraphs = MockedSubgraphs([
+            ("user", MockSubgraph::builder().with_json(
+                    serde_json::json!{{"query":"{currentUser{__typename id}}"}},
+                    serde_json::json!{{"data": {"currentUser": { "__typename": "User", "id": "0" }}}}
+                )
+                .with_json(
+                    serde_json::json!{{
+                        "query":"query($representations:[_Any!]!){_entities(representations:$representations){...on User{name}}}",
+                        "variables": {"representations":[{"__typename": "User", "id":"0"}]}
+                    }},
+                    serde_json::json!{{"data": {"_entities": [{ "name": "deferred name" }]}}}
+                ).build()),
+            ("orga", MockSubgraph::default())
+        ].into_iter().collect());
+
+        let service = TestHarness::builder()
+            .schema(include_str!("../../testdata/orga_supergraph.graphql"))
+            .extra_plugin(subgraphs)
+            .build_supergraph()
+            .await
+            .unwrap();
+
+        let context = crate::Context::new();
+        context.extensions().with_lock(|lock| {
+            lock.insert(ClientRequestAccepts {
+                multipart_defer: true,
+                ..Default::default()
+            });
+            // What the telemetry plugin inserts for `events.supergraph.response: info`.
+            lock.insert(SupergraphEventResponse {
+                level: EventLevel::Info,
+                condition: Arc::new(Condition::True),
+            });
+        });
+        let request = supergraph::Request::fake_builder()
+            .context(context)
+            .query("query { currentUser { id  ...@defer { name } } }")
+            .build()
+            .unwrap();
+
+        let buff = LogBuffer::default();
+        let format = Json::new(
+            Resource::builder_empty().build(),
+            JsonFormat {
+                display_span_list: false,
+                display_current_span: false,
+                display_resource: false,
+                ..Default::default()
+            },
+        );
+        let fmt_layer = FmtLayer::new(format, buff.clone()).boxed();
+        let subscriber = fmt::Subscriber::new()
+            .with(otel::layer().with_tracer(make_tracer()))
+            .with(fmt_layer);
+
+        let chunks: Vec<String> = async move {
+            // Events attach their attributes to the current span, which must be created
+            // once the subscriber is installed.
+            async move {
+                let mut stream = service.oneshot(request).await.unwrap();
+                let mut chunks = Vec::new();
+                while let Some(chunk) = stream.next_response().await {
+                    chunks.push(serde_json::to_string(&chunk).unwrap());
+                }
+                chunks
+            }
+            .instrument(info_span!("test"))
+            .await
+        }
+        .with_subscriber(subscriber)
+        .await;
+
+        let logs = buff.to_string();
+        let events: Vec<&str> = logs
+            .lines()
+            .filter(|line| line.contains(r#""kind":"supergraph.response""#))
+            .collect();
+        assert_eq!(chunks.len(), 2, "expected a primary and a deferred chunk");
+        assert_eq!(events.len(), chunks.len());
+        for (event, chunk) in events.iter().zip(&chunks) {
+            assert_eq!(event.matches(r#""http.response.body""#).count(), 1);
+            let event: serde_json::Value = serde_json::from_str(event).unwrap();
+            assert_eq!(event["http.response.body"].as_str(), Some(chunk.as_str()));
+        }
+    }
+
     // TODO add test using on_request/on_reponse/on_error
 }

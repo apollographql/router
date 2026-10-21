@@ -455,6 +455,7 @@ impl ConnectorCacheService {
                     data: serde_json_bytes::to_value(resp.response.body().clone())
                         .unwrap_or_default(),
                     warnings: Vec::new(),
+                    has_errors: false,
                     should_store: false,
                 }
                 .update_metadata();
@@ -830,6 +831,7 @@ impl ConnectorCacheService {
                             "data": cache_entry.data.clone()
                         }),
                         warnings: Vec::new(),
+                        has_errors: false,
                         should_store: true,
                     }
                     .update_metadata()
@@ -1144,9 +1146,10 @@ impl ConnectorCacheService {
                             entity_key,
                             invalidation_keys: user_tags,
                             has_tags,
+                            has_errors,
                         };
 
-                        if !has_errors
+                        if !miss.has_errors
                             && !is_null_entity
                             && !unstorable_private_response
                             && response_cache_control.should_store()
@@ -1162,7 +1165,7 @@ impl ConnectorCacheService {
                         if debug && let Some(ref debug_req) = debug_request {
                             debug_ctx_entries.push(build_entity_debug_entry(
                                 &miss,
-                                !has_errors && !is_null_entity,
+                                !miss.has_errors && !is_null_entity,
                                 private_id.clone(),
                                 source_name,
                                 CacheKeySource::Connector,
@@ -1190,9 +1193,8 @@ impl ConnectorCacheService {
         response.response.body_mut().data = response_data;
 
         // Update errors with reindexed paths (entity indices changed due to cache merge), keeping
-        // any error that has no entity slot to be reindexed into. Identical to the subgraph path
-        // (`insert_entities_in_result`'s caller), so a partial hit returns the same error set on
-        // both, which is what `EntityCacheMiss`'s shared shape is there to keep true.
+        // any error that has no entity slot to be reindexed into, so a partial hit never swallows
+        // an error that a full miss would have returned.
         let mut errors = non_entity_errors(&response.response.body().errors);
         errors.extend(new_errors);
         response.response.body_mut().errors = errors;
@@ -1481,6 +1483,7 @@ impl ConnectorRequestCacheService {
                     cache_control: CacheControl::default_no_store(),
                     data: serde_json_bytes::Value::Null,
                     warnings: Vec::new(),
+                    has_errors: false,
                     should_store: false,
                 }
                 .update_metadata();
@@ -1644,6 +1647,7 @@ impl ConnectorRequestCacheService {
                         cache_control: entry.control.clone(),
                         data: serde_json_bytes::json!({"data": entry.data.clone()}),
                         warnings: Vec::new(),
+                        has_errors: false,
                         should_store: true,
                     }
                     .update_metadata();
@@ -1820,6 +1824,7 @@ impl ConnectorRequestCacheService {
                                 cache_control: cache_control.clone(),
                                 data: serde_json_bytes::json!({"data": data.clone()}),
                                 warnings: Vec::new(),
+                                has_errors: false,
                                 // Only built for a response that is about to be stored.
                                 should_store: true,
                             }

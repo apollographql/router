@@ -1,5 +1,3 @@
-use schemars::JsonSchema;
-use serde::Deserialize;
 use tower::BoxError;
 
 use crate::Context;
@@ -9,8 +7,8 @@ use crate::plugins::telemetry::config_new::instruments::InstrumentValue;
 use crate::plugins::telemetry::config_new::instruments::Standard;
 use crate::services::http;
 
-#[derive(Deserialize, JsonSchema, Clone, Debug)]
-#[serde(deny_unknown_fields, rename_all = "snake_case", untagged)]
+#[apollo_configuration::configuration]
+#[serde(untagged)]
 pub(crate) enum HttpClientValue {
     Standard(Standard),
     Custom(HttpClientSelector),
@@ -25,12 +23,14 @@ impl From<&HttpClientValue> for InstrumentValue<HttpClientSelector> {
     }
 }
 
-#[derive(derive_more::Debug, derive_more::PartialEq, Deserialize, JsonSchema, Clone)]
-#[serde(deny_unknown_fields, untagged)]
+#[apollo_configuration::configuration]
+#[derive(PartialEq)]
+#[serde(untagged)]
 pub(crate) enum HttpClientSelector {
     /// A header from the HTTP request
     HttpClientRequestHeader {
         /// The name of the request header.
+        #[config(required)]
         request_header: String,
         /// Optional redaction pattern.
         redact: Option<crate::services::header_masking::RedactMode>,
@@ -40,6 +40,7 @@ pub(crate) enum HttpClientSelector {
     /// A header from the HTTP response
     HttpClientResponseHeader {
         /// The name of the response header.
+        #[config(required)]
         response_header: String,
         /// Optional redaction pattern.
         redact: Option<crate::services::header_masking::RedactMode>,

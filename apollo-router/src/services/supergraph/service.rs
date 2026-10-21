@@ -157,7 +157,6 @@ async fn service_call(
 ) -> Result<SupergraphResponse, BoxError> {
     let context = req.context;
     let body = req.supergraph_request.body();
-    let variables = body.variables.clone();
 
     if let Some(document) = context
         .extensions()
@@ -175,7 +174,7 @@ async fn service_call(
             .call(introspection::IntrospectionRequest {
                 schema,
                 document,
-                variables,
+                variables: body.variables.clone(),
             })
             .await;
 
@@ -250,7 +249,7 @@ async fn service_call(
 
     match content {
         Some(plan) => {
-            let is_deferred = plan.is_deferred(&variables);
+            let is_deferred = plan.is_deferred(&body.variables);
             let is_subscription = plan.is_subscription();
 
             let ClientRequestAccepts {
@@ -305,7 +304,7 @@ async fn service_call(
                     .call(
                         ExecutionRequest::internal_builder()
                             .supergraph_request(req.supergraph_request)
-                            .query_plan(plan.clone())
+                            .query_plan(plan)
                             .context(context)
                             .build()
                             .await,
@@ -369,6 +368,8 @@ async fn service_call(
                             Key::from_static_str("http.response.version"),
                             opentelemetry::Value::String(format!("{:?}", parts.version).into()),
                         ));
+                        // Immutable: chunk bodies must not accumulate in this stream-lived list.
+                        let attrs = attrs;
                         let ctx = context.clone();
                         let response_stream = Box::pin(response_stream.inspect(move |resp| {
                             if !supergraph_response_event
@@ -377,7 +378,8 @@ async fn service_call(
                             {
                                 return;
                             }
-                            attrs.push(KeyValue::new(
+                            let mut event_attrs = attrs.clone();
+                            event_attrs.push(KeyValue::new(
                                 Key::from_static_str("http.response.body"),
                                 opentelemetry::Value::String(
                                     serde_json::to_string(resp).unwrap_or_default().into(),
@@ -386,7 +388,7 @@ async fn service_call(
                             log_event(
                                 supergraph_response_event.level,
                                 "supergraph.response",
-                                attrs.clone(),
+                                event_attrs,
                                 "",
                             );
                         }));
@@ -419,7 +421,7 @@ async fn plan_query(
             query_planner::CachingRequest::builder()
                 .query(query_str)
                 .and_operation_name(operation_name)
-                .context(context.clone())
+                .context(context)
                 .build(),
         )
         .instrument(query_planning_span())

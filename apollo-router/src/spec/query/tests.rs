@@ -146,8 +146,7 @@ impl FormatTest {
             self.variables
                 .unwrap_or_else(|| Value::Object(Object::default()))
                 .as_object()
-                .unwrap()
-                .clone(),
+                .unwrap(),
             api_schema,
             BooleanValues { bits: 0 },
             true,
@@ -7141,7 +7140,7 @@ fn fragment_on_interface_on_query() {
 
     query.format_response(
         &mut response,
-        Default::default(),
+        &Object::new(),
         api_schema,
         BooleanValues { bits: 0 },
         true,
@@ -7829,7 +7828,7 @@ fn format_filtered_then_original(query: &Query, schema: &Schema, data: Value) ->
 
     query.format_response_filtered_then_original(
         &mut response,
-        Object::new(),
+        &Object::new(),
         schema.api_schema(),
         BooleanValues { bits: 0 },
         true,
@@ -8004,7 +8003,7 @@ fn filtered_defer_fragment() {
 
     query.filtered_query.as_ref().unwrap().format_response(
         &mut response,
-        Object::new(),
+        &Object::new(),
         schema.api_schema(),
         BooleanValues { bits: 0 },
         true,
@@ -8014,7 +8013,7 @@ fn filtered_defer_fragment() {
 
     query.format_response(
         &mut response,
-        Object::new(),
+        &Object::new(),
         schema.api_schema(),
         BooleanValues { bits: 0 },
         true,
