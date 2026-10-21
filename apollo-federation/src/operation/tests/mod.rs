@@ -2179,3 +2179,92 @@ fn add_aliases_for_non_merging_fields_inside_untyped_inline_fragment() {
     "
     );
 }
+
+fn aliased(schema_doc: &str, type_name: &str, selection: &str) -> String {
+    let schema = parse_schema(schema_doc);
+    let type_position: crate::schema::position::CompositeTypeDefinitionPosition = schema
+        .get_type(&Name::new(type_name).expect("valid name"))
+        .expect("type exists")
+        .try_into()
+        .expect("composite type");
+    let selection_set =
+        SelectionSet::parse(schema, type_position, selection).expect("selection parses");
+    let (aliased, rewrites) = selection_set
+        .add_aliases_for_non_merging_fields()
+        .expect("aliases computed");
+    let rewrites = rewrites
+        .iter()
+        .map(|rewrite| format!("{rewrite:?}"))
+        .collect::<Vec<_>>()
+        .join("\n");
+    format!("{aliased}\n{rewrites}")
+}
+
+const ALIAS_SCHEMA: &str = r#"
+    type Query { i: I }
+    interface I { id: ID o: O }
+    type A implements I { id: ID v: Int o: O }
+    type B implements I { id: ID v: String o: O }
+    type C implements I { id: ID w: Int o: O }
+    type O { p: Int q: Int r: P }
+    type P { s: Int }
+"#;
+
+#[test]
+fn aliases_fields_whose_types_differ_across_fragments() {
+    insta::assert_snapshot!(
+        aliased(ALIAS_SCHEMA, "I", "... on A { v } ... on B { v } ... on C { w }"),
+        @r###"
+    { ... on A { v } ... on B { v__alias_0: v } ... on C { w } }
+    KeyRenamer(FetchDataKeyRenamer { path: [TypenameEquals("B"), Key("v__alias_0", None)], rename_key_to: "v" })
+    "###
+    );
+}
+
+#[test]
+fn aliases_nested_conflicts_under_merged_fields() {
+    insta::assert_snapshot!(
+        aliased(
+            ALIAS_SCHEMA,
+            "I",
+            "... on A { o { r { s } } v } ... on B { o { r: p } v id } ... on C { o { r { s } q } }",
+        ),
+        @r###"
+    { ... on A { o { r { s } } v } ... on B { o { r__alias_0: p } v__alias_0: v id } ... on C { o { r { s } q } } }
+    KeyRenamer(FetchDataKeyRenamer { path: [TypenameEquals("B"), Key("v__alias_0", None)], rename_key_to: "v" })
+    KeyRenamer(FetchDataKeyRenamer { path: [TypenameEquals("B"), Key("o", None), Key("r__alias_0", None)], rename_key_to: "r" })
+    "###
+    );
+}
+
+#[test]
+fn aliases_nothing_when_fields_merge() {
+    insta::assert_snapshot!(
+        aliased(ALIAS_SCHEMA, "I", "id o { p } ... on A { id o { q } } ... on C { w }"),
+        @"{ id o { p } ... on A { id o { q } } ... on C { w } }"
+    );
+}
+
+#[test]
+fn aliases_conflicts_found_after_merging_parent_fields() {
+    insta::assert_snapshot!(
+        aliased(
+            r#"
+            type Query { i: I }
+            interface I { o: O }
+            type A implements I { o: O }
+            type B implements I { o: O }
+            type O { t: T }
+            interface T { id: ID }
+            type X implements T { id: ID n: Int }
+            type Y implements T { id: ID n: String }
+            "#,
+            "I",
+            "... on A { o { t { ... on X { n } } } } ... on B { o { t { id ... on Y { n } } } }",
+        ),
+        @r###"
+    { ... on A { o { t { ... on X { n } } } } ... on B { o { t { id ... on Y { n__alias_0: n } } } } }
+    KeyRenamer(FetchDataKeyRenamer { path: [TypenameEquals("B"), Key("o", None), Key("t", None), TypenameEquals("Y"), Key("n__alias_0", None)], rename_key_to: "n" })
+    "###
+    );
+}

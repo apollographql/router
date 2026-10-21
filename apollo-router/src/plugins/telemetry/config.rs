@@ -65,8 +65,6 @@ pub(crate) struct Conf {
     pub(crate) exporters: Exporters,
 
     /// Instrumentation configuration
-    // Instrumentation's nested types don't use the configuration attribute, so they have no Validate impl.
-    #[config(skip_validate)]
     pub(crate) instrumentation: Instrumentation,
 }
 
@@ -83,8 +81,7 @@ pub(crate) struct Exporters {
 }
 
 /// Instrumentation configuration
-#[derive(Clone, Default, Debug, Deserialize, JsonSchema)]
-#[serde(deny_unknown_fields, default)]
+#[apollo_configuration::configuration]
 pub(crate) struct Instrumentation {
     /// Event configuration
     pub(crate) events: config_new::events::Events,
@@ -95,10 +92,10 @@ pub(crate) struct Instrumentation {
 }
 
 impl Instrumentation {
-    pub(crate) fn validate(&self) -> Result<(), String> {
-        self.events.validate()?;
-        self.instruments.validate()?;
-        self.spans.validate()
+    pub(crate) fn validate_selectors(&self) -> Result<(), String> {
+        self.events.validate_selectors()?;
+        self.instruments.validate_selectors()?;
+        self.spans.validate_selectors()
     }
 }
 
@@ -561,6 +558,20 @@ impl AttributeValue {
     }
 }
 
+// f64 has no Validate impl, so the configuration attribute can't derive one for the F64 variant.
+// This validates every other variant; the enum is untagged, so each value keeps its own path.
+impl apollo_configuration::Validate for AttributeValue {
+    fn validate(&self, errors: apollo_configuration::ErrorCollector<'_>) {
+        match self {
+            AttributeValue::Bool(value) => value.validate(errors),
+            AttributeValue::I64(value) => value.validate(errors),
+            AttributeValue::F64(_) => {}
+            AttributeValue::String(value) => value.validate(errors),
+            AttributeValue::Array(values) => values.validate(errors),
+        }
+    }
+}
+
 impl From<String> for AttributeValue {
     fn from(value: String) -> Self {
         AttributeValue::String(value)
@@ -705,6 +716,19 @@ impl std::fmt::Display for AttributeArray {
     }
 }
 
+// f64 has no Validate impl, so the configuration attribute can't derive one for the F64 variant.
+// This validates every other variant; the enum is untagged, so each array keeps its own path.
+impl apollo_configuration::Validate for AttributeArray {
+    fn validate(&self, errors: apollo_configuration::ErrorCollector<'_>) {
+        match self {
+            AttributeArray::Bool(values) => values.validate(errors),
+            AttributeArray::I64(values) => values.validate(errors),
+            AttributeArray::F64(_) => {}
+            AttributeArray::String(values) => values.validate(errors),
+        }
+    }
+}
+
 impl From<AttributeArray> for opentelemetry::Array {
     fn from(array: AttributeArray) -> Self {
         match array {
@@ -738,9 +762,16 @@ pub(crate) enum SamplerOption {
     Always(Sampler),
 }
 
-// The configuration attribute can't validate the TraceIdRatioBased variant because f64 has no
-// Validate impl. Neither variant has nested rules.
-impl apollo_configuration::Validate for SamplerOption {}
+// f64 has no Validate impl, so the configuration attribute can't derive one for the
+// TraceIdRatioBased variant. The enum is untagged, so the sampler keeps its own path.
+impl apollo_configuration::Validate for SamplerOption {
+    fn validate(&self, errors: apollo_configuration::ErrorCollector<'_>) {
+        match self {
+            SamplerOption::TraceIdRatioBased(_) => {}
+            SamplerOption::Always(sampler) => sampler.validate(errors),
+        }
+    }
+}
 
 #[apollo_configuration::configuration]
 #[derive(PartialEq)]

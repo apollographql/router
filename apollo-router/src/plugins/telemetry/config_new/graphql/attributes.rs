@@ -2,8 +2,6 @@ use apollo_compiler::executable::Field;
 use apollo_compiler::executable::NamedType;
 use opentelemetry::Key;
 use opentelemetry::KeyValue;
-use schemars::JsonSchema;
-use serde::Deserialize;
 use serde_json_bytes::Value;
 use tower::BoxError;
 
@@ -22,8 +20,8 @@ use crate::plugins::telemetry::config_new::selectors::OperationName;
 use crate::plugins::telemetry::otlp::TelemetryDataKind;
 use crate::services::supergraph;
 
-#[derive(Deserialize, JsonSchema, Clone, Default, Debug, PartialEq)]
-#[serde(deny_unknown_fields, default)]
+#[apollo_configuration::configuration]
+#[derive(PartialEq)]
 pub(crate) struct GraphQLAttributes {
     /// The GraphQL field name
     #[serde(rename = "graphql.field.name")]

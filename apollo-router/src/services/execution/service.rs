@@ -298,7 +298,7 @@ impl ExecutionService {
 
             let paths = query.format_response_filtered_then_original(
                 &mut response,
-                variables.clone(),
+                variables,
                 schema.api_schema(),
                 variables_set,
                 insert_result_coercion_errors,

@@ -2507,6 +2507,7 @@ expression: "&schema"
               "type": "string"
             },
             "default": {
+              "default": null,
               "description": "Optional default value.",
               "type": [
                 "string",
@@ -2538,6 +2539,7 @@ expression: "&schema"
               "type": "string"
             },
             "default": {
+              "default": null,
               "description": "Optional default value.",
               "type": [
                 "string",
@@ -2677,6 +2679,7 @@ expression: "&schema"
                   "type": "null"
                 }
               ],
+              "default": null,
               "description": "Optional default value."
             },
             "request_context": {
@@ -2693,6 +2696,7 @@ expression: "&schema"
           "additionalProperties": false,
           "properties": {
             "default": {
+              "default": null,
               "description": "Optional default value.",
               "type": [
                 "string",
@@ -3624,6 +3628,7 @@ expression: "&schema"
       "type": "object"
     },
     "Event": {
+      "additionalProperties": false,
       "description": "An event that can be logged as part of a trace.\nThe event has an implicit `type` attribute that matches the name of the event in the yaml\nand a message that can be used to provide additional information.",
       "properties": {
         "attributes": {
@@ -3655,6 +3660,7 @@ expression: "&schema"
       "type": "object"
     },
     "Event2": {
+      "additionalProperties": false,
       "description": "An event that can be logged as part of a trace.\nThe event has an implicit `type` attribute that matches the name of the event in the yaml\nand a message that can be used to provide additional information.",
       "properties": {
         "attributes": {
@@ -3686,6 +3692,7 @@ expression: "&schema"
       "type": "object"
     },
     "Event3": {
+      "additionalProperties": false,
       "description": "An event that can be logged as part of a trace.\nThe event has an implicit `type` attribute that matches the name of the event in the yaml\nand a message that can be used to provide additional information.",
       "properties": {
         "attributes": {
@@ -3717,6 +3724,7 @@ expression: "&schema"
       "type": "object"
     },
     "Event4": {
+      "additionalProperties": false,
       "description": "An event that can be logged as part of a trace.\nThe event has an implicit `type` attribute that matches the name of the event in the yaml\nand a message that can be used to provide additional information.",
       "properties": {
         "attributes": {
@@ -5548,6 +5556,7 @@ expression: "&schema"
           "additionalProperties": false,
           "properties": {
             "default": {
+              "default": null,
               "description": "Optional default value.",
               "type": [
                 "string",
@@ -5864,6 +5873,7 @@ expression: "&schema"
           "description": "A header from the HTTP request",
           "properties": {
             "default": {
+              "default": null,
               "description": "Optional default value.",
               "type": [
                 "string",
@@ -5896,6 +5906,7 @@ expression: "&schema"
           "description": "A header from the HTTP response",
           "properties": {
             "default": {
+              "default": null,
               "description": "Optional default value.",
               "type": [
                 "string",
@@ -8321,6 +8332,7 @@ expression: "&schema"
                   "type": "null"
                 }
               ],
+              "default": null,
               "description": "Optional default value."
             }
           },
@@ -8334,6 +8346,7 @@ expression: "&schema"
           "description": "A value from an environment variable.",
           "properties": {
             "default": {
+              "default": null,
               "description": "Optional default value.",
               "type": [
                 "string",
@@ -8381,6 +8394,7 @@ expression: "&schema"
           "description": "The operation name from the query.",
           "properties": {
             "default": {
+              "default": null,
               "description": "Optional default value.",
               "type": [
                 "string",
@@ -8410,6 +8424,7 @@ expression: "&schema"
                   "type": "null"
                 }
               ],
+              "default": null,
               "description": "Optional default value."
             },
             "redact": {
@@ -8446,6 +8461,7 @@ expression: "&schema"
                   "type": "null"
                 }
               ],
+              "default": null,
               "description": "Optional default value."
             },
             "request_context": {
@@ -8541,6 +8557,7 @@ expression: "&schema"
                   "type": "null"
                 }
               ],
+              "default": null,
               "description": "Optional default value."
             },
             "redact": {
@@ -8577,6 +8594,7 @@ expression: "&schema"
                   "type": "null"
                 }
               ],
+              "default": null,
               "description": "Optional default value."
             },
             "response_context": {
@@ -9014,6 +9032,7 @@ expression: "&schema"
           "$ref": "#/$defs/EventLevelConfig"
         },
         {
+          "additionalProperties": false,
           "properties": {
             "condition": {
               "$ref": "#/$defs/ConditionConnectorSelector"
@@ -9036,6 +9055,7 @@ expression: "&schema"
           "$ref": "#/$defs/EventLevelConfig"
         },
         {
+          "additionalProperties": false,
           "properties": {
             "condition": {
               "$ref": "#/$defs/ConditionRouterSelector"
@@ -9058,6 +9078,7 @@ expression: "&schema"
           "$ref": "#/$defs/EventLevelConfig"
         },
         {
+          "additionalProperties": false,
           "properties": {
             "condition": {
               "$ref": "#/$defs/ConditionSubgraphSelector"
@@ -9080,6 +9101,7 @@ expression: "&schema"
           "$ref": "#/$defs/EventLevelConfig"
         },
         {
+          "additionalProperties": false,
           "properties": {
             "condition": {
               "$ref": "#/$defs/ConditionSupergraphSelector"
@@ -9869,6 +9891,7 @@ expression: "&schema"
           "additionalProperties": false,
           "properties": {
             "default": {
+              "default": null,
               "description": "Optional default value.",
               "type": [
                 "string",
@@ -9928,6 +9951,7 @@ expression: "&schema"
           "additionalProperties": false,
           "properties": {
             "default": {
+              "default": null,
               "description": "Optional default value.",
               "type": [
                 "string",
@@ -9956,6 +9980,7 @@ expression: "&schema"
                   "type": "null"
                 }
               ],
+              "default": null,
               "description": "Optional default value."
             },
             "subgraph_query_variable": {
@@ -9980,6 +10005,7 @@ expression: "&schema"
                   "type": "null"
                 }
               ],
+              "default": null,
               "description": "Optional default value."
             },
             "subgraph_response_data": {
@@ -10004,6 +10030,7 @@ expression: "&schema"
                   "type": "null"
                 }
               ],
+              "default": null,
               "description": "Optional default value."
             },
             "subgraph_response_errors": {
@@ -10020,6 +10047,7 @@ expression: "&schema"
           "additionalProperties": false,
           "properties": {
             "default": {
+              "default": null,
               "description": "Optional default value.",
               "type": [
                 "string",
@@ -10064,6 +10092,7 @@ expression: "&schema"
           "additionalProperties": false,
           "properties": {
             "default": {
+              "default": null,
               "description": "Optional default value.",
               "type": [
                 "string",
@@ -10129,6 +10158,7 @@ expression: "&schema"
                   "type": "null"
                 }
               ],
+              "default": null,
               "description": "Optional default value."
             },
             "subgraph_resend_count": {
@@ -10145,6 +10175,7 @@ expression: "&schema"
           "additionalProperties": false,
           "properties": {
             "default": {
+              "default": null,
               "description": "Optional default value.",
               "type": [
                 "string",
@@ -10178,6 +10209,7 @@ expression: "&schema"
           "additionalProperties": false,
           "properties": {
             "default": {
+              "default": null,
               "description": "Optional default value.",
               "type": [
                 "string",
@@ -10206,6 +10238,7 @@ expression: "&schema"
                   "type": "null"
                 }
               ],
+              "default": null,
               "description": "Optional default value."
             },
             "supergraph_query_variable": {
@@ -10222,6 +10255,7 @@ expression: "&schema"
           "additionalProperties": false,
           "properties": {
             "default": {
+              "default": null,
               "description": "Optional default value.",
               "type": [
                 "string",
@@ -10261,6 +10295,7 @@ expression: "&schema"
                   "type": "null"
                 }
               ],
+              "default": null,
               "description": "Optional default value."
             },
             "request_context": {
@@ -10285,6 +10320,7 @@ expression: "&schema"
                   "type": "null"
                 }
               ],
+              "default": null,
               "description": "Optional default value."
             },
             "response_context": {
@@ -10326,6 +10362,7 @@ expression: "&schema"
                   "type": "null"
                 }
               ],
+              "default": null,
               "description": "Optional default value."
             }
           },
@@ -10338,6 +10375,7 @@ expression: "&schema"
           "additionalProperties": false,
           "properties": {
             "default": {
+              "default": null,
               "description": "Optional default value.",
               "type": [
                 "string",
@@ -11010,6 +11048,7 @@ expression: "&schema"
           "additionalProperties": false,
           "properties": {
             "default": {
+              "default": null,
               "description": "Optional default value.",
               "type": [
                 "string",
@@ -11043,6 +11082,7 @@ expression: "&schema"
           "additionalProperties": false,
           "properties": {
             "default": {
+              "default": null,
               "description": "Optional default value.",
               "type": [
                 "string",
@@ -11071,6 +11111,7 @@ expression: "&schema"
                   "type": "null"
                 }
               ],
+              "default": null,
               "description": "Optional default value."
             },
             "query_variable": {
@@ -11087,6 +11128,7 @@ expression: "&schema"
           "additionalProperties": false,
           "properties": {
             "default": {
+              "default": null,
               "description": "Optional default value.",
               "type": [
                 "string",
@@ -11118,6 +11160,7 @@ expression: "&schema"
           "additionalProperties": false,
           "properties": {
             "default": {
+              "default": null,
               "description": "Optional default value.",
               "type": [
                 "string",
@@ -11171,6 +11214,7 @@ expression: "&schema"
                   "type": "null"
                 }
               ],
+              "default": null,
               "description": "Optional default value."
             },
             "request_context": {
@@ -11195,6 +11239,7 @@ expression: "&schema"
                   "type": "null"
                 }
               ],
+              "default": null,
               "description": "Optional default value."
             },
             "response_context": {
@@ -11219,6 +11264,7 @@ expression: "&schema"
                   "type": "null"
                 }
               ],
+              "default": null,
               "description": "Optional default value."
             },
             "response_data": {
@@ -11243,6 +11289,7 @@ expression: "&schema"
                   "type": "null"
                 }
               ],
+              "default": null,
               "description": "Optional default value."
             },
             "response_errors": {
@@ -11271,6 +11318,7 @@ expression: "&schema"
                   "type": "null"
                 }
               ],
+              "default": null,
               "description": "Optional default value."
             }
           },
@@ -11283,6 +11331,7 @@ expression: "&schema"
           "additionalProperties": false,
           "properties": {
             "default": {
+              "default": null,
               "description": "Optional default value.",
               "type": [
                 "string",
