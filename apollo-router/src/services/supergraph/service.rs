@@ -369,6 +369,8 @@ async fn service_call(
                             Key::from_static_str("http.response.version"),
                             opentelemetry::Value::String(format!("{:?}", parts.version).into()),
                         ));
+                        // Immutable: chunk bodies must not accumulate in this stream-lived list.
+                        let attrs = attrs;
                         let ctx = context.clone();
                         let response_stream = Box::pin(response_stream.inspect(move |resp| {
                             if !supergraph_response_event
@@ -377,7 +379,8 @@ async fn service_call(
                             {
                                 return;
                             }
-                            attrs.push(KeyValue::new(
+                            let mut event_attrs = attrs.clone();
+                            event_attrs.push(KeyValue::new(
                                 Key::from_static_str("http.response.body"),
                                 opentelemetry::Value::String(
                                     serde_json::to_string(resp).unwrap_or_default().into(),
@@ -386,7 +389,7 @@ async fn service_call(
                             log_event(
                                 supergraph_response_event.level,
                                 "supergraph.response",
-                                attrs.clone(),
+                                event_attrs,
                                 "",
                             );
                         }));
