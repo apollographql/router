@@ -1,0 +1,40 @@
+extend schema
+  @link(url: "https://specs.apollo.dev/federation/v2.13", import: ["@key"])
+  @link(
+    url: "https://specs.apollo.dev/connect/v0.4"
+    import: ["@connect", "@source"]
+  )
+  @source(name: "api", http: { baseURL: "http://localhost" })
+
+# `->first` no longer records a list index in the `$this` key trie
+# (RH-1415), so `$this.items->first` consumes `items`, the same as a plain
+# `$this.items`. When `items` is a list of objects, a bare `items` is not a
+# valid field set: the object needs a subselection. This is rejected at
+# composition with `CONNECTORS_CANNOT_RESOLVE_KEY` rather than reaching the
+# router. Selecting fields (`$this.items->first { id }`) resolves it.
+
+type Query {
+  cart(id: ID!): Cart
+    @connect(
+      source: "api"
+      http: { GET: "/carts/{$args.id}" }
+      selection: "id items { id name }"
+      entity: true
+    )
+}
+
+type Cart @key(fields: "id") {
+  id: ID!
+  items: [Item]!
+  result: String
+    @connect(
+      source: "api"
+      http: { POST: "/process", body: "{ item: $this.items->first }" }
+      selection: "$"
+    )
+}
+
+type Item {
+  id: ID!
+  name: String
+}

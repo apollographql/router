@@ -1,5 +1,9 @@
 //! De-duplicate subgraph requests in flight. Implemented as a tower Layer.
 //!
+//! Identical queries in flight share one fetch. Queries that differ only in their operation name
+//! count as identical, so fetch nodes that send the same query and variables to the same subgraph
+//! share a fetch even though the query planner names each one differently.
+//!
 //! See [`Layer`] and [`tower::Service`] for more details.
 
 use std::collections::HashMap;
@@ -37,6 +41,26 @@ where
 }
 
 type CacheKey = (http_ext::Request<Request>, Arc<CacheKeyMetadata>);
+
+/// The key `request` waits under for an identical fetch in flight.
+///
+/// The operation name is left out of the key, both the `operationName` field and the name in
+/// the query text: the planner gives every fetch node its own name, so two fetch nodes that
+/// send the same query with the same variables would otherwise never share a fetch. Requests
+/// reach this layer as the planner wrote them, a single operation starting with
+/// `query <operationName>`. A query in any other shape keeps its name in the key.
+fn cache_key(request: &SubgraphRequest) -> CacheKey {
+    let mut http_request: http_ext::Request<Request> = (&request.subgraph_request).into();
+    let body = http_request.body_mut();
+    if let (Some(name), Some(query)) = (&body.operation_name, &body.query)
+        && let Some(rest) = query.strip_prefix(&format!("query {name}"))
+        && !rest.starts_with(|c: char| c == '_' || c.is_ascii_alphanumeric())
+    {
+        body.query = Some(format!("query{rest}"));
+        body.operation_name = None;
+    }
+    (http_request, request.authorization.clone())
+}
 
 type WaitMap = Arc<Mutex<HashMap<CacheKey, Sender<Result<CloneSubgraphResponse, String>>>>>;
 
@@ -88,10 +112,9 @@ where
         }
         loop {
             let mut locked_wait_map = wait_map.lock().await;
-            let authorization_cache_key = request.authorization.clone();
-            let cache_key = ((&request.subgraph_request).into(), authorization_cache_key);
+            let key = cache_key(&request);
 
-            match locked_wait_map.get_mut(&cache_key) {
+            match locked_wait_map.get_mut(&key) {
                 Some(waiter) => {
                     // Register interest in key
                     let mut receiver = waiter.subscribe();
@@ -117,13 +140,12 @@ where
                 None => {
                     let (tx, _rx) = broadcast::channel(1);
 
-                    locked_wait_map.insert(cache_key, tx.clone());
+                    locked_wait_map.insert(key, tx.clone());
                     drop(locked_wait_map);
 
                     let context = request.context.clone();
-                    let authorization_cache_key = request.authorization.clone();
                     let id = request.id.clone();
-                    let cache_key = ((&request.subgraph_request).into(), authorization_cache_key);
+                    let key = cache_key(&request);
                     let (res, handle) = {
                         // when _drop_signal is dropped, either by getting out of the block, returning
                         // the error from ready_oneshot or by cancellation, the drop_sentinel future will
@@ -132,7 +154,7 @@ where
                         let handle = tokio::task::spawn(async move {
                             let _ = drop_sentinel.await;
                             let mut locked_wait_map = wait_map.lock().await;
-                            locked_wait_map.remove(&cache_key);
+                            locked_wait_map.remove(&key);
                         });
 
                         (
@@ -210,10 +232,13 @@ mod tests {
     use std::sync::atomic::Ordering;
     use std::time::Duration;
 
+    use futures::FutureExt;
+    use serde_json_bytes::json;
     use tower::Service;
     use tower::ServiceExt;
 
     use super::QueryDeduplicationService;
+    use crate::graphql;
     use crate::plugin::test::MockSubgraphService;
     use crate::services::SubgraphRequest;
     use crate::services::SubgraphResponse;
@@ -300,5 +325,143 @@ mod tests {
         res2.expect("fut2 spawned").expect("fut2 joined");
 
         assert_eq!(1, inner_invocation_count.load(Ordering::Relaxed));
+    }
+
+    /// An entity fetch named `operation_name`, the way the query planner names each fetch node.
+    fn entity_fetch(operation_name: &str, upc: &str) -> SubgraphRequest {
+        let body = graphql::Request::fake_builder()
+            .query(format!(
+                "query {operation_name}($representations:[_Any!]!){{_entities(representations:$representations){{...on Product{{name}}}}}}"
+            ))
+            .operation_name(operation_name)
+            .variable(
+                "representations",
+                json!([{ "__typename": "Product", "upc": upc }]),
+            )
+            .build();
+        SubgraphRequest::fake_builder()
+            .subgraph_request(http::Request::new(body))
+            .build()
+    }
+
+    /// Sends `first` and then `second` while `first` is in flight, answers every request that
+    /// reaches the subgraph, and returns how many did.
+    async fn subgraph_requests_for(first: SubgraphRequest, second: SubgraphRequest) -> usize {
+        let (mock, mut handle) = tower_test::mock::pair::<SubgraphRequest, SubgraphResponse>();
+        let mut svc = QueryDeduplicationService::new(mock);
+
+        svc.ready().await.expect("it is ready");
+        let mut fut1 = svc.call(first);
+        svc.ready().await.expect("it is ready");
+        let mut fut2 = svc.call(second);
+        assert!(futures::poll!(&mut fut1).is_pending());
+        assert!(futures::poll!(&mut fut2).is_pending());
+
+        let mut sent = 0;
+        while let Some(Some((req, responder))) = handle.next_request().now_or_never() {
+            sent += 1;
+            responder.send_response(
+                SubgraphResponse::fake_builder()
+                    .context(req.context)
+                    .build(),
+            );
+        }
+        fut1.await.expect("fut1 gets a response");
+        fut2.await.expect("fut2 gets a response");
+        sent
+    }
+
+    #[tokio::test]
+    async fn queries_differing_only_in_operation_name_share_a_fetch() {
+        let sent = subgraph_requests_for(
+            entity_fetch("Op__products__1", "1"),
+            entity_fetch("Op__products__7", "1"),
+        )
+        .await;
+        assert_eq!(sent, 1, "the second fetch node joins the first one's fetch");
+    }
+
+    #[tokio::test]
+    async fn queries_with_different_variables_do_not_share_a_fetch() {
+        let sent = subgraph_requests_for(
+            entity_fetch("Op__products__1", "1"),
+            entity_fetch("Op__products__7", "2"),
+        )
+        .await;
+        assert_eq!(sent, 2, "each fetch node sends its own representations");
+    }
+
+    /// The cache key of a request sending `query` named `operation_name`, with fixed variables.
+    fn test_cache_key(query: &str, operation_name: Option<&str>) -> super::CacheKey {
+        let body = graphql::Request::fake_builder()
+            .query(query)
+            .and_operation_name(operation_name.map(str::to_string))
+            .variable(
+                "representations",
+                json!([{ "__typename": "Product", "upc": "1" }]),
+            )
+            .build();
+        super::cache_key(
+            &SubgraphRequest::fake_builder()
+                .subgraph_request(http::Request::new(body))
+                .build(),
+        )
+    }
+
+    #[test]
+    fn cache_key_leaves_out_only_the_operation_name() {
+        let named_a = test_cache_key(
+            "query A($r:[_Any!]!){_entities(representations:$r){__typename}}",
+            Some("A"),
+        );
+        let named_b = test_cache_key(
+            "query B($r:[_Any!]!){_entities(representations:$r){__typename}}",
+            Some("B"),
+        );
+        assert!(
+            named_a == named_b,
+            "queries differing only in their name share a key"
+        );
+
+        let anonymous = test_cache_key(
+            "query($r:[_Any!]!){_entities(representations:$r){__typename}}",
+            None,
+        );
+        assert!(
+            anonymous == named_a,
+            "an anonymous query is the same query without a name"
+        );
+
+        let other_name = test_cache_key(
+            "query B($r:[_Any!]!){_entities(representations:$r){__typename}}",
+            Some("A"),
+        );
+        assert!(
+            other_name != named_a,
+            "a query naming another operation keeps its name"
+        );
+
+        let other_body = test_cache_key(
+            "query B($r:[_Any!]!){_entities(representations:$r){id}}",
+            Some("B"),
+        );
+        assert!(
+            other_body != named_a,
+            "different query bodies don't share a key"
+        );
+
+        let longer_name = test_cache_key(
+            "query Op__12($r:[_Any!]!){_entities(representations:$r){__typename}}",
+            Some("Op__1"),
+        );
+        // What stripping `Op__1` from `Op__12` without a name boundary would leave.
+        let stripped = test_cache_key(
+            "query2($r:[_Any!]!){_entities(representations:$r){__typename}}",
+            None,
+        );
+        assert!(
+            longer_name != stripped,
+            "the name is only stripped up to a name boundary"
+        );
     }
 }
