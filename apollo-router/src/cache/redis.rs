@@ -989,7 +989,7 @@ impl RedisCacheStorage {
 /// Replica settings for cluster mode, where reads are routed to replicas.
 fn configure_cluster_replicas(replica: &mut ReplicaConfig) {
     // NOTE: this defaults to true in fred but we're intentionally paying attention to
-    // errors becomes sometimes fred gets into a funky state with its redis
+    // errors because sometimes fred gets into a funky state with its redis
     // connections. Sometimes, eg, a brief network outage in whatever cloud provider folks are
     // using can destabilize what fred views as routeable nodes--ignoring errors can
     // get us into a state where fred can't connect to those nodes and we don't know
