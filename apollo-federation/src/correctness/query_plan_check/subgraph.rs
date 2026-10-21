@@ -1,16 +1,18 @@
-//! The federation metadata a subgraph schema carries: `@key`, `@requires`, `@external` and
-//! `@provides`.
+//! The federation metadata a subgraph schema carries: `@key`, `@requires`, `@external`,
+//! `@provides`, `@context` and `@fromContext`.
 //!
 //! The model keeps these beside the schema (`Subgraph.keys`, `Subgraph.requires`,
-//! `Subgraph.resolves`, `Subgraph.provides`) because its `Schema` does not model directives. Here
-//! they are read from the subgraph schema itself, and what the subgraph can resolve from the
-//! metadata the query graph is built from.
+//! `Subgraph.resolves`, `Subgraph.provides`, `Subgraph.contextArguments`, `Subgraph.contextTypes`)
+//! because its `Schema` does not model directives. Here they are read from the subgraph schema
+//! itself, and what the subgraph can resolve from the metadata the query graph is built from.
 //!
 //! Field sets are written as strings in the directives. A `@key` or `@requires` field set is parsed
 //! against the **supergraph** schema, not the subgraph's: it names the requirement the plan must
 //! already have satisfied, and that requirement is compared against selections written in
 //! supergraph terms. A `@provides` field set is parsed against the subgraph's own schema: what it
-//! grants is read against a fetch's operation, which is written in the subgraph's terms.
+//! grants is read against a fetch's operation, which is written in the subgraph's terms. So is a
+//! `@fromContext` selection, at the first type declaring its context, where composition has
+//! validated it; it is read by field name and type condition, which is all a reading of it needs.
 
 use apollo_compiler::Name;
 use apollo_compiler::Node;
@@ -23,12 +25,15 @@ use apollo_compiler::schema::ExtendedType;
 
 use super::ComparisonError;
 use crate::error::FederationError;
+use crate::internal_error;
 use crate::link::federation_spec_definition::FederationSpecDefinition;
 use crate::link::federation_spec_definition::get_federation_spec_definition_from_subgraph;
 use crate::schema::ValidFederationSchema;
+use crate::schema::field_set::parse_field_value_without_validation;
 use crate::schema::position::FieldDefinitionPosition;
 use crate::schema::position::ObjectFieldDefinitionPosition;
 use crate::schema::subgraph_metadata::SubgraphMetadata;
+use crate::schema::validators::from_context::parse_context;
 
 /// One `@key` application on an entity type in a subgraph.
 pub(super) struct KeyDirective {
@@ -37,6 +42,18 @@ pub(super) struct KeyDirective {
     /// Whether the subgraph will resolve the entity from this key. An entity fetch may only rely
     /// on a resolvable key.
     pub(super) resolvable: bool,
+}
+
+/// One `@fromContext` argument of a field: the argument's name, the context it is taken from and
+/// the declaration's selection, the two halves `parse_context` splits the directive's `field` into.
+/// The model's `ContextArgument`.
+#[derive(Clone, PartialEq)]
+pub(super) struct ContextArgument {
+    pub(super) name: Name,
+    pub(super) context: Name,
+    /// Parsed at the first type declaring the context in the subgraph. Composition rejects an
+    /// alias in it, so its fields are read by name.
+    pub(super) selection: Vec<Selection>,
 }
 
 /// A subgraph's federation metadata.
@@ -130,12 +147,19 @@ impl<'a> Subgraph<'a> {
             self.federation.requires_directive_definition(self.schema),
             type_name,
             field_name,
-            |directive| {
-                self.federation
-                    .requires_directive_arguments(directive)
-                    .map(|arguments| arguments.fields.to_string())
+            |field, directive| {
+                field
+                    .directives
+                    .get(directive)
+                    .map(|application| {
+                        self.federation
+                            .requires_directive_arguments(application)
+                            .map(|arguments| arguments.fields.to_string())
+                    })
+                    .transpose()
             },
         )
+        .map(Option::flatten)
     }
 
     /// The `@provides` field set of a field, by parent type and field name, parsed against this
@@ -145,31 +169,124 @@ impl<'a> Subgraph<'a> {
         type_name: &Name,
         field_name: &Name,
     ) -> Result<Option<Vec<Selection>>, ComparisonError> {
-        let fields = self.field_directive(
-            self.federation.provides_directive_definition(self.schema),
-            type_name,
-            field_name,
-            |directive| {
-                self.federation
-                    .provides_directive_arguments(directive)
-                    .map(|arguments| arguments.fields.to_string())
-            },
-        )?;
+        let fields = self
+            .field_directive(
+                self.federation.provides_directive_definition(self.schema),
+                type_name,
+                field_name,
+                |field, directive| {
+                    field
+                        .directives
+                        .get(directive)
+                        .map(|application| {
+                            self.federation
+                                .provides_directive_arguments(application)
+                                .map(|arguments| arguments.fields.to_string())
+                        })
+                        .transpose()
+                },
+            )?
+            .flatten();
         let (Some(fields), Some(field)) = (fields, self.field(type_name, field_name)) else {
             return Ok(None);
         };
         parse_field_set(self.schema, field.ty.inner_named_type(), &fields).map(Some)
     }
 
-    /// The arguments of a federation directive applied to a field, read by `arguments`: `None`
-    /// when the subgraph does not define the directive, does not declare the field, or does not
-    /// apply the directive to it.
+    /// The `@fromContext` arguments of a field, by parent type and field name: the model's
+    /// `Subgraph.contextArguments`.
+    pub(super) fn context_arguments(
+        &self,
+        type_name: &Name,
+        field_name: &Name,
+    ) -> Result<Vec<ContextArgument>, ComparisonError> {
+        self.field_directive(
+            self.federation
+                .from_context_directive_definition(self.schema),
+            type_name,
+            field_name,
+            |field, directive| {
+                field
+                    .arguments
+                    .iter()
+                    .filter_map(|argument| {
+                        let application = argument.directives.get(directive)?;
+                        Some(self.context_argument(&argument.name, application))
+                    })
+                    .collect()
+            },
+        )
+        .map(Option::unwrap_or_default)
+    }
+
+    /// One `@fromContext` application, its `field` split into the context and the selection, and
+    /// the selection parsed at the first type declaring the context.
+    fn context_argument(
+        &self,
+        name: &Name,
+        application: &Node<Directive>,
+    ) -> Result<ContextArgument, FederationError> {
+        let field = self
+            .federation
+            .from_context_directive_arguments(application)?
+            .field;
+        let (Some(context), Some(selection)) = parse_context(field) else {
+            return Err(internal_error!("`{field}` names no context and selection"));
+        };
+        let context = Name::new(&context)?;
+        let Some(declaring_type) = self.declaring_types(&context)?.into_iter().next() else {
+            return Err(internal_error!("no type declares context `{context}`"));
+        };
+        let selection =
+            parse_field_value_without_validation(self.schema, declaring_type, &selection)?
+                .selection_set
+                .selections;
+        Ok(ContextArgument {
+            name: name.clone(),
+            context,
+            selection,
+        })
+    }
+
+    /// The types declaring a context, `@context(name:)` on an object, an interface or a union, in
+    /// the order the schema holds them: the model's `Subgraph.contextTypes`. Extraction writes a
+    /// context into the subgraph under the name the subgraph gave it.
+    pub(super) fn context_types(&self, context: &Name) -> Result<Vec<Name>, ComparisonError> {
+        self.declaring_types(context).map_err(|e| {
+            ComparisonError::new(format!("malformed @context declaring `{context}`: {e}"))
+        })
+    }
+
+    fn declaring_types(&self, context: &Name) -> Result<Vec<Name>, FederationError> {
+        let Ok(definition) = self.federation.context_directive_definition(self.schema) else {
+            return Ok(Vec::new());
+        };
+        let mut types = Vec::new();
+        for (type_name, ty) in &self.schema.schema().types {
+            for application in ty.directives().get_all(&definition.name) {
+                if self
+                    .federation
+                    .context_directive_arguments(application)?
+                    .name
+                    == context.as_str()
+                {
+                    types.push(type_name.clone());
+                }
+            }
+        }
+        Ok(types)
+    }
+
+    /// Reads a federation directive's applications on a field, by parent type and field name:
+    /// `read` is handed the field and the name the directive has in this subgraph, and finds the
+    /// applications on the field or on its arguments. `None` when the subgraph does not define the
+    /// directive or does not declare the field.
     fn field_directive<T>(
         &self,
         definition: Result<&Node<DirectiveDefinition>, FederationError>,
         type_name: &Name,
         field_name: &Name,
-        arguments: impl FnOnce(&Node<Directive>) -> Result<T, FederationError>,
+        read: impl FnOnce(&'a Node<ast::FieldDefinition>, &Name) -> Result<T, FederationError>,
     ) -> Result<Option<T>, ComparisonError> {
         let Ok(definition) = definition else {
             return Ok(None);
@@ -177,10 +294,7 @@ impl<'a> Subgraph<'a> {
         let Some(field) = self.field(type_name, field_name) else {
             return Ok(None);
         };
-        let Some(directive) = field.directives.get(&definition.name) else {
-            return Ok(None);
-        };
-        arguments(directive).map(Some).map_err(|e| {
+        read(field, &definition.name).map(Some).map_err(|e| {
             ComparisonError::new(format!(
                 "malformed @{} on {type_name}.{field_name}: {e}",
                 definition.name

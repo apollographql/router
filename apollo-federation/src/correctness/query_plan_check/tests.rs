@@ -1345,3 +1345,507 @@ fn the_extracted_shop_reads_its_externals_as_written() {
     assert!(metadata.is_field_external(&field(name!("Brand"), name!("id"))));
     assert!(metadata.is_field_external(&field(name!("Vendor"), name!("name"))));
 }
+
+//==================================================================================================
+// Contextual arguments: bound, and read from their declaration
+//
+// A field with a `@fromContext` argument is resolved with a value the router reads from above it
+// and passes as a variable a context rewrite binds. Every such argument a fetch's operation passes
+// has to be passed a variable one of its rewrites binds, and every rewrite binding one has to read,
+// through what was fetched, a leaf of the declaration off an object setting the context. Each test
+// below is the port of a theorem of the model's `ContextArguments` tests, named in its comment,
+// over the world `context_arguments.graphql` describes: an accepted plan is the planner's, and a
+// rejected one the planner's edited as its comment says.
+//
+// A rewrite climbing past the nearest object setting the context to another that sets it too
+// reads a value of the declared shape from the wrong object, and is accepted: which setter is the
+// nearest is not asked, and no test here asserts that verdict.
+
+fn context_fixture() -> Fixture {
+    Fixture::new(include_str!("testdata/context_arguments.graphql"))
+}
+
+/// Where the planner's plans for the context world keep the first fetch's operation, from
+/// `directory`, and the second fetch, to `stores`.
+const DIRECTORY_OPERATION: &str = "/Sequence/nodes/0/Fetch/operation_document";
+const STORES_FETCH: &str = "/Sequence/nodes/1/Flatten/node/Fetch";
+
+/// A plan from `testdata/plans/`, edited as JSON before it is read.
+fn edited_plan(
+    fixture: &Fixture,
+    plan: &str,
+    edit: impl FnOnce(&mut serde_json::Value),
+) -> QueryPlan {
+    let mut plan: serde_json::Value = serde_json::from_str(plan).expect("valid plan json");
+    edit(&mut plan);
+    fixture.written_plan(&plan.to_string())
+}
+
+/// Replaces the one occurrence of `from` in the string at the JSON pointer `at`.
+fn replace_once(plan: &mut serde_json::Value, at: &str, from: &str, to: &str) {
+    let value = plan.pointer_mut(at).expect("a value at the pointer");
+    let text = value.as_str().expect("a string at the pointer");
+    assert_eq!(text.matches(from).count(), 1, "`{from}` in `{text}`");
+    *value = serde_json::Value::String(text.replacen(from, to, 1));
+}
+
+/// Sets the value at the JSON pointer `at`.
+fn set(plan: &mut serde_json::Value, at: &str, value: serde_json::Value) {
+    *plan.pointer_mut(at).expect("a value at the pointer") = value;
+}
+
+/// The path of the stores fetch's context rewrite `index`.
+fn rewrite_path(index: usize) -> String {
+    format!("{STORES_FETCH}/context_rewrites/{index}/KeyRenamer/path")
+}
+
+/// A rewrite path climbing `climb` levels to an object of `type_name` and reading its `key`.
+fn reading(climb: usize, type_name: &str, key: &str) -> serde_json::Value {
+    let mut path = vec![serde_json::json!("Parent"); climb];
+    path.push(serde_json::json!({ "TypenameEquals": type_name }));
+    path.push(serde_json::json!({ "Key": [key, null] }));
+    serde_json::Value::Array(path)
+}
+
+fn assert_rejected_for(fixture: &Fixture, plan: &QueryPlan, operation: &str, clause: &str) {
+    let error = fixture.rejection(plan, operation);
+    assert!(error.contains(clause), "{error}");
+}
+
+const STORE_OFFERS_LABEL: &str = "{ regions { stores { offers { label } } } }";
+
+/// The binding clause of `Offer.label`'s `locale`.
+const LABEL_LOCALE: &str = "`Offer.label` takes `locale` from context `locality`, and the fetch";
+
+const NOT_FETCHED: &str = "is not always fetched where the fetch runs";
+
+const NOT_A_LEAF: &str = "not a leaf of the declaration's selection there";
+
+// `label` is passed a variable a rewrite binds to `locale` read off the store one level up, an
+// object setting `locality`. The planner's plan. The model's
+// `contextualArgumentBoundAndReadIsAccepted`.
+//
+// A control of preserved behaviour.
+#[test]
+fn a_contextual_argument_bound_and_read_is_accepted() {
+    let fixture = context_fixture();
+    let plan = fixture.written_plan(plan_json!("regions_stores_offers_label"));
+    fixture.check(&plan, STORE_OFFERS_LABEL).unwrap();
+}
+
+/// The planner's plan for `label` below each store with the stores fetch's `label` passed
+/// `argument`, its variable undeclared, and no context rewrite.
+fn label_passed(fixture: &Fixture, argument: &str) -> QueryPlan {
+    edited_plan(fixture, plan_json!("regions_stores_offers_label"), |plan| {
+        let operation = format!("{STORES_FETCH}/operation_document");
+        replace_once(
+            plan,
+            &operation,
+            "label(locale: $contextualArgument_2_0)",
+            argument,
+        );
+        replace_once(plan, &operation, ", $contextualArgument_2_0: String", "");
+        set(
+            plan,
+            &format!("{STORES_FETCH}/variable_usages"),
+            serde_json::json!([]),
+        );
+        set(
+            plan,
+            &format!("{STORES_FETCH}/context_rewrites"),
+            serde_json::json!([]),
+        );
+    })
+}
+
+// `label` is selected with no `locale` and the fetch declares no rewrite, so `stores` resolves it
+// with no value where its declaration takes the store's. Nothing but the binding obligation sees
+// this: the fetch declares no rewrite to be checked, and still fetches the `label` asked for. The
+// model's `argumentAndRewriteBothOmittedIsRejected`.
+//
+// A control of changed behaviour.
+#[test]
+fn an_argument_and_its_rewrite_both_omitted_are_rejected() {
+    let fixture = context_fixture();
+    let plan = label_passed(&fixture, "label");
+    assert_rejected_for(
+        &fixture,
+        &plan,
+        STORE_OFFERS_LABEL,
+        &format!("{LABEL_LOCALE} passes it no variable a context rewrite binds"),
+    );
+}
+
+// `label` is passed a variable no rewrite binds, which reaches `stores` with no value. The model's
+// `argumentPassedWithNoRewriteIsRejected`.
+//
+// The verdict is preserved and the clause asserted changed: before, completeness rejected the plan,
+// reading the argument as the client's. The model satisfies the client's demand from another
+// subgraph so that binding alone rejects; no other subgraph here resolves `label`, and the clause
+// is what holds the binding obligation responsible.
+#[test]
+fn an_argument_passed_with_no_rewrite_is_rejected() {
+    let fixture = context_fixture();
+    let plan = edited_plan(
+        &fixture,
+        plan_json!("regions_stores_offers_label"),
+        |plan| {
+            set(
+                plan,
+                &format!("{STORES_FETCH}/context_rewrites"),
+                serde_json::json!([]),
+            );
+        },
+    );
+    assert_rejected_for(
+        &fixture,
+        &plan,
+        STORE_OFFERS_LABEL,
+        &format!(
+            "{LABEL_LOCALE} passes it `$contextualArgument_2_0`, which none of its context \
+             rewrites binds"
+        ),
+    );
+}
+
+// `label` is passed a literal where its declaration takes the context's value: a literal is no
+// variable a rewrite binds. The model's `argumentPassedALiteralIsRejected`.
+//
+// The verdict is preserved and the clause asserted changed, as for the variable no rewrite binds.
+#[test]
+fn an_argument_passed_a_literal_is_rejected() {
+    let fixture = context_fixture();
+    let plan = label_passed(&fixture, "label(locale: \"en\")");
+    assert_rejected_for(
+        &fixture,
+        &plan,
+        STORE_OFFERS_LABEL,
+        &format!("{LABEL_LOCALE} passes it no variable a context rewrite binds"),
+    );
+}
+
+/// The planner's plan for `label` below each store with `directory`'s selection of the store's
+/// `locale` written as `store_locale` and the rewrite's path as `rewrite`.
+fn label_reading(fixture: &Fixture, store_locale: &str, rewrite: serde_json::Value) -> QueryPlan {
+    edited_plan(fixture, plan_json!("regions_stores_offers_label"), |plan| {
+        replace_once(
+            plan,
+            DIRECTORY_OPERATION,
+            "stores { __typename locale offers",
+            &format!("stores {{ __typename {store_locale} offers"),
+        );
+        set(plan, &rewrite_path(0), rewrite);
+    })
+}
+
+// The rewrite climbs to the store, which sets `locality`, but reads its `id` where the declaration
+// selects `{ locale }`. The `id` is fetched, so only the declaration tells. The model's
+// `rewriteReadingAnotherLeafIsRejected`.
+//
+// A control of changed behaviour.
+#[test]
+fn a_rewrite_reading_another_leaf_is_rejected() {
+    let fixture = context_fixture();
+    let plan = label_reading(&fixture, "id locale", reading(1, "Store", "id"));
+    assert_rejected_for(&fixture, &plan, STORE_OFFERS_LABEL, NOT_A_LEAF);
+}
+
+// `directory` put the store's `currency` under the response key `locale`, and the rewrite reads
+// that key: the router forwards the currency, whatever the key is called, so it is the field under
+// the key that is compared with the declaration. The model's `aliasedWrongFieldIsRejected`.
+//
+// A control of changed behaviour.
+#[test]
+fn an_aliased_wrong_field_is_rejected() {
+    let fixture = context_fixture();
+    let plan = label_reading(&fixture, "locale: currency", reading(1, "Store", "locale"));
+    assert_rejected_for(
+        &fixture,
+        &plan,
+        STORE_OFFERS_LABEL,
+        &format!("on `Store` holds `currency`, {NOT_A_LEAF}"),
+    );
+}
+
+// `directory` put the store's `locale` under the response key `ctxLocale`, and the rewrite reads
+// that key, under which the declared field sits. The model's `aliasedDeclaredFieldIsAccepted`.
+//
+// A control of preserved behaviour, which a reading comparing the key's spelling would fail.
+#[test]
+fn an_aliased_declared_field_is_accepted() {
+    let fixture = context_fixture();
+    let plan = label_reading(
+        &fixture,
+        "ctxLocale: locale",
+        reading(1, "Store", "ctxLocale"),
+    );
+    fixture.check(&plan, STORE_OFFERS_LABEL).unwrap();
+}
+
+// A type guard after the last key, on the value itself: the `locale` read is a `String`, no object
+// matches the guard, and the router supplies no argument. The model's
+// `typeGuardAfterTheLeafIsRejected`.
+//
+// A control of changed behaviour: a copy narrowed to nothing at the level its path ends at was
+// still a copy, and the value was found.
+#[test]
+fn a_type_guard_after_the_leaf_is_rejected() {
+    let fixture = context_fixture();
+    let mut rewrite = reading(1, "Store", "locale");
+    rewrite
+        .as_array_mut()
+        .expect("a path")
+        .push(serde_json::json!({ "TypenameEquals": "Offer" }));
+    let plan = label_reading(&fixture, "locale", rewrite);
+    assert_rejected_for(&fixture, &plan, STORE_OFFERS_LABEL, NOT_FETCHED);
+}
+
+// No department's offers are fetched, so the fetch runs at the stores' offers alone, and its
+// rewrite, written for either member, reads the store's `locale`. The department's `locale` key,
+// which holds its currency, is one no execution of the fetch reads, and is not judged. The
+// planner's plan for the stores' offers, with the departments' `locale: currency` fetched and the
+// rewrite's type guard dropped. The model's `rewriteReadsOnlyWhereTheFetchRunsIsAccepted`.
+//
+// A control of preserved behaviour, which a reading judging every copy the path reaches would fail.
+#[test]
+fn a_rewrite_reads_only_where_the_fetch_runs_and_is_accepted() {
+    let fixture = context_fixture();
+    let plan = edited_plan(&fixture, plan_json!("outlets_store_offers_label"), |plan| {
+        replace_once(
+            plan,
+            DIRECTORY_OPERATION,
+            "offers { __typename id } } } }",
+            "offers { __typename id } } ... on Department { locale: currency } } }",
+        );
+        set(
+            plan,
+            &rewrite_path(0),
+            serde_json::json!(["Parent", { "Key": ["locale", null] }]),
+        );
+    });
+    fixture
+        .check(&plan, "{ outlets { ... on Store { offers { label } } } }")
+        .unwrap();
+}
+
+const STORE_OFFERS_PRICE: &str = "{ regions { stores { offers { price } } } }";
+
+// Each of `price`'s arguments is bound by its own rewrite to the leaf its declaration selects off
+// the store. The planner's plan. The model's `twoArgumentsEachBoundToTheirOwnLeafAreAccepted`.
+//
+// A control of preserved behaviour.
+#[test]
+fn two_arguments_each_bound_to_their_own_leaf_are_accepted() {
+    let fixture = context_fixture();
+    let plan = fixture.written_plan(plan_json!("regions_stores_offers_price"));
+    fixture.check(&plan, STORE_OFFERS_PRICE).unwrap();
+}
+
+// Each variable is bound to the other's leaf, so `stores` is sent the currency as `locale` and the
+// locale as `currency`. Both are `String` and both are fetched, so only the declaration tells. The
+// model's `twoArgumentsBoundToEachOthersLeavesAreRejected`.
+//
+// A control of changed behaviour.
+#[test]
+fn two_arguments_bound_to_each_others_leaves_are_rejected() {
+    let fixture = context_fixture();
+    let plan = edited_plan(
+        &fixture,
+        plan_json!("regions_stores_offers_price"),
+        |plan| {
+            set(plan, &rewrite_path(0), reading(1, "Store", "currency"));
+            set(plan, &rewrite_path(1), reading(1, "Store", "locale"));
+        },
+    );
+    assert_rejected_for(&fixture, &plan, STORE_OFFERS_PRICE, NOT_A_LEAF);
+}
+
+// The rewrite climbs past the store to the region, which does not set `locality`, and reads the
+// region's own `locale`, which is fetched. The model's `rewriteClimbingToANonSetterIsRejected`.
+//
+// A control of changed behaviour.
+#[test]
+fn a_rewrite_climbing_to_a_non_setter_is_rejected() {
+    let fixture = context_fixture();
+    let plan = edited_plan(
+        &fixture,
+        plan_json!("regions_stores_offers_label"),
+        |plan| {
+            replace_once(
+                plan,
+                DIRECTORY_OPERATION,
+                "{ regions { stores {",
+                "{ regions { __typename locale stores {",
+            );
+            set(plan, &rewrite_path(0), reading(2, "Region", "locale"));
+        },
+    );
+    assert_rejected_for(
+        &fixture,
+        &plan,
+        STORE_OFFERS_LABEL,
+        "which climbs to `Region`, a type declaring no context `locality`",
+    );
+}
+
+// The rewrite reads `locale` off the department, the nearest of the two objects above the offer
+// that set `locality`. The planner's plan. The model's `rewriteReadingTheNearestSetterIsAccepted`.
+//
+// A control of preserved behaviour.
+#[test]
+fn a_rewrite_reading_the_nearest_setter_is_accepted() {
+    let fixture = context_fixture();
+    let plan = fixture.written_plan(plan_json!("regions_stores_departments_offers_label"));
+    fixture
+        .check(
+            &plan,
+            "{ regions { stores { departments { offers { label } } } } }",
+        )
+        .unwrap();
+}
+
+/// A planner's plan for the offers' `label` below each store and department, an interface's members
+/// or a union's, with the department's rewrite dropped.
+fn department_unread(plan: &str, fixture: &Fixture) -> QueryPlan {
+    edited_plan(fixture, plan, |plan| {
+        plan.pointer_mut(&format!("{STORES_FETCH}/context_rewrites"))
+            .and_then(serde_json::Value::as_array_mut)
+            .expect("the rewrites")
+            .remove(1);
+    })
+}
+
+/// The same plan with the department's rewrite reading its `currency`, which `directory` then
+/// fetches.
+fn department_misread(plan: &str, fixture: &Fixture) -> QueryPlan {
+    edited_plan(fixture, plan, |plan| {
+        replace_once(
+            plan,
+            DIRECTORY_OPERATION,
+            "... on Department { __typename locale offers",
+            "... on Department { __typename locale currency offers",
+        );
+        set(plan, &rewrite_path(1), reading(1, "Department", "currency"));
+    })
+}
+
+const OUTLETS_MEMBERS_OFFERS_LABEL: &str =
+    "{ outlets { ... on Store { offers { label } } ... on Department { offers { label } } } }";
+
+// An outlet is a store or a department, both setting `locality`: one variable is bound by a rewrite
+// per type, each reading the declared leaf, and the router takes the value from the one that finds
+// it. The planner's plan, which selects the interface's members by fragment; the model selects the
+// interface's fields unsplit, which the planner does not plan. The model's
+// `oneRewritePerSetterIsAccepted`.
+//
+// A control of preserved behaviour.
+#[test]
+fn one_rewrite_per_setter_is_accepted() {
+    let fixture = context_fixture();
+    let plan = fixture.written_plan(plan_json!("outlets_members_offers_label"));
+    fixture.check(&plan, OUTLETS_MEMBERS_OFFERS_LABEL).unwrap();
+}
+
+// Only the store's rewrite remains, so an offer under a department is sent no `locale`. The model's
+// `oneSetterLeftUnreadIsRejected`.
+//
+// A control of preserved behaviour.
+#[test]
+fn one_setter_left_unread_is_rejected() {
+    let fixture = context_fixture();
+    let plan = department_unread(plan_json!("outlets_members_offers_label"), &fixture);
+    assert_rejected_for(&fixture, &plan, OUTLETS_MEMBERS_OFFERS_LABEL, NOT_FETCHED);
+}
+
+// The department's rewrite reads `currency` where the declaration selects `{ locale }`. Every
+// outlet still binds a value, so only the declaration tells. The model's
+// `oneSetterMisreadIsRejected`.
+//
+// A control of changed behaviour.
+#[test]
+fn one_setter_misread_is_rejected() {
+    let fixture = context_fixture();
+    let plan = department_misread(plan_json!("outlets_members_offers_label"), &fixture);
+    assert_rejected_for(
+        &fixture,
+        &plan,
+        OUTLETS_MEMBERS_OFFERS_LABEL,
+        &format!("on `Department` holds `currency`, {NOT_A_LEAF}"),
+    );
+}
+
+// A context declared on an interface is set by its members, which the rewrites read off, and the
+// declaration's `locale` is read on the interface. The planner's plan for `note`, which takes its
+// `locale` from `outlet`, declared on `Outlet`. The model's
+// `contextDeclaredOnAnInterfaceIsReadOnItsMembersIsAccepted`.
+//
+// A control of preserved behaviour.
+#[test]
+fn a_context_declared_on_an_interface_is_read_on_its_members_and_accepted() {
+    let fixture = context_fixture();
+    let plan = fixture.written_plan(plan_json!("outlets_offers_note"));
+    fixture
+        .check(&plan, "{ outlets { offers { note } } }")
+        .unwrap();
+}
+
+const VENUES_OFFERS_LABEL: &str =
+    "{ venues { ... on Store { offers { label } } ... on Department { offers { label } } } }";
+
+// Both members of the union set `locality`, and a rewrite per member reads the declared leaf off
+// it. The planner's plan. The model's `oneRewritePerUnionMemberIsAccepted`.
+//
+// A control of preserved behaviour.
+#[test]
+fn one_rewrite_per_union_member_is_accepted() {
+    let fixture = context_fixture();
+    let plan = fixture.written_plan(plan_json!("venues_offers_label"));
+    fixture.check(&plan, VENUES_OFFERS_LABEL).unwrap();
+}
+
+// Only the store's rewrite remains, so an offer under a department of the union is sent no
+// `locale`. The model's `unionMemberLeftUnreadIsRejected`.
+//
+// A control of preserved behaviour.
+#[test]
+fn a_union_member_left_unread_is_rejected() {
+    let fixture = context_fixture();
+    let plan = department_unread(plan_json!("venues_offers_label"), &fixture);
+    assert_rejected_for(&fixture, &plan, VENUES_OFFERS_LABEL, NOT_FETCHED);
+}
+
+// The department's rewrite reads `currency`, and the value is there: only the declaration tells,
+// and only a path follower that keeps the member's object below the union's fragment reaches it.
+// The model's `unionMemberMisreadIsRejected`.
+//
+// A control of changed behaviour.
+#[test]
+fn a_union_member_misread_is_rejected() {
+    let fixture = context_fixture();
+    let plan = department_misread(plan_json!("venues_offers_label"), &fixture);
+    assert_rejected_for(
+        &fixture,
+        &plan,
+        VENUES_OFFERS_LABEL,
+        &format!("on `Department` holds `currency`, {NOT_A_LEAF}"),
+    );
+}
+
+// A context declared on a union selects its `__typename`, which every union has though it declares
+// no field, and each member's fetched tag is read by the rewrite on it. The planner's plan for
+// `tag`, which takes its `kind` from `venue`, declared on `Venue`. The model's
+// `contextOnAUnionReadsItsTypenameIsAccepted`.
+//
+// A control of preserved behaviour, which a reading looking `__typename` up among the declared
+// fields would fail.
+#[test]
+fn a_context_on_a_union_reads_its_typename_and_is_accepted() {
+    let fixture = context_fixture();
+    let plan = fixture.written_plan(plan_json!("venues_offers_tag"));
+    fixture
+        .check(
+            &plan,
+            "{ venues { ... on Store { offers { tag } } ... on Department { offers { tag } } } }",
+        )
+        .unwrap();
+}
