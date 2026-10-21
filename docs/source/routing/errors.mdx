@@ -182,6 +182,11 @@ The operation was not executed due to exceeding the `max_root_fields` limit.
 The operation was not executed because safelisting is enabled and the freeform GraphQL document provided was not found in the persisted query safelist.
 
 </Property>
+<Property name="QUERY_PLAN_COMPLEXITY_EXCEEDED">
+
+The operation was not executed because query planning exceeded a complexity limit: the non-local selections limit, the `supergraph.query_planning.experimental_paths_limit` option, or the cap on path combinations.
+
+</Property>
 <Property name="PERSISTED_QUERY_HASH_MISMATCH">
 
 The operation was not executed due to a mismatch with the automatic persisted query (APQ) protocol.
