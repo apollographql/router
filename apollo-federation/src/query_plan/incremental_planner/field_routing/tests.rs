@@ -590,50 +590,50 @@ fn requires_fields_added_to_fetch() {
 fn requires_unresolvable_locally_hops_through_owning_subgraph() {
     let plan_str = plan_query(REQUIRES_SCHEMA, "{ productInB { shippingCost } }");
     insta::assert_snapshot!(plan_str, @r###"
-        QueryPlan {
-          Sequence {
-            Fetch(service: "b") {
-              {
-                productInB {
-                  __typename
-                  id
-                }
+    QueryPlan {
+      Sequence {
+        Fetch(service: "b") {
+          {
+            productInB {
+              __typename
+              id
+            }
+          }
+        },
+        Flatten(path: "productInB") {
+          Fetch(service: "a") {
+            {
+              ... on Product {
+                __typename
+                id
               }
-            },
-            Flatten(path: "productInB") {
-              Fetch(service: "a") {
-                {
-                  ... on Product {
-                    __typename
-                    id
-                  }
-                } =>
-                {
-                  ... on Product {
-                    __require_0_weight: weight
-                  }
-                }
-              },
-            },
-            Flatten(path: "productInB") {
-              Fetch(service: "b") {
-                {
-                  ... on Product {
-                    __typename
-                    id
-                    __require_0_weight: weight
-                  }
-                } =>
-                {
-                  ... on Product {
-                    shippingCost
-                  }
-                }
-              },
-            },
+            } =>
+            {
+              ... on Product {
+                weight
+              }
+            }
           },
-        }
-        "###);
+        },
+        Flatten(path: "productInB") {
+          Fetch(service: "b") {
+            {
+              ... on Product {
+                __typename
+                id
+                weight
+              }
+            } =>
+            {
+              ... on Product {
+                shippingCost
+              }
+            }
+          },
+        },
+      },
+    }
+    "###);
 }
 
 /// @requires whose field set walks through a *locally resolvable* field
@@ -652,11 +652,11 @@ fn requires_through_local_field_resolves_nested_parts() {
             "Plan should fetch {needle:?}: {plan_str}"
         );
     }
-    // The nested hops must merge at C's `a` (aliased as a @requires
-    // condition), i.e. path a.c.__require_0_a, not at the top-level `a`.
+    // The nested hops must merge at C's `a`, i.e. path a.c.a, not at the
+    // top-level `a`.
     assert!(
-        plan_str.contains("a.c.__require_0_a"),
-        "Nested requires parts should merge under a.c.__require_0_a: {plan_str}"
+        plan_str.contains(r#"Flatten(path: "a.c.a")"#),
+        "Nested requires parts should merge under a.c.a: {plan_str}"
     );
 }
 
@@ -2153,11 +2153,9 @@ fn entity_shareable_field_filters_inconsistent_union_members() {
 /// A field with locally-unresolvable @requires reached through an
 /// @include-gated fragment: the same-subgraph entity re-fetch must carry the
 /// gating fragment into its op path (or the hopped selection loses its
-/// condition), and boolean conditions on the path disable condition-field
-/// sharing.
+/// condition), while the condition input itself is fetched unconditionally.
 /// Targets requires.rs trailing_condition_fragments on the self-key-hop
-/// commit path (routing.rs self_key_hop -> commit.rs target_paths) and
-/// path_has_boolean_conditions in shareable_condition_fields.
+/// commit path (routing.rs self_key_hop -> commit.rs target_paths).
 #[test]
 fn requires_under_include_fragment_keeps_condition_on_entity_fetch() {
     let plan_str = plan_query(
@@ -2185,7 +2183,7 @@ fn requires_under_include_fragment_keeps_condition_on_entity_fetch() {
             } =>
             {
               ... on Product {
-                __require_0_weight: weight
+                weight
               }
             }
           },
@@ -2197,7 +2195,7 @@ fn requires_under_include_fragment_keeps_condition_on_entity_fetch() {
                 ... on Product {
                   __typename
                   id
-                  __require_0_weight: weight
+                  weight
                 }
               } =>
               {
@@ -2213,13 +2211,12 @@ fn requires_under_include_fragment_keeps_condition_on_entity_fetch() {
     "###);
 }
 
-/// A key-hop @requires reached through an @include-gated fragment: boolean
-/// conditions on the anchor path make condition-field sharing unprovable, so
-/// the condition is aliased instead of deduped with any user selection.
-/// Targets requires.rs path_has_boolean_conditions in
-/// shareable_condition_fields.
+/// A key-hop @requires reached through an @include-gated fragment: a gate on
+/// the anchor path does not change which field a response key holds, so the
+/// condition keeps its own name.
+/// Targets response_keys.rs condition_needs_alias.
 #[test]
-fn key_hop_requires_under_include_fragment_uses_alias() {
+fn key_hop_requires_under_include_fragment_shares_condition_key() {
     let plan_str = plan_query(
         &requires_key_hop_schema(),
         "query($v: Boolean!) { product { ... on Product @include(if: $v) { shippingEstimate } } }",
@@ -2229,8 +2226,8 @@ fn key_hop_requires_under_include_fragment_uses_alias() {
         "Plan should fetch shippingEstimate: {plan_str}"
     );
     assert!(
-        plan_str.contains("__require"),
-        "Gated condition must be aliased, not shared: {plan_str}"
+        !plan_str.contains("__require"),
+        "Nothing else uses the condition's key, so it needs no alias: {plan_str}"
     );
 }
 
@@ -5039,7 +5036,7 @@ fn connector_requires_partly_in_shape_routes_only_missing_fields() {
         include_str!("../fixtures/connector_requires_partly_in_shape.graphql"),
         "{ products { shippingEstimate } }",
     );
-    insta::assert_snapshot!(plan_str, @r#"
+    insta::assert_snapshot!(plan_str, @r###"
     QueryPlan {
       Sequence {
         Fetch(service: "products_Query_products_0") {
@@ -5047,7 +5044,7 @@ fn connector_requires_partly_in_shape_routes_only_missing_fields() {
             products {
               __typename
               id
-              __require_1_name: name
+              name
             }
           }
         },
@@ -5061,7 +5058,7 @@ fn connector_requires_partly_in_shape_routes_only_missing_fields() {
             } =>
             {
               ... on Product {
-                __require_0_weight: weight
+                weight
               }
             }
           },
@@ -5072,8 +5069,8 @@ fn connector_requires_partly_in_shape_routes_only_missing_fields() {
               ... on Product {
                 __typename
                 id
-                __require_0_weight: weight
-                __require_1_name: name
+                weight
+                name
               }
             } =>
             {
@@ -5085,7 +5082,7 @@ fn connector_requires_partly_in_shape_routes_only_missing_fields() {
         },
       },
     }
-    "#);
+    "###);
 }
 
 /// `/products` returns `sku` but not `id` of the `id sku` key, and

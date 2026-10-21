@@ -84,7 +84,47 @@ fn assert_no_extra_fetches(planner: &BulbTwinPlanner, operation: &str) -> (Query
         "incremental planner used {bulb_fetches} fetches, legacy used {legacy_fetches}\n\
          --- legacy ---\n{legacy}\n--- incremental ---\n{bulb}",
     );
+    check_unaliased_plan(planner, &document, &bulb);
     (legacy, bulb)
+}
+
+/// The correctness checker rejects the input rewrites that undo condition
+/// aliases, so only plans without them can be checked.
+#[track_caller]
+fn check_unaliased_plan(
+    planner: &BulbTwinPlanner,
+    document: &apollo_compiler::validation::Valid<apollo_compiler::ExecutableDocument>,
+    plan: &QueryPlan,
+) {
+    if plan.to_string().contains("__require_") {
+        return;
+    }
+    let bulb = planner.bulb();
+    if let Err(err) = apollo_federation::correctness::check_plan(
+        bulb.api_schema(),
+        bulb.supergraph_schema(),
+        bulb.subgraph_schemas(),
+        document,
+        plan,
+    ) {
+        panic!("incremental plan failed check_plan: {err}\n{plan}");
+    }
+}
+
+#[track_caller]
+fn plan_bulb(planner: &BulbTwinPlanner, operation: &str) -> QueryPlan {
+    let document = apollo_compiler::ExecutableDocument::parse_and_validate(
+        planner.api_schema().schema(),
+        operation,
+        "operation.graphql",
+    )
+    .expect("valid graphql document");
+    let plan = planner
+        .bulb()
+        .build_query_plan(&document, None, Default::default())
+        .expect("incremental plan");
+    check_unaliased_plan(planner, &document, &plan);
+    plan
 }
 
 /// S1 owns `T.listing`, S2 owns the listing's fields, and S3 computes
@@ -200,4 +240,82 @@ fn req_client_field_lets_condition_ride_its_fetch() {
 fn req_two_consumers_with_client_field_share_fetch() {
     let planner = twin_planner!(S1: LISTING_S1, S2: LISTING_S2, S3: LISTING_S3);
     assert_no_extra_fetches(&planner, "{ t { price weight listing { name } } }");
+}
+
+/// The client puts a different field under the condition field's response
+/// key, so the condition cannot share it and must be aliased.
+#[test]
+fn req_client_alias_on_condition_key_forces_alias() {
+    let planner = twin_planner!(
+        S1: r#"
+            type Query { t: T }
+            type T @key(fields: "id") { id: ID! listing: Listing other: Listing }
+            type Listing @key(fields: "id") { id: ID! }
+        "#,
+        S2: LISTING_S2,
+        S3: LISTING_S3,
+    );
+    let plan = plan_bulb(&planner, "{ t { listing: other { name } price } }");
+    let rendered = plan.to_string();
+    assert!(
+        rendered.contains("__require_0_listing: listing"),
+        "the client's `listing` key holds `other`, so the condition needs an alias:\n{rendered}",
+    );
+}
+
+/// Two conditions walk the same field but disagree on a nested field's
+/// arguments. Sharing the top-level key would put both `cost` selections
+/// under one response key, so each condition needs its own alias.
+#[test]
+fn req_nested_argument_conflict_between_conditions_forces_aliases() {
+    let planner = twin_planner!(
+        S1: LISTING_S1,
+        S2: r#"
+            type Listing @key(fields: "id") { id: ID! cost(currency: String!): Int }
+        "#,
+        S3: r#"
+            type T @key(fields: "id") {
+                id: ID!
+                listing: Listing @external
+                usd: Int @requires(fields: "listing { cost(currency: \"USD\") }")
+                eur: Int @requires(fields: "listing { cost(currency: \"EUR\") }")
+            }
+            type Listing @key(fields: "id") { id: ID! cost(currency: String!): Int @external }
+        "#,
+    );
+    let plan = plan_bulb(&planner, "{ t { usd eur } }");
+    let rendered = plan.to_string();
+    assert!(
+        rendered.contains("__require_0_listing: listing")
+            && rendered.contains("__require_1_listing: listing"),
+        "conflicting nested arguments need two aliases:\n{rendered}",
+    );
+}
+
+/// Two consumers need the same aliased condition. They share the alias, so
+/// the condition is fetched once and both consumers read it from one
+/// entity fetch.
+#[test]
+fn req_identical_aliased_conditions_share_one_fetch() {
+    let planner = twin_planner!(
+        S1: LISTING_S1,
+        S2: r#"
+            type Listing @key(fields: "id") { id: ID! cost(currency: String!): Int }
+        "#,
+        S3: r#"
+            type T @key(fields: "id") {
+                id: ID!
+                listing: Listing @external
+                price: Int @requires(fields: "listing { cost(currency: \"USD\") }")
+                tax: Int @requires(fields: "listing { cost(currency: \"USD\") }")
+            }
+            type Listing @key(fields: "id") { id: ID! cost(currency: String!): Int @external }
+        "#,
+    );
+    let (_, bulb) = assert_no_extra_fetches(&planner, "{ t { price tax } }");
+    let rendered = bulb.to_string();
+    assert!(
+        rendered.contains("__require_0_listing: listing") && !rendered.contains("__require_1_"),
+        "both conditions should share one alias:\n{rendered}",
+    );
 }
