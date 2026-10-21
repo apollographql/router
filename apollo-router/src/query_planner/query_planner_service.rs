@@ -528,19 +528,21 @@ impl QueryPlannerService {
                 )
                 .map_err(QueryPlannerError::from)?;
                 selections.unauthorized.paths = paths;
-            }
-        }
 
-        if key.filtered_query != key.original_query {
-            let mut filtered = self
-                .parse_selections(
-                    key.filtered_query.clone(),
-                    key.operation_name.as_deref(),
-                    &doc,
-                )
-                .await?;
-            filtered.is_original = false;
-            selections.filtered_query = Some(Arc::new(filtered));
+                // Only a filtered operation needs the extra formatting pass in
+                // `Query::format_response_filtered_then_original`. Comparing query strings
+                // can't tell: `key.filtered_query` is re-printed, so it differs from the
+                // client's text even when nothing was filtered.
+                let mut filtered = self
+                    .parse_selections(
+                        key.filtered_query.clone(),
+                        key.operation_name.as_deref(),
+                        &doc,
+                    )
+                    .await?;
+                filtered.is_original = false;
+                selections.filtered_query = Some(Arc::new(filtered));
+            }
         }
 
         self.plan(
@@ -1108,6 +1110,76 @@ mod tests {
             plan.root.is_none(),
             "the plan must carry no fetches when every requested field failed authorization"
         );
+        assert_eq!(
+            plan.query
+                .unauthorized
+                .paths
+                .first()
+                .map(ToString::to_string),
+            Some("/me".to_string())
+        );
+    }
+
+    /// Plans `query` against the authorization fixture schema as an unauthenticated
+    /// request.
+    async fn plan_auth_fixture(configuration: Configuration, query: &str) -> Arc<QueryPlan> {
+        let configuration = Arc::new(configuration);
+        let schema = include_str!("../../tests/fixtures/supergraph-auth.graphql");
+        let schema = Arc::new(Schema::parse(schema, &configuration).unwrap());
+        let planner = QueryPlannerService::for_test(schema.clone(), configuration.clone()).unwrap();
+        let doc = Query::parse_document(query, None, &schema, &configuration).unwrap();
+
+        let response = planner
+            .oneshot(QueryPlannerRequest {
+                query: query.to_string(),
+                operation_name: None,
+                document: doc,
+                metadata: CacheKeyMetadata::default(),
+                plan_options: PlanOptions::default(),
+                compute_job_type: ComputeJobType::QueryPlanning,
+            })
+            .await
+            .unwrap();
+        response.content.expect("planning succeeded")
+    }
+
+    fn authorization_enabled() -> Configuration {
+        serde_json::from_value(serde_json::json!({
+            "authorization": { "directives": { "enabled": true } }
+        }))
+        .unwrap()
+    }
+
+    /// Responses are formatted once per `Query` the plan carries, so a plan only carries a
+    /// filtered `Query` when authorization removed something. The client's query text
+    /// differs from the planner's re-printed query in every case below.
+    #[test(tokio::test)]
+    async fn only_filtered_operations_carry_a_filtered_query() {
+        let unfiltered = [
+            (Configuration::default(), "{ me { name } }"),
+            // The planner adds a label to the `@defer`.
+            (
+                Configuration::default(),
+                "{ topProducts { upc ... @defer { name } } }",
+            ),
+            // Nothing requested requires authorization.
+            (authorization_enabled(), "{ topProducts { upc name } }"),
+        ];
+        for (configuration, query) in unfiltered {
+            let plan = plan_auth_fixture(configuration, query).await;
+            assert!(
+                plan.query.filtered_query.is_none(),
+                "nothing was filtered from {query:?}, so it must not be formatted twice"
+            );
+        }
+
+        // `me` requires the `profile` scope, which the request doesn't have.
+        let plan = plan_auth_fixture(
+            authorization_enabled(),
+            "{ me { name } topProducts { upc } }",
+        )
+        .await;
+        assert!(plan.query.filtered_query.is_some());
         assert_eq!(
             plan.query
                 .unauthorized
