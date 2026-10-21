@@ -1225,8 +1225,9 @@ impl FieldRoutingSearchSpace {
     }
 
     /// Append entity-resolver connector hops for a field no connector serves
-    /// directly. A resolver qualifies when it returns some of `selection`;
-    /// what it leaves out is routed again, so each hop makes progress.
+    /// directly. A resolver qualifies when it returns some of `selection`, or
+    /// a key that resolves some of it one level down; what it leaves out is
+    /// routed again, so each hop makes progress.
     fn push_entity_resolver_options(
         &self,
         options: &mut Vec<RoutingChoice>,
@@ -1256,6 +1257,7 @@ impl FieldRoutingSearchSpace {
             if !self
                 .connector_index
                 .resolver_provides_any(&entry.coordinate, selection)
+                && !self.resolver_returns_child_key(entry, selection)
             {
                 continue;
             }

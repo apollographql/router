@@ -3962,6 +3962,481 @@ fn connector_field_without_this_beside_this_connector() {
     "#);
 }
 
+/// The connector returns `author` without its key. Re-fetch `author` from
+/// the `Post` level through `post(id:)`, which returns the key, instead of
+/// sending `User` representations with no `id`.
+#[test]
+fn connector_unprovided_key_refetches_parent() {
+    let plan_str = plan_query_with_router_specs(
+        include_str!("../fixtures/connector_nested_reference_without_key.graphql"),
+        "{ posts { title author { name email } } }",
+    );
+    insta::assert_snapshot!(plan_str, @r#"
+    QueryPlan {
+      Sequence {
+        Fetch(service: "blog_Query_posts_0") {
+          {
+            posts {
+              __typename
+              title
+              author {
+                name
+              }
+              id
+            }
+          }
+        },
+        Flatten(path: "posts.@") {
+          Fetch(service: "blog_Query_post_0") {
+            {
+              ... on Post {
+                __typename
+                id
+              }
+            } =>
+            {
+              ... on Post {
+                author {
+                  __typename
+                  id
+                }
+              }
+            }
+          },
+        },
+        Flatten(path: "posts.@.author") {
+          Fetch(service: "blog_User_0") {
+            {
+              ... on User {
+                __typename
+                id
+              }
+            } =>
+            {
+              ... on User {
+                email
+              }
+            }
+          },
+        },
+      },
+    }
+    "#);
+}
+
+/// A no-`$this` connector on `User` gives it a `__typename` key, but that key
+/// does not resolve `email`: the lift must still re-fetch `author` through
+/// `post(id:)` rather than treat any provided key as enough.
+#[test]
+fn connector_unprovided_key_refetches_parent_despite_typename_key() {
+    let plan_str = plan_query_with_router_specs(
+        include_str!("../fixtures/connector_nested_reference_typename_key.graphql"),
+        "{ posts { title author { name email } } }",
+    );
+    insta::assert_snapshot!(plan_str, @r#"
+    QueryPlan {
+      Sequence {
+        Fetch(service: "blog_Query_posts_0") {
+          {
+            posts {
+              __typename
+              title
+              author {
+                name
+              }
+              id
+            }
+          }
+        },
+        Flatten(path: "posts.@") {
+          Fetch(service: "blog_Query_post_0") {
+            {
+              ... on Post {
+                __typename
+                id
+              }
+            } =>
+            {
+              ... on Post {
+                author {
+                  __typename
+                  id
+                }
+              }
+            }
+          },
+        },
+        Flatten(path: "posts.@.author") {
+          Fetch(service: "blog_User_0") {
+            {
+              ... on User {
+                __typename
+                id
+              }
+            } =>
+            {
+              ... on User {
+                email
+              }
+            }
+          },
+        },
+      },
+    }
+    "#);
+}
+
+/// The unprovided field sits under a conditional fragment of `author`; the
+/// lift must see through it.
+#[test]
+fn connector_unprovided_key_refetches_parent_through_include() {
+    let plan_str = plan_query_with_router_specs(
+        include_str!("../fixtures/connector_nested_reference_without_key.graphql"),
+        "query($x: Boolean!) { posts { title author { name ... @include(if: $x) { email } } } }",
+    );
+    insta::assert_snapshot!(plan_str, @r#"
+    QueryPlan {
+      Sequence {
+        Fetch(service: "blog_Query_posts_0") {
+          {
+            posts {
+              __typename
+              title
+              author {
+                name
+              }
+              id
+            }
+          }
+        },
+        Flatten(path: "posts.@") {
+          Fetch(service: "blog_Query_post_0") {
+            {
+              ... on Post {
+                __typename
+                id
+              }
+            } =>
+            {
+              ... on Post {
+                author {
+                  __typename
+                  id
+                }
+              }
+            }
+          },
+        },
+        Flatten(path: "posts.@.author") {
+          Fetch(service: "blog_User_0") {
+            {
+              ... on User {
+                __typename
+                id
+              }
+            } =>
+            {
+              ... on User {
+                email
+              }
+            }
+          },
+        },
+      },
+    }
+    "#);
+}
+
+/// Same, with the unprovided field under `@defer`.
+#[test]
+fn connector_unprovided_key_refetches_parent_through_defer() {
+    let supergraph = Supergraph::new_with_router_specs(include_str!(
+        "../fixtures/connector_nested_reference_without_key.graphql"
+    ))
+    .expect("supergraph parse");
+    let config = QueryPlannerConfig {
+        incremental_delivery: QueryPlanIncrementalDeliveryConfig { enable_defer: true },
+        ..default_config()
+    };
+    let planner = QueryPlanner::new(&supergraph, config).expect("planner creation");
+    let document = apollo_compiler::ExecutableDocument::parse_and_validate(
+        planner.api_schema().schema(),
+        "{ posts { title author { name ... @defer { email } } } }",
+        "test.graphql",
+    )
+    .expect("query parse");
+    let plan = planner
+        .build_query_plan(&document, None, Default::default())
+        .expect("query plan");
+    insta::assert_snapshot!(format!("{plan}"), @r#"
+    QueryPlan {
+      Defer {
+        Primary {
+          { posts { title author { name } } }:
+          Fetch(service: "blog_Query_posts_0", id: 0) {
+            {
+              posts {
+                __typename
+                title
+                author {
+                  name
+                }
+                id
+              }
+            }
+          },
+        }, [
+          Deferred(depends: [0], path: "posts/author") {
+            { email }:
+            Sequence {
+              Flatten(path: "posts.@") {
+                Fetch(service: "blog_Query_post_0") {
+                  {
+                    ... on Post {
+                      __typename
+                      id
+                    }
+                  } =>
+                  {
+                    ... on Post {
+                      author {
+                        __typename
+                        id
+                      }
+                    }
+                  }
+                },
+              },
+              Flatten(path: "posts.@.author") {
+                Fetch(service: "blog_User_0") {
+                  {
+                    ... on User {
+                      __typename
+                      id
+                    }
+                  } =>
+                  {
+                    ... on User {
+                      email
+                    }
+                  }
+                },
+              },
+            },
+          },
+        ]
+      },
+    }
+    "#);
+}
+
+/// The `User` resolver returns `friend` with only its key: it resolves
+/// `friend { email }` through that key, so the selection stays at `author`
+/// rather than being re-fetched from `Post`.
+#[test]
+fn connector_nested_selection_resolved_through_resolver_key() {
+    let plan_str = plan_query_with_router_specs(
+        include_str!("../fixtures/connector_nested_reference_resolver_key.graphql"),
+        "{ posts { author { friend { email } } } }",
+    );
+    insta::assert_snapshot!(plan_str, @r#"
+    QueryPlan {
+      Sequence {
+        Fetch(service: "blog_Query_posts_0") {
+          {
+            posts {
+              author {
+                __typename
+                id
+              }
+            }
+          }
+        },
+        Flatten(path: "posts.@.author") {
+          Fetch(service: "blog_User_0") {
+            {
+              ... on User {
+                __typename
+                id
+              }
+            } =>
+            {
+              ... on User {
+                friend {
+                  __typename
+                  id
+                }
+              }
+            }
+          },
+        },
+        Flatten(path: "posts.@.author.friend") {
+          Fetch(service: "blog_User_0") {
+            {
+              ... on User {
+                __typename
+                id
+              }
+            } =>
+            {
+              ... on User {
+                email
+              }
+            }
+          },
+        },
+      },
+    }
+    "#);
+}
+
+/// Neither `author` nor `friend` comes with a key: `friend { email }` is
+/// lifted to `author`, then `author { friend { email } }` to `Post`, and
+/// re-entered through `post(id:)` and the `User` resolver's `friend { id }`.
+#[test]
+fn connector_unprovided_key_refetches_through_two_levels() {
+    let plan_str = plan_query_with_router_specs(
+        include_str!("../fixtures/connector_nested_reference_resolver_key_unprovided.graphql"),
+        "{ posts { author { name friend { name email } } } }",
+    );
+    insta::assert_snapshot!(plan_str, @r#"
+    QueryPlan {
+      Sequence {
+        Fetch(service: "blog_Query_posts_0") {
+          {
+            posts {
+              __typename
+              author {
+                name
+                friend {
+                  name
+                }
+              }
+              id
+            }
+          }
+        },
+        Flatten(path: "posts.@") {
+          Fetch(service: "blog_Query_post_0") {
+            {
+              ... on Post {
+                __typename
+                id
+              }
+            } =>
+            {
+              ... on Post {
+                author {
+                  __typename
+                  id
+                }
+              }
+            }
+          },
+        },
+        Flatten(path: "posts.@.author") {
+          Fetch(service: "blog_User_0") {
+            {
+              ... on User {
+                __typename
+                id
+              }
+            } =>
+            {
+              ... on User {
+                friend {
+                  __typename
+                  id
+                }
+              }
+            }
+          },
+        },
+        Flatten(path: "posts.@.author.friend") {
+          Fetch(service: "blog_User_0") {
+            {
+              ... on User {
+                __typename
+                id
+              }
+            } =>
+            {
+              ... on User {
+                email
+              }
+            }
+          },
+        },
+      },
+    }
+    "#);
+}
+
+/// Two lifted items under the same `@include` share one fragment in the
+/// re-fetch. `id` comes back from `post(id:)` under the fragment; `email`
+/// goes on to the `User` resolver.
+#[test]
+fn connector_unprovided_key_refetches_parent_through_shared_include() {
+    let plan_str = plan_query_with_router_specs(
+        include_str!("../fixtures/connector_nested_reference_without_key.graphql"),
+        "query($x: Boolean!) { posts { title author { name ... @include(if: $x) { email id } } } }",
+    );
+    insta::assert_snapshot!(plan_str, @r#"
+    QueryPlan {
+      Sequence {
+        Fetch(service: "blog_Query_posts_0") {
+          {
+            posts {
+              __typename
+              title
+              author {
+                name
+              }
+              id
+            }
+          }
+        },
+        Flatten(path: "posts.@") {
+          Fetch(service: "blog_Query_post_0") {
+            {
+              ... on Post {
+                __typename
+                id
+              }
+            } =>
+            {
+              ... on Post {
+                author {
+                  __typename
+                  ... @include(if: $x) {
+                    id
+                  }
+                  id
+                }
+              }
+            }
+          },
+        },
+        Flatten(path: "posts.@.author") {
+          Fetch(service: "blog_User_0") {
+            {
+              ... on User {
+                __typename
+                id
+              }
+            } =>
+            {
+              ... on User {
+                email
+              }
+            }
+          },
+        },
+      },
+    }
+    "#);
+}
+
 /// `/skus` returns `sku` but not `id`: resolve through the resolver keyed
 /// on `sku`, not the one keyed on `id`.
 #[test]
