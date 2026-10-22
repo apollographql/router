@@ -27,6 +27,7 @@ pub use self::headers::OriginatingDirective;
 pub use self::http_json_transport::HTTPMethod;
 pub use self::http_json_transport::HttpJsonTransport;
 pub use self::http_json_transport::MakeUriError;
+pub use self::http_json_transport::StreamMode;
 pub use self::problem_location::ProblemLocation;
 pub use self::source::SourceName;
 use super::ConnectId;
@@ -673,6 +674,7 @@ mod tests {
                         source_query_params: None,
                         connect_path: None,
                         connect_query_params: None,
+                        stream: None,
                     },
                 ),
                 selection: JSONSelection {
@@ -854,6 +856,7 @@ mod tests {
                         source_query_params: None,
                         connect_path: None,
                         connect_query_params: None,
+                        stream: None,
                     },
                 ),
                 selection: JSONSelection {

@@ -1,0 +1,28 @@
+---
+source: apollo-federation/src/connectors/validation/mod.rs
+expression: errors
+input_file: apollo-federation/src/connectors/validation/test_data/stream/stream_v0_5.graphql
+---
+[
+    Message {
+        code: InvalidStream,
+        message: "`@connect(http: {stream:})` on `Query.last` must be \"array\", but found \"last\".",
+        locations: [
+            29:40..29:46,
+        ],
+    },
+    Message {
+        code: InvalidStream,
+        message: "`@connect(http: {stream:})` on `Query.product` can't be used with `entity: true`.",
+        locations: [
+            36:52..36:59,
+        ],
+    },
+    Message {
+        code: InvalidStream,
+        message: "`@connect(http: {stream:})` on `Order` can't be used with `@connect` on a type.",
+        locations: [
+            59:62..59:69,
+        ],
+    },
+]
