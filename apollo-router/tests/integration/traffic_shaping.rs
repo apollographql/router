@@ -20,7 +20,6 @@ async fn test_router_timeout() -> Result<(), BoxError> {
                 exporters:
                     metrics:
                         prometheus:
-                            listen: 127.0.0.1:4000
                             enabled: true
                             path: /metrics
             traffic_shaping:
@@ -56,7 +55,6 @@ async fn test_subgraph_timeout() -> Result<(), BoxError> {
                 exporters:
                     metrics:
                         prometheus:
-                            listen: 127.0.0.1:4000
                             enabled: true
                             path: /metrics
             include_subgraph_errors:
@@ -95,7 +93,6 @@ async fn test_connector_timeout() -> Result<(), BoxError> {
                 exporters:
                     metrics:
                         prometheus:
-                            listen: 127.0.0.1:4000
                             enabled: true
                             path: /metrics
             traffic_shaping:
@@ -194,7 +191,6 @@ async fn test_router_custom_metric() -> Result<(), BoxError> {
                 exporters:
                     metrics:
                         prometheus:
-                            listen: 127.0.0.1:4000
                             enabled: true
                             path: /metrics
                 instrumentation:
@@ -238,7 +234,6 @@ async fn test_router_rate_limit() -> Result<(), BoxError> {
                 exporters:
                     metrics:
                         prometheus:
-                            listen: 127.0.0.1:4000
                             enabled: true
                             path: /metrics
             traffic_shaping:
@@ -281,7 +276,6 @@ async fn test_subgraph_rate_limit() -> Result<(), BoxError> {
                 exporters:
                     metrics:
                         prometheus:
-                            listen: 127.0.0.1:4000
                             enabled: true
                             path: /metrics
             include_subgraph_errors:
@@ -326,7 +320,6 @@ async fn test_connector_rate_limit() -> Result<(), BoxError> {
                 exporters:
                     metrics:
                         prometheus:
-                            listen: 127.0.0.1:4000
                             enabled: true
                             path: /metrics
             include_subgraph_errors:
