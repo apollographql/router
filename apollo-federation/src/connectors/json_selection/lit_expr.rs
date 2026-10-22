@@ -139,20 +139,6 @@ impl LitOp {
 impl LitExpr {
     // LitExpr ::= LitOpChain | LitPath | LitPrimitive | LitObject | LitArray | PathSelection
     pub(crate) fn parse(input: Span) -> ParseResult<WithRange<Self>> {
-        // Callers try this speculatively before a closing delimiter, which
-        // can never start an expression, so those attempts do not count
-        // toward the recursion limit.
-        let _guard = if input.fragment().trim_start().starts_with([')', ']', '}']) {
-            None
-        } else {
-            Some(DepthGuard::increment(&input)?)
-        };
-        Self::parse_uncounted(input)
-    }
-
-    // Parses without counting a level toward the recursion limit, for a
-    // caller whose alternative parse covers the same nesting and counts it.
-    pub(crate) fn parse_uncounted(input: Span) -> ParseResult<WithRange<Self>> {
         match input.extra.spec {
             ConnectSpec::V0_1 | ConnectSpec::V0_2 => {
                 let (input, _) = spaces_or_comments(input)?;
@@ -473,6 +459,7 @@ impl LitExpr {
 
         let (input, _) = spaces_or_comments(input)?;
         let (input, open_brace) = ranged_span("{").parse(input)?;
+        let _guard = DepthGuard::increment(&input)?;
         let (mut input, _) = spaces_or_comments(input)?;
 
         let mut output = IndexMap::default();
@@ -539,9 +526,9 @@ impl LitExpr {
 
     // LitArray ::= "[" (LitExpr ("," LitExpr)* ","?)? "]"
     pub(super) fn parse_array(input: Span) -> ParseResult<WithRange<Self>> {
+        let (input, (_, open_bracket)) = (spaces_or_comments, ranged_span("[")).parse(input)?;
+        let _guard = DepthGuard::increment(&input)?;
         (
-            spaces_or_comments,
-            ranged_span("["),
             spaces_or_comments,
             map(
                 opt((
@@ -562,7 +549,7 @@ impl LitExpr {
             ranged_span("]"),
         )
             .parse(input)
-            .map(|(input, (_, open_bracket, _, output, _, close_bracket))| {
+            .map(|(input, (_, output, _, close_bracket))| {
                 let range = merge_ranges(open_bracket.range(), close_bracket.range());
                 (input, WithRange::new(output, range))
             })

@@ -37,7 +37,7 @@ pub(crate) struct SpanExtra<'a> {
     pub(super) depth: &'a DepthCounter,
 }
 
-/// Counts how deeply the parser has recursed, to prevent stack overflow.
+/// Counts how deeply the parser has nested, to prevent stack overflow.
 #[derive(Debug, Default, PartialEq, Eq)]
 pub(crate) struct DepthCounter {
     pub(super) depth: Cell<usize>,

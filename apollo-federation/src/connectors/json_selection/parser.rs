@@ -89,24 +89,32 @@ pub(super) fn nom_fail_message(
     ))
 }
 
-// Counts each PathList step, SubSelection and LitExpr the parser enters, which
-// are the points every recursive cycle passes through. One `a { ... }` level
-// spends three, one `.key` or `->method` step spends one. Chosen
-// experimentally for release builds, which is how the router runs, with Rust
-// 1.99.0 on aarch64-apple-darwin on a 2MB thread stack, the default for tokio
-// workers. Nested groups, the most expensive levels there, overflowed past
-// 310, so 128 is about 40% of that. Debug builds use several times more stack
-// per level and can overflow a 2MB stack below this limit.
+// Counts each `{`, `[`, `(` and `$(` the parser is inside, plus each path step
+// (key, `.key`, `->method`, `$`, `@`, `?`) leading to it, so one `a { ... }`
+// level spends two and one `a: { ... }` or `[ ... ]` level spends one. Every
+// walker of the parsed selection (shape computation, apply_to, printing,
+// validation, Drop) recurses once per such level, so this bounds them too.
+// Chosen experimentally for release builds, which is how the router runs, with
+// Rust 1.99.0 on aarch64-apple-darwin on a 2MB thread stack, the default for
+// tokio workers. Parsing and then running every walker, nested `$( ... )` was
+// the most expensive per level and overflowed past 250, so 128 is about half
+// of that. Debug builds use several times more stack per level and can
+// overflow a 2MB stack below this limit.
 const DEFAULT_RECURSION_LIMIT: usize = 128;
 
-const RECURSION_LIMIT_MESSAGE: &str = "Selection nested too deeply";
+fn recursion_limit_message() -> String {
+    format!(
+        "Selection nested too deeply: more than {DEFAULT_RECURSION_LIMIT} levels, counting each \
+         {{, [, (, $( and path step"
+    )
+}
 
 /// Decrements the parse's depth when dropped.
 pub(super) struct DepthGuard<'a>(&'a DepthCounter);
 
 impl<'a> DepthGuard<'a> {
-    /// Marks that the parser is recursing, failing once the limit is reached.
-    /// Reaching the limit fails the whole parse, which
+    /// Marks that the parser is nesting one level deeper, failing once the
+    /// limit is reached. Reaching the limit fails the whole parse, which
     /// `JSONSelection::parse_with_spec` reports, so callers that backtrack
     /// on errors need not tell this one apart from the others.
     pub(super) fn increment(
@@ -117,7 +125,10 @@ impl<'a> DepthGuard<'a> {
             if counter.exceeded_at.get().is_none() {
                 counter.exceeded_at.set(Some(input.location_offset()));
             }
-            return Err(nom_fail_message(input.clone(), RECURSION_LIMIT_MESSAGE));
+            return Err(nom_fail_message(
+                input.clone(),
+                "Selection nested too deeply",
+            ));
         }
         counter.depth.set(counter.depth.get() + 1);
         Ok(Self(counter))
@@ -305,7 +316,7 @@ impl JSONSelection {
 
         if let Some(offset) = depth.exceeded_at.get() {
             return Err(JSONSelectionParseError {
-                message: RECURSION_LIMIT_MESSAGE.to_string(),
+                message: recursion_limit_message(),
                 fragment: input[offset..].to_string(),
                 offset,
                 spec,
@@ -525,7 +536,7 @@ impl JSONSelection {
         fn lit_expr_top_level(input: Span) -> ParseResult<JSONSelection> {
             let spec = get_connect_spec(&input);
             let (input, _) = spaces_or_comments(input)?;
-            let (remainder, lit) = LitExpr::parse_uncounted(input)?;
+            let (remainder, lit) = LitExpr::parse(input)?;
             // Backtrack (non-fatal error) if the LitExpr did not consume the
             // rest of the input (modulo trailing whitespace/comments), so
             // `alt` can fall through to `naked_named` for multi-entry naked
@@ -1263,8 +1274,15 @@ impl PathList {
         WithRange::new(self, None)
     }
 
-    pub(super) fn parse_with_depth(input: Span, depth: usize) -> ParseResult<WithRange<Self>> {
+    // Parses the rest of the path after one step. Every walker of the parsed
+    // PathList recurses once per step, so the step counts as a level toward
+    // the recursion limit while the rest is parsed.
+    fn parse_rest(input: Span, depth: usize) -> ParseResult<WithRange<Self>> {
         let _guard = DepthGuard::increment(&input)?;
+        Self::parse_with_depth(input, depth + 1)
+    }
+
+    pub(super) fn parse_with_depth(input: Span, depth: usize) -> ParseResult<WithRange<Self>> {
         let spec = get_connect_spec(&input);
 
         // If the input is empty (i.e. this method will end up returning
@@ -1287,29 +1305,29 @@ impl PathList {
             // case needs to come before the $ (and $var) case, because $( looks
             // like the $ variable followed by a parse error in the variable
             // case, unless we add some complicated lookahead logic there.
-            match (
-                spaces_or_comments,
-                ranged_span("$("),
-                LitExpr::parse,
-                spaces_or_comments,
-                ranged_span(")"),
-            )
-                .parse(input.clone())
+            if let Ok((after_open, (_, dollar_open_paren))) =
+                (spaces_or_comments, ranged_span("$(")).parse(input.clone())
             {
-                Ok((suffix, (_, dollar_open_paren, expr, close_paren, _))) => {
-                    let (remainder, rest) = Self::parse_with_depth(suffix, depth + 1)?;
-                    let expr_range = merge_ranges(dollar_open_paren.range(), close_paren.range());
-                    let full_range = merge_ranges(expr_range, rest.range());
-                    return Ok((
-                        remainder,
-                        WithRange::new(Self::Expr(expr, rest), full_range),
-                    ));
-                }
-                Err(nom::Err::Failure(err)) => {
-                    return Err(nom::Err::Failure(err));
-                }
-                Err(_) => {
-                    // We can otherwise continue for non-fatal errors
+                // The expression and the rest of the path both nest inside
+                // the $(, so it counts as one level for both.
+                let _guard = DepthGuard::increment(&after_open)?;
+                match (LitExpr::parse, spaces_or_comments, ranged_span(")")).parse(after_open) {
+                    Ok((suffix, (expr, close_paren, _))) => {
+                        let (remainder, rest) = Self::parse_with_depth(suffix, depth + 1)?;
+                        let expr_range =
+                            merge_ranges(dollar_open_paren.range(), close_paren.range());
+                        let full_range = merge_ranges(expr_range, rest.range());
+                        return Ok((
+                            remainder,
+                            WithRange::new(Self::Expr(expr, rest), full_range),
+                        ));
+                    }
+                    Err(nom::Err::Failure(err)) => {
+                        return Err(nom::Err::Failure(err));
+                    }
+                    Err(_) => {
+                        // We can otherwise continue for non-fatal errors
+                    }
                 }
             }
 
@@ -1317,7 +1335,7 @@ impl PathList {
                 (ranged_span("$"), opt(parse_identifier_no_space)).parse(input.clone())
             {
                 let dollar_range = dollar.range();
-                let (remainder, rest) = Self::parse_with_depth(suffix, depth + 1)?;
+                let (remainder, rest) = Self::parse_rest(suffix, depth)?;
                 let full_range = merge_ranges(dollar_range.clone(), rest.range());
                 return if let Some(var) = opt_var {
                     let full_name = format!("{}{}", dollar.as_ref(), var.as_str());
@@ -1345,7 +1363,7 @@ impl PathList {
             }
 
             if let Ok((suffix, at)) = ranged_span("@").parse(input.clone()) {
-                let (remainder, rest) = Self::parse_with_depth(suffix, depth + 1)?;
+                let (remainder, rest) = Self::parse_rest(suffix, depth)?;
                 let full_range = merge_ranges(at.range(), rest.range());
                 return Ok((
                     remainder,
@@ -1357,7 +1375,7 @@ impl PathList {
             }
 
             if let Ok((suffix, key)) = Key::parse(input.clone()) {
-                let (remainder, rest) = Self::parse_with_depth(suffix, depth + 1)?;
+                let (remainder, rest) = Self::parse_rest(suffix, depth)?;
 
                 return match spec {
                     ConnectSpec::V0_1 | ConnectSpec::V0_2 => match rest.as_ref() {
@@ -1425,7 +1443,7 @@ impl PathList {
             }
             ConnectSpec::V0_3 | ConnectSpec::V0_4 | ConnectSpec::V0_5 => {
                 if let Ok((suffix, question)) = ranged_span("?").parse(input.clone()) {
-                    let (remainder, rest) = Self::parse_with_depth(suffix.clone(), depth + 1)?;
+                    let (remainder, rest) = Self::parse_rest(suffix.clone(), depth)?;
 
                     return match rest.as_ref() {
                         // The ? cannot be repeated sequentially, so if rest starts with
@@ -1463,7 +1481,7 @@ impl PathList {
         // equivalent to the old behavior, but parses unambiguously. In terms of
         // this code, that means we allow a .key only at depths > 0.
         if let Ok((remainder, (dot, key))) = (ranged_span("."), Key::parse).parse(input.clone()) {
-            let (remainder, rest) = Self::parse_with_depth(remainder, depth + 1)?;
+            let (remainder, rest) = Self::parse_rest(remainder, depth)?;
             let dot_key_range = merge_ranges(dot.range(), key.range());
             let full_range = merge_ranges(dot_key_range, rest.range());
             return Ok((remainder, WithRange::new(Self::Key(key, rest), full_range)));
@@ -1541,8 +1559,7 @@ impl PathList {
                         suffix
                     };
 
-                    let (remainder, rest) =
-                        Self::parse_with_depth(suffix_with_local_var, depth + 1)?;
+                    let (remainder, rest) = Self::parse_rest(suffix_with_local_var, depth)?;
                     let full_range = merge_ranges(arrow.range(), rest.range());
 
                     Ok((
@@ -2216,6 +2233,7 @@ impl MethodArgs {
     fn parse(input: Span) -> ParseResult<Self> {
         let input = spaces_or_comments(input)?.0;
         let (mut input, open_paren) = ranged_span("(").parse(input)?;
+        let _guard = DepthGuard::increment(&input)?;
         input = spaces_or_comments(input)?.0;
 
         let mut args = Vec::new();
@@ -5278,17 +5296,23 @@ mod tests {
     );
 
     // Each shape nests by repeating `open` around `leaf`, then closing. The
-    // last column is the deepest nesting the limit accepts, which differs by
-    // shape because each level passes through a different number of guards.
+    // last column is the deepest nesting the limit accepts: each `{`, `[`,
+    // `(`, `$(` and path step counts one level, including the steps in the
+    // prefix and the leaf.
     const NESTINGS: [Nesting; 8] = [
-        ("subselection", "", "a { ", "b", " }", 42),
-        ("group", "", "a: { ", "b", " }", 126),
-        ("path", "a: b", ".c", "", "", 125),
-        ("method", "a: b", "->first", "", "", 125),
-        ("method arg", "a: ", "b->echo(", "1", ")", 42),
-        ("expr", "a: ", "$(", "1", ")", 63),
-        ("array", "a: ", "[", "1", "]", 126),
-        ("mixed", "", "{ a: [", "1", "] }", 42),
+        // `a` and `{` per level, plus the leaf `b`.
+        ("subselection", "", "a { ", "b", " }", 63),
+        // `{` per level, plus the leaf `b`.
+        ("group", "", "a: { ", "b", " }", 127),
+        // One step per level, plus `b`.
+        ("path", "a: b", ".c", "", "", 127),
+        ("method", "a: b", "->first", "", "", 127),
+        // `b` and `(` per level.
+        ("method arg", "a: ", "b->echo(", "1", ")", 64),
+        ("expr", "a: ", "$(", "1", ")", 128),
+        ("array", "a: ", "[", "1", "]", 128),
+        // `{` and `[` per level.
+        ("mixed", "", "{ a: [", "1", "] }", 64),
     ];
 
     fn nested(shape: Nesting, levels: usize) -> String {
@@ -5327,7 +5351,8 @@ mod tests {
             })
             .expect_err("deep nesting should be rejected");
             assert_eq!(
-                err.message, RECURSION_LIMIT_MESSAGE,
+                err.message,
+                recursion_limit_message(),
                 "{} under {spec:?}",
                 shape.0
             );
@@ -5355,7 +5380,7 @@ mod tests {
             );
             assert_eq!(
                 past_limit,
-                Err(RECURSION_LIMIT_MESSAGE.to_string()),
+                Err(recursion_limit_message()),
                 "{name} at {} levels under {spec:?}",
                 deepest + 1,
             );
