@@ -23,6 +23,7 @@ use super::requires::gated_input_path;
 use super::requires::trailing_condition_fragments;
 use super::requires::trailing_conditions_context;
 use super::requires::unconditioned_input_path;
+use super::requires::with_own_conditions;
 use super::routing::IntermediateKeyHop;
 use super::routing::RoutingChoice;
 use super::state::PendingSelection;
@@ -177,17 +178,20 @@ impl FieldRoutingSearchSpace {
                 let (local_key, routed_key) =
                     self.split_anchor_key(state, pending, key_conditions, key_locally_resolvable)?;
                 // The connector fetch is gated on the trailing conditions
-                // (`with_trailing_conditions` below), so its inputs keep them,
-                // and so does its representation, in case the fetch merges
-                // with a differently gated one.
+                // (`with_trailing_conditions` below) and the field's own, so
+                // its inputs keep them, including the key parts routed to
+                // other fetches, and so does its representation, in case the
+                // fetch merges with a differently gated one.
+                let gate_path = with_own_conditions(&pending.op_path, &pending.selection);
+                let input_path = gated_input_path(&gate_path);
                 self.append_entity_inputs_at(
                     state,
                     pending.fetch_node,
-                    &gated_input_path(&pending.op_path),
+                    &input_path,
                     local_key.as_ref(),
                     &source,
                 );
-                let needed_under = trailing_conditions_context(&pending.op_path)?;
+                let needed_under = trailing_conditions_context(&gate_path)?;
 
                 let merge_at = self.pending_merge_at(state, pending);
 
@@ -215,7 +219,13 @@ impl FieldRoutingSearchSpace {
                     .add_dependency(pending.fetch_node, new_group, inputs);
 
                 if let Some(routed_key) = &routed_key {
-                    self.push_condition_pendings(state, pending, routed_key, new_group)?;
+                    self.push_condition_pendings_at(
+                        state,
+                        pending,
+                        routed_key,
+                        new_group,
+                        &input_path,
+                    )?;
                 }
 
                 let entity_base_path = self.entity_root_path(entity_type.type_name())?;
@@ -624,6 +634,16 @@ impl FieldRoutingSearchSpace {
                             .collect()
                     }
                     OpPathElement::Field(_) => Vec::new(),
+                })
+                // The item's own condition (`email @include(if: $x)`).
+                .chain(match &item.selection {
+                    Selection::Field(item_field) => {
+                        condition_directives(&item_field.field.directives)
+                            .iter()
+                            .cloned()
+                            .collect()
+                    }
+                    Selection::InlineFragment(_) => Vec::new(),
                 })
                 .collect();
             let index = match lifted.iter().position(|(r, ..)| *r == item.defer_ref) {

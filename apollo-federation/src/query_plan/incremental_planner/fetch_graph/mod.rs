@@ -702,12 +702,23 @@ impl FetchGraph {
         Ok(())
     }
 
-    /// Whether the edge already carries a key input for the given source
-    /// type.
-    pub(crate) fn edge_has_key_input(&self, edge: EdgeIndex, source_type: &Name) -> bool {
+    /// Whether the edge already carries a key input for `input`'s source
+    /// type that covers it: one needed unconditionally, or under the same
+    /// conditions. A key input needed under other conditions doesn't, since
+    /// the representation reads each input only under its own.
+    pub(crate) fn edge_has_key_input(&self, edge: EdgeIndex, input: &InputContribution) -> bool {
+        let InputContribution::Key {
+            source_type_name: source_type,
+            needed_under: needed,
+            ..
+        } = input
+        else {
+            return false;
+        };
         self.graph[edge].inputs.iter().any(|i| {
-            matches!(i, InputContribution::Key { source_type_name, .. }
-                if source_type_name == source_type)
+            matches!(i, InputContribution::Key { source_type_name, needed_under, .. }
+                if source_type_name == source_type
+                    && (needed_under.is_empty() || needed_under == needed))
         })
     }
 
@@ -2294,7 +2305,7 @@ mod tests {
         let root = g.get_or_create_root_group(&sg, dummy_root_type());
         let entity = g.add_entity_group(&sg, vec![]);
         let edge = g.add_dependency(root, entity, vec![]);
-        assert!(!g.edge_has_key_input(edge, &apollo_compiler::name!("User")));
+        assert!(!g.edge_has_key_input(edge, &test_input_contribution()));
     }
 
     #[test]

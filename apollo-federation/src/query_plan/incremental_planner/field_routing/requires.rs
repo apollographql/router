@@ -233,6 +233,31 @@ pub(super) fn gated_input_path(
     input_path_keeping(op_path, &gate)
 }
 
+/// `op_path` followed by the @skip/@include on the `selection` field itself
+/// (`email @include(if: $x)`) as a condition-only fragment, so that
+/// `gated_input_path` and `trailing_conditions_context` also keep the
+/// conditions that gate the field's fetch through the field.
+pub(super) fn with_own_conditions(
+    op_path: &SharedPath<Arc<OpPathElement>>,
+    selection: &Selection,
+) -> SharedPath<Arc<OpPathElement>> {
+    let Selection::Field(field_sel) = selection else {
+        return op_path.clone();
+    };
+    let field = &field_sel.field;
+    let conditions = condition_directives(&field.directives);
+    if conditions.is_empty() {
+        return op_path.clone();
+    }
+    op_path.pushed(Arc::new(OpPathElement::InlineFragment(InlineFragment {
+        schema: field.schema.clone(),
+        parent_type_position: field.field_position.parent(),
+        type_condition_position: None,
+        directives: conditions,
+        selection_id: SelectionId::new(),
+    })))
+}
+
 /// The @skip/@include of `trailing_condition_fragments(op_path)`, which
 /// `gated_input_path` keeps on the key inputs, as the context to build the
 /// entity representation under.

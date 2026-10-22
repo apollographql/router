@@ -229,15 +229,17 @@ fn inc_two_subgraph_key_hop() {
             }
           }
         "#,
-        @r###"
+        @r#"
     QueryPlan {
       Sequence {
         Fetch(service: "a") {
           {
             user {
-              __typename
               name
-              id
+              ... @include(if: $a) @skip(if: $b) {
+                __typename
+                id
+              }
             }
           }
         },
@@ -262,7 +264,7 @@ fn inc_two_subgraph_key_hop() {
         },
       },
     }
-    "###
+    "#
     );
 
     // Disabling the only subgraph that can resolve a field must produce a
