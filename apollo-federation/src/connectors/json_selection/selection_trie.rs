@@ -72,6 +72,30 @@ impl Hash for SelectionTrie {
     }
 }
 
+/// The segments of `name` from its base to `name` itself, like `Name::iter`,
+/// which in shape@0.9.1 copies its parent's segments at every level and so
+/// takes time quadratic in the length of the name. `compute_output_shape`
+/// records a name once per path step, so walking the parent links once here
+/// keeps long paths fast.
+fn name_segments(name: &Name) -> Vec<&Name> {
+    let mut segments = Vec::new();
+    let mut current = Some(name);
+    while let Some(segment) = current {
+        segments.push(segment);
+        current = match segment.case() {
+            NameCase::Base(_) => None,
+            NameCase::Field(parent, _)
+            | NameCase::AnyField(parent)
+            | NameCase::Item(parent, _)
+            | NameCase::AnyItem(parent)
+            | NameCase::Question(parent)
+            | NameCase::NotNone(parent) => Some(parent),
+        };
+    }
+    segments.reverse();
+    segments
+}
+
 impl SelectionTrie {
     pub(crate) fn new() -> Self {
         Self {
@@ -158,21 +182,9 @@ impl SelectionTrie {
     /// matching how a downstream upstream-query would express it.
     pub(crate) fn add_name(&mut self, name: &Name) -> &mut Self {
         let mut current: &mut SelectionTrie = self;
-        // Ranges specific to each name segment (not inherited from parent
-        // segments). `Name::locations()` (public) returns the parent chain's
-        // locations followed by the segment's own, deduplicated in insertion
-        // order; `Name::locs()` (the per-segment accessor) is `pub(crate)` in
-        // shape@0.7.0, so we recover the per-segment slice by tracking the
-        // previous segment's accumulated location count.
-        let mut prev_count = 0;
-        for part in name.iter() {
-            let all_locs: Vec<_> = part.locations().collect();
-            let ranges: Vec<Range<usize>> = all_locs
-                .iter()
-                .skip(prev_count)
-                .map(|loc| loc.span.clone())
-                .collect();
-            prev_count = all_locs.len();
+        for part in name_segments(name) {
+            // Ranges specific to this segment, not inherited from its parents.
+            let ranges: Vec<Range<usize>> = part.locs().map(|loc| loc.span.clone()).collect();
             match part.case() {
                 NameCase::Base(base) => current = current.add_str_with_ranges(base, ranges),
                 NameCase::Field(_, field) => {
@@ -208,7 +220,7 @@ impl SelectionTrie {
     /// `add_name(name)` would walk already exists in this trie.
     pub(crate) fn contains_name(&self, name: &Name) -> bool {
         let mut current = self;
-        for part in name.iter() {
+        for part in name_segments(name) {
             let key = match part.case() {
                 NameCase::Base(base) => base.to_string(),
                 NameCase::Field(_, field) => field.to_string(),
@@ -302,6 +314,67 @@ mod tests {
         fn add_key(&mut self, key: &WithRange<Key>) -> &mut Self {
             self.add_str_with_ranges(key.as_str(), key.range())
         }
+    }
+
+    #[test]
+    fn test_add_name_records_each_segment_with_its_own_ranges() {
+        use shape::Shape;
+        use shape::ShapeCase;
+        use shape::location::SourceId;
+
+        let source = SourceId::new("test");
+        // `b` repeats its parent's location. Ranges are recorded per segment,
+        // so `b` keeps it even though `a` already has it.
+        let shape = Shape::name("$root", [source.location(0..5)])
+            .field("a", [source.location(6..7)])
+            .any_item([source.location(8..9)])
+            .field("b", [source.location(6..7), source.location(10..11)]);
+        let ShapeCase::Name(name, _) = shape.case() else {
+            panic!("expected a name shape, got {}", shape.pretty_print());
+        };
+
+        let mut trie = SelectionTrie::new();
+        trie.add_name(name).set_leaf();
+
+        assert_eq!(trie.to_string(), "$root { a { b } }");
+        assert!(trie.contains_name(name));
+        let spans = |trie: &SelectionTrie, key: &str| -> Vec<(usize, usize)> {
+            trie.key_ranges(key).map(|r| (r.start, r.end)).collect()
+        };
+        assert_eq!(spans(&trie, "$root"), [(0, 5)]);
+        let root = trie.get("$root").unwrap();
+        assert_eq!(spans(root, "a"), [(6, 7)]);
+        let a = root.get("a").unwrap();
+        assert_eq!(spans(a, "b"), [(6, 7), (10, 11)]);
+    }
+
+    #[test]
+    fn test_add_name_on_a_long_path() {
+        use shape::Shape;
+        use shape::ShapeCase;
+
+        // Recording a name used to take time quartic in its length across a
+        // path, because it rebuilt the name's parent chain at every segment.
+        let mut shape = Shape::name("$root", []);
+        for _ in 0..1000 {
+            shape = shape.field("c", []);
+        }
+        let ShapeCase::Name(name, _) = shape.case() else {
+            panic!("expected a name shape, got {}", shape.pretty_print());
+        };
+
+        let mut trie = SelectionTrie::new();
+        trie.add_name(name).set_leaf();
+
+        let mut depth = 0;
+        let mut current = trie.get("$root").unwrap();
+        while let Some(sub) = current.get("c") {
+            depth += 1;
+            current = sub;
+        }
+        assert_eq!(depth, 1000);
+        assert!(current.is_leaf());
+        assert!(trie.contains_name(name));
     }
 
     #[test]
