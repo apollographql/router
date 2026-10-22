@@ -1,4 +1,3 @@
-use std::fmt::Debug;
 use std::pin::Pin;
 use std::sync::atomic::AtomicU64;
 use std::sync::atomic::Ordering;
@@ -8,8 +7,6 @@ use bytes::Bytes;
 use futures::Stream;
 use opentelemetry::metrics::Histogram;
 use pin_project_lite::pin_project;
-use schemars::JsonSchema;
-use serde::Deserialize;
 use tower::BoxError;
 
 use super::selectors::RouterSelector;
@@ -31,8 +28,7 @@ use crate::plugins::telemetry::config_new::router_overhead::RouterOverheadAttrib
 use crate::plugins::telemetry::otlp::TelemetryDataKind;
 use crate::services::router;
 
-#[derive(Clone, Deserialize, JsonSchema, Debug, Default)]
-#[serde(deny_unknown_fields, default)]
+#[apollo_configuration::configuration]
 pub(crate) struct RouterInstrumentsConfig {
     /// Histogram of server request duration
     #[serde(rename = "http.server.request.duration")]

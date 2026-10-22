@@ -2,7 +2,6 @@ use std::net::SocketAddr;
 use std::pin::Pin;
 use std::sync::Arc;
 
-use derivative::Derivative;
 use futures::channel::oneshot;
 use futures::prelude::*;
 use itertools::Itertools;
@@ -44,8 +43,7 @@ type ExtraListeners = Vec<(ListenAddr, Listener)>;
 /// This relies on the underlying server implementation doing the right thing.
 /// There are various ways that a user could prevent this working, including holding open connections
 /// and sending huge requests. There is potential work needed for hardening.
-#[derive(Derivative)]
-#[derivative(Debug)]
+#[derive(derive_more::Debug)]
 pub(crate) struct HttpServerHandle {
     /// Sender to use to notify of shutdown
     main_shutdown_sender: oneshot::Sender<()>,
@@ -54,11 +52,11 @@ pub(crate) struct HttpServerHandle {
     extra_shutdown_sender: oneshot::Sender<()>,
 
     /// Future to wait on for graceful shutdown
-    #[derivative(Debug = "ignore")]
+    #[debug(skip)]
     main_future: Pin<Box<dyn Future<Output = Result<Listener, ApolloRouterError>> + Send>>,
 
     /// More futures to wait on for graceful shutdown
-    #[derivative(Debug = "ignore")]
+    #[debug(skip)]
     extra_futures: Pin<Box<dyn Future<Output = Result<ExtraListeners, ApolloRouterError>> + Send>>,
 
     /// The listen addresses that the server is actually listening on.

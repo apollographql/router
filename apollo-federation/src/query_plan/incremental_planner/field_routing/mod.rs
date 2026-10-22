@@ -151,6 +151,9 @@ pub(super) struct PlannerCaches {
     /// session; `child_possible_types` runs on every dispatch, so building
     /// the sorted Vec fresh each time dominated allocation on small graphs.
     pub(super) possible_type_names: RefCell<HashMap<Name, Arc<Vec<Name>>>>,
+    /// Whether a field resolves in more than one subgraph, by (parent
+    /// type, field). Asked on every dispatch along a shareable path.
+    pub(super) fields_in_multiple_subgraphs: RefCell<HashMap<(Name, Name), bool>>,
 }
 
 impl PlannerCaches {
@@ -164,6 +167,7 @@ impl PlannerCaches {
             key_hops_in_flight: RefCell::new(HashSet::new()),
             guard_hits: std::cell::Cell::new(0),
             possible_type_names: RefCell::new(HashMap::new()),
+            fields_in_multiple_subgraphs: RefCell::new(HashMap::new()),
         }
     }
 }

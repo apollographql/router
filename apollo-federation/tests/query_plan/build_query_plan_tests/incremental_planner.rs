@@ -1,4 +1,5 @@
 use apollo_compiler::Name;
+use apollo_federation::query_plan::DeferNode;
 use apollo_federation::query_plan::FetchDataPathElement;
 use apollo_federation::query_plan::FetchDataRewrite;
 use apollo_federation::query_plan::PlanNode;
@@ -2993,7 +2994,7 @@ fn inc_partial_overlap_explodes_abstract_type() {
             }
           }
         },
-        Flatten(path: "u") {
+        Flatten(path: "u|[B,C]") {
           Fetch(service: "Subgraph2") {
             {
               ... on B {
@@ -3013,6 +3014,606 @@ fn inc_partial_overlap_explodes_abstract_type() {
                 v
               }
             }
+          },
+        },
+      },
+    }
+    "###
+    );
+}
+
+/// Entity fetches reached through different union members. Members reaching
+/// the same entity type with different selections get one type-conditioned
+/// fetch each, so no entity gets another member's fields.
+#[test]
+fn inc_entity_fetches_under_union_members() {
+    let planner = planner!(
+        config = incremental_config(),
+        catalog: r#"
+          type Query {
+            shelf: Shelf
+          }
+
+          type Shelf @key(fields: "id") {
+            id: ID!
+            entries: [Entry]
+          }
+
+          type Item @key(fields: "id") {
+            id: ID!
+          }
+
+          type Thing @key(fields: "id") {
+            id: ID!
+          }
+
+          union Entry = Book | Film | Album | Game
+
+          type Book {
+            item: Item
+            parts: [Part]
+          }
+
+          type Film {
+            item: Item
+            parts: [Part]
+          }
+
+          type Album {
+            item: Item
+            parts: [Part]
+          }
+
+          union Part = Front | Body | Back
+
+          type Front {
+            item: Item
+          }
+
+          type Body {
+            item: Item
+          }
+
+          type Back {
+            item: Item
+          }
+
+          type Game {
+            item: Thing
+          }
+        "#,
+        inventory: r#"
+          type Item @key(fields: "id") {
+            id: ID!
+            pages: Int!
+            minutes: Int!
+            tracks: Int!
+          }
+
+          type Thing @key(fields: "id") {
+            id: ID!
+            name: String!
+          }
+        "#,
+    );
+
+    // Every member selected, along with the key.
+    assert_plan!(
+        &planner,
+        r#"
+          { shelf { entries { __typename ... on Book { item { id pages } } ... on Film { item { id minutes } } ... on Album { item { id tracks } } } } }
+        "#,
+        @r###"
+    QueryPlan {
+      Sequence {
+        Fetch(service: "catalog") {
+          {
+            shelf {
+              entries {
+                __typename
+                ... on Album {
+                  item {
+                    __typename
+                    id
+                  }
+                }
+                ... on Film {
+                  item {
+                    __typename
+                    id
+                  }
+                }
+                ... on Book {
+                  item {
+                    __typename
+                    id
+                  }
+                }
+              }
+            }
+          }
+        },
+        Parallel {
+          Flatten(path: "shelf.entries.@|[Book].item") {
+            Fetch(service: "inventory") {
+              {
+                ... on Item {
+                  __typename
+                  id
+                }
+              } =>
+              {
+                ... on Item {
+                  pages
+                }
+              }
+            },
+          },
+          Flatten(path: "shelf.entries.@|[Film].item") {
+            Fetch(service: "inventory") {
+              {
+                ... on Item {
+                  __typename
+                  id
+                }
+              } =>
+              {
+                ... on Item {
+                  minutes
+                }
+              }
+            },
+          },
+          Flatten(path: "shelf.entries.@|[Album].item") {
+            Fetch(service: "inventory") {
+              {
+                ... on Item {
+                  __typename
+                  id
+                }
+              } =>
+              {
+                ... on Item {
+                  tracks
+                }
+              }
+            },
+          },
+        },
+      },
+    }
+    "###
+    );
+
+    // No key or __typename in the operation.
+    assert_plan!(
+        &planner,
+        r#"
+          { shelf { entries { ... on Book { item { pages } } ... on Film { item { minutes } } ... on Album { item { tracks } } } } }
+        "#,
+        @r###"
+    QueryPlan {
+      Sequence {
+        Fetch(service: "catalog") {
+          {
+            shelf {
+              entries {
+                __typename
+                ... on Book {
+                  item {
+                    __typename
+                    id
+                  }
+                }
+                ... on Film {
+                  item {
+                    __typename
+                    id
+                  }
+                }
+                ... on Album {
+                  item {
+                    __typename
+                    id
+                  }
+                }
+              }
+            }
+          }
+        },
+        Parallel {
+          Flatten(path: "shelf.entries.@|[Album].item") {
+            Fetch(service: "inventory") {
+              {
+                ... on Item {
+                  __typename
+                  id
+                }
+              } =>
+              {
+                ... on Item {
+                  tracks
+                }
+              }
+            },
+          },
+          Flatten(path: "shelf.entries.@|[Film].item") {
+            Fetch(service: "inventory") {
+              {
+                ... on Item {
+                  __typename
+                  id
+                }
+              } =>
+              {
+                ... on Item {
+                  minutes
+                }
+              }
+            },
+          },
+          Flatten(path: "shelf.entries.@|[Book].item") {
+            Fetch(service: "inventory") {
+              {
+                ... on Item {
+                  __typename
+                  id
+                }
+              } =>
+              {
+                ... on Item {
+                  pages
+                }
+              }
+            },
+          },
+        },
+      },
+    }
+    "###
+    );
+
+    // One member alone has nothing to merge with.
+    assert_plan!(
+        &planner,
+        r#"
+          { shelf { entries { ... on Book { item { id pages } } } } }
+        "#,
+        @r###"
+    QueryPlan {
+      Sequence {
+        Fetch(service: "catalog") {
+          {
+            shelf {
+              entries {
+                __typename
+                ... on Book {
+                  item {
+                    __typename
+                    id
+                  }
+                }
+              }
+            }
+          }
+        },
+        Flatten(path: "shelf.entries.@|[Book].item") {
+          Fetch(service: "inventory") {
+            {
+              ... on Item {
+                __typename
+                id
+              }
+            } =>
+            {
+              ... on Item {
+                pages
+              }
+            }
+          },
+        },
+      },
+    }
+    "###
+    );
+
+    // Different entity types merge onto a path keeping both members'
+    // conditions, so Album items aren't asked for pages. The response shape
+    // checker can't match a path condition spanning several union members,
+    // so it can't validate this or the next case.
+    assert_plan!(
+        validate_correctness = false,
+        &planner,
+        r#"
+          { shelf { entries { ... on Book { item { pages } } ... on Game { item { name } } ... on Album { item { __typename id } } } } }
+        "#,
+        @r###"
+    QueryPlan {
+      Sequence {
+        Fetch(service: "catalog") {
+          {
+            shelf {
+              entries {
+                __typename
+                ... on Book {
+                  item {
+                    __typename
+                    id
+                  }
+                }
+                ... on Game {
+                  item {
+                    __typename
+                    id
+                  }
+                }
+                ... on Album {
+                  item {
+                    __typename
+                    id
+                  }
+                }
+              }
+            }
+          }
+        },
+        Flatten(path: "shelf.entries.@|[Book,Game].item") {
+          Fetch(service: "inventory") {
+            {
+              ... on Item {
+                __typename
+                id
+              }
+              ... on Thing {
+                __typename
+                id
+              }
+            } =>
+            {
+              ... on Item {
+                pages
+              }
+              ... on Thing {
+                name
+              }
+            }
+          },
+        },
+      },
+    }
+    "###
+    );
+
+    // The same entity type with identical selections shares one fetch.
+    assert_plan!(
+        validate_correctness = false,
+        &planner,
+        r#"
+          { shelf { entries { ... on Book { item { pages } } ... on Film { item { pages } } } } }
+        "#,
+        @r###"
+    QueryPlan {
+      Sequence {
+        Fetch(service: "catalog") {
+          {
+            shelf {
+              entries {
+                __typename
+                ... on Book {
+                  item {
+                    __typename
+                    id
+                  }
+                }
+                ... on Film {
+                  item {
+                    __typename
+                    id
+                  }
+                }
+              }
+            }
+          }
+        },
+        Flatten(path: "shelf.entries.@|[Book,Film].item") {
+          Fetch(service: "inventory") {
+            {
+              ... on Item {
+                __typename
+                id
+              }
+            } =>
+            {
+              ... on Item {
+                pages
+              }
+            }
+          },
+        },
+      },
+    }
+    "###
+    );
+    // Nested unions with identical selections share one fetch, since every
+    // combination of the members' conditions is selected.
+    assert_plan!(
+        validate_correctness = false,
+        &planner,
+        r#"
+          { shelf { entries { ... on Book { parts { ... on Front { item { pages } } ... on Body { item { pages } } ... on Back { item { pages } } } } ... on Film { parts { ... on Front { item { pages } } ... on Body { item { pages } } ... on Back { item { pages } } } } ... on Album { parts { ... on Front { item { pages } } ... on Body { item { pages } } ... on Back { item { pages } } } } } } }
+        "#,
+        @r###"
+    QueryPlan {
+      Sequence {
+        Fetch(service: "catalog") {
+          {
+            shelf {
+              entries {
+                __typename
+                ... on Book {
+                  parts {
+                    __typename
+                    ... on Front {
+                      item {
+                        __typename
+                        id
+                      }
+                    }
+                    ... on Body {
+                      item {
+                        __typename
+                        id
+                      }
+                    }
+                    ... on Back {
+                      item {
+                        __typename
+                        id
+                      }
+                    }
+                  }
+                }
+                ... on Film {
+                  parts {
+                    __typename
+                    ... on Front {
+                      item {
+                        __typename
+                        id
+                      }
+                    }
+                    ... on Body {
+                      item {
+                        __typename
+                        id
+                      }
+                    }
+                    ... on Back {
+                      item {
+                        __typename
+                        id
+                      }
+                    }
+                  }
+                }
+                ... on Album {
+                  parts {
+                    __typename
+                    ... on Front {
+                      item {
+                        __typename
+                        id
+                      }
+                    }
+                    ... on Body {
+                      item {
+                        __typename
+                        id
+                      }
+                    }
+                    ... on Back {
+                      item {
+                        __typename
+                        id
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        Flatten(path: "shelf.entries.@|[Album,Book,Film].parts.@|[Back,Body,Front].item") {
+          Fetch(service: "inventory") {
+            {
+              ... on Item {
+                __typename
+                id
+              }
+            } =>
+            {
+              ... on Item {
+                pages
+              }
+            }
+          },
+        },
+      },
+    }
+    "###
+    );
+    // Without every combination selected, the union would also cover Book's
+    // Body parts and Film's Front parts, so these stay apart.
+    assert_plan!(
+        validate_correctness = false,
+        &planner,
+        r#"
+          { shelf { entries { ... on Book { parts { ... on Front { item { pages } } } } ... on Film { parts { ... on Body { item { pages } } } } } } }
+        "#,
+        @r###"
+    QueryPlan {
+      Sequence {
+        Fetch(service: "catalog") {
+          {
+            shelf {
+              entries {
+                __typename
+                ... on Book {
+                  parts {
+                    __typename
+                    ... on Front {
+                      item {
+                        __typename
+                        id
+                      }
+                    }
+                  }
+                }
+                ... on Film {
+                  parts {
+                    __typename
+                    ... on Body {
+                      item {
+                        __typename
+                        id
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        Parallel {
+          Flatten(path: "shelf.entries.@|[Film].parts.@|[Body].item") {
+            Fetch(service: "inventory") {
+              {
+                ... on Item {
+                  __typename
+                  id
+                }
+              } =>
+              {
+                ... on Item {
+                  pages
+                }
+              }
+            },
+          },
+          Flatten(path: "shelf.entries.@|[Book].parts.@|[Front].item") {
+            Fetch(service: "inventory") {
+              {
+                ... on Item {
+                  __typename
+                  id
+                }
+              } =>
+              {
+                ... on Item {
+                  pages
+                }
+              }
+            },
           },
         },
       },
@@ -3214,6 +3815,360 @@ fn inc_nested_defer_produces_nested_defer_nodes() {
     }
     "###
     );
+}
+
+/// Nested @defer whose outer block plans an entity hop that feeds both the
+/// outer block's own follow-up fetch and the inner block. That hop gets a
+/// fetch id for the inner block, but the outer block must not list it in its
+/// own `depends`: the router would wait for a fetch that only runs once the
+/// block itself starts.
+#[test]
+fn inc_nested_defer_does_not_depend_on_its_own_fetches() {
+    let planner = planner!(
+        config = incremental_defer_config(),
+        Subgraph1: r#"
+          type Query {
+            t: T
+          }
+
+          type T @key(fields: "id") {
+            id: ID!
+            x: Int
+          }
+        "#,
+        Subgraph2: r#"
+          type T @key(fields: "id") {
+            id: ID!
+            u: U
+          }
+
+          type U @key(fields: "id") {
+            id: ID!
+          }
+        "#,
+        Subgraph3: r#"
+          type U @key(fields: "id") {
+            id: ID!
+            name: String
+            age: Int
+          }
+        "#,
+    );
+
+    let plan = assert_plan!(
+        &planner,
+        r#"
+          {
+            t {
+              x
+              ... @defer {
+                u {
+                  name
+                  ... @defer {
+                    age
+                  }
+                }
+              }
+            }
+          }
+        "#,
+        @r###"
+    QueryPlan {
+      Defer {
+        Primary {
+          { t { x } }:
+          Fetch(service: "Subgraph1", id: 0) {
+            {
+              t {
+                __typename
+                x
+                id
+              }
+            }
+          },
+        }, [
+          Deferred(depends: [0], path: "t") {
+            Defer {
+              Primary {
+                { u { name } }:
+                Sequence {
+                  Flatten(path: "t") {
+                    Fetch(service: "Subgraph2", id: 1) {
+                      {
+                        ... on T {
+                          __typename
+                          id
+                        }
+                      } =>
+                      {
+                        ... on T {
+                          u {
+                            __typename
+                            id
+                          }
+                        }
+                      }
+                    },
+                  },
+                  Flatten(path: "t.u") {
+                    Fetch(service: "Subgraph3") {
+                      {
+                        ... on U {
+                          __typename
+                          id
+                        }
+                      } =>
+                      {
+                        ... on U {
+                          name
+                        }
+                      }
+                    },
+                  },
+                },
+              }, [
+                Deferred(depends: [1], path: "t/u") {
+                  { age }:
+                  Flatten(path: "t.u") {
+                    Fetch(service: "Subgraph3") {
+                      {
+                        ... on U {
+                          __typename
+                          id
+                        }
+                      } =>
+                      {
+                        ... on U {
+                          age
+                        }
+                      }
+                    },
+                  },
+                },
+              ]
+            },
+          },
+        ]
+      },
+    }
+    "###
+    );
+    match &plan.node {
+        Some(TopLevelPlanNode::Defer(defer)) => assert_no_self_dependent_deferred_blocks(defer),
+        other => panic!("expected a top-level Defer node, got {other:?}"),
+    }
+}
+
+/// The deferred block needs only `t`'s key from the primary's first fetch,
+/// so it depends on that fetch alone and starts while the primary is still
+/// fetching `y`. Listing the block's own Subgraph2 fetch would hold it until
+/// the whole primary finished.
+#[test]
+fn inc_nested_defer_starts_before_the_primary_finishes() {
+    let planner = planner!(
+        config = incremental_defer_config(),
+        Subgraph1: r#"
+          type Query {
+            t: T
+          }
+          type T @key(fields: "id") {
+            id: ID!
+            x: Int
+          }
+        "#,
+        Subgraph2: r#"
+          type T @key(fields: "id") {
+            id: ID!
+            u: U
+          }
+          type U @key(fields: "id") {
+            id: ID!
+          }
+        "#,
+        Subgraph3: r#"
+          type U @key(fields: "id") {
+            id: ID!
+            name: String
+            age: Int
+          }
+        "#,
+        Subgraph4: r#"
+          type T @key(fields: "id") {
+            id: ID!
+            y: Int
+          }
+        "#,
+    );
+    let plan = assert_plan!(
+        &planner,
+        r#"
+          {
+            t {
+              x
+              y
+              ... @defer {
+                u {
+                  name
+                  ... @defer {
+                    age
+                  }
+                }
+              }
+            }
+          }
+        "#,
+        @r###"
+    QueryPlan {
+      Defer {
+        Primary {
+          { t { x y } }:
+          Sequence {
+            Fetch(service: "Subgraph1", id: 0) {
+              {
+                t {
+                  __typename
+                  x
+                  id
+                }
+              }
+            },
+            Flatten(path: "t") {
+              Fetch(service: "Subgraph4") {
+                {
+                  ... on T {
+                    __typename
+                    id
+                  }
+                } =>
+                {
+                  ... on T {
+                    y
+                  }
+                }
+              },
+            },
+          },
+        }, [
+          Deferred(depends: [0], path: "t") {
+            Defer {
+              Primary {
+                { u { name } }:
+                Sequence {
+                  Flatten(path: "t") {
+                    Fetch(service: "Subgraph2", id: 1) {
+                      {
+                        ... on T {
+                          __typename
+                          id
+                        }
+                      } =>
+                      {
+                        ... on T {
+                          u {
+                            __typename
+                            id
+                          }
+                        }
+                      }
+                    },
+                  },
+                  Flatten(path: "t.u") {
+                    Fetch(service: "Subgraph3") {
+                      {
+                        ... on U {
+                          __typename
+                          id
+                        }
+                      } =>
+                      {
+                        ... on U {
+                          name
+                        }
+                      }
+                    },
+                  },
+                },
+              }, [
+                Deferred(depends: [1], path: "t/u") {
+                  { age }:
+                  Flatten(path: "t.u") {
+                    Fetch(service: "Subgraph3") {
+                      {
+                        ... on U {
+                          __typename
+                          id
+                        }
+                      } =>
+                      {
+                        ... on U {
+                          age
+                        }
+                      }
+                    },
+                  },
+                },
+              ]
+            },
+          },
+        ]
+      },
+    }
+    "###
+    );
+    match &plan.node {
+        Some(TopLevelPlanNode::Defer(defer)) => assert_no_self_dependent_deferred_blocks(defer),
+        other => panic!("expected a top-level Defer node, got {other:?}"),
+    }
+}
+
+fn assert_no_self_dependent_deferred_blocks(defer: &DeferNode) {
+    for block in &defer.deferred {
+        let Some(node) = &block.node else { continue };
+        let mut inside = Vec::new();
+        collect_fetch_ids(node, &mut inside);
+        for dependency in &block.depends {
+            assert!(
+                !inside.contains(&dependency.id),
+                "deferred block at {:?} depends on fetch {} planned inside itself",
+                block.query_path,
+                dependency.id,
+            );
+        }
+        if let PlanNode::Defer(nested) = node.as_ref() {
+            assert_no_self_dependent_deferred_blocks(nested);
+        }
+    }
+}
+
+fn collect_fetch_ids(node: &PlanNode, ids: &mut Vec<String>) {
+    match node {
+        PlanNode::Fetch(fetch) => ids.extend(fetch.id.map(|id| id.to_string())),
+        PlanNode::Flatten(flatten) => collect_fetch_ids(&flatten.node, ids),
+        PlanNode::Sequence(sequence) => sequence
+            .nodes
+            .iter()
+            .for_each(|node| collect_fetch_ids(node, ids)),
+        PlanNode::Parallel(parallel) => parallel
+            .nodes
+            .iter()
+            .for_each(|node| collect_fetch_ids(node, ids)),
+        PlanNode::Condition(condition) => condition
+            .if_clause
+            .iter()
+            .chain(condition.else_clause.iter())
+            .for_each(|node| collect_fetch_ids(node, ids)),
+        PlanNode::Defer(defer) => defer
+            .primary
+            .node
+            .iter()
+            .chain(
+                defer
+                    .deferred
+                    .iter()
+                    .filter_map(|block| block.node.as_ref()),
+            )
+            .for_each(|node| collect_fetch_ids(node, ids)),
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -4364,38 +5319,40 @@ fn inc_plain_requires_after_aliased_requires_does_not_overwrite() {
               }
             },
           },
-          Flatten(path: "t.__require_0_a") {
-            Fetch(service: "S3") {
-              {
-                ... on A {
-                  __typename
-                  id
+          Sequence {
+            Flatten(path: "t.__require_0_a") {
+              Fetch(service: "S3") {
+                {
+                  ... on A {
+                    __typename
+                    id
+                  }
+                } =>
+                {
+                  ... on A {
+                    x
+                  }
                 }
-              } =>
-              {
-                ... on A {
-                  x
-                }
-              }
+              },
             },
-          },
-        },
-        Flatten(path: "t") {
-          Fetch(service: "S2") {
-            {
-              ... on T {
-                __typename
-                id
-                __require_0_a: a {
-                  x
+            Flatten(path: "t") {
+              Fetch(service: "S2") {
+                {
+                  ... on T {
+                    __typename
+                    id
+                    __require_0_a: a {
+                      x
+                    }
+                  }
+                } =>
+                {
+                  ... on T {
+                    b
+                  }
                 }
-              }
-            } =>
-            {
-              ... on T {
-                b
-              }
-            }
+              },
+            },
           },
         },
       },
@@ -4815,38 +5772,40 @@ fn inc_requires_aliased_then_plain_input_does_not_collide() {
               }
             },
           },
-          Flatten(path: "t.__require_0_a") {
-            Fetch(service: "S3") {
-              {
-                ... on A {
-                  __typename
-                  id
+          Sequence {
+            Flatten(path: "t.__require_0_a") {
+              Fetch(service: "S3") {
+                {
+                  ... on A {
+                    __typename
+                    id
+                  }
+                } =>
+                {
+                  ... on A {
+                    x
+                  }
                 }
-              } =>
-              {
-                ... on A {
-                  x
-                }
-              }
+              },
             },
-          },
-        },
-        Flatten(path: "t") {
-          Fetch(service: "S2") {
-            {
-              ... on T {
-                __typename
-                id
-                __require_0_a: a {
-                  x
+            Flatten(path: "t") {
+              Fetch(service: "S2") {
+                {
+                  ... on T {
+                    __typename
+                    id
+                    __require_0_a: a {
+                      x
+                    }
+                  }
+                } =>
+                {
+                  ... on T {
+                    b
+                  }
                 }
-              }
-            } =>
-            {
-              ... on T {
-                b
-              }
-            }
+              },
+            },
           },
         },
       },
@@ -5747,6 +6706,458 @@ fn inc_fragment_outside_every_route_is_dropped() {
             }
           }
         }
+      },
+    }
+    "###
+    );
+}
+
+// s2's key needs k2, which only s2 has, so every route into s2 needs a route into s2 first. Key
+// conditions on that cycle used to nest down to the condition depth limit, branching at each
+// level, and planning ran out of memory. The final s1 hop through the `k3` key is redundant, but
+// the planner picks it with or without s2.
+#[test]
+fn inc_key_condition_cycle_does_not_recurse_to_the_depth_limit() {
+    let planner = planner!(
+        config = incremental_config(),
+        s0: r#"
+          type Query { t: T }
+          type T @key(fields: "k4") { k4: ID! @shareable k1: ID! @shareable }
+        "#,
+        s1: r#"
+          type T @key(fields: "k3") @key(fields: "f { a }") { k3: ID! @shareable f: U @shareable }
+          type U { a: Int @shareable }
+        "#,
+        s2: r#"
+          type T @key(fields: "k1 k2") {
+            k1: ID! @shareable
+            k2: ID! @shareable @inaccessible
+            k4: ID! @shareable
+          }
+        "#,
+        s3: r#"
+          type T @key(fields: "k4") { k4: ID! @shareable f: U @shareable }
+          type U { a: Int @shareable }
+        "#,
+    );
+    assert_plan!(
+        &planner,
+        "{ t { k3 } }",
+        @r###"
+    QueryPlan {
+      Sequence {
+        Fetch(service: "s0") {
+          {
+            t {
+              __typename
+              k4
+            }
+          }
+        },
+        Flatten(path: "t") {
+          Fetch(service: "s3") {
+            {
+              ... on T {
+                __typename
+                k4
+              }
+            } =>
+            {
+              ... on T {
+                __typename
+                f {
+                  a
+                }
+              }
+            }
+          },
+        },
+        Flatten(path: "t") {
+          Fetch(service: "s1") {
+            {
+              ... on T {
+                __typename
+                f {
+                  a
+                }
+              }
+            } =>
+            {
+              ... on T {
+                k3
+              }
+            }
+          },
+        },
+        Flatten(path: "t") {
+          Fetch(service: "s1") {
+            {
+              ... on T {
+                __typename
+                k3
+              }
+            } =>
+            {
+              ... on T {
+                k3
+              }
+            }
+          },
+        },
+      },
+    }
+    "###
+    );
+}
+
+// A fetch whose inputs come from sibling fetches must not wait for an
+// unrelated, deeper sibling branch. Here `e` needs `c` and `d`, while
+// `b -> f -> g` is independent, so `e` runs alongside `f`.
+#[test]
+fn inc_multi_parent_fetch_does_not_wait_for_unrelated_branch() {
+    let planner = planner!(
+        config = incremental_config(),
+        a: r#"
+          type Query { t: T }
+          type T @key(fields: "id") { id: ID! }
+        "#,
+        b: r#"
+          type T @key(fields: "id") { id: ID! u: U }
+          type U @key(fields: "id") { id: ID! }
+        "#,
+        c: r#"
+          type T @key(fields: "id") { id: ID! c: Int }
+        "#,
+        d: r#"
+          type T @key(fields: "id") { id: ID! d: Int }
+        "#,
+        e: r#"
+          type T @key(fields: "id") {
+            id: ID!
+            c: Int @external
+            d: Int @external
+            e: Int @requires(fields: "c d")
+          }
+        "#,
+        f: r#"
+          type U @key(fields: "id") { id: ID! v: V }
+          type V @key(fields: "id") { id: ID! }
+        "#,
+        g: r#"
+          type V @key(fields: "id") { id: ID! w: Int }
+        "#,
+    );
+
+    // validate_correctness = false: the correctness checker does not follow
+    // aliased @requires inputs (`__require_0_c: c`), so it rejects this plan.
+    assert_plan!(
+        validate_correctness = false,
+        &planner,
+        r#"
+          {
+            t {
+              e
+              u { v { w } }
+            }
+          }
+        "#,
+        @r###"
+    QueryPlan {
+      Sequence {
+        Fetch(service: "a") {
+          {
+            t {
+              __typename
+              id
+            }
+          }
+        },
+        Parallel {
+          Sequence {
+            Flatten(path: "t") {
+              Fetch(service: "b") {
+                {
+                  ... on T {
+                    __typename
+                    id
+                  }
+                } =>
+                {
+                  ... on T {
+                    u {
+                      __typename
+                      id
+                    }
+                  }
+                }
+              },
+            },
+            Flatten(path: "t.u") {
+              Fetch(service: "f") {
+                {
+                  ... on U {
+                    __typename
+                    id
+                  }
+                } =>
+                {
+                  ... on U {
+                    v {
+                      __typename
+                      id
+                    }
+                  }
+                }
+              },
+            },
+            Flatten(path: "t.u.v") {
+              Fetch(service: "g") {
+                {
+                  ... on V {
+                    __typename
+                    id
+                  }
+                } =>
+                {
+                  ... on V {
+                    w
+                  }
+                }
+              },
+            },
+          },
+          Sequence {
+            Parallel {
+              Flatten(path: "t") {
+                Fetch(service: "d") {
+                  {
+                    ... on T {
+                      __typename
+                      id
+                    }
+                  } =>
+                  {
+                    ... on T {
+                      __require_1_d: d
+                    }
+                  }
+                },
+              },
+              Flatten(path: "t") {
+                Fetch(service: "c") {
+                  {
+                    ... on T {
+                      __typename
+                      id
+                    }
+                  } =>
+                  {
+                    ... on T {
+                      __require_0_c: c
+                    }
+                  }
+                },
+              },
+            },
+            Flatten(path: "t") {
+              Fetch(service: "e") {
+                {
+                  ... on T {
+                    __typename
+                    id
+                    __require_0_c: c
+                    __require_1_d: d
+                  }
+                } =>
+                {
+                  ... on T {
+                    e
+                  }
+                }
+              },
+            },
+          },
+        },
+      },
+    }
+    "###
+    );
+}
+
+// Fetches that depend on one first-level fetch alone nest under it, so
+// `f` does not wait for `c` and `c2` does not wait for `b`. `e` needs both
+// sides, and `g` sits at `e`'s level, so both run after the two branches.
+#[test]
+fn inc_private_chain_nests_under_its_fetch_until_the_shared_level() {
+    let planner = planner!(
+        config = incremental_config(),
+        a: r#"
+          type Query { t: T }
+          type T @key(fields: "id") { id: ID! }
+        "#,
+        b: r#"
+          type T @key(fields: "id") { id: ID! x: Int u: U }
+          type U @key(fields: "id") { id: ID! }
+        "#,
+        c: r#"
+          type T @key(fields: "id") { id: ID! z: Int }
+        "#,
+        c2: r#"
+          type T @key(fields: "id") {
+            id: ID!
+            z: Int @external
+            y: Int @requires(fields: "z")
+          }
+        "#,
+        e: r#"
+          type T @key(fields: "id") {
+            id: ID!
+            x: Int @external
+            y: Int @external
+            e: Int @requires(fields: "x y")
+          }
+        "#,
+        f: r#"
+          type U @key(fields: "id") { id: ID! v: V }
+          type V @key(fields: "id") { id: ID! }
+        "#,
+        g: r#"
+          type V @key(fields: "id") { id: ID! w: Int }
+        "#,
+    );
+
+    // validate_correctness = false: the correctness checker does not follow
+    // aliased @requires inputs (`__require_0_c: c`), so it rejects this plan.
+    assert_plan!(
+        validate_correctness = false,
+        &planner,
+        r#"
+          {
+            t {
+              e
+              u { v { w } }
+            }
+          }
+        "#,
+        @r###"
+    QueryPlan {
+      Sequence {
+        Fetch(service: "a") {
+          {
+            t {
+              __typename
+              id
+            }
+          }
+        },
+        Parallel {
+          Sequence {
+            Flatten(path: "t") {
+              Fetch(service: "c") {
+                {
+                  ... on T {
+                    __typename
+                    id
+                  }
+                } =>
+                {
+                  ... on T {
+                    __require_2_z: z
+                  }
+                }
+              },
+            },
+            Flatten(path: "t") {
+              Fetch(service: "c2") {
+                {
+                  ... on T {
+                    __typename
+                    id
+                    __require_2_z: z
+                  }
+                } =>
+                {
+                  ... on T {
+                    __require_1_y: y
+                  }
+                }
+              },
+            },
+          },
+          Sequence {
+            Flatten(path: "t") {
+              Fetch(service: "b") {
+                {
+                  ... on T {
+                    __typename
+                    id
+                  }
+                } =>
+                {
+                  ... on T {
+                    __require_0_x: x
+                    u {
+                      __typename
+                      id
+                    }
+                  }
+                }
+              },
+            },
+            Flatten(path: "t.u") {
+              Fetch(service: "f") {
+                {
+                  ... on U {
+                    __typename
+                    id
+                  }
+                } =>
+                {
+                  ... on U {
+                    v {
+                      __typename
+                      id
+                    }
+                  }
+                }
+              },
+            },
+          },
+        },
+        Parallel {
+          Flatten(path: "t.u.v") {
+            Fetch(service: "g") {
+              {
+                ... on V {
+                  __typename
+                  id
+                }
+              } =>
+              {
+                ... on V {
+                  w
+                }
+              }
+            },
+          },
+          Flatten(path: "t") {
+            Fetch(service: "e") {
+              {
+                ... on T {
+                  __typename
+                  id
+                  __require_0_x: x
+                  __require_1_y: y
+                }
+              } =>
+              {
+                ... on T {
+                  e
+                }
+              }
+            },
+          },
+        },
       },
     }
     "###

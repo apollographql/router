@@ -3,7 +3,6 @@ use std::path::PathBuf;
 use std::pin::Pin;
 use std::sync::Arc;
 
-use derivative::Derivative;
 use derive_more::Display;
 use derive_more::From;
 use futures::prelude::*;
@@ -19,8 +18,7 @@ use crate::uplink::UplinkConfig;
 type ConfigurationStream = Pin<Box<dyn Stream<Item = Configuration> + Send>>;
 
 /// The user supplied config. Either a static instance or a stream for hot reloading.
-#[derive(From, Display, Derivative)]
-#[derivative(Debug)]
+#[derive(From, Display, derive_more::Debug)]
 #[non_exhaustive]
 pub enum ConfigurationSource {
     /// A static configuration.
@@ -34,7 +32,7 @@ pub enum ConfigurationSource {
     /// A configuration stream where the server will react to new configuration. If possible
     /// the configuration will be applied without restarting the internal http server.
     #[display("Stream")]
-    Stream(#[derivative(Debug = "ignore")] ConfigurationStream),
+    Stream(#[debug(skip)] ConfigurationStream),
 
     /// A yaml file that may be watched for changes
     #[display("File")]

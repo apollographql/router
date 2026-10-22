@@ -1,6 +1,3 @@
-use schemars::JsonSchema;
-use serde::Deserialize;
-
 use crate::plugins::telemetry::config_new::DefaultForLevel;
 use crate::plugins::telemetry::config_new::attributes::DefaultAttributeRequirementLevel;
 use crate::plugins::telemetry::config_new::conditional::Conditional;
@@ -9,8 +6,7 @@ use crate::plugins::telemetry::config_new::router::attributes::RouterAttributes;
 use crate::plugins::telemetry::config_new::router::selectors::RouterSelector;
 use crate::plugins::telemetry::otlp::TelemetryDataKind;
 
-#[derive(Deserialize, JsonSchema, Clone, Debug, Default)]
-#[serde(deny_unknown_fields, default)]
+#[apollo_configuration::configuration]
 pub(crate) struct RouterSpans {
     /// Custom attributes that are attached to the router span.
     pub(crate) attributes: Extendable<RouterAttributes, Conditional<RouterSelector>>,

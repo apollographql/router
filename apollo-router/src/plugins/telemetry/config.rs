@@ -11,8 +11,6 @@ use opentelemetry_sdk::metrics::Aggregation;
 use opentelemetry_sdk::metrics::Instrument;
 use opentelemetry_sdk::metrics::Stream;
 use opentelemetry_sdk::trace::SpanLimits;
-use schemars::JsonSchema;
-use serde::Deserialize;
 use serde::Serialize;
 use tower::BoxError;
 
@@ -65,8 +63,6 @@ pub(crate) struct Conf {
     pub(crate) exporters: Exporters,
 
     /// Instrumentation configuration
-    // Instrumentation's nested types don't use the configuration attribute, so they have no Validate impl.
-    #[config(skip_validate)]
     pub(crate) instrumentation: Instrumentation,
 }
 
@@ -83,8 +79,7 @@ pub(crate) struct Exporters {
 }
 
 /// Instrumentation configuration
-#[derive(Clone, Default, Debug, Deserialize, JsonSchema)]
-#[serde(deny_unknown_fields, default)]
+#[apollo_configuration::configuration]
 pub(crate) struct Instrumentation {
     /// Event configuration
     pub(crate) events: config_new::events::Events,
@@ -95,10 +90,10 @@ pub(crate) struct Instrumentation {
 }
 
 impl Instrumentation {
-    pub(crate) fn validate(&self) -> Result<(), String> {
-        self.events.validate()?;
-        self.instruments.validate()?;
-        self.spans.validate()
+    pub(crate) fn validate_selectors(&self) -> Result<(), String> {
+        self.events.validate_selectors()?;
+        self.instruments.validate_selectors()?;
+        self.spans.validate_selectors()
     }
 }
 
@@ -126,8 +121,7 @@ pub(crate) struct MetricsCommon {
     #[config(skip_validate)]
     pub(crate) resource: BTreeMap<String, AttributeValue>,
     /// Custom buckets for all histograms
-    // f64 has no Validate impl.
-    #[config(default = default_buckets(), skip_validate)]
+    #[config(default = default_buckets())]
     pub(crate) buckets: Vec<f64>,
     /// Views applied on metrics
     pub(crate) views: Vec<MetricView>,
@@ -321,8 +315,7 @@ pub(crate) enum MetricAggregation {
     /// An aggregation that summarizes a set of measurements as an histogram with
     /// explicitly defined buckets.
     Histogram {
-        // f64 has no Validate impl.
-        #[config(required, skip_validate)]
+        #[config(required)]
         buckets: Vec<f64>,
     },
     /// Simply drop the metrics matching this view
@@ -532,8 +525,9 @@ fn default_sampler() -> SamplerOption {
     SamplerOption::Always(Sampler::AlwaysOn)
 }
 
-#[derive(Debug, Clone, Deserialize, Serialize, JsonSchema, PartialEq)]
-#[serde(untagged, deny_unknown_fields)]
+#[apollo_configuration::configuration]
+#[derive(Serialize, PartialEq)]
+#[serde(untagged)]
 #[allow(missing_docs)] // only public-but-hidden for tests
 pub enum AttributeValue {
     /// bool values
@@ -681,8 +675,9 @@ impl From<AttributeValue> for opentelemetry::Value {
     }
 }
 
-#[derive(Debug, Clone, Deserialize, Serialize, JsonSchema, PartialEq)]
-#[serde(untagged, deny_unknown_fields)]
+#[apollo_configuration::configuration]
+#[derive(Serialize, PartialEq)]
+#[serde(untagged)]
 pub(crate) enum AttributeArray {
     /// Array of bools
     Bool(Vec<bool>),
@@ -730,17 +725,14 @@ impl From<opentelemetry::Array> for AttributeArray {
     }
 }
 
-#[derive(Clone, Debug, Deserialize, JsonSchema, PartialEq)]
-#[serde(deny_unknown_fields, untagged)]
+#[apollo_configuration::configuration]
+#[derive(PartialEq)]
+#[serde(untagged)]
 pub(crate) enum SamplerOption {
     /// Sample a given fraction. Fractions >= 1 will always sample.
     TraceIdRatioBased(f64),
     Always(Sampler),
 }
-
-// The configuration attribute can't validate the TraceIdRatioBased variant because f64 has no
-// Validate impl. Neither variant has nested rules.
-impl apollo_configuration::Validate for SamplerOption {}
 
 #[apollo_configuration::configuration]
 #[derive(PartialEq)]

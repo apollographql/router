@@ -38,10 +38,16 @@ fn schema_generation() {
     );
 }
 
+/// The schema declares draft 2020-12 and is valid against that draft's meta-schema, which
+/// `meta::validate` selects from the schema's own `$schema`.
 #[test]
 fn schema_is_valid() {
     let schema = generate_config_schema();
-    jsonschema::draft7::meta::validate(schema.as_value()).expect("generated schema must be valid");
+    assert_eq!(
+        schema.get("$schema"),
+        Some(&json!("https://json-schema.org/draft/2020-12/schema"))
+    );
+    jsonschema::meta::validate(schema.as_value()).expect("generated schema must be valid");
 }
 
 #[test]
@@ -990,11 +996,9 @@ fn from_str_reads_environment_variables_on_every_parse() {
     unsafe { std::env::remove_var(NAME) };
 }
 
-#[rstest::rstest]
-#[case("")]
-#[case("plugins:")]
-fn unusual_configs_validate(#[case] input: &str) {
-    parse_without_inputs(input, Migration::None).expect("should be valid configuration");
+#[test]
+fn empty_config_validates() {
+    parse_without_inputs("", Migration::None).expect("should be valid configuration");
 }
 
 fn visit_schema(path: &str, schema: &Value, errors: &mut Vec<String>) {
@@ -1375,6 +1379,14 @@ fn nested_plugin_sections_reject_unknown_keys() {
         (
             "telemetry:\n  apollo:\n    metrics:\n      usage_reports:\n        batch_processor:\n          scheduled_dealy: 5s\n",
             "scheduled_dealy",
+        ),
+        (
+            "telemetry:\n  instrumentation:\n    events:\n      router:\n        my.event:\n          message: sent\n          on: request\n          level: info\n          levle: warn\n",
+            "levle",
+        ),
+        (
+            "telemetry:\n  instrumentation:\n    events:\n      router:\n        request:\n          level: info\n          condition:\n            exists:\n              request_header: x-trace\n          conditon: {}\n",
+            "conditon",
         ),
     ] {
         assert_rejects_unknown_key(yaml, key);

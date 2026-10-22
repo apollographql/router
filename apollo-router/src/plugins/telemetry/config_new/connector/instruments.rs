@@ -3,8 +3,6 @@ use std::sync::Arc;
 
 use opentelemetry::metrics::MeterProvider;
 use parking_lot::Mutex;
-use schemars::JsonSchema;
-use serde::Deserialize;
 use tokio::time::Instant;
 use tower::BoxError;
 
@@ -33,8 +31,7 @@ use crate::plugins::telemetry::config_new::instruments::METER_NAME;
 use crate::plugins::telemetry::config_new::instruments::StaticInstrument;
 use crate::plugins::telemetry::otlp::TelemetryDataKind;
 
-#[derive(Clone, Deserialize, JsonSchema, Debug, Default)]
-#[serde(deny_unknown_fields, default)]
+#[apollo_configuration::configuration]
 pub(crate) struct ConnectorInstrumentsConfig {
     /// Histogram of client request duration
     #[serde(rename = "http.client.request.duration")]

@@ -115,11 +115,11 @@ async fn apq_request(
     let maybe_query_hash =
         PersistedQuery::maybe_from_request(&request).and_then(PersistedQuery::decode_hash);
 
-    let body_query = request.supergraph_request.body().query.clone();
+    let body_query = request.supergraph_request.body().query.as_deref();
 
     match (maybe_query_hash, body_query) {
         (Some((query_hash, query_hash_bytes)), Some(query)) => {
-            if query_matches_hash(query.as_str(), query_hash_bytes.as_slice()) {
+            if query_matches_hash(query, query_hash_bytes.as_slice()) {
                 tracing::trace!("apq: cache insert");
                 let _ = request.context.insert(PERSISTED_QUERY_REGISTERED, true);
                 let query = query.to_owned();
