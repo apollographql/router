@@ -21,7 +21,6 @@ use crate::operation::SelectionSet;
 use crate::operation::TYPENAME_FIELD;
 use crate::query_plan::FetchDataPathElement;
 use crate::schema::ValidFederationSchema;
-use crate::schema::position::ObjectTypeDefinitionPosition;
 
 /// What a selection under a response key resolves to: the field and its
 /// arguments. Directives are left out because they do not affect merging.
@@ -236,7 +235,7 @@ impl<'a> RequiresLookup<'a> {
     }
 
     /// Each @requires on `field`, for every object type it can be selected
-    /// on, with the object field it belongs to.
+    /// on and the interfaces those implement, with the field it belongs to.
     fn conditions_of(&mut self, field: &Field) -> Vec<((Name, Name), SelectionSet)> {
         let Some((join, directive)) = &self.join else {
             return Vec::new();
@@ -247,11 +246,24 @@ impl<'a> RequiresLookup<'a> {
         else {
             return Vec::new();
         };
-        let mut found = Vec::new();
+        // An @interfaceObject's @requires sits on the interface field, so the
+        // interfaces the runtime types implement are sites too.
+        let mut types: Vec<Name> = Vec::new();
         for object in objects {
-            let site = (object.type_name.clone(), field.name().clone());
+            if let Some(def) = self.supergraph.schema().get_object(&object.type_name) {
+                for itf in def.implements_interfaces.iter() {
+                    if !types.contains(itf) {
+                        types.push((**itf).clone());
+                    }
+                }
+            }
+            types.push(object.type_name);
+        }
+        let mut found = Vec::new();
+        for type_name in types {
+            let site = (type_name, field.name().clone());
             let conditions = self.parsed.entry(site.clone()).or_insert_with(|| {
-                parse_requires(self.supergraph, join, directive, &object, field.name())
+                parse_requires(self.supergraph, join, directive, &site.0, field.name())
             });
             found.extend(conditions.iter().map(|c| (site.clone(), c.clone())));
         }
@@ -263,10 +275,10 @@ fn parse_requires(
     supergraph: &ValidFederationSchema,
     join: &JoinSpecDefinition,
     directive: &Name,
-    object: &ObjectTypeDefinitionPosition,
+    type_name: &Name,
     field_name: &Name,
 ) -> Vec<SelectionSet> {
-    let Ok(definition) = object.field(field_name.clone()).get(supergraph.schema()) else {
+    let Some(definition) = supergraph.schema().type_field(type_name, field_name).ok() else {
         return Vec::new();
     };
     definition
@@ -274,13 +286,8 @@ fn parse_requires(
         .get_all(directive)
         .filter_map(|application| join.field_directive_arguments(application).ok()?.requires)
         .filter_map(|text| {
-            crate::schema::field_set::parse_field_set(
-                supergraph,
-                object.type_name.clone(),
-                text,
-                false,
-            )
-            .ok()
+            crate::schema::field_set::parse_field_set(supergraph, type_name.clone(), text, false)
+                .ok()
         })
         .collect()
 }

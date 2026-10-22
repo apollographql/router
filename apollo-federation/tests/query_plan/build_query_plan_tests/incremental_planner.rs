@@ -6909,6 +6909,147 @@ fn inc_requires_aliases_only_colliding_conditions() {
     "###);
 }
 
+/// An @interfaceObject's @requires sits on the interface field, so its
+/// condition can share the client's copy of the field.
+#[test]
+fn inc_requires_on_interface_object_shares_client_field() {
+    let planner = planner!(
+        config = incremental_config(),
+        S1: r#"
+          type Query { t: I }
+          interface I @key(fields: "id") { id: ID! listing: Listing }
+          type A implements I @key(fields: "id") { id: ID! listing: Listing @shareable }
+          type Listing @key(fields: "id") { id: ID! }
+        "#,
+        S2: r#"
+          type Listing @key(fields: "id") {
+            id: ID!
+            sku: String @shareable
+            cost(currency: String!): Int
+          }
+        "#,
+        S3: r#"
+          type I @key(fields: "id") @interfaceObject {
+            id: ID!
+            listing: Listing @external
+            usd: Int @requires(fields: "listing { cost(currency: \"USD\") }")
+          }
+          type Listing @key(fields: "id") { id: ID! cost(currency: String!): Int @external }
+        "#,
+    );
+    assert_plan!(
+        &planner,
+        "{ t { listing { sku } usd } }",
+        @r###"
+    QueryPlan {
+      Sequence {
+        Fetch(service: "S1") {
+          {
+            t {
+              __typename
+              listing {
+                __typename
+                id
+              }
+              id
+            }
+          }
+        },
+        Flatten(path: "t.listing") {
+          Fetch(service: "S2") {
+            {
+              ... on Listing {
+                __typename
+                id
+              }
+            } =>
+            {
+              ... on Listing {
+                sku
+                cost(currency: "USD")
+              }
+            }
+          },
+        },
+        Flatten(path: "t") {
+          Fetch(service: "S3") {
+            {
+              ... on I {
+                __typename
+                id
+                listing {
+                  cost
+                }
+              }
+            } =>
+            {
+              ... on I {
+                usd
+              }
+            }
+          },
+        },
+      },
+    }
+    "###
+    );
+    assert_plan!(
+        &planner,
+        "{ t { usd } }",
+        @r###"
+    QueryPlan {
+      Sequence {
+        Fetch(service: "S1") {
+          {
+            t {
+              __typename
+              id
+              listing {
+                __typename
+                id
+              }
+            }
+          }
+        },
+        Flatten(path: "t.listing") {
+          Fetch(service: "S2") {
+            {
+              ... on Listing {
+                __typename
+                id
+              }
+            } =>
+            {
+              ... on Listing {
+                cost(currency: "USD")
+              }
+            }
+          },
+        },
+        Flatten(path: "t") {
+          Fetch(service: "S3") {
+            {
+              ... on I {
+                __typename
+                id
+                listing {
+                  cost
+                }
+              }
+            } =>
+            {
+              ... on I {
+                usd
+              }
+            }
+          },
+        },
+      },
+    }
+    "###
+    );
+}
+
 /// An aliased condition renamed back onto a key field must keep the key's
 /// nested fields, or the representation loses part of the key.
 #[test]
