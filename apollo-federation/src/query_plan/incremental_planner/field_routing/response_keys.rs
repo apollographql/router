@@ -204,18 +204,16 @@ mod tests {
 
     use super::*;
     use crate::schema::ValidFederationSchema;
-    use crate::schema::position::CompositeTypeDefinitionPosition;
-
-    const SCHEMA: &str = r#"
-        type Query { t: T }
-        type T { listing: Listing other: Listing }
-        type Listing { sku: String cost(currency: String): Int media: Media }
-        interface Media { name: String }
-        type Photo implements Media { name: String size(unit: String): Int }
-    "#;
 
     fn schema() -> ValidFederationSchema {
-        let schema = apollo_compiler::Schema::parse_and_validate(SCHEMA, "schema.graphql")
+        let sdl = r#"
+            type Query { t: T }
+            type T { listing: Listing other: Listing }
+            type Listing { sku: String cost(currency: String): Int media: Media }
+            interface Media { name: String }
+            type Photo implements Media { name: String size(unit: String): Int }
+        "#;
+        let schema = apollo_compiler::Schema::parse_and_validate(sdl, "schema.graphql")
             .expect("valid schema");
         ValidFederationSchema::new(schema).expect("valid federation schema")
     }
@@ -226,125 +224,92 @@ mod tests {
         OperationResponseKeys::new(&op.selection_set)
     }
 
+    /// The first field of a condition parsed on `T`.
     fn condition(text: &str) -> Arc<FieldSelection> {
         let schema = schema();
-        let t: CompositeTypeDefinitionPosition = schema
-            .get_type(&name!("T"))
-            .expect("T exists")
-            .try_into()
-            .expect("T is composite");
-        let set = SelectionSet::parse(schema, t, text).expect("condition parses");
+        let t = schema.get_type(&name!("T")).expect("T exists");
+        let set = SelectionSet::parse(schema, t.try_into().expect("T is composite"), text)
+            .expect("condition parses");
         match set.selections.values().next().expect("one selection") {
             Selection::Field(field) => field.clone(),
             Selection::InlineFragment(_) => panic!("expected a field"),
         }
     }
 
-    fn at_t() -> Vec<FetchDataPathElement> {
-        vec![FetchDataPathElement::Key(name!("t"), None)]
+    fn needs_alias(operation: &str, condition_text: &str) -> bool {
+        let at_t = [FetchDataPathElement::Key(name!("t"), None)];
+        keys_for(operation).condition_needs_alias(&at_t, &condition(condition_text))
     }
 
     #[test]
-    fn plain_field_shares_an_unclaimed_key() {
-        let keys = keys_for("{ t { listing { sku } } }");
-        assert!(!keys.condition_needs_alias(&at_t(), &condition("listing { sku }")));
-        assert!(!keys.condition_needs_alias(&at_t(), &condition("other { sku }")));
+    fn conditions_are_aliased_only_on_collisions() {
+        // An unclaimed key, or one holding the same field, is shared.
+        assert!(!needs_alias("{ t { listing { sku } } }", "listing { sku }"));
+        assert!(!needs_alias("{ t { listing { sku } } }", "other { sku }"));
+        assert!(!needs_alias(
+            "{ t { listing: other { sku } } }",
+            "__typename"
+        ));
+        // The client puts a different field under the key.
+        assert!(needs_alias(
+            "{ t { listing: other { sku } } }",
+            "listing { sku }"
+        ));
+        // Arguments are safe only on an exact client match, since another
+        // condition could otherwise claim the key with other arguments.
+        let usd = r#"{ t { listing { cost(currency: "USD") } } }"#;
+        assert!(!needs_alias(usd, r#"listing { cost(currency: "USD") }"#));
+        assert!(needs_alias(usd, r#"listing { cost(currency: "EUR") }"#));
+        assert!(needs_alias(
+            "{ t { other { sku } } }",
+            r#"listing { cost(currency: "USD") }"#
+        ));
+        // Nested fields count, through fragments too.
+        let px = r#"{ t { listing { media { ... on Photo { size(unit: "px") } } } } }"#;
+        assert!(!needs_alias(
+            px,
+            r#"listing { media { ... on Photo { size(unit: "px") } } }"#
+        ));
+        assert!(needs_alias(
+            px,
+            r#"listing { media { ... on Photo { size(unit: "em") } } }"#
+        ));
     }
 
     #[test]
-    fn client_alias_on_the_key_forces_an_alias() {
-        let keys = keys_for("{ t { listing: other { sku } } }");
-        assert!(keys.condition_needs_alias(&at_t(), &condition("listing { sku }")));
-    }
-
-    #[test]
-    fn arguments_need_an_exact_client_match() {
-        let keys = keys_for(r#"{ t { listing { cost(currency: "USD") } } }"#);
-        assert!(
-            !keys
-                .condition_needs_alias(&at_t(), &condition(r#"listing { cost(currency: "USD") }"#))
-        );
-        assert!(
-            keys.condition_needs_alias(&at_t(), &condition(r#"listing { cost(currency: "EUR") }"#))
-        );
-        let unclaimed = keys_for("{ t { other { sku } } }");
-        assert!(
-            unclaimed
-                .condition_needs_alias(&at_t(), &condition(r#"listing { cost(currency: "USD") }"#))
-        );
-    }
-
-    #[test]
-    fn unknown_path_step_forces_an_alias() {
-        let keys = keys_for("{ t { listing { sku } } }");
-        let merge_at = vec![
-            FetchDataPathElement::Key(name!("t"), None),
-            FetchDataPathElement::Parent,
-        ];
-        assert!(keys.condition_needs_alias(&merge_at, &condition("listing { sku }")));
-    }
-
-    #[test]
-    fn alias_identity_ignores_argument_free_fields() {
-        let sku = AliasIdentity::of(&condition("listing { sku }"));
-        let usd = AliasIdentity::of(&condition(r#"listing { sku cost(currency: "USD") }"#));
-        let eur = AliasIdentity::of(&condition(r#"listing { cost(currency: "EUR") }"#));
-        assert_eq!(sku, AliasIdentity::of(&condition("listing { __typename }")));
-        assert_ne!(sku, usd);
-        assert_ne!(usd, eur);
-        assert_eq!(
-            usd,
-            AliasIdentity::of(&condition(r#"listing { cost(currency: "USD") }"#))
-        );
-    }
-
-    /// A list index adds no response key: the lookup still finds the client's
-    /// selections, and still shares an unclaimed key.
-    #[test]
-    fn list_indices_are_skipped() {
-        let merge_at = vec![
-            FetchDataPathElement::Key(name!("t"), None),
-            FetchDataPathElement::AnyIndex(None),
-        ];
-        let plain = keys_for("{ t { listing { sku } } }");
-        assert!(!plain.condition_needs_alias(&merge_at, &condition("listing { sku }")));
+    fn merge_path_steps() {
+        let t = FetchDataPathElement::Key(name!("t"), None);
+        let in_list = [t.clone(), FetchDataPathElement::AnyIndex(None)];
+        let listing = condition("listing { sku }");
+        // A list index adds no response key.
+        assert!(!keys_for("{ t { listing { sku } } }").condition_needs_alias(&in_list, &listing));
         let aliased = keys_for("{ t { listing: other { sku } } }");
-        assert!(aliased.condition_needs_alias(&merge_at, &condition("listing { sku }")));
+        assert!(aliased.condition_needs_alias(&in_list, &listing));
+        // A step that is not a response key can't be looked up.
+        let unknown = [t, FetchDataPathElement::Parent];
+        assert!(keys_for("{ t { listing { sku } } }").condition_needs_alias(&unknown, &listing));
     }
 
     #[test]
-    fn typename_never_needs_an_alias() {
-        let keys = keys_for("{ t { listing: other { sku } } }");
-        assert!(!keys.condition_needs_alias(&at_t(), &condition("__typename")));
-    }
-
-    /// A nested argument under a fragment counts the same as one outside it,
-    /// both for the alias decision and for the alias identity.
-    #[test]
-    fn nested_arguments_are_found_through_fragments() {
-        let keys = keys_for(r#"{ t { listing { media { ... on Photo { size(unit: "px") } } } } }"#);
-        assert!(!keys.condition_needs_alias(
-            &at_t(),
-            &condition(r#"listing { media { ... on Photo { size(unit: "px") } } }"#)
-        ));
-        assert!(keys.condition_needs_alias(
-            &at_t(),
-            &condition(r#"listing { media { ... on Photo { size(unit: "em") } } }"#)
-        ));
-        let pixels = AliasIdentity::of(&condition(
-            r#"listing { media { ... on Photo { size(unit: "px") } } }"#,
-        ));
-        assert_eq!(
-            pixels,
-            AliasIdentity::of(&condition(
-                r#"listing { media { name ... on Photo { name size(unit: "px") } } }"#
-            )),
+    fn alias_identity_tracks_nested_arguments() {
+        let id = |text: &str| AliasIdentity::of(&condition(text));
+        assert_eq!(id("listing { sku }"), id("listing { __typename }"));
+        assert_ne!(
+            id("listing { sku }"),
+            id(r#"listing { cost(currency: "USD") }"#)
         );
         assert_ne!(
-            pixels,
-            AliasIdentity::of(&condition(
-                r#"listing { media { ... on Photo { size(unit: "em") } } }"#
-            )),
+            id(r#"listing { cost(currency: "USD") }"#),
+            id(r#"listing { cost(currency: "EUR") }"#)
+        );
+        let px = r#"listing { media { ... on Photo { size(unit: "px") } } }"#;
+        assert_eq!(
+            id(px),
+            id(r#"listing { media { name ... on Photo { name size(unit: "px") } } }"#)
+        );
+        assert_ne!(
+            id(px),
+            id(r#"listing { media { ... on Photo { size(unit: "em") } } }"#)
         );
     }
 }

@@ -590,50 +590,50 @@ fn requires_fields_added_to_fetch() {
 fn requires_unresolvable_locally_hops_through_owning_subgraph() {
     let plan_str = plan_query(REQUIRES_SCHEMA, "{ productInB { shippingCost } }");
     insta::assert_snapshot!(plan_str, @r###"
-    QueryPlan {
-      Sequence {
-        Fetch(service: "b") {
-          {
-            productInB {
-              __typename
-              id
-            }
-          }
-        },
-        Flatten(path: "productInB") {
-          Fetch(service: "a") {
-            {
-              ... on Product {
-                __typename
-                id
+        QueryPlan {
+          Sequence {
+            Fetch(service: "b") {
+              {
+                productInB {
+                  __typename
+                  id
+                }
               }
-            } =>
-            {
-              ... on Product {
-                weight
-              }
-            }
+            },
+            Flatten(path: "productInB") {
+              Fetch(service: "a") {
+                {
+                  ... on Product {
+                    __typename
+                    id
+                  }
+                } =>
+                {
+                  ... on Product {
+                    weight
+                  }
+                }
+              },
+            },
+            Flatten(path: "productInB") {
+              Fetch(service: "b") {
+                {
+                  ... on Product {
+                    __typename
+                    id
+                    weight
+                  }
+                } =>
+                {
+                  ... on Product {
+                    shippingCost
+                  }
+                }
+              },
+            },
           },
-        },
-        Flatten(path: "productInB") {
-          Fetch(service: "b") {
-            {
-              ... on Product {
-                __typename
-                id
-                weight
-              }
-            } =>
-            {
-              ... on Product {
-                shippingCost
-              }
-            }
-          },
-        },
-      },
-    }
-    "###);
+        }
+        "###);
 }
 
 /// @requires whose field set walks through a *locally resolvable* field

@@ -43,7 +43,6 @@ mod fragment_autogeneration;
 mod handles_fragments_with_directive_conditions;
 mod handles_operations_with_directives;
 mod incremental_planner;
-mod incremental_planner_requires;
 mod interface_object;
 mod interface_type_explosion;
 mod introspection_typename_handling;

@@ -1,4 +1,4 @@
-# Composed from subgraphs with hash: 8c08aa93cb0603230d9acc63955dd9aa4c0715af
+# Composed from subgraphs with hash: 11b0a3603bf5fb2ad4e013409d012e35c16ff402
 schema
   @link(url: "https://specs.apollo.dev/link/v1.0")
   @link(url: "https://specs.apollo.dev/join/v0.5", for: EXECUTION)
@@ -74,17 +74,11 @@ type Listing
   item: Item
 }
 
-type Page
-  @join__type(graph: CATALOG)
-{
-  blocks: [Block]
-}
-
 type Query
   @join__type(graph: CATALOG)
   @join__type(graph: RATINGS)
 {
-  page: Page @join__field(graph: CATALOG)
+  blocks: [Block] @join__field(graph: CATALOG)
 }
 
 type Ratings

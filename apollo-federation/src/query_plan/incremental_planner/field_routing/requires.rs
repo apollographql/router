@@ -428,51 +428,25 @@ mod tests {
     /// fields inside it. A field with the same identity reuses its alias.
     #[test]
     fn alias_condition_fields_aliases_fields_and_keeps_fragments() {
-        let schema = apollo_compiler::schema::Schema::parse_and_validate(
-            r#"
-            type Query { i: I }
-            interface I { a: Int }
-            type A implements I { a: Int b: Int }
-            "#,
-            "schema.graphql",
-        )
-        .expect("valid schema");
+        let sdl =
+            "type Query { i: I } interface I { a: Int } type A implements I { a: Int b: Int }";
+        let schema = apollo_compiler::schema::Schema::parse_and_validate(sdl, "schema.graphql")
+            .expect("valid schema");
         let schema = ValidFederationSchema::new(schema).expect("valid federation schema");
-        let interface = schema
-            .get_type(&name!("I"))
-            .expect("I exists")
-            .try_into()
-            .expect("I is composite");
-        let conditions = Arc::new(
-            SelectionSet::parse(schema, interface, "a ... on A { b }").expect("conditions parse"),
-        );
+        let interface = schema.get_type(&name!("I")).expect("I exists");
+        let conditions = SelectionSet::parse(
+            schema,
+            interface.try_into().expect("I is composite"),
+            "a ... on A { b }",
+        )
+        .expect("conditions parse");
+        let conditions = Arc::new(conditions);
         let mut alias_ids = Vec::new();
-
-        let (aliased, rewrites) =
-            alias_condition_fields(&conditions, &mut alias_ids, |_| true).expect("aliases");
-        assert_eq!(rewrites, vec![(name!("__require_0_a"), name!("a"))]);
-        let mut kept_fragment = false;
-        for selection in aliased.selections.values() {
-            match selection {
-                Selection::Field(field) => {
-                    assert_eq!(field.field.alias, Some(name!("__require_0_a")));
-                }
-                Selection::InlineFragment(_) => {
-                    kept_fragment = true;
-                    assert!(
-                        conditions
-                            .selections
-                            .values()
-                            .any(|original| original == selection)
-                    );
-                }
-            }
+        for _ in 0..2 {
+            let (aliased, rewrites) =
+                alias_condition_fields(&conditions, &mut alias_ids, |_| true).expect("aliases");
+            assert_eq!(aliased.to_string(), "{ __require_0_a: a ... on A { b } }");
+            assert_eq!(rewrites, vec![(name!("__require_0_a"), name!("a"))]);
         }
-        assert!(kept_fragment, "the fragment should pass through: {aliased}");
-
-        let (_, again) =
-            alias_condition_fields(&conditions, &mut alias_ids, |_| true).expect("aliases");
-        assert_eq!(again, rewrites);
-        assert_eq!(alias_ids.len(), 1);
     }
 }

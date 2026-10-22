@@ -117,37 +117,13 @@ impl std::ops::Deref for BulbTwinPlanner {
     }
 }
 
-impl BulbTwinPlanner {
-    pub(crate) fn bulb(&self) -> &QueryPlanner {
-        &self.bulb
-    }
-}
-
 #[track_caller]
 pub(crate) fn test_planner_with_bulb_twin(
     function_path: &'static str,
     config: QueryPlannerConfig,
     subgraph_names_and_schemas: &[(&str, &str)],
 ) -> BulbTwinPlanner {
-    bulb_twin_for(compose(function_path, subgraph_names_and_schemas), config)
-}
-
-/// [`test_planner_with_bulb_twin`] over a supergraph cached under
-/// `fixture_name`, which every test composing the same subgraphs can share.
-#[track_caller]
-pub(crate) fn shared_test_planner_with_bulb_twin(
-    fixture_name: &'static str,
-    config: QueryPlannerConfig,
-    subgraph_names_and_schemas: &[(&str, &str)],
-) -> BulbTwinPlanner {
-    bulb_twin_for(
-        compose_shared(fixture_name, subgraph_names_and_schemas),
-        config,
-    )
-}
-
-#[track_caller]
-fn bulb_twin_for(supergraph: String, config: QueryPlannerConfig) -> BulbTwinPlanner {
+    let supergraph = compose(function_path, subgraph_names_and_schemas);
     let supergraph = apollo_federation::Supergraph::new_with_router_specs(&supergraph)
         .expect("valid supergraph");
     let mut bulb_config = config.clone();
@@ -197,46 +173,6 @@ pub(crate) fn compose(
     function_path: &'static str,
     subgraph_names_and_schemas: &[(&str, &str)],
 ) -> String {
-    let test_name = function_path.rsplit("::").next().unwrap();
-    compose_fixture(test_name, false, subgraph_names_and_schemas)
-}
-
-/// Like [`compose`], but caches the supergraph under `fixture_name` instead
-/// of the test's name, so tests composing the same subgraphs share one file.
-#[track_caller]
-pub(crate) fn compose_shared(
-    fixture_name: &'static str,
-    subgraph_names_and_schemas: &[(&str, &str)],
-) -> String {
-    compose_fixture(fixture_name, true, subgraph_names_and_schemas)
-}
-
-/// Records that the fixture `name` is in use in this process. A test's own
-/// fixture is used once. A shared one may be reused, but only for the same
-/// subgraphs, so two tests never write different content to one file.
-#[track_caller]
-fn claim_fixture_name(name: &'static str, shared_hash: Option<&str>) {
-    static SEEN: OnceLock<Mutex<std::collections::HashMap<&'static str, Option<String>>>> =
-        OnceLock::new();
-    let mut seen = SEEN.get_or_init(Default::default).lock().unwrap();
-    match (seen.get(name), shared_hash) {
-        (None, _) => {
-            seen.insert(name, shared_hash.map(str::to_owned));
-        }
-        (Some(Some(claimed)), Some(hash)) => assert_eq!(
-            claimed, hash,
-            "shared fixture '{name}' is composed from different subgraphs"
-        ),
-        _ => panic!("planner!() can only be used once in test(s) named '{name}'"),
-    }
-}
-
-#[track_caller]
-fn compose_fixture(
-    name: &'static str,
-    shared: bool,
-    subgraph_names_and_schemas: &[(&str, &str)],
-) -> String {
     let unique_names: IndexSet<_> = subgraph_names_and_schemas
         .iter()
         .map(|(name, _)| name)
@@ -267,12 +203,22 @@ fn compose_fixture(
     let expected_hash = hex::encode(hasher.finalize());
     let prefix = "# Composed from subgraphs with hash: ";
 
-    claim_fixture_name(name, shared.then_some(expected_hash.as_str()));
+    let test_name = function_path.rsplit("::").next().unwrap();
+    static SEEN_TEST_NAMES: OnceLock<Mutex<IndexSet<&'static str>>> = OnceLock::new();
+    let new = SEEN_TEST_NAMES
+        .get_or_init(Default::default)
+        .lock()
+        .unwrap()
+        .insert(test_name);
+    assert!(
+        new,
+        "planner!() can only be used once in test(s) named '{test_name}'"
+    );
     let supergraph_path = std::path::PathBuf::from(std::env::var_os("CARGO_MANIFEST_DIR").unwrap())
         .join("tests")
         .join("query_plan")
         .join("supergraphs")
-        .join(format!("{name}.graphql",));
+        .join(format!("{test_name}.graphql",));
     let supergraph = match std::fs::read_to_string(&supergraph_path) {
         Ok(contents) => {
             if let Some(hash) = contents
@@ -329,11 +275,7 @@ fn compose_fixture(
             .read_to_string(&mut supergraph)
             .unwrap();
         assert!(rover.wait().unwrap().success());
-        // Tests sharing a fixture can regenerate it at the same time, so a
-        // reader must never see a partly written file.
-        let partial = supergraph_path.with_extension(format!("{}.tmp", std::process::id()));
-        std::fs::write(&partial, &supergraph).unwrap();
-        std::fs::rename(partial, supergraph_path).unwrap();
+        std::fs::write(supergraph_path, &supergraph).unwrap();
         supergraph
     })
 }
