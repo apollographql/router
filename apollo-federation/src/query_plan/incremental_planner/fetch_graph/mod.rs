@@ -700,6 +700,7 @@ impl FetchGraph {
 
     /// Iterator over all inputs arriving at `node` from parent fetch
     /// groups.
+    #[cfg(test)]
     pub(crate) fn incoming_inputs(
         &self,
         node: NodeIndex,
@@ -827,6 +828,7 @@ impl FetchGraph {
         self.graph.node_count()
     }
 
+    #[cfg(test)]
     pub(crate) fn node_indices(&self) -> impl Iterator<Item = NodeIndex> + '_ {
         self.graph.node_indices()
     }

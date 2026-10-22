@@ -67,6 +67,7 @@ pub(super) fn connector_search_space(sdl: &str) -> FieldRoutingSearchSpace {
         connector_index: Arc::new(connector_index),
         caches: super::PlannerCaches::new(),
         disabled_subgraphs: Default::default(),
+        response_keys: Default::default(),
     }
 }
 
@@ -80,6 +81,7 @@ fn space_for(schema: ValidFederationSchema, api: ValidFederationSchema) -> Field
         connector_index: Default::default(),
         caches: super::PlannerCaches::new(),
         disabled_subgraphs: Default::default(),
+        response_keys: Default::default(),
     }
 }
 

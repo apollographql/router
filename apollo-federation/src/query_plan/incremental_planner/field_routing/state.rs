@@ -340,16 +340,12 @@ pub(crate) struct PlanState {
     /// operation the legacy planner handles. Loop detection in the condition
     /// resolution rework should replace it.
     pub(crate) forced_backtracks: u64,
-    /// Interned @requires condition-field aliases: index is the alias id,
-    /// the entry is the widest (unaliased) selection interned so far under
-    /// that alias. A condition shares an alias with any entry it contains
-    /// or is contained by, so overlapping conditions stage their shared
-    /// prefix once instead of duplicating the fetch chain per alias.
-    /// Sharing stays correct because every consumer routes its own
-    /// conditions under the alias path and the fetch graph dedupes them.
-    /// Append-only; not restored on rollback (aliases only need to be
-    /// stable, not predictable).
-    pub(crate) condition_alias_ids: Vec<Selection>,
+    /// Interned @requires condition-field aliases: index is the alias id.
+    /// Conditions on the same field with the same nested arguments share an
+    /// alias, so they stage one fetch chain and the fetch graph dedupes
+    /// their selections under it. Append-only; not restored on rollback
+    /// (aliases only need to be stable, not predictable).
+    pub(crate) condition_alias_ids: Vec<super::response_keys::AliasIdentity>,
 }
 
 #[derive(Clone, Debug)]
