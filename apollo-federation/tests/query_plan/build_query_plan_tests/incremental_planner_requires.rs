@@ -1,8 +1,8 @@
 //! @requires shapes where the incremental planner used to fetch more than
 //! the legacy planner. Each test plans the same operation with both planners
 //! and fails, with both plans printed, when the incremental planner uses
-//! more fetches. Plans without condition aliases also go through the
-//! correctness checker.
+//! more fetches. Incremental plans also go through the correctness checker
+//! unless a test opts out with `validate_correctness = false`.
 
 use apollo_federation::query_plan::PlanNode;
 use apollo_federation::query_plan::QueryPlan;
@@ -67,20 +67,16 @@ fn count_fetches(plan: &QueryPlan) -> usize {
 /// Plan `operation` with both planners and fail if the incremental planner
 /// uses more fetches than the legacy one.
 #[track_caller]
-fn assert_no_extra_fetches(planner: &BulbTwinPlanner, operation: &str) -> (QueryPlan, QueryPlan) {
-    let document = apollo_compiler::ExecutableDocument::parse_and_validate(
-        planner.api_schema().schema(),
-        operation,
-        "operation.graphql",
-    )
-    .expect("valid graphql document");
+fn no_extra_fetches(
+    planner: &BulbTwinPlanner,
+    operation: &str,
+    validate_correctness: bool,
+) -> (QueryPlan, QueryPlan) {
+    let document = parse_operation(planner, operation);
     let legacy = planner
         .build_query_plan(&document, None, Default::default())
         .expect("legacy plan");
-    let bulb = planner
-        .bulb()
-        .build_query_plan(&document, None, Default::default())
-        .expect("incremental plan");
+    let bulb = plan_incremental(planner, &document, validate_correctness);
     let legacy_fetches = count_fetches(&legacy);
     let bulb_fetches = count_fetches(&bulb);
     assert!(
@@ -88,47 +84,62 @@ fn assert_no_extra_fetches(planner: &BulbTwinPlanner, operation: &str) -> (Query
         "incremental planner used {bulb_fetches} fetches, legacy used {legacy_fetches}\n\
          --- legacy ---\n{legacy}\n--- incremental ---\n{bulb}",
     );
-    check_unaliased_plan(planner, &document, &bulb);
     (legacy, bulb)
 }
 
-/// The correctness checker rejects the input rewrites that undo condition
-/// aliases, so only plans without them can be checked.
 #[track_caller]
-fn check_unaliased_plan(
+fn parse_operation(
     planner: &BulbTwinPlanner,
-    document: &apollo_compiler::validation::Valid<apollo_compiler::ExecutableDocument>,
-    plan: &QueryPlan,
-) {
-    if plan.to_string().contains("__require_") {
-        return;
-    }
-    let bulb = planner.bulb();
-    if let Err(err) = apollo_federation::correctness::check_plan(
-        bulb.api_schema(),
-        bulb.supergraph_schema(),
-        bulb.subgraph_schemas(),
-        document,
-        plan,
-    ) {
-        panic!("incremental plan failed check_plan: {err}\n{plan}");
-    }
-}
-
-#[track_caller]
-fn plan_bulb(planner: &BulbTwinPlanner, operation: &str) -> QueryPlan {
-    let document = apollo_compiler::ExecutableDocument::parse_and_validate(
+    operation: &str,
+) -> apollo_compiler::validation::Valid<apollo_compiler::ExecutableDocument> {
+    apollo_compiler::ExecutableDocument::parse_and_validate(
         planner.api_schema().schema(),
         operation,
         "operation.graphql",
     )
-    .expect("valid graphql document");
-    let plan = planner
-        .bulb()
-        .build_query_plan(&document, None, Default::default())
+    .expect("valid graphql document")
+}
+
+#[track_caller]
+fn plan_incremental(
+    planner: &BulbTwinPlanner,
+    document: &apollo_compiler::validation::Valid<apollo_compiler::ExecutableDocument>,
+    validate_correctness: bool,
+) -> QueryPlan {
+    let bulb = planner.bulb();
+    let plan = bulb
+        .build_query_plan(document, None, Default::default())
         .expect("incremental plan");
-    check_unaliased_plan(planner, &document, &plan);
+    if validate_correctness {
+        apollo_federation::correctness::check_plan(
+            bulb.api_schema(),
+            bulb.supergraph_schema(),
+            bulb.subgraph_schemas(),
+            document,
+            &plan,
+        )
+        .unwrap_or_else(|err| panic!("incremental plan failed check_plan: {err}\n{plan}"));
+    }
     plan
+}
+
+/// [`no_extra_fetches`], taking `validate_correctness = false` the way
+/// `assert_plan!` does.
+macro_rules! assert_no_extra_fetches {
+    (validate_correctness = $validate: expr, $planner: expr, $operation: expr $(,)?) => {
+        no_extra_fetches($planner, $operation, $validate)
+    };
+    ($planner: expr, $operation: expr $(,)?) => {
+        no_extra_fetches($planner, $operation, true)
+    };
+}
+
+/// The incremental plan alone, taking `validate_correctness = false` the
+/// way `assert_plan!` does.
+macro_rules! plan_bulb {
+    (validate_correctness = $validate: expr, $planner: expr, $operation: expr $(,)?) => {
+        plan_incremental($planner, &parse_operation($planner, $operation), $validate)
+    };
 }
 
 /// S1 owns `T.listing`, S2 owns the listing's fields, and S3 computes
@@ -180,7 +191,7 @@ fn listing_planner() -> BulbTwinPlanner {
 /// both stay unaliased and share one listing fetch.
 #[test]
 fn req_sibling_conditions_on_same_entity_share_fetch() {
-    assert_no_extra_fetches(&listing_planner(), "{ t { price weight } }");
+    assert_no_extra_fetches!(&listing_planner(), "{ t { price weight } }");
 }
 
 /// Same as above with the consumers in different subgraphs: the listing
@@ -207,7 +218,7 @@ fn req_consumers_in_different_subgraphs_share_fetch() {
             type Listing @key(fields: "id") { id: ID! dims: String @external }
         "#,
     );
-    assert_no_extra_fetches(&planner, "{ t { price weight } }");
+    assert_no_extra_fetches!(&planner, "{ t { price weight } }");
 }
 
 /// The parent path is gated by @include. A gate does not change which field
@@ -215,7 +226,7 @@ fn req_consumers_in_different_subgraphs_share_fetch() {
 /// `listing` and the listing entity is fetched once.
 #[test]
 fn req_client_field_under_include_shares_fetch() {
-    assert_no_extra_fetches(
+    assert_no_extra_fetches!(
         &listing_planner(),
         "query($v: Boolean!) { t @include(if: $v) { price listing { name } } }",
     );
@@ -243,7 +254,7 @@ fn req_partially_in_place_condition_needs_no_alias() {
             }
         "#,
     );
-    let (_, bulb) = assert_no_extra_fetches(&planner, "{ t { a c } }");
+    let (_, bulb) = assert_no_extra_fetches!(&planner, "{ t { a c } }");
     let rendered = bulb.to_string();
     assert!(
         !rendered.contains("__require_"),
@@ -255,14 +266,14 @@ fn req_partially_in_place_condition_needs_no_alias() {
 /// the client's fetch chain and nothing is duplicated.
 #[test]
 fn req_client_field_lets_condition_ride_its_fetch() {
-    assert_no_extra_fetches(&listing_planner(), "{ t { price listing { name } } }");
+    assert_no_extra_fetches!(&listing_planner(), "{ t { price listing { name } } }");
 }
 
 /// With the client's copy present, both consumers' conditions merge into
 /// it as well.
 #[test]
 fn req_two_consumers_with_client_field_share_fetch() {
-    assert_no_extra_fetches(
+    assert_no_extra_fetches!(
         &listing_planner(),
         "{ t { price weight listing { name } } }",
     );
@@ -272,7 +283,11 @@ fn req_two_consumers_with_client_field_share_fetch() {
 /// key, so the condition cannot share it and must be aliased.
 #[test]
 fn req_client_alias_on_condition_key_forces_alias() {
-    let plan = plan_bulb(
+    // validate_correctness = false: the correctness checker rejects input
+    // KeyRenamer rewrites, which this plan uses to rename an aliased
+    // @requires condition back to its field name.
+    let plan = plan_bulb!(
+        validate_correctness = false,
         &listing_planner(),
         "{ t { listing: other { name } price } }",
     );
@@ -288,7 +303,14 @@ fn req_client_alias_on_condition_key_forces_alias() {
 /// under one response key, so each condition needs its own alias.
 #[test]
 fn req_nested_argument_conflict_between_conditions_forces_aliases() {
-    let plan = plan_bulb(&listing_planner(), "{ t { usd eur } }");
+    // validate_correctness = false: the correctness checker rejects input
+    // KeyRenamer rewrites, which this plan uses to rename an aliased
+    // @requires condition back to its field name.
+    let plan = plan_bulb!(
+        validate_correctness = false,
+        &listing_planner(),
+        "{ t { usd eur } }",
+    );
     let rendered = plan.to_string();
     assert!(
         rendered.contains("__require_0_listing: listing")
@@ -302,7 +324,14 @@ fn req_nested_argument_conflict_between_conditions_forces_aliases() {
 /// entity fetch.
 #[test]
 fn req_identical_aliased_conditions_share_one_fetch() {
-    let (_, bulb) = assert_no_extra_fetches(&listing_planner(), "{ t { usd tax } }");
+    // validate_correctness = false: the correctness checker rejects input
+    // KeyRenamer rewrites, which this plan uses to rename an aliased
+    // @requires condition back to its field name.
+    let (_, bulb) = assert_no_extra_fetches!(
+        validate_correctness = false,
+        &listing_planner(),
+        "{ t { usd tax } }",
+    );
     let rendered = bulb.to_string();
     assert!(
         rendered.contains("__require_0_listing: listing") && !rendered.contains("__require_1_"),
