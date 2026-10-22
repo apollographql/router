@@ -198,9 +198,9 @@ dependencies = [
 
 [[package]]
 name = "apollo-configuration"
-version = "0.9.1"
+version = "0.10.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "2aad828a7f8f17711a596fe28340c67c8f22ad0d5f4c33f97547e431972bd58d"
+checksum = "1dcbf8f01b72646bfb64ccaaf089157e2e794d2902b5ba6511a0f0f5602135a4"
 dependencies = [
  "apollo-configuration-macros",
  "apollo-errors",
@@ -342,9 +342,9 @@ dependencies = [
 
 [[package]]
 name = "apollo-opentelemetry"
-version = "0.12.2"
+version = "0.12.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "3fda389ca9c02364c5afd51f75642434ed203dd7d4b08ca72396a8f755190f8d"
+checksum = "8d12654664f3c6a8d172090f400e143f123c91ce53cc9b4731d78e13876900c2"
 dependencies = [
  "apollo-configuration",
  "apollo-errors",
@@ -413,9 +413,9 @@ dependencies = [
 
 [[package]]
 name = "apollo-qos"
-version = "0.10.2"
+version = "0.10.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "7c7ef1803b3e6340e4e49aafef365f6c5ed9c2a9ed1539aff06563cd9ae8c63d"
+checksum = "2f6a845caf5ee7964af929d95533a3edf58650cf1d1490d61764d957fae0263f"
 dependencies = [
  "apollo-configuration",
  "apollo-errors",
