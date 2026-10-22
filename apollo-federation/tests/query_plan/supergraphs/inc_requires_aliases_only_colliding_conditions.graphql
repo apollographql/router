@@ -1,4 +1,4 @@
-# Composed from subgraphs with hash: d7efb3007b56dd1bb18a2409012e220d3b618b0f
+# Composed from subgraphs with hash: 7b880c984479e9aed3156e22e5cf50cd3eebe2ba
 schema
   @link(url: "https://specs.apollo.dev/link/v1.0")
   @link(url: "https://specs.apollo.dev/join/v0.5", for: EXECUTION)
@@ -86,5 +86,6 @@ type T
   price: Int @join__field(graph: S3, requires: "listing { sku }")
   weight: Int @join__field(graph: S3, requires: "listing { dims }")
   usd: Int @join__field(graph: S3, requires: "listing { cost(currency: \"USD\") }")
+  eur: Int @join__field(graph: S3, requires: "listing { cost(currency: \"EUR\") }")
   tax: Int @join__field(graph: S3, requires: "listing { cost(currency: \"USD\") }")
 }

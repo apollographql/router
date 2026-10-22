@@ -5,11 +5,14 @@
 //! Condition fields never carry aliases, so two argument-less condition
 //! fields with the same name are the same field and always merge. A key can
 //! only be contested by the client (a different field or arguments under
-//! that name) or by another condition that passes different arguments.
+//! that name) or by another condition that passes different arguments. Both
+//! are indexed up front: the client's selections, and the @requires
+//! conditions of every field it selects, which sit beside that field.
 
 use apollo_compiler::Name;
 use hashbrown::HashMap;
 
+use crate::link::join_spec_definition::JoinSpecDefinition;
 use crate::operation::ArgumentList;
 use crate::operation::Field;
 use crate::operation::FieldSelection;
@@ -17,6 +20,8 @@ use crate::operation::Selection;
 use crate::operation::SelectionSet;
 use crate::operation::TYPENAME_FIELD;
 use crate::query_plan::FetchDataPathElement;
+use crate::schema::ValidFederationSchema;
+use crate::schema::position::ObjectTypeDefinitionPosition;
 
 /// What a selection under a response key resolves to: the field and its
 /// arguments. Directives are left out because they do not affect merging.
@@ -85,22 +90,37 @@ fn collect_argument_fields(
     }
 }
 
-/// Field identities the client operation selects, by response path and
-/// response name. Inline fragments are transparent, so selections on
-/// different types under one key are pooled, which can only add aliases.
+/// Field identities selected by the client operation or by a @requires
+/// condition it can trigger, by response path and response name. Inline
+/// fragments are transparent, so selections on different types under one
+/// key are pooled, which can only add aliases.
 #[derive(Debug, Default)]
 pub(crate) struct OperationResponseKeys {
     claims: HashMap<Vec<Name>, HashMap<Name, Vec<FieldIdentity>>>,
 }
 
 impl OperationResponseKeys {
-    pub(crate) fn new(selection_set: &SelectionSet) -> Self {
+    pub(crate) fn new(selection_set: &SelectionSet, supergraph: &ValidFederationSchema) -> Self {
         let mut keys = Self::default();
-        keys.collect(selection_set, &mut Vec::new());
+        let mut requires = RequiresLookup::new(supergraph);
+        keys.collect(
+            selection_set,
+            &mut Vec::new(),
+            &mut requires,
+            &mut Vec::new(),
+        );
         keys
     }
 
-    fn collect(&mut self, selection_set: &SelectionSet, path: &mut Vec<Name>) {
+    /// `expanding` holds the fields whose conditions are being walked, so a
+    /// condition that leads back to its own field is not walked again.
+    fn collect(
+        &mut self,
+        selection_set: &SelectionSet,
+        path: &mut Vec<Name>,
+        requires: &mut RequiresLookup,
+        expanding: &mut Vec<(Name, Name)>,
+    ) {
         for selection in selection_set.selections.values() {
             match selection {
                 Selection::Field(field_sel) => {
@@ -115,22 +135,31 @@ impl OperationResponseKeys {
                     if !claimed.contains(&identity) {
                         claimed.push(identity);
                     }
+                    for (site, conditions) in requires.conditions_of(field) {
+                        if expanding.contains(&site) {
+                            continue;
+                        }
+                        expanding.push(site);
+                        self.collect(&conditions, path, requires, expanding);
+                        expanding.pop();
+                    }
                     if let Some(sub) = &field_sel.selection_set {
                         path.push(field.response_name().clone());
-                        self.collect(sub, path);
+                        self.collect(sub, path, requires, expanding);
                         path.pop();
                     }
                 }
-                Selection::InlineFragment(frag) => self.collect(&frag.selection_set, path),
+                Selection::InlineFragment(frag) => {
+                    self.collect(&frag.selection_set, path, requires, expanding)
+                }
             }
         }
     }
 
     /// Whether a condition field selected at `merge_at` must be aliased:
     /// it or a field below it could share a response key with a different
-    /// field. A field with arguments is safe only when the client selects
-    /// exactly it, which keeps another condition from claiming that key
-    /// with other arguments.
+    /// field. A field with arguments nothing claims is aliased too, since a
+    /// condition the index does not reach could pass other arguments.
     pub(crate) fn condition_needs_alias(
         &self,
         merge_at: &[FetchDataPathElement],
@@ -183,6 +212,79 @@ impl OperationResponseKeys {
     }
 }
 
+/// The supergraph's @requires conditions by object field, parsed once each.
+struct RequiresLookup<'a> {
+    supergraph: &'a ValidFederationSchema,
+    join: Option<(&'static JoinSpecDefinition, Name)>,
+    parsed: HashMap<(Name, Name), Vec<SelectionSet>>,
+}
+
+impl<'a> RequiresLookup<'a> {
+    fn new(supergraph: &'a ValidFederationSchema) -> Self {
+        // A schema without the join spec has no @requires to find.
+        let join = crate::validate_supergraph_for_query_planning(supergraph)
+            .ok()
+            .and_then(|(_, join, _)| {
+                let directive = join.field_directive_definition(supergraph).ok()?;
+                Some((join, directive.name.clone()))
+            });
+        Self {
+            supergraph,
+            join,
+            parsed: HashMap::new(),
+        }
+    }
+
+    /// Each @requires on `field`, for every object type it can be selected
+    /// on, with the object field it belongs to.
+    fn conditions_of(&mut self, field: &Field) -> Vec<((Name, Name), SelectionSet)> {
+        let Some((join, directive)) = &self.join else {
+            return Vec::new();
+        };
+        let Ok(objects) = self
+            .supergraph
+            .possible_runtime_types(field.field_position.parent())
+        else {
+            return Vec::new();
+        };
+        let mut found = Vec::new();
+        for object in objects {
+            let site = (object.type_name.clone(), field.name().clone());
+            let conditions = self.parsed.entry(site.clone()).or_insert_with(|| {
+                parse_requires(self.supergraph, join, directive, &object, field.name())
+            });
+            found.extend(conditions.iter().map(|c| (site.clone(), c.clone())));
+        }
+        found
+    }
+}
+
+fn parse_requires(
+    supergraph: &ValidFederationSchema,
+    join: &JoinSpecDefinition,
+    directive: &Name,
+    object: &ObjectTypeDefinitionPosition,
+    field_name: &Name,
+) -> Vec<SelectionSet> {
+    let Ok(definition) = object.field(field_name.clone()).get(supergraph.schema()) else {
+        return Vec::new();
+    };
+    definition
+        .directives
+        .get_all(directive)
+        .filter_map(|application| join.field_directive_arguments(application).ok()?.requires)
+        .filter_map(|text| {
+            crate::schema::field_set::parse_field_set(
+                supergraph,
+                object.type_name.clone(),
+                text,
+                false,
+            )
+            .ok()
+        })
+        .collect()
+}
+
 /// The response keys along `merge_at`, skipping list indices. `None` when a
 /// step is not a plain key.
 fn response_path(merge_at: &[FetchDataPathElement]) -> Option<Vec<Name>> {
@@ -221,7 +323,7 @@ mod tests {
     fn keys_for(operation: &str) -> OperationResponseKeys {
         let op = crate::operation::Operation::parse(schema(), operation, "op.graphql")
             .expect("valid operation");
-        OperationResponseKeys::new(&op.selection_set)
+        OperationResponseKeys::new(&op.selection_set, &schema())
     }
 
     /// The first field of a condition parsed on `T`.

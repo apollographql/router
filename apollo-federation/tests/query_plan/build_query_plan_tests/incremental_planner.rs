@@ -2004,7 +2004,7 @@ type C
 // else in the operation uses those response keys.
 // Based on: requires.rs::it_handles_simple_require_chain
 #[test]
-fn inc_requires_chain_aliases_conditions() {
+fn inc_requires_chain_keeps_condition_names() {
     let planner = planner!(
         config = incremental_config(),
         Subgraph1: r#"
@@ -5333,7 +5333,7 @@ type C
 // collides with another selection, so both stay unaliased and the
 // consumers share one entity fetch with a merged `a` input.
 #[test]
-fn inc_plain_requires_after_aliased_requires_does_not_overwrite() {
+fn inc_requires_hopped_and_local_conditions_share_one_input() {
     let planner = planner!(
         config = incremental_config(),
         S1: r#"
@@ -5746,7 +5746,7 @@ fn inc_defer_multi_dependency_deferred_section() {
 /// Neither needs an alias, so whichever arrives second merges into the
 /// other's representation under one `a`.
 #[test]
-fn inc_requires_aliased_then_plain_input_does_not_collide() {
+fn inc_requires_conditions_merge_in_either_order() {
     let planner = planner!(
         config = incremental_config(),
         S1: r#"
@@ -6301,6 +6301,7 @@ fn inc_requires_aliases_only_colliding_conditions() {
             price: Int @requires(fields: "listing { sku }")
             weight: Int @requires(fields: "listing { dims }")
             usd: Int @requires(fields: "listing { cost(currency: \"USD\") }")
+            eur: Int @requires(fields: "listing { cost(currency: \"EUR\") }")
             tax: Int @requires(fields: "listing { cost(currency: \"USD\") }")
           }
           type Listing @key(fields: "id") {
@@ -6431,13 +6432,14 @@ fn inc_requires_aliases_only_colliding_conditions() {
     "###
     );
 
-    // `tax` needs the same aliased condition as `usd` and shares its alias,
-    // so `cost` is fetched once for both.
+    // The client's `listing` holds `other`, so `usd` and `tax` are both
+    // aliased. They need the same condition and share one alias, so `cost`
+    // is fetched once for both.
     // validate_correctness = false: as above.
     assert_plan!(
         validate_correctness = false,
         &planner,
-        "{ t { usd tax } }",
+        "{ t { listing: other { name } usd tax } }",
         @r###"
     QueryPlan {
       Sequence {
@@ -6483,8 +6485,402 @@ fn inc_requires_aliases_only_colliding_conditions() {
               ... on T {
                 usd
                 tax
+                listing: other {
+                  name
+                }
               }
             }
+          },
+        },
+      },
+    }
+    "###
+    );
+
+    // Only `usd` claims `cost(currency: "USD")` under the client's
+    // `listing`, so the condition shares the client's listing fetch.
+    assert_plan!(&planner, "{ t { listing { sku } usd } }", @r###"
+    QueryPlan {
+      Sequence {
+        Fetch(service: "S1") {
+          {
+            t {
+              __typename
+              listing {
+                __typename
+                id
+              }
+              id
+            }
+          }
+        },
+        Flatten(path: "t.listing") {
+          Fetch(service: "S2") {
+            {
+              ... on Listing {
+                __typename
+                id
+              }
+            } =>
+            {
+              ... on Listing {
+                sku
+                cost(currency: "USD")
+              }
+            }
+          },
+        },
+        Flatten(path: "t") {
+          Fetch(service: "S3") {
+            {
+              ... on T {
+                __typename
+                id
+                listing {
+                  cost
+                }
+              }
+            } =>
+            {
+              ... on T {
+                usd
+              }
+            }
+          },
+        },
+      },
+    }
+    "###);
+    assert_plan!(&planner, "{ t { listing { sku } price usd } }", @r###"
+    QueryPlan {
+      Sequence {
+        Fetch(service: "S1") {
+          {
+            t {
+              __typename
+              listing {
+                __typename
+                id
+              }
+              id
+            }
+          }
+        },
+        Flatten(path: "t.listing") {
+          Fetch(service: "S2") {
+            {
+              ... on Listing {
+                __typename
+                id
+              }
+            } =>
+            {
+              ... on Listing {
+                sku
+                cost(currency: "USD")
+              }
+            }
+          },
+        },
+        Flatten(path: "t") {
+          Fetch(service: "S3") {
+            {
+              ... on T {
+                __typename
+                id
+                listing {
+                  sku
+                  cost
+                }
+              }
+            } =>
+            {
+              ... on T {
+                price
+                usd
+              }
+            }
+          },
+        },
+      },
+    }
+    "###);
+
+    // `usd` and `eur` disagree on `cost`'s arguments, so both are aliased,
+    // while `price` stays plain. An alias renamed back onto `listing` would
+    // replace the plain `listing` in the representation, so the consumer
+    // fetch splits. The two orders reach that check from opposite sides.
+    // validate_correctness = false: as above.
+    assert_plan!(
+        validate_correctness = false,
+        &planner,
+        "{ t { usd eur price } }",
+        @r###"
+    QueryPlan {
+      Sequence {
+        Fetch(service: "S1") {
+          {
+            t {
+              __typename
+              id
+              __require_0_listing: listing {
+                __typename
+                id
+              }
+              __require_1_listing: listing {
+                __typename
+                id
+              }
+              listing {
+                __typename
+                id
+              }
+            }
+          }
+        },
+        Parallel {
+          Sequence {
+            Flatten(path: "t.listing") {
+              Fetch(service: "S2") {
+                {
+                  ... on Listing {
+                    __typename
+                    id
+                  }
+                } =>
+                {
+                  ... on Listing {
+                    sku
+                  }
+                }
+              },
+            },
+            Flatten(path: "t") {
+              Fetch(service: "S3") {
+                {
+                  ... on T {
+                    __typename
+                    id
+                    listing {
+                      sku
+                    }
+                  }
+                } =>
+                {
+                  ... on T {
+                    price
+                  }
+                }
+              },
+            },
+          },
+          Sequence {
+            Flatten(path: "t.__require_1_listing") {
+              Fetch(service: "S2") {
+                {
+                  ... on Listing {
+                    __typename
+                    id
+                  }
+                } =>
+                {
+                  ... on Listing {
+                    cost(currency: "EUR")
+                  }
+                }
+              },
+            },
+            Flatten(path: "t") {
+              Fetch(service: "S3") {
+                {
+                  ... on T {
+                    __typename
+                    id
+                    __require_1_listing: listing {
+                      cost
+                    }
+                  }
+                } =>
+                {
+                  ... on T {
+                    eur
+                  }
+                }
+              },
+            },
+          },
+          Sequence {
+            Flatten(path: "t.__require_0_listing") {
+              Fetch(service: "S2") {
+                {
+                  ... on Listing {
+                    __typename
+                    id
+                  }
+                } =>
+                {
+                  ... on Listing {
+                    cost(currency: "USD")
+                  }
+                }
+              },
+            },
+            Flatten(path: "t") {
+              Fetch(service: "S3") {
+                {
+                  ... on T {
+                    __typename
+                    id
+                    __require_0_listing: listing {
+                      cost
+                    }
+                  }
+                } =>
+                {
+                  ... on T {
+                    usd
+                  }
+                }
+              },
+            },
+          },
+        },
+      },
+    }
+    "###
+    );
+    assert_plan!(
+        validate_correctness = false,
+        &planner,
+        "{ t { price usd eur } }",
+        @r###"
+    QueryPlan {
+      Sequence {
+        Fetch(service: "S1") {
+          {
+            t {
+              __typename
+              id
+              listing {
+                __typename
+                id
+              }
+              __require_0_listing: listing {
+                __typename
+                id
+              }
+              __require_1_listing: listing {
+                __typename
+                id
+              }
+            }
+          }
+        },
+        Parallel {
+          Sequence {
+            Flatten(path: "t.__require_1_listing") {
+              Fetch(service: "S2") {
+                {
+                  ... on Listing {
+                    __typename
+                    id
+                  }
+                } =>
+                {
+                  ... on Listing {
+                    cost(currency: "EUR")
+                  }
+                }
+              },
+            },
+            Flatten(path: "t") {
+              Fetch(service: "S3") {
+                {
+                  ... on T {
+                    __typename
+                    id
+                    __require_1_listing: listing {
+                      cost
+                    }
+                  }
+                } =>
+                {
+                  ... on T {
+                    eur
+                  }
+                }
+              },
+            },
+          },
+          Sequence {
+            Flatten(path: "t.__require_0_listing") {
+              Fetch(service: "S2") {
+                {
+                  ... on Listing {
+                    __typename
+                    id
+                  }
+                } =>
+                {
+                  ... on Listing {
+                    cost(currency: "USD")
+                  }
+                }
+              },
+            },
+            Flatten(path: "t") {
+              Fetch(service: "S3") {
+                {
+                  ... on T {
+                    __typename
+                    id
+                    __require_0_listing: listing {
+                      cost
+                    }
+                  }
+                } =>
+                {
+                  ... on T {
+                    usd
+                  }
+                }
+              },
+            },
+          },
+          Sequence {
+            Flatten(path: "t.listing") {
+              Fetch(service: "S2") {
+                {
+                  ... on Listing {
+                    __typename
+                    id
+                  }
+                } =>
+                {
+                  ... on Listing {
+                    sku
+                  }
+                }
+              },
+            },
+            Flatten(path: "t") {
+              Fetch(service: "S3") {
+                {
+                  ... on T {
+                    __typename
+                    id
+                    listing {
+                      sku
+                    }
+                  }
+                } =>
+                {
+                  ... on T {
+                    price
+                  }
+                }
+              },
+            },
           },
         },
       },
@@ -6511,6 +6907,148 @@ fn inc_requires_aliases_only_colliding_conditions() {
       },
     }
     "###);
+}
+
+/// An aliased condition renamed back onto a key field must keep the key's
+/// nested fields, or the representation loses part of the key.
+#[test]
+fn inc_requires_alias_keeps_nested_key_fields() {
+    let planner = planner!(
+        config = incremental_config(),
+        S1: r#"
+          type Query { t: T }
+          type T @key(fields: "id owner { id }") { id: ID! owner: Owner }
+          type Owner @key(fields: "id") { id: ID! }
+        "#,
+        S2: r#"
+          type Owner @key(fields: "id") { id: ID! tag(lang: String): String }
+        "#,
+        S3: r#"
+          type T @key(fields: "id owner { id }") {
+            id: ID!
+            owner: Owner
+            label: String @requires(fields: "owner { tag(lang: \"en\") }")
+            note: String @requires(fields: "owner { tag(lang: \"fr\") }")
+          }
+          type Owner @key(fields: "id") { id: ID! tag(lang: String): String @external }
+        "#,
+    );
+    // `label` and `note` disagree on `tag`'s arguments, so both conditions
+    // are aliased. Each alias is renamed back onto `owner`, which is also a
+    // key field, so each must carry `owner { id }` too.
+    // validate_correctness = false: the correctness checker rejects input
+    // KeyRenamer rewrites, which this plan uses to rename an aliased
+    // @requires condition back to its field name.
+    assert_plan!(
+        validate_correctness = false,
+        &planner,
+        "{ t { label note } }",
+        @r###"
+    QueryPlan {
+      Sequence {
+        Fetch(service: "S1") {
+          {
+            t {
+              __typename
+              id
+              owner {
+                id
+              }
+              __require_0_owner: owner {
+                __typename
+                id
+              }
+              __require_1_owner: owner {
+                __typename
+                id
+              }
+            }
+          }
+        },
+        Parallel {
+          Sequence {
+            Flatten(path: "t.__require_1_owner") {
+              Fetch(service: "S2") {
+                {
+                  ... on Owner {
+                    __typename
+                    id
+                  }
+                } =>
+                {
+                  ... on Owner {
+                    tag(lang: "fr")
+                  }
+                }
+              },
+            },
+            Flatten(path: "t") {
+              Fetch(service: "S3") {
+                {
+                  ... on T {
+                    __typename
+                    id
+                    owner {
+                      id
+                    }
+                    __require_1_owner: owner {
+                      tag
+                      id
+                    }
+                  }
+                } =>
+                {
+                  ... on T {
+                    note
+                  }
+                }
+              },
+            },
+          },
+          Sequence {
+            Flatten(path: "t.__require_0_owner") {
+              Fetch(service: "S2") {
+                {
+                  ... on Owner {
+                    __typename
+                    id
+                  }
+                } =>
+                {
+                  ... on Owner {
+                    tag(lang: "en")
+                  }
+                }
+              },
+            },
+            Flatten(path: "t") {
+              Fetch(service: "S3") {
+                {
+                  ... on T {
+                    __typename
+                    id
+                    owner {
+                      id
+                    }
+                    __require_0_owner: owner {
+                      tag
+                      id
+                    }
+                  }
+                } =>
+                {
+                  ... on T {
+                    label
+                  }
+                }
+              },
+            },
+          },
+        },
+      },
+    }
+    "###
+    );
 }
 
 /// Multiple non-nested @defer labels: sibling entity merging must not

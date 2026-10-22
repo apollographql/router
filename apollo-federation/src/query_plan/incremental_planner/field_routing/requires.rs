@@ -84,6 +84,58 @@ pub(super) fn alias_condition_fields(
     Ok((Arc::new(aliased_ss), alias_rewrites))
 }
 
+/// Widen each aliased condition field whose original name is also a field
+/// of a key input on `edge` with that key field's sub-selection. The alias is
+/// renamed back by removing and reinserting the key, so without it the rename
+/// would drop the key's nested fields from the representation.
+fn widen_aliases_with_key_inputs(
+    conditions: &Arc<SelectionSet>,
+    alias_rewrites: &[(Name, Name)],
+    graph: &super::super::fetch_graph::FetchGraph,
+    edge: EdgeIndex,
+    source_type: &Name,
+) -> Result<Arc<SelectionSet>, FederationError> {
+    let mut widened: Option<SelectionSet> = None;
+    for input in &graph.edge_weight_raw(edge).inputs {
+        if input.rewrite_info().is_none() || input.source_type_name() != source_type {
+            continue;
+        }
+        for key_sel in input.conditions().selections.values() {
+            let Selection::Field(key_field) = key_sel else {
+                continue;
+            };
+            let Some(key_sub) = &key_field.selection_set else {
+                continue;
+            };
+            let Some((alias, _)) = alias_rewrites
+                .iter()
+                .find(|(_, original)| original == key_field.field.response_name())
+            else {
+                continue;
+            };
+            let target = widened.get_or_insert_with(|| (**conditions).clone());
+            let mut new_map = SelectionMap::new();
+            for sel in target.selections.values() {
+                if let Selection::Field(f) = sel
+                    && f.field.response_name() == alias
+                    && let Some(sub) = &f.selection_set
+                {
+                    let mut merged = sub.clone();
+                    merged.add_selection_set(key_sub)?;
+                    new_map.insert(Selection::Field(Arc::new(FieldSelection {
+                        field: f.field.clone(),
+                        selection_set: Some(merged),
+                    })));
+                } else {
+                    new_map.insert(sel.clone());
+                }
+            }
+            target.selections = Arc::new(new_map);
+        }
+    }
+    Ok(widened.map(Arc::new).unwrap_or_else(|| conditions.clone()))
+}
+
 /// Trailing inline-fragment elements of `op_path` (after the last field)
 /// that carry @skip/@include, which a key hop must carry into the entity
 /// fetch's op path. Only condition directives are kept.
@@ -193,6 +245,16 @@ impl FieldRoutingSearchSpace {
             let source = self.node_source(pending.query_graph_node)?;
             let (conditions, alias_rewrites) =
                 self.stage_condition_aliases(state, pending, requires_conditions)?;
+            let conditions = match key_hop_edge {
+                Some(edge) => widen_aliases_with_key_inputs(
+                    &conditions,
+                    &alias_rewrites,
+                    &state.graph,
+                    edge,
+                    source.type_pos.type_name(),
+                )?,
+                None => conditions,
+            };
             let input_conflict = key_hop_edge.is_some_and(|e| {
                 Self::has_conflicting_requires_inputs(&state.graph, e, &conditions, &alias_rewrites)
             });
@@ -288,7 +350,8 @@ impl FieldRoutingSearchSpace {
             }
             Self::plain_input_has_argument_conflict(input.conditions(), new_conditions)
                 // Splitting cannot separate a condition from the key it
-                // enters with, so only other condition inputs count.
+                // enters with, so key inputs are handled by widening the
+                // alias instead (`widen_aliases_with_key_inputs`).
                 || (input.rewrite_info().is_none()
                     && Self::aliased_input_collides_with_plain(new_rewrites, input.conditions()))
         })

@@ -127,6 +127,7 @@ pub(crate) fn build_bulb_plan(
         // planning runs one search per top-level field.
         response_keys: field_routing::response_keys::OperationResponseKeys::new(
             &parameters.operation.selection_set,
+            supergraph_schema,
         ),
     };
 
