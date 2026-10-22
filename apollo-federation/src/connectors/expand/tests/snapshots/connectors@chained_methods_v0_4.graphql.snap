@@ -50,6 +50,7 @@ input_file: apollo-federation/src/connectors/expand/tests/schemas/expand/chained
                 source_query_params: None,
                 connect_path: None,
                 connect_query_params: None,
+                stream: None,
             },
         ),
         selection: JSONSelection {
@@ -414,6 +415,7 @@ input_file: apollo-federation/src/connectors/expand/tests/schemas/expand/chained
                 source_query_params: None,
                 connect_path: None,
                 connect_query_params: None,
+                stream: None,
             },
         ),
         selection: JSONSelection {
@@ -823,6 +825,7 @@ input_file: apollo-federation/src/connectors/expand/tests/schemas/expand/chained
                 source_query_params: None,
                 connect_path: None,
                 connect_query_params: None,
+                stream: None,
             },
         ),
         selection: JSONSelection {

@@ -1,0 +1,18 @@
+extend schema
+  @link(url: "https://specs.apollo.dev/federation/v2.10", import: ["@key"])
+  @link(url: "https://specs.apollo.dev/connect/v0.4", import: ["@connect", "@source"])
+  @source(name: "mcp", http: { baseURL: "https://mcp.example.com/" })
+
+type Query {
+  # Invalid: `http.stream` was added in connect/v0.5.
+  progress: [Progress]
+    @connect(
+      source: "mcp"
+      http: { GET: "/progress", stream: "array" }
+      selection: "percent: params.progress"
+    )
+}
+
+type Progress {
+  percent: Float
+}

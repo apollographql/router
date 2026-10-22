@@ -1,0 +1,63 @@
+extend schema
+  @link(url: "https://specs.apollo.dev/federation/v2.10", import: ["@key"])
+  @link(url: "https://specs.apollo.dev/connect/v0.5", import: ["@connect", "@source"])
+  @source(name: "mcp", http: { baseURL: "https://mcp.example.com/" })
+
+type Query {
+  # Valid: the selection folds the list of events to the last one.
+  weather(city: String!): Weather
+    @connect(
+      source: "mcp"
+      http: {
+        POST: "/mcp"
+        body: "method: $('tools/call') params: { name: $('weather') arguments: { city: $args.city } }"
+        stream: "array"
+      }
+      selection: "$->last.result.structuredContent { temp }"
+    )
+  # Valid: the selection maps over every event.
+  progress: [Progress]
+    @connect(
+      source: "mcp"
+      http: { GET: "/progress", stream: "array" }
+      selection: "percent: params.progress"
+    )
+  # Invalid: not a known mode.
+  last: Weather
+    @connect(
+      source: "mcp"
+      http: { GET: "/weather", stream: "last" }
+      selection: "temp"
+    )
+  # Invalid: an entity resolver receives one entity's response, not a stream.
+  product(id: ID!): Product
+    @connect(
+      source: "mcp"
+      http: { GET: "/products/{$args.id}", stream: "array" }
+      selection: "id"
+      entity: true
+    )
+}
+
+type Weather {
+  temp: Float
+}
+
+type Progress {
+  percent: Float
+}
+
+type Product @key(fields: "id") {
+  id: ID!
+}
+
+# Invalid: a connector on a type is a batch or entity resolver.
+type Order
+  @key(fields: "id")
+  @connect(
+    source: "mcp"
+    http: { POST: "/orders", body: "ids: $batch.id", stream: "array" }
+    selection: "id"
+  ) {
+  id: ID!
+}
