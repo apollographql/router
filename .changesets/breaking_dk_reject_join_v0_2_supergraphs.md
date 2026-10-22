@@ -4,6 +4,6 @@ The router now refuses to start with a supergraph that uses join spec v0.2 (`htt
 
 What to do: recompose your supergraph with Federation 2.3 or later, for example by setting `federation_version` in your `rover supergraph compose` config or by updating the build pipeline's federation version in GraphOS.
 
-When the router rejects a supergraph for this reason, the `apollo.router.lifecycle.query_planner.init` metric records `init.error_kind = unsupported_join_version`.
+When the router rejects a supergraph for this reason, the `apollo.router.lifecycle.query_planner.init` metric records `init.error_kind = unsupported_federation_version`.
 
-By [@dariuszkuc](https://github.com/dariuszkuc) in https://github.com/apollographql/router/pull/TBD
+By [@dariuszkuc](https://github.com/dariuszkuc) in https://github.com/apollographql/router/pull/10642

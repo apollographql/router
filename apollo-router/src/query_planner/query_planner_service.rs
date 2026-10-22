@@ -54,7 +54,7 @@ use crate::spec::SpecError;
 
 pub(crate) const RUST_QP_MODE: &str = "rust";
 const UNSUPPORTED_FED1: &str = "fed1";
-const UNSUPPORTED_JOIN_VERSION: &str = "unsupported_join_version";
+const UNSUPPORTED_FEDERATION_VERSION: &str = "unsupported_federation_version";
 const INTERNAL_INIT_ERROR: &str = "internal";
 
 const ENV_DISABLE_NON_LOCAL_SELECTIONS_CHECK: &str =
@@ -121,7 +121,7 @@ impl QueryPlannerService {
                     if schema.federation_version() == Some(1) {
                         metric_rust_qp_init(Some(UNSUPPORTED_FED1));
                     } else {
-                        metric_rust_qp_init(Some(UNSUPPORTED_JOIN_VERSION));
+                        metric_rust_qp_init(Some(UNSUPPORTED_FEDERATION_VERSION));
                     }
                 }
                 SingleFederationError::UnsupportedFeature {
@@ -738,7 +738,7 @@ mod tests {
             assert_counter!(
                 "apollo.router.lifecycle.query_planner.init",
                 1,
-                "init.error_kind" = "unsupported_join_version",
+                "init.error_kind" = "unsupported_federation_version",
                 "init.is_success" = false
             );
         }
@@ -1241,11 +1241,11 @@ mod tests {
             "init.error_kind" = "fed1",
             "init.is_success" = false
         );
-        metric_rust_qp_init(Some(UNSUPPORTED_JOIN_VERSION));
+        metric_rust_qp_init(Some(UNSUPPORTED_FEDERATION_VERSION));
         assert_counter!(
             "apollo.router.lifecycle.query_planner.init",
             1,
-            "init.error_kind" = "unsupported_join_version",
+            "init.error_kind" = "unsupported_federation_version",
             "init.is_success" = false
         );
         metric_rust_qp_init(Some(INTERNAL_INIT_ERROR));
