@@ -17,9 +17,10 @@
 //! The [`init_telemetry`] function sets up the tracing subscriber stack with:
 //! - Dynamic attribute layer for request-scoped attributes
 //! - OpenTelemetry layer for distributed tracing
-//! - Format layer for structured logging (JSON or text based on TTY)
+//! - Format layer for structured logging (JSON or text based on TTY), which only sees events
+//! - Span fields layer, which records the span fields the format layer shows
 //! - Rate limiting layer for OpenTelemetry internal log messages
-//! - Environment filter for log level control
+//! - Environment filter for log level control, which tracks spans only for span-scoped directives
 //!
 //! ## Reloading
 //!
@@ -44,7 +45,6 @@ use opentelemetry_sdk::trace::SdkTracerProvider;
 use opentelemetry_sdk::trace::Tracer;
 use parking_lot::Mutex;
 use tower::BoxError;
-use tracing_subscriber::EnvFilter;
 use tracing_subscriber::Layer;
 use tracing_subscriber::Registry;
 use tracing_subscriber::layer::Layered;
@@ -55,11 +55,14 @@ use tracing_subscriber::util::SubscriberInitExt;
 
 use crate::plugins::telemetry::dynamic_attribute::DynAttributeLayer;
 use crate::plugins::telemetry::fmt_layer::FmtLayer;
+use crate::plugins::telemetry::fmt_layer::SpanFieldsLayer;
 use crate::plugins::telemetry::formatters::json::Json;
 use crate::plugins::telemetry::formatters::text::Text;
 use crate::plugins::telemetry::otel;
 use crate::plugins::telemetry::otel::OpenTelemetryLayer;
 use crate::plugins::telemetry::otel::OtelData;
+use crate::plugins::telemetry::reload::log_layers::EventsOnly;
+use crate::plugins::telemetry::reload::log_layers::LogFilter;
 use crate::plugins::telemetry::reload::rate_limit::RateLimitLayer;
 use crate::plugins::telemetry::tracing::reload::ReloadTracer;
 use crate::tracer::TraceId;
@@ -125,13 +128,16 @@ pub(crate) fn init_telemetry(log_level: &str) -> anyhow::Result<()> {
             tracing_subscriber::registry()
                 .with(DynAttributeLayer::new())
                 .with(opentelemetry_layer)
-                .with(fmt_layer)
+                // The reloadable format layer gets events only, so that span callbacks don't take
+                // the reload lock. Span fields for the logs are recorded outside it.
+                .with(EventsOnly::new(fmt_layer))
+                .with(SpanFieldsLayer::default())
                 // Rate limit OpenTelemetry internal log messages to avoid log spam when things go wrong
                 .with(RateLimitLayer::new(
                     "opentelemetry",
                     Duration::from_secs(10),
                 ))
-                .with(EnvFilter::try_new(log_level)?)
+                .with(LogFilter::try_new(&log_level)?)
                 .try_init()?;
 
             Ok(hot_tracer)
