@@ -1,0 +1,135 @@
+# A context read off a sibling branch. A `Setter`'s `left` and `right` are each an `A` or a `B`,
+# independently; `consumer` sets the context `ctx` on a `Setter` and resolves an `A`'s `info` from
+# the `val` of the setter's `right`.
+#
+# Composed with `apollo_federation::composition::compose` from the two subgraphs below. Recompose it
+# when they change.
+#
+# Subgraph `base`:
+#
+#   extend schema @link(url: "https://specs.apollo.dev/federation/v2.8", import: ["@key", "@shareable", "@external", "@requires", "@provides", "@override", "@interfaceObject", "@context", "@fromContext"])
+#
+#   type Query {
+#     setter: Setter
+#   }
+#
+#   type Setter {
+#     left: I @shareable
+#     right: I @shareable
+#   }
+#
+#   interface I {
+#     val: String
+#   }
+#
+#   type A implements I @key(fields: "id") {
+#     id: ID!
+#     val: String @shareable
+#   }
+#
+#   type B implements I {
+#     val: String @shareable
+#   }
+#
+# Subgraph `consumer`:
+#
+#   extend schema @link(url: "https://specs.apollo.dev/federation/v2.8", import: ["@key", "@shareable", "@external", "@requires", "@provides", "@override", "@interfaceObject", "@context", "@fromContext"])
+#
+#   type Setter @context(name: "ctx") {
+#     left: I @shareable
+#     right: I @shareable
+#   }
+#
+#   interface I {
+#     val: String
+#   }
+#
+#   type A implements I @key(fields: "id") {
+#     id: ID!
+#     val: String @shareable
+#     info(c: String @fromContext(field: "$ctx { right { val } }")): String
+#   }
+#
+#   type B implements I {
+#     val: String @shareable
+#   }
+
+schema @link(url: "https://specs.apollo.dev/link/v1.0") @link(url: "https://specs.apollo.dev/join/v0.5", for: EXECUTION) @link(url: "https://specs.apollo.dev/context/v0.1", for: SECURITY) {
+  query: Query
+}
+
+directive @link(url: String, as: String, for: link__Purpose, import: [link__Import]) repeatable on SCHEMA
+
+directive @join__graph(name: String!, url: String!) on ENUM_VALUE
+
+directive @join__type(graph: join__Graph!, key: join__FieldSet, extension: Boolean! = false, resolvable: Boolean! = true, isInterfaceObject: Boolean! = false) repeatable on OBJECT | INTERFACE | UNION | ENUM | INPUT_OBJECT | SCALAR
+
+directive @join__field(graph: join__Graph, requires: join__FieldSet, provides: join__FieldSet, type: String, external: Boolean, override: String, usedOverridden: Boolean, overrideLabel: String, contextArguments: [join__ContextArgument!]) repeatable on FIELD_DEFINITION | INPUT_FIELD_DEFINITION
+
+directive @join__implements(graph: join__Graph!, interface: String!) repeatable on OBJECT | INTERFACE
+
+directive @join__unionMember(graph: join__Graph!, member: String!) repeatable on UNION
+
+directive @join__enumValue(graph: join__Graph!) repeatable on ENUM_VALUE
+
+directive @join__directive(graphs: [join__Graph!], name: String!, args: join__DirectiveArguments) repeatable on SCHEMA | OBJECT | INTERFACE | FIELD_DEFINITION
+
+directive @context(name: String!) repeatable on INTERFACE | OBJECT | UNION
+
+directive @context__fromContext(field: context__ContextFieldValue) on ARGUMENT_DEFINITION
+
+enum link__Purpose {
+  """
+  `SECURITY` features provide metadata necessary to securely resolve fields.
+  """
+  SECURITY
+  """
+  `EXECUTION` features provide metadata necessary for operation execution.
+  """
+  EXECUTION
+}
+
+scalar link__Import
+
+enum join__Graph {
+  BASE @join__graph(name: "base", url: "http://base")
+  CONSUMER @join__graph(name: "consumer", url: "http://consumer")
+}
+
+scalar join__FieldSet
+
+scalar join__DirectiveArguments
+
+scalar join__FieldValue
+
+input join__ContextArgument {
+  name: String!
+  type: String!
+  context: String!
+  selection: join__FieldValue!
+}
+
+scalar context__ContextFieldValue
+
+type Query @join__type(graph: BASE) @join__type(graph: CONSUMER) {
+  setter: Setter @join__field(graph: BASE)
+}
+
+type Setter @join__type(graph: BASE) @join__type(graph: CONSUMER) @context(name: "consumer__ctx") {
+  left: I
+  right: I
+}
+
+interface I @join__type(graph: BASE) @join__type(graph: CONSUMER) {
+  val: String
+}
+
+type A implements I @join__implements(graph: BASE, interface: "I") @join__implements(graph: CONSUMER, interface: "I") @join__type(graph: BASE, key: "id") @join__type(graph: CONSUMER, key: "id") {
+  id: ID!
+  val: String
+  info: String @join__field(graph: CONSUMER, contextArguments: [{context: "consumer__ctx", name: "c", type: "String", selection: "{ right { val } }"}])
+}
+
+type B implements I @join__implements(graph: BASE, interface: "I") @join__implements(graph: CONSUMER, interface: "I") @join__type(graph: BASE) @join__type(graph: CONSUMER) {
+  val: String
+}
