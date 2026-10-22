@@ -113,7 +113,9 @@ impl ConnectorIndex {
 
                 index.output_shapes.insert(
                     entry.coordinate.clone(),
-                    SelectionAnalysis::new(connector.selection.clone()).output_shape(),
+                    normalize_output_shape(
+                        &SelectionAnalysis::new(connector.selection.clone()).output_shape(),
+                    ),
                 );
 
                 // The parent-data condition guarding entry into an
@@ -192,6 +194,16 @@ impl ConnectorIndex {
         self.key_conditions.get(coordinate)
     }
 
+    /// The shape an entity-resolver connector returns for the entity's field
+    /// `field_name`, when it returns that field.
+    pub(crate) fn resolver_field_shape(&self, coordinate: &str, field_name: &str) -> Option<Shape> {
+        let shape = self.output_shapes.get(coordinate)?;
+        if let Some(own_field) = self.implicit_fields.get(coordinate) {
+            return (own_field == field_name).then(|| shape.clone());
+        }
+        object_fields(shape)?.get(field_name).cloned()
+    }
+
     /// Whether an entity-resolver connector returns every field of the
     /// entity's `selection`.
     pub(crate) fn resolver_provides(&self, coordinate: &str, selection: &Selection) -> bool {
@@ -246,6 +258,46 @@ impl ConnectorIndex {
         self.service_subgraphs
             .iter()
             .map(|(service, subgraph)| (service.as_str(), subgraph.as_ref()))
+    }
+}
+
+/// The shape the planner reasons about: an intersection that contains an
+/// object (a spread such as `author: { name ... authorExtra }`, which is
+/// `All<$root.*.authorExtra, { name }>`) counts as that object's known fields.
+/// What the spread may add at runtime is unknown, so it provides nothing
+/// beyond them. Composition and connector expansion read it the same way.
+fn normalize_output_shape(shape: &Shape) -> Shape {
+    match shape.case() {
+        ShapeCase::Object { fields, rest } => Shape::object(
+            fields
+                .iter()
+                .map(|(name, field)| (name.clone(), normalize_output_shape(field)))
+                .collect(),
+            rest.clone(),
+            [],
+        ),
+        ShapeCase::Array { prefix, tail } => Shape::array(
+            prefix.iter().map(normalize_output_shape),
+            normalize_output_shape(tail),
+            [],
+        ),
+        ShapeCase::One(members) => Shape::one(members.iter().map(normalize_output_shape), []),
+        ShapeCase::All(members) => {
+            let members: Vec<_> = members.iter().map(normalize_output_shape).collect();
+            let mut merged = None;
+            for member in &members {
+                if let ShapeCase::Object { fields, .. } = member.case() {
+                    merged
+                        .get_or_insert_with(Shape::empty_map)
+                        .extend(fields.clone());
+                }
+            }
+            match merged {
+                Some(merged) => Shape::object(merged, Shape::none(), []),
+                None => Shape::all(members, []),
+            }
+        }
+        _ => shape.clone(),
     }
 }
 
@@ -758,5 +810,87 @@ mod tests {
         assert!(index.by_field(&name!("Product"), &name!("name")).is_none());
         assert!(index.entity_resolvers(&name!("Product")).is_none());
         assert!(!index.is_connector_subgraph("connectors"));
+    }
+
+    /// A spread of an unknown path provides only the known fields beside it,
+    /// at any depth and in every `->match` arm. An intersection with no known
+    /// fields stays opaque.
+    #[test]
+    fn normalize_output_shape_keeps_known_fields_of_spreads() {
+        use crate::connectors::json_selection::JSONSelection;
+
+        let normalized = [
+            "author: { name ... authorExtra }",
+            "id ... $.extra",
+            "items: $.items { id ... extra }",
+            "id ... $.k->match([\"a\", { author: { name ... extra } }], [@, { title }])",
+            "id ... $.k->match([\"a\", { title }], [@, { name }]) ... $.extra",
+            "author: { ... a ... b }",
+        ]
+        .map(|selection| {
+            let selection = JSONSelection::parse_with_spec(selection, ConnectSpec::V0_4)
+                .expect("valid selection");
+            let shape = SelectionAnalysis::new(selection.clone()).output_shape();
+            format!(
+                "{selection}\n=> {}",
+                normalize_output_shape(&shape).pretty_print()
+            )
+        })
+        .join("\n\n");
+        insta::assert_snapshot!(normalized, @r#"
+        author: {
+          name
+          ... authorExtra
+        }
+        => { author: { name: $root.*.name } }
+
+        id
+        ... $.extra
+        => { id: $root.*.id }
+
+        items: $.items {
+          id
+          ... extra
+        }
+        => { items: { id: $root.*.items.*.id } }
+
+        id
+        ... $.k->match(
+          ["a", {
+            author: {
+              name
+              ... extra
+            }
+          }],
+          [@, {
+            title
+          }]
+        )
+        => One<
+          { author: { name: $root.*.k.*.name }, id: $root.*.id },
+          { id: $root.*.id, title: $root.*.title },
+        >
+
+        id
+        ... $.k->match(
+          ["a", {
+            title
+          }],
+          [@, {
+            name
+          }]
+        )
+        ... $.extra
+        => One<
+          { id: $root.*.id, title: $root.*.title },
+          { id: $root.*.id, name: $root.*.name },
+        >
+
+        author: {
+          ... a
+          ... b
+        }
+        => { author: All<$root.*.a, $root.*.b> }
+        "#);
     }
 }
