@@ -3312,7 +3312,7 @@ fn inc_entity_fetches_under_union_members() {
     // Different entity types merge onto a path keeping both members'
     // conditions, so Album items aren't asked for pages. The response shape
     // checker can't match a path condition spanning several union members,
-    // so it can't validate this or the next case.
+    // so it can't validate this case or the next two.
     assert_plan!(
         validate_correctness = false,
         &planner,
@@ -3537,7 +3537,6 @@ fn inc_entity_fetches_under_union_members() {
     // Without every combination selected, the union would also cover Book's
     // Body parts and Film's Front parts, so these stay apart.
     assert_plan!(
-        validate_correctness = false,
         &planner,
         r#"
           { shelf { entries { ... on Book { parts { ... on Front { item { pages } } } } ... on Film { parts { ... on Body { item { pages } } } } } } }
