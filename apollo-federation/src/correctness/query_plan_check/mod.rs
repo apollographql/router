@@ -60,11 +60,12 @@
 //!   path element whose condition is the empty list, `…|[]`, a fetch the planner decided can never
 //!   run. The model reads that condition as it reads any condition naming no object of its
 //!   position, an interface's or a union's name among them: the fetch below contributes nothing
-//!   and the requirements mounted for it disappear, while its structural checks remain and, where
-//!   its path ends at a key, its contextual values are still asked for, its own position being
-//!   read without that key's condition. This checker decides the same with the option off. The
-//!   report is this port's own and reads only whether the written list is empty, so a nonempty
-//!   condition naming no object of its position is not reported.
+//!   and the requirements mounted for it disappear, and its own position, read to the object it
+//!   runs on with the last element's condition narrowing that object, reaches nothing, so no
+//!   contextual value is owed for it, while its structural checks remain. This checker decides
+//!   the same with the option off. The report is this port's own and reads only whether the
+//!   written list is empty, so a nonempty condition naming no object of its position is not
+//!   reported.
 //! - **A key's condition before an index**, a limit this port shares with the model: a condition
 //!   on a key whose value is a list is read as carrying into the index, so `items|[Book, Film].@`
 //!   is credited, while Router's executor compares the list itself, which has no `__typename`,
@@ -137,6 +138,7 @@ use self::context::check_context_readings;
 use self::context::check_context_rewrites;
 use self::context::context_uses;
 use self::context::context_variables;
+use self::context::fetch_positions;
 use self::context::remove_context_arguments;
 use self::requires::Reading;
 use self::requires::check_requires_conflict;
@@ -617,12 +619,26 @@ impl<'a> Checker<'a> {
         let context_variables = context_variables(&fetch.context_rewrites);
         let uses = context_uses(&subgraph, &operation)?;
         check_context_arguments(fetch, reached.path, &uses, &context_variables)?;
+        // Where the fetch runs, which the readings and the availability of what it reads are both
+        // judged over, found once; a fetch with no context rewrite is asked neither.
+        let positions = if fetch.context_rewrites.is_empty() {
+            Vec::new()
+        } else {
+            fetch_positions(
+                self.supergraph_schema,
+                &self.root_type,
+                available,
+                reached.path,
+                fetch,
+            )
+        };
         check_context_readings(
             self.supergraph_schema,
             &subgraph,
             &self.root_type,
             reached.path,
             available,
+            &positions,
             fetch,
             &uses,
         )?;
@@ -640,6 +656,18 @@ impl<'a> Checker<'a> {
         } else {
             let entity_body = entity_body(fetch, &body)?;
             self.check_fetch(fetch, &subgraph, &entity_body, reached, available, readable)?;
+            // Context rewrites are an entity fetch's business:
+            // `add_context_renamers_for_selection_set` runs on the node that has just been given
+            // its key inputs, and the router resolves none for a fetch that requires nothing.
+            check_context_rewrites(
+                self.supergraph_schema,
+                &self.root_type,
+                reached.path,
+                reached.condition,
+                &positions,
+                readable,
+                fetch,
+            )?;
             restrict_to_entry_types(&require_types(fetch)?, entity_body)
         };
         // The entity cases were read off the fetch's own operation above; what it *contributes*
@@ -726,16 +754,13 @@ fn entity_body(fetch: &FetchNode, body: &[Selection]) -> Result<Vec<Selection>, 
 //==================================================================================================
 
 impl Checker<'_> {
-    /// Whether one entity fetch is well formed, its requirements and entity cases match each
-    /// other, and the contextual data it reads is already fetched.
+    /// Whether one entity fetch is well formed and its requirements and entity cases match each
+    /// other. Whether the contextual data it reads is already fetched is asked beside this, in
+    /// [`Self::walk_fetch`], which has where the fetch runs in hand.
     ///
     /// Each `requires` entry must be matched by some entity case, and each case by some entry.
     /// Legacy checks only the first direction, plus the count kept here, and does not check
     /// `@context` at all.
-    ///
-    /// Context rewrites are an entity fetch's business: `add_context_renamers_for_selection_set`
-    /// runs on the node that has just been given its key inputs, so a fetch with them has
-    /// `requires`.
     fn check_fetch(
         &self,
         fetch: &FetchNode,
@@ -892,15 +917,7 @@ impl Checker<'_> {
                 )));
             }
         }
-        check_context_rewrites(
-            self.supergraph_schema,
-            &self.root_type,
-            reached.path,
-            reached.condition,
-            available,
-            readable,
-            fetch,
-        )
+        Ok(())
     }
 
     /// A `requires` entry agrees with the fetch's input rewrites, which link each alias it reads
