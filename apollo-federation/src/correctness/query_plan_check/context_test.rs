@@ -166,7 +166,7 @@ fn no_climb_stays_under_the_fetch() {
 /// What a fetch at `path` needs of `available`, as the checker asks it outside a deferred block,
 /// where a fetch can read everything placed before it. `available` is what a root fetch before it
 /// selected. Every path here ends at a `U`, so the fetch is sent the `U` entities there: its
-/// position is narrowed to the types its `requires` entries are written at.
+/// position is narrowed to the types its `requires` entries admit.
 fn context_met(
     path: &[FetchDataPathElement],
     condition: &[BooleanLiteral],

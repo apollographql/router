@@ -1,0 +1,259 @@
+# The world of the planner's `conditional_requires_sharing_a_fetch_with_an_unconditional_sibling`,
+# extended for the conditional `requires` controls: `Subgraph1` serves `T`, whose `id` keys it,
+# with what the requiring fields read, and `Subgraph2` resolves a `T` from `id` and requires its
+# inputs: `b` requires `a`, `d` `e`, `both` `u { left right }`, `onLeft` and `onRight` one child of
+# `u` each, the `for…` fields `media` under three readings of its interface, and `forParts` a
+# `Photo`'s `a` and a `Video`'s `b`. `I` is an interface `T` implements in `Subgraph1` alone, for
+# an entry written at it; `V` has two keys, `id` and `id2`, and `W` three, two of them composite,
+# `org { id }` and `team { id }`; `t` takes a `String` argument, for an operation that declares a
+# variable other than a `Boolean`.
+#
+# Composed with `apollo_federation::composition::compose` from the two subgraphs below. Recompose
+# it when they change.
+#
+# Subgraph `Subgraph1`:
+#
+#   extend schema @link(url: "https://specs.apollo.dev/federation/v2.7", import: ["@key", "@shareable", "@external", "@requires"])
+#
+#   type Query {
+#     t(s: String): T
+#     v: V
+#     w: W
+#   }
+#
+#   interface I {
+#     id: ID!
+#     a: Int
+#   }
+#
+#   type T implements I @key(fields: "id") {
+#     id: ID!
+#     a: Int
+#     e: Int
+#     u: U
+#     media: [Media]
+#   }
+#
+#   interface Media {
+#     id: ID!
+#   }
+#
+#   type Photo implements Media {
+#     id: ID!
+#     a: X
+#   }
+#
+#   type Video implements Media {
+#     id: ID!
+#     b: X
+#   }
+#
+#   type X {
+#     x: Int
+#   }
+#
+#   type U {
+#     left: Int
+#     right: Int
+#   }
+#
+#   type V @key(fields: "id") @key(fields: "id2") {
+#     id: ID!
+#     id2: ID!
+#   }
+#
+#   type W @key(fields: "org { id }") @key(fields: "team { id }") @key(fields: "id2") {
+#     org: Org
+#     team: Team
+#     id2: ID!
+#   }
+#
+#   type Org @shareable {
+#     id: ID!
+#   }
+#
+#   type Team @shareable {
+#     id: ID!
+#   }
+#
+# Subgraph `Subgraph2`:
+#
+#   extend schema @link(url: "https://specs.apollo.dev/federation/v2.7", import: ["@key", "@shareable", "@external", "@requires"])
+#
+#   type T @key(fields: "id") {
+#     id: ID!
+#     a: Int @external
+#     e: Int @external
+#     u: U @external
+#     b: Int @requires(fields: "a")
+#     c: Int
+#     d: Int @requires(fields: "e")
+#     both: Int @requires(fields: "u { left right }")
+#     onLeft: Int @requires(fields: "u { left }")
+#     onRight: Int @requires(fields: "u { right }")
+#     media: [Media] @external
+#     forPhotos: Int @requires(fields: "media { ... on Photo { id } }")
+#     forMedia: Int @requires(fields: "media { ... on Media { id } }")
+#     forAll: Int @requires(fields: "media { id }")
+#     forParts: Int @requires(fields: "media { ... on Photo { a { x } } ... on Video { b { x } } }")
+#   }
+#
+#   interface Media {
+#     id: ID!
+#   }
+#
+#   type Photo implements Media {
+#     id: ID! @external
+#     a: X @external
+#   }
+#
+#   type Video implements Media {
+#     id: ID! @external
+#     b: X @external
+#   }
+#
+#   type X {
+#     x: Int @external
+#   }
+#
+#   type U {
+#     left: Int @external
+#     right: Int @external
+#   }
+#
+#   type V @key(fields: "id") @key(fields: "id2") {
+#     id: ID!
+#     id2: ID!
+#     c: Int
+#   }
+#
+#   type W @key(fields: "org { id }") @key(fields: "team { id }") @key(fields: "id2") {
+#     org: Org
+#     team: Team
+#     id2: ID!
+#     c: Int
+#   }
+#
+#   type Org @shareable {
+#     id: ID!
+#   }
+#
+#   type Team @shareable {
+#     id: ID!
+#   }
+
+schema @link(url: "https://specs.apollo.dev/link/v1.0") @link(url: "https://specs.apollo.dev/join/v0.4", for: EXECUTION) {
+  query: Query
+}
+
+directive @link(url: String, as: String, for: link__Purpose, import: [link__Import]) repeatable on SCHEMA
+
+directive @join__graph(name: String!, url: String!) on ENUM_VALUE
+
+directive @join__type(graph: join__Graph!, key: join__FieldSet, extension: Boolean! = false, resolvable: Boolean! = true, isInterfaceObject: Boolean! = false) repeatable on OBJECT | INTERFACE | UNION | ENUM | INPUT_OBJECT | SCALAR
+
+directive @join__field(graph: join__Graph, requires: join__FieldSet, provides: join__FieldSet, type: String, external: Boolean, override: String, usedOverridden: Boolean, overrideLabel: String) repeatable on FIELD_DEFINITION | INPUT_FIELD_DEFINITION
+
+directive @join__implements(graph: join__Graph!, interface: String!) repeatable on OBJECT | INTERFACE
+
+directive @join__unionMember(graph: join__Graph!, member: String!) repeatable on UNION
+
+directive @join__enumValue(graph: join__Graph!) repeatable on ENUM_VALUE
+
+directive @join__directive(graphs: [join__Graph!], name: String!, args: join__DirectiveArguments) repeatable on SCHEMA | OBJECT | INTERFACE | FIELD_DEFINITION
+
+enum link__Purpose {
+  """
+  `SECURITY` features provide metadata necessary to securely resolve fields.
+  """
+  SECURITY
+  """
+  `EXECUTION` features provide metadata necessary for operation execution.
+  """
+  EXECUTION
+}
+
+scalar link__Import
+
+enum join__Graph {
+  SUBGRAPH1 @join__graph(name: "Subgraph1", url: "http://Subgraph1")
+  SUBGRAPH2 @join__graph(name: "Subgraph2", url: "http://Subgraph2")
+}
+
+scalar join__FieldSet
+
+scalar join__DirectiveArguments
+
+type Query @join__type(graph: SUBGRAPH1) @join__type(graph: SUBGRAPH2) {
+  t(s: String): T @join__field(graph: SUBGRAPH1)
+  v: V @join__field(graph: SUBGRAPH1)
+  w: W @join__field(graph: SUBGRAPH1)
+}
+
+interface I @join__type(graph: SUBGRAPH1) {
+  id: ID!
+  a: Int
+}
+
+type T implements I @join__implements(graph: SUBGRAPH1, interface: "I") @join__type(graph: SUBGRAPH1, key: "id") @join__type(graph: SUBGRAPH2, key: "id") {
+  id: ID!
+  a: Int @join__field(graph: SUBGRAPH1) @join__field(graph: SUBGRAPH2, external: true)
+  e: Int @join__field(graph: SUBGRAPH1) @join__field(graph: SUBGRAPH2, external: true)
+  u: U @join__field(graph: SUBGRAPH1) @join__field(graph: SUBGRAPH2, external: true)
+  media: [Media] @join__field(graph: SUBGRAPH1) @join__field(graph: SUBGRAPH2, external: true)
+  b: Int @join__field(graph: SUBGRAPH2, requires: "a")
+  c: Int @join__field(graph: SUBGRAPH2)
+  d: Int @join__field(graph: SUBGRAPH2, requires: "e")
+  both: Int @join__field(graph: SUBGRAPH2, requires: "u { left right }")
+  onLeft: Int @join__field(graph: SUBGRAPH2, requires: "u { left }")
+  onRight: Int @join__field(graph: SUBGRAPH2, requires: "u { right }")
+  forPhotos: Int @join__field(graph: SUBGRAPH2, requires: "media { ... on Photo { id } }")
+  forMedia: Int @join__field(graph: SUBGRAPH2, requires: "media { ... on Media { id } }")
+  forAll: Int @join__field(graph: SUBGRAPH2, requires: "media { id }")
+  forParts: Int @join__field(graph: SUBGRAPH2, requires: "media { ... on Photo { a { x } } ... on Video { b { x } } }")
+}
+
+interface Media @join__type(graph: SUBGRAPH1) @join__type(graph: SUBGRAPH2) {
+  id: ID!
+}
+
+type Photo implements Media @join__implements(graph: SUBGRAPH1, interface: "Media") @join__implements(graph: SUBGRAPH2, interface: "Media") @join__type(graph: SUBGRAPH1) @join__type(graph: SUBGRAPH2) {
+  id: ID! @join__field(graph: SUBGRAPH1) @join__field(graph: SUBGRAPH2, external: true)
+  a: X @join__field(graph: SUBGRAPH1) @join__field(graph: SUBGRAPH2, external: true)
+}
+
+type Video implements Media @join__implements(graph: SUBGRAPH1, interface: "Media") @join__implements(graph: SUBGRAPH2, interface: "Media") @join__type(graph: SUBGRAPH1) @join__type(graph: SUBGRAPH2) {
+  id: ID! @join__field(graph: SUBGRAPH1) @join__field(graph: SUBGRAPH2, external: true)
+  b: X @join__field(graph: SUBGRAPH1) @join__field(graph: SUBGRAPH2, external: true)
+}
+
+type X @join__type(graph: SUBGRAPH1) @join__type(graph: SUBGRAPH2) {
+  x: Int @join__field(graph: SUBGRAPH1) @join__field(graph: SUBGRAPH2, external: true)
+}
+
+type U @join__type(graph: SUBGRAPH1) @join__type(graph: SUBGRAPH2) {
+  left: Int @join__field(graph: SUBGRAPH1) @join__field(graph: SUBGRAPH2, external: true)
+  right: Int @join__field(graph: SUBGRAPH1) @join__field(graph: SUBGRAPH2, external: true)
+}
+
+type V @join__type(graph: SUBGRAPH1, key: "id") @join__type(graph: SUBGRAPH1, key: "id2") @join__type(graph: SUBGRAPH2, key: "id") @join__type(graph: SUBGRAPH2, key: "id2") {
+  id: ID!
+  id2: ID!
+  c: Int @join__field(graph: SUBGRAPH2)
+}
+
+type W @join__type(graph: SUBGRAPH1, key: "org { id }") @join__type(graph: SUBGRAPH1, key: "team { id }") @join__type(graph: SUBGRAPH1, key: "id2") @join__type(graph: SUBGRAPH2, key: "org { id }") @join__type(graph: SUBGRAPH2, key: "team { id }") @join__type(graph: SUBGRAPH2, key: "id2") {
+  org: Org
+  team: Team
+  id2: ID!
+  c: Int @join__field(graph: SUBGRAPH2)
+}
+
+type Org @join__type(graph: SUBGRAPH1) @join__type(graph: SUBGRAPH2) {
+  id: ID!
+}
+
+type Team @join__type(graph: SUBGRAPH1) @join__type(graph: SUBGRAPH2) {
+  id: ID!
+}
+
