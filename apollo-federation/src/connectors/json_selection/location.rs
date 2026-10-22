@@ -39,12 +39,7 @@ pub(crate) struct SpanExtra<'a> {
 
 /// Counts how deeply the parser has nested, to prevent stack overflow.
 #[derive(Debug, Default, PartialEq, Eq)]
-pub(crate) struct DepthCounter {
-    pub(super) depth: Cell<usize>,
-    /// Offset where the parse first reached the limit. Once set, the whole
-    /// parse fails, whatever alternatives the parser backtracks into.
-    pub(super) exceeded_at: Cell<Option<usize>>,
-}
+pub(crate) struct DepthCounter(pub(super) Cell<usize>);
 
 #[cfg(test)]
 pub(crate) fn new_span(input: &str) -> Span<'_> {

@@ -114,30 +114,43 @@ pub(super) struct DepthGuard<'a>(&'a DepthCounter);
 
 impl<'a> DepthGuard<'a> {
     /// Marks that the parser is nesting one level deeper, failing once the
-    /// limit is reached. Reaching the limit fails the whole parse, which
-    /// `JSONSelection::parse_with_spec` reports, so callers that backtrack
-    /// on errors need not tell this one apart from the others.
+    /// limit is reached.
     pub(super) fn increment(
         input: &Span<'a>,
     ) -> Result<Self, nom::Err<nom::error::Error<Span<'a>>>> {
-        let counter = input.extra.depth;
-        if counter.exceeded_at.get().is_some() || counter.depth.get() >= DEFAULT_RECURSION_LIMIT {
-            if counter.exceeded_at.get().is_none() {
-                counter.exceeded_at.set(Some(input.location_offset()));
-            }
-            return Err(nom_fail_message(
-                input.clone(),
-                "Selection nested too deeply",
-            ));
+        let depth = input.extra.depth;
+        if depth.0.get() >= DEFAULT_RECURSION_LIMIT {
+            return Err(
+                nom_fail_message(input.clone(), recursion_limit_message()).map(|error| {
+                    nom::error::Error {
+                        code: nom::error::ErrorKind::TooLarge,
+                        ..error
+                    }
+                }),
+            );
         }
-        counter.depth.set(counter.depth.get() + 1);
-        Ok(Self(counter))
+        depth.0.set(depth.0.get() + 1);
+        Ok(Self(depth))
     }
 }
 
 impl Drop for DepthGuard<'_> {
     fn drop(&mut self) {
-        self.0.depth.set(self.0.depth.get() - 1);
+        self.0.0.set(self.0.0.get() - 1);
+    }
+}
+
+// Hands a parse result back for the caller to inspect, unless it failed on the
+// recursion limit. That failure is propagated so callers that backtrack do not
+// try alternatives once the limit has been reached.
+pub(super) fn propagate_recursion_error<'a, T>(
+    result: ParseResult<'a, T>,
+) -> Result<ParseResult<'a, T>, nom::Err<nom::error::Error<Span<'a>>>> {
+    match result {
+        Err(nom::Err::Failure(error)) if error.code == nom::error::ErrorKind::TooLarge => {
+            Err(nom::Err::Failure(error))
+        }
+        result => Ok(result),
     }
 }
 
@@ -312,18 +325,8 @@ impl JSONSelection {
     ) -> Result<Self, JSONSelectionParseError> {
         let depth = DepthCounter::default();
         let span = new_span_with_depth(input, spec, &depth);
-        let result = JSONSelection::parse_span(span);
 
-        if let Some(offset) = depth.exceeded_at.get() {
-            return Err(JSONSelectionParseError {
-                message: recursion_limit_message(),
-                fragment: input[offset..].to_string(),
-                offset,
-                spec,
-            });
-        }
-
-        match result {
+        match JSONSelection::parse_span(span) {
             Ok((remainder, selection)) => {
                 let fragment = remainder.fragment();
                 let produced_errors = !remainder.extra.errors.is_empty();
@@ -875,7 +878,9 @@ impl NamedSelection {
         let (after_alias, alias) = opt(Alias::parse).parse(input.clone())?;
 
         if let Some(alias) = alias {
-            if let Ok((remainder, sub)) = SubSelection::parse(after_alias.clone()) {
+            if let Ok((remainder, sub)) =
+                propagate_recursion_error(SubSelection::parse(after_alias.clone()))?
+            {
                 let sub_range = sub.range();
                 return Ok((
                     remainder,
@@ -965,7 +970,9 @@ impl NamedSelection {
         let (after_alias, alias) = opt(Alias::parse).parse(input.clone())?;
 
         if let Some(alias) = alias {
-            if let Ok((remainder, sub)) = SubSelection::parse(after_alias.clone()) {
+            if let Ok((remainder, sub)) =
+                propagate_recursion_error(SubSelection::parse(after_alias.clone()))?
+            {
                 let sub_range = sub.range();
                 return Ok((
                     remainder,
@@ -1503,7 +1510,9 @@ impl PathList {
             // method name, so we can unconditionally return based on what
             // parse_identifier tells us. since MethodArgs::parse is optional,
             // the absence of args will never trigger the error case.
-            return match (parse_identifier, opt(MethodArgs::parse)).parse(suffix) {
+            return match propagate_recursion_error(
+                (parse_identifier, opt(MethodArgs::parse)).parse(suffix),
+            )? {
                 Ok((suffix, (method, args_opt))) => {
                     let mut local_var_name = None;
 
@@ -1579,7 +1588,9 @@ impl PathList {
         // responsible for enforcing a trailing SubSelection in the
         // PathWithSubSelection case, since that requirement is checked by
         // NamedSelection::parse_path.
-        if let Ok((suffix, selection)) = SubSelection::parse(input.clone()) {
+        if let Ok((suffix, selection)) =
+            propagate_recursion_error(SubSelection::parse(input.clone()))?
+        {
             let selection_range = selection.range();
             return Ok((
                 suffix,
@@ -1883,7 +1894,7 @@ impl SubSelection {
                     // another NamedSelection follows without a preceding
                     // comma, that is an inconsistent-separator error; if no
                     // NamedSelection follows, the list is simply over.
-                    if NamedSelection::parse(after_ws.clone()).is_ok() {
+                    if propagate_recursion_error(NamedSelection::parse(after_ws.clone()))?.is_ok() {
                         // Likewise, the colon-led summary ("Missing comma
                         // before item") lands at the end so the offending
                         // item follows it directly when the error is shown.
@@ -2237,13 +2248,15 @@ impl MethodArgs {
         input = spaces_or_comments(input)?.0;
 
         let mut args = Vec::new();
-        if let Ok((remainder, first)) = LitExpr::parse(input.clone()) {
+        if let Ok((remainder, first)) = propagate_recursion_error(LitExpr::parse(input.clone()))? {
             args.push(first);
             input = remainder;
 
             while let Ok((remainder, _)) = (spaces_or_comments, char(',')).parse(input.clone()) {
                 input = spaces_or_comments(remainder)?.0;
-                if let Ok((remainder, arg)) = LitExpr::parse(input.clone()) {
+                if let Ok((remainder, arg)) =
+                    propagate_recursion_error(LitExpr::parse(input.clone()))?
+                {
                     args.push(arg);
                     input = remainder;
                 } else {
