@@ -56,7 +56,7 @@ debug = 1
 ahash = "0.8.11"
 apollo-cache-memory = "0.3.0"
 apollo-compiler = "=2.0.0-beta.1"
-apollo-configuration = "0.9.0"
+apollo-configuration = "0.10.0"
 apollo-parser = "=0.9.0-beta.0"
 apollo-smith = "=0.17.0-beta.1"
 async-trait = "0.1.77"
