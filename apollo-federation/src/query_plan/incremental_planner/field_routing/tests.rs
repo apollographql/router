@@ -1582,6 +1582,297 @@ fn interface_object_key_hop_gated_by_typed_include() {
     "#);
 }
 
+/// `a` resolves `posts` and `User.name`; `b` resolves `email`, and
+/// `emailDomain` with `@requires(fields: "name")`; `c` resolves `score`.
+fn gated_key_hop_schema() -> String {
+    wrap_supergraph(
+        r#"  A @join__graph(name: "a", url: "http://a")
+  B @join__graph(name: "b", url: "http://b")
+  C @join__graph(name: "c", url: "http://c")"#,
+        r#"
+type Query
+  @join__type(graph: A)
+  @join__type(graph: B)
+  @join__type(graph: C)
+{
+  posts: [Post] @join__field(graph: A)
+}
+
+type Post
+  @join__type(graph: A)
+{
+  title: String
+  author: User
+}
+
+type User
+  @join__type(graph: A, key: "id")
+  @join__type(graph: B, key: "id")
+  @join__type(graph: C, key: "id")
+{
+  id: ID!
+  name: String @join__field(graph: A) @join__field(graph: B, external: true)
+  email: String @join__field(graph: B)
+  emailDomain: String @join__field(graph: B, requires: "name")
+  score: Int @join__field(graph: C)
+}
+"#,
+    )
+}
+
+/// The key hop's fetch is gated on the `@include`, so its key inputs are
+/// selected under it too.
+#[test]
+fn key_hop_inputs_gated_by_include() {
+    let plan_str = plan_query(
+        &gated_key_hop_schema(),
+        "query($x: Boolean!) { posts { author { name ... @include(if: $x) { email } } } }",
+    );
+    insta::assert_snapshot!(plan_str, @r#"
+    QueryPlan {
+      Sequence {
+        Fetch(service: "a") {
+          {
+            posts {
+              author {
+                name
+                ... @include(if: $x) {
+                  __typename
+                  id
+                }
+              }
+            }
+          }
+        },
+        Include(if: $x) {
+          Flatten(path: "posts.@.author") {
+            Fetch(service: "b") {
+              {
+                ... on User {
+                  __typename
+                  id
+                }
+              } =>
+              {
+                ... on User {
+                  email
+                }
+              }
+            },
+          },
+        },
+      },
+    }
+    "#);
+}
+
+/// Key hops under different conditions share one fetch, which is not gated.
+/// Each keeps its key input, and its representation is built under its
+/// condition: with both conditions false, the fetch reads no keys.
+#[test]
+fn key_hops_with_different_conditions_build_conditional_representations() {
+    let plan_str = plan_query(
+        &gated_key_hop_schema(),
+        "query($a: Boolean!, $b: Boolean!) { posts { author { ... @include(if: $a) { email } ... @include(if: $b) { email } } } }",
+    );
+    insta::assert_snapshot!(plan_str, @r#"
+    QueryPlan {
+      Sequence {
+        Fetch(service: "a") {
+          {
+            posts {
+              author {
+                ... @include(if: $a) {
+                  __typename
+                  id
+                }
+                ... @include(if: $b) {
+                  __typename
+                  id
+                }
+              }
+            }
+          }
+        },
+        Flatten(path: "posts.@.author") {
+          Fetch(service: "b") {
+            {
+              ... on User @include(if: $a) {
+                __typename
+                id
+              }
+              ... on User @include(if: $b) {
+                __typename
+                id
+              }
+            } =>
+            {
+              ... on User {
+                ... @include(if: $a) {
+                  email
+                }
+                ... @include(if: $b) {
+                  email
+                }
+              }
+            }
+          },
+        },
+      },
+    }
+    "#);
+}
+
+/// The `@requires` condition fields are read under the same condition as the
+/// key. Otherwise, with both conditions false, `__typename` (selected for
+/// `c`) and `name` would form a representation without `id`.
+#[test]
+fn requires_input_built_under_key_conditions() {
+    let plan_str = plan_query(
+        &gated_key_hop_schema(),
+        "query($x: Boolean!, $y: Boolean!) { posts { author { score ... @include(if: $x) { emailDomain } ... @include(if: $y) { email } } } }",
+    );
+    insta::assert_snapshot!(plan_str, @r#"
+    QueryPlan {
+      Sequence {
+        Fetch(service: "a") {
+          {
+            posts {
+              author {
+                __typename
+                id
+                name
+              }
+            }
+          }
+        },
+        Parallel {
+          Flatten(path: "posts.@.author") {
+            Fetch(service: "b") {
+              {
+                ... on User @include(if: $x) {
+                  __typename
+                  id
+                  name
+                }
+                ... on User @include(if: $y) {
+                  __typename
+                  id
+                }
+              } =>
+              {
+                ... on User {
+                  ... @include(if: $x) {
+                    emailDomain
+                  }
+                  ... @include(if: $y) {
+                    email
+                  }
+                }
+              }
+            },
+          },
+          Flatten(path: "posts.@.author") {
+            Fetch(service: "c") {
+              {
+                ... on User {
+                  __typename
+                  id
+                }
+              } =>
+              {
+                ... on User {
+                  score
+                }
+              }
+            },
+          },
+        },
+      },
+    }
+    "#);
+}
+
+/// A deferred field local to the parent subgraph is redirected into an entity
+/// fetch, whose representations are built under each branch's condition.
+#[test]
+fn defer_redirect_inputs_gated_by_include() {
+    let config = QueryPlannerConfig {
+        incremental_delivery: QueryPlanIncrementalDeliveryConfig { enable_defer: true },
+        ..default_config()
+    };
+    let plan_str = plan_query_with_options(
+        &gated_key_hop_schema(),
+        "query($a: Boolean!, $b: Boolean!) { posts { author { email ... @defer { ... @include(if: $a) { name } ... @include(if: $b) { name } } } } }",
+        config,
+        Default::default(),
+    );
+    insta::assert_snapshot!(plan_str, @r#"
+    QueryPlan {
+      Defer {
+        Primary {
+          { posts { author { email } } }:
+          Sequence {
+            Fetch(service: "a", id: 0) {
+              {
+                posts {
+                  author {
+                    __typename
+                    id
+                  }
+                }
+              }
+            },
+            Flatten(path: "posts.@.author") {
+              Fetch(service: "b") {
+                {
+                  ... on User {
+                    __typename
+                    id
+                  }
+                } =>
+                {
+                  ... on User {
+                    email
+                  }
+                }
+              },
+            },
+          },
+        }, [
+          Deferred(depends: [0], path: "posts/author") {
+            { ... @include(if: $a) { name } ... @include(if: $b) { name } }:
+            Flatten(path: "posts.@.author") {
+              Fetch(service: "a") {
+                {
+                  ... on User @include(if: $a) {
+                    __typename
+                    id
+                  }
+                  ... on User @include(if: $b) {
+                    __typename
+                    id
+                  }
+                } =>
+                {
+                  ... on User {
+                    ... @include(if: $a) {
+                      name
+                    }
+                    ... @include(if: $b) {
+                      name
+                    }
+                  }
+                }
+              },
+            },
+          },
+        ]
+      },
+    }
+    "#);
+}
+
 /// A fake downcast whose fragment also selects a field only the concrete
 /// type defines: that field cannot stay under the io type in B, so it is
 /// fetched from A, where the concrete type exists.

@@ -1007,10 +1007,12 @@ impl FieldRoutingSearchSpace {
         let source = self.node_source(pending.query_graph_node)?;
         let subgraph = qg.node_weight(pending.query_graph_node)?.source.clone();
 
-        self.append_entity_inputs(
+        // The redirect target is gated on the trailing conditions
+        // (`defer_redirect_target`), so the inputs keep them.
+        self.append_entity_inputs_at(
             state,
             pending.fetch_node,
-            &pending.op_path,
+            &gated_input_path(&pending.op_path),
             Some(&key_conditions),
             &source,
         );
@@ -1037,7 +1039,7 @@ impl FieldRoutingSearchSpace {
                 dest_type,
                 dest_subgraph: subgraph,
             },
-            needed_under: Default::default(),
+            needed_under: trailing_conditions_context(&pending.op_path)?,
         });
 
         let edge = self.wire_key_edge(state, pending.fetch_node, new_group, key_input);

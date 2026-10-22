@@ -360,6 +360,11 @@ impl FieldRoutingSearchSpace {
                 source_type_name: source.type_pos.type_name().clone(),
                 conditions: conditions.clone(),
                 condition_alias_rewrites: alias_rewrites,
+                // Under the same conditions as the key (`commit_key_hop`).
+                needed_under: trailing_conditions_context(&with_own_conditions(
+                    &pending.op_path,
+                    &pending.selection,
+                ))?,
             };
             let dest = if input_conflict {
                 // The original target.fetch_node is abandoned: it retains its
