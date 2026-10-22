@@ -1029,6 +1029,7 @@ mod tests {
     #[case::this_on_query("$this.something")]
     #[case::bare_field_no_var("something")]
     #[case::recursive_input_whole("$args.recursive")]
+    #[case::unknown_field_through_recursive_input("$args.recursive.child.unknown")]
     fn common_invalid_expressions(#[case] selection: &str) {
         // If this fails, another ConnectSpec version has probably been added,
         // and should be accounted for in the loop below.
@@ -1456,6 +1457,45 @@ mod tests {
             err.locations.contains(&expected_location),
             "The expected location {:?} wasn't included in {:?}",
             expected_location,
+            err.locations
+        );
+    }
+
+    /// A nested input field's type is a reference to its own `shape_lookup`
+    /// entry. Resolving it must not add the field definition's location
+    /// (`inner: MultiLevel`) to the error, which points at the expression and
+    /// the type.
+    #[test]
+    fn nested_object_in_url_has_no_field_definition_location() {
+        let selection = "$args.multiLevel.inner";
+        let err = validate_with_context(selection, scalars(), ConnectSpec::latest())
+            .expect_err("objects are not allowed");
+        let schema_str = schema_for(selection, ConnectSpec::latest());
+        let schema = Schema::parse(&schema_str, "schema").expect("test schema parses");
+        let file = schema
+            .sources
+            .values()
+            .find(|file| file.path() == std::path::Path::new("schema"))
+            .expect("the parsed schema is among its own sources");
+        let field_type_offset = schema_str
+            .find("inner: MultiLevel")
+            .expect("`MultiLevelInput.inner` is defined")
+            + "inner: ".len();
+        let field_type_location = file
+            .get_line_column_range(field_type_offset..field_type_offset + "MultiLevel".len())
+            .expect("offsets are within the schema");
+        assert!(
+            !err.locations.contains(&field_type_location),
+            "{:?}",
+            err.locations
+        );
+        assert!(
+            err.locations.contains(&location_of_expression(
+                "inner",
+                selection,
+                ConnectSpec::latest()
+            )),
+            "{:?}",
             err.locations
         );
     }

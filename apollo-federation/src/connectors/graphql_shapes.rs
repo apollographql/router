@@ -251,7 +251,9 @@ impl<'a> GraphQLSchemaWalker<'a> {
     /// reachable through more than one field per level (`billingAddress` and
     /// `shippingAddress: Address` repeated down a hierarchy). Callers that walk
     /// into a field resolve the reference through the returned map, as
-    /// `validation::expression` does.
+    /// `validation::expression` does. The reference has no locations of its
+    /// own: resolving it adds them to the referenced type's, and an inlined
+    /// type carried only the type's.
     fn shape_from_named_type(&mut self, name: &Name) -> Shape {
         match self.locator.schema.types.get(name) {
             Some(
@@ -259,7 +261,7 @@ impl<'a> GraphQLSchemaWalker<'a> {
                 | ExtendedType::Interface(_)
                 | ExtendedType::Union(_)
                 | ExtendedType::InputObject(_)),
-            ) => Shape::name(extended.name().as_str(), self.locations(name.location())),
+            ) => Shape::name(extended.name().as_str(), []),
             Some(extended) => self.shape_from_extended_type(extended),
             None => Shape::unknown(self.locations(name.location())),
         }
