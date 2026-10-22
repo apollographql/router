@@ -80,8 +80,7 @@ pub(crate) enum StrategyConfig {
         #[config(required)]
         list_size: u32,
         /// The maximum cost of a query
-        // f64 has no Validate impl.
-        #[config(required, skip_validate)]
+        #[config(required)]
         max: f64,
 
         /// The strategy used to calculate the actual cost incurred by an operation.
