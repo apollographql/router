@@ -75,6 +75,7 @@ impl Layer<LayeredTracer> for NoOpLayer {}
 pub(crate) struct FmtLayer<T, S, W> {
     fmt_event: T,
     excluded_attributes: HashSet<&'static str>,
+    span_fields: SpanFieldsLayer,
     make_writer: W,
     _inner: PhantomData<S>,
 }
@@ -89,6 +90,7 @@ where
         Self {
             fmt_event,
             excluded_attributes: EXCLUDED_ATTRIBUTES.into(),
+            span_fields: SpanFieldsLayer::default(),
             make_writer,
             _inner: PhantomData,
         }
@@ -107,44 +109,11 @@ where
         id: &tracing_core::span::Id,
         ctx: Context<'_, S>,
     ) {
-        if let Some(span) = ctx.span(id) {
-            let mut visitor = FieldsVisitor::new(&self.excluded_attributes);
-            // We're checking if it's sampled to not add both attributes in OtelData and our LogAttributes
-            if !span.is_sampled() {
-                attrs.record(&mut visitor);
-            }
-            let mut extensions = span.extensions_mut();
-            if let Some(log_attrs) = extensions.get_mut::<LogAttributes>() {
-                log_attrs.extend(visitor.values.into_iter().filter_map(|(k, v)| {
-                    Some(KeyValue::new(Key::new(k), v.maybe_to_otel_value()?))
-                }));
-            } else {
-                let mut fields = LogAttributes::default();
-                fields.extend(visitor.values.into_iter().filter_map(|(k, v)| {
-                    Some(KeyValue::new(Key::new(k), v.maybe_to_otel_value()?))
-                }));
-                extensions.insert(fields);
-            }
-        } else {
-            eprintln!("FmtLayer::on_new_span: Span not found, this is a bug");
-        }
+        self.span_fields.on_new_span(attrs, id, ctx);
     }
 
     fn on_record(&self, id: &Id, values: &Record<'_>, ctx: Context<'_, S>) {
-        if let Some(span) = ctx.span(id) {
-            let mut extensions = span.extensions_mut();
-            if let Some(fields) = extensions.get_mut::<LogAttributes>() {
-                let mut visitor = FieldsVisitor::new(&self.excluded_attributes);
-                values.record(&mut visitor);
-                fields.extend(visitor.values.into_iter().filter_map(|(k, v)| {
-                    Some(KeyValue::new(Key::new(k), v.maybe_to_otel_value()?))
-                }));
-            } else {
-                eprintln!("FmtLayer::on_record: cannot access to LogAttributes, this is a bug");
-            }
-        } else {
-            eprintln!("FmtLayer::on_record: Span not found, this is a bug");
-        }
+        self.span_fields.on_record(id, values, ctx);
     }
 
     fn on_event(&self, event: &Event<'_>, ctx: Context<'_, S>) {
@@ -180,6 +149,76 @@ where
             }
             buf.clear();
         });
+    }
+}
+
+/// Records each span's fields in its [`LogAttributes`], where the log formatters find them.
+///
+/// [`FmtLayer`] records them itself, but the router's subscriber passes its reloadable `FmtLayer`
+/// events only, and records span fields with this layer instead, outside the reload layer's lock.
+/// See [`EventsOnly`](crate::plugins::telemetry::reload::log_layers::EventsOnly).
+pub(crate) struct SpanFieldsLayer {
+    excluded_attributes: HashSet<&'static str>,
+}
+
+impl Default for SpanFieldsLayer {
+    fn default() -> Self {
+        Self {
+            excluded_attributes: EXCLUDED_ATTRIBUTES.into(),
+        }
+    }
+}
+
+impl<S> Layer<S> for SpanFieldsLayer
+where
+    S: tracing_core::Subscriber + for<'lookup> tracing_subscriber::registry::LookupSpan<'lookup>,
+{
+    fn on_new_span(
+        &self,
+        attrs: &tracing_core::span::Attributes<'_>,
+        id: &tracing_core::span::Id,
+        ctx: Context<'_, S>,
+    ) {
+        if let Some(span) = ctx.span(id) {
+            let mut visitor = FieldsVisitor::new(&self.excluded_attributes);
+            // We're checking if it's sampled to not add both attributes in OtelData and our LogAttributes
+            if !span.is_sampled() {
+                attrs.record(&mut visitor);
+            }
+            let mut extensions = span.extensions_mut();
+            if let Some(log_attrs) = extensions.get_mut::<LogAttributes>() {
+                log_attrs.extend(visitor.values.into_iter().filter_map(|(k, v)| {
+                    Some(KeyValue::new(Key::new(k), v.maybe_to_otel_value()?))
+                }));
+            } else {
+                let mut fields = LogAttributes::default();
+                fields.extend(visitor.values.into_iter().filter_map(|(k, v)| {
+                    Some(KeyValue::new(Key::new(k), v.maybe_to_otel_value()?))
+                }));
+                extensions.insert(fields);
+            }
+        } else {
+            eprintln!("SpanFieldsLayer::on_new_span: Span not found, this is a bug");
+        }
+    }
+
+    fn on_record(&self, id: &Id, values: &Record<'_>, ctx: Context<'_, S>) {
+        if let Some(span) = ctx.span(id) {
+            let mut extensions = span.extensions_mut();
+            if let Some(fields) = extensions.get_mut::<LogAttributes>() {
+                let mut visitor = FieldsVisitor::new(&self.excluded_attributes);
+                values.record(&mut visitor);
+                fields.extend(visitor.values.into_iter().filter_map(|(k, v)| {
+                    Some(KeyValue::new(Key::new(k), v.maybe_to_otel_value()?))
+                }));
+            } else {
+                eprintln!(
+                    "SpanFieldsLayer::on_record: cannot access to LogAttributes, this is a bug"
+                );
+            }
+        } else {
+            eprintln!("SpanFieldsLayer::on_record: Span not found, this is a bug");
+        }
     }
 }
 
@@ -300,8 +339,10 @@ mod tests {
     use crate::plugins::telemetry::config_new::logging::RateLimit;
     use crate::plugins::telemetry::config_new::logging::TextFormat;
     use crate::plugins::telemetry::config_new::router::events::RouterResponseBodyExtensionType;
+    use crate::plugins::telemetry::dynamic_attribute::DynAttributeLayer;
     use crate::plugins::telemetry::dynamic_attribute::SpanDynAttribute;
     use crate::plugins::telemetry::otel;
+    use crate::plugins::telemetry::reload::log_layers::EventsOnly;
     use crate::services::connector::request_service::Request;
     use crate::services::connector::request_service::Response;
     use crate::services::connector::request_service::TransportOutcome;
@@ -510,6 +551,58 @@ connector:
             error!(http.method = "GET", "Hello from nested test");
         }
         info!(event_attr = "foo", "Hello from test");
+    }
+
+    /// Logs from nested spans, with a field recorded after its span was created, through the
+    /// router's arrangement of logging layers or through a `FmtLayer` alone.
+    fn json_logs(routers_arrangement: bool, with_tracer: bool) -> String {
+        let buff = LogBuffer::default();
+        let format = || {
+            Json::new(
+                Resource::builder_empty().build(),
+                JsonFormat {
+                    display_timestamp: false,
+                    ..Default::default()
+                },
+            )
+        };
+        let subscriber = tracing_subscriber::Registry::default()
+            .with(DynAttributeLayer::new())
+            .with(with_tracer.then(|| otel::layer().with_tracer(make_tracer())))
+            .with((!routers_arrangement).then(|| FmtLayer::new(format(), buff.clone())))
+            .with(
+                routers_arrangement.then(|| EventsOnly::new(FmtLayer::new(format(), buff.clone()))),
+            )
+            .with(routers_arrangement.then(SpanFieldsLayer::default));
+
+        ::tracing::subscriber::with_default(subscriber, || {
+            let span = info_span!("outer", first = "one", late = ::tracing::field::Empty);
+            let _outer = span.enter();
+            span.record("late", "recorded");
+            span.set_span_dyn_attribute("custom_dyn".into(), "test".into());
+            let nested = info_span!("nested", two = "two");
+            let _nested = nested.enter();
+            info!(event_attr = "foo", "Hello from nested");
+        });
+
+        // Trace and span IDs differ between runs.
+        let ids = regex::Regex::new(r#""(trace_id|span_id)":"[0-9a-f]+""#).unwrap();
+        ids.replace_all(&buff.to_string(), r#""$1":"[id]""#)
+            .into_owned()
+    }
+
+    #[test]
+    fn routers_logging_layers_log_the_same_span_fields_as_fmt_layer() {
+        for with_tracer in [false, true] {
+            let alone = json_logs(false, with_tracer);
+            assert!(alone.contains(r#""late":"recorded""#), "{alone}");
+            assert!(alone.contains(r#""custom_dyn":"test""#), "{alone}");
+            assert_eq!(
+                json_logs(true, with_tracer),
+                alone,
+                "with_tracer: {with_tracer}"
+            );
+        }
     }
 
     #[tokio::test]
