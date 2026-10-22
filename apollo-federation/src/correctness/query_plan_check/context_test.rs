@@ -13,6 +13,8 @@ use apollo_compiler::executable::Selection;
 use apollo_compiler::name;
 use apollo_compiler::schema::Schema;
 
+use super::super::test_support::recursive_chain;
+use super::super::test_support::recursive_subgraph;
 use super::super::test_support::selections;
 use super::*;
 use crate::query_plan::FetchDataKeyRenamer;
@@ -334,4 +336,20 @@ fn shared_guard_cancels() {
         r#"query($v: Boolean!) { concrete @include(if: $v) { prop u { id } } }"#,
         vec![rewrite_on(name!("T"))]
     ));
+}
+
+/// The chain the resolution walk is tested on, for the collector of contextual uses: it completes,
+/// the runtime types below a field being pooled, and finds no argument taken from a context. It
+/// shows completion on this input, not a growth law.
+///
+/// The model's `deepInterfaceChainIsCollectedOnce`.
+#[test]
+fn a_deep_interface_chain_is_collected_once() {
+    let subgraph = recursive_subgraph();
+    let schema = subgraph.validated_schema();
+    let document = recursive_chain(schema, 64);
+    let operation = document.operations.get(None).expect("one operation");
+    let subgraph = Subgraph::new(schema).expect("subgraph metadata");
+    let uses = context_uses(&subgraph, &operation.selection_set).expect("uses collected");
+    assert!(uses.is_empty());
 }

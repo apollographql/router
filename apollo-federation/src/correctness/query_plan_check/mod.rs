@@ -15,9 +15,11 @@
 //!   selections at the path it runs at, then ask whether the result includes the client operation.
 //!   That question is [`super::query_compare::includes`], itself a port of the model's
 //!   `includesBool`.
-//! - **Soundness** — every fetch's subgraph can resolve what the fetch selects, and every entity
-//!   fetch's `requires` is matched by its entity cases, each checked where the fetch is reached,
-//!   while the state that reached it is in hand. No fetch site is ever collected.
+//! - **Soundness** — every fetch's subgraph can resolve what the fetch selects, every contextual
+//!   argument the fetch passes is bound by a context rewrite reading what its declaration asks for,
+//!   and every entity fetch's `requires` is matched by its entity cases, each checked where the
+//!   fetch is reached, while the state that reached it is in hand. No fetch site is ever
+//!   collected.
 //!
 //! # What a fetch must already have found
 //!
@@ -130,7 +132,10 @@ use apollo_compiler::executable::Selection;
 use apollo_compiler::name;
 use apollo_compiler::validation::Valid;
 
+use self::context::check_context_arguments;
+use self::context::check_context_readings;
 use self::context::check_context_rewrites;
+use self::context::context_uses;
 use self::context::context_variables;
 use self::context::remove_context_arguments;
 use self::requires::Reading;
@@ -595,9 +600,10 @@ impl<'a> Checker<'a> {
 
     /// What one fetch contributes, mounted where it runs.
     ///
-    /// Every fetch is checked here against what its subgraph can resolve, and an entity fetch
-    /// against its requirements too, while the state that reached it is in hand, so no fetch site
-    /// is ever collected.
+    /// Every fetch is checked here against its subgraph's declarations, what the subgraph can
+    /// resolve and the contextual arguments it is passed, and an entity fetch against its
+    /// requirements too, while the state that reached it is in hand, so no fetch site is ever
+    /// collected.
     fn walk_fetch(
         &self,
         fetch: &FetchNode,
@@ -608,6 +614,18 @@ impl<'a> Checker<'a> {
         let subgraph = self.subgraph(fetch)?;
         let operation = self.fetch_body(fetch)?;
         check_fetch_resolves(&subgraph, &fetch.subgraph_name, reached.path, &operation)?;
+        let context_variables = context_variables(&fetch.context_rewrites);
+        let uses = context_uses(&subgraph, &operation)?;
+        check_context_arguments(fetch, reached.path, &uses, &context_variables)?;
+        check_context_readings(
+            self.supergraph_schema,
+            &subgraph,
+            &self.root_type,
+            reached.path,
+            available,
+            fetch,
+            &uses,
+        )?;
         let body = operation.selections;
         // A root fetch selects its whole operation and requires nothing; an entity fetch selects
         // what its operation asks of the entities it was given, which are those of a type some
@@ -634,8 +652,7 @@ impl<'a> Checker<'a> {
             &fetch.output_rewrites,
             selected,
         );
-        let contributed =
-            remove_context_arguments(&context_variables(&fetch.context_rewrites), contributed);
+        let contributed = remove_context_arguments(&context_variables, contributed);
         Ok(selections_at(
             self.supergraph_schema,
             available,
