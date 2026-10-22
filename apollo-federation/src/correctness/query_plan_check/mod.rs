@@ -23,20 +23,30 @@
 //! - **Soundness** — every fetch's subgraph can resolve what the fetch selects, the type conditions
 //!   on the path it runs at read a fetched `__typename` value, every contextual argument the fetch
 //!   passes is bound by a context rewrite reading what its declaration asks for, and an entity
-//!   fetch's `requires` is matched by its entity cases on the copies the plan supplies, which hold
-//!   what the subgraph demands, as they hold the contextual values it reads.
+//!   fetch's representation, what its `requires` entries project where it runs, is read from what
+//!   the plan fetched and covers what the subgraph demands, in each configuration, as the
+//!   contextual values it reads were fetched.
+//! - **The Boolean boundary** — every Boolean variable the plan's conditions read is one the
+//!   operation declares a `Boolean`, which is what the configurations are made of
+//!   ([`check_boolean_variables`]).
 //!
 //! # What a fetch must already have found
 //!
-//! A `requires` entry is not the authority on that; two other things are. The subgraph is sent the
-//! demand, so what must already be fetched is the demand's *preimage* under the fetch's input
-//! rewrites — the demand says which field each key must hold and with which arguments, which the
-//! entry cannot, `trim_requires_selection_set` having dropped its arguments; the rewrites say
-//! which key it is read from. The entry is checked against the two rather than read from: it has
-//! the demand's shape by field name, on each copy the plan supplies under it, and it agrees with
-//! the rewrites, which link each alias it reads under to the field it names. A planner may fetch a
-//! `@requires` input under an alias and name it back with an input key renamer, which is what the
-//! router's `execute_selection_set` and `apply_rewrites` do between them.
+//! The representation an entity fetch sends is what the router's `execute_selection_set` projects
+//! from its `requires` entries at each object it runs on, the entries' type conditions and
+//! `@skip`/`@include` conditions read there, fields replacing what an earlier entry left under
+//! their response key and fragments merging (`representation.rs`). Everything it reads must have
+//! been fetched, under the field the entry names, a value read and later overwritten included.
+//! What it must hold is the subgraph's demand, not the entries': the subgraph is sent the demand,
+//! so what must already be fetched is the demand's *preimage* under the fetch's input rewrites —
+//! the demand says which field each key must hold and with which arguments, which an entry cannot,
+//! `trim_requires_selection_set` having dropped its arguments; the rewrites say which key it is
+//! read from. The representation covers that preimage, through some resolvable key in each
+//! configuration, and may hold more; what it explicitly selects, and every demanded field it holds,
+//! agrees with the rewrites, which link each alias it is read under to the field it names. A
+//! planner may fetch a `@requires` input under an alias and name it back with an input key
+//! renamer, which is what the router's `execute_selection_set` and `apply_rewrites` do between
+//! them.
 //!
 //! # What the checker assumes of the supergraph and the subgraphs
 //!
@@ -78,8 +88,20 @@
 //!
 //! # Differences from the model
 //!
-//! - **No fuel.** `conditionMatchesRequirementFuel` carries a budget that is an artifact of Lean's
-//!   termination checker; the model's own notes say an implementation should simply loop.
+//! - **No fuel.** The model's coverage and its rewrite agreement over a representation carry
+//!   budgets that are artifacts of Lean's termination checker; its own notes say an
+//!   implementation should simply loop.
+//! - **A representation is regions, not a value per configuration.** The model projects the
+//!   entries in every configuration; here the projection is read once, as the configurations in
+//!   which each location of the representation is present, explicitly selected and read, which
+//!   the model's projection determines because every write at one location reads the same
+//!   contributions (`representation.rs`). A key is still chosen per configuration: where no one
+//!   key covers every configuration, the configurations each key fails in are intersected.
+//! - **An entity fetch's additions are not withheld where it sends nothing.** The model's
+//!   `FetchNode.producedResponse` credits an entity fetch only where its representation is
+//!   non-empty. Wherever this checker lets the fetch run and its representation is empty, the
+//!   fetch must select nothing active there or it is refused, so what the model withholds is
+//!   inactive there and the verdicts are the same.
 //! - **Configurations are decided, not enumerated.** The model asks each obligation under every
 //!   Boolean assignment and every configuration of the copies' runtime types. Here a copy's
 //!   runtime type is a variable and every obligation is a region of configurations to be covered
@@ -141,6 +163,7 @@ mod context;
 mod coverage;
 mod hypothesis;
 mod region;
+mod representation;
 mod requires;
 mod resolution;
 mod response;
@@ -153,11 +176,13 @@ mod test_support;
 mod tests;
 
 use std::cell::RefCell;
+use std::collections::HashSet;
 use std::sync::Arc;
 
 use apollo_compiler::ExecutableDocument;
 use apollo_compiler::Name;
 use apollo_compiler::Node;
+use apollo_compiler::ast;
 use apollo_compiler::collections::IndexMap;
 use apollo_compiler::executable;
 use apollo_compiler::executable::FragmentMap;
@@ -173,6 +198,7 @@ use self::context::context_variables;
 use self::context::remove_context_arguments;
 use self::coverage::Coverage;
 use self::coverage::Demand;
+use self::coverage::Supplier;
 use self::coverage::Supplies;
 use self::coverage::render_clause;
 use self::hypothesis::Hypothesis;
@@ -181,15 +207,13 @@ use self::region::Clause;
 use self::region::Work;
 use self::region::boolean;
 use self::region::everything;
-use self::requires::Reading;
-use self::requires::check_requires_conflict;
-use self::requires::condition_matches_supplied;
-use self::requires::entry_selections;
-use self::requires::inline_fragment;
-use self::requires::key_half;
-use self::requires::requires_half;
-use self::requires::same_keys;
-use self::requires::to_requires_field_set;
+use self::representation::Agreement;
+use self::representation::Projection;
+use self::representation::check_explicit_agreement;
+use self::representation::check_inputs_available;
+use self::representation::entity_fragments;
+use self::representation::requires_projection;
+use self::representation::requires_variables;
 use self::resolution::check_fetch_resolves;
 use self::response::ContributionId;
 use self::response::CopyId;
@@ -200,14 +224,8 @@ use self::response::Response;
 use self::response::View;
 use self::response::every_object;
 use self::response::union;
-use self::selections::apply_key_renamers;
 use self::selections::inline_fragment_spreads;
-use self::selections::invert_key_renamers;
-use self::selections::type_filter_covers;
-use self::selections::type_filter_meets;
-use self::selections::wrap_non_empty;
 use self::sharing::Sharing;
-use self::subgraph::KeyDirective;
 use self::subgraph::Subgraph;
 use super::query_compare::conditions::BooleanLiteral;
 use super::query_compare::schema_view::SchemaView;
@@ -215,7 +233,6 @@ use super::response_shape_compare::ComparisonError;
 use crate::correctness::CheckerOptions;
 use crate::query_plan::DeferredDependency;
 use crate::query_plan::FetchDataPathElement;
-use crate::query_plan::FetchDataRewrite;
 use crate::query_plan::FetchNode;
 use crate::query_plan::PlanNode;
 use crate::query_plan::QueryPlan;
@@ -250,8 +267,8 @@ struct Site<'s> {
     /// The copy the path addresses.
     position: &'s Position,
     /// The configurations the fetch runs there in: its path's type conditions, the condition-node
-    /// branches it runs under and, for an entity fetch, the runtime types some `requires` entry is
-    /// written at.
+    /// branches it runs under and, for an entity fetch, the runtime types some `requires` entry
+    /// admits.
     region: Clause,
     /// The admissible configurations of what was fetched before the fetch, where its position and
     /// the copies it reads are.
@@ -650,6 +667,48 @@ impl<'a> Checker<'a> {
         let Some(region) = self.site_region(response, &position, reached.condition, fetch) else {
             return Ok(Vec::new());
         };
+        // The subgraph entity types an entity fetch's `_entities` can return, each with the
+        // supergraph objects it stands for.
+        let mut entity_types: Vec<(Name, Vec<Name>)> = Vec::new();
+        if entity_selections.is_some() {
+            for (subgraph_type, object) in subgraph
+                .field_runtime_types(
+                    &algebra.work,
+                    &self.schema_view,
+                    &operation.ty,
+                    &ENTITIES_FIELD_NAME,
+                )
+                .into_iter()
+                .flatten()
+            {
+                match entity_types
+                    .iter_mut()
+                    .find(|(known, _)| *known == subgraph_type)
+                {
+                    Some((_, objects)) => objects.push(object),
+                    None => entity_types.push((subgraph_type, vec![object])),
+                }
+            }
+        }
+        // What an entity fetch sends where it runs: its representation, held as contributions of
+        // its own that no other view lists.
+        let projection = entity_selections.as_ref().map(|_| {
+            requires_projection(
+                algebra,
+                &self.schema_view,
+                response.view(readable),
+                position.copy,
+                &region,
+                &fetch.requires,
+            )
+        });
+        let held = match &projection {
+            Some(projection) => {
+                let held = projection.held(algebra, response.view(readable));
+                response.detached(held)
+            }
+            None => Vec::new(),
+        };
         let base = {
             let available_view = response.view(available);
             let hypothesis = Hypothesis::new(algebra, available_view);
@@ -665,8 +724,16 @@ impl<'a> Checker<'a> {
             };
             check_context_readings(&site, &subgraph, &uses)?;
             check_path_observed(&site)?;
-            if let Some(entity_selections) = &entity_selections {
-                self.check_fetch(fetch, &subgraph, entity_selections, &site)?;
+            if let (Some(entity_selections), Some(projection)) = (&entity_selections, &projection) {
+                self.check_entity_fetch(
+                    fetch,
+                    &subgraph,
+                    entity_selections,
+                    &entity_types,
+                    projection,
+                    response.view(&held),
+                    &site,
+                )?;
                 // Context rewrites are an entity fetch's business:
                 // `add_context_renamers_for_selection_set` runs on the node that has just been
                 // given its key inputs, and the router resolves none for a fetch that requires
@@ -713,23 +780,7 @@ impl<'a> Checker<'a> {
             };
             vec![(operation.ty.clone(), algebra.objects([root]))]
         } else {
-            let mut cases: Vec<(Name, Vec<Name>)> = Vec::new();
-            for (subgraph_type, object) in subgraph
-                .field_runtime_types(
-                    &algebra.work,
-                    &self.schema_view,
-                    &operation.ty,
-                    &ENTITIES_FIELD_NAME,
-                )
-                .into_iter()
-                .flatten()
-            {
-                match cases.iter_mut().find(|(known, _)| *known == subgraph_type) {
-                    Some((_, objects)) => objects.push(object),
-                    None => cases.push((subgraph_type, vec![object])),
-                }
-            }
-            cases
+            entity_types
                 .into_iter()
                 .map(|(subgraph_type, objects)| (subgraph_type, algebra.objects(&objects)))
                 .collect()
@@ -764,10 +815,11 @@ impl<'a> Checker<'a> {
 
     /// The configurations a fetch runs at its position in: the model's `FetchSite.ActiveAt` with
     /// `fetchPositions`. Its path's type conditions, the condition-node branches it runs under and,
-    /// for an entity fetch, the runtime types some `requires` entry is written at, read in the
-    /// supergraph, an interface entry standing for its objects: the router applies the fetch's
-    /// `requires` selection to each object the path selects and sends a representation only where
-    /// it yields a non-empty object (`Variables::new` in the router's `query_planner/fetch.rs`).
+    /// for an entity fetch, the runtime types some `requires` entry admits, read in the
+    /// supergraph, an interface entry standing for its objects and an entry with no type
+    /// condition, or a field, admitting every object: the model's `FetchNode.admitsPosition`. An
+    /// entry's Boolean conditions do not restrict where the fetch runs; where they exclude every
+    /// entry the representation is empty, and what it owes there is the representation check's.
     /// `None` where it runs nowhere.
     fn site_region(
         &self,
@@ -781,17 +833,20 @@ impl<'a> Checker<'a> {
             &position.region,
             &algebra.clause(condition.iter().map(boolean))?,
         )?;
+        let mut admitted: Vec<Name> = Vec::new();
+        for entry in &fetch.requires {
+            let requires_selection::Selection::InlineFragment(fragment) = entry else {
+                return Some(region);
+            };
+            let Some(type_name) = &fragment.type_condition else {
+                return Some(region);
+            };
+            admitted.push(type_name.clone());
+            admitted.extend(self.schema_view.possible_types(type_name).iter().cloned());
+        }
         if !fetch.requires.is_empty() {
-            let mut sent: Vec<Name> = Vec::new();
-            for entry in &fetch.requires {
-                if let requires_selection::Selection::InlineFragment(fragment) = entry
-                    && let Some(type_name) = &fragment.type_condition
-                {
-                    sent.push(type_name.clone());
-                    sent.extend(self.schema_view.possible_types(type_name).iter().cloned());
-                }
-            }
-            let literal = response.type_literal(algebra, position.copy, algebra.objects(&sent))?;
+            let literal =
+                response.type_literal(algebra, position.copy, algebra.objects(&admitted))?;
             region = algebra.conjoin(&region, &literal)?;
         }
         Some(region)
@@ -842,8 +897,8 @@ const ENTITIES_FIELD_NAME: Name = name!("_entities");
 /// What an entity fetch asks of the entities it was given, with its shape checked.
 ///
 /// This is the model's `entityOperationWellFormed`: exactly one root field, `_entities`. What is
-/// selected under it must all be type-conditioned inline fragments, which [`entity_cases`] checks
-/// where it reads them off.
+/// selected under it must all be type-conditioned inline fragments, which
+/// [`representation::entity_fragments`] checks where it reads them off.
 fn entity_body(fetch: &FetchNode, body: &[Selection]) -> Result<Vec<Selection>, ComparisonError> {
     match body {
         [Selection::Field(field)] if field.name == ENTITIES_FIELD_NAME => {
@@ -861,470 +916,208 @@ fn entity_body(fetch: &FetchNode, body: &[Selection]) -> Result<Vec<Selection>, 
 //==================================================================================================
 
 impl Checker<'_> {
-    /// Whether one entity fetch is well formed and its requirements and entity cases match each
-    /// other on the copies it runs on, `positions`. Whether the contextual data it reads is
-    /// already fetched is asked beside this, in [`Self::walk_fetch`].
-    ///
-    /// Each `requires` entry must be matched by some entity case, and each case by some entry.
-    /// Legacy checks only the first direction, plus the count kept here, and does not check
-    /// `@context` at all.
-    fn check_fetch(
+    /// Is an entity fetch's representation what its subgraph is owed, wherever it runs: the
+    /// model's `checkEntityFetch`, its contextual availability asked beside it in
+    /// [`Self::walk_fetch`]. The `_entities` body is read first, every selection there an inline
+    /// fragment carrying a type condition; then everything the representation reads was fetched
+    /// under the fields the entries name, its explicit selections agree with the input rewrites,
+    /// and it covers what the subgraph demands, through a resolvable key in each configuration
+    /// (`representation.rs`).
+    #[allow(clippy::too_many_arguments)]
+    fn check_entity_fetch(
         &self,
         fetch: &FetchNode,
         subgraph: &Subgraph<'_>,
         entity_body: &[Selection],
+        entity_types: &[(Name, Vec<Name>)],
+        projection: &Projection,
+        held: View<'_>,
         site: &Site<'_>,
     ) -> Result<(), ComparisonError> {
-        let grouped;
-        let fetch = if fetch.requires.iter().any(has_conditions) {
-            grouped = FetchNode {
-                requires: group_requires_by_type_condition(&fetch.requires),
-                ..fetch.clone()
-            };
-            &grouped
-        } else {
-            fetch
-        };
-        let cases = entity_cases(fetch, entity_body)?;
-        let require_types = require_types(fetch)?;
-        if cases.len() > require_types.len() {
-            return Err(ComparisonError::new(format!(
-                "fetch to {}: {} entity cases but only {} `requires` entries",
-                fetch.subgraph_name,
-                cases.len(),
-                require_types.len()
-            )));
-        }
-
-        // Only `key.fields` varies across the keys tried, so hoist the rest per case.
-        let mut per_case = Vec::with_capacity(cases.len());
-        for (entity_type, entity_selections) in &cases {
-            let selections = requires_half(
-                self.supergraph_schema,
-                subgraph,
-                entity_type,
-                entity_selections,
-            )?;
-            if self.options.check_requires_conflict {
-                check_requires_conflict(self.supergraph_schema, &selections).map_err(|e| {
-                    ComparisonError::new(format!(
-                        "fetch to {}: entity case `{entity_type}`: {}",
-                        fetch.subgraph_name,
-                        e.description()
-                    ))
-                })?;
-            }
-            let field_set = to_requires_field_set(&selections);
-            per_case.push((subgraph.keys(entity_type)?, selections, field_set));
-        }
-
-        // An entry agrees with the fetch's input rewrites, or it is matched by no case at all:
-        // the check reads the fetch and the entry, never the case or the `@key`, so it is asked
-        // once per entry rather than once per pair.
-        for (entry, require_type) in require_types.iter().enumerate() {
-            self.check_entry_agrees_with_rewrites(fetch, entry, require_type)?;
-        }
-
-        // The table of outcomes, one per (`requires` entry, entity case) pair. Cells are filled
-        // in on demand: the two checks below only ask whether *some* cell of a row, and of a
-        // column, is a match, and a plan writes one entry per case it means to serve, so the
-        // pairs of equal type usually settle every row and column between them. A cell is a
-        // verdict and never an error, so a cell not computed cannot hide one; a row or column
-        // that fails is filled in completely before it is described.
-        let mut table: Table = vec![vec![None; cases.len()]; require_types.len()];
-        let mut matched_entry = vec![false; require_types.len()];
-        let mut matched_case = vec![false; cases.len()];
-        let case_of_type: IndexMap<&Name, usize> = cases
-            .iter()
-            .enumerate()
-            .map(|(index, case)| (case.0, index))
-            .collect();
-
-        let fill = |checker: &Self,
-                    table: &mut Table,
-                    entry: usize,
-                    case: usize|
-         -> Result<bool, ComparisonError> {
-            if table[entry][case].is_none() {
-                table[entry][case] = Some(checker.requirement_matches_case(
-                    &fetch.requires[entry],
-                    require_types[entry],
-                    cases[case].0,
-                    &fetch.input_rewrites,
-                    &per_case[case],
-                    site,
-                )?);
-            }
-            Ok(is_match(&table[entry][case]))
-        };
-
-        // The pairs the plan meant to go together: entry `... on X` against the case `X`.
-        for entry in 0..require_types.len() {
-            let Some(&case) = case_of_type.get(require_types[entry]) else {
-                continue;
-            };
-            if fill(self, &mut table, entry, case)? {
-                matched_entry[entry] = true;
-                matched_case[case] = true;
-            }
-        }
-
-        // Every entry must be there for a reason: some case is matched by it.
-        for entry in 0..require_types.len() {
-            if matched_entry[entry] {
-                continue;
-            }
-            for (case, matched) in matched_case.iter_mut().enumerate() {
-                if fill(self, &mut table, entry, case)? {
-                    matched_entry[entry] = true;
-                    *matched = true;
-                    break;
-                }
-            }
-            if !matched_entry[entry] {
-                return Err(ComparisonError::new(format!(
-                    "fetch to {}: `requires` entry {} is matched by no entity case:\n{}",
-                    fetch.subgraph_name,
-                    fetch.requires[entry],
-                    describe(computed(
-                        cases.iter().map(|case| case.0),
-                        table[entry].iter()
-                    ))
-                )));
-            }
-        }
-        // Every case must be accounted for: some entry is matched to it.
-        for case in 0..cases.len() {
-            if matched_case[case] {
-                continue;
-            }
-            for entry in 0..require_types.len() {
-                if fill(self, &mut table, entry, case)? {
-                    matched_case[case] = true;
-                    break;
-                }
-            }
-            if !matched_case[case] {
-                return Err(ComparisonError::new(format!(
-                    "fetch to {}: entity case `{}` is covered by no `requires` entry:\n{}",
-                    fetch.subgraph_name,
-                    cases[case].0,
-                    describe(computed(
-                        require_types.iter().copied(),
-                        table.iter().map(|row| &row[case])
-                    ))
-                )));
-            }
-        }
-        Ok(())
-    }
-
-    /// A `requires` entry agrees with the fetch's input rewrites, which link each alias it reads
-    /// under to the field it names.
-    ///
-    /// The entry is read two ways — `AsRead`, each field under the key it is read from, and
-    /// `AsSent`, each under its own name — and the rewrites must carry one to the other in both
-    /// directions, compared key for key.
-    /// - Forwards, the entry as read, renamed as `apply_rewrites` renames a representation, has
-    ///   the keys it is sent under: no alias left unnamed, and no demanded field renamed away.
-    /// - Inverted, the entry as sent, taken back through every rewrite, has the keys it reads
-    ///   from. Since the demand's preimage is computed by that same inversion, this is what makes
-    ///   it the keys *this* entry reads. It also rules out two fields sent under one key, and a
-    ///   rewrite reaching a key the entry sends under its own name.
-    ///
-    /// A rewrite reaching nothing the entry has is allowed. That has a cost: a fetch sending two
-    /// entity types where only one aliases its input, under a renamer with no type condition, is
-    /// correct — the router finds nothing to rename in the other's representation — but the
-    /// renamer disagrees with that entry and the plan is rejected. Scoping the renamer with a
-    /// `typenameEquals` makes it agree.
-    fn check_entry_agrees_with_rewrites(
-        &self,
-        fetch: &FetchNode,
-        entry: usize,
-        require_type: &Name,
-    ) -> Result<(), ComparisonError> {
-        let entry_item = std::slice::from_ref(&fetch.requires[entry]);
-        let as_read = entry_selections(
+        let fragments = entity_fragments(fetch, entity_body)?;
+        check_inputs_available(site, projection)?;
+        let agreement = Agreement::new(
             self.supergraph_schema,
-            require_type,
-            Reading::AsRead,
-            entry_item,
-        )?;
-        let as_sent = entry_selections(
-            self.supergraph_schema,
-            require_type,
-            Reading::AsSent,
-            entry_item,
-        )?;
-        let renamed = apply_key_renamers(
-            self.supergraph_schema,
-            type_filter_meets,
             &fetch.input_rewrites,
-            as_read.clone(),
+            site.position.copy,
         );
-        let inverted = invert_key_renamers(
-            self.supergraph_schema,
-            type_filter_covers,
-            &fetch.input_rewrites,
-            as_sent.clone(),
-        );
-        if same_keys(&renamed, &as_sent) && same_keys(&inverted, &as_read) {
-            return Ok(());
-        }
-        Err(ComparisonError::new(format!(
-            "fetch to {}: `requires` entry {} does not agree with the fetch's input rewrites: \
-             the keys it reads and the keys it sends are not the ones the rewrites carry between",
-            fetch.subgraph_name, fetch.requires[entry]
-        )))
-    }
-
-    /// Whether one `requires` entry is matched by one entity case: the subgraph resolves that
-    /// case from a key, and on every copy the fetch runs on that the entry is written for, the
-    /// entry declares what the subgraph demands there and the plan has fetched it. The model's
-    /// `checkRequirementMatchesCase`.
-    ///
-    /// `None` means matched; `Some(why)` says why not, per `@key` tried. An `Err` is a malformed
-    /// plan or schema, not a mismatch.
-    ///
-    /// The `@key`-does-not-apply arm below has no test; `tests.rs` does not reach it. It needs two
-    /// things at once: entity types whose keys name different fields, so that one type's key can
-    /// fail to typecheck at another's entry, and a plan whose pairs of equal type do not settle
-    /// the table, so that the search looks at any other pair at all. A plan the planner produced
-    /// never supplies the second. Covering it means writing a plan whose diagonal fails by hand.
-    fn requirement_matches_case(
-        &self,
-        require_item: &requires_selection::Selection,
-        require_type: &Name,
-        entity_type: &Name,
-        input_rewrites: &[Arc<FetchDataRewrite>],
-        hoisted: &(
-            Vec<KeyDirective>,
-            Vec<Selection>,
-            Vec<requires_selection::Selection>,
-        ),
-        site: &Site<'_>,
-    ) -> Result<Option<String>, ComparisonError> {
-        let (keys, requires_selections, requires_field_set) = hoisted;
-        let hypothesis = site.hypothesis;
-        let algebra = hypothesis.algebra;
-        let response = site.readable.response;
-        let copy = site.position.copy;
-        if keys.is_empty() {
-            return Ok(Some(format!(
-                "  the subgraph declares no `@key` on `{entity_type}`"
-            )));
-        }
-        // The configurations the entry is sent in. The router builds this entry's representation
-        // only for entities of its type, and the demand's `@requires` half sits at the subgraph's
-        // entity type, which for an interface object reaches every implementation; another
-        // implementation's inputs are its own entry's business.
-        let mut written_at = vec![require_type.clone()];
-        written_at.extend(
-            self.schema_view
-                .possible_types(require_type)
-                .iter()
-                .cloned(),
-        );
-        let served: Option<Clause> = response
-            .type_literal(algebra, copy, algebra.objects(&written_at))
-            .and_then(|literal| algebra.conjoin(&site.region, &literal))
-            .filter(|region| hypothesis.feasible(copy, region));
-        let no_fragments = FragmentMap::default();
-        let mut unmatched = Vec::new();
-        for key in keys {
-            if !key.resolvable {
-                unmatched.push(format!(
-                    "  @key({}): the subgraph will not resolve the entity from this key",
-                    key.fields
-                ));
-                continue;
-            }
-            // `entityFetchRequirement`, in its two halves: the conversion to a field set
-            // distributes over concatenation, so the halves can be read separately.
-            let key_selections = match key_half(self.supergraph_schema, require_type, &key.fields) {
-                Ok(selections) => selections,
-                // A key that does not typecheck here is this pair saying no; see `key_half`.
-                Err(reason) => {
-                    unmatched.push(format!(
-                        "  @key({}): does not apply to `{require_type}`:\n{}",
-                        key.fields,
-                        indent(&reason.to_string())
-                    ));
-                    continue;
-                }
-            };
-            let mut demanded = to_requires_field_set(&key_selections);
-            demanded.extend(requires_field_set.iter().cloned());
-            let demanded: Vec<&requires_selection::Selection> = demanded.iter().collect();
-            // The subgraph is sent the demand, so what must already be fetched is the demand's
-            // preimage under the fetch's input rewrites: each one inverted, where its filter
-            // covers the position, at the entry's own type, which is also what lets a renamer be
-            // inverted at all, `type_filter_covers` asking whether a filter admits every type a
-            // position can hold.
-            let mut demand = key_selections;
-            demand.extend(requires_selections.iter().cloned());
-            let required = invert_key_renamers(
-                self.supergraph_schema,
-                type_filter_covers,
-                input_rewrites,
-                wrap_non_empty(
-                    |selections| inline_fragment(require_type.clone(), selections),
-                    demand,
-                ),
-            );
-            let required: Vec<&Selection> = required.iter().collect();
-            let Some(served) = &served else {
-                return Ok(None);
-            };
-            let served = vec![served.clone()];
-            // Matched on the copies the plan supplies, and read from what the fetch can read: a
-            // deferred block that cannot read a requirement there is rejected rather than having
-            // the requirement vanish from it.
-            if let Err(mismatch) = condition_matches_supplied(
-                self.supergraph_schema,
-                &self.schema_view,
-                hypothesis,
-                copy,
-                &served,
-                &[require_item],
-                &demanded,
-                &Demand::of(algebra, served.clone(), required.clone()),
-            ) {
-                unmatched.push(format!(
-                    "  @key({}): the entry does not declare what the subgraph demands at \
-                     {}:\n{}",
-                    key.fields,
-                    response.describe(copy),
-                    indent(&mismatch.to_string())
-                ));
-                continue;
-            }
-            let coverage = Coverage {
-                schema: &self.schema_view,
-                fragments: &no_fragments,
-                hypothesis,
-                supplied: &site.supplies,
-            };
-            if let Err(uncovered) = coverage.covers(copy, Demand::of(algebra, served, required)) {
-                unmatched.push(format!(
-                    "  @key({}): the plan has not fetched what the subgraph demands at \
-                     {}:\n{}",
-                    key.fields,
-                    response.describe(copy),
-                    indent(&uncovered.to_string())
-                ));
-                continue;
-            }
-            return Ok(None);
-        }
-        Ok(Some(unmatched.join("\n")))
+        check_explicit_agreement(site, projection, &agreement)?;
+        self.check_representations(
+            fetch,
+            subgraph,
+            &fragments,
+            entity_types,
+            projection,
+            held,
+            &agreement,
+            site,
+        )
     }
 }
 
-/// The type condition each `requires` entry declares.
+//==================================================================================================
+// The Boolean boundary
+//==================================================================================================
+
+/// Is every Boolean variable the plan's conditions read declared by the operation as `Boolean` or
+/// `Boolean!`? The model's `queryPlanBooleanError`, checked before anything is read: a condition
+/// node's variable, each `@skip` and `@include` of a fetch's operation, and each condition of a
+/// `requires` entry at any depth, read before a literal is folded, so a variable beside
+/// `@include(if: false)`, or under both `@include` and `@skip`, is read all the same. The checker's
+/// configurations give each such variable a Boolean value; a variable the operation does not
+/// declare, or declares as anything but a `Boolean`, has none, and the router's
+/// `Condition::is_included` excludes nothing for a variable it cannot resolve, so reading one as
+/// excluding, or as contradicting another condition, would be unsound. The plan is refused, the
+/// variable named.
 ///
-/// This is the model's `requiresWellFormed`: every entry is a type-conditioned inline fragment.
-fn require_types(fetch: &FetchNode) -> Result<Vec<&Name>, ComparisonError> {
-    fetch
-        .requires
+/// The client operation's own conditions are not read: its validity, which the checker assumes,
+/// has each variable they read declared as a `Boolean` or a `Boolean!`. Each reference is looked
+/// up by name among the declared Booleans, so the boundary reads each declaration once and each
+/// reference once.
+///
+/// A declaration is what is checked, not a value. The configurations are complete Boolean
+/// assignments, a value overriding a default included; whether every variable read is given a
+/// Boolean by the request or by a default, which a nullable `Boolean` omitted with no default, or
+/// passed `null`, is not, is the model's separate `queryPlanBooleanValuesError` over supplied
+/// values. `check_plan` is given no values and does not decide it, and the router does not refuse
+/// such a request either: it reads the condition as excluding nothing.
+fn check_boolean_variables(
+    algebra: &Algebra,
+    variables: &[Node<ast::VariableDefinition>],
+    plan: &QueryPlan,
+) -> Result<(), ComparisonError> {
+    let mut read: Vec<Name> = Vec::new();
+    match &plan.node {
+        None => {}
+        Some(TopLevelPlanNode::Subscription(subscription)) => {
+            fetch_variables(algebra, &subscription.primary, &mut read);
+            if let Some(rest) = &subscription.rest {
+                plan_variables(algebra, rest, &mut read);
+            }
+        }
+        Some(TopLevelPlanNode::Fetch(fetch)) => fetch_variables(algebra, fetch, &mut read),
+        Some(TopLevelPlanNode::Sequence(node)) => {
+            for node in &node.nodes {
+                plan_variables(algebra, node, &mut read);
+            }
+        }
+        Some(TopLevelPlanNode::Parallel(node)) => {
+            for node in &node.nodes {
+                plan_variables(algebra, node, &mut read);
+            }
+        }
+        Some(TopLevelPlanNode::Flatten(node)) => plan_variables(algebra, &node.node, &mut read),
+        Some(TopLevelPlanNode::Defer(node)) => defer_variables(algebra, node, &mut read),
+        Some(TopLevelPlanNode::Condition(node)) => condition_variables(algebra, node, &mut read),
+    }
+    let declared: HashSet<&Name> = variables
         .iter()
-        .map(|require_item| match require_item {
-            requires_selection::Selection::InlineFragment(fragment) => {
-                fragment.type_condition.as_ref().ok_or_else(|| {
-                    ComparisonError::new(format!(
-                        "fetch to {}: a `requires` entry must carry a type condition",
-                        fetch.subgraph_name
-                    ))
-                })
-            }
-            requires_selection::Selection::Field(field) => Err(ComparisonError::new(format!(
-                "fetch to {}: a `requires` entry must be an inline fragment, found field `{}`",
-                fetch.subgraph_name, field.name
-            ))),
+        .filter(|definition| {
+            matches!(
+                definition.ty.as_ref(),
+                ast::Type::Named(name) | ast::Type::NonNullNamed(name) if name == "Boolean"
+            )
         })
-        .collect()
+        .map(|definition| &definition.name)
+        .collect();
+    for variable in read {
+        if !declared.contains(&variable) {
+            return Err(ComparisonError::new(format!(
+                "the plan conditions on `${variable}`, which the operation does not declare as \
+                 `Boolean` or `Boolean!`"
+            )));
+        }
+    }
+    Ok(())
 }
 
-fn has_conditions(item: &requires_selection::Selection) -> bool {
-    matches!(item, requires_selection::Selection::InlineFragment(inline) if !inline.conditions.is_empty())
+/// The Boolean variables a plan node's conditions read: [`check_boolean_variables`]'s walk.
+fn plan_variables(algebra: &Algebra, node: &PlanNode, read: &mut Vec<Name>) {
+    match node {
+        PlanNode::Fetch(fetch) => fetch_variables(algebra, fetch, read),
+        PlanNode::Sequence(node) => {
+            for node in &node.nodes {
+                plan_variables(algebra, node, read);
+            }
+        }
+        PlanNode::Parallel(node) => {
+            for node in &node.nodes {
+                plan_variables(algebra, node, read);
+            }
+        }
+        PlanNode::Flatten(node) => plan_variables(algebra, &node.node, read),
+        PlanNode::Defer(node) => defer_variables(algebra, node, read),
+        PlanNode::Condition(node) => condition_variables(algebra, node, read),
+    }
 }
 
-/// The router builds one representation per entity from every top-level `requires` item whose
-/// type condition matches it, so items sharing a type condition are one entry. A conditional item
-/// is nested under its group so its conditions are kept.
-fn group_requires_by_type_condition(
-    requires: &[requires_selection::Selection],
-) -> Vec<requires_selection::Selection> {
-    let mut grouped: Vec<requires_selection::Selection> = Vec::new();
-    for item in requires {
-        let requires_selection::Selection::InlineFragment(inline) = item else {
-            grouped.push(item.clone());
-            continue;
+fn defer_variables(algebra: &Algebra, node: &crate::query_plan::DeferNode, read: &mut Vec<Name>) {
+    if let Some(primary) = &node.primary.node {
+        plan_variables(algebra, primary, read);
+    }
+    for block in &node.deferred {
+        if let Some(deferred) = &block.node {
+            plan_variables(algebra, deferred, read);
+        }
+    }
+}
+
+fn condition_variables(
+    algebra: &Algebra,
+    node: &crate::query_plan::ConditionNode,
+    read: &mut Vec<Name>,
+) {
+    algebra.work.boolean_references.add(1);
+    read.push(node.condition_variable.clone());
+    for clause in [&node.if_clause, &node.else_clause].into_iter().flatten() {
+        plan_variables(algebra, clause, read);
+    }
+}
+
+/// A fetch's: its `requires` entries' conditions, and the `@skip` and `@include` of its operation,
+/// its fragments' included. An operation that does not parse reads nothing here; the walk reports
+/// it.
+fn fetch_variables(algebra: &Algebra, fetch: &FetchNode, read: &mut Vec<Name>) {
+    let mut named = Vec::new();
+    requires_variables(algebra, &fetch.requires, &mut named);
+    read.extend(named.into_iter().cloned());
+    let Ok(document) = fetch.operation_document.as_parsed() else {
+        return;
+    };
+    for operation in document.operations.iter() {
+        selection_variables(algebra, &operation.selection_set.selections, read);
+    }
+    for fragment in document.fragments.values() {
+        selection_variables(algebra, &fragment.selection_set.selections, read);
+    }
+}
+
+fn selection_variables(algebra: &Algebra, selections: &[Selection], read: &mut Vec<Name>) {
+    for selection in selections {
+        let (directives, below) = match selection {
+            Selection::Field(field) => (&field.directives, Some(&field.selection_set.selections)),
+            Selection::InlineFragment(fragment) => (
+                &fragment.directives,
+                Some(&fragment.selection_set.selections),
+            ),
+            Selection::FragmentSpread(spread) => (&spread.directives, None),
         };
-        let group = grouped.iter_mut().find_map(|existing| match existing {
-            requires_selection::Selection::InlineFragment(existing)
-                if existing.type_condition == inline.type_condition =>
+        for directive in directives.iter() {
+            if directive.name != "skip" && directive.name != "include" {
+                continue;
+            }
+            algebra.work.boolean_references.add(1);
+            if let Some(ast::Value::Variable(variable)) = directive
+                .specified_argument_by_name("if")
+                .map(|value| value.as_ref())
             {
-                Some(existing)
+                read.push(variable.clone());
             }
-            _ => None,
-        });
-        match group {
-            None if inline.conditions.is_empty() => grouped.push(item.clone()),
-            None => grouped.push(requires_selection::Selection::InlineFragment(
-                requires_selection::InlineFragment {
-                    type_condition: inline.type_condition.clone(),
-                    conditions: Vec::new(),
-                    selections: vec![item.clone()],
-                },
-            )),
-            Some(group) if inline.conditions.is_empty() => {
-                group.selections.extend(inline.selections.iter().cloned())
-            }
-            Some(group) => group.selections.push(item.clone()),
+        }
+        if let Some(below) = below {
+            selection_variables(algebra, below, read);
         }
     }
-    grouped
-}
-
-/// The entity cases of a fetch: the type condition and selections of each `_entities` inline
-/// fragment, one per entity type the fetch asks about.
-///
-/// Entries and cases are matched many-to-many, and the plan does not record the matching.
-fn entity_cases<'a>(
-    fetch: &FetchNode,
-    entity_body: &'a [Selection],
-) -> Result<Vec<(&'a Name, Vec<Selection>)>, ComparisonError> {
-    // The router applies every fragment matching an entity, so fragments on one type are one case.
-    // A fragment's own directives are kept around its selections.
-    let mut cases: Vec<(&'a Name, Vec<Selection>)> = Vec::new();
-    for selection in entity_body {
-        let Selection::InlineFragment(fragment) = selection else {
-            return Err(ComparisonError::new(format!(
-                "fetch to {}: `{ENTITIES_FIELD_NAME}` must select only inline fragments",
-                fetch.subgraph_name
-            )));
-        };
-        let Some(entity_type) = &fragment.type_condition else {
-            return Err(ComparisonError::new(format!(
-                "fetch to {}: an `{ENTITIES_FIELD_NAME}` selection must carry a type condition",
-                fetch.subgraph_name
-            )));
-        };
-        let selections = selections::under_directives(
-            &fragment.directives,
-            entity_type,
-            fragment.selection_set.selections.clone(),
-        );
-        match cases
-            .iter_mut()
-            .find(|(existing, _)| *existing == entity_type)
-        {
-            Some((_, existing)) => existing.extend(selections),
-            None => cases.push((entity_type, selections)),
-        }
-    }
-    Ok(cases)
 }
 
 //==================================================================================================
@@ -1419,45 +1212,6 @@ fn is_introspection_field(name: &Name) -> bool {
     name == "__schema" || name == "__type"
 }
 
-/// Renders the outcomes of one row or column of the requirement table.
-/// An outcome that has been computed: `None` is a match, `Some(why)` says why not.
-type Cell = Option<Option<String>>;
-type Table = Vec<Vec<Cell>>;
-
-/// Whether a computed cell is a match. An uncomputed cell is not one.
-fn is_match(cell: &Cell) -> bool {
-    matches!(cell, Some(None))
-}
-
-/// A row or column of the outcome table paired with its names, skipping cells never computed.
-/// Pairing before skipping is what keeps a name with its own outcome; the failing row or column
-/// is filled in by the time it is described, so nothing is dropped in practice.
-fn computed<'a>(
-    names: impl Iterator<Item = &'a Name>,
-    cells: impl Iterator<Item = &'a Cell>,
-) -> impl Iterator<Item = (&'a Name, &'a Option<String>)> {
-    names
-        .zip(cells)
-        .filter_map(|(name, cell)| cell.as_ref().map(|outcome| (name, outcome)))
-}
-
-fn describe<'a>(outcomes: impl Iterator<Item = (&'a Name, &'a Option<String>)>) -> String {
-    outcomes
-        .map(|(name, outcome)| match outcome {
-            Some(why) => format!("* `{name}`:\n{why}"),
-            None => format!("* `{name}`: matched"),
-        })
-        .collect::<Vec<_>>()
-        .join("\n")
-}
-
-fn indent(text: &str) -> String {
-    text.lines()
-        .map(|line| format!("    {line}"))
-        .collect::<Vec<_>>()
-        .join("\n")
-}
-
 //==================================================================================================
 // Checker entry point
 //==================================================================================================
@@ -1536,6 +1290,7 @@ fn check_plan_counted(
     };
     let verdict = checker.check(
         operation_doc,
+        &operation.variables,
         &operation.selection_set.selections,
         root_type,
         plan,
@@ -1544,15 +1299,17 @@ fn check_plan_counted(
 }
 
 impl Checker<'_> {
-    /// Walks the plan, checking each fetch where it is reached, then the client operation against
-    /// everything fetched.
+    /// Checks the Boolean variables the plan reads, then walks the plan, checking each fetch where
+    /// it is reached, then the client operation against everything fetched.
     fn check(
         &self,
         operation_doc: &Valid<ExecutableDocument>,
+        variables: &[Node<ast::VariableDefinition>],
         selections: &[Selection],
         root_type: Name,
         plan: &QueryPlan,
     ) -> Result<(), ComparisonError> {
+        check_boolean_variables(&self.algebra, variables, plan)?;
         let mut response = Response::new(root_type);
         let fetched = match &plan.node {
             Some(node) => self.walk_top_level(&mut response, node)?,
@@ -1571,6 +1328,8 @@ impl Checker<'_> {
             fragments: &operation_doc.fragments,
             hypothesis: &hypothesis,
             supplied: &Supplies::new(view),
+            supplier: Supplier::Plan,
+            agreement: None,
         }
         .covers(
             CopyId::ROOT,

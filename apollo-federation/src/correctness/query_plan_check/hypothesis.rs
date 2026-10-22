@@ -406,6 +406,57 @@ impl<'h> Hypothesis<'h> {
         Some(self.explained(copy, keep, residual, &[]))
     }
 
+    /// [`Self::uncovered`], with every configuration left rather than one: the residual region
+    /// over the variables the obligation mentions and the copy's own, so that it still says the
+    /// copy is present once it is read beside obligations at other copies, empty where the
+    /// obligation holds. For a walk collecting where a demand fails rather than stopping at it.
+    pub(super) fn uncovered_region(
+        &self,
+        copy: CopyId,
+        demand: &Clause,
+        supplies: &[Clause],
+    ) -> Region {
+        let mut keep: Vec<Var> = vars(demand).cloned().collect();
+        for supply in supplies {
+            keep.extend(vars(supply).cloned());
+        }
+        if copy != CopyId::ROOT {
+            keep.push(Var::Copy(copy));
+        }
+        let algebra = self.algebra;
+        algebra
+            .work
+            .support_literals
+            .add((demand.len() + supplies.iter().map(Vec::len).sum::<usize>()) as u64);
+        let base = algebra.product(&self.chain(copy, keep), std::slice::from_ref(demand));
+        algebra.work.obligations.add(1);
+        let domain = self.completion();
+        algebra.simplify(algebra.subtract_all(base, supplies, &domain), &domain)
+    }
+
+    /// Is some configuration of `clause` admissible, the anchor and every copy below it the clause
+    /// names present? The copies off the anchor's chain are read as the tree they make with it.
+    pub(super) fn feasible_below(&self, anchor: CopyId, clause: &Clause) -> bool {
+        let response = self.view.response;
+        let chain = response.ancestors(anchor);
+        let mut branches: Vec<CopyId> = Vec::new();
+        for var in vars(clause) {
+            let Var::Copy(copy) = var else {
+                continue;
+            };
+            for ancestor in response.ancestors(*copy) {
+                if !chain.contains(&ancestor) && !branches.contains(&ancestor) {
+                    branches.push(ancestor);
+                }
+            }
+        }
+        if branches.is_empty() {
+            return self.feasible(anchor, clause);
+        }
+        self.uncovered_in_tree(anchor, &branches, clause, &[])
+            .is_some()
+    }
+
     /// What is left of an obligation, with the runtime types of the copy and its nearest
     /// ancestors it is left at, for the explanation. The nearest alone: a projection onto every
     /// ancestor can hold as many clauses as there are paths down the chain.

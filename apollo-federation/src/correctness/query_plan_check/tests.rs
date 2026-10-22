@@ -30,6 +30,9 @@ use crate::query_plan::QueryPlan;
 use crate::query_plan::TopLevelPlanNode;
 use crate::schema::ValidFederationSchema;
 
+/// The end of a rejection for a value the plan never fetched where it is read.
+const READ_UNFETCHED: &str = "which the plan has not fetched there";
+
 /// The schemas a plan is checked under, read from a supergraph.
 struct Fixture {
     supergraph_schema: ValidFederationSchema,
@@ -174,6 +177,31 @@ impl Fixture {
     }
 }
 
+/// An operation declaring Boolean variables and using each on the root's `__typename`, which the
+/// router answers without a fetch and the checker asks nothing of: for written plans whose
+/// condition nodes read variables the operation's own selections do not. `operation` is a
+/// selection set, `{ … }`.
+fn declaring_booleans<V: std::fmt::Display>(
+    variables: impl IntoIterator<Item = V>,
+    operation: &str,
+) -> String {
+    let variables: Vec<String> = variables.into_iter().map(|v| v.to_string()).collect();
+    let declared: Vec<String> = variables
+        .iter()
+        .map(|variable| format!("${variable}: Boolean!"))
+        .collect();
+    let used: String = variables
+        .iter()
+        .map(|variable| format!("__typename @include(if: ${variable}) "))
+        .collect();
+    let body = operation
+        .trim()
+        .strip_prefix('{')
+        .and_then(|body| body.strip_suffix('}'))
+        .expect("a selection set");
+    format!("query({}) {{ {used}{body} }}", declared.join(", "))
+}
+
 /// A plan from `testdata/plans/`, by file stem.
 macro_rules! plan_json {
     ($name:literal) => {
@@ -261,13 +289,8 @@ fn a_vacuous_type_condition_in_the_operation_is_accepted() {
     .unwrap();
 }
 
-// One entity fetch over two types whose `@key` field sets name different fields, so the requires
-// entries and the entity cases are not interchangeable.
-//
-// This does *not* reach the branch that reads one type's `@key` at another's entry: the table is
-// filled from the pairs of equal type outwards, and on a plan the planner produced those settle
-// every row and column, so no other pair is ever computed. Reaching it needs a plan whose diagonal
-// fails, which the planner does not emit -- see the note in `mod.rs` on what still has no test.
+// One entity fetch over two types whose `@key` field sets name different fields: each runtime
+// type's representation is read against its own entity type's keys and demand.
 #[test]
 fn entity_cases_with_different_keys_are_accepted() {
     check(
@@ -291,8 +314,8 @@ fn a_single_entity_case_is_accepted() {
     .unwrap();
 }
 
-// The interface field alongside the entity cases, so the fetch carries a selection that is not
-// under any type condition as well as the two that are.
+// The interface field alongside the two types' fragments, so the fetch carries a selection that is
+// not under any type condition as well as the two that are.
 #[test]
 fn entity_cases_beside_an_interface_field_are_accepted() {
     check(
@@ -471,9 +494,10 @@ fn an_entry_reading_a_key_the_plan_never_fetched_is_rejected() {
     let plan = aliased_requires_plan(&fixture, "__typename id isbn", "isbn");
     let error = check_blurb_plan(&fixture, &plan).expect_err("`__require_0_isbn` is never fetched");
     assert!(
-        error
-            .to_string()
-            .contains("has not fetched what the subgraph demands"),
+        error.to_string().contains(
+            "the representation reads `__require_0_isbn` at `feed`, a `Book`, which \
+                       the plan has not fetched there"
+        ),
         "{error}"
     );
 }
@@ -487,9 +511,216 @@ fn a_renamed_key_naming_a_different_field_is_rejected() {
     let plan = aliased_requires_plan(&fixture, "__typename id __require_0_isbn: id", "id");
     let error = check_blurb_plan(&fixture, &plan).expect_err("`isbn` would carry `id`'s value");
     assert!(
+        error.to_string().contains(
+            "the representation sends `__require_0_isbn` at `feed`, a `Book` as `id`, and the \
+             fetch's input rewrites do not carry the one to the other"
+        ),
+        "{error}"
+    );
+}
+
+/// A plan whose `reviews` fetch is sent each `Book` of the feed as `entry`, the selections of one
+/// `requires` entry on `Book`, under the input rewrites `rewrites`, after `locations` fetched
+/// `locations_selections` on each `Book`.
+fn book_requires_plan(
+    fixture: &Fixture,
+    locations_selections: &str,
+    entry: serde_json::Value,
+    rewrites: serde_json::Value,
+) -> QueryPlan {
+    let blurb = with(
+        entity_fetch("reviews", "Book", entry, "blurb"),
+        "input_rewrites",
+        rewrites,
+    );
+    plan_of(
+        fixture,
+        sequence(vec![
+            root_fetch(
+                "locations",
+                &format!("{{ feed {{ __typename ... on Book {{ {locations_selections} }} }} }}"),
+            ),
+            flatten(
+                serde_json::json!([{ "Key": ["feed", null] }, { "AnyIndex": null }]),
+                blurb,
+            ),
+        ]),
+    )
+}
+
+/// `__typename`, `id`, and `isbn` read under `__require_0_isbn`, an entry's selections on `Book`.
+fn aliased_isbn() -> serde_json::Value {
+    serde_json::json!([
+        { "kind": "Field", "name": "__typename" },
+        { "kind": "Field", "name": "id" },
+        { "kind": "Field", "alias": "__require_0_isbn", "name": "isbn" }
+    ])
+}
+
+/// A key renamer at `path`, with the type filters written before its last key.
+fn renaming(path: &[serde_json::Value], to: &str) -> serde_json::Value {
+    serde_json::json!([renamer(serde_json::Value::Array(path.to_vec()), to)])
+}
+
+fn key(name: &str) -> serde_json::Value {
+    serde_json::json!({ "Key": [name, null] })
+}
+
+fn typename_equals(type_name: &str) -> serde_json::Value {
+    serde_json::json!({ "TypenameEquals": type_name })
+}
+
+// The entry reads `isbn` under an alias and nothing names it back: the subgraph would be sent
+// `__require_0_isbn`.
+//
+// The model's `aliasNotRenamedBackDisagrees`. A control of preserved behaviour.
+#[test]
+fn an_alias_no_rewrite_names_back_is_rejected() {
+    let fixture = fixture();
+    let plan = book_requires_plan(
+        &fixture,
+        "__typename id __require_0_isbn: isbn",
+        aliased_isbn(),
+        serde_json::json!([]),
+    );
+    let error = check_blurb_plan(&fixture, &plan).expect_err("the alias is sent as it is");
+    assert!(
+        error.to_string().contains(
+            "the representation sends `__require_0_isbn` at `feed`, a `Book` as `isbn`, and the \
+             fetch's input rewrites do not carry the one to the other"
+        ),
+        "{error}"
+    );
+}
+
+// The alias was fetched, but holding `id`: what the entry reads under it is not `isbn`.
+//
+// The model's `aliasHoldingAnotherFieldIsNotAvailable`. A control of preserved behaviour.
+#[test]
+fn an_alias_holding_another_field_is_rejected() {
+    let fixture = fixture();
+    let plan = aliased_requires_plan(&fixture, "__typename id __require_0_isbn: id", "isbn");
+    let error = check_blurb_plan(&fixture, &plan).expect_err("the alias holds `id`");
+    assert!(
+        error.to_string().contains(
+            "the representation reads `__require_0_isbn` at `feed`, a `Book` as `isbn`, where \
+             the plan fetched `id` there"
+        ),
+        "{error}"
+    );
+}
+
+// The entry reads `isbn` under its own name, which nothing fetched, and the renamer names an alias
+// the entry never reads.
+//
+// The model's `renamerTheEntryDoesNotUseDisagrees`. A control of preserved behaviour.
+#[test]
+fn a_renamer_the_entry_does_not_use_is_rejected() {
+    let fixture = fixture();
+    let plan = book_requires_plan(
+        &fixture,
+        "__typename id __require_0_isbn: isbn",
+        entry_fields(&["__typename", "id", "isbn"]),
+        renaming(&[key("__require_0_isbn")], "isbn"),
+    );
+    let error = check_blurb_plan(&fixture, &plan).expect_err("`isbn` is never fetched");
+    assert!(
         error
             .to_string()
-            .contains("does not agree with the fetch's input rewrites"),
+            .contains("the representation reads `isbn` at `feed`, a `Book`, which"),
+        "{error}"
+    );
+}
+
+// The entry reads `isbn` both under its own name and under the alias, and the renamer sends both
+// as `isbn`: inverted, it would read both from the alias.
+//
+// The model's `twoFieldsSentUnderOneKeyDisagree`. A control of preserved behaviour.
+#[test]
+fn two_fields_sent_under_one_key_are_rejected() {
+    let fixture = fixture();
+    let plan = book_requires_plan(
+        &fixture,
+        "__typename id isbn __require_0_isbn: isbn",
+        serde_json::json!([
+            { "kind": "Field", "name": "__typename" },
+            { "kind": "Field", "name": "id" },
+            { "kind": "Field", "name": "isbn" },
+            { "kind": "Field", "alias": "__require_0_isbn", "name": "isbn" }
+        ]),
+        renaming(&[key("__require_0_isbn")], "isbn"),
+    );
+    let error = check_blurb_plan(&fixture, &plan).expect_err("two values sent as `isbn`");
+    assert!(
+        error.to_string().contains(
+            "the representation sends `isbn` at `feed`, a `Book` as `isbn`, and the fetch's \
+             input rewrites do not carry the one to the other"
+        ),
+        "{error}"
+    );
+}
+
+// A renamer sends the demanded `isbn` away as `foo`; its demand, its shape and the data are all in
+// order, so only the forwards reading catches it.
+//
+// The model's `renamerSendingAFieldAwayDisagrees`. A control of preserved behaviour.
+#[test]
+fn a_renamer_sending_a_field_away_is_rejected() {
+    let fixture = fixture();
+    let plan = book_requires_plan(
+        &fixture,
+        "__typename id isbn",
+        entry_fields(&["__typename", "id", "isbn"]),
+        renaming(&[key("isbn")], "foo"),
+    );
+    let error = check_blurb_plan(&fixture, &plan).expect_err("`isbn` is sent as `foo`");
+    assert!(
+        error.to_string().contains(
+            "the representation sends `isbn` at `feed`, a `Book` as `isbn`, and the fetch's \
+             input rewrites do not carry the one to the other"
+        ),
+        "{error}"
+    );
+}
+
+/// The aliased `isbn` named back by a renamer filtered on `type_name`.
+fn isbn_named_back_on(fixture: &Fixture, type_name: &str) -> QueryPlan {
+    book_requires_plan(
+        fixture,
+        "__typename id __require_0_isbn: isbn",
+        aliased_isbn(),
+        renaming(
+            &[typename_equals(type_name), key("__require_0_isbn")],
+            "isbn",
+        ),
+    )
+}
+
+// A renamer filtered on `Book` names the alias back at the `Book`s the fetch is sent: the alias is
+// read at each runtime type the copy can be, the filter splitting the configurations by it.
+//
+// The model's `renamerCoveringPartOfAPositionDisagrees` and
+// `renamerNamingBackOnPartOfAPositionDisagrees` split a position the same way, at objects this
+// world gives no common field. A control of preserved behaviour.
+#[test]
+fn a_renamer_filtered_on_the_runtime_type_names_its_alias_back_there() {
+    let fixture = fixture();
+    check_blurb_plan(&fixture, &isbn_named_back_on(&fixture, "Book")).unwrap();
+}
+
+// One filtered on `Film` names it back nowhere a `Book` is.
+//
+// A control of preserved behaviour.
+#[test]
+fn a_renamer_filtered_on_another_type_leaves_the_alias_unnamed() {
+    let fixture = fixture();
+    let error = check_blurb_plan(&fixture, &isbn_named_back_on(&fixture, "Film"))
+        .expect_err("nothing names a `Book`'s alias");
+    assert!(
+        error.to_string().contains(
+            "the representation sends `__require_0_isbn` at `feed`, a `Book` as `isbn`, and the \
+             fetch's input rewrites do not carry the one to the other"
+        ),
         "{error}"
     );
 }
@@ -599,9 +830,8 @@ fn check_deferred_blurbs(depends: &[u64]) -> Result<(), CorrectnessError> {
 fn a_deferred_block_missing_an_indirect_dependency_is_rejected() {
     let error = check_deferred_blurbs(&[1]).expect_err("the block cannot read `id`");
     assert!(
-        error
-            .to_string()
-            .contains("has not fetched what the subgraph demands"),
+        error.to_string().contains("the representation reads")
+            && error.to_string().contains(READ_UNFETCHED),
         "{error}"
     );
 }
@@ -2552,7 +2782,7 @@ const FIXED_PRICE: &str = "... on FixedPrice { value }";
 
 // `price` from `oth`, which declares both members, and the entry clipped. `sup` resolves `price`
 // too, a `FixedPrice` alone, and the two subgraphs serving one field return one value: no `price`
-// is a `RangePrice`, where the entry would not declare what the subgraph demands.
+// is a `RangePrice`, where the clipped representation would not hold what the subgraph demands.
 //
 // The model's `sharedClippedRequirement`, which replaced `clippedWidenedRequirementIsRejected` on
 // this input. A control of changed behaviour.
@@ -2592,8 +2822,8 @@ fn the_planners_plan_reading_the_shared_price_as_its_narrower_provider_is_accept
 }
 
 // `sup` declares both members too, so a `price` can be a `RangePrice` whichever subgraph is asked.
-// Clipped, the entry does not declare what the subgraph demands there; whole, the `minValue` it
-// sends was never fetched.
+// Clipped, the representation does not hold what the subgraph demands there; whole, the
+// `minValue` it reads was never fetched.
 //
 // The model's `bothWideClippedRejected` and `bothWideFullRejected`. Controls of preserved
 // behaviour.
@@ -2605,7 +2835,9 @@ fn entries_owe_the_member_every_provider_can_return() {
         PRODUCT_ESTIMATE,
     );
     assert!(
-        error.contains("the entry does not declare what the subgraph demands"),
+        error.contains(
+            "the representation does not hold `minValue` at `product.price`, a `RangePrice`"
+        ),
         "{error}"
     );
     let error = fixture.rejection(
@@ -2613,7 +2845,7 @@ fn entries_owe_the_member_every_provider_can_return() {
         PRODUCT_ESTIMATE,
     );
     assert!(
-        error.contains("the plan has not fetched what the subgraph demands"),
+        error.contains("the representation reads") && error.contains(READ_UNFETCHED),
         "{error}"
     );
 }
@@ -2630,7 +2862,7 @@ fn an_external_declaration_constrains_nothing() {
         PRODUCT_ESTIMATE,
     );
     assert!(
-        error.contains("the plan has not fetched what the subgraph demands"),
+        error.contains("the representation reads") && error.contains(READ_UNFETCHED),
         "{error}"
     );
 }
@@ -2650,7 +2882,7 @@ fn a_field_of_the_same_name_at_another_parent_constrains_nothing() {
         PRODUCT_ESTIMATE,
     );
     assert!(
-        error.contains("the plan has not fetched what the subgraph demands"),
+        error.contains("the representation reads") && error.contains(READ_UNFETCHED),
         "{error}"
     );
 }
@@ -2822,7 +3054,7 @@ fn a_narrower_contribution_leaves_the_other_rows_requirement_owed() {
     let plan = without_b_datum(&fixture, plan_json!("rows_result"));
     let error = fixture.rejection(&plan, ROWS_RESULT);
     assert!(
-        error.contains("the plan has not fetched what the subgraph demands"),
+        error.contains("the representation reads") && error.contains(READ_UNFETCHED),
         "{error}"
     );
 }
@@ -3522,7 +3754,7 @@ fn a_guarded_contribution_serves_its_guard_alone() {
             "query($take: Boolean!) { parent { child { value @include(if: $take) } } }",
         )
         .unwrap();
-    let error = fixture.rejection(&plan, PARENT_CHILD_VALUE);
+    let error = fixture.rejection(&plan, &declaring_booleans(["take"], PARENT_CHILD_VALUE));
     assert!(error.contains("does not select `value`"), "{error}");
     assert!(error.contains("¬$take"), "{error}");
 }
@@ -3568,7 +3800,7 @@ fn a_renamed_key_merges_where_its_final_key_does() {
         .unwrap();
     let error = fixture.rejection(&renamed_child(&fixture, "other"), PARENT_CHILD_VALUE);
     assert!(
-        error.contains("the plan has not fetched what the subgraph demands"),
+        error.contains("the representation reads") && error.contains(READ_UNFETCHED),
         "{error}"
     );
 }
@@ -3745,7 +3977,7 @@ fn a_value_fetched_under_one_parent_type_does_not_serve_the_other() {
     fixture.check(&plan("value"), PARENT_CHILD_SCORES).unwrap();
     let error = fixture.rejection(&plan(""), PARENT_CHILD_SCORES);
     assert!(
-        error.contains("the plan has not fetched what the subgraph demands"),
+        error.contains("the representation reads") && error.contains(READ_UNFETCHED),
         "{error}"
     );
     assert!(error.contains("`parent` is `B`"), "{error}");
@@ -3794,7 +4026,7 @@ fn a_deferred_block_reads_each_parent_types_value_from_the_fetch_sending_it() {
         .unwrap();
     let error = fixture.rejection(&plan(vec![0, 1]), PARENT_CHILD_SCORES);
     assert!(
-        error.contains("the plan has not fetched what the subgraph demands"),
+        error.contains("the representation reads") && error.contains(READ_UNFETCHED),
         "{error}"
     );
     assert!(error.contains("`parent` is `B`"), "{error}");
@@ -3875,11 +4107,11 @@ fn a_deferred_dependency_sends_only_the_fields_leading_to_its_additions() {
         .unwrap();
     let error = fixture.rejection(&deferred_scores(&fixture, vec![1, 2]), operation);
     assert!(
-        error.contains("the plan has not fetched what the subgraph demands"),
+        error.contains("the representation reads") && error.contains(READ_UNFETCHED),
         "{error}"
     );
     assert!(
-        error.contains("does not select `child` on `parent`, a `B`"),
+        error.contains("the representation reads `child` at `parent`, a `B`"),
         "{error}"
     );
 }
@@ -3989,11 +4221,11 @@ fn a_deferred_dependency_sends_no_field_its_condition_excludes() {
         .unwrap();
     let error = fixture.rejection(&aliased_children_scores(&fixture, vec![0, 3]), operation);
     assert!(
-        error.contains("the plan has not fetched what the subgraph demands"),
+        error.contains("the representation reads") && error.contains(READ_UNFETCHED),
         "{error}"
     );
     assert!(
-        error.contains("does not select `child` on `parent`"),
+        error.contains("the representation reads `child` at `parent`"),
         "{error}"
     );
 }
@@ -4084,11 +4316,11 @@ fn a_deferred_dependency_sends_no_field_below_a_parent_its_condition_excludes() 
         .unwrap();
     let error = fixture.rejection(&aliased_parents_scores(&fixture, vec![1, 3]), operation);
     assert!(
-        error.contains("the plan has not fetched what the subgraph demands"),
+        error.contains("the representation reads") && error.contains(READ_UNFETCHED),
         "{error}"
     );
     assert!(
-        error.contains("does not select `child` on `holder.b`"),
+        error.contains("the representation reads `child` at `holder.b`"),
         "{error}"
     );
 }
@@ -4272,7 +4504,7 @@ fn a_deferred_block_reads_a_guarded_dependency_under_its_guard() {
         .unwrap();
     let error = fixture.rejection(&deferred_results(&fixture, parent_child, false), operation);
     assert!(
-        error.contains("the plan has not fetched what the subgraph demands"),
+        error.contains("the representation reads") && error.contains(READ_UNFETCHED),
         "{error}"
     );
     assert!(error.contains("¬$v"), "{error}");
@@ -4296,7 +4528,7 @@ fn a_deferred_block_reads_a_guarded_dependency_under_its_guard() {
 #[test]
 fn a_guarded_contribution_narrows_the_copy_under_its_guard_alone() {
     let fixture = Fixture::new(include_str!("testdata/conditional_intersection.graphql"));
-    let operation = "{ holder { thing { ... on Y { y } } } }";
+    let operation = &declaring_booleans(["v"], "{ holder { thing { ... on Y { y } } } }");
     let narrow = || root_fetch("narrow", "{ holder { thing { ... on X { x } } } }");
     let wide_y = || root_fetch("wide", "{ holder { thing { ... on Y { y } } } }");
     let plan = |under_v: Vec<serde_json::Value>, otherwise: Option<serde_json::Value>| {
@@ -4981,20 +5213,24 @@ fn absorption_compares_the_clauses_that_survive_joining() {
 #[test]
 fn the_largest_region_account_records_a_subtractions_residual() {
     let fixture = Fixture::new(include_str!("testdata/deferred_seed.graphql"));
-    let operation = "{ parent { __typename } }";
+    let fetched = "{ parent { __typename } }";
     let guarded = |index: usize| {
         condition(
             &format!("p{index}"),
             Some(condition(
                 &format!("q{index}"),
-                Some(root_fetch("first", operation)),
+                Some(root_fetch("first", fetched)),
                 None,
             )),
             None,
         )
     };
     let plan = plan_of(&fixture, parallel((1..=4).map(guarded).collect()));
-    let (verdict, work) = family_check(&fixture, &plan, operation);
+    let operation = declaring_booleans(
+        (1..=4).flat_map(|index| [format!("p{index}"), format!("q{index}")]),
+        fetched,
+    );
+    let (verdict, work) = family_check(&fixture, &plan, &operation);
     let error = verdict.unwrap_err().to_string();
     assert!(error.contains("does not select `parent`"), "{error}");
     assert_eq!(work.largest_region_clauses.get(), 16);
@@ -5239,10 +5475,15 @@ fn absorbed_guards_plan(fixture: &Fixture, members: usize) -> QueryPlan {
 #[test]
 fn a_clause_absorbed_is_compared_up_to_the_clause_absorbing_it() {
     let fixture = Fixture::new(include_str!("testdata/deferred_seed.graphql"));
-    let operation = "{ parent { __typename } }";
     for members in [8, 16] {
         let plan = absorbed_guards_plan(&fixture, members);
-        let (verdict, work) = family_check(&fixture, &plan, operation);
+        let operation = declaring_booleans(
+            (0..members)
+                .map(|i| format!("b{i}"))
+                .chain((0..members * members).map(|j| format!("c{j}"))),
+            "{ parent { __typename } }",
+        );
+        let (verdict, work) = family_check(&fixture, &plan, &operation);
         let error = verdict.unwrap_err().to_string();
         assert!(error.contains("does not select `parent`"), "{error}");
         let members = members as u64;
@@ -5259,4 +5500,2001 @@ fn a_clause_absorbed_is_compared_up_to_the_clause_absorbing_it() {
             "bucket probes and absorption comparisons at {members}"
         );
     }
+}
+
+//==================================================================================================
+// Conditional `requires` entries: what an entity fetch sends in each configuration
+//
+// An entry's `@skip`/`@include` conditions are read on the operation's Boolean variables, and the
+// representation an entity fetch sends where it runs is what its admitting entries project there,
+// in document order, fields replacing and fragments merging: it must have read only what was
+// fetched, under the fields its entries name, and cover what the subgraph demands there through a
+// key chosen in each configuration. A test porting a theorem of the model's `Apollo/Tests/
+// QueryPlanChecker.lean`, one of the sixty of its `ConditionalRequires` namespace or
+// `undeclaredConditionNodeWithSufficientBranchesIsRejected` outside it, names the theorem beside
+// it; the rest are the port's own controls. Each reads the world of the planner's
+// `conditional_requires_sharing_a_fetch_with_an_unconditional_sibling` and says whether its
+// verdict is changed or preserved against the checker that grouped the entries by type condition
+// and matched each with an entity case.
+
+fn conditional_requires_fixture() -> Fixture {
+    Fixture::new(include_str!("testdata/conditional_requires.graphql"))
+}
+
+/// The variables a document reads, in the order it first reads each.
+fn read_variables(document: &str) -> Vec<String> {
+    let mut variables: Vec<String> = Vec::new();
+    for (at, _) in document.match_indices('$') {
+        let name: String = document[at + 1..]
+            .chars()
+            .take_while(|c| c.is_ascii_alphanumeric() || *c == '_')
+            .collect();
+        if !name.is_empty() && !variables.contains(&name) {
+            variables.push(name);
+        }
+    }
+    variables
+}
+
+/// A selection set as an operation declaring, as a `Boolean!`, each variable it reads.
+fn declaring_read(selections: &str) -> String {
+    let variables = read_variables(selections);
+    if variables.is_empty() {
+        return selections.to_string();
+    }
+    let declared: Vec<String> = variables
+        .iter()
+        .map(|variable| format!("${variable}: Boolean!"))
+        .collect();
+    format!("query({}) {selections}", declared.join(", "))
+}
+
+/// A field of a `requires` entry, with what is selected under it.
+fn input(name: &str, below: Vec<serde_json::Value>) -> serde_json::Value {
+    let mut field = serde_json::json!({ "kind": "Field", "name": name });
+    if !below.is_empty() {
+        field["selections"] = serde_json::Value::Array(below);
+    }
+    field
+}
+
+/// A field of a `requires` entry read under an alias.
+fn aliased_input(alias: &str, name: &str) -> serde_json::Value {
+    serde_json::json!({ "kind": "Field", "alias": alias, "name": name })
+}
+
+/// A `requires` inline fragment, on `type_condition` or on none, under `conditions`.
+fn entry(
+    type_condition: Option<&str>,
+    conditions: Vec<serde_json::Value>,
+    selections: Vec<serde_json::Value>,
+) -> serde_json::Value {
+    let mut fragment = serde_json::json!({ "kind": "InlineFragment", "selections": selections });
+    if let Some(type_condition) = type_condition {
+        fragment["typeCondition"] = type_condition.into();
+    }
+    if !conditions.is_empty() {
+        fragment["conditions"] = serde_json::Value::Array(conditions);
+    }
+    fragment
+}
+
+/// An entry on `T`.
+fn on_t(
+    conditions: Vec<serde_json::Value>,
+    selections: Vec<serde_json::Value>,
+) -> serde_json::Value {
+    entry(Some("T"), conditions, selections)
+}
+
+/// `@include` or `@skip` on a variable, or on a literal.
+fn include(variable: &str) -> serde_json::Value {
+    serde_json::json!({ "kind": "include", "if": variable })
+}
+
+fn skip(variable: &str) -> serde_json::Value {
+    serde_json::json!({ "kind": "skip", "if": variable })
+}
+
+fn include_literal(value: bool) -> serde_json::Value {
+    serde_json::json!({ "kind": "include", "if": value })
+}
+
+fn skip_literal(value: bool) -> serde_json::Value {
+    serde_json::json!({ "kind": "skip", "if": value })
+}
+
+/// `__typename` and `id`: what the key of `T` is read from.
+fn key_inputs() -> Vec<serde_json::Value> {
+    vec![input("__typename", vec![]), input("id", vec![])]
+}
+
+/// The key inputs followed by `more`.
+fn key_inputs_and(more: Vec<serde_json::Value>) -> Vec<serde_json::Value> {
+    let mut inputs = key_inputs();
+    inputs.extend(more);
+    inputs
+}
+
+/// The variables a list of entries' conditions name.
+fn entry_variables(entries: &[serde_json::Value], out: &mut Vec<String>) {
+    for entry in entries {
+        if let Some(conditions) = entry["conditions"].as_array() {
+            for condition in conditions {
+                if let Some(variable) = condition["if"].as_str()
+                    && !out.iter().any(|known| known == variable)
+                {
+                    out.push(variable.to_string());
+                }
+            }
+        }
+        if let Some(below) = entry["selections"].as_array() {
+            entry_variables(below, out);
+        }
+    }
+}
+
+/// An entity fetch's plan in the conditional world: `Subgraph1` fetches `fetched` on each `parent`,
+/// then `Subgraph2` is sent each as `entries`, under `rewrites`, and asked for `cases` under
+/// `_entities`, `... on T { selected }` where none are given. `condition` runs the second fetch
+/// under one branch of a condition node on a variable.
+struct Sent<'a> {
+    parent: &'a str,
+    fetched: &'a str,
+    entries: Vec<serde_json::Value>,
+    cases: Option<&'a str>,
+    rewrites: serde_json::Value,
+    condition: Option<(&'a str, bool)>,
+    selected: &'a str,
+}
+
+impl<'a> Sent<'a> {
+    fn new(fetched: &'a str, entries: Vec<serde_json::Value>, selected: &'a str) -> Self {
+        Sent {
+            parent: "t",
+            fetched,
+            entries,
+            cases: None,
+            rewrites: serde_json::json!([]),
+            condition: None,
+            selected,
+        }
+    }
+
+    fn cases(self, cases: &'a str) -> Self {
+        Sent {
+            cases: Some(cases),
+            ..self
+        }
+    }
+
+    fn rewrites(self, rewrites: serde_json::Value) -> Self {
+        Sent { rewrites, ..self }
+    }
+
+    fn parent(self, parent: &'a str) -> Self {
+        Sent { parent, ..self }
+    }
+
+    fn under(self, variable: &'a str, value: bool) -> Self {
+        Sent {
+            condition: Some((variable, value)),
+            ..self
+        }
+    }
+
+    fn entities(&self) -> String {
+        match self.cases {
+            Some(cases) => cases.to_string(),
+            None => format!("... on T {{ {} }}", self.selected),
+        }
+    }
+
+    fn plan(&self, fixture: &Fixture) -> QueryPlan {
+        let parent = self.parent;
+        let fetched = root_fetch(
+            "Subgraph1",
+            &declaring_read(&format!("{{ {parent} {{ {} }} }}", self.fetched)),
+        );
+        let entities = self.entities();
+        let declared: String = read_variables(&entities)
+            .iter()
+            .map(|variable| format!(", ${variable}: Boolean!"))
+            .collect();
+        let sent = serde_json::json!({ "Fetch": {
+            "subgraph_name": "Subgraph2",
+            "variable_usages": [],
+            "requires": self.entries,
+            "operation_document": format!(
+                "query($representations: [_Any!]!{declared}) {{ \
+                 _entities(representations: $representations) {{ {entities} }} }}"
+            ),
+            "operation_kind": "query",
+            "input_rewrites": self.rewrites,
+            "output_rewrites": [],
+            "context_rewrites": []
+        } });
+        let sent = flatten(serde_json::json!([{ "Key": [parent, null] }]), sent);
+        let sent = match self.condition {
+            None => sent,
+            Some((variable, true)) => condition(variable, Some(sent), None),
+            Some((variable, false)) => condition(variable, None, Some(sent)),
+        };
+        plan_of(fixture, sequence(vec![fetched, sent]))
+    }
+
+    /// The client asking `selected` on each `parent`, declaring every variable the plan reads.
+    fn operation(&self) -> String {
+        let mut variables = read_variables(self.fetched);
+        for variable in read_variables(&self.entities())
+            .into_iter()
+            .chain(read_variables(self.selected))
+        {
+            if !variables.contains(&variable) {
+                variables.push(variable);
+            }
+        }
+        entry_variables(&self.entries, &mut variables);
+        if let Some((variable, _)) = self.condition
+            && !variables.iter().any(|known| known == variable)
+        {
+            variables.push(variable.to_string());
+        }
+        let operation = format!("{{ {} {{ {} }} }}", self.parent, self.selected);
+        if variables.is_empty() {
+            operation
+        } else {
+            declaring_booleans(variables, &operation)
+        }
+    }
+
+    fn check(&self) -> Result<(), CorrectnessError> {
+        let fixture = conditional_requires_fixture();
+        fixture.check(&self.plan(&fixture), &self.operation())
+    }
+
+    fn rejection(&self) -> String {
+        match self.check() {
+            Ok(()) => panic!("expected the check to reject this plan"),
+            Err(error) => error.to_string(),
+        }
+    }
+}
+
+/// What `Subgraph1` fetches on `t`: its key, and its key with `a` under `$x`.
+const KEY_FIELDS: &str = "__typename id";
+const KEY_AND_A: &str = "__typename id a";
+const GUARDED_A: &str = "__typename id a @include(if: $x)";
+/// `b`, which requires `a`, under `$x`, beside an unconditional `c`.
+const GUARDED_B: &str = "c b @include(if: $x)";
+
+/// The key unconditionally and `a` under `$x`, in two entries.
+fn split_inputs() -> Vec<serde_json::Value> {
+    vec![
+        on_t(vec![], key_inputs()),
+        on_t(vec![include("x")], vec![input("a", vec![])]),
+    ]
+}
+
+// The planner's plan, transcribed: the unconditional sibling `c` is sent the key alone where
+// `$test` is false, and the two entries together send `b`'s `a` where it is true.
+//
+// The model's `plannerConditionalRequiresSiblingIsAccepted`. A control of preserved behaviour.
+#[test]
+fn the_planners_conditional_entry_beside_an_unconditional_sibling_is_accepted() {
+    Sent::new(
+        "__typename id ... on T @include(if: $test) { a }",
+        vec![
+            on_t(vec![], key_inputs()),
+            on_t(
+                vec![include("test")],
+                vec![input("__typename", vec![]), input("a", vec![])],
+            ),
+        ],
+        "c b @include(if: $test)",
+    )
+    .check()
+    .unwrap();
+}
+
+// Without its conditional entry, the planner's plan sends no `a` where `$test` is true.
+//
+// The model's `plannerConditionalEntryRemovedIsRejected`. A control of preserved behaviour.
+#[test]
+fn the_planners_plan_without_its_conditional_entry_is_rejected() {
+    let error = Sent::new(
+        "__typename id ... on T @include(if: $test) { a }",
+        vec![on_t(vec![], key_inputs())],
+        "c b @include(if: $test)",
+    )
+    .rejection();
+    assert!(
+        error.contains("does not hold `a` at `t`, a `T` when $test"),
+        "{error}"
+    );
+}
+
+// `b` is selected unconditionally and `a` was fetched, but the entry reading it is under `$x`:
+// where `$x` is false the representation has no `a`, which is named there.
+//
+// The model's `narrowerEntryLeavesUnconditionalDemandIsRejected`, with its diagnostic. A control of
+// changed behaviour.
+#[test]
+fn a_narrower_entry_leaves_an_unconditional_demand_owed() {
+    let error = Sent::new(KEY_AND_A, split_inputs(), "b").rejection();
+    assert!(
+        error.contains("does not hold `a` at `t`, a `T` when ¬$x"),
+        "{error}"
+    );
+}
+
+// `a` was fetched unconditionally, so a representation holding it everywhere is sound even where
+// `$x` excludes `b`.
+//
+// The model's `coverageWithAvailableSurplusIsAccepted`. A control of preserved behaviour.
+#[test]
+fn available_surplus_beside_a_conditional_demand_is_accepted() {
+    Sent::new(
+        KEY_AND_A,
+        vec![on_t(vec![], key_inputs_and(vec![input("a", vec![])]))],
+        GUARDED_B,
+    )
+    .check()
+    .unwrap();
+}
+
+// The same representation where `a` was fetched under `$x` alone: where `$x` is false it reads an
+// `a` never fetched.
+//
+// The model's `coverageWithUnavailableSurplusIsRejected`. A control of changed behaviour.
+#[test]
+fn unavailable_surplus_is_rejected() {
+    let error = Sent::new(
+        GUARDED_A,
+        vec![on_t(vec![], key_inputs_and(vec![input("a", vec![])]))],
+        GUARDED_B,
+    )
+    .rejection();
+    assert!(
+        error.contains("the representation reads `a` at `t`, a `T` when ¬$x"),
+        "{error}"
+    );
+    assert!(error.contains(READ_UNFETCHED), "{error}");
+}
+
+// A representation holding an available `a` that no demand reads: coverage, not equality.
+//
+// The model's `unconditionalSurplusIsAccepted`. A control of changed behaviour.
+#[test]
+fn available_surplus_no_demand_reads_is_accepted() {
+    Sent::new(
+        KEY_AND_A,
+        vec![on_t(vec![], key_inputs_and(vec![input("a", vec![])]))],
+        "c",
+    )
+    .check()
+    .unwrap();
+}
+
+// Neither entry alone holds both the key and `a`; the representation they project together does.
+//
+// The model's `splitUnconditionalRepresentationIsAccepted`. A control of changed behaviour.
+#[test]
+fn a_representation_split_across_unconditional_entries_is_accepted() {
+    Sent::new(
+        KEY_AND_A,
+        vec![
+            on_t(vec![], key_inputs()),
+            on_t(vec![], vec![input("a", vec![])]),
+        ],
+        "b",
+    )
+    .check()
+    .unwrap();
+}
+
+// The key in an unconditional entry and `a` in one under `$x`: where `$x` holds, only the two
+// together cover `b`'s demand.
+//
+// The model's `splitConditionedRepresentationIsAccepted`. A control of preserved behaviour.
+#[test]
+fn a_representation_split_across_conditioned_entries_is_accepted() {
+    Sent::new(GUARDED_A, split_inputs(), GUARDED_B)
+        .check()
+        .unwrap();
+}
+
+/// `b` under `$x` alone, with nothing else selected.
+const CONDITIONAL_B_ONLY: &str = "b @include(if: $x)";
+
+// Where `$x` is false nothing is demanded and nothing sent; where it is true the entry sends `a`
+// but no key, and `id` is named there.
+//
+// The model's `conditionedEntryAloneLacksKeyIsRejected`, with its diagnostic. A control of
+// preserved behaviour.
+#[test]
+fn a_conditioned_entry_without_a_key_is_rejected() {
+    let error = Sent::new(
+        GUARDED_A,
+        vec![on_t(
+            vec![include("x")],
+            vec![input("__typename", vec![]), input("a", vec![])],
+        )],
+        CONDITIONAL_B_ONLY,
+    )
+    .rejection();
+    assert!(
+        error.contains("does not hold `id` at `t`, a `T` when $x"),
+        "{error}"
+    );
+}
+
+// Adding `id` to the same entry repairs it.
+//
+// The model's `conditionedEntryWithKeyIsAccepted`. A control of preserved behaviour.
+#[test]
+fn a_conditioned_entry_with_its_key_is_accepted() {
+    Sent::new(
+        GUARDED_A,
+        vec![on_t(
+            vec![include("x")],
+            key_inputs_and(vec![input("a", vec![])]),
+        )],
+        CONDITIONAL_B_ONLY,
+    )
+    .check()
+    .unwrap();
+}
+
+/// `Subgraph1` fetches `u`'s two children beside the key.
+const KEY_AND_U: &str = "__typename id u { left right }";
+
+/// `u { right }` under a fragment on `T`, then `u { left }`, in one entry, or in the other order.
+fn u_right_then_left() -> Vec<serde_json::Value> {
+    key_inputs_and(vec![
+        on_t(vec![], vec![input("u", vec![input("right", vec![])])]),
+        input("u", vec![input("left", vec![])]),
+    ])
+}
+
+fn u_left_then_right() -> Vec<serde_json::Value> {
+    key_inputs_and(vec![
+        input("u", vec![input("left", vec![])]),
+        on_t(vec![], vec![input("u", vec![input("right", vec![])])]),
+    ])
+}
+
+// A later field `u` replaces the value an earlier fragment wrote under `u`, its `right` with it,
+// though both children were fetched.
+//
+// The model's `unconditionalLaterFieldReplacementIsRejected`. A control of changed behaviour.
+#[test]
+fn a_later_field_replaces_what_an_earlier_fragment_wrote() {
+    let error = Sent::new(KEY_AND_U, vec![on_t(vec![], u_right_then_left())], "both").rejection();
+    assert!(error.contains("does not hold `right` at `t.u`"), "{error}");
+}
+
+// The fragment last merges `u.right` into the `u` the field wrote.
+//
+// The model's `unconditionalLaterFragmentMergeIsAccepted`. A control of preserved behaviour.
+#[test]
+fn a_later_fragment_merges_into_what_an_earlier_field_wrote() {
+    Sent::new(KEY_AND_U, vec![on_t(vec![], u_left_then_right())], "both")
+        .check()
+        .unwrap();
+}
+
+/// A bare `u` beside the key: everything fetched under `u` is copied.
+fn copied_u() -> Vec<serde_json::Value> {
+    vec![on_t(vec![], key_inputs_and(vec![input("u", vec![])]))]
+}
+
+// A bare `u` copies the available `extra: left` beside the demanded `right` with no rename owed for
+// it.
+//
+// The model's `copiedCompositeSurplusAliasIsAccepted`. A control of changed behaviour.
+#[test]
+fn a_bare_field_copies_surplus_without_a_rename() {
+    Sent::new(
+        "__typename id u { right extra: left }",
+        copied_u(),
+        "onRight",
+    )
+    .check()
+    .unwrap();
+}
+
+// The same surplus cannot supply the `right` the copy lacks.
+//
+// The model's `copiedCompositeSurplusMissingDemandIsRejected`. A control of preserved behaviour.
+#[test]
+fn copied_surplus_cannot_supply_an_omitted_demand() {
+    let error = Sent::new("__typename id u { extra: left }", copied_u(), "onRight").rejection();
+    assert!(error.contains("does not hold `right` at `t.u`"), "{error}");
+}
+
+// A copied value under `right` must be the field `right`.
+//
+// The model's `copiedCompositeSurplusMisidentifiedDemandIsRejected`. A control of preserved
+// behaviour.
+#[test]
+fn a_copied_value_under_a_demanded_key_must_be_the_demanded_field() {
+    let error = Sent::new(
+        "__typename id u { right: left extra: left }",
+        copied_u(),
+        "onRight",
+    )
+    .rejection();
+    assert!(
+        error.contains("holds `right` at `t.u`") && error.contains("as `left`"),
+        "{error}"
+    );
+}
+
+/// A renamer at `u` and one of its keys.
+fn renaming_below_u(from: &str, to: &str) -> serde_json::Value {
+    renaming(&[key("u"), key(from)], to)
+}
+
+// A demanded `right` copied under `u` is renamed away by an input rewrite: the subgraph is sent no
+// `right`.
+//
+// The model's `copiedDemandRenamedAwayIsRejected`. A control of preserved behaviour.
+#[test]
+fn a_demanded_copied_field_renamed_away_is_rejected() {
+    let error = Sent::new("__typename id u { right }", copied_u(), "onRight")
+        .rewrites(renaming_below_u("right", "gone"))
+        .rejection();
+    assert!(
+        error.contains("the representation sends `right` at `t.u`")
+            && error.contains("do not carry the one to the other"),
+        "{error}"
+    );
+}
+
+// A copied `r: right` named back by a rewrite, beside a copied `extra: left` no rewrite names.
+//
+// The model's `copiedDemandRenamedBackWithSurplusIsAccepted`. A control of changed behaviour.
+#[test]
+fn a_demanded_copied_field_renamed_back_beside_surplus_is_accepted() {
+    Sent::new(
+        "__typename id u { r: right extra: left }",
+        copied_u(),
+        "onRight",
+    )
+    .rewrites(renaming_below_u("r", "right"))
+    .check()
+    .unwrap();
+}
+
+// The fetch runs where `$x` is false, and `onRight`'s demand is active only where it is true: the
+// `right` renamed away is owed nowhere the fetch runs.
+//
+// The model's `copiedInactiveDemandAddsNoRewriteObligation`. A control of changed behaviour.
+#[test]
+fn an_inactive_demand_owes_no_rename() {
+    Sent::new("__typename id u { right }", copied_u(), "c @skip(if: $x)")
+        .cases("... on T { c onRight @include(if: $x) }")
+        .rewrites(renaming_below_u("right", "gone"))
+        .under("x", false)
+        .check()
+        .unwrap();
+}
+
+/// `u { right }` under a fragment, then `u { left }`, beside the key.
+fn overwritten_inputs() -> Vec<serde_json::Value> {
+    vec![on_t(vec![], u_right_then_left())]
+}
+
+// The later `u { left }` covers `onLeft`, but the earlier `u.right` it overwrites was read all the
+// same, and never fetched.
+//
+// The model's `overwrittenUnfetchedReadIsRejected`. A control of preserved behaviour.
+#[test]
+fn an_overwritten_read_of_an_unfetched_value_is_rejected() {
+    let error = Sent::new("__typename id u { left }", overwritten_inputs(), "onLeft").rejection();
+    assert!(
+        error.contains("the representation reads `right` at `t.u`")
+            && error.contains(READ_UNFETCHED),
+        "{error}"
+    );
+}
+
+// Fetching the overwritten `right` repairs it.
+//
+// The model's `overwrittenFetchedReadIsAccepted`. A control of changed behaviour.
+#[test]
+fn an_overwritten_read_of_a_fetched_value_is_accepted() {
+    Sent::new(KEY_AND_U, overwritten_inputs(), "onLeft")
+        .check()
+        .unwrap();
+}
+
+/// `onLeft` unconditionally and `onRight` under `$x`.
+const PROJECTION_DEMAND: &str = "onLeft onRight @include(if: $x)";
+
+// Where `$x` holds, the later field `u { left }` replaces the conditioned fragment's `u.right`,
+// which `onRight` demands there: `right` is named at `$x`.
+//
+// The model's `laterFieldReplacesConditionedProjectionIsRejected`, with its diagnostic. A control
+// of changed behaviour.
+#[test]
+fn a_later_field_replaces_a_conditioned_fragments_value() {
+    let error = Sent::new(
+        KEY_AND_U,
+        vec![on_t(
+            vec![],
+            key_inputs_and(vec![
+                on_t(
+                    vec![include("x")],
+                    vec![input("u", vec![input("right", vec![])])],
+                ),
+                input("u", vec![input("left", vec![])]),
+            ]),
+        )],
+        PROJECTION_DEMAND,
+    )
+    .rejection();
+    assert!(
+        error.contains("does not hold `right` at `t.u`, a `U` when `t` is `T` ∧ $x"),
+        "{error}"
+    );
+}
+
+// The conditioned fragment last merges `u.right` where `$x` holds and adds nothing elsewhere.
+//
+// The model's `laterConditionedFragmentMergesProjectionIsAccepted`. A control of preserved
+// behaviour.
+#[test]
+fn a_later_conditioned_fragment_merges_into_a_fields_value() {
+    Sent::new(
+        KEY_AND_U,
+        vec![on_t(
+            vec![],
+            key_inputs_and(vec![
+                input("u", vec![input("left", vec![])]),
+                on_t(
+                    vec![include("x")],
+                    vec![input("u", vec![input("right", vec![])])],
+                ),
+            ]),
+        )],
+        PROJECTION_DEMAND,
+    )
+    .check()
+    .unwrap();
+}
+
+/// `u { r: right }`, read and then replaced by `u { left }`, beside the key.
+fn overwritten_alias() -> Vec<serde_json::Value> {
+    vec![on_t(
+        vec![],
+        key_inputs_and(vec![
+            input("u", vec![aliased_input("r", "right")]),
+            input("u", vec![input("left", vec![])]),
+        ]),
+    )]
+}
+
+// An alias read and then overwritten does not survive: with both inputs fetched and only `u.left`
+// demanded, no rewrite is owed for it.
+//
+// A port control of the model's rewrite agreement on surviving explicit selections. A control of
+// changed behaviour.
+#[test]
+fn an_overwritten_alias_owes_no_rename() {
+    Sent::new(
+        "__typename id u { left r: right }",
+        overwritten_alias(),
+        "onLeft",
+    )
+    .check()
+    .unwrap();
+}
+
+// The same with the alias's input omitted: the read of it is still owed.
+//
+// Its neighbour, beside the model's `overwrittenUnfetchedReadIsRejected`. A control of preserved
+// behaviour.
+#[test]
+fn an_overwritten_alias_owes_its_read() {
+    let error = Sent::new("__typename id u { left }", overwritten_alias(), "onLeft").rejection();
+    assert!(
+        error.contains("the representation reads `r` at `t.u`") && error.contains(READ_UNFETCHED),
+        "{error}"
+    );
+}
+
+// A later fragment's bare `u` writes `u.r` again as copied surplus: the explicit alias the earlier
+// field wrote there is no longer the surviving write, so no rename is owed for it.
+//
+// A port control of the model's `mergeRepresentation`, whose explicit selections a later fragment
+// removes where it writes a value, not where it writes an explicit selection. A control of changed
+// behaviour.
+#[test]
+fn a_later_fragments_bare_copy_clears_an_earlier_explicit_alias() {
+    Sent::new(
+        "__typename id u { left r: right }",
+        vec![on_t(
+            vec![],
+            key_inputs_and(vec![
+                input("u", vec![aliased_input("r", "right")]),
+                on_t(vec![], vec![input("u", vec![])]),
+            ]),
+        )],
+        "onLeft",
+    )
+    .check()
+    .unwrap();
+}
+
+// A field inside a fragment replaces only what that fragment wrote: the enclosing `u.right`
+// survives the fragment's own `u { right } u { left }`, and the merge leaves both children.
+//
+// A port control of the scope a field clears, a fragment's projection starting empty. A control of
+// preserved behaviour.
+#[test]
+fn a_fragments_own_replacement_leaves_the_enclosing_value() {
+    Sent::new(
+        KEY_AND_U,
+        vec![on_t(
+            vec![],
+            key_inputs_and(vec![
+                input("u", vec![input("right", vec![])]),
+                on_t(
+                    vec![],
+                    vec![
+                        input("u", vec![input("right", vec![])]),
+                        input("u", vec![input("left", vec![])]),
+                    ],
+                ),
+            ]),
+        )],
+        "both",
+    )
+    .check()
+    .unwrap();
+}
+
+// An entry on `U` sends each `t.u` a representation, but `Subgraph2` resolves no `U` entity: no key
+// of it can be chosen, and the plan is refused with the object named.
+//
+// A port control of the model's `RepresentationCovers` at a runtime type `entityTypesAt` gives no
+// entity type: a non-empty representation there covers nothing.
+#[test]
+fn a_representation_of_an_object_the_subgraph_resolves_no_entity_of_is_rejected() {
+    let fixture = conditional_requires_fixture();
+    let mut sent = entity_fetch("Subgraph2", "T", entry_fields(&["left"]), "c");
+    sent["Fetch"]["requires"][0]["typeCondition"] = "U".into();
+    let plan = plan_of(
+        &fixture,
+        sequence(vec![
+            root_fetch("Subgraph1", "{ t { __typename id u { left } } }"),
+            flatten(
+                serde_json::json!([{ "Key": ["t", null] }, { "Key": ["u", null] }]),
+                sent,
+            ),
+        ]),
+    );
+    let error = fixture.rejection(&plan, "{ t { u { left } } }");
+    assert!(
+        error.contains("is of a `U`, which the subgraph resolves no entity of"),
+        "{error}"
+    );
+}
+
+/// The key and `a` under `$x`, and again under `¬$x`.
+fn opposite_inputs() -> Vec<serde_json::Value> {
+    vec![
+        on_t(vec![include("x")], key_inputs_and(vec![input("a", vec![])])),
+        on_t(vec![skip("x")], key_inputs_and(vec![input("a", vec![])])),
+    ]
+}
+
+// Opposite entries on `$x` supply the unconditional `b` in both configurations.
+//
+// The model's `complementaryEntriesCoverBothConfigurationsIsAccepted`. A control of preserved
+// behaviour.
+#[test]
+fn complementary_entries_cover_both_configurations() {
+    Sent::new(KEY_AND_A, opposite_inputs(), "b")
+        .check()
+        .unwrap();
+}
+
+// Without the `@skip` entry nothing is sent where `$x` is false, and `b` is demanded there.
+//
+// The model's `complementaryEntryRemovedIsRejected`. A control of changed behaviour.
+#[test]
+fn a_removed_complementary_entry_leaves_its_configuration_uncovered() {
+    let error = Sent::new(
+        KEY_AND_A,
+        vec![on_t(
+            vec![include("x")],
+            key_inputs_and(vec![input("a", vec![])]),
+        )],
+        "b",
+    )
+    .rejection();
+    assert!(error.contains("¬$x"), "{error}");
+}
+
+// `V` has two keys: the representation sends `id` where `$x` holds and `id2` where it does not, so
+// each configuration resolves a key and no one key covers both.
+//
+// The model's `complementaryEntriesMayResolveDifferentKeysIsAccepted`. A control of changed
+// behaviour.
+#[test]
+fn complementary_entries_may_resolve_different_keys() {
+    let entries = vec![
+        entry(
+            Some("V"),
+            vec![include("x")],
+            vec![input("__typename", vec![]), input("id", vec![])],
+        ),
+        entry(
+            Some("V"),
+            vec![skip("x")],
+            vec![input("__typename", vec![]), input("id2", vec![])],
+        ),
+    ];
+    Sent::new("__typename id id2", entries, "c")
+        .parent("v")
+        .cases("... on V { c }")
+        .check()
+        .unwrap();
+}
+
+// The same with the `@skip` entry's `id2` dropped: where `$x` is false neither key is sent, and
+// every key's failure there is named.
+//
+// A neighbour of the model's `complementaryEntriesMayResolveDifferentKeysIsAccepted`. A control of
+// changed behaviour.
+#[test]
+fn a_configuration_no_key_covers_is_rejected_with_each_keys_failure() {
+    let entries = vec![
+        entry(
+            Some("V"),
+            vec![include("x")],
+            vec![input("__typename", vec![]), input("id", vec![])],
+        ),
+        entry(
+            Some("V"),
+            vec![skip("x")],
+            vec![input("__typename", vec![])],
+        ),
+    ];
+    let error = Sent::new("__typename id id2", entries, "c")
+        .parent("v")
+        .cases("... on V { c }")
+        .rejection();
+    assert!(
+        error.contains("through none of its resolvable keys when `v` is `V` ∧ ¬$x"),
+        "{error}"
+    );
+    assert!(
+        error.contains("@key(id)") && error.contains("@key(id2)"),
+        "{error}"
+    );
+}
+
+// An entry with no type condition admits the object it is read at.
+//
+// The model's `untypedUnconditionalEntryIsAccepted`. A control of changed behaviour.
+#[test]
+fn an_untyped_entry_admits_the_object() {
+    Sent::new(KEY_FIELDS, vec![entry(None, vec![], key_inputs())], "c")
+        .check()
+        .unwrap();
+}
+
+// An entry on the interface `I` projects `a` into the same `T` representation as the object
+// entry's key.
+//
+// The model's `overlappingInterfaceAndObjectEntriesAreAccepted`. A control of changed behaviour.
+#[test]
+fn an_interface_entry_projects_beside_an_object_entry() {
+    Sent::new(
+        KEY_AND_A,
+        vec![
+            on_t(vec![], key_inputs()),
+            entry(Some("I"), vec![], vec![input("a", vec![])]),
+        ],
+        "b",
+    )
+    .check()
+    .unwrap();
+}
+
+// The entity fragment is under `$x`, but the unconditional representation still reads `a` where
+// `$x` is false, where it was not fetched.
+//
+// The model's `entityFragmentCannotHideUnreadSurplusIsRejected`. A control of changed behaviour.
+#[test]
+fn an_entity_fragments_condition_cannot_hide_an_unread_surplus() {
+    let error = Sent::new(
+        GUARDED_A,
+        vec![on_t(vec![], key_inputs_and(vec![input("a", vec![])]))],
+        "b @include(if: $x)",
+    )
+    .cases("... on T @include(if: $x) { b }")
+    .rejection();
+    assert!(
+        error.contains("the representation reads `a` at `t`, a `T` when ¬$x"),
+        "{error}"
+    );
+}
+
+// The fragment under `@include(if: false)` owes no `a`; its sibling's key is still sent.
+//
+// The model's `entityFragmentLiteralFalseIsAccepted`. A control of changed behaviour.
+#[test]
+fn an_entity_fragment_under_a_false_literal_owes_nothing() {
+    Sent::new(
+        KEY_FIELDS,
+        vec![on_t(vec![], key_inputs()), on_t(vec![], key_inputs())],
+        "c",
+    )
+    .cases("... on T { c } ... on T @include(if: false) { b }")
+    .check()
+    .unwrap();
+}
+
+// Two fragments on `T` are active together: `a` and `e` are demanded together, and one
+// representation holds both.
+//
+// The model's `sameTypeFragmentDemandsTogetherAreAccepted`. A control of preserved behaviour.
+#[test]
+fn same_type_entity_fragments_are_demanded_together() {
+    Sent::new(
+        "__typename id a e",
+        vec![on_t(
+            vec![],
+            key_inputs_and(vec![input("a", vec![]), input("e", vec![])]),
+        )],
+        "b d",
+    )
+    .cases("... on T { b } ... on T { d }")
+    .check()
+    .unwrap();
+}
+
+// The second fragment's `d` demands `e`, which the representation lacks.
+//
+// The model's `sameTypeFragmentDemandMissingIsRejected`. A control of preserved behaviour.
+#[test]
+fn a_second_same_type_entity_fragments_demand_stays_owed() {
+    let error = Sent::new(
+        "__typename id a e",
+        vec![on_t(vec![], key_inputs_and(vec![input("a", vec![])]))],
+        "b d",
+    )
+    .cases("... on T { b } ... on T { d }")
+    .rejection();
+    assert!(error.contains("does not hold `e` at `t`"), "{error}");
+}
+
+/// The key, and `a` in an entry under one literal condition; `c`, and `b` under the matching
+/// directive, selected; `a` fetched or not.
+fn literal_sent(
+    condition: serde_json::Value,
+    directive: &'static str,
+    fetched_a: bool,
+) -> Result<(), CorrectnessError> {
+    let selected = format!("c b {directive}");
+    Sent::new(
+        if fetched_a { KEY_AND_A } else { KEY_FIELDS },
+        vec![
+            on_t(vec![], key_inputs()),
+            on_t(vec![condition], vec![input("a", vec![])]),
+        ],
+        &selected,
+    )
+    .check()
+}
+
+// `@include(if: true)` folds to no condition, and `a` is sent.
+//
+// The model's `includeTrueReadsTheEntryIsAccepted`. A control of preserved behaviour.
+#[test]
+fn include_true_reads_its_entry() {
+    literal_sent(include_literal(true), "@include(if: true)", true).unwrap();
+}
+
+// `@include(if: false)` excludes the entry, so the `a` never fetched is never read, and the
+// unconditional key serves `c`.
+//
+// The model's `includeFalseExcludesTheEntryIsAccepted`. A control of preserved behaviour.
+#[test]
+fn include_false_excludes_its_entry() {
+    literal_sent(include_literal(false), "@include(if: false)", false).unwrap();
+}
+
+// `@skip(if: false)` folds to no condition, and `a` is sent.
+//
+// The model's `skipFalseReadsTheEntryIsAccepted`. A control of preserved behaviour.
+#[test]
+fn skip_false_reads_its_entry() {
+    literal_sent(skip_literal(false), "@skip(if: false)", true).unwrap();
+}
+
+// `@skip(if: true)` excludes the entry, which is not an empty condition list admitting it.
+//
+// The model's `skipTrueExcludesTheEntryIsAccepted`. A control of preserved behaviour.
+#[test]
+fn skip_true_excludes_its_entry() {
+    literal_sent(skip_literal(true), "@skip(if: true)", false).unwrap();
+}
+
+// Every entry excluded by a literal: the fetch sends nothing, so it serves no `c`, as it would if
+// it had become a root fetch.
+//
+// The model's `allLiteralExcludedEntriesSendNothingIsRejected`. A control of changed behaviour.
+#[test]
+fn entries_all_excluded_send_nothing() {
+    let error = Sent::new(
+        KEY_FIELDS,
+        vec![on_t(vec![include_literal(false)], key_inputs())],
+        "c",
+    )
+    .rejection();
+    assert!(
+        error.contains("does not hold `__typename` at `t`"),
+        "{error}"
+    );
+}
+
+// Excluded entries still make the fetch an entity fetch, which must select `_entities`; with no
+// entries at all the same root operation is a root fetch, and fine.
+//
+// The model's `allLiteralExcludedEntriesKeepEntityKindIsRejected`. A control of preserved
+// behaviour.
+#[test]
+fn entries_all_excluded_keep_the_fetch_an_entity_fetch() {
+    let fixture = conditional_requires_fixture();
+    let plan = |requires: serde_json::Value| {
+        plan_of(
+            &fixture,
+            sequence(vec![
+                root_fetch("Subgraph1", "{ t { __typename id } }"),
+                with(
+                    root_fetch("Subgraph2", "{ _service { sdl } }"),
+                    "requires",
+                    requires,
+                ),
+            ]),
+        )
+    };
+    let error = fixture.rejection(
+        &plan(serde_json::json!([on_t(
+            vec![include_literal(false)],
+            key_inputs()
+        )])),
+        "{ t { id } }",
+    );
+    assert!(
+        error.contains("an entity fetch must select exactly one root field, `_entities`"),
+        "{error}"
+    );
+    fixture
+        .check(&plan(serde_json::json!([])), "{ t { id } }")
+        .unwrap();
+}
+
+/// `u` with a fragment under `@include(if: false)` below it, beside the key.
+fn u_with_an_excluded_fragment() -> Vec<serde_json::Value> {
+    vec![on_t(
+        vec![],
+        key_inputs_and(vec![input(
+            "u",
+            vec![entry(
+                None,
+                vec![include_literal(false)],
+                vec![input("right", vec![])],
+            )],
+        )]),
+    )]
+}
+
+// Excluding the fragment below `u` leaves `u` itself selected: the available `u` is read, its
+// excluded `right` is not.
+//
+// The model's `nestedLiteralExclusionKeepsContainingFieldIsAccepted`. A control of changed
+// behaviour.
+#[test]
+fn an_excluded_nested_fragment_keeps_its_containing_field() {
+    Sent::new(
+        "__typename id u { left }",
+        u_with_an_excluded_fragment(),
+        "c",
+    )
+    .check()
+    .unwrap();
+}
+
+// The same entry where `u` was never fetched: its read is owed whatever is excluded below it.
+//
+// The model's `nestedLiteralExclusionCannotEraseContainingReadIsRejected`. A control of preserved
+// behaviour.
+#[test]
+fn an_excluded_nested_fragment_cannot_erase_its_containing_read() {
+    let error = Sent::new(KEY_FIELDS, u_with_an_excluded_fragment(), "c").rejection();
+    assert!(
+        error.contains("the representation reads `u` at `t`") && error.contains(READ_UNFETCHED),
+        "{error}"
+    );
+}
+
+/// The key, and `a` in an entry under `conditions`; `c` selected and fetched, by an operation
+/// declaring no variable.
+fn undeclared_sent(conditions: Vec<serde_json::Value>) -> String {
+    let fixture = conditional_requires_fixture();
+    let sent = Sent::new(
+        KEY_FIELDS,
+        vec![
+            on_t(vec![], key_inputs()),
+            on_t(conditions, vec![input("a", vec![])]),
+        ],
+        "c",
+    );
+    fixture.rejection(&sent.plan(&fixture), "{ t { c } }")
+}
+
+// `$missing` is declared nowhere: `@include` and `@skip` on it do not make the entry unreachable,
+// since the router includes it, and the plan is refused with the variable named.
+//
+// The model's `unresolvedOppositeConditionsAreRefusedByName`. A control whose verdict is preserved
+// and whose reason changes: the trunk rejects it for the `a` it reads as undemanded, naming no
+// variable.
+#[test]
+fn an_undeclared_variable_under_opposite_conditions_is_refused_by_name() {
+    let error = undeclared_sent(vec![include("missing"), skip("missing")]);
+    assert!(
+        error.contains("the plan conditions on `$missing`, which the operation does not declare"),
+        "{error}"
+    );
+}
+
+// Folding the false literal beside it does not hide `$missing`.
+//
+// The model's `literalFalseBesideUnresolvedVariableIsRefusedByName`. A control whose verdict is
+// preserved and whose reason changes: the trunk rejects it for the `a` it reads as undemanded,
+// naming no variable.
+#[test]
+fn an_undeclared_variable_beside_a_false_literal_is_refused_by_name() {
+    let error = undeclared_sent(vec![include_literal(false), include("missing")]);
+    assert!(
+        error.contains("the plan conditions on `$missing`, which the operation does not declare"),
+        "{error}"
+    );
+}
+
+// With `$x` declared, `@include` and `@skip` on it exclude the entry in both configurations, so the
+// unfetched `a` is never read.
+//
+// The model's `resolvedOppositeConditionsExcludeTheEntryIsAccepted`. A control of changed
+// behaviour.
+#[test]
+fn opposite_conditions_on_a_declared_variable_exclude_their_entry() {
+    Sent::new(
+        KEY_FIELDS,
+        vec![
+            on_t(vec![], key_inputs()),
+            on_t(vec![include("x"), skip("x")], vec![input("a", vec![])]),
+        ],
+        "c",
+    )
+    .check()
+    .unwrap();
+}
+
+/// The operation using a `String` as `t`'s argument, and the plan sending the key under
+/// `conditions`.
+fn string_variable_plan(fixture: &Fixture, conditions: Vec<serde_json::Value>) -> QueryPlan {
+    let mut sent = entity_fetch("Subgraph2", "T", serde_json::json!([]), "c");
+    sent["Fetch"]["requires"] = serde_json::json!([on_t(conditions, key_inputs())]);
+    plan_of(
+        fixture,
+        sequence(vec![
+            root_fetch(
+                "Subgraph1",
+                "query($s: String) { t(s: $s) { __typename id } }",
+            ),
+            flatten(serde_json::json!([{ "Key": ["t", null] }]), sent),
+        ]),
+    )
+}
+
+const STRING_VARIABLE: &str = "query($s: String) { t(s: $s) { c } }";
+
+// A `String` the operation uses as an argument is no Boolean: a condition on it is refused with the
+// variable named.
+//
+// A port control of the model's `DeclaresBoolean`: a declared variable of another type is no
+// configuration's Boolean. A control of changed behaviour.
+#[test]
+fn a_condition_on_a_string_variable_is_refused_by_name() {
+    let fixture = conditional_requires_fixture();
+    let error = fixture.rejection(
+        &string_variable_plan(&fixture, vec![include("s")]),
+        STRING_VARIABLE,
+    );
+    assert!(
+        error.contains(
+            "the plan conditions on `$s`, which the operation does not declare as `Boolean` or \
+             `Boolean!`"
+        ),
+        "{error}"
+    );
+}
+
+// The same entry with no condition is accepted.
+//
+// Its neighbour. A control of preserved behaviour.
+#[test]
+fn the_same_entry_unconditioned_beside_a_string_variable_is_accepted() {
+    let fixture = conditional_requires_fixture();
+    fixture
+        .check(&string_variable_plan(&fixture, vec![]), STRING_VARIABLE)
+        .unwrap();
+}
+
+/// The key, and `a` under `$x` and, nested, `$y`.
+fn nested_inputs() -> Vec<serde_json::Value> {
+    vec![
+        on_t(vec![], key_inputs()),
+        on_t(
+            vec![include("x")],
+            vec![on_t(vec![include("y")], vec![input("a", vec![])])],
+        ),
+    ]
+}
+
+// The two independent conditions are conjoined: `a` is read only where both hold, and fetched
+// there.
+//
+// The model's `nestedIndependentConditionsAreConjoinedIsAccepted`. A control of preserved
+// behaviour.
+#[test]
+fn nested_conditions_are_conjoined() {
+    Sent::new(
+        "__typename id ... @include(if: $x) { a @include(if: $y) }",
+        nested_inputs(),
+        "c ... @include(if: $x) { b @include(if: $y) }",
+    )
+    .check()
+    .unwrap();
+}
+
+// `b` is demanded under `$y`, but the outer `$x` excludes its `a` where `$x` is false.
+//
+// The model's `nestedOuterExclusionCannotCoverYDemandIsRejected`. A control of changed behaviour.
+#[test]
+fn an_outer_condition_cannot_cover_a_demand_under_the_inner_one() {
+    let error = Sent::new(KEY_AND_A, nested_inputs(), "c b @include(if: $y)").rejection();
+    assert!(
+        error.contains("does not hold `a` at `t`") && error.contains("¬$x") && error.contains("$y"),
+        "{error}"
+    );
+}
+
+// `b` is demanded under `$x`, but the inner `$y` excludes its `a` where `$y` is false.
+//
+// The model's `nestedInnerExclusionCannotCoverXDemandIsRejected`. A control of changed behaviour.
+#[test]
+fn an_inner_condition_cannot_cover_a_demand_under_the_outer_one() {
+    let error = Sent::new(KEY_AND_A, nested_inputs(), GUARDED_B).rejection();
+    assert!(
+        error.contains("does not hold `a` at `t`") && error.contains("¬$y"),
+        "{error}"
+    );
+}
+
+// An untyped fragment under `$x` at the top admits `T`, and reads `a` where `b` selects it.
+//
+// The model's `untypedConditionedTopEntryIsAccepted`. A control of changed behaviour.
+#[test]
+fn an_untyped_conditioned_entry_admits_the_object() {
+    Sent::new(
+        GUARDED_A,
+        vec![
+            on_t(vec![], key_inputs()),
+            entry(None, vec![include("x")], vec![input("a", vec![])]),
+        ],
+        GUARDED_B,
+    )
+    .check()
+    .unwrap();
+}
+
+// The same fragment nested in an untyped one keeps its condition and admits the same object.
+//
+// The model's `untypedConditionedNestedEntryIsAccepted`. A control of changed behaviour.
+#[test]
+fn an_untyped_conditioned_entry_nested_in_an_untyped_one_admits_the_object() {
+    Sent::new(
+        GUARDED_A,
+        vec![
+            on_t(vec![], key_inputs()),
+            entry(
+                None,
+                vec![],
+                vec![entry(None, vec![include("x")], vec![input("a", vec![])])],
+            ),
+        ],
+        GUARDED_B,
+    )
+    .check()
+    .unwrap();
+}
+
+/// `c` unconditionally, and `b` under `$x` in a fragment of its own.
+const C_AND_GUARDED_B_CASES: &str = "... on T { c } ... on T @include(if: $x) { b }";
+
+// The entity fragment's own `@include(if: $x)` owes `a` only where `$x` holds, where its entry and
+// the fetch before supply it.
+//
+// The model's `entityFragmentDirectiveLimitsDemandIsAccepted`. A control of preserved behaviour.
+#[test]
+fn an_entity_fragments_condition_limits_its_demand() {
+    Sent::new(GUARDED_A, split_inputs(), GUARDED_B)
+        .cases(C_AND_GUARDED_B_CASES)
+        .check()
+        .unwrap();
+}
+
+// The fragment admits `b` under `$x` where the entry for its `a` is under `$y`: where `$x` holds
+// and `$y` does not, `a` is owed and not sent.
+//
+// The model's `entityFragmentAdmitsConfigurationItsEntryExcludesIsRejected`. A control of changed
+// behaviour.
+#[test]
+fn an_entity_fragment_admitting_what_its_entry_excludes_is_rejected() {
+    let error = Sent::new(
+        KEY_AND_A,
+        vec![
+            on_t(vec![], key_inputs()),
+            on_t(vec![include("y")], vec![input("a", vec![])]),
+        ],
+        GUARDED_B,
+    )
+    .cases(C_AND_GUARDED_B_CASES)
+    .rejection();
+    assert!(
+        error.contains("does not hold `a` at `t`") && error.contains("$x") && error.contains("¬$y"),
+        "{error}"
+    );
+}
+
+// The operation declares `$x` a `Boolean` with a default: the variable is declared, and the
+// configurations give it either value, an override of the default included.
+//
+// The model's `defaultedBooleanPassesTheBoundaryIsAccepted`. A control of changed behaviour.
+#[test]
+fn a_defaulted_boolean_passes_the_boundary() {
+    let fixture = conditional_requires_fixture();
+    let sent = Sent::new(
+        KEY_FIELDS,
+        vec![
+            on_t(vec![], key_inputs()),
+            on_t(vec![include("x"), skip("x")], vec![input("a", vec![])]),
+        ],
+        "c",
+    );
+    fixture
+        .check(
+            &sent.plan(&fixture),
+            "query($x: Boolean = false) { __typename @include(if: $x) t { c } }",
+        )
+        .unwrap();
+}
+
+// The entity fragment's own `@skip(if: $x)` owes `a` where `$x` is false alone, matching its entry
+// and the fetch before.
+//
+// The model's `entityFragmentSkipLimitsDemandIsAccepted`. A control of preserved behaviour.
+#[test]
+fn an_entity_fragments_skip_limits_its_demand() {
+    Sent::new(
+        "__typename id a @skip(if: $x)",
+        vec![
+            on_t(vec![], key_inputs()),
+            on_t(vec![skip("x")], vec![input("a", vec![])]),
+        ],
+        "c b @skip(if: $x)",
+    )
+    .cases("... on T { c } ... on T @skip(if: $x) { b }")
+    .check()
+    .unwrap();
+}
+
+// Both branches of a condition node on an undeclared `$missing` fetch everything the operation
+// asks: the variable alone is refused, by name.
+//
+// The model's `undeclaredConditionNodeWithSufficientBranchesIsRejected`. A control of changed
+// behaviour.
+#[test]
+fn an_undeclared_condition_node_variable_is_refused_where_both_branches_suffice() {
+    let fixture = conditional_requires_fixture();
+    let fetch = || Some(root_fetch("Subgraph1", "{ v { id } }"));
+    let plan = plan_of(&fixture, condition("missing", fetch(), fetch()));
+    let error = fixture.rejection(&plan, "{ v { id } }");
+    assert!(
+        error.contains("the plan conditions on `$missing`, which the operation does not declare"),
+        "{error}"
+    );
+}
+
+// An `_entities` fragment with no type condition is refused as the fetch's syntax, where a
+// `requires` entry may have none; the typed fragment under it, written as a fragment of its own,
+// is accepted.
+//
+// A port control of the model's `entityOperationWellFormed`. A control of preserved behaviour.
+#[test]
+fn an_untyped_entities_fragment_is_refused_as_syntax() {
+    let entries = vec![on_t(vec![], key_inputs())];
+    let error = Sent::new(KEY_FIELDS, entries.clone(), "c @include(if: $x)")
+        .cases("... @include(if: $x) { ... on T { c } }")
+        .rejection();
+    assert!(
+        error.contains("an `_entities` selection must carry a type condition"),
+        "{error}"
+    );
+    Sent::new(KEY_FIELDS, entries, "c @include(if: $x)")
+        .cases("... on T @include(if: $x) { c }")
+        .check()
+        .unwrap();
+}
+
+//--------------------------------------------------------------------------------------------------
+// Grounding a type condition against its position, through coverage
+
+/// `media` read under the key as `inputs`, demanded by `field`.
+fn media_sent(inputs: Vec<serde_json::Value>, field: &str) -> Result<(), CorrectnessError> {
+    Sent::new(
+        "__typename id media { __typename id }",
+        vec![on_t(vec![], key_inputs_and(vec![input("media", inputs)]))],
+        field,
+    )
+    .check()
+}
+
+// A demand naming the whole interface, `media { ... on Media { id } }`, admits every object at that
+// position, and `media { id }` covers it.
+//
+// The model's `conditionNamingThePositionItselfIsMatched`, migrated to coverage. A control of
+// preserved behaviour.
+#[test]
+fn a_demand_naming_the_position_itself_is_covered() {
+    media_sent(vec![input("id", vec![])], "forMedia").unwrap();
+}
+
+// An `id` sent for every `Media` covers a `Photo`'s demand; a `Video`'s is available surplus.
+//
+// The model's `broaderEntryCoversNarrowedDemand`, which replaced
+// `realNarrowingInTheDemandIsNotMatched`. A control of changed behaviour.
+#[test]
+fn a_broader_entry_covers_a_narrowed_demand() {
+    media_sent(vec![input("id", vec![])], "forPhotos").unwrap();
+}
+
+// An `id` sent for a `Photo` alone does not cover a demand on every `Media`: a `Video` still owes
+// it.
+//
+// The model's `narrowedEntryDoesNotCoverBroaderDemand`, which replaced `narrowerEntryIsMatched`. A
+// control of preserved behaviour.
+#[test]
+fn a_narrowed_entry_does_not_cover_a_broader_demand() {
+    let error = media_sent(
+        vec![entry(Some("Photo"), vec![], vec![input("id", vec![])])],
+        "forAll",
+    )
+    .expect_err("a `Video` owes its `id`")
+    .to_string();
+    assert!(
+        error.contains("does not hold `id` at `t.media`, a `Video`"),
+        "{error}"
+    );
+}
+
+//--------------------------------------------------------------------------------------------------
+// What conditional entries cost
+//
+// The model's growth controls count complete assignments: two for any number of entries over one
+// variable, 2, 4 and 8 for one, two and three independent ones. This checker enumerates no
+// assignment, so those counts are not its to reach; what it owes is that an entry's conditions add
+// the work of reading them and the obligations they guard, never a configuration product. Each test
+// below states the work and storage it expects of a family before it runs: the selections and
+// literals the projection reads and the regions it writes, exact in the family's size; the
+// obligations decided and the most clauses one region held, either the same at every size or
+// growing by a constant per entry; and the contributions the representation holds. A product over
+// `n` independent variables would make a region or the obligations grow as `2ⁿ`.
+
+/// The conditional world with `fields` more fields of `T`, `f1` to `fN`, which `Subgraph1`
+/// resolves and nothing requires.
+fn conditional_world_with_fields(fields: usize) -> Fixture {
+    let supergraph = include_str!("testdata/conditional_requires.graphql");
+    let opening = "type T implements I @join__implements(graph: SUBGRAPH1, interface: \"I\") \
+                   @join__type(graph: SUBGRAPH1, key: \"id\") @join__type(graph: SUBGRAPH2, key: \"id\") {\n";
+    let added: String = (1..=fields)
+        .map(|i| format!("  f{i}: Int @join__field(graph: SUBGRAPH1)\n"))
+        .collect();
+    assert!(
+        supergraph.contains(opening),
+        "the fixture's `T` is where it was"
+    );
+    Fixture::new(&supergraph.replacen(opening, &format!("{opening}{added}"), 1))
+}
+
+/// The key, then `n` entries each reading `fields(i)` under `@include(if: variable(i))`.
+fn conditioned_entries(
+    n: usize,
+    variable: impl Fn(usize) -> String,
+    fields: impl Fn(usize) -> String,
+) -> Vec<serde_json::Value> {
+    let mut entries = vec![on_t(vec![], key_inputs())];
+    entries.extend(
+        (1..=n).map(|i| on_t(vec![include(&variable(i))], vec![input(&fields(i), vec![])])),
+    );
+    entries
+}
+
+fn sent_work(fixture: &Fixture, sent: &Sent<'_>) -> (Result<(), ComparisonError>, Work) {
+    family_check(fixture, &sent.plan(fixture), &sent.operation())
+}
+
+// Entries over one variable, `n` of them, each reading `a` under `$x`. Expected, before the run:
+// the projection reads `2n + 3` selections (the key's fragment and its two fields, each entry's
+// fragment and its field) and `n` literals, and the boundary `n` references; it writes `6n + 9`
+// regions (three per field read, four for the key's merge, five for the first entry's and six for
+// every later one's, which narrows the explicit selection the one before left); it scans nothing,
+// no entry reading a composite. Everything else is the same at every `n`: `a`'s regions stay one
+// clause, `$x`, so the obligations decided, the most clauses a region held, the most variables an
+// obligation kept, and the three contributions the representation holds with their literals.
+//
+// The work-control counterpart of the model's
+// `fixedVariableEntriesKeepTwoConfigurationsIsAccepted`, at its three and six entries and beyond.
+#[test]
+fn entries_over_one_variable_add_no_configuration_axis() {
+    let fixture = conditional_requires_fixture();
+    let mut constant: Option<Vec<u64>> = None;
+    for n in [3u64, 6, 16, 32] {
+        let sent = Sent::new(
+            KEY_AND_A,
+            conditioned_entries(n as usize, |_| "x".to_string(), |_| "a".to_string()),
+            "c",
+        );
+        let (verdict, work) = sent_work(&fixture, &sent);
+        verdict.unwrap();
+        assert_eq!(work.entry_selections.get(), 2 * n + 3, "selections at {n}");
+        assert_eq!(work.entry_literals.get(), n, "literals at {n}");
+        assert_eq!(work.boolean_references.get(), n, "references at {n}");
+        assert_eq!(work.projection_writes.get(), 6 * n + 9, "writes at {n}");
+        assert_eq!(work.projection_scans.get(), 0, "scans at {n}");
+        let same = vec![
+            work.obligations.get(),
+            work.largest_region_clauses.get(),
+            work.projection_support_max.get(),
+            work.held_contributions.get(),
+            work.held_guard_literals.get(),
+        ];
+        assert_eq!(work.held_contributions.get(), 3, "held at {n}");
+        match &constant {
+            None => constant = Some(same),
+            Some(constant) => assert_eq!(&same, constant, "the same at {n}"),
+        }
+    }
+}
+
+// Independent variables over one field, `n` of them, each entry reading `a` under its own `$xᵢ`:
+// `a`'s regions are the `n` clauses `$x₁ ∨ … ∨ $xₙ`, and nothing multiplies them. Expected: each
+// clause one availability and one rewrite-agreement obligation, so the obligations grow by exactly
+// two per variable; the most clauses one region held is `n + 2`, the union of the regions the
+// representation's top-level locations are present in, `__typename`'s, `id`'s and `a`'s `n`,
+// before simplification absorbs it, never `2ⁿ`; the representation still holds three
+// contributions.
+//
+// The work-control counterpart of the model's
+// `independentEntryVariablesAddConfigurationAxesIsAccepted`, whose 2, 4 and 8 assignments for one,
+// two and three variables this checker does not enumerate.
+#[test]
+fn independent_entry_variables_are_decided_apart() {
+    let fixture = conditional_requires_fixture();
+    let mut base: Option<u64> = None;
+    for n in [1u64, 2, 3, 8] {
+        let sent = Sent::new(
+            KEY_AND_A,
+            conditioned_entries(n as usize, |i| format!("x{i}"), |_| "a".to_string()),
+            "c",
+        );
+        let (verdict, work) = sent_work(&fixture, &sent);
+        verdict.unwrap();
+        assert_eq!(work.entry_literals.get(), n, "literals at {n}");
+        assert_eq!(work.held_contributions.get(), 3, "held at {n}");
+        let (obligations, largest) = (work.obligations.get(), work.largest_region_clauses.get());
+        let rest = *base.get_or_insert(obligations - 2 * n);
+        assert_eq!(obligations, rest + 2 * n, "obligations at {n}");
+        assert_eq!(largest, n + 2, "the most clauses at {n}");
+    }
+}
+
+// `a` is never fetched and the entries read it under `$x` and under `$y`: the rejection names the
+// read in a configuration of the entries' own variables, which the boundary read beforehand.
+//
+// The work-control counterpart of the model's `rejectedReadKeepsEntryConfigurationAxesIsRejected`.
+#[test]
+fn a_rejected_read_keeps_its_entry_variables() {
+    let fixture = conditional_requires_fixture();
+    let sent = Sent::new(
+        KEY_FIELDS,
+        conditioned_entries(2, |i| ["x", "y"][i - 1].to_string(), |_| "a".to_string()),
+        "c",
+    );
+    let (verdict, work) = sent_work(&fixture, &sent);
+    let error = verdict.unwrap_err().to_string();
+    assert!(
+        error.contains("the representation reads `a` at `t`, a `T` when $")
+            && error.contains(READ_UNFETCHED),
+        "{error}"
+    );
+    assert_eq!(work.boolean_references.get(), 2);
+}
+
+// An entry under `@include(if: false)` and `$x`, nesting one under `$y`: the boundary reads its
+// three conditions, the literal and both variables, before anything is folded; the projection
+// reads the outer two, excludes the entry at the literal and reads nothing below it, so no
+// obligation keeps `$x` or `$y`: the obligations and the most variables one kept are those of the
+// same plan without the entry.
+//
+// The work-control counterpart of the model's
+// `nestedExcludedLiteralsKeepBothConfigurationAxesIsAccepted`.
+#[test]
+fn variables_behind_a_false_literal_are_read_at_the_boundary_alone() {
+    let fixture = conditional_requires_fixture();
+    let excluded = on_t(
+        vec![include_literal(false), include("x")],
+        vec![on_t(vec![include("y")], vec![input("a", vec![])])],
+    );
+    let with = Sent::new(KEY_FIELDS, vec![on_t(vec![], key_inputs()), excluded], "c");
+    let (verdict, work) = sent_work(&fixture, &with);
+    verdict.unwrap();
+    assert_eq!(work.boolean_references.get(), 3);
+    assert_eq!(work.entry_literals.get(), 2);
+    let without = Sent::new(KEY_FIELDS, vec![on_t(vec![], key_inputs())], "c");
+    let operation = declaring_booleans(["x", "y"], "{ t { c } }");
+    let (verdict, alone) = family_check(&fixture, &without.plan(&fixture), &operation);
+    verdict.unwrap();
+    assert_eq!(work.obligations.get(), alone.obligations.get());
+    assert_eq!(
+        work.projection_support_max.get(),
+        alone.projection_support_max.get()
+    );
+}
+
+// Independent variables on separate obligations, `n` of them, each entry reading its own `fᵢ`
+// under its own `$xᵢ`. Expected, before the run: the projection reads `2n + 3` selections and `n`
+// literals, the boundary `n` references; it writes `5n + 10` regions, no entry's location written
+// by another; the representation holds `n + 2` contributions; each `fᵢ` owes one availability and
+// one rewrite-agreement obligation over `$xᵢ` alone, so the obligations grow by exactly two per
+// entry; the most variables one obligation kept is the same at every `n`, and the most clauses one
+// region held is `n + 2`, the union of the regions the top-level locations are present in before
+// simplification absorbs it, where a product of the `n` variables would make either `2ⁿ`.
+#[test]
+fn independent_variables_on_separate_obligations_grow_by_entry() {
+    let mut base: Option<(u64, u64)> = None;
+    for n in [4u64, 8, 16, 32] {
+        let fixture = conditional_world_with_fields(n as usize);
+        let fetched = format!(
+            "__typename id {}",
+            (1..=n)
+                .map(|i| format!("f{i}"))
+                .collect::<Vec<_>>()
+                .join(" ")
+        );
+        let sent = Sent::new(
+            &fetched,
+            conditioned_entries(n as usize, |i| format!("x{i}"), |i| format!("f{i}")),
+            "c",
+        );
+        let (verdict, work) = sent_work(&fixture, &sent);
+        verdict.unwrap();
+        assert_eq!(work.entry_selections.get(), 2 * n + 3, "selections at {n}");
+        assert_eq!(work.entry_literals.get(), n, "literals at {n}");
+        assert_eq!(work.boolean_references.get(), n, "references at {n}");
+        assert_eq!(work.projection_writes.get(), 5 * n + 10, "writes at {n}");
+        assert_eq!(work.held_contributions.get(), n + 2, "held at {n}");
+        assert_eq!(
+            work.largest_region_clauses.get(),
+            n + 2,
+            "the most clauses at {n}"
+        );
+        let (rest, support) = *base.get_or_insert((
+            work.obligations.get() - 2 * n,
+            work.projection_support_max.get(),
+        ));
+        assert_eq!(work.obligations.get(), rest + 2 * n, "obligations at {n}");
+        assert_eq!(work.projection_support_max.get(), support, "support at {n}");
+    }
+}
+
+// What the key choice, a bare copy and the rewrite agreement cost, each stated before the run. A
+// key covering every configuration is chosen outright: the planner's plan tries its one key and
+// collects no failure. Where no key does, each key's failures are collected where every key before
+// it failed: `V`'s `id` fails where `$x` is false, one clause, and `id2`, asked there alone,
+// covers it and fails nowhere. A
+// bare `u` copies the two readable locations under it, `right` and `extra`. A `typenameEquals`
+// filter splits a location's agreement in two, so a renamer after it is asked of both halves: with
+// the filtered renamer before an unrelated one, the agreement follows one state more at the one
+// location the filter reaches, read once as an explicit selection and once as a demanded field,
+// than with the same renamer unfiltered.
+#[test]
+fn the_key_choice_and_the_agreement_read_what_they_split() {
+    let world = conditional_requires_fixture();
+    let planner = Sent::new(
+        "__typename id ... on T @include(if: $test) { a }",
+        vec![
+            on_t(vec![], key_inputs()),
+            on_t(
+                vec![include("test")],
+                vec![input("__typename", vec![]), input("a", vec![])],
+            ),
+        ],
+        "c b @include(if: $test)",
+    );
+    let (verdict, work) = sent_work(&world, &planner);
+    verdict.unwrap();
+    assert_eq!(work.key_candidates.get(), 1);
+    assert_eq!(work.key_failure_clauses.get(), 0);
+    let keys = Sent::new(
+        "__typename id id2",
+        vec![
+            entry(
+                Some("V"),
+                vec![include("x")],
+                vec![input("__typename", vec![]), input("id", vec![])],
+            ),
+            entry(
+                Some("V"),
+                vec![skip("x")],
+                vec![input("__typename", vec![]), input("id2", vec![])],
+            ),
+        ],
+        "c",
+    )
+    .parent("v")
+    .cases("... on V { c }");
+    let (verdict, work) = sent_work(&world, &keys);
+    verdict.unwrap();
+    assert_eq!(work.key_candidates.get(), 2);
+    assert_eq!(work.key_failure_clauses.get(), 1);
+    let copied = Sent::new(
+        "__typename id u { right extra: left }",
+        copied_u(),
+        "onRight",
+    );
+    let (verdict, work) = sent_work(&world, &copied);
+    verdict.unwrap();
+    assert_eq!(work.copied_locations.get(), 2);
+
+    let books = fixture();
+    let renamed = |first: Vec<serde_json::Value>| {
+        let plan = book_requires_plan(
+            &books,
+            "__typename id __require_0_isbn: isbn",
+            aliased_isbn(),
+            serde_json::json!([
+                renamer(serde_json::Value::Array(first), "isbn"),
+                renamer(serde_json::json!([key("foo")]), "bar")
+            ]),
+        );
+        let (verdict, work) = family_check(&books, &plan, "{ feed { ... on Book { blurb } } }");
+        verdict.unwrap();
+        work.agreement_states.get()
+    };
+    let filtered = renamed(vec![typename_equals("Book"), key("__require_0_isbn")]);
+    let unfiltered = renamed(vec![key("__require_0_isbn")]);
+    assert_eq!(filtered, unfiltered + 2);
+}
+
+//--------------------------------------------------------------------------------------------------
+// The repair round: ancestor names per demand, a path's last element, explanations per
+// configuration, and keys failing below the copy the fetch runs on
+
+/// A `Photo`'s `a` and a `Video`'s `b` fetched under `p`, a `Video`'s `x` under `r`, all copied
+/// whole by a bare `media` and named back, in order, `media/[Photo]/p → a`, `media/[Video]/p → b`
+/// and, when `final_rename`, `media/b/r → x`.
+fn renamed_parts(final_rename: bool) -> Sent<'static> {
+    let mut rewrites = vec![
+        renamer(
+            serde_json::json!([key("media"), typename_equals("Photo"), key("p")]),
+            "a",
+        ),
+        renamer(
+            serde_json::json!([key("media"), typename_equals("Video"), key("p")]),
+            "b",
+        ),
+    ];
+    if final_rename {
+        rewrites.push(renamer(
+            serde_json::json!([key("media"), key("b"), key("r")]),
+            "x",
+        ));
+    }
+    Sent::new(
+        "__typename id media { __typename ... on Photo { p: a { x } } ... on Video { p: b { r: x } } }",
+        vec![on_t(vec![], key_inputs_and(vec![input("media", vec![])]))],
+        "forParts",
+    )
+    .rewrites(serde_json::Value::Array(rewrites))
+}
+
+// `forParts` demands a `Photo`'s `a { x }` and a `Video`'s `b { x }`, both read under `p`, the
+// `Video`'s `x` under `r`. The model's agreement reads each demanded field under the names of the
+// fields leading to it in its own configuration, `media.a.x` for a `Photo` and `media.b.x` for a
+// `Video`, so the three renamers carry each read key to its name and back: the model accepts.
+//
+// A control of the demand's ancestor names, which a shared read key must keep per configuration.
+#[test]
+fn a_shared_read_key_keeps_each_configurations_ancestor_names() {
+    renamed_parts(true).check().unwrap();
+}
+
+// Without `media/b/r → x` a `Video`'s `x` is sent as `r`, and the demanded `x` is not held: the
+// model rejects.
+//
+// Its neighbour.
+#[test]
+fn a_shared_read_key_without_its_last_rename_is_rejected() {
+    let error = renamed_parts(false).rejection();
+    assert!(
+        error.contains("does not hold `x` at `t.media.p`"),
+        "{error}"
+    );
+}
+
+// A renamer whose path ends at an index after `id` renames nothing, as `rename_key_at` follows it:
+// the representation sends `id` as it is, and the model accepts.
+//
+// A control of a renamer's last element: only a path ending at a key renames.
+#[test]
+fn a_renamer_ending_at_an_index_renames_nothing() {
+    Sent::new(KEY_FIELDS, vec![on_t(vec![], key_inputs())], "c")
+        .rewrites(renaming(
+            &[key("id"), serde_json::json!({ "AnyIndex": null })],
+            "other",
+        ))
+        .check()
+        .unwrap();
+}
+
+// Its neighbour ending at `id` sends the key away: the model rejects.
+#[test]
+fn a_renamer_ending_at_the_key_sends_it_away() {
+    let error = Sent::new(KEY_FIELDS, vec![on_t(vec![], key_inputs())], "c")
+        .rewrites(renaming(&[key("id")], "other"))
+        .rejection();
+    assert!(
+        error.contains("the representation sends `id` at `t`, a `T` as `id`"),
+        "{error}"
+    );
+}
+
+// `V`'s `id` is sent where `$x` and `$y` are both false and `id2` where `$x` holds or `$y` does not:
+// neither key is sent where `$x` is false and `$y` holds, and the model rejects there. Each key's
+// failure is explained in that configuration, `id`'s too, which also fails where `$x` holds.
+//
+// A control of the explanation of a configuration no key covers.
+#[test]
+fn every_keys_failure_is_explained_where_no_key_covers() {
+    let error = Sent::new(
+        "__typename id id2",
+        vec![
+            entry(Some("V"), vec![], vec![input("__typename", vec![])]),
+            entry(
+                Some("V"),
+                vec![skip("x"), skip("y")],
+                vec![input("id", vec![])],
+            ),
+            entry(Some("V"), vec![include("x")], vec![input("id2", vec![])]),
+            entry(Some("V"), vec![skip("y")], vec![input("id2", vec![])]),
+        ],
+        "c",
+    )
+    .parent("v")
+    .cases("... on V { c }")
+    .rejection();
+    assert!(
+        error.contains("through none of its resolvable keys when `v` is `V` ∧ ¬$x ∧ $y"),
+        "{error}"
+    );
+    assert!(
+        error.contains("does not hold `id` at `v`, a `V` when ¬$x ∧ $y")
+            && error.contains("does not hold `id2` at `v`, a `V` when ¬$x ∧ $y"),
+        "{error}"
+    );
+    assert!(!error.contains("a `V` when $x"), "{error}");
+}
+
+/// `W`'s `org`, `team` and `id2` fetched, `W` sent `entries` and asked for `c`.
+fn w_sent(entries: Vec<serde_json::Value>) -> Sent<'static> {
+    Sent::new("__typename org { id } team { id } id2", entries, "c")
+        .parent("w")
+        .cases("... on W { c }")
+}
+
+/// `container` sent in every configuration, its `id` under `condition`.
+fn retained(container: &str, condition: serde_json::Value) -> serde_json::Value {
+    input(
+        container,
+        vec![entry(None, vec![condition], vec![input("id", vec![])])],
+    )
+}
+
+// `org` is sent in every configuration and its `id` only where `$x` holds, `id2` where it does not:
+// the model resolves `org { id }` where `$x` holds and `id2` where it does not, and accepts. The
+// key `org { id }` fails below `w`, at `w.org`, where `$x` is false.
+//
+// A control of a key failing below the copy the fetch runs on.
+#[test]
+fn a_composite_key_failing_below_the_fetch_is_covered_by_another_key() {
+    w_sent(vec![
+        entry(
+            Some("W"),
+            vec![],
+            vec![input("__typename", vec![]), retained("org", include("x"))],
+        ),
+        entry(Some("W"), vec![skip("x")], vec![input("id2", vec![])]),
+    ])
+    .check()
+    .unwrap();
+}
+
+// `org` and `team` are both sent in every configuration, `org.id` where `$x` holds and `team.id`
+// where it does not: the model resolves `org { id }` and `team { id }` in turn, and accepts.
+//
+// A control of two composite keys failing on different branches.
+#[test]
+fn two_composite_keys_failing_on_different_branches_are_accepted() {
+    w_sent(vec![entry(
+        Some("W"),
+        vec![],
+        vec![
+            input("__typename", vec![]),
+            retained("org", include("x")),
+            retained("team", skip("x")),
+        ],
+    )])
+    .check()
+    .unwrap();
+}
+
+// `team.id` under `$y` instead: where `$x` and `$y` are both false neither composite key is sent
+// and `id2` is not either, so the model rejects there, the two composite keys failing on their own
+// branches together, each explained there.
+//
+// Its neighbour.
+#[test]
+fn two_composite_keys_failing_together_on_different_branches_are_rejected() {
+    let error = w_sent(vec![entry(
+        Some("W"),
+        vec![],
+        vec![
+            input("__typename", vec![]),
+            retained("org", include("x")),
+            retained("team", include("y")),
+        ],
+    )])
+    .rejection();
+    assert!(
+        error.contains("through none of its resolvable keys")
+            && error.contains("¬$x")
+            && error.contains("¬$y"),
+        "{error}"
+    );
+    assert!(
+        error.contains("does not hold `id` at `w.org`")
+            && error.contains("does not hold `id` at `w.team`")
+            && error.contains("does not hold `id2` at `w`"),
+        "{error}"
+    );
 }
