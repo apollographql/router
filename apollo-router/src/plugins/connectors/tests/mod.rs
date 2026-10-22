@@ -48,6 +48,7 @@ mod public_plugin;
 mod query_plan;
 mod quickstart;
 mod req_asserts;
+mod stream;
 mod url_properties;
 mod variables;
 
