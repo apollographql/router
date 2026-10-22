@@ -3,6 +3,7 @@ use serde_json::Number;
 use serde_json_bytes::Value as JSON;
 use shape::Shape;
 
+use crate::connectors::json_selection::ApplyContext;
 use crate::connectors::json_selection::ApplyToError;
 use crate::connectors::json_selection::ApplyToInternal;
 use crate::connectors::json_selection::MethodArgs;
@@ -14,7 +15,6 @@ use crate::connectors::json_selection::location::Ranged;
 use crate::connectors::json_selection::location::WithRange;
 use crate::connectors::json_selection::methods::common::could_satisfy;
 use crate::connectors::json_selection::methods::common::present_part;
-use crate::connectors::spec::ConnectSpec;
 use crate::impl_arrow_method;
 
 /// This module exports a series of math functions (add, sub, mul, div, mod) which accept a number, and are applied
@@ -36,14 +36,15 @@ pub(super) fn arithmetic_method(
     data: &JSON,
     vars: &VarsWithPathsMap,
     input_path: &InputPath<JSON>,
-    spec: ConnectSpec,
+    context: &ApplyContext,
 ) -> (Option<JSON>, Vec<ApplyToError>) {
+    let spec = context.spec();
     if let Some(MethodArgs { args, .. }) = method_args {
         if let JSON::Number(result) = data {
             let mut result = result.clone();
             let mut errors = Vec::new();
             for arg in args {
-                let (value_opt, arg_errors) = arg.apply_to_path(data, vars, input_path, spec);
+                let (value_opt, arg_errors) = arg.apply_to_path(data, vars, input_path, context);
                 errors.extend(arg_errors);
                 if let Some(JSON::Number(n)) = value_opt {
                     if let Some(new_result) = op(&result, &n) {
@@ -248,9 +249,17 @@ macro_rules! infix_math_method {
             data: &JSON,
             vars: &VarsWithPathsMap,
             input_path: &InputPath<JSON>,
-            spec: ConnectSpec,
+            context: &ApplyContext,
         ) -> (Option<JSON>, Vec<ApplyToError>) {
-            arithmetic_method(method_name, method_args, $op, data, vars, input_path, spec)
+            arithmetic_method(
+                method_name,
+                method_args,
+                $op,
+                data,
+                vars,
+                input_path,
+                context,
+            )
         }
     };
 }

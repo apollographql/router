@@ -2241,6 +2241,7 @@ mod tests {
         Connector {
             spec: ConnectSpec::V0_1,
             schema_subtypes_map: Connector::subtypes_map_from_schema(&schema),
+            methods: None,
             id: ConnectId::new(
                 "subgraph_name".into(),
                 None,

@@ -1,6 +1,7 @@
 use serde_json_bytes::Value as JSON;
 use shape::Shape;
 
+use crate::connectors::json_selection::ApplyContext;
 use crate::connectors::json_selection::ApplyToError;
 use crate::connectors::json_selection::ApplyToInternal;
 use crate::connectors::json_selection::MethodArgs;
@@ -14,7 +15,6 @@ use crate::connectors::json_selection::methods::common::may_be_missing;
 use crate::connectors::json_selection::methods::common::number_value_as_float;
 use crate::connectors::json_selection::methods::common::or_missing;
 use crate::connectors::json_selection::methods::common::present_arg;
-use crate::connectors::spec::ConnectSpec;
 use crate::impl_arrow_method;
 
 impl_arrow_method!(EqMethod, eq_method, eq_shape);
@@ -29,12 +29,13 @@ fn eq_method(
     data: &JSON,
     vars: &VarsWithPathsMap,
     input_path: &InputPath<JSON>,
-    spec: ConnectSpec,
+    context: &ApplyContext,
 ) -> (Option<JSON>, Vec<ApplyToError>) {
+    let spec = context.spec();
     if let Some(MethodArgs { args, .. }) = method_args
         && let [arg] = args.as_slice()
     {
-        let (value_opt, arg_errors) = arg.apply_to_path(data, vars, input_path, spec);
+        let (value_opt, arg_errors) = arg.apply_to_path(data, vars, input_path, context);
         let mut apply_to_errors = arg_errors;
         let matches = value_opt.and_then(|value| match (data, &value) {
             // Number comparisons: Always convert to float so 1 == 1.0

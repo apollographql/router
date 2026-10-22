@@ -1,6 +1,7 @@
 use serde_json_bytes::Value as JSON;
 use shape::Shape;
 
+use crate::connectors::json_selection::ApplyContext;
 use crate::connectors::json_selection::ApplyToError;
 use crate::connectors::json_selection::ApplyToInternal;
 use crate::connectors::json_selection::MethodArgs;
@@ -9,7 +10,6 @@ use crate::connectors::json_selection::VarsWithPathsMap;
 use crate::connectors::json_selection::immutable::InputPath;
 use crate::connectors::json_selection::location::Ranged;
 use crate::connectors::json_selection::location::WithRange;
-use crate::connectors::spec::ConnectSpec;
 use crate::impl_arrow_method;
 
 impl_arrow_method!(HasMethod, has_method, has_shape);
@@ -20,8 +20,9 @@ fn has_method(
     data: &JSON,
     vars: &VarsWithPathsMap,
     input_path: &InputPath<JSON>,
-    spec: ConnectSpec,
+    context: &ApplyContext,
 ) -> (Option<JSON>, Vec<ApplyToError>) {
+    let spec = context.spec();
     let Some(arg) = method_args.and_then(|MethodArgs { args, .. }| args.first()) else {
         return (
             None,
@@ -33,7 +34,7 @@ fn has_method(
             )],
         );
     };
-    match arg.apply_to_path(data, vars, input_path, spec) {
+    match arg.apply_to_path(data, vars, input_path, context) {
         (Some(JSON::Number(ref n)), arg_errors) => {
             match (data, n.as_i64()) {
                 (JSON::Array(array), Some(index)) => {
