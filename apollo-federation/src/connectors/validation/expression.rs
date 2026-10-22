@@ -12,6 +12,7 @@ use apollo_compiler::collections::HashSet;
 use apollo_compiler::collections::IndexMap;
 use apollo_compiler::parser::LineColumn;
 use itertools::Itertools;
+use shape::PrintLimits;
 use shape::Shape;
 use shape::ShapeCase;
 use shape::location::Location;
@@ -301,8 +302,12 @@ pub(crate) fn validate(
                 "expected {} but received incompatible {}\nDetails: `{}` does not accept `{}`",
                 short_shape_name(&mismatch.expected),
                 short_shape_name(&mismatch.received),
-                mismatch.expected.pretty_print(),
-                mismatch.received.pretty_print(),
+                mismatch
+                    .expected
+                    .pretty_print_bounded(PrintLimits::default()),
+                mismatch
+                    .received
+                    .pretty_print_bounded(PrintLimits::default()),
             ),
             locations: transform_locations(mismatch.received.locations(), context, expression),
         })
@@ -334,8 +339,8 @@ pub(crate) fn validate_could_satisfy(
                 "expected {} but received incompatible {}\nDetails: `{}` is never `{}`",
                 short_shape_name(expected_shape),
                 short_shape_name(&actual_shape),
-                actual_shape.pretty_print(),
-                expected_shape.pretty_print(),
+                actual_shape.pretty_print_bounded(PrintLimits::default()),
+                expected_shape.pretty_print_bounded(PrintLimits::default()),
             ),
             locations: transform_locations(actual_shape.locations(), context, expression),
         })
@@ -1406,6 +1411,22 @@ mod tests {
             expected_location,
             err.locations
         );
+    }
+
+    #[test]
+    fn mismatch_message_bounds_the_printed_shape() {
+        // Deeper and wider than `PrintLimits::default()` prints.
+        let fields = (0..20)
+            .map(|i| format!("f{i}: {i}"))
+            .collect::<Vec<_>>()
+            .join(", ");
+        let selection =
+            format!("$({{ a: {{ b: {{ c: {{ d: {{ deepest: 1 }} }} }} }}, {fields} }})");
+        let err = validate_with_context(&selection, scalars(), ConnectSpec::latest())
+            .expect_err("objects are not allowed");
+        assert!(err.message.contains('…'), "{}", err.message);
+        assert!(!err.message.contains("deepest"), "{}", err.message);
+        assert!(!err.message.contains("f19"), "{}", err.message);
     }
 
     #[test]

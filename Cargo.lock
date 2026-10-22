@@ -7229,9 +7229,9 @@ dependencies = [
 
 [[package]]
 name = "shape"
-version = "0.9.1"
+version = "0.9.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "6b7b173db9755192afa577a469506cf52c81274ca66aeac3637027717ab93b1e"
+checksum = "05f825864db703c48d426d7226769632692cd4c23a84bcacf5316e526a73042c"
 dependencies = [
  "indexmap 2.14.2",
  "serde_json",
