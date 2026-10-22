@@ -4,11 +4,8 @@ use std::collections::HashSet;
 use std::ops::ControlFlow;
 use std::sync::Arc;
 
-use apollo_federation::connectors::runtime::errors::Error as ConnectorError;
-use apollo_federation::connectors::runtime::errors::RuntimeError;
 use apollo_federation::connectors::runtime::http_json_transport::HttpRequest as ConnectorsHttpRequest;
 use apollo_federation::connectors::runtime::http_json_transport::TransportRequest;
-use apollo_federation::connectors::runtime::http_json_transport::TransportResponse;
 use apollo_federation::connectors::runtime::responses::MappedResponse;
 use schemars::JsonSchema;
 use serde::Deserialize;
@@ -37,6 +34,7 @@ use crate::plugins::telemetry::config_new::conditions::Condition;
 use crate::plugins::telemetry::config_new::connector::selectors::ConnectorSelector;
 use crate::services::PipelineStep;
 use crate::services::connector::request_service;
+use crate::services::connector::request_service::TransportOutcome;
 use crate::services::external::Control;
 use crate::services::external::Externalizable;
 use crate::services::external::externalize_header_map;
@@ -344,7 +342,7 @@ where
 
         const DEFAULT_BREAK_MESSAGE: &str = "Internal error";
 
-        let (message, code, extra_extensions) = match body {
+        let (message, code, extensions) = match body {
             Value::String(s) if !s.as_str().is_empty() => (
                 s.as_str().to_owned(),
                 COPROCESSOR_ERROR_EXTENSION.to_string(),
@@ -363,21 +361,14 @@ where
             ),
         };
 
-        let mut runtime_error = RuntimeError::new(&message, &request.key).with_code(code);
-        for (k, v) in extra_extensions {
-            runtime_error = runtime_error.extension(k, v);
-        }
-
-        let res = request_service::Response {
-            context: request.context.clone(),
-            subgraph_name: request.connector.id.subgraph_name.to_string(),
-            transport_result: Err(ConnectorError::TransportFailure(message)),
-            mapped_response: MappedResponse::Error {
-                error: runtime_error,
-                key: request.key,
-                problems: Vec::new(),
-            },
-        };
+        let res = request_service::Response::error_from_request(
+            request.context.clone(),
+            request.connector,
+            request.key,
+            message,
+            code,
+            extensions,
+        );
 
         if let Some(context) = co_processor_output.context {
             for (mut key, value) in context.try_into_iter()? {
@@ -463,9 +454,8 @@ where
         return Ok(response);
     }
 
-    // Extract data from the transport result
-    let (headers_to_send, status_to_send) = match &response.transport_result {
-        Ok(TransportResponse::Http(http_response)) => {
+    let (headers_to_send, status_to_send) = match &response.transport_outcome {
+        TransportOutcome::Response(http_response) => {
             let headers = response_config
                 .headers
                 .then(|| externalize_header_map(&http_response.inner.headers));
@@ -488,7 +478,7 @@ where
                 .then(|| http_response.inner.status.as_u16());
             (headers, status)
         }
-        Ok(TransportResponse::MappingOnly) | Err(_) => (None, None),
+        TransportOutcome::MappingOnly | TransportOutcome::Error(_) => (None, None),
     };
 
     // Extract body from mapped response
@@ -555,13 +545,13 @@ where
     if let Some(control) = co_processor_output.control {
         let new_status = control.get_http_status()?;
         // Update the transport result status if it was successful
-        if let Ok(TransportResponse::Http(ref mut http_response)) = response.transport_result {
+        if let TransportOutcome::Response(ref mut http_response) = response.transport_outcome {
             http_response.inner.status = new_status;
         }
     }
 
     if let Some(headers) = co_processor_output.headers
-        && let Ok(TransportResponse::Http(ref mut http_response)) = response.transport_result
+        && let TransportOutcome::Response(ref mut http_response) = response.transport_outcome
     {
         http_response.inner.headers = internalize_header_map(headers)?;
     }
@@ -614,7 +604,7 @@ where
 
 /// Parse structured error from a coprocessor break response body.
 /// Expects a JSON object with an `"errors"` array containing GraphQL-style errors.
-/// Returns `(message, code, extra_extensions)`.
+/// Returns `(message, code, extensions)`.
 fn parse_connector_break_error(
     obj: &serde_json_bytes::Map<ByteString, Value>,
 ) -> (String, String, serde_json_bytes::Map<ByteString, Value>) {
@@ -638,7 +628,7 @@ fn parse_connector_break_error(
         .map(|s| s.to_string())
         .unwrap_or(default_msg);
 
-    let mut extra_extensions = serde_json_bytes::Map::default();
+    let mut extensions = serde_json_bytes::Map::default();
     let code = if let Some(Value::Object(ext)) = first_error.get("extensions") {
         let code = ext
             .get("code")
@@ -646,14 +636,129 @@ fn parse_connector_break_error(
             .map(|s| s.to_string())
             .unwrap_or(default_code);
         for (k, v) in ext.iter() {
-            if k.as_str() != "code" {
-                extra_extensions.insert(k.clone(), v.clone());
-            }
+            extensions.insert(k.clone(), v.clone());
         }
         code
     } else {
         default_code
     };
 
-    (message, code, extra_extensions)
+    (message, code, extensions)
+}
+
+#[cfg(test)]
+mod tests {
+    use std::sync::Arc;
+
+    use apollo_federation::connectors::JSONSelection;
+    use apollo_federation::connectors::runtime::key::ResponseKey;
+    use futures::future::BoxFuture;
+
+    use super::*;
+    use crate::plugins::telemetry::config::AttributeValue;
+    use crate::plugins::telemetry::config_new::conditions::SelectorOrValue;
+    use crate::plugins::telemetry::config_new::selectors::ResponseStatus;
+    use crate::services::router::body;
+    use crate::services::router::body::RouterBody;
+
+    type MockCallback = fn(
+        http::Request<RouterBody>,
+    ) -> BoxFuture<'static, Result<http::Response<RouterBody>, BoxError>>;
+
+    /// Minimal in-process coprocessor: drives a `tower_test` mock with the given callback.
+    /// Mirrors `supergraph::tests::mock_with_callback`, which is not reachable across modules.
+    fn mock_coprocessor(
+        callback: MockCallback,
+    ) -> tower_test::mock::Mock<HttpRequest, HttpResponse> {
+        let (mock, mut handle) = tower_test::mock::pair::<HttpRequest, HttpResponse>();
+        tokio::spawn(async move {
+            while let Some((req, responder)) = handle.next_request().await {
+                let context = req.context.clone();
+                if let Ok(response) = callback(req.http_request).await {
+                    responder.send_response(HttpResponse {
+                        http_response: response,
+                        context,
+                    });
+                }
+            }
+        });
+        mock
+    }
+
+    /// Echoes the request payload back as a valid coprocessor response, asserting that the
+    /// cache-hit payload carries `cacheHit: true` and no status (no HTTP call happened).
+    /// Echoes the request payload back as a valid coprocessor response.
+    fn echo_payload(
+        req: http::Request<RouterBody>,
+    ) -> BoxFuture<'static, Result<http::Response<RouterBody>, BoxError>> {
+        Box::pin(async move {
+            let bytes = body::into_bytes(req.into_body()).await.unwrap();
+            Ok(http::Response::builder()
+                .body(body::from_bytes(bytes))
+                .unwrap())
+        })
+    }
+
+    fn root_field_key() -> ResponseKey {
+        ResponseKey::RootField {
+            name: "hello".to_string(),
+            inputs: Default::default(),
+            selection: Arc::new(JSONSelection::parse("$.data").unwrap()),
+        }
+    }
+
+    // A condition built on a transport selector: the response status must equal 599. On a real
+    // HTTP response it is false unless the status is 599; on a cache hit the status is absent, so
+    // the selector yields `None` and the condition is false.
+    fn status_eq_599() -> Condition<ConnectorSelector> {
+        Condition::Eq([
+            SelectorOrValue::Selector(ConnectorSelector::ConnectorResponseStatus {
+                connector_http_response_status: ResponseStatus::Code,
+            }),
+            SelectorOrValue::Value(AttributeValue::I64(599)),
+        ])
+    }
+
+    #[tokio::test]
+    async fn connector_response_stage_still_gated_by_condition_on_http_response() {
+        // Negative control: for a real HTTP response, an unmatched transport condition still skips
+        // the stage — the cache-hit bypass must not turn the condition into a no-op.
+        let context = Context::new();
+        let response = request_service::Response::test_new(
+            context.clone(),
+            root_field_key(),
+            vec![],
+            serde_json_bytes::json!({}),
+            None,
+        );
+        // test_new sets a 200 HTTP transport result, which does not match `status == 599`.
+
+        let response_config = ConnectorResponseConf {
+            condition: status_eq_599(),
+            status_code: true,
+            ..Default::default()
+        };
+
+        let mut executed = false;
+        let result = process_connector_response_stage(
+            mock_coprocessor(echo_payload),
+            "http://test".to_string(),
+            "test_service".to_string(),
+            response,
+            response_config,
+            context,
+            &mut executed,
+            None,
+        )
+        .await;
+
+        assert!(result.is_ok(), "skipped stage should not error: {result:?}");
+        assert!(
+            !executed,
+            "connector_response stage must be skipped when a transport condition is unmatched on a real HTTP response"
+        );
+    }
+
+    // A condition the router *can* decide for a cached response: `mapped_response` is replayed on
+    // a hit, so `connector_on_response_error` still yields a value.
 }

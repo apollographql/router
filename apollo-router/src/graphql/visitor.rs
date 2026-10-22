@@ -139,7 +139,7 @@ mod tests {
 
         let mut visitor = FieldCounter::new();
         visitor.visit(&request, &response, &Default::default());
-        insta::with_settings!({sort_maps=>true}, { assert_yaml_snapshot!(visitor) })
+        insta::with_settings!({sort_maps=>true}, { assert_yaml_snapshot!(visitor); })
     }
 
     #[test]
@@ -154,7 +154,7 @@ mod tests {
 
         let mut visitor = FieldCounter::new();
         visitor.visit(&request, &response, &Default::default());
-        insta::with_settings!({sort_maps=>true}, { assert_yaml_snapshot!(visitor) })
+        insta::with_settings!({sort_maps=>true}, { assert_yaml_snapshot!(visitor); })
     }
 
     #[test]
@@ -169,7 +169,7 @@ mod tests {
 
         let mut visitor = FieldCounter::new();
         visitor.visit(&request, &response, &Default::default());
-        insta::with_settings!({sort_maps=>true}, { assert_yaml_snapshot!(visitor) })
+        insta::with_settings!({sort_maps=>true}, { assert_yaml_snapshot!(visitor); })
     }
 
     #[test]
@@ -184,7 +184,7 @@ mod tests {
 
         let mut visitor = FieldCounter::new();
         visitor.visit(&request, &response, &Default::default());
-        insta::with_settings!({sort_maps=>true}, { assert_yaml_snapshot!(visitor) })
+        insta::with_settings!({sort_maps=>true}, { assert_yaml_snapshot!(visitor); })
     }
 
     struct FieldCounter {

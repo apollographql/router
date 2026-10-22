@@ -9,7 +9,8 @@ use super::location::WithRange;
 use crate::connectors::json_selection::ShapeContext;
 use crate::connectors::spec::ConnectSpec;
 
-mod common;
+pub(super) mod common;
+pub(crate) use common::could_satisfy;
 
 // Two kinds of methods: public ones and not-yet-public ones. The future ones
 // have proposed implementations and tests, and some are even used within the
@@ -67,6 +68,8 @@ pub(super) enum ArrowMethod {
     Trim,
     TrimStart,
     TrimEnd,
+    WithWarning,
+    WithError,
 
     // Future methods:
     TypeOf,
@@ -120,6 +123,15 @@ pub(super) trait ArrowMethodImpl {
         spec: ConnectSpec,
     ) -> (Option<JSON>, Vec<ApplyToError>);
 
+    /// Computes the result shape of a call to this method.
+    ///
+    /// Errors in argument shapes don't need to be included in the result:
+    /// `ShapeContext::compute_method_shape` records the shape of each argument
+    /// as this method computes it with `compute_output_shape`, and adds their
+    /// errors to the result. That only works for an argument computed as a
+    /// whole. Parts of an argument computed separately, like the values of
+    /// `->match` pairs, are not recorded, so an error in a part that doesn't
+    /// end up in the result (like a `->match` pattern) is dropped.
     fn shape(
         &self,
         context: &ShapeContext,
@@ -188,6 +200,8 @@ impl std::ops::Deref for ArrowMethod {
             Self::Trim => &public::TrimMethod,
             Self::TrimStart => &public::TrimStartMethod,
             Self::TrimEnd => &public::TrimEndMethod,
+            Self::WithWarning => &public::WithWarningMethod,
+            Self::WithError => &public::WithErrorMethod,
 
             // Future methods:
             Self::TypeOf => &future::TypeOfMethod,
@@ -252,6 +266,8 @@ impl ArrowMethod {
             "trim" => Some(Self::Trim),
             "trimStart" => Some(Self::TrimStart),
             "trimEnd" => Some(Self::TrimEnd),
+            "withWarning" => Some(Self::WithWarning),
+            "withError" => Some(Self::WithError),
             _ => None,
         };
 
@@ -306,6 +322,8 @@ impl ArrowMethod {
                 | Self::Trim
                 | Self::TrimStart
                 | Self::TrimEnd
+                | Self::WithWarning
+                | Self::WithError
         )
     }
 }

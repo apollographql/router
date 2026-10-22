@@ -1,0 +1,23 @@
+---
+source: apollo-federation/src/connectors/validation/mod.rs
+expression: errors
+input_file: apollo-federation/src/connectors/validation/test_data/is_success/is_success_could_be_boolean_v0_5.graphql
+---
+[
+    Message {
+        code: InvalidIsSuccess,
+        message: "In `@connect(isSuccess:)` on `Query.size`: expected boolean but received incompatible number\nDetails: `Int` is never `Bool`",
+        locations: [
+            52:30..52:34,
+        ],
+    },
+    Message {
+        code: InvalidIsSuccess,
+        message: "In `@connect(isSuccess:)` on `Query.matchWithoutBoolean`: expected boolean but received incompatible union\nDetails: `One<1, \"x\">` is never `Bool`",
+        locations: [
+            59:40..59:41,
+            59:28..59:33,
+            59:48..59:51,
+        ],
+    },
+]

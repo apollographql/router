@@ -19,6 +19,10 @@ use crate::spec::selection::Selection;
 pub(crate) struct SubSelectionKey {
     pub(crate) defer_label: Option<String>,
     pub(crate) defer_conditions: BooleanValues,
+    /// Response keys from the operation root to the deferred fragment. A labeled `@defer` in a
+    /// fragment spread multiple times yields one subselection per spread position, sharing a
+    /// label and distinguished by this path.
+    pub(crate) defer_path: Vec<String>,
 }
 
 // Do not replace this with a derived Serialize implementation
@@ -28,10 +32,15 @@ impl Serialize for SubSelectionKey {
     where
         S: serde::Serializer,
     {
+        debug_assert!(
+            !self.defer_path.iter().any(|segment| segment.contains('|')),
+            "defer_path segments must not contain the `|` separator"
+        );
         let s = format!(
-            "{:?}|{}",
+            "{:?}|{}|{}",
             self.defer_conditions.bits,
-            self.defer_label.as_deref().unwrap_or("")
+            self.defer_label.as_deref().unwrap_or(""),
+            self.defer_path.join("/")
         );
         serializer.serialize_str(&s)
     }
@@ -52,14 +61,18 @@ impl Visitor<'_> for SubSelectionKeyVisitor {
 
     fn expecting(&self, formatter: &mut std::fmt::Formatter) -> std::fmt::Result {
         formatter
-            .write_str("a string containing the defer label and defer conditions separated by |")
+            .write_str("a string containing the defer conditions, label and path separated by |")
     }
 
     fn visit_str<E>(self, s: &str) -> Result<Self::Value, E>
     where
         E: serde::de::Error,
     {
-        if let Some((bits_str, label)) = s.split_once('|') {
+        if let Some((bits_str, rest)) = s.split_once('|') {
+            // Split from the right: `@defer(label:)` is an arbitrary string and may contain `|`,
+            // while path segments are response keys, which cannot. (The fallback parses the
+            // pre-`defer_path` two-field format, where the whole remainder is the label.)
+            let (label, path) = rest.rsplit_once('|').unwrap_or((rest, ""));
             Ok(SubSelectionKey {
                 defer_conditions: BooleanValues {
                     bits: bits_str
@@ -70,6 +83,11 @@ impl Visitor<'_> for SubSelectionKeyVisitor {
                     None
                 } else {
                     Some(label.to_string())
+                },
+                defer_path: if path.is_empty() {
+                    Vec::new()
+                } else {
+                    path.split('/').map(str::to_owned).collect()
                 },
             })
         } else {
@@ -137,6 +155,7 @@ pub(crate) fn collect_subselections(
                 SubSelectionKey {
                     defer_label: None,
                     defer_conditions,
+                    defer_path: Vec::new(),
                 },
                 SubSelectionValue {
                     selection_set: primary,
@@ -184,6 +203,18 @@ impl BooleanValues {
     }
 }
 
+/// Normalize a deferred response's path to the field response keys of `defer_path`: array
+/// indices and type conditions appear in response paths but not in query-derived paths.
+pub(crate) fn defer_path_from_response_path(path: &crate::json_ext::Path) -> Vec<String> {
+    path.0
+        .iter()
+        .filter_map(|element| match element {
+            crate::json_ext::PathElement::Key(key, _) => Some(key.clone()),
+            _ => None,
+        })
+        .collect()
+}
+
 /// Common arguments to multiple function calls
 struct Shared<'a> {
     defer_stats: &'a DeferStats,
@@ -200,6 +231,13 @@ impl Shared<'_> {
             Condition::No => false,
             Condition::Variable(name) => self.defer_conditions.eval(name, self.defer_stats),
         }
+    }
+
+    fn defer_path(&self) -> Vec<String> {
+        self.path
+            .iter()
+            .map(|(name, _)| name.as_str().to_owned())
+            .collect()
     }
 
     /// Take a selection set at `self.path` and reconstruct a selection set that belong
@@ -289,6 +327,7 @@ fn collect_from_selection_set<'a>(
                         SubSelectionKey {
                             defer_label: defer_label.clone(),
                             defer_conditions: shared.defer_conditions,
+                            defer_path: shared.defer_path(),
                         },
                         SubSelectionValue {
                             selection_set: shared.reconstruct_up_to_root(nested),
@@ -337,6 +376,7 @@ fn collect_from_selection_set<'a>(
                         SubSelectionKey {
                             defer_label: defer_label.clone(),
                             defer_conditions: shared.defer_conditions,
+                            defer_path: shared.defer_path(),
                         },
                         SubSelectionValue {
                             selection_set: shared.reconstruct_up_to_root(nested),
@@ -359,4 +399,44 @@ fn collect_from_selection_set<'a>(
         }
     }
     Ok(primary)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::BooleanValues;
+    use super::SubSelectionKey;
+
+    #[track_caller]
+    fn assert_round_trips(key: SubSelectionKey) {
+        let serialized = serde_json::to_string(&key).unwrap();
+        let deserialized: SubSelectionKey = serde_json::from_str(&serialized).unwrap();
+        assert_eq!(deserialized, key, "did not round trip through {serialized}");
+    }
+
+    /// `SubSelectionKey` is serialized as a JSON object key when a `Query` goes through the
+    /// distributed query plan cache, so it must round trip: a key that comes back different is a
+    /// lookup miss, and a missed deferred subselection silently yields an empty incremental
+    /// payload. `@defer(label:)` is an arbitrary string and may contain any number of the `|`
+    /// field separator; path segments are response keys, which cannot.
+    #[test]
+    fn sub_selection_key_round_trips() {
+        let cases = [
+            (None, &[][..]),
+            (Some("_UserFrag"), &["currentUser"][..]),
+            (Some("0"), &["currentUser", "activeOrganization"][..]),
+            (Some("_a|b"), &[][..]),
+            (Some("_a|b"), &["a", "b"][..]),
+            (Some("_a|b|c"), &["a", "b"][..]),
+            (Some("_a|"), &["a"][..]),
+        ];
+        for (defer_label, defer_path) in cases {
+            for bits in [0, 5] {
+                assert_round_trips(SubSelectionKey {
+                    defer_label: defer_label.map(str::to_owned),
+                    defer_conditions: BooleanValues { bits },
+                    defer_path: defer_path.iter().map(|s| (*s).to_owned()).collect(),
+                });
+            }
+        }
+    }
 }

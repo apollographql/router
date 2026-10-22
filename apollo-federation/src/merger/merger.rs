@@ -81,6 +81,7 @@ use crate::merger::merge_links::SupergraphInfo;
 use crate::schema::FederationSchema;
 use crate::schema::ValidFederationSchema;
 use crate::schema::directive_location::DirectiveLocationExt;
+use crate::schema::fed3_upgrader;
 use crate::schema::position::DirectiveDefinitionPosition;
 use crate::schema::position::DirectiveTargetPosition;
 use crate::schema::position::FieldDefinitionPosition;
@@ -191,6 +192,9 @@ impl Merger {
         options: CompositionOptions,
     ) -> Result<Self, FederationError> {
         let names: Vec<String> = subgraphs.iter().map(|s| s.name.clone()).collect();
+        // The hints each subgraph raised on its way to `Validated` are *not* seeded into the error
+        // reporter here: `compose` reports them itself, so that they survive a failure between
+        // validation and merging. Seeding them here as well reported each one twice.
         let mut error_reporter = ErrorReporter::new(names.clone());
         let latest_federation_version_used =
             Self::get_latest_federation_version_used(&subgraphs, &mut error_reporter).clone();
@@ -692,6 +696,10 @@ impl Merger {
         trace!("Removing redundant @join__field directives");
         self.remove_redundant_join_fields()?;
 
+        // Remove invalid @deprecated from implementing fields (after backfilling interface object fields)
+        trace!("Removing @deprecated from implementations of non-deprecated interface fields");
+        self.remove_invalid_implementation_deprecations();
+
         // Return result
         let (mut errors, hints) = self.error_reporter.into_errors_and_hints();
         if !errors.is_empty() {
@@ -750,7 +758,7 @@ impl Merger {
         // _assert_ that `Schema.validate()` doesn't throw as a sanity check.
         let supergraph_schema = merged
             .validate_or_return_self()
-            .map_err(|(_partial_schema, err)| Self::convert_to_merge_errors(err))?;
+            .map_err(|(_partial_schema, err)| CompositionError::from_federation_error(err))?;
 
         // Lastly, we validate that the API schema of the supergraph can be successfully computed,
         // which currently will surface issues around misuses of `@inaccessible` (there should be
@@ -766,18 +774,6 @@ impl Merger {
         )?;
 
         Ok(supergraph_schema)
-    }
-
-    /// Convert a FederationError into a Vec<CompositionError> for merge errors.
-    fn convert_to_merge_errors(error: FederationError) -> Vec<CompositionError> {
-        error
-            .into_errors()
-            .into_iter()
-            .map(|e| CompositionError::MergeError {
-                error: e,
-                locations: Vec::new(),
-            })
-            .collect()
     }
 
     /// Push non-internal errors as merge errors, but bubble up the first internal error.
@@ -2910,6 +2906,38 @@ format!("Field \"{field}\" of {} type \"{}\" is defined in some but not all subg
         }
 
         Ok(())
+    }
+
+    /// Enforces the 2025 spec rule that an implementing field may only be deprecated when every
+    /// interface field it implements is deprecated. Each subgraph can satisfy the rule on its own
+    /// while the merged schema does not, for example when the interface field is declared in a
+    /// different subgraph.
+    fn remove_invalid_implementation_deprecations(&mut self) {
+        let stripped =
+            fed3_upgrader::strip_invalid_implementation_deprecations(self.merged.schema_mut());
+        for stripped in stripped {
+            let locations = self.deprecated_locations(&stripped.type_name, &stripped.field_name);
+            self.error_reporter.add_hint(stripped.into_hint(locations));
+        }
+    }
+
+    /// Where `type_name.field_name` is deprecated in a subgraph schema.
+    fn deprecated_locations(&self, type_name: &Name, field_name: &Name) -> Vec<SubgraphLocation> {
+        self.subgraphs
+            .iter()
+            .filter_map(|subgraph| {
+                let schema = subgraph.schema().schema();
+                let directive = schema
+                    .type_field(type_name, field_name)
+                    .ok()?
+                    .directives
+                    .get("deprecated")?;
+                Some(SubgraphLocation {
+                    subgraph: subgraph.name.clone(),
+                    range: directive.line_column_range(&schema.sources)?,
+                })
+            })
+            .collect()
     }
 }
 
