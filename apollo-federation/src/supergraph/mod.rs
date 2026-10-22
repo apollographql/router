@@ -272,6 +272,10 @@ impl HintCodeDefinition {
     }
 }
 
+/// The oldest join spec version that can be extracted into subgraphs. Older versions are rejected
+/// with [`SingleFederationError::UnsupportedFederationVersion`].
+const MIN_SUPPORTED_JOIN_VERSION: Version = Version { major: 0, minor: 3 };
+
 /// Assumes the given schema has been validated.
 ///
 /// TODO: A lot of common data gets passed around in the functions called by this one, considering
@@ -284,7 +288,8 @@ pub(crate) fn extract_subgraphs_from_supergraph(
     let validate_default_values = supergraph_schema.schema().validate_default_values;
     let (link_spec_definition, join_spec_definition, context_spec_definition) =
         crate::validate_supergraph_for_query_planning(supergraph_schema)?;
-    let is_fed_1 = *join_spec_definition.version() == Version { major: 0, minor: 1 };
+    let join_version = join_spec_definition.version();
+    let is_fed_1 = *join_version == Version { major: 0, minor: 1 };
     let (mut subgraphs, federation_spec_definitions, graph_enum_value_name_to_subgraph_name) =
         collect_empty_subgraphs(
             supergraph_schema,
@@ -309,6 +314,13 @@ pub(crate) fn extract_subgraphs_from_supergraph(
         let unsupported = SingleFederationError::UnsupportedFederationVersion {
             message: String::from(
                 "Supergraphs composed with federation version 1 are not supported. Please recompose your supergraph with federation version 2 or greater",
+            ),
+        };
+        return Err(unsupported.into());
+    } else if *join_version < MIN_SUPPORTED_JOIN_VERSION {
+        let unsupported = SingleFederationError::UnsupportedFederationVersion {
+            message: format!(
+                "Supergraphs using join spec v{join_version} are not supported (minimum supported version is v{MIN_SUPPORTED_JOIN_VERSION}). Please recompose your supergraph with federation version 2.3 or greater",
             ),
         };
         return Err(unsupported.into());
@@ -2311,6 +2323,8 @@ mod tests {
     use insta::assert_snapshot;
 
     use crate::ValidFederationSubgraphs;
+    use crate::error::FederationError;
+    use crate::error::SingleFederationError;
     use crate::schema::FederationSchema;
 
     // JS PORT NOTE: these tests were ported from
@@ -2755,11 +2769,65 @@ mod tests {
     }
 
     #[test]
-    fn preserves_default_values_of_input_object_fields() {
+    fn rejects_supergraphs_using_join_v0_2() {
         let supergraph = r#"
             schema
               @link(url: "https://specs.apollo.dev/link/v1.0")
               @link(url: "https://specs.apollo.dev/join/v0.2", for: EXECUTION)
+            {
+              query: Query
+            }
+
+            directive @join__field(graph: join__Graph!, requires: join__FieldSet, provides: join__FieldSet, type: String, external: Boolean, override: String, usedOverridden: Boolean) repeatable on FIELD_DEFINITION | INPUT_FIELD_DEFINITION
+            directive @join__graph(name: String!, url: String!) on ENUM_VALUE
+            directive @join__implements(graph: join__Graph!, interface: String!) repeatable on OBJECT | INTERFACE
+            directive @join__type(graph: join__Graph!, key: join__FieldSet, extension: Boolean! = false, resolvable: Boolean! = true) repeatable on OBJECT | INTERFACE | UNION | ENUM | INPUT_OBJECT | SCALAR
+            directive @link(url: String, as: String, for: link__Purpose, import: [link__Import]) repeatable on SCHEMA
+
+            enum link__Purpose {
+              SECURITY
+              EXECUTION
+            }
+
+            scalar join__FieldSet
+            scalar link__Import
+
+            enum join__Graph {
+              A @join__graph(name: "a", url: "http://a")
+            }
+
+            type Query @join__type(graph: A) {
+              field: String @join__field(graph: A)
+            }
+        "#;
+
+        let schema = Schema::parse(supergraph, "supergraph.graphql").unwrap();
+        let error = super::extract_subgraphs_from_supergraph(
+            &FederationSchema::new(schema).unwrap(),
+            Some(true),
+        )
+        .unwrap_err();
+        assert!(
+            matches!(
+                error,
+                FederationError::SingleFederationError(
+                    SingleFederationError::UnsupportedFederationVersion { .. }
+                )
+            ),
+            "unexpected error: {error:?}"
+        );
+        assert_eq!(
+            error.to_string(),
+            "Supergraphs using join spec v0.2 are not supported (minimum supported version is v0.3). Please recompose your supergraph with federation version 2.3 or greater"
+        );
+    }
+
+    #[test]
+    fn preserves_default_values_of_input_object_fields() {
+        let supergraph = r#"
+            schema
+              @link(url: "https://specs.apollo.dev/link/v1.0")
+              @link(url: "https://specs.apollo.dev/join/v0.3", for: EXECUTION)
             {
               query: Query
             }
@@ -2770,7 +2838,9 @@ mod tests {
 
             directive @join__implements(graph: join__Graph!, interface: String!) repeatable on OBJECT | INTERFACE
 
-            directive @join__type(graph: join__Graph!, key: join__FieldSet, extension: Boolean! = false, resolvable: Boolean! = true) repeatable on OBJECT | INTERFACE | UNION | ENUM | INPUT_OBJECT | SCALAR
+            directive @join__type(graph: join__Graph!, key: join__FieldSet, extension: Boolean! = false, resolvable: Boolean! = true, isInterfaceObject: Boolean! = false) repeatable on OBJECT | INTERFACE | UNION | ENUM | INPUT_OBJECT | SCALAR
+            directive @join__unionMember(graph: join__Graph!, member: String!) repeatable on UNION
+            directive @join__enumValue(graph: join__Graph!) repeatable on ENUM_VALUE
 
             directive @link(url: String, as: String, for: link__Purpose, import: [link__Import]) repeatable on SCHEMA
 

@@ -54,6 +54,7 @@ use crate::spec::SpecError;
 
 pub(crate) const RUST_QP_MODE: &str = "rust";
 const UNSUPPORTED_FED1: &str = "fed1";
+const UNSUPPORTED_JOIN_VERSION: &str = "unsupported_join_version";
 const INTERNAL_INIT_ERROR: &str = "internal";
 
 const ENV_DISABLE_NON_LOCAL_SELECTIONS_CHECK: &str =
@@ -117,7 +118,11 @@ impl QueryPlannerService {
         match &result {
             Err(FederationError::SingleFederationError(error)) => match error {
                 SingleFederationError::UnsupportedFederationVersion { .. } => {
-                    metric_rust_qp_init(Some(UNSUPPORTED_FED1));
+                    if schema.federation_version() == Some(1) {
+                        metric_rust_qp_init(Some(UNSUPPORTED_FED1));
+                    } else {
+                        metric_rust_qp_init(Some(UNSUPPORTED_JOIN_VERSION));
+                    }
                 }
                 SingleFederationError::UnsupportedFeature {
                     message: _,
@@ -720,6 +725,27 @@ mod tests {
         );
 
         async {
+            let sdl = include_str!("../../tests/fixtures/supergraph-join-v0.2.graphql");
+            let config = Arc::default();
+            let schema = Schema::parse(sdl, &config).unwrap();
+            let error = QueryPlannerService::for_test(schema.into(), config)
+                .err()
+                .expect("expected error for join v0.2 supergraph");
+            assert_eq!(
+                error.to_string(),
+                "failed to initialize the query planner: Supergraphs using join spec v0.2 are not supported (minimum supported version is v0.3). Please recompose your supergraph with federation version 2.3 or greater"
+            );
+            assert_counter!(
+                "apollo.router.lifecycle.query_planner.init",
+                1,
+                "init.error_kind" = "unsupported_join_version",
+                "init.is_success" = false
+            );
+        }
+        .with_metrics()
+        .await;
+
+        async {
             let sdl = include_str!("../testdata/minimal_supergraph.graphql");
             let config = Arc::default();
             let schema = Schema::parse(sdl, &config).unwrap();
@@ -1213,6 +1239,13 @@ mod tests {
             "apollo.router.lifecycle.query_planner.init",
             1,
             "init.error_kind" = "fed1",
+            "init.is_success" = false
+        );
+        metric_rust_qp_init(Some(UNSUPPORTED_JOIN_VERSION));
+        assert_counter!(
+            "apollo.router.lifecycle.query_planner.init",
+            1,
+            "init.error_kind" = "unsupported_join_version",
             "init.is_success" = false
         );
         metric_rust_qp_init(Some(INTERNAL_INIT_ERROR));

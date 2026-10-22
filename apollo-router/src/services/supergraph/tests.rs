@@ -1616,7 +1616,7 @@ async fn root_typename_with_defer_in_defer() {
 async fn query_reconstruction() {
     let schema = r#"schema
     @link(url: "https://specs.apollo.dev/link/v1.0")
-    @link(url: "https://specs.apollo.dev/join/v0.2", for: EXECUTION)
+    @link(url: "https://specs.apollo.dev/join/v0.3", for: EXECUTION)
     @link(url: "https://specs.apollo.dev/tag/v0.2")
     @link(url: "https://specs.apollo.dev/inaccessible/v0.2", for: SECURITY)
   {
@@ -1853,7 +1853,7 @@ async fn filter_nullified_deferred_responses() {
 async fn reconstruct_deferred_query_under_interface() {
     let schema = r#"schema
             @link(url: "https://specs.apollo.dev/link/v1.0")
-            @link(url: "https://specs.apollo.dev/join/v0.2", for: EXECUTION)
+            @link(url: "https://specs.apollo.dev/join/v0.3", for: EXECUTION)
             @link(url: "https://specs.apollo.dev/tag/v0.2")
             @link(url: "https://specs.apollo.dev/inaccessible/v0.2")
             {

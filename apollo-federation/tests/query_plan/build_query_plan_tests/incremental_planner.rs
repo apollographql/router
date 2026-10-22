@@ -1728,7 +1728,7 @@ fn inc_query_field_root_hops_to_other_subgraph() {
 /// key resolves.
 #[test]
 fn inc_circular_key_backtracks_to_alternative() {
-    // Pre-composed with join/v0.2 because join/v0.5 composition omits
+    // Hand-written rather than composed, because current composition omits
     // per-field @join__field annotations on fields present in every subgraph,
     // and the query graph builder then fails to rebase key conditions that
     // reference fields absent from a source subgraph. The circular key
@@ -1738,7 +1738,7 @@ fn inc_circular_key_backtracks_to_alternative() {
     let supergraph_sdl = r#"
 schema
   @link(url: "https://specs.apollo.dev/link/v1.0")
-  @link(url: "https://specs.apollo.dev/join/v0.2", for: EXECUTION)
+  @link(url: "https://specs.apollo.dev/join/v0.3", for: EXECUTION)
 {
   query: Query
 }
@@ -1746,7 +1746,9 @@ schema
 directive @join__field(graph: join__Graph!, requires: join__FieldSet, provides: join__FieldSet, type: String, external: Boolean, override: String, usedOverridden: Boolean) repeatable on FIELD_DEFINITION | INPUT_FIELD_DEFINITION
 directive @join__graph(name: String!, url: String!) on ENUM_VALUE
 directive @join__implements(graph: join__Graph!, interface: String!) repeatable on OBJECT | INTERFACE
-directive @join__type(graph: join__Graph!, key: join__FieldSet, extension: Boolean! = false, resolvable: Boolean! = true) repeatable on OBJECT | INTERFACE | UNION | ENUM | INPUT_OBJECT | SCALAR
+directive @join__type(graph: join__Graph!, key: join__FieldSet, extension: Boolean! = false, resolvable: Boolean! = true, isInterfaceObject: Boolean! = false) repeatable on OBJECT | INTERFACE | UNION | ENUM | INPUT_OBJECT | SCALAR
+directive @join__unionMember(graph: join__Graph!, member: String!) repeatable on UNION
+directive @join__enumValue(graph: join__Graph!) repeatable on ENUM_VALUE
 directive @link(url: String, as: String, for: link__Purpose, import: [link__Import]) repeatable on SCHEMA
 
 scalar join__FieldSet
@@ -1835,7 +1837,7 @@ fn inc_multi_hop_key_chain_reaches_transitive_subgraph() {
     let supergraph_sdl = r#"
 schema
   @link(url: "https://specs.apollo.dev/link/v1.0")
-  @link(url: "https://specs.apollo.dev/join/v0.2", for: EXECUTION)
+  @link(url: "https://specs.apollo.dev/join/v0.3", for: EXECUTION)
 {
   query: Query
 }
@@ -1843,7 +1845,9 @@ schema
 directive @join__field(graph: join__Graph!, requires: join__FieldSet, provides: join__FieldSet, type: String, external: Boolean, override: String, usedOverridden: Boolean) repeatable on FIELD_DEFINITION | INPUT_FIELD_DEFINITION
 directive @join__graph(name: String!, url: String!) on ENUM_VALUE
 directive @join__implements(graph: join__Graph!, interface: String!) repeatable on OBJECT | INTERFACE
-directive @join__type(graph: join__Graph!, key: join__FieldSet, extension: Boolean! = false, resolvable: Boolean! = true) repeatable on OBJECT | INTERFACE | UNION | ENUM | INPUT_OBJECT | SCALAR
+directive @join__type(graph: join__Graph!, key: join__FieldSet, extension: Boolean! = false, resolvable: Boolean! = true, isInterfaceObject: Boolean! = false) repeatable on OBJECT | INTERFACE | UNION | ENUM | INPUT_OBJECT | SCALAR
+directive @join__unionMember(graph: join__Graph!, member: String!) repeatable on UNION
+directive @join__enumValue(graph: join__Graph!) repeatable on ENUM_VALUE
 directive @link(url: String, as: String, for: link__Purpose, import: [link__Import]) repeatable on SCHEMA
 
 scalar join__FieldSet
@@ -1927,7 +1931,7 @@ fn inc_unresolvable_circular_key_errors() {
     let supergraph_sdl = r#"
 schema
   @link(url: "https://specs.apollo.dev/link/v1.0")
-  @link(url: "https://specs.apollo.dev/join/v0.2", for: EXECUTION)
+  @link(url: "https://specs.apollo.dev/join/v0.3", for: EXECUTION)
 {
   query: Query
 }
@@ -1935,7 +1939,9 @@ schema
 directive @join__field(graph: join__Graph!, requires: join__FieldSet, provides: join__FieldSet, type: String, external: Boolean, override: String, usedOverridden: Boolean) repeatable on FIELD_DEFINITION | INPUT_FIELD_DEFINITION
 directive @join__graph(name: String!, url: String!) on ENUM_VALUE
 directive @join__implements(graph: join__Graph!, interface: String!) repeatable on OBJECT | INTERFACE
-directive @join__type(graph: join__Graph!, key: join__FieldSet, extension: Boolean! = false, resolvable: Boolean! = true) repeatable on OBJECT | INTERFACE | UNION | ENUM | INPUT_OBJECT | SCALAR
+directive @join__type(graph: join__Graph!, key: join__FieldSet, extension: Boolean! = false, resolvable: Boolean! = true, isInterfaceObject: Boolean! = false) repeatable on OBJECT | INTERFACE | UNION | ENUM | INPUT_OBJECT | SCALAR
+directive @join__unionMember(graph: join__Graph!, member: String!) repeatable on UNION
+directive @join__enumValue(graph: join__Graph!) repeatable on ENUM_VALUE
 directive @link(url: String, as: String, for: link__Purpose, import: [link__Import]) repeatable on SCHEMA
 
 scalar join__FieldSet
@@ -5154,7 +5160,7 @@ fn inc_forced_backtrack_recovers_circular_key_dead_end() {
     let supergraph_sdl = r#"
 schema
   @link(url: "https://specs.apollo.dev/link/v1.0")
-  @link(url: "https://specs.apollo.dev/join/v0.2", for: EXECUTION)
+  @link(url: "https://specs.apollo.dev/join/v0.3", for: EXECUTION)
 {
   query: Query
 }
@@ -5162,7 +5168,9 @@ schema
 directive @join__field(graph: join__Graph!, requires: join__FieldSet, provides: join__FieldSet, type: String, external: Boolean, override: String, usedOverridden: Boolean) repeatable on FIELD_DEFINITION | INPUT_FIELD_DEFINITION
 directive @join__graph(name: String!, url: String!) on ENUM_VALUE
 directive @join__implements(graph: join__Graph!, interface: String!) repeatable on OBJECT | INTERFACE
-directive @join__type(graph: join__Graph!, key: join__FieldSet, extension: Boolean! = false, resolvable: Boolean! = true) repeatable on OBJECT | INTERFACE | UNION | ENUM | INPUT_OBJECT | SCALAR
+directive @join__type(graph: join__Graph!, key: join__FieldSet, extension: Boolean! = false, resolvable: Boolean! = true, isInterfaceObject: Boolean! = false) repeatable on OBJECT | INTERFACE | UNION | ENUM | INPUT_OBJECT | SCALAR
+directive @join__unionMember(graph: join__Graph!, member: String!) repeatable on UNION
+directive @join__enumValue(graph: join__Graph!) repeatable on ENUM_VALUE
 directive @link(url: String, as: String, for: link__Purpose, import: [link__Import]) repeatable on SCHEMA
 
 scalar join__FieldSet
