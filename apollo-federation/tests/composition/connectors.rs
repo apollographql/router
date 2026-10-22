@@ -617,6 +617,51 @@ mod tests {
         assert_snapshot!(api_schema_string);
     }
 
+    /// `http.stream` is carried into the supergraph like any other `@connect` argument. The
+    /// composed schema is the router's `testdata/stream.graphql` fixture.
+    #[test]
+    fn composes_stream_v0_5() {
+        let streams = ServiceDefinition {
+            name: "streams",
+            type_defs: r#"
+                extend schema
+                @link(
+                    url: "https://specs.apollo.dev/connect/v0.5"
+                    import: ["@connect", "@source"]
+                )
+                @source(name: "mcp", http: { baseURL: "http://localhost:4001" })
+
+                type Query {
+                    weather(city: String!): Weather
+                    @connect(
+                        source: "mcp"
+                        http: {
+                            POST: "/mcp"
+                            body: "method: $('tools/call') params: { name: $('weather') arguments: { city: $args.city } }"
+                            stream: "array"
+                        }
+                        selection: "$->last.result { temp }"
+                    )
+
+                    progress: [Progress]
+                    @connect(source: "mcp", http: { GET: "/progress", stream: "array" }, selection: "percent: params.progress")
+                }
+
+                type Weather {
+                    temp: Float
+                }
+
+                type Progress {
+                    percent: Float
+                }
+            "#,
+        };
+
+        let result = compose_as_fed2_connectors_subgraphs(&[streams]);
+        let supergraph = result.expect("Expected composition to succeed");
+        assert_snapshot!(supergraph.schema().schema().to_string());
+    }
+
     #[test]
     fn connectors_validation_errors_fail_composition() {
         let with_connectors = ServiceDefinition {
