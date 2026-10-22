@@ -1,4 +1,4 @@
-# Composed from subgraphs with hash: d8e56e2ace04681a049acc23e20a1978e1f7ff7c
+# Composed from subgraphs with hash: b4a62fef8f14f6f67746c93cd828902d0569e86e
 schema
   @link(url: "https://specs.apollo.dev/link/v1.0")
   @link(url: "https://specs.apollo.dev/join/v0.5", for: EXECUTION)
@@ -66,6 +66,7 @@ type Listing
   name: String @join__field(graph: S2)
   sku: String @join__field(graph: S2) @join__field(graph: S3, external: true)
   dims: String @join__field(graph: S2) @join__field(graph: S4, external: true)
+  cost(currency: String!): Int @join__field(graph: S2)
 }
 
 type Query
@@ -84,6 +85,7 @@ type T
 {
   id: ID!
   listing: Listing @join__field(graph: S1) @join__field(graph: S3, external: true) @join__field(graph: S4, external: true)
+  other: Listing @join__field(graph: S1)
   price: Int @join__field(graph: S3, requires: "listing { sku }")
   weight: Int @join__field(graph: S4, requires: "listing { dims }")
 }

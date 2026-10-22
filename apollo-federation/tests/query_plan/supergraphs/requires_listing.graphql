@@ -1,4 +1,4 @@
-# Composed from subgraphs with hash: d38307ab94d76d472af93fc794fec2fa1a518d2f
+# Composed from subgraphs with hash: 8ffdf330e8839dfddb6bb560a5b0e21e82ceb857
 schema
   @link(url: "https://specs.apollo.dev/link/v1.0")
   @link(url: "https://specs.apollo.dev/join/v0.5", for: EXECUTION)
@@ -61,6 +61,9 @@ type Listing
   @join__type(graph: S3, key: "id")
 {
   id: ID!
+  name: String @join__field(graph: S2)
+  sku: String @join__field(graph: S2) @join__field(graph: S3, external: true)
+  dims: String @join__field(graph: S2) @join__field(graph: S3, external: true)
   cost(currency: String!): Int @join__field(graph: S2) @join__field(graph: S3, external: true)
 }
 
@@ -78,6 +81,10 @@ type T
 {
   id: ID!
   listing: Listing @join__field(graph: S1) @join__field(graph: S3, external: true)
-  price: Int @join__field(graph: S3, requires: "listing { cost(currency: \"USD\") }")
+  other: Listing @join__field(graph: S1)
+  price: Int @join__field(graph: S3, requires: "listing { sku }")
+  weight: Int @join__field(graph: S3, requires: "listing { dims }")
+  usd: Int @join__field(graph: S3, requires: "listing { cost(currency: \"USD\") }")
+  eur: Int @join__field(graph: S3, requires: "listing { cost(currency: \"EUR\") }")
   tax: Int @join__field(graph: S3, requires: "listing { cost(currency: \"USD\") }")
 }

@@ -1,9 +1,8 @@
-//! @requires shapes where the incremental planner's plans diverge from the
-//! legacy planner's. Each test plans the same operation with both planners
+//! @requires shapes where the incremental planner used to fetch more than
+//! the legacy planner. Each test plans the same operation with both planners
 //! and fails, with both plans printed, when the incremental planner uses
-//! more fetches. The tests that pass today document the one case where
-//! condition data already dedupes with the client's selection, so the
-//! rework keeps it.
+//! more fetches. Plans without condition aliases also go through the
+//! correctness checker.
 
 use apollo_federation::query_plan::PlanNode;
 use apollo_federation::query_plan::QueryPlan;
@@ -12,20 +11,25 @@ use apollo_federation::query_plan::query_planner::IncrementalPlannerConfig;
 use apollo_federation::query_plan::query_planner::QueryPlannerConfig;
 
 use crate::query_plan::build_query_plan_support::BulbTwinPlanner;
+use crate::query_plan::build_query_plan_support::shared_test_planner_with_bulb_twin;
+
+fn twin_config() -> QueryPlannerConfig {
+    QueryPlannerConfig {
+        incremental_planner: IncrementalPlannerConfig {
+            enabled: false,
+            beam_width: 4,
+            fuel: 100_000,
+            ..Default::default()
+        },
+        ..Default::default()
+    }
+}
 
 macro_rules! twin_planner {
     ( $( $subgraph_name: tt: $subgraph_schema: expr),+ $(,)? ) => {{
         $crate::query_plan::build_query_plan_support::test_planner_with_bulb_twin(
             insta::_function_name!(),
-            QueryPlannerConfig {
-                incremental_planner: IncrementalPlannerConfig {
-                    enabled: false,
-                    beam_width: 4,
-                    fuel: 100_000,
-                    ..Default::default()
-                },
-                ..Default::default()
-            },
+            twin_config(),
             &[ $( (subgraph_name!($subgraph_name), $subgraph_schema) ),+ ],
         )
     }};
@@ -128,14 +132,21 @@ fn plan_bulb(planner: &BulbTwinPlanner, operation: &str) -> QueryPlan {
 }
 
 /// S1 owns `T.listing`, S2 owns the listing's fields, and S3 computes
-/// `T.price` and `T.weight` from different listing fields.
+/// fields of `T` from listing fields. Most tests here plan against this one
+/// supergraph, so it carries every field they need between them.
 const LISTING_S1: &str = r#"
     type Query { t: T }
-    type T @key(fields: "id") { id: ID! listing: Listing }
+    type T @key(fields: "id") { id: ID! listing: Listing other: Listing }
     type Listing @key(fields: "id") { id: ID! }
 "#;
 const LISTING_S2: &str = r#"
-    type Listing @key(fields: "id") { id: ID! name: String sku: String dims: String }
+    type Listing @key(fields: "id") {
+        id: ID!
+        name: String
+        sku: String
+        dims: String
+        cost(currency: String!): Int
+    }
 "#;
 const LISTING_S3: &str = r#"
     type T @key(fields: "id") {
@@ -143,17 +154,33 @@ const LISTING_S3: &str = r#"
         listing: Listing @external
         price: Int @requires(fields: "listing { sku }")
         weight: Int @requires(fields: "listing { dims }")
+        usd: Int @requires(fields: "listing { cost(currency: \"USD\") }")
+        eur: Int @requires(fields: "listing { cost(currency: \"EUR\") }")
+        tax: Int @requires(fields: "listing { cost(currency: \"USD\") }")
     }
-    type Listing @key(fields: "id") { id: ID! sku: String @external dims: String @external }
+    type Listing @key(fields: "id") {
+        id: ID!
+        sku: String @external
+        dims: String @external
+        cost(currency: String!): Int @external
+    }
 "#;
 
+#[track_caller]
+fn listing_planner() -> BulbTwinPlanner {
+    shared_test_planner_with_bulb_twin(
+        "requires_listing",
+        twin_config(),
+        &[("S1", LISTING_S1), ("S2", LISTING_S2), ("S3", LISTING_S3)],
+    )
+}
+
 /// Two @requires on sibling fields walk the same entity for different
-/// leaves. Neither condition contains the other, so each gets its own
-/// alias and its own entity fetch chain, where one listing fetch would do.
+/// leaves. Neither condition field collides with another selection, so
+/// both stay unaliased and share one listing fetch.
 #[test]
 fn req_sibling_conditions_on_same_entity_share_fetch() {
-    let planner = twin_planner!(S1: LISTING_S1, S2: LISTING_S2, S3: LISTING_S3);
-    assert_no_extra_fetches(&planner, "{ t { price weight } }");
+    assert_no_extra_fetches(&listing_planner(), "{ t { price weight } }");
 }
 
 /// Same as above with the consumers in different subgraphs: the listing
@@ -183,14 +210,13 @@ fn req_consumers_in_different_subgraphs_share_fetch() {
     assert_no_extra_fetches(&planner, "{ t { price weight } }");
 }
 
-/// The parent path is gated by @include. Sharing with the client's copy
-/// of `listing` is disabled on conditional paths, so the condition is
-/// staged under an alias and the listing entity is fetched twice.
+/// The parent path is gated by @include. A gate does not change which field
+/// a response key holds, so the condition still shares the client's
+/// `listing` and the listing entity is fetched once.
 #[test]
 fn req_client_field_under_include_shares_fetch() {
-    let planner = twin_planner!(S1: LISTING_S1, S2: LISTING_S2, S3: LISTING_S3);
     assert_no_extra_fetches(
-        &planner,
+        &listing_planner(),
         "query($v: Boolean!) { t @include(if: $v) { price listing { name } } }",
     );
 }
@@ -226,36 +252,30 @@ fn req_partially_in_place_condition_needs_no_alias() {
 }
 
 /// When the client selects the walked field itself, the condition rides
-/// the client's fetch chain and nothing is duplicated. This is the case
-/// the rework must keep.
+/// the client's fetch chain and nothing is duplicated.
 #[test]
 fn req_client_field_lets_condition_ride_its_fetch() {
-    let planner = twin_planner!(S1: LISTING_S1, S2: LISTING_S2, S3: LISTING_S3);
-    assert_no_extra_fetches(&planner, "{ t { price listing { name } } }");
+    assert_no_extra_fetches(&listing_planner(), "{ t { price listing { name } } }");
 }
 
 /// With the client's copy present, both consumers' conditions merge into
 /// it as well.
 #[test]
 fn req_two_consumers_with_client_field_share_fetch() {
-    let planner = twin_planner!(S1: LISTING_S1, S2: LISTING_S2, S3: LISTING_S3);
-    assert_no_extra_fetches(&planner, "{ t { price weight listing { name } } }");
+    assert_no_extra_fetches(
+        &listing_planner(),
+        "{ t { price weight listing { name } } }",
+    );
 }
 
 /// The client puts a different field under the condition field's response
 /// key, so the condition cannot share it and must be aliased.
 #[test]
 fn req_client_alias_on_condition_key_forces_alias() {
-    let planner = twin_planner!(
-        S1: r#"
-            type Query { t: T }
-            type T @key(fields: "id") { id: ID! listing: Listing other: Listing }
-            type Listing @key(fields: "id") { id: ID! }
-        "#,
-        S2: LISTING_S2,
-        S3: LISTING_S3,
+    let plan = plan_bulb(
+        &listing_planner(),
+        "{ t { listing: other { name } price } }",
     );
-    let plan = plan_bulb(&planner, "{ t { listing: other { name } price } }");
     let rendered = plan.to_string();
     assert!(
         rendered.contains("__require_0_listing: listing"),
@@ -268,22 +288,7 @@ fn req_client_alias_on_condition_key_forces_alias() {
 /// under one response key, so each condition needs its own alias.
 #[test]
 fn req_nested_argument_conflict_between_conditions_forces_aliases() {
-    let planner = twin_planner!(
-        S1: LISTING_S1,
-        S2: r#"
-            type Listing @key(fields: "id") { id: ID! cost(currency: String!): Int }
-        "#,
-        S3: r#"
-            type T @key(fields: "id") {
-                id: ID!
-                listing: Listing @external
-                usd: Int @requires(fields: "listing { cost(currency: \"USD\") }")
-                eur: Int @requires(fields: "listing { cost(currency: \"EUR\") }")
-            }
-            type Listing @key(fields: "id") { id: ID! cost(currency: String!): Int @external }
-        "#,
-    );
-    let plan = plan_bulb(&planner, "{ t { usd eur } }");
+    let plan = plan_bulb(&listing_planner(), "{ t { usd eur } }");
     let rendered = plan.to_string();
     assert!(
         rendered.contains("__require_0_listing: listing")
@@ -297,22 +302,7 @@ fn req_nested_argument_conflict_between_conditions_forces_aliases() {
 /// entity fetch.
 #[test]
 fn req_identical_aliased_conditions_share_one_fetch() {
-    let planner = twin_planner!(
-        S1: LISTING_S1,
-        S2: r#"
-            type Listing @key(fields: "id") { id: ID! cost(currency: String!): Int }
-        "#,
-        S3: r#"
-            type T @key(fields: "id") {
-                id: ID!
-                listing: Listing @external
-                price: Int @requires(fields: "listing { cost(currency: \"USD\") }")
-                tax: Int @requires(fields: "listing { cost(currency: \"USD\") }")
-            }
-            type Listing @key(fields: "id") { id: ID! cost(currency: String!): Int @external }
-        "#,
-    );
-    let (_, bulb) = assert_no_extra_fetches(&planner, "{ t { price tax } }");
+    let (_, bulb) = assert_no_extra_fetches(&listing_planner(), "{ t { usd tax } }");
     let rendered = bulb.to_string();
     assert!(
         rendered.contains("__require_0_listing: listing") && !rendered.contains("__require_1_"),
