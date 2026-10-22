@@ -519,6 +519,7 @@ input_file: apollo-federation/src/connectors/expand/tests/schemas/expand/realist
                 source_query_params: None,
                 connect_path: None,
                 connect_query_params: None,
+                stream: None,
             },
         ),
         selection: JSONSelection {
@@ -718,6 +719,7 @@ input_file: apollo-federation/src/connectors/expand/tests/schemas/expand/realist
                 source_query_params: None,
                 connect_path: None,
                 connect_query_params: None,
+                stream: None,
             },
         ),
         selection: JSONSelection {
@@ -947,6 +949,7 @@ input_file: apollo-federation/src/connectors/expand/tests/schemas/expand/realist
                 source_query_params: None,
                 connect_path: None,
                 connect_query_params: None,
+                stream: None,
             },
         ),
         selection: JSONSelection {
@@ -1301,6 +1304,7 @@ input_file: apollo-federation/src/connectors/expand/tests/schemas/expand/realist
                 source_query_params: None,
                 connect_path: None,
                 connect_query_params: None,
+                stream: None,
             },
         ),
         selection: JSONSelection {

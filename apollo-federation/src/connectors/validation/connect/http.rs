@@ -9,12 +9,18 @@ use apollo_compiler::ast::Value;
 use multi_try::MultiTry;
 use shape::Shape;
 
+use crate::connectors::ConnectSpec;
 use crate::connectors::HTTPMethod;
 use crate::connectors::Namespace;
 use crate::connectors::SourceName;
+use crate::connectors::StreamMode;
+use crate::connectors::id::ConnectedElement;
+use crate::connectors::spec::connect::BATCH_ARGUMENT_NAME;
 use crate::connectors::spec::connect::CONNECT_BODY_ARGUMENT_NAME;
+use crate::connectors::spec::connect::CONNECT_ENTITY_ARGUMENT_NAME;
 use crate::connectors::spec::connect::CONNECT_SOURCE_ARGUMENT_NAME;
 use crate::connectors::spec::http::HTTP_ARGUMENT_NAME;
+use crate::connectors::spec::http::STREAM_ARGUMENT_NAME;
 use crate::connectors::string_template;
 use crate::connectors::string_template::Part;
 use crate::connectors::string_template::StringTemplate;
@@ -78,6 +84,7 @@ impl<'schema> Http<'schema> {
 
         Body::parse(http_arg, coordinate, schema)
             .map_err(|err| vec![err])
+            .and_try(parse_stream(http_arg, coordinate, schema).map_err(|err| vec![err]))
             .and_try(Headers::parse(
                 http_arg,
                 HttpHeadersCoordinate::Connect {
@@ -93,7 +100,7 @@ impl<'schema> Http<'schema> {
                 schema,
             ))
             .map_err(|nested| nested.into_iter().flatten().collect())
-            .map(|(body, headers, transport)| Self {
+            .map(|(body, _stream, headers, transport)| Self {
                 body,
                 headers,
                 transport,
@@ -207,6 +214,99 @@ impl Display for BodyCoordinate<'_> {
         write!(
             f,
             "`@{connect_directive_name}({HTTP_ARGUMENT_NAME}: {{{CONNECT_BODY_ARGUMENT_NAME}:}})` on `{element}`",
+            connect_directive_name = self.connect.directive.name,
+            element = self.connect.element
+        )
+    }
+}
+
+/// Parse `@connect(http: {stream:})`, which only exists from connect/v0.5.
+///
+/// A stream mode decides the shape of the whole response the selection receives, so it can't be
+/// combined with connectors whose response is split up by entity: `entity: true`, `batch`, or
+/// `@connect` on a type.
+fn parse_stream<'schema>(
+    http_arg: &'schema [(Name, Node<Value>)],
+    connect: ConnectDirectiveCoordinate<'schema>,
+    schema: &'schema SchemaInfo,
+) -> Result<Option<StreamMode>, Message> {
+    let Some((_, value)) = http_arg
+        .iter()
+        .find(|(name, _)| name == &STREAM_ARGUMENT_NAME)
+    else {
+        return Ok(None);
+    };
+    let coordinate = StreamCoordinate { connect };
+    let locations = || {
+        value
+            .line_column_range(&schema.sources)
+            .into_iter()
+            .collect()
+    };
+
+    // `ConnectHTTP` has no `stream` field before v0.5, so GraphQL validation rejects it too, but
+    // that message doesn't say which version to use.
+    if schema.connect_link.spec < ConnectSpec::V0_5 {
+        return Err(Message {
+            code: Code::InvalidStream,
+            message: format!(
+                "{coordinate} requires connect spec v0.5 or later. Use `@link(url: \"{url}\")`.",
+                url = ConnectSpec::V0_5.url(),
+            ),
+            locations: locations(),
+        });
+    }
+
+    let mode = value
+        .as_str()
+        .and_then(|mode| StreamMode::from_str(mode).ok())
+        .ok_or_else(|| Message {
+            code: Code::InvalidStream,
+            message: format!(
+                "{coordinate} must be \"{array}\", but found {value}.",
+                array = StreamMode::Array,
+            ),
+            locations: locations(),
+        })?;
+
+    let is_entity = connect
+        .directive
+        .specified_argument_by_name(&CONNECT_ENTITY_ARGUMENT_NAME)
+        .is_some_and(|value| value.to_bool() == Some(true));
+    let conflict = if matches!(connect.element, ConnectedElement::Type { .. }) {
+        Some(format!("`@{}` on a type", connect.directive.name))
+    } else if is_entity {
+        Some(format!("`{CONNECT_ENTITY_ARGUMENT_NAME}: true`"))
+    } else if connect
+        .directive
+        .specified_argument_by_name(&BATCH_ARGUMENT_NAME)
+        .is_some()
+    {
+        Some(format!("`{BATCH_ARGUMENT_NAME}`"))
+    } else {
+        None
+    };
+    if let Some(conflict) = conflict {
+        return Err(Message {
+            code: Code::InvalidStream,
+            message: format!("{coordinate} can't be used with {conflict}."),
+            locations: locations(),
+        });
+    }
+
+    Ok(Some(mode))
+}
+
+#[derive(Clone, Copy)]
+struct StreamCoordinate<'schema> {
+    connect: ConnectDirectiveCoordinate<'schema>,
+}
+
+impl Display for StreamCoordinate<'_> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(
+            f,
+            "`@{connect_directive_name}({HTTP_ARGUMENT_NAME}: {{{STREAM_ARGUMENT_NAME}:}})` on `{element}`",
             connect_directive_name = self.connect.directive.name,
             element = self.connect.element
         )
