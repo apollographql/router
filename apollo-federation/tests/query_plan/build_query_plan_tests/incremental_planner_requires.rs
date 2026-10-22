@@ -298,6 +298,52 @@ fn req_client_alias_on_condition_key_forces_alias() {
     );
 }
 
+/// The condition is resolvable in place through `@provides`, and the client
+/// puts a different field under its response key. The in-place condition
+/// needs an alias just like a key-hopped one.
+#[test]
+fn req_client_alias_on_in_place_condition_key_forces_alias() {
+    let planner = twin_planner!(
+        S1: r#"
+            type T @key(fields: "id") {
+                id: ID!
+                listing: Listing @shareable
+                other: Listing @shareable
+            }
+            type Listing @key(fields: "id") {
+                id: ID!
+                sku: String @shareable
+                name: String @shareable
+            }
+        "#,
+        S3: r#"
+            type Query { t: T @provides(fields: "listing { sku }") }
+            type T @key(fields: "id") {
+                id: ID!
+                listing: Listing @external
+                other: Listing @shareable
+                price: Int @requires(fields: "listing { sku }")
+            }
+            type Listing @key(fields: "id") {
+                id: ID!
+                sku: String @external
+            }
+        "#,
+    );
+    // The legacy planner fetches `listing { sku name }` in place of
+    // `other { name }` here, so only the incremental plan is checked.
+    let plan = plan_bulb!(
+        validate_correctness = true,
+        &planner,
+        "{ t { listing: other { name } price } }",
+    );
+    let rendered = plan.to_string();
+    assert!(
+        rendered.contains("__require_0_listing: listing"),
+        "the client's `listing` key holds `other`, so the condition needs an alias:\n{rendered}",
+    );
+}
+
 /// Two conditions walk the same field but disagree on a nested field's
 /// arguments. Sharing the top-level key would put both `cost` selections
 /// under one response key, so each condition needs its own alias.
