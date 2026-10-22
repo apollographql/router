@@ -7278,10 +7278,7 @@ expression: "&schema"
           "$ref": "#/$defs/ValidatedConfig"
         }
       },
-      "type": [
-        "object",
-        "null"
-      ]
+      "type": "object"
     },
     "Policy": {
       "additionalProperties": false,
@@ -12332,7 +12329,6 @@ expression: "&schema"
     },
     "plugins": {
       "$ref": "#/$defs/Plugins",
-      "default": null,
       "description": "Plugin configuration"
     },
     "preview_file_uploads": {

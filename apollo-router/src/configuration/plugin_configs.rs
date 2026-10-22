@@ -125,8 +125,7 @@ impl UserPlugins {
     }
 }
 
-/// The `plugins` section: a map from registered plugin name to its config. `null` means no
-/// user plugins, as in earlier releases.
+/// The `plugins` section: a map from registered plugin name to its config.
 impl<'de> Deserialize<'de> for UserPlugins {
     fn deserialize<D: Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
         struct SectionsVisitor;
@@ -136,21 +135,6 @@ impl<'de> Deserialize<'de> for UserPlugins {
 
             fn expecting(&self, formatter: &mut fmt::Formatter) -> fmt::Result {
                 formatter.write_str("plugin sections keyed by plugin name")
-            }
-
-            fn visit_none<E>(self) -> Result<Self::Value, E> {
-                Ok(UserPlugins::default())
-            }
-
-            fn visit_unit<E>(self) -> Result<Self::Value, E> {
-                Ok(UserPlugins::default())
-            }
-
-            fn visit_some<D: Deserializer<'de>>(
-                self,
-                deserializer: D,
-            ) -> Result<Self::Value, D::Error> {
-                deserializer.deserialize_map(self)
             }
 
             fn visit_map<A: MapAccess<'de>>(self, mut map: A) -> Result<Self::Value, A::Error> {
@@ -168,7 +152,7 @@ impl<'de> Deserialize<'de> for UserPlugins {
             }
         }
 
-        deserializer.deserialize_option(SectionsVisitor)
+        deserializer.deserialize_map(SectionsVisitor)
     }
 }
 

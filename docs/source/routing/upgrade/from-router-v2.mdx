@@ -310,6 +310,7 @@ The router checks your configuration more thoroughly at startup and on reload, s
   - `authorization`
   - `coprocessor`
   - `telemetry`
+- **An empty `plugins` key is an error.** YAML reads a `plugins:` key with nothing under it as `null`, for example when every plugin beneath it is commented out. Router v2.x treated that as no plugins. Now it is rejected like any other value of the wrong type.
 - **Substituted values take the type their setting declares.** Router v2.x converted any `${env.MY_ENV_VAR}` value that looked like a number or a boolean to that type. Now a setting with a declared type takes that type, so a string setting such as a CORS header name keeps `5` as the string `"5"`. A setting that accepts either a number or a string also keeps the text. A setting that accepts any value, such as a Connector's `$config` object, reads the value as YAML: `5` becomes the number `5`, `false` becomes the boolean `false`, `~` or `null` becomes `null`, and `0042` stays the string `"0042"`. A substitution with text around it, such as `count-${env.N}`, is always a string.
 - **Some substituted values that stopped router v2.x now load.** A boolean setting accepts `True` and `TRUE` as well as `true`, and the same forms of `false`. An empty value at an optional number or boolean setting leaves the setting unset. If you relied on router v2.x refusing to start to catch an empty variable, check the variable before starting the router.
 - **Some `$config` values arrive differently.** Router v2.x sent an empty value as `""`. Now it arrives as `null`. `True` and `NULL` become `true` and `null` instead of staying text.
@@ -319,6 +320,7 @@ The router checks your configuration more thoroughly at startup and on reload, s
 - Run `router config validate` against your configuration and fix any errors it reports.
 - If it says your file relies on automatic upgrades, run `router config upgrade` to update the file.
 - Make sure every file referenced with `${file.PATH}` exists wherever the router runs.
+- Delete an empty `plugins:` key, or write `plugins: {}`.
 
 ### Changed default for JWT authentication errors to redact
 
