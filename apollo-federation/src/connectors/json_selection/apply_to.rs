@@ -1785,41 +1785,58 @@ impl SubSelection {
         dollar_shape: Shape,
     ) -> Shape {
         let locations = self.shape_location(context.source_id());
-        let mut selection_shapes = Vec::with_capacity(self.selections.len());
+        let mut selections = self.selections.iter();
 
-        for named_selection in self.selections.iter() {
+        // Object shapes with no field in common can be merged in one call, so
+        // they are combined once instead of rebuilt for every named selection.
+        let mut object_shapes = Vec::with_capacity(self.selections.len());
+        let mut field_names = IndexSet::default();
+        let mut merged_shape = None;
+        for named_selection in selections.by_ref() {
             let shape = named_selection.compute_output_shape(
                 context,
                 input_shape.clone(),
                 dollar_shape.clone(),
             );
-            // If any named_selection item returns null instead of an object,
-            // that nullifies the whole object and allows shape computation to
-            // bail out early.
-            let is_null = shape.is_null();
-            selection_shapes.push(shape);
-            if is_null {
+            if Self::adds_only_new_fields(&shape, &mut field_names) {
+                object_shapes.push(shape);
+            } else {
+                let objects = Shape::merge(object_shapes.drain(..), locations.clone());
+                merged_shape = Some(Shape::merge([objects, shape], locations.clone()));
                 break;
             }
         }
-
-        let merged_shape = if Self::merges_in_one_call(&selection_shapes) {
-            // Merge in one call so object shapes are combined once instead of
-            // rebuilt for every named selection.
-            Shape::merge(selection_shapes, locations.clone())
-        } else {
-            // Shape::merge only drops impossible combinations of union members
-            // when it expands them, so merging all the shapes in one call can
-            // produce a different shape than merging them one at a time.
-            let mut merged_shape = Shape::unknown([]);
-            for shape in selection_shapes {
-                merged_shape = Shape::merge([merged_shape, shape], locations.clone());
-                if merged_shape.is_null() {
-                    break;
-                }
-            }
-            merged_shape
+        let Some(mut merged_shape) = merged_shape else {
+            let merged_shape = Shape::merge(object_shapes, locations.clone());
+            return if merged_shape.is_unknown() {
+                Shape::empty_object(locations)
+            } else {
+                merged_shape
+            };
         };
+
+        // From the first shape that isn't such an object, merge one at a time:
+        // Shape::merge only drops impossible combinations of union members when
+        // it expands them, so merging the rest in one call could produce a
+        // different shape.
+        for named_selection in selections {
+            // If merging produces null instead of an object, that nullifies the
+            // whole object and allows shape computation to bail out early.
+            if merged_shape.is_null() {
+                break;
+            }
+            merged_shape = Shape::merge(
+                [
+                    merged_shape,
+                    named_selection.compute_output_shape(
+                        context,
+                        input_shape.clone(),
+                        dollar_shape.clone(),
+                    ),
+                ],
+                locations.clone(),
+            );
+        }
 
         if merged_shape.is_unknown() {
             Shape::empty_object(locations)
@@ -1828,18 +1845,19 @@ impl SubSelection {
         }
     }
 
-    /// Whether merging `shapes` in one [`Shape::merge`] call produces the same
-    /// shape as merging them one at a time. That holds when every shape is an
-    /// object and no field appears in more than one of them, since then no
-    /// shapes other than the objects themselves are merged together.
-    fn merges_in_one_call(shapes: &[Shape]) -> bool {
-        let mut field_names = IndexSet::default();
-        shapes.iter().all(|shape| match shape.case() {
+    /// Whether `shape` is an object whose fields are all missing from
+    /// `field_names`, in which case they are added to `field_names`.
+    fn adds_only_new_fields(shape: &Shape, field_names: &mut IndexSet<String>) -> bool {
+        match shape.case() {
             ShapeCase::Object { fields, .. } => {
-                fields.keys().all(|name| field_names.insert(name.as_str()))
+                if fields.keys().any(|name| field_names.contains(name)) {
+                    return false;
+                }
+                field_names.extend(fields.keys().cloned());
+                true
             }
             _ => false,
-        })
+        }
     }
 }
 
@@ -4494,30 +4512,73 @@ mod tests {
         assert!(wide.pretty_print().contains("field299: $root.*.field299"));
     }
 
-    // Spreads whose shapes are unions, and fields that more than one spread
-    // outputs, must still be merged one at a time.
+    // Spreads whose shapes are unions, fields that more than one spread
+    // outputs, and shapes that merge to null must still be merged one at a
+    // time, recording the same consumption as merging them one at a time.
     #[rstest]
-    #[case::union_spreads(&[
-        "... a->match([1, 1], [@, 'x'])",
-        "... b->match([1, true], [@, 2.5])",
-        "c",
-    ], "All<1, { c: $root.*.c }>")]
-    #[case::repeated_field(&[
-        "x: a->match([1, 1], [@, 'x'])",
-        "... b { x: c->match([1, true], [@, 2.5]) }",
-        "... d { x: $(true) }",
-    ], "{ x: All<1, true> }")]
+    #[case::union_spreads(
+        "... a->match([1, 1], [@, 'x']) ... b->match([1, true], [@, 2.5]) c",
+        "All<1, { c: $root.*.c }>"
+    )]
+    #[case::repeated_field(
+        "x: a->match([1, 1], [@, 'x']) ... b { x: c->match([1, true], [@, 2.5]) } ... d { x: $(true) }",
+        "{ x: All<1, true> }"
+    )]
+    #[case::never_then_null(
+        "id: $.id ... $.c->match([1, 1], [@, 'x']) ... $(null) name: $.name",
+        "Never (err \"no value is both a number and an object\", \"no value is both a string and an object\")"
+    )]
+    #[case::union_merging_to_null(
+        "id: $.id ... $.c->match([1, null], [@, 'x']) name: $.name other: $.other",
+        "null"
+    )]
+    #[case::null_spread("a b ... $(null) c d", "null")]
+    #[case::union_then_objects(
+        "a ... $.u->match([1, { p: 1 }], [@, { q: 2 }]) b c",
+        "One<\n  { a: $root.*.a, b: $root.*.b, c: $root.*.c, p: 1 },\n  { a: $root.*.a, b: $root.*.b, c: $root.*.c, q: 2 },\n>"
+    )]
     fn test_compute_output_shape_matches_pairwise_merge(
-        #[case] parts: &[&str],
+        #[case] selection: &str,
         #[case] expected: &str,
     ) {
         let spec = ConnectSpec::V0_4;
-        let pairwise = parts.iter().fold(Shape::unknown([]), |acc, part| {
-            Shape::merge([acc, selection!(part, spec).shape()], [])
-        });
-        let shape = selection!(&parts.join(" "), spec).shape();
+        let selection = selection!(selection, spec);
+        let TopLevelSelection::Named(sub) = &selection.inner else {
+            panic!("expected named selections");
+        };
+        let compute = |merge: &dyn Fn(&ShapeContext, Shape) -> Shape| {
+            let root = Shape::name("$root", []);
+            let context = ShapeContext::new(SourceId::Other("JSONSelection".into()))
+                .with_spec(spec)
+                .with_named_shapes([("$root".to_string(), root.clone())]);
+            let shape = merge(&context, root.any_item([]));
+            let consumption = context.consumption().borrow().clone();
+            (shape, consumption)
+        };
 
-        assert_eq!(shape.pretty_print(), pairwise.pretty_print());
+        let (shape, consumption) = compute(&|context, input| {
+            sub.compute_selections_shape_no_rebind(context, input.clone(), input)
+        });
+        let (pairwise_shape, pairwise_consumption) = compute(&|context, input| {
+            let locations = sub.shape_location(context.source_id());
+            let mut merged_shape = Shape::unknown([]);
+            for named_selection in sub.selections.iter() {
+                merged_shape = Shape::merge(
+                    [
+                        merged_shape,
+                        named_selection.compute_output_shape(context, input.clone(), input.clone()),
+                    ],
+                    locations.clone(),
+                );
+                if merged_shape.is_null() {
+                    break;
+                }
+            }
+            merged_shape
+        });
+
+        assert_eq!(shape, pairwise_shape);
+        assert_eq!(consumption, pairwise_consumption);
         assert_eq!(shape.pretty_print(), expected);
     }
 
