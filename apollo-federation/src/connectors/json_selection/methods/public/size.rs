@@ -49,7 +49,8 @@ fn size_method(
             (Some(JSON::Number(size.into())), Vec::new())
         }
         JSON::String(s) => {
-            let size = s.as_str().len() as i64;
+            // Count chars, not bytes, as ->first, ->last, ->get and ->slice do.
+            let size = s.as_str().chars().count() as i64;
             (Some(JSON::Number(size.into())), Vec::new())
         }
         // Though we can't ask for ->first or ->last or ->at(n) on an object, we
@@ -93,7 +94,7 @@ fn size_shape(
 
     match input_shape.case() {
         ShapeCase::String(Some(value)) => Shape::int_value(
-            value.len() as i64,
+            value.chars().count() as i64,
             method_name.shape_location(context.source_id()),
         ),
         ShapeCase::String(None) => Shape::int(method_name.shape_location(context.source_id())),
@@ -208,6 +209,15 @@ mod tests {
             selection!("$->size").apply_to(&json!("hello")),
             (Some(json!(5)), vec![]),
         );
+    }
+
+    #[test]
+    fn size_should_count_chars_not_bytes() {
+        assert_eq!(
+            selection!("$->size").apply_to(&json!("é🙂x")),
+            (Some(json!(3)), vec![]),
+        );
+        assert_eq!(selection!("$('é🙂x')->size").shape().pretty_print(), "3");
     }
 
     #[test]

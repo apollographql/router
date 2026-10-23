@@ -44,8 +44,9 @@ fn has_method(
                 }
 
                 (JSON::String(s), Some(index)) => {
-                    let ilen = s.as_str().len() as i64;
-                    // Negative indices count from the end of the array
+                    // Count chars, not bytes, as ->get indexes strings.
+                    let ilen = s.as_str().chars().count() as i64;
+                    // Negative indices count from the end of the string
                     let index = if index < 0 { ilen + index } else { index };
                     (Some(JSON::Bool(index >= 0 && index < ilen)), arg_errors)
                 }
@@ -106,6 +107,18 @@ mod tests {
         assert_eq!(
             selection!("$->has(2)").apply_to(&json!("oyez")),
             (Some(json!(true)), vec![]),
+        );
+    }
+
+    #[test]
+    fn has_should_count_string_chars_not_bytes() {
+        assert_eq!(
+            selection!("$->has(2)").apply_to(&json!("é🙂x")),
+            (Some(json!(true)), vec![]),
+        );
+        assert_eq!(
+            selection!("$->has(3)").apply_to(&json!("é🙂x")),
+            (Some(json!(false)), vec![]),
         );
     }
 
