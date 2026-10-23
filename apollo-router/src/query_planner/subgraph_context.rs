@@ -1,4 +1,3 @@
-use std::collections::HashMap;
 use std::collections::HashSet;
 
 use apollo_compiler::ExecutableDocument;
@@ -13,6 +12,7 @@ use apollo_compiler::executable::SelectionSet;
 use apollo_compiler::validation::Valid;
 use apollo_compiler::validation::WithErrors;
 use apollo_federation::query_plan::serializable_document::SerializableDocument;
+use indexmap::IndexMap;
 use serde_json_bytes::ByteString;
 use serde_json_bytes::Map;
 
@@ -35,7 +35,7 @@ pub(crate) struct SubgraphContext<'a> {
     pub(crate) data: &'a Value,
     pub(crate) schema: &'a Schema,
     pub(crate) context_rewrites: &'a Vec<DataRewrite>,
-    pub(crate) named_args: Vec<HashMap<String, Value>>,
+    pub(crate) named_args: Vec<IndexMap<String, Value>>,
 }
 
 // context_path is a non-standard relative path which may navigate up the tree
@@ -106,7 +106,7 @@ impl<'a> SubgraphContext<'a> {
     // - Returns the context index (the index of `self.named_args`) to use for this path.
     pub(crate) fn execute_on_path(&mut self, path: &Path) -> usize {
         let mut found_rewrites: HashSet<String> = HashSet::new();
-        let hash_map: HashMap<String, Value> = self
+        let hash_map: IndexMap<String, Value> = self
             .context_rewrites
             .iter()
             .filter_map(|rewrite| {
@@ -174,7 +174,7 @@ impl<'a> SubgraphContext<'a> {
                     None,
                 )
             } else {
-                let mut hash_map: HashMap<String, Value> = HashMap::new();
+                let mut hash_map: IndexMap<String, Value> = IndexMap::new();
                 let arg_names: HashSet<_> = first_map.keys().cloned().collect();
                 for (index, item) in self.named_args.iter().enumerate() {
                     // append _<index> to each of the arguments and push all the values into hash_map
@@ -194,7 +194,7 @@ impl<'a> SubgraphContext<'a> {
                 )
             }
         } else {
-            (HashMap::new(), None)
+            (IndexMap::new(), None)
         };
 
         variables.extend(
