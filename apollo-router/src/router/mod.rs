@@ -30,6 +30,7 @@ use crate::axum_factory::AxumHttpServerFactory;
 use crate::configuration::ListenAddr;
 use crate::orbiter::OrbiterRouterSuperServiceFactory;
 use crate::plugins::chaos::ChaosEventStream;
+use crate::registry::OciConfig;
 use crate::router::event::reload::ReloadableEventStream;
 use crate::router_factory::YamlRouterFactory;
 use crate::state_machine::ListenAddresses;
@@ -102,6 +103,12 @@ impl RouterHttpServer {
     ///   Optional.
     ///   Specifies the Uplink configuration options.
     ///
+    /// * `.pq_oci(impl Into<OciConfig>)`
+    ///   Optional.
+    ///   Specifies the OCI persisted-queries artifact configuration, used to fetch the
+    ///   persisted query manifest from its standalone artifact when a persisted-queries
+    ///   artifact reference is configured. Independent of the schema source.
+    ///
     /// * `.shutdown(impl Into<`[`ShutdownSource`]`>)`
     ///   Optional.
     ///   Specifies when the server should gracefully shut down.
@@ -128,6 +135,7 @@ impl RouterHttpServer {
         license: Option<LicenseSource>,
         shutdown: Option<ShutdownSource>,
         uplink: Option<UplinkConfig>,
+        pq_oci: Option<OciConfig>,
         is_telemetry_disabled: Option<bool>,
     ) -> RouterHttpServer {
         let (shutdown_sender, shutdown_receiver) = oneshot::channel::<()>();
@@ -136,6 +144,7 @@ impl RouterHttpServer {
             configuration.unwrap_or_default(),
             schema,
             uplink,
+            pq_oci,
             license.unwrap_or_default(),
             shutdown_receiver,
         );
@@ -229,6 +238,7 @@ fn generate_event_stream(
     configuration: ConfigurationSource,
     schema: SchemaSource,
     uplink_config: Option<UplinkConfig>,
+    pq_oci_config: Option<OciConfig>,
     license: LicenseSource,
     shutdown_receiver: oneshot::Receiver<()>,
 ) -> impl Stream<Item = Event> {
@@ -236,7 +246,9 @@ fn generate_event_stream(
         shutdown.into_stream().boxed(),
         schema.into_stream().boxed(),
         license.into_stream().boxed(),
-        configuration.into_stream(uplink_config).boxed(),
+        configuration
+            .into_stream(uplink_config, pq_oci_config)
+            .boxed(),
         shutdown_receiver
             .into_stream()
             .map(|_| Event::Shutdown)

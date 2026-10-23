@@ -1,0 +1,6 @@
+supergraph:
+  introspection: false
+apq:
+  enabled: false
+persisted_queries:
+  enabled: true
