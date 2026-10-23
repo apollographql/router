@@ -275,6 +275,8 @@ mod helpers {
     use crate::link::spec::Identity;
     use crate::schema::FederationSchema;
     use crate::schema::ValidFederationSchema;
+    use crate::schema::directive_location::DirectiveLocationExt;
+    use crate::schema::position::DirectiveDefinitionPosition;
     use crate::schema::position::InterfaceFieldDefinitionPosition;
     use crate::schema::position::ObjectFieldDefinitionPosition;
     use crate::schema::position::ObjectOrInterfaceFieldDefinitionPosition;
@@ -388,6 +390,7 @@ mod helpers {
             connector: &Connector,
         ) -> Result<FederationSchema, FederationError> {
             let mut schema = new_empty_federation_2_subgraph_schema()?;
+            self.process_executable_directives(&mut schema)?;
             let query_alias = self
                 .original_schema
                 .schema()
@@ -545,6 +548,35 @@ mod helpers {
             Ok(schema)
         }
 
+        /// Carry over executable directive definitions, along with the types their arguments
+        /// reference.
+        ///
+        /// Subgraph extraction copies executable directive definitions into every subgraph, since
+        /// an operation using one may be routed to any of them, so each synthetic subgraph needs
+        /// them (and their argument types) to be valid on its own.
+        fn process_executable_directives(
+            &self,
+            to_schema: &mut FederationSchema,
+        ) -> Result<(), FederationError> {
+            for (name, def) in &self.original_schema.schema().directive_definitions {
+                if to_schema.schema().directive_definitions.contains_key(name)
+                    || !def.locations.iter().any(|loc| loc.is_executable_location())
+                {
+                    continue;
+                }
+
+                self.process_inputs(to_schema, &def.arguments)?;
+
+                let pos = DirectiveDefinitionPosition {
+                    directive_name: name.clone(),
+                };
+                pos.pre_insert(to_schema)?;
+                pos.insert(to_schema, def.clone())?;
+            }
+
+            Ok(())
+        }
+
         /// Process all input types
         ///
         /// Inputs can include leaf types as well as custom inputs.
@@ -594,7 +626,9 @@ mod helpers {
         ) -> Result<(), FederationError> {
             let resolvable_key = connector
                 .resolvable_key(self.original_schema.schema())
-                .map_err(|_| FederationError::internal("error creating resolvable key"))?;
+                .map_err(|err| {
+                    FederationError::internal(format!("error creating resolvable key: {err}"))
+                })?;
 
             let Some(resolvable_key) = resolvable_key else {
                 // When an implicit entity resolver has no $this variables (e.g., the
@@ -729,6 +763,16 @@ mod helpers {
                 .iter()
                 .any(|d| d.name == self.interface_object_name);
 
+            // Only copy keys for `@interfaceObject` types, and always as
+            // `resolvable: false`. Copying a declared `@key` onto a non-entity
+            // connector's output type (e.g. a `Query` field connector mapping
+            // from `$args`) as resolvable would give the query planner a second,
+            // spurious entity path and let it route reference resolution through
+            // the wrong connector.
+            if !is_interface_object {
+                return Ok(());
+            }
+
             let pos = ObjectTypeDefinitionPosition {
                 type_name: original_output_type.name.clone(),
             };
@@ -742,21 +786,18 @@ mod helpers {
                     .argument_by_name("fields", self.original_schema.schema())
                     .map_err(|_| internal_error!("@key(fields:) argument missing"))?;
 
-                let mut arguments = vec![Node::new(Argument {
-                    name: name!("fields"),
-                    value: key_fields.clone(),
-                })];
-
-                if is_interface_object {
-                    arguments.push(Node::new(Argument {
-                        name: name!("resolvable"),
-                        value: Node::new(Value::Boolean(false)),
-                    }));
-                }
-
                 let key = Directive {
                     name: key.name.clone(),
-                    arguments,
+                    arguments: vec![
+                        Node::new(Argument {
+                            name: name!("fields"),
+                            value: key_fields.clone(),
+                        }),
+                        Node::new(Argument {
+                            name: name!("resolvable"),
+                            value: Node::new(Value::Boolean(false)),
+                        }),
+                    ],
                 };
                 pos.insert_directive(to_schema, Component::new(key))?;
             }
@@ -1049,6 +1090,7 @@ mod helpers {
             connector: &Connector,
         ) -> Result<FederationSchema, FederationError> {
             let mut schema = new_empty_federation_2_subgraph_schema()?;
+            self.process_executable_directives(&mut schema)?;
             let query_alias = self
                 .original_schema
                 .schema()
@@ -1198,6 +1240,35 @@ mod helpers {
             Ok(schema)
         }
 
+        /// Carry over executable directive definitions, along with the types their arguments
+        /// reference.
+        ///
+        /// Subgraph extraction copies executable directive definitions into every subgraph, since
+        /// an operation using one may be routed to any of them, so each synthetic subgraph needs
+        /// them (and their argument types) to be valid on its own.
+        fn process_executable_directives(
+            &self,
+            to_schema: &mut FederationSchema,
+        ) -> Result<(), FederationError> {
+            for (name, def) in &self.original_schema.schema().directive_definitions {
+                if to_schema.schema().directive_definitions.contains_key(name)
+                    || !def.locations.iter().any(|loc| loc.is_executable_location())
+                {
+                    continue;
+                }
+
+                self.process_inputs(to_schema, &def.arguments)?;
+
+                let pos = DirectiveDefinitionPosition {
+                    directive_name: name.clone(),
+                };
+                pos.pre_insert(to_schema)?;
+                pos.insert(to_schema, def.clone())?;
+            }
+
+            Ok(())
+        }
+
         /// Process all input types
         ///
         /// Inputs can include leaf types as well as custom inputs.
@@ -1247,7 +1318,9 @@ mod helpers {
         ) -> Result<(), FederationError> {
             let resolvable_key = connector
                 .resolvable_key(self.original_schema.schema())
-                .map_err(|_| FederationError::internal("error creating resolvable key"))?;
+                .map_err(|err| {
+                    FederationError::internal(format!("error creating resolvable key: {err}"))
+                })?;
 
             let Some(resolvable_key) = resolvable_key else {
                 return self.copy_interface_object_keys(output_type_name, to_schema);
@@ -1373,8 +1446,10 @@ mod helpers {
 
         /// If the type has @interfaceObject and it doesn't have a key at this point
         /// we'll need to add a key — this is a requirement for using @interfaceObject.
-        /// For now we'll just copy over keys from the original supergraph as resolvable: false
-        /// but we need to think through the implications of that.
+        /// Keys are copied over from the original supergraph as `resolvable: false`,
+        /// and only for @interfaceObject types. That is the specified behavior in both
+        /// expanders; see `Expander::copy_interface_object_keys` for why a resolvable
+        /// key here would be wrong.
         fn copy_interface_object_keys(
             &self,
             type_name: Name,

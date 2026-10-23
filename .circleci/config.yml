@@ -527,6 +527,21 @@ jobs:
       - setup_environment:
           platform: << parameters.platform >>
       - xtask_test
+      # Native plugin builds may set `--cfg tracing_unstable`, which compiles code paths (such as
+      # structured `valuable` log fields) that the default build excludes. Exercise them on one
+      # platform, since changing RUSTFLAGS forces a full rebuild. Don't gate this on a job
+      # parameter: if workflows expanded `test-amd_linux_test` differently, CircleCI would rename
+      # one of them `test-amd_linux_test-1`, and the required status check would never report.
+      - when:
+          condition:
+            equal: [*amd_linux_test_executor, << parameters.platform >>]
+          steps:
+            - run:
+                name: Run tracing_unstable telemetry tests
+                environment:
+                  RUSTFLAGS: "--cfg tracing_unstable"
+                command: |
+                  cargo test --locked -p apollo-router --lib plugins::telemetry::fmt_layer
       # Temporarily disable cargo-fuzz https://github.com/apollographql/router/pull/7488
       # - when:
       #     condition:
