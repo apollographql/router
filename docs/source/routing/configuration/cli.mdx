@@ -328,7 +328,7 @@ The router can be used to validate an existing configuration file. This can be u
 
 This command checks the file the way the router does when it loads its configuration at startup, including the automatic upgrades the router applies to settings that have changed within its major version. It exits with a non-zero status and prints the errors if the configuration is invalid.
 
-If a valid file relies on automatic upgrades, the command lists what each upgrade changes and how to update the file:
+If a valid file relies on automatic upgrades, the command lists them and still exits successfully:
 
 ```
 Configuration at path router.yaml is valid.
@@ -337,7 +337,7 @@ It relies on automatic upgrades that the router applies at startup:
 Run `router config upgrade router.yaml` to update the file.
 ```
 
-The command still exits successfully in this case, and it prints these notices as part of its output rather than as log lines. Run `router config upgrade` to write the upgraded file, so that the router no longer needs to upgrade it at startup.
+To stop the router applying these upgrades at every startup, run `router config upgrade` to write them to the file.
 
 <Note>
 
