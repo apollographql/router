@@ -17,6 +17,7 @@ mod connect;
 pub(super) mod context;
 mod fork;
 mod requires;
+pub(super) mod response_keys;
 mod routing;
 pub(super) mod state;
 #[cfg(test)]
@@ -151,6 +152,9 @@ pub(super) struct PlannerCaches {
     /// session; `child_possible_types` runs on every dispatch, so building
     /// the sorted Vec fresh each time dominated allocation on small graphs.
     pub(super) possible_type_names: RefCell<HashMap<Name, Arc<Vec<Name>>>>,
+    /// Whether a field resolves in more than one subgraph, by (parent
+    /// type, field). Asked on every dispatch along a shareable path.
+    pub(super) fields_in_multiple_subgraphs: RefCell<HashMap<(Name, Name), bool>>,
 }
 
 impl PlannerCaches {
@@ -164,6 +168,7 @@ impl PlannerCaches {
             key_hops_in_flight: RefCell::new(HashSet::new()),
             guard_hits: std::cell::Cell::new(0),
             possible_type_names: RefCell::new(HashMap::new()),
+            fields_in_multiple_subgraphs: RefCell::new(HashMap::new()),
         }
     }
 }
@@ -191,6 +196,8 @@ pub(crate) struct FieldRoutingSearchSpace {
     pub(super) caches: PlannerCaches,
     /// Subgraphs the caller disabled: enumeration never routes into them.
     pub(crate) disabled_subgraphs: apollo_compiler::collections::IndexSet<Arc<str>>,
+    /// Response keys the client operation claims, for @requires aliasing.
+    pub(crate) response_keys: response_keys::OperationResponseKeys,
 }
 
 /// Identity of the selection a key-hop enumeration serves; paired with the

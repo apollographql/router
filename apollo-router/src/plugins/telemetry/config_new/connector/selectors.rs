@@ -2,12 +2,9 @@ use std::sync::atomic::Ordering;
 
 use apollo_federation::connectors::runtime::http_json_transport::TransportRequest;
 use apollo_federation::connectors::runtime::responses::MappedResponse;
-use derivative::Derivative;
 use opentelemetry::Array;
 use opentelemetry::StringValue;
 use opentelemetry::Value;
-use schemars::JsonSchema;
-use serde::Deserialize;
 use sha2::Digest;
 use tower::BoxError;
 
@@ -29,15 +26,15 @@ use crate::plugins::telemetry::config_new::selectors::ResponseStatus;
 use crate::services::connector::request_service::TransportOutcome;
 use crate::services::http::service::WireByteCount;
 
-#[derive(Deserialize, JsonSchema, Clone, Debug, PartialEq)]
-#[serde(deny_unknown_fields, rename_all = "snake_case")]
+#[apollo_configuration::configuration]
+#[derive(PartialEq)]
 pub(crate) enum ConnectorSource {
     /// The name of the connector source.
     Name,
 }
 
-#[derive(Deserialize, JsonSchema, Clone, Debug)]
-#[serde(deny_unknown_fields, rename_all = "snake_case", untagged)]
+#[apollo_configuration::configuration]
+#[serde(untagged)]
 pub(crate) enum ConnectorValue {
     Standard(Standard),
     Custom(ConnectorSelector),
@@ -52,8 +49,8 @@ impl From<&ConnectorValue> for InstrumentValue<ConnectorSelector> {
     }
 }
 
-#[derive(Deserialize, JsonSchema, Clone, Debug, PartialEq)]
-#[serde(deny_unknown_fields, rename_all = "snake_case")]
+#[apollo_configuration::configuration]
+#[derive(PartialEq)]
 pub(crate) enum MappingProblems {
     /// String representation of all problems
     Problems,
@@ -63,20 +60,23 @@ pub(crate) enum MappingProblems {
     Boolean,
 }
 
-#[derive(Deserialize, JsonSchema, Clone, Derivative)]
-#[serde(deny_unknown_fields, rename_all = "snake_case", untagged)]
-#[derivative(Debug, PartialEq)]
+#[apollo_configuration::configuration]
+#[derive(PartialEq)]
+#[serde(untagged)]
 pub(crate) enum ConnectorSelector {
     SubgraphName {
         /// The subgraph name
+        #[config(required)]
         subgraph_name: bool,
     },
     ConnectorSource {
         /// The connector source.
+        #[config(required)]
         connector_source: ConnectorSource,
     },
     HttpRequestHeader {
         /// The name of a connector HTTP request header.
+        #[config(required)]
         connector_http_request_header: String,
         /// Optional redaction pattern.
         redact: Option<crate::services::header_masking::RedactMode>,
@@ -85,6 +85,7 @@ pub(crate) enum ConnectorSelector {
     },
     ConnectorResponseHeader {
         /// The name of a connector HTTP response header.
+        #[config(required)]
         connector_http_response_header: String,
         /// Optional redaction pattern.
         redact: Option<crate::services::header_masking::RedactMode>,
@@ -93,44 +94,54 @@ pub(crate) enum ConnectorSelector {
     },
     ConnectorResponseStatus {
         /// The connector HTTP response status code.
+        #[config(required)]
         connector_http_response_status: ResponseStatus,
     },
     ConnectorResponseBodySize {
         /// The connector HTTP response body size (wire bytes before decompression).
+        #[config(required)]
         connector_http_response_body_size: bool,
     },
     ConnectorHttpMethod {
         /// The connector HTTP method.
+        #[config(required)]
         connector_http_method: bool,
     },
     ConnectorUrlTemplate {
         /// The connector URL template.
+        #[config(required)]
         connector_url_template: bool,
     },
     StaticField {
         /// A static value
+        #[config(required)]
         r#static: AttributeValue,
     },
     Error {
         /// Critical error if it happens
+        #[config(required)]
         error: ErrorRepr,
     },
     RequestMappingProblems {
         /// Request mapping problems, if any
+        #[config(required)]
         connector_request_mapping_problems: MappingProblems,
     },
     ResponseMappingProblems {
         /// Response mapping problems, if any
+        #[config(required)]
         connector_response_mapping_problems: MappingProblems,
     },
     RequestContext {
         /// The request context key.
+        #[config(required)]
         request_context: String,
         /// Optional default value.
         default: Option<AttributeValue>,
     },
     SupergraphOperationName {
         /// The supergraph query operation name.
+        #[config(required)]
         supergraph_operation_name: OperationName,
         /// Optional default value.
         default: Option<String>,
@@ -139,16 +150,19 @@ pub(crate) enum ConnectorSelector {
         /// The supergraph query operation kind (query|mutation|subscription).
         // Allow dead code is required because there is only one variant in OperationKind and we need to avoid the dead code warning.
         #[allow(dead_code)]
+        #[config(required)]
         supergraph_operation_kind: OperationKind,
     },
     OnResponseError {
         /// Boolean set to true if the response's `is_successful` condition is false. If this is not
         /// set, returns true when the response contains a non-200 status code
+        #[config(required)]
         connector_on_response_error: bool,
     },
     /// The context ID of the request (unique per request).
     ContextId {
         /// The context ID
+        #[config(required)]
         context_id: bool,
     },
 }

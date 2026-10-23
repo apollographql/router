@@ -9,13 +9,12 @@ use apollo_federation::query_plan::serializable_document::SerializableDocument;
 use indexmap::IndexSet;
 use serde::Deserialize;
 use serde::Serialize;
-use serde_json_bytes::ByteString;
-use serde_json_bytes::Map;
 use tokio::sync::broadcast::Sender;
 use tower::ServiceExt;
 use tracing::Instrument;
 use tracing::instrument;
 
+use super::log::SubfetchTrace;
 use super::rewrites;
 use super::selection::execute_selection_set;
 use super::subgraph_context::ContextualArguments;
@@ -37,6 +36,7 @@ use crate::query_planner::SubgraphSchemas;
 use crate::services::SubgraphRequest;
 use crate::services::fetch::ErrorMapping;
 use crate::services::subgraph::BoxCloneService;
+use crate::spec::Query;
 use crate::spec::QueryHash;
 use crate::spec::Schema;
 
@@ -159,6 +159,7 @@ impl Variables {
         data: &Value,
         current_dir: &Path,
         request: &Arc<http::Request<Request>>,
+        query: &Query,
         schema: &Schema,
         input_rewrites: &Option<Vec<rewrites::DataRewrite>>,
         context_rewrites: &Option<Vec<rewrites::DataRewrite>>,
@@ -166,6 +167,13 @@ impl Variables {
         let body = request.body();
         let mut subgraph_context = SubgraphContext::new(data, schema, context_rewrites);
         if !requires.is_empty() {
+            // Resolves the boolean variables that `@skip`/`@include` conditions on the `requires`
+            // selections may refer to, taking the operation's variable defaults into account.
+            let boolean_variable = |name: &str| {
+                query
+                    .variable_value(name, &body.variables)
+                    .and_then(Value::as_bool)
+            };
             let mut variables = Object::with_capacity(1 + variable_usages.len());
 
             variables.extend(variable_usages.iter().filter_map(|key| {
@@ -182,7 +190,8 @@ impl Variables {
                     context.execute_on_path(path);
                 }
 
-                let mut value = execute_selection_set(value, requires, schema, None);
+                let mut value =
+                    execute_selection_set(value, requires, schema, None, &boolean_variable);
                 if value.as_object().map(|o| !o.is_empty()).unwrap_or(false) {
                     rewrites::apply_rewrites(schema, &mut value, input_rewrites);
                     match values.get_index_of(&value) {
@@ -254,8 +263,7 @@ impl FetchNode {
         current_dir: &Path,
         schema: &Schema,
         paths: Vec<Vec<Path>>,
-        operation_str: &str,
-        variables: Map<ByteString, Value>,
+        subfetch_trace: Option<SubfetchTrace>,
         hoist_orphan_errors: bool,
     ) -> (Value, Vec<Error>) {
         let (_parts, response) = match service
@@ -270,7 +278,9 @@ impl FetchNode {
             Ok(res) => res.response.into_parts(),
         };
 
-        super::log::trace_subfetch(&self.service_name, operation_str, &variables, &response);
+        if let Some(subfetch_trace) = &subfetch_trace {
+            super::log::trace_subfetch(&self.service_name, subfetch_trace, &response);
+        }
 
         if !response.is_primary() {
             return (
@@ -605,6 +615,7 @@ mod tests {
         vec![requires_selection::Selection::InlineFragment(
             requires_selection::InlineFragment {
                 type_condition: Some(name!("T")),
+                conditions: vec![],
                 selections: vec![requires_selection::Selection::Field(
                     requires_selection::Field {
                         alias: None,
@@ -1438,6 +1449,7 @@ mod tests {
             &data,
             &current_dir,
             &request,
+            &Query::empty_for_tests(),
             &schema,
             &None,
             &None,

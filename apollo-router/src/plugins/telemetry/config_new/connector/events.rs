@@ -3,8 +3,6 @@ use std::sync::Arc;
 use opentelemetry::Key;
 use opentelemetry::KeyValue;
 use parking_lot::Mutex;
-use schemars::JsonSchema;
-use serde::Deserialize;
 use tower::BoxError;
 
 use crate::Context;
@@ -38,8 +36,7 @@ pub(crate) struct ConnectorEventResponse {
     pub(crate) condition: Arc<Condition<ConnectorSelector>>,
 }
 
-#[derive(Clone, Deserialize, JsonSchema, Debug, Default)]
-#[serde(deny_unknown_fields, default)]
+#[apollo_configuration::configuration]
 pub(crate) struct ConnectorEventsConfig {
     /// Log the connector HTTP request
     pub(crate) request: StandardEventConfig<ConnectorSelector>,

@@ -15,7 +15,6 @@ use std::time::Duration;
 
 use apollo_redaction::Redacted;
 use connector::ConnectorConfiguration;
-use derivative::Derivative;
 use displaydoc::Display;
 use itertools::Either;
 use itertools::Itertools;
@@ -171,8 +170,7 @@ impl From<proteus::parser::Error> for ConfigurationError {
 /// or inline in Rust code with `serde_json::json!` and `serde_json::from_value`.
 // Every way in goes through `ConfigurationParser`, so the configuration is checked against
 // Router's schema and every plugin's validation rules.
-#[derive(Clone, Derivative, JsonSchema)]
-#[derivative(Debug)]
+#[derive(Clone, derive_more::Debug, JsonSchema)]
 // We can't put a global #[serde(default)] here because the Default implementation deserializes an empty document
 pub struct Configuration {
     /// The raw configuration value.
@@ -228,7 +226,6 @@ pub struct Configuration {
 
     /// Plugin configuration
     #[serde(default)]
-    #[schemars(extend("default" = null))]
     pub(crate) plugins: UserPlugins,
 
     /// Built-in plugin configuration. Built in plugins are pushed to the top level of config.
@@ -349,7 +346,7 @@ impl Configuration {
             .map(|s| serde_yaml::to_string(s).expect("config was not serializable"))
             .unwrap_or_default();
         hasher.update(defaulted_raw);
-        let hash: String = format!("{:x}", hasher.finalize());
+        let hash: String = hex::encode(hasher.finalize());
         hash
     }
 
@@ -777,10 +774,7 @@ impl JsonSchema for UserPlugins {
             .filter(|factory| !factory.name.starts_with(APOLLO_PLUGIN_PREFIX))
             .map(|factory| (factory.name.to_string(), factory.create_schema(generator)))
             .collect();
-        let mut schema = gen_schema(plugins, None);
-        // `plugins: null` means no user plugins, as in earlier releases.
-        schema.insert("type".to_string(), serde_json::json!(["object", "null"]));
-        schema
+        gen_schema(plugins, None)
     }
 }
 

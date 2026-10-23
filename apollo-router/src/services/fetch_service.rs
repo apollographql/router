@@ -26,6 +26,7 @@ use crate::query_planner::FETCH_SPAN_NAME;
 use crate::query_planner::SubgraphSchemas;
 use crate::query_planner::build_operation_with_aliasing;
 use crate::query_planner::fetch::FetchNode;
+use crate::query_planner::log::SubfetchTrace;
 use crate::services::FetchResponse;
 use crate::services::SubgraphServices;
 use crate::services::fetch::ErrorMapping;
@@ -172,7 +173,7 @@ impl FetchService {
                     ConnectRequest::builder()
                         .service_name(fetch_node.service_name.clone())
                         .context(context)
-                        .operation(operation?.clone())
+                        .operation(operation?)
                         .supergraph_request(supergraph_request)
                         .variables(variables)
                         .and_keys(keys)
@@ -265,10 +266,9 @@ impl FetchService {
             operation.as_serialized()
         };
 
-        let aqs = aliased_operation.to_string(); // TODO
-        let current_dir = current_dir.clone();
+        let subfetch_trace = SubfetchTrace::capture(aliased_operation, &variables.variables);
         let service = subgraph_services
-            .get(&service_name.clone())
+            .get(service_name)
             .expect("we already checked that the service exists during planning; qed");
 
         let mut subgraph_request = SubgraphRequest::builder()
@@ -281,7 +281,7 @@ impl FetchService {
                         GraphQLRequest::builder()
                             .query(aliased_operation)
                             .and_operation_name(operation_name.as_ref().map(|n| n.to_string()))
-                            .variables(variables.variables.clone())
+                            .variables(variables.variables)
                             .build(),
                     )
                     .build()
@@ -290,7 +290,7 @@ impl FetchService {
             .subgraph_name(service_name.to_string())
             .operation_kind(*operation_kind)
             .and_executable_document(operation.as_parsed().ok().cloned())
-            .context(context.clone())
+            .context(context)
             .build();
         subgraph_request.query_hash = fetch_node.schema_aware_hash.clone();
         subgraph_request.authorization = fetch_node.authorization.clone();
@@ -306,8 +306,7 @@ impl FetchService {
                     &current_dir,
                     &schema,
                     variables.inverted_paths,
-                    &aqs,
-                    variables.variables,
+                    subfetch_trace,
                     hoist_orphan_errors,
                 )
                 .await)

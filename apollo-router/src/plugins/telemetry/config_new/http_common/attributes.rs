@@ -1,5 +1,3 @@
-use std::fmt::Debug;
-
 use http::StatusCode;
 use http::header::CONTENT_LENGTH;
 use opentelemetry::KeyValue;
@@ -11,8 +9,6 @@ use opentelemetry_semantic_conventions::trace::NETWORK_PROTOCOL_NAME;
 use opentelemetry_semantic_conventions::trace::NETWORK_PROTOCOL_VERSION;
 use opentelemetry_semantic_conventions::trace::NETWORK_TRANSPORT;
 use opentelemetry_semantic_conventions::trace::NETWORK_TYPE;
-use schemars::JsonSchema;
-use serde::Deserialize;
 use tower::BoxError;
 
 use crate::Context;
@@ -27,9 +23,8 @@ use crate::services::router;
 
 /// Common attributes for http server and client.
 /// See https://opentelemetry.io/docs/specs/semconv/http/http-spans/#common-attributes
-#[derive(Deserialize, JsonSchema, Clone, Default, Debug)]
+#[apollo_configuration::configuration]
 #[cfg_attr(test, derive(PartialEq))]
-#[serde(deny_unknown_fields, default)]
 pub(crate) struct HttpCommonAttributes {
     /// Describes a class of error the operation ended with.
     /// Examples:

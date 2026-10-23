@@ -184,7 +184,6 @@ fn config_with_subgraph_prometheus() -> Value {
               "metrics": {
                   "prometheus": {
                       "enabled": true,
-                      "listen": "127.0.0.1:9090",
                       "path": "/metrics"
                   }
               }

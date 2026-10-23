@@ -19,6 +19,7 @@ use std::fmt::Formatter;
 use std::hash::Hash;
 use std::hash::Hasher;
 use std::ops::Deref;
+use std::rc::Rc;
 use std::sync::Arc;
 use std::sync::atomic;
 
@@ -1841,9 +1842,9 @@ impl SelectionSet {
     ) -> Result<(SelectionSet, Vec<Arc<FetchDataRewrite>>), FederationError> {
         let mut aliases = Vec::new();
         compute_aliases_for_non_merging_fields(
-            vec![SelectionSetAtPath {
-                path: Vec::new(),
-                selections: Some(self.clone()),
+            vec![AliasSetAtPath {
+                path: AliasPath::default(),
+                selections: self,
             }],
             &mut aliases,
             &self.schema,
@@ -1857,6 +1858,7 @@ impl SelectionSet {
                      mut path,
                      response_name,
                      alias,
+                     ..
                  }| {
                     path.push(FetchDataPathElement::Key(alias, Default::default()));
                     Arc::new(FetchDataRewrite::KeyRenamer(FetchDataKeyRenamer {
@@ -1878,38 +1880,40 @@ impl SelectionSet {
             return Ok(self.clone());
         }
 
-        let mut at_current_level: IndexMap<FetchDataPathElement, &FieldToAlias> =
-            IndexMap::default();
+        let mut at_current_level: IndexMap<(&Name, &Name), &FieldToAlias> = IndexMap::default();
         let mut remaining: Vec<&FieldToAlias> = Vec::new();
 
         for alias in aliases {
             if !alias.path.is_empty() {
                 remaining.push(alias);
             } else {
-                at_current_level.insert(
-                    FetchDataPathElement::Key(alias.response_name.clone(), Default::default()),
-                    alias,
-                );
+                at_current_level.insert((&alias.response_name, &alias.field_name), alias);
             }
         }
 
         let mut selection_map = SelectionMap::new();
         for selection in self.selections.values() {
             let path_element = selection.element().as_path_element();
-            let subselection_aliases = remaining
-                .iter()
-                .filter_map(|alias| {
-                    if alias.path.first() == path_element.as_ref() {
-                        Some(FieldToAlias {
-                            path: alias.path[1..].to_vec(),
-                            response_name: alias.response_name.clone(),
-                            alias: alias.alias.clone(),
-                        })
-                    } else {
-                        None
-                    }
-                })
-                .collect::<Vec<_>>();
+            let subselection_aliases = match &path_element {
+                Some(path_element) => remaining
+                    .iter()
+                    .filter_map(|alias| {
+                        if alias.path.first() == Some(path_element) {
+                            Some(FieldToAlias {
+                                path: alias.path[1..].to_vec(),
+                                ..(*alias).clone()
+                            })
+                        } else {
+                            None
+                        }
+                    })
+                    .collect::<Vec<_>>(),
+                // Only an inline fragment without a type condition has no path element.
+                // `collect_alias_fields` adds nothing to alias paths for such a fragment, so every
+                // alias at this level, including those for fields directly at this level,
+                // also applies inside it.
+                None => aliases.to_vec(),
+            };
             let selection_set = selection.selection_set();
             let updated_selection_set = selection_set
                 .map(|selection_set| selection_set.with_field_aliased(&subselection_aliases))
@@ -1917,7 +1921,8 @@ impl SelectionSet {
 
             match selection {
                 Selection::Field(field) => {
-                    let alias = path_element.and_then(|elem| at_current_level.get(&elem));
+                    let alias =
+                        at_current_level.get(&(field.field.response_name(), field.field.name()));
                     if alias.is_none() && selection_set == updated_selection_set.as_ref() {
                         selection_map.insert(selection.clone());
                     } else {
@@ -1945,44 +1950,6 @@ impl SelectionSet {
             type_position: self.type_position.clone(),
             selections: Arc::new(selection_map),
         })
-    }
-
-    /// # Preconditions
-    /// The selection set must not contain named fragment spreads.
-    fn fields_in_set(&self) -> Vec<CollectedFieldInSet> {
-        let mut fields = Vec::new();
-
-        for selection in self.selections.values() {
-            match selection {
-                Selection::Field(field) => fields.push(CollectedFieldInSet {
-                    path: Vec::new(),
-                    field: field.clone(),
-                }),
-                Selection::InlineFragment(inline_fragment) => {
-                    let condition = inline_fragment
-                        .inline_fragment
-                        .type_condition_position
-                        .as_ref();
-                    let header = match condition {
-                        Some(cond) => vec![FetchDataPathElement::TypenameEquals(
-                            cond.type_name().clone(),
-                        )],
-                        None => vec![],
-                    };
-                    for CollectedFieldInSet { path, field } in
-                        inline_fragment.selection_set.fields_in_set().into_iter()
-                    {
-                        let mut new_path = header.clone();
-                        new_path.extend(path);
-                        fields.push(CollectedFieldInSet {
-                            path: new_path,
-                            field,
-                        })
-                    }
-                }
-            }
-        }
-        fields
     }
 
     pub(crate) fn validate(
@@ -2076,104 +2043,122 @@ impl<'a> IntoIterator for &'a SelectionSet {
     }
 }
 
-#[derive(Clone, Debug)]
-pub(crate) struct SelectionSetAtPath {
-    path: Vec<FetchDataPathElement>,
-    selections: Option<SelectionSet>,
-}
-
+#[derive(Clone)]
 pub(crate) struct FieldToAlias {
     path: Vec<FetchDataPathElement>,
     response_name: Name,
+    /// Name of the field to alias. Fields inside an inline fragment without a type condition
+    /// share the path of their siblings outside it, so path and response name alone don't
+    /// tell which occurrence to alias; conflicting occurrences at one path differ in name.
+    field_name: Name,
     alias: Name,
 }
 
-pub(crate) struct SeenResponseName {
-    field_name: Name,
-    field_type: executable::Type,
-    selections: Option<Vec<SelectionSetAtPath>>,
+/// A response path shared between the selections under one parent, so
+/// walking a selection set copies a pointer per field instead of a `Vec`.
+#[derive(Clone, Default)]
+struct AliasPath(Option<Rc<(AliasPath, FetchDataPathElement)>>);
+
+impl AliasPath {
+    fn pushed(&self, element: FetchDataPathElement) -> Self {
+        Self(Some(Rc::new((self.clone(), element))))
+    }
+
+    fn to_vec(&self) -> Vec<FetchDataPathElement> {
+        let mut elements = Vec::new();
+        let mut current = &self.0;
+        while let Some(node) = current {
+            elements.push(node.1.clone());
+            current = &node.0.0;
+        }
+        elements.reverse();
+        elements
+    }
 }
 
-pub(crate) struct CollectedFieldInSet {
-    path: Vec<FetchDataPathElement>,
-    field: Arc<FieldSelection>,
+struct AliasSetAtPath<'a> {
+    path: AliasPath,
+    selections: &'a SelectionSet,
 }
 
-struct FieldInPath {
-    path: Vec<FetchDataPathElement>,
-    field: Arc<FieldSelection>,
+struct AliasSeenResponseName<'a> {
+    field_name: &'a Name,
+    field_type: &'a executable::Type,
+    selections: Option<Vec<AliasSetAtPath<'a>>>,
+}
+
+/// The fields of `selections`, looking through inline fragments, in
+/// selection order.
+// - `selections` must be fragment-spread-free.
+fn collect_alias_fields<'a>(
+    selections: &'a SelectionSet,
+    path: &AliasPath,
+    fields: &mut Vec<(AliasPath, &'a FieldSelection)>,
+) {
+    for selection in selections.selections.values() {
+        match selection {
+            Selection::Field(field) => fields.push((path.clone(), field)),
+            Selection::InlineFragment(inline_fragment) => {
+                let path = match &inline_fragment.inline_fragment.type_condition_position {
+                    Some(condition) => path.pushed(FetchDataPathElement::TypenameEquals(
+                        condition.type_name().clone(),
+                    )),
+                    None => path.clone(),
+                };
+                collect_alias_fields(&inline_fragment.selection_set, &path, fields);
+            }
+        }
+    }
 }
 
 // - `selections` must be fragment-spread-free.
-fn compute_aliases_for_non_merging_fields(
-    selections: Vec<SelectionSetAtPath>,
+fn compute_aliases_for_non_merging_fields<'a>(
+    selections: Vec<AliasSetAtPath<'a>>,
     alias_collector: &mut Vec<FieldToAlias>,
     schema: &ValidFederationSchema,
 ) -> Result<(), FederationError> {
-    let mut seen_response_names: IndexMap<Name, SeenResponseName> = IndexMap::default();
-
-    // - `s.selections` must be fragment-spread-free.
-    fn rebased_fields_in_set(s: &SelectionSetAtPath) -> impl Iterator<Item = FieldInPath> {
-        s.selections.iter().flat_map(|s2| {
-            s2.fields_in_set()
-                .into_iter()
-                .map(|CollectedFieldInSet { path, field }| {
-                    let mut new_path = s.path.clone();
-                    new_path.extend(path);
-                    FieldInPath {
-                        path: new_path,
-                        field,
-                    }
-                })
-        })
+    let mut fields = Vec::new();
+    for set in &selections {
+        collect_alias_fields(set.selections, &set.path, &mut fields);
     }
 
-    for FieldInPath { mut path, field } in selections.iter().flat_map(rebased_fields_in_set) {
-        let field_schema = field.field.schema().schema();
+    let mut seen_response_names: IndexMap<Name, AliasSeenResponseName<'a>> = IndexMap::default();
+    for (path, field) in fields {
         let field_name = field.field.name();
         let response_name = field.field.response_name();
-        let field_type = &field.field.field_position.get(field_schema)?.ty;
+        let field_type = &field
+            .field
+            .field_position
+            .get(field.field.schema().schema())?
+            .ty;
 
-        match seen_response_names.get(response_name) {
+        match seen_response_names.get_mut(response_name) {
             Some(previous) => {
-                if &previous.field_name == field_name
-                    && types_can_be_merged(&previous.field_type, field_type, schema.schema())?
+                if previous.field_name == field_name
+                    && types_can_be_merged(previous.field_type, field_type, schema.schema())?
                 {
                     let output_type = schema.get_type(field_type.inner_named_type())?;
                     // If the type is non-composite, then we're all set. But if it is composite, we need to record the sub-selection to that response name
                     // as we need to "recurse" on the merged of both the previous and this new field.
                     if output_type.is_composite_type() {
-                        match &previous.selections {
-                            None => {
-                                return Err(SingleFederationError::Internal {
-                                    message: format!(
-                                        "Should have added selections for `'{:?}\'",
-                                        previous.field_type
-                                    ),
-                                }
-                                .into());
+                        let Some(previous_selections) = previous.selections.as_mut() else {
+                            return Err(SingleFederationError::Internal {
+                                message: format!(
+                                    "Should have added selections for `'{:?}\'",
+                                    previous.field_type
+                                ),
                             }
-                            Some(s) => {
-                                let mut selections = s.clone();
-                                let mut p = path.clone();
-                                p.push(FetchDataPathElement::Key(
+                            .into());
+                        };
+                        if let Some(sub_selections) = &field.selection_set {
+                            previous_selections.push(AliasSetAtPath {
+                                path: path.pushed(FetchDataPathElement::Key(
                                     response_name.clone(),
                                     Default::default(),
-                                ));
-                                selections.push(SelectionSetAtPath {
-                                    path: p,
-                                    selections: field.selection_set.clone(),
-                                });
-                                seen_response_names.insert(
-                                    response_name.clone(),
-                                    SeenResponseName {
-                                        field_name: previous.field_name.clone(),
-                                        field_type: previous.field_type.clone(),
-                                        selections: Some(selections),
-                                    },
-                                )
-                            }
-                        };
+                                )),
+                                selections: sub_selections,
+                            });
+                        }
                     }
                 } else {
                     // We need to alias the new occurrence.
@@ -2182,23 +2167,24 @@ fn compute_aliases_for_non_merging_fields(
                     // Given how we generate aliases, it's is very unlikely that the generated alias will conflict with any of the other response name
                     // at the level, but it's theoretically possible. By adding the alias to the seen names, we ensure that in the remote change that
                     // this ever happen, we'll avoid the conflict by giving another alias to the followup occurrence.
-                    let selections = match field.selection_set.as_ref() {
-                        Some(s) => {
-                            let mut p = path.clone();
-                            p.push(FetchDataPathElement::Key(alias.clone(), Default::default()));
-                            Some(vec![SelectionSetAtPath {
-                                path: p,
-                                selections: Some(s.clone()),
-                            }])
-                        }
-                        None => None,
-                    };
-
+                    let selections = field.selection_set.as_ref().map(|sub_selections| {
+                        vec![AliasSetAtPath {
+                            // Nested aliases are keyed by the original response name, not by
+                            // `alias`: `with_field_aliased` matches paths against the selections'
+                            // response names before aliasing, and the output rewrites rename this
+                            // field back to `response_name` before the nested renames run.
+                            path: path.pushed(FetchDataPathElement::Key(
+                                response_name.clone(),
+                                Default::default(),
+                            )),
+                            selections: sub_selections,
+                        }]
+                    });
                     seen_response_names.insert(
                         alias.clone(),
-                        SeenResponseName {
-                            field_name: field_name.clone(),
-                            field_type: field_type.clone(),
+                        AliasSeenResponseName {
+                            field_name,
+                            field_type,
                             selections,
                         },
                     );
@@ -2206,32 +2192,28 @@ fn compute_aliases_for_non_merging_fields(
                     // Lastly, we record that the added alias need to be rewritten back to the proper response name post query.
 
                     alias_collector.push(FieldToAlias {
-                        path,
+                        path: path.to_vec(),
                         response_name: response_name.clone(),
+                        field_name: field_name.clone(),
                         alias,
                     })
                 }
             }
             None => {
-                let selections: Option<Vec<SelectionSetAtPath>> = match field.selection_set.as_ref()
-                {
-                    Some(s) => {
-                        path.push(FetchDataPathElement::Key(
+                let selections = field.selection_set.as_ref().map(|sub_selections| {
+                    vec![AliasSetAtPath {
+                        path: path.pushed(FetchDataPathElement::Key(
                             response_name.clone(),
                             Default::default(),
-                        ));
-                        Some(vec![SelectionSetAtPath {
-                            path,
-                            selections: Some(s.clone()),
-                        }])
-                    }
-                    None => None,
-                };
+                        )),
+                        selections: sub_selections,
+                    }]
+                });
                 seen_response_names.insert(
                     response_name.clone(),
-                    SeenResponseName {
-                        field_name: field_name.clone(),
-                        field_type: field_type.clone(),
+                    AliasSeenResponseName {
+                        field_name,
+                        field_type,
                         selections,
                     },
                 );
@@ -2241,13 +2223,13 @@ fn compute_aliases_for_non_merging_fields(
 
     seen_response_names
         .into_values()
-        .filter_map(|selections| selections.selections)
+        .filter_map(|seen| seen.selections)
         .try_for_each(|selections| {
             compute_aliases_for_non_merging_fields(selections, alias_collector, schema)
         })
 }
 
-fn gen_alias_name(base_name: &Name, unavailable_names: &IndexMap<Name, SeenResponseName>) -> Name {
+fn gen_alias_name(base_name: &Name, unavailable_names: &IndexMap<Name, impl Sized>) -> Name {
     let mut counter = 0usize;
     loop {
         if let Ok(name) = Name::try_from(format!("{base_name}__alias_{counter}"))

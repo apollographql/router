@@ -1596,6 +1596,7 @@ async fn a_burst_of_subgraph_cache_hits_records_nothing() {
 }
 
 /// A subgraph request sent with `cache_control`.
+#[cfg(any(not(feature = "ci"), all(target_arch = "x86_64", target_os = "linux")))]
 fn subgraph_request_with_cache_control(
     request: crate::services::subgraph::Request,
     cache_control: &'static str,

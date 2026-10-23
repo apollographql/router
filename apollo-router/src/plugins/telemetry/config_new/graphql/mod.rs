@@ -1,8 +1,6 @@
 use apollo_compiler::ExecutableDocument;
 use apollo_compiler::ast::NamedType;
 use apollo_compiler::executable::Field;
-use schemars::JsonSchema;
-use serde::Deserialize;
 use serde_json_bytes::Value;
 use tower::BoxError;
 
@@ -29,8 +27,7 @@ pub(crate) mod selectors;
 pub(crate) const FIELD_LENGTH: &str = "graphql.field.list.length";
 pub(crate) const FIELD_EXECUTION: &str = "graphql.field.execution";
 
-#[derive(Deserialize, JsonSchema, Clone, Default, Debug)]
-#[serde(deny_unknown_fields, default)]
+#[apollo_configuration::configuration]
 pub(crate) struct GraphQLInstrumentsConfig {
     /// A histogram of the length of a selected field in the GraphQL response
     #[serde(rename = "list.length")]

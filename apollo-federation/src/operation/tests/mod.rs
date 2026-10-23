@@ -2094,3 +2094,177 @@ mod generated_document_validation_tests {
         );
     }
 }
+
+/// An inline fragment without a type condition adds no element to alias paths, so aliases
+/// computed for fields inside it must be applied inside it as well; otherwise the subgraph
+/// operation keeps two incompatible selections under one response name.
+#[test]
+fn add_aliases_for_non_merging_fields_inside_untyped_inline_fragment() {
+    let schema = parse_schema(
+        r#"
+        directive @dir on INLINE_FRAGMENT
+        type Query { u: [U!]! }
+        union U = A | B
+        type A { x: Int! }
+        type B { x: Int y: String }
+        "#,
+    );
+    let aliased = |query: &str| {
+        // The input selects incompatible types under one response name, as the planner's
+        // internal fetch selections can before aliasing; so it's parsed without validation.
+        let document =
+            ExecutableDocument::parse(schema.schema(), query, "query.graphql").expect("parses");
+        let operation = normalize_operation(
+            document.operations.iter().next().expect("has an operation"),
+            &document.fragments,
+            &schema,
+            &Default::default(),
+            &never_cancel,
+            true,
+        )
+        .expect("normalizes");
+        let (selection_set, rewrites) = operation
+            .selection_set
+            .add_aliases_for_non_merging_fields()
+            .expect("aliases can be computed");
+        let rewrites = rewrites
+            .iter()
+            .map(|rewrite| match rewrite.as_ref() {
+                crate::query_plan::FetchDataRewrite::KeyRenamer(renamer) => format!(
+                    "{} -> {}",
+                    renamer
+                        .path
+                        .iter()
+                        .map(|element| element.to_string())
+                        .collect::<Vec<_>>()
+                        .join("/"),
+                    renamer.rename_key_to
+                ),
+                other => panic!("unexpected rewrite {other:?}"),
+            })
+            .collect::<Vec<_>>();
+        format!("{selection_set}\n{}", rewrites.join("\n"))
+    };
+
+    // The untyped fragment wraps the whole conflicting selection.
+    insta::assert_snapshot!(
+        aliased("{ ... @dir { u { ... on A { x } ... on B { x } } } }"),
+        @"
+    { ... @dir { u { ... on A { x } ... on B { x__alias_0: x } } } }
+    u/... on B/x__alias_0 -> x
+    "
+    );
+    // The untyped fragment sits at the level where the alias is applied.
+    insta::assert_snapshot!(
+        aliased("{ u { ... on A { x } ... on B { ... @dir { x } } } }"),
+        @"
+    { u { ... on A { x } ... on B { ... @dir { x__alias_0: x } } } }
+    u/... on B/x__alias_0 -> x
+    "
+    );
+    // Fields inside and outside the untyped fragment share a path, so only the occurrence that
+    // conflicts may be aliased, in either order.
+    insta::assert_snapshot!(
+        aliased("{ u { ... on B { x ... @dir { x: y } } } }"),
+        @"
+    { u { ... on B { x ... @dir { x__alias_0: y } } } }
+    u/... on B/x__alias_0 -> x
+    "
+    );
+    insta::assert_snapshot!(
+        aliased("{ u { ... on B { ... @dir { x: y } x } } }"),
+        @"
+    { u { ... on B { ... @dir { x: y } x__alias_0: x } } }
+    u/... on B/x__alias_0 -> x
+    "
+    );
+}
+
+fn aliased(schema_doc: &str, type_name: &str, selection: &str) -> String {
+    let schema = parse_schema(schema_doc);
+    let type_position: crate::schema::position::CompositeTypeDefinitionPosition = schema
+        .get_type(&Name::new(type_name).expect("valid name"))
+        .expect("type exists")
+        .try_into()
+        .expect("composite type");
+    let selection_set =
+        SelectionSet::parse(schema, type_position, selection).expect("selection parses");
+    let (aliased, rewrites) = selection_set
+        .add_aliases_for_non_merging_fields()
+        .expect("aliases computed");
+    let rewrites = rewrites
+        .iter()
+        .map(|rewrite| format!("{rewrite:?}"))
+        .collect::<Vec<_>>()
+        .join("\n");
+    format!("{aliased}\n{rewrites}")
+}
+
+const ALIAS_SCHEMA: &str = r#"
+    type Query { i: I }
+    interface I { id: ID o: O }
+    type A implements I { id: ID v: Int o: O }
+    type B implements I { id: ID v: String o: O }
+    type C implements I { id: ID w: Int o: O }
+    type O { p: Int q: Int r: P }
+    type P { s: Int }
+"#;
+
+#[test]
+fn aliases_fields_whose_types_differ_across_fragments() {
+    insta::assert_snapshot!(
+        aliased(ALIAS_SCHEMA, "I", "... on A { v } ... on B { v } ... on C { w }"),
+        @r###"
+    { ... on A { v } ... on B { v__alias_0: v } ... on C { w } }
+    KeyRenamer(FetchDataKeyRenamer { path: [TypenameEquals("B"), Key("v__alias_0", None)], rename_key_to: "v" })
+    "###
+    );
+}
+
+#[test]
+fn aliases_nested_conflicts_under_merged_fields() {
+    insta::assert_snapshot!(
+        aliased(
+            ALIAS_SCHEMA,
+            "I",
+            "... on A { o { r { s } } v } ... on B { o { r: p } v id } ... on C { o { r { s } q } }",
+        ),
+        @r###"
+    { ... on A { o { r { s } } v } ... on B { o { r__alias_0: p } v__alias_0: v id } ... on C { o { r { s } q } } }
+    KeyRenamer(FetchDataKeyRenamer { path: [TypenameEquals("B"), Key("v__alias_0", None)], rename_key_to: "v" })
+    KeyRenamer(FetchDataKeyRenamer { path: [TypenameEquals("B"), Key("o", None), Key("r__alias_0", None)], rename_key_to: "r" })
+    "###
+    );
+}
+
+#[test]
+fn aliases_nothing_when_fields_merge() {
+    insta::assert_snapshot!(
+        aliased(ALIAS_SCHEMA, "I", "id o { p } ... on A { id o { q } } ... on C { w }"),
+        @"{ id o { p } ... on A { id o { q } } ... on C { w } }"
+    );
+}
+
+#[test]
+fn aliases_conflicts_found_after_merging_parent_fields() {
+    insta::assert_snapshot!(
+        aliased(
+            r#"
+            type Query { i: I }
+            interface I { o: O }
+            type A implements I { o: O }
+            type B implements I { o: O }
+            type O { t: T }
+            interface T { id: ID }
+            type X implements T { id: ID n: Int }
+            type Y implements T { id: ID n: String }
+            "#,
+            "I",
+            "... on A { o { t { ... on X { n } } } } ... on B { o { t { id ... on Y { n } } } }",
+        ),
+        @r###"
+    { ... on A { o { t { ... on X { n } } } } ... on B { o { t { id ... on Y { n__alias_0: n } } } } }
+    KeyRenamer(FetchDataKeyRenamer { path: [TypenameEquals("B"), Key("o", None), Key("t", None), TypenameEquals("Y"), Key("n__alias_0", None)], rename_key_to: "n" })
+    "###
+    );
+}

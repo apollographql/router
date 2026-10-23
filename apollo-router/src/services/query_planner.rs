@@ -2,7 +2,6 @@
 
 use std::sync::Arc;
 
-use derivative::Derivative;
 use serde::Deserialize;
 use serde::Serialize;
 use static_assertions::assert_impl_all;
@@ -26,8 +25,7 @@ pub(crate) struct PlanOptions {
 
 assert_impl_all!(Request: Send);
 /// [`Context`] for the request.
-#[derive(Derivative)]
-#[derivative(Debug)]
+#[derive(derive_more::Debug)]
 pub(crate) struct Request {
     pub(crate) query: String,
     pub(crate) operation_name: Option<String>,
@@ -63,8 +61,7 @@ impl Request {
 }
 
 /// [`Context`] for the request.
-#[derive(Clone, Derivative)]
-#[derivative(Debug)]
+#[derive(Clone, derive_more::Debug)]
 pub(crate) struct CachingRequest {
     pub(crate) query: String,
     pub(crate) operation_name: Option<String>,

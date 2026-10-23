@@ -106,6 +106,7 @@ pub(crate) fn discovery_env_vars() -> HashMap<String, String> {
         ("ZIPKIN_HOST", "http://example.com"),
         ("TEST_CONFIG_ENDPOINT", "http://example.com"),
         ("TEST_CONFIG_COLLECTOR_ENDPOINT", "http://example.com"),
+        ("TEST_CONFIG_COPROCESSOR_URL", "http://example.com"),
         ("PARSER_MAX_RECURSION", "500"),
         ("AWS_ROLE_ARN", "arn:aws:iam::12345678:role/SomeRole"),
         ("INVALIDATION_SHARED_KEY", "invalidation"),

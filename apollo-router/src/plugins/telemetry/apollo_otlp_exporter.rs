@@ -1,4 +1,3 @@
-use derivative::Derivative;
 use opentelemetry::InstrumentationScope;
 use opentelemetry::KeyValue;
 use opentelemetry::trace::Event;
@@ -45,11 +44,10 @@ use crate::plugins::telemetry::tracing::BatchProcessorConfig;
 use crate::plugins::telemetry::tracing::apollo_telemetry::APOLLO_PRIVATE_OPERATION_SIGNATURE;
 
 /// The Apollo Otlp exporter is a thin wrapper around the OTLP SpanExporter.
-#[derive(Derivative)]
-#[derivative(Debug)]
+#[derive(derive_more::Debug)]
 pub(crate) struct ApolloOtlpExporter {
     instrumentation_scope: InstrumentationScope,
-    #[derivative(Debug = "ignore")]
+    #[debug(skip)]
     otlp_exporter: opentelemetry_otlp::SpanExporter,
     errors_configuration: ErrorsConfiguration,
 }
