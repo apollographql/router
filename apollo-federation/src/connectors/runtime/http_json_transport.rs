@@ -500,9 +500,15 @@ mod tests {
     }
 
     fn accept_header_of(transport: &HttpJsonTransport) -> Vec<String> {
+        accept_header_with_client_headers(transport, &Default::default())
+    }
+
+    fn accept_header_with_client_headers(
+        transport: &HttpJsonTransport,
+        client_headers: &HeaderMap<HeaderValue>,
+    ) -> Vec<String> {
         let (TransportRequest::Http(request), _) =
-            super::make_request(transport, IndexMap::default(), &Default::default(), &None)
-                .unwrap()
+            super::make_request(transport, IndexMap::default(), client_headers, &None).unwrap()
         else {
             panic!("expected Http transport request");
         };
@@ -538,6 +544,30 @@ mod tests {
             ..Default::default()
         };
         assert_eq!(accept_header_of(&transport), vec!["text/event-stream"]);
+    }
+
+    #[test]
+    fn a_stream_mode_keeps_a_propagated_accept_header_and_defaults_without_one() {
+        let transport = HttpJsonTransport {
+            connect_template: StringTemplate::from_str("http://localhost:8080/").unwrap(),
+            headers: vec![Header::from_values(
+                "accept".parse().unwrap(),
+                HeaderSource::From("accept".parse().unwrap()),
+                OriginatingDirective::Connect,
+            )],
+            stream: Some(StreamMode::Array),
+            ..Default::default()
+        };
+
+        let mut client_headers = HeaderMap::new();
+        client_headers.insert(ACCEPT, HeaderValue::from_static("application/x-ndjson"));
+        assert_eq!(
+            accept_header_with_client_headers(&transport, &client_headers),
+            vec!["application/x-ndjson"]
+        );
+
+        // The client sent nothing to propagate, so the default applies
+        assert_eq!(accept_header_of(&transport), vec![STREAM_ACCEPT]);
     }
 
     #[test]

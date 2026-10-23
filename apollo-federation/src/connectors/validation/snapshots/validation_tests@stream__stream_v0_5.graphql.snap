@@ -13,16 +13,23 @@ input_file: apollo-federation/src/connectors/validation/test_data/stream/stream_
     },
     Message {
         code: InvalidStream,
-        message: "`@connect(http: {stream:})` on `Query.product` can't be used with `entity: true`.",
+        message: "`@connect(http: {stream:})` on `Query.everyWeather` makes `$` a list of events, and this selection maps every one of them, but `Query.everyWeather` resolves one value. Pick one event, for example with `$->last`.",
         locations: [
-            36:52..36:59,
+            36:40..36:47,
         ],
     },
     Message {
         code: InvalidStream,
-        message: "`@connect(http: {stream:})` on `Order` can't be used with `@connect` on a type.",
+        message: "`@connect(http: {stream:})` on `Shelf` makes `$` a list of events, and this selection maps every one of them, but `Shelf` resolves one value. Pick one event, for example with `$->last`.",
         locations: [
-            59:62..59:69,
+            105:49..105:56,
+        ],
+    },
+    Message {
+        code: InvalidStream,
+        message: "`@connect(http: {stream:})` on `Order` can't be used with `$batch`.",
+        locations: [
+            117:62..117:69,
         ],
     },
 ]
