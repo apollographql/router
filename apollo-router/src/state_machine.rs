@@ -564,24 +564,65 @@ impl<FA: RouterServiceFactory> State<FA> {
                             "reload complete"
                         );
                         record_reload_attempt(None);
+
+                        // Subscriptions need some very special handling to let clients know
+                        // about reloads that require them to reconnect.
+                        // We do all of that manually here. When we do new better subscriptions, we
+                        // should come up with a different way to do this, perhaps using a shared
+                        // state mechanism between plugin instances across reloads.
+                        fn get_subscription_notify(
+                            factory: &impl RouterFactory,
+                        ) -> Option<
+                            crate::plugins::subscription::notification::Notify<
+                                String,
+                                crate::graphql::Response,
+                            >,
+                        > {
+                            factory
+                                .plugins()
+                                .values()
+                                .find_map(|plugin| {
+                                    plugin
+                                        .as_any()
+                                        .downcast_ref::<crate::plugins::subscription::Subscription>(
+                                        )
+                                })
+                                .map(|subscription_plugin| subscription_plugin.notify.clone())
+                        }
+
+                        let old_notify = get_subscription_notify(&router_service_factory);
+                        let new_notify = if let State::Running {
+                            router_service_factory,
+                            ..
+                        } = &new_state
+                        {
+                            get_subscription_notify(router_service_factory)
+                        } else {
+                            None
+                        };
+
                         // Explicitly drop the old factory before broadcasting notifications so
                         // that its resources (connections, background tasks) are fully torn down
                         // before any listeners act on the reload-complete signal.
                         drop(router_service_factory);
+
                         // Broadcast change notifications after pipelines have fully rolled over.
-                        if configuration.is_pending() {
+                        if configuration.is_pending()
+                            && let Some(old_notify) = old_notify
+                        {
                             // Notify listeners on the *previous* configuration's channel that
                             // the configuration has changed, passing a weak ref to the new one.
-                            configuration
-                                .committed()
-                                .notify
+                            old_notify
                                 .broadcast_configuration(Arc::downgrade(configuration.target()));
                         }
-                        if schema.is_pending() {
+                        if schema.is_pending()
+                            && let Some(new_notify) = new_notify
+                        {
                             // Notify listeners on the *new* configuration's channel that
                             // the schema has changed.
-                            configuration.target().notify.broadcast_schema(new_schema);
+                            new_notify.broadcast_schema(new_schema);
                         }
+
                         new_state
                     }
                     Err(e) if server_handle.is_some() => {
@@ -2201,7 +2242,8 @@ mod tests {
             .returning(|_, _, _, _, _, _| {
                 let mut router = MockMyRouterFactory::new();
                 router.expect_clone().returning(MockMyRouterFactory::new);
-                router.expect_web_endpoints().returning(MultiMap::new);
+                router.expect_web_endpoints().returning(Default::default);
+                router.expect_plugins().returning(Default::default);
                 Ok(router)
             });
         router_factory
@@ -2245,7 +2287,8 @@ mod tests {
             .returning(|_, _, _, _, _, _| {
                 let mut router = MockMyRouterFactory::new();
                 router.expect_clone().returning(MockMyRouterFactory::new);
-                router.expect_web_endpoints().returning(MultiMap::new);
+                router.expect_web_endpoints().returning(Default::default);
+                router.expect_plugins().returning(Default::default);
                 Ok(router)
             });
         router_factory
@@ -2261,7 +2304,8 @@ mod tests {
             .returning(|_, _, _, _, _, _| {
                 let mut router = MockMyRouterFactory::new();
                 router.expect_clone().returning(MockMyRouterFactory::new);
-                router.expect_web_endpoints().returning(MultiMap::new);
+                router.expect_web_endpoints().returning(Default::default);
+                router.expect_plugins().returning(Default::default);
                 Ok(router)
             });
 
@@ -2420,6 +2464,7 @@ mod tests {
             fn create(&self) -> router::BoxCloneService;
             fn web_endpoints(&self) -> MultiMap<ListenAddr, Endpoint>;
             fn pipeline_handle(&self) -> Arc<PipelineHandle>;
+            fn plugins(&self) -> Arc<crate::services::Plugins>;
         }
 
         impl Clone for MyRouterFactory {
@@ -2481,6 +2526,7 @@ mod tests {
         let extra_shutdown_receivers = Arc::new(Mutex::new(vec![]));
         let shutdown_receivers_clone = shutdown_receivers.to_owned();
         let extra_shutdown_receivers_clone = extra_shutdown_receivers.to_owned();
+
         server_factory
             .expect_create_server()
             .times(expect_times_called)
@@ -2536,7 +2582,8 @@ mod tests {
             .returning(move |_, _, _, _, _, _| {
                 let mut router = MockMyRouterFactory::new();
                 router.expect_clone().returning(MockMyRouterFactory::new);
-                router.expect_web_endpoints().returning(MultiMap::new);
+                router.expect_web_endpoints().returning(Default::default);
+                router.expect_plugins().returning(Default::default);
                 Ok(router)
             });
 
@@ -2556,7 +2603,8 @@ mod tests {
                 .returning(move |_, _, _, _, _, _| {
                     let mut router = MockMyRouterFactory::new();
                     router.expect_clone().returning(MockMyRouterFactory::new);
-                    router.expect_web_endpoints().returning(MultiMap::new);
+                    router.expect_web_endpoints().returning(Default::default);
+                    router.expect_plugins().returning(Default::default);
                     Ok(router)
                 });
         }
@@ -2575,7 +2623,8 @@ mod tests {
             .returning(move |_, _, _, _, _, _| {
                 let mut router = MockMyRouterFactory::new();
                 router.expect_clone().returning(MockMyRouterFactory::new);
-                router.expect_web_endpoints().returning(MultiMap::new);
+                router.expect_web_endpoints().returning(Default::default);
+                router.expect_plugins().returning(Default::default);
                 Ok(router)
             });
 
@@ -2599,7 +2648,8 @@ mod tests {
         fn mock_router_ok() -> MockMyRouterFactory {
             let mut router = MockMyRouterFactory::new();
             router.expect_clone().returning(MockMyRouterFactory::new);
-            router.expect_web_endpoints().returning(MultiMap::new);
+            router.expect_web_endpoints().returning(Default::default);
+            router.expect_plugins().returning(Default::default);
             router
         }
 

@@ -27,7 +27,6 @@ use crate::plugin;
 use crate::plugin::DynPlugin;
 use crate::plugin::PluginInit;
 use crate::plugin::PluginPrivate;
-use crate::plugins::subscription::notification::Notify;
 use crate::query_planner::QueryPlannerService;
 use crate::services::execution;
 use crate::services::http;
@@ -140,7 +139,6 @@ impl<T: Into<Box<dyn DynPlugin + 'static>> + 'static> PluginTestHarness<T> {
             .supergraph_sdl(supergraph_sdl)
             .supergraph_schema(Arc::new(parsed_schema))
             .subgraph_schemas(subgraph_schemas)
-            .notify(Notify::default())
             .license(Arc::new(license.unwrap_or_default()))
             .full_config(full_config)
             .build();

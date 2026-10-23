@@ -8,6 +8,7 @@ use crate::axum_factory::Endpoint;
 use crate::configuration::Configuration;
 use crate::pipeline::Pipeline;
 use crate::plugin::DynPlugin;
+use crate::services::Plugins;
 use crate::services::router;
 use crate::services::router::pipeline_handle::PipelineHandle;
 use crate::spec::Schema;
@@ -24,6 +25,9 @@ pub(crate) trait RouterFactory: Clone + Send + 'static {
     /// requests are still served from this pipeline, including across a reload that
     /// replaces this factory.
     fn pipeline_handle(&self) -> Arc<PipelineHandle>;
+
+    /// Returns the active plugins in this factory's pipeline.
+    fn plugins(&self) -> Arc<Plugins>;
 }
 
 /// Factory for creating a RouterFactory

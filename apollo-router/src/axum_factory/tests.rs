@@ -159,6 +159,10 @@ impl RouterFactory for TestRouterFactory {
             "dummy".to_string(),
         ))
     }
+
+    fn plugins(&self) -> Arc<crate::services::Plugins> {
+        Default::default()
+    }
 }
 
 /// Like [`TestRouterFactory`], but counts calls to `create()` so tests can observe how many
@@ -185,6 +189,10 @@ impl RouterFactory for CountingRouterFactory {
             None,
             "dummy".to_string(),
         ))
+    }
+
+    fn plugins(&self) -> Arc<crate::services::Plugins> {
+        Default::default()
     }
 }
 
