@@ -1,0 +1,58 @@
+extend schema
+  @link(url: "https://specs.apollo.dev/federation/v2.10", import: ["@key"])
+  @link(url: "https://specs.apollo.dev/connect/v0.5", import: ["@connect", "@source"])
+  @source(name: "events", http: { baseURL: "https://events.example.com/" })
+
+type Query {
+  ping: String @connect(source: "events", http: { GET: "/ping" }, selection: "$")
+}
+
+type Subscription {
+  # Valid: without `stream`, `$` is each event.
+  ticks(channel: String!): Tick
+    @connect(
+      source: "events"
+      http: { GET: "/ticks/{$args.channel}" }
+      selection: "n"
+    )
+  # Valid: under `array`, `$` is every event so far, and the selection picks one value.
+  latest: Tick
+    @connect(
+      source: "events"
+      http: { GET: "/ticks", stream: "array" }
+      selection: "$->last { n }"
+    )
+  # Valid: under `array`, a list field can map every event so far.
+  history: [Tick]
+    @connect(
+      source: "events"
+      http: { GET: "/ticks", stream: "array" }
+      selection: "n"
+    )
+  # Invalid: under `array`, maps every event so far for a field that isn't a list.
+  everyTick: Tick
+    @connect(
+      source: "events"
+      http: { GET: "/ticks", stream: "array" }
+      selection: "n"
+    )
+  # Invalid: entity resolvers belong on `Query`.
+  tick(n: Int!): Tick
+    @connect(
+      source: "events"
+      http: { GET: "/ticks/{$args.n}" }
+      selection: "n"
+      entity: true
+    )
+  # Invalid: a root field has no parent object, so no `$this`.
+  parentTicks: Tick
+    @connect(
+      source: "events"
+      http: { GET: "/ticks/{$this.n}" }
+      selection: "n"
+    )
+}
+
+type Tick @key(fields: "n") {
+  n: Int!
+}
