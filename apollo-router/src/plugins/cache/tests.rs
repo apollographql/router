@@ -688,18 +688,7 @@ async fn aliased_context_entity_fetch_bypasses_cache() {
 
     // The first fetch is a plain root query, cached as such. The second fetch has two `U`
     // entities whose enclosing `T` has a different `prop`, so it is sent aliased per context.
-    //
-    // The contextual variables are collected into a `HashMap` before being added to the
-    // request, so their order in the request body is not deterministic, and mock matching is
-    // order-sensitive. Register the aliased fetch under both orderings, as the `set_context`
-    // integration fixture does.
     const ALIASED_QUERY: &str = "query QueryLL__Subgraph1__1($representations_0: [_Any!]!, $representations_1: [_Any!]!, $contextualArgument_1_0_0: String, $contextualArgument_1_0_1: String) { _entities_0: _entities(representations: $representations_0) { ... on U { field(a: $contextualArgument_1_0_0) } } _entities_1: _entities(representations: $representations_1) { ... on U { field(a: $contextualArgument_1_0_1) } } }";
-    let aliased_response = serde_json::json!({
-        "data": {
-            "_entities_0": [{ "id": "3", "field": 3456 }],
-            "_entities_1": [{ "id": "4", "field": 222 }]
-        }
-    });
     let subgraph1 = MockSubgraph::builder()
         .with_json(
             serde_json::json!({
@@ -736,20 +725,12 @@ async fn aliased_context_entity_fetch_bypasses_cache() {
                     "representations_1": [{ "__typename": "U", "id": "4" }]
                 }
             }),
-            aliased_response.clone(),
-        )
-        .with_json(
             serde_json::json!({
-                "query": ALIASED_QUERY,
-                "operationName": "QueryLL__Subgraph1__1",
-                "variables": {
-                    "contextualArgument_1_0_1": "prop value 2",
-                    "contextualArgument_1_0_0": "prop value 1",
-                    "representations_0": [{ "__typename": "U", "id": "3" }],
-                    "representations_1": [{ "__typename": "U", "id": "4" }]
+                "data": {
+                    "_entities_0": [{ "id": "3", "field": 3456 }],
+                    "_entities_1": [{ "id": "4", "field": 222 }]
                 }
             }),
-            aliased_response,
         )
         .with_header(CACHE_CONTROL, HeaderValue::from_static("public"))
         .build();
