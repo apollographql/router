@@ -6,6 +6,7 @@ use opentelemetry::metrics::MeterProvider as _;
 use opentelemetry::metrics::ObservableGauge;
 
 use crate::metrics::meter_provider;
+use crate::spec::Schema;
 
 pub(crate) const CONNECTOR_TYPE_HTTP: &str = "http";
 
@@ -69,6 +70,54 @@ fn connect_stream_mode_counts(connectors: &Connectors) -> HashMap<&'static str, 
             *acc.entry(mode.as_str()).or_insert(0u64) += 1u64;
             acc
         })
+}
+
+/// Create a gauge instrument for the number of connectors on the subscription root type, by
+/// `http.stream` mode (`none` for one event per upstream event), or `None` when there are none
+pub(crate) fn connector_subscriptions_instrument(schema: &Schema) -> Option<ObservableGauge<u64>> {
+    let mode_counts = connector_subscription_counts(schema)?;
+    Some(
+        meter_provider()
+            .meter("apollo/router")
+            .u64_observable_gauge("apollo.router.schema.connectors.subscriptions")
+            .with_description(
+                "Number of connect directives on subscription fields in the supergraph",
+            )
+            .with_callback(move |observer| {
+                mode_counts.iter().for_each(|(&mode, &count)| {
+                    observer.observe(count, &[KeyValue::new("connect.stream.mode", mode)])
+                })
+            })
+            .build(),
+    )
+}
+
+/// Map from `http.stream` mode (`none` when absent) to the number of connectors on the
+/// subscription root type with that mode, or `None` if there are none
+fn connector_subscription_counts(schema: &Schema) -> Option<HashMap<&'static str, u64>> {
+    let subscription = schema
+        .supergraph_schema()
+        .schema_definition
+        .subscription
+        .as_ref()?;
+    let mode_counts = schema
+        .connectors
+        .as_ref()?
+        .by_service_name
+        .values()
+        .filter(|connector| connector.id.parent_type_name().as_ref() == Some(&**subscription))
+        .map(|connector| {
+            connector
+                .transport
+                .as_ref()
+                .and_then(|transport| transport.stream)
+                .map_or("none", |mode| mode.as_str())
+        })
+        .fold(HashMap::new(), |mut acc, mode| {
+            *acc.entry(mode).or_insert(0u64) += 1u64;
+            acc
+        });
+    (!mode_counts.is_empty()).then_some(mode_counts)
 }
 
 /// Map from connect spec version to the number of connectors with that version
@@ -189,6 +238,52 @@ mod tests {
                 6,
                 connect.stream.mode = "array"
             );
+        }
+        .with_metrics()
+        .await;
+    }
+
+    #[tokio::test]
+    async fn connector_subscriptions_instrument_counts_subscription_connectors() {
+        async {
+            let config = Arc::default();
+            // One connector on `Query`, and four on `Subscription`, one with `stream: "array"`
+            let schema =
+                Schema::parse(include_str!("./testdata/subscription.graphql"), &config).unwrap();
+            let _services = ConnectorServices::empty(Arc::from(schema));
+
+            assert_gauge!(
+                "apollo.router.schema.connectors.subscriptions",
+                3,
+                connect.stream.mode = "none"
+            );
+            assert_gauge!(
+                "apollo.router.schema.connectors.subscriptions",
+                1,
+                connect.stream.mode = "array"
+            );
+        }
+        .with_metrics()
+        .await;
+    }
+
+    #[tokio::test]
+    async fn connector_subscriptions_instrument_is_absent_without_subscription_connectors() {
+        async {
+            let config = Arc::default();
+            let schema = Schema::parse(STEEL_THREAD_SCHEMA, &config).unwrap();
+            let _services = ConnectorServices::empty(Arc::from(schema));
+
+            assert_gauge!(
+                "apollo.router.schema.connectors",
+                6,
+                connect.spec.version = "0.1"
+            );
+            assert!(!crate::metrics::collect_metrics().metric_exists(
+                "apollo.router.schema.connectors.subscriptions",
+                crate::metrics::test_utils::MetricType::Gauge,
+                &[],
+            ));
         }
         .with_metrics()
         .await;
