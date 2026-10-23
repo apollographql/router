@@ -1976,3 +1976,87 @@ fn fragments_with_non_intersecting_types() {
         }
     "###);
 }
+
+/// An inline fragment without a type condition adds no element to alias paths, so aliases
+/// computed for fields inside it must be applied inside it as well; otherwise the subgraph
+/// operation keeps two incompatible selections under one response name.
+#[test]
+fn add_aliases_for_non_merging_fields_inside_untyped_inline_fragment() {
+    let schema = parse_schema(
+        r#"
+        directive @dir on INLINE_FRAGMENT
+        type Query { u: [U!]! }
+        union U = A | B
+        type A { x: Int! }
+        type B { x: Int y: String }
+        "#,
+    );
+    let aliased = |query: &str| {
+        // The input selects incompatible types under one response name, as the planner's
+        // internal fetch selections can before aliasing; so it's parsed without validation.
+        let document =
+            ExecutableDocument::parse(schema.schema(), query, "query.graphql").expect("parses");
+        let operation = normalize_operation(
+            document.operations.iter().next().expect("has an operation"),
+            &document.fragments,
+            &schema,
+            &Default::default(),
+            &never_cancel,
+        )
+        .expect("normalizes");
+        let (selection_set, rewrites) = operation
+            .selection_set
+            .add_aliases_for_non_merging_fields()
+            .expect("aliases can be computed");
+        let rewrites = rewrites
+            .iter()
+            .map(|rewrite| match rewrite.as_ref() {
+                crate::query_plan::FetchDataRewrite::KeyRenamer(renamer) => format!(
+                    "{} -> {}",
+                    renamer
+                        .path
+                        .iter()
+                        .map(|element| element.to_string())
+                        .collect::<Vec<_>>()
+                        .join("/"),
+                    renamer.rename_key_to
+                ),
+                other => panic!("unexpected rewrite {other:?}"),
+            })
+            .collect::<Vec<_>>();
+        format!("{selection_set}\n{}", rewrites.join("\n"))
+    };
+
+    // The untyped fragment wraps the whole conflicting selection.
+    insta::assert_snapshot!(
+        aliased("{ ... @dir { u { ... on A { x } ... on B { x } } } }"),
+        @"
+    { ... @dir { u { ... on A { x } ... on B { x__alias_0: x } } } }
+    u/... on B/x__alias_0 -> x
+    "
+    );
+    // The untyped fragment sits at the level where the alias is applied.
+    insta::assert_snapshot!(
+        aliased("{ u { ... on A { x } ... on B { ... @dir { x } } } }"),
+        @"
+    { u { ... on A { x } ... on B { ... @dir { x__alias_0: x } } } }
+    u/... on B/x__alias_0 -> x
+    "
+    );
+    // Fields inside and outside the untyped fragment share a path, so only the occurrence that
+    // conflicts may be aliased, in either order.
+    insta::assert_snapshot!(
+        aliased("{ u { ... on B { x ... @dir { x: y } } } }"),
+        @"
+    { u { ... on B { x ... @dir { x__alias_0: y } } } }
+    u/... on B/x__alias_0 -> x
+    "
+    );
+    insta::assert_snapshot!(
+        aliased("{ u { ... on B { ... @dir { x: y } x } } }"),
+        @"
+    { u { ... on B { ... @dir { x: y } x__alias_0: x } } }
+    u/... on B/x__alias_0 -> x
+    "
+    );
+}
