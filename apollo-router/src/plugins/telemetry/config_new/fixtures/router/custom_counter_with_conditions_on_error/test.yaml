@@ -1,0 +1,27 @@
+description: Custom counter conditions are evaluated when a coprocessor call fails at the router stage
+events:
+  - - router_request:
+        uri: "/hello"
+        method: POST
+        body: |
+          hello
+    - router_response:
+        body: |
+          hello
+        status: 200
+        headers:
+          x-outcome: match
+  - - router_request:
+        uri: "/hello"
+        method: POST
+        body: |
+          hello
+    - router_error:
+        error: "HTTP fetch failed: tcp connect error"
+  - - router_request:
+        uri: "/hello"
+        method: POST
+        body: |
+          hello
+    - router_error:
+        error: "some other error"
