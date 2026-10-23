@@ -66,24 +66,37 @@ fn request_params_to_requests(
     for response_key in request_params {
         let connector = connector.clone();
 
-        let (transport_request, mapping_problems) =
-            if let Some(transport) = connector.transport.as_ref() {
-                make_request(
-                    transport,
-                    response_key
-                        .inputs()
-                        .clone()
-                        .merger(&connector.request_variable_keys)
-                        .config(connector.config.as_ref())
-                        .context(context)
-                        .request(&connector.request_headers, supergraph_request.headers())
-                        .merge(),
-                    supergraph_request.headers(),
-                    debug,
-                )?
-            } else {
-                (TransportRequest::MappingOnly, Vec::new())
-            };
+        let merged_inputs = response_key
+            .inputs()
+            .clone()
+            .merger(&connector.request_variable_keys)
+            .config(connector.config.as_ref())
+            .context(context)
+            .request(&connector.request_headers, supergraph_request.headers())
+            .merge();
+
+        // CNN-474 proof of concept: if any `requires` path is null/missing,
+        // skip the request entirely rather than calling the transport.
+        let requires_met = connector.requires.iter().all(|path| {
+            !matches!(
+                path.apply_with_vars(&serde_json_bytes::json!({}), &merged_inputs)
+                    .0,
+                None | Some(serde_json_bytes::Value::Null)
+            )
+        });
+
+        let (transport_request, mapping_problems) = if !requires_met {
+            (TransportRequest::Skipped, Vec::new())
+        } else if let Some(transport) = connector.transport.as_ref() {
+            make_request(
+                transport,
+                merged_inputs,
+                supergraph_request.headers(),
+                debug,
+            )?
+        } else {
+            (TransportRequest::MappingOnly, Vec::new())
+        };
 
         results.push(Request {
             context: context.clone(),
@@ -553,6 +566,7 @@ mod tests {
     use apollo_federation::connectors::Connector;
     use apollo_federation::connectors::HttpJsonTransport;
     use apollo_federation::connectors::JSONSelection;
+    use apollo_federation::connectors::Namespace;
     use apollo_federation::connectors::StringTemplate;
     use apollo_federation::connectors::runtime::http_json_transport::TransportRequest;
     use apollo_federation::connectors::runtime::responses::MappedResponse;
@@ -562,6 +576,7 @@ mod tests {
     use crate::Context;
     use crate::graphql;
     use crate::query_planner::fetch::Variables;
+    use crate::services::connector::request_service::Request;
 
     // Helper function to create test Variables directly from a serde_json Value
     fn create_test_variables(vars: serde_json_bytes::Value) -> Variables {
@@ -592,6 +607,7 @@ mod tests {
         let variables = create_test_variables(serde_json_bytes::json!({}));
 
         let connector = Connector {
+            requires: Vec::new(),
             spec: ConnectSpec::V0_1,
             schema_subtypes_map: Connector::subtypes_map_from_schema(&schema),
             id: ConnectId::new(
@@ -665,6 +681,7 @@ mod tests {
         let variables = create_test_variables(serde_json_bytes::json!({ "var": "variable" }));
 
         let connector = Connector {
+            requires: Vec::new(),
             spec: ConnectSpec::V0_1,
             schema_subtypes_map: Connector::subtypes_map_from_schema(&schema),
             id: ConnectId::new(
@@ -767,6 +784,7 @@ mod tests {
         };
 
         let connector = Connector {
+            requires: Vec::new(),
             spec: ConnectSpec::V0_1,
             schema_subtypes_map: Connector::subtypes_map_from_schema(&schema),
             id: ConnectId::new(
@@ -882,6 +900,7 @@ mod tests {
         };
 
         let connector = Connector {
+            requires: Vec::new(),
             spec: ConnectSpec::V0_1,
             schema_subtypes_map: Connector::subtypes_map_from_schema(&subgraph_schema),
             id: ConnectId::new(
@@ -996,6 +1015,7 @@ mod tests {
         };
 
         let connector = Connector {
+            requires: Vec::new(),
             spec: ConnectSpec::V0_1,
             schema_subtypes_map: Connector::subtypes_map_from_schema(&subgraph_schema),
             id: ConnectId::new(
@@ -1091,6 +1111,7 @@ mod tests {
         };
 
         let connector = Connector {
+            requires: Vec::new(),
             spec: ConnectSpec::V0_1,
             schema_subtypes_map: Connector::subtypes_map_from_schema(&schema),
             id: ConnectId::new(
@@ -1208,6 +1229,7 @@ mod tests {
         };
 
         let connector = Connector {
+            requires: Vec::new(),
             spec: ConnectSpec::V0_1,
             schema_subtypes_map: Connector::subtypes_map_from_schema(&subgraph_schema),
             id: ConnectId::new(
@@ -1360,6 +1382,7 @@ mod tests {
         };
 
         let connector = Connector {
+            requires: Vec::new(),
             spec: ConnectSpec::V0_1,
             schema_subtypes_map: Connector::subtypes_map_from_schema(&subgraph_schema),
             id: ConnectId::new(
@@ -1509,6 +1532,7 @@ mod tests {
         };
 
         let connector = Connector {
+            requires: Vec::new(),
             spec: ConnectSpec::V0_1,
             schema_subtypes_map: Connector::subtypes_map_from_schema(&subgraph_schema),
             id: ConnectId::new(
@@ -1629,6 +1653,7 @@ mod tests {
         };
 
         let connector = Connector {
+            requires: Vec::new(),
             spec: ConnectSpec::V0_1,
             id: ConnectId::new_on_object("subgraph_name".into(), None, name!(Entity), None, 0),
             schema_subtypes_map: Connector::subtypes_map_from_schema(&subgraph_schema),
@@ -1729,6 +1754,7 @@ mod tests {
         };
 
         let connector = Connector {
+            requires: Vec::new(),
             spec: ConnectSpec::V0_1,
             id: ConnectId::new_on_object("subgraph_name".into(), None, name!(Entity), None, 0),
             schema_subtypes_map: Connector::subtypes_map_from_schema(&subgraph_schema),
@@ -1834,6 +1860,7 @@ mod tests {
         };
 
         let connector = Connector {
+            requires: Vec::new(),
             spec: ConnectSpec::V0_1,
             id: ConnectId::new_on_object("subgraph_name".into(), None, name!(Entity), None, 0),
             schema_subtypes_map: Connector::subtypes_map_from_schema(&subgraph_schema),
@@ -1941,6 +1968,7 @@ mod tests {
         };
 
         let connector = Connector {
+            requires: Vec::new(),
             spec: DEFAULT_CONNECT_SPEC,
             id: ConnectId::new_on_object("subgraph_name".into(), None, name!(Entity), None, 0),
             schema_subtypes_map: Connector::subtypes_map_from_schema(&subgraph_schema),
@@ -2009,6 +2037,7 @@ mod tests {
         );
 
         let connector = Connector {
+            requires: Vec::new(),
             spec: ConnectSpec::V0_1,
             schema_subtypes_map: Connector::subtypes_map_from_schema(&schema),
             id: ConnectId::new(
@@ -2088,6 +2117,99 @@ mod tests {
         "#);
     }
 
+    /// CNN-474 proof of concept: builds a connector with a `requires: ["$config.flag"]`
+    /// precondition, and returns the requests produced for `config`'s given value of
+    /// `flag` (or its absence, if `config` is `None`).
+    fn make_requires_test_requests(config: Option<serde_json::Value>) -> Vec<Request> {
+        let schema = Schema::parse_and_validate("type Query { hello: String }", "./").unwrap();
+        let operation =
+            ExecutableDocument::parse_and_validate(&schema, "query { a: hello }".to_string(), "./")
+                .unwrap();
+        let variables = Variables {
+            variables: Default::default(),
+            inverted_paths: Default::default(),
+            contextual_arguments: Default::default(),
+        };
+        let supergraph_request = Arc::new(
+            http::Request::builder()
+                .body(graphql::Request::builder().build())
+                .unwrap(),
+        );
+
+        let connector = Connector {
+            requires: vec![JSONSelection::parse("$config.flag").unwrap()],
+            spec: ConnectSpec::V0_1,
+            schema_subtypes_map: Connector::subtypes_map_from_schema(&schema),
+            id: ConnectId::new(
+                "subgraph_name".into(),
+                None,
+                name!(Query),
+                name!(hello),
+                None,
+                0,
+            ),
+            transport: Some(HttpJsonTransport {
+                source_template: "http://localhost/api".parse().ok(),
+                connect_template: "/path".parse().unwrap(),
+                ..Default::default()
+            }),
+            selection: JSONSelection::parse("$.data").unwrap(),
+            entity_resolver: None,
+            config: config.map(|c| {
+                Arc::new(
+                    c.as_object()
+                        .expect("test config must be an object")
+                        .clone()
+                        .into_iter()
+                        .collect(),
+                )
+            }),
+            max_requests: None,
+            batch_settings: None,
+            request_headers: Default::default(),
+            response_headers: Default::default(),
+            request_variable_keys: IndexMap::from_iter([(Namespace::Config, IndexSet::default())]),
+            response_variable_keys: Default::default(),
+            error_settings: Default::default(),
+            output_type: None,
+            label: "test label".into(),
+        };
+
+        super::make_requests(
+            &operation,
+            &variables,
+            None,
+            &Context::new(),
+            supergraph_request.clone(),
+            Arc::new(connector),
+            &None,
+        )
+        .unwrap()
+    }
+
+    #[test]
+    fn requires_met_makes_http_request() {
+        let requests = make_requires_test_requests(Some(serde_json::json!({ "flag": true })));
+        assert_eq!(requests.len(), 1);
+        assert!(
+            matches!(requests[0].transport_request, TransportRequest::Http(_)),
+            "expected an Http transport request when `requires` is satisfied, got {:?}",
+            requests[0].transport_request,
+        );
+    }
+
+    #[test]
+    fn requires_not_met_skips_request() {
+        // `flag` is absent from `$config` entirely, so `$config.flag` is null.
+        let requests = make_requires_test_requests(Some(serde_json::json!({})));
+        assert_eq!(requests.len(), 1);
+        assert!(
+            matches!(requests[0].transport_request, TransportRequest::Skipped),
+            "expected a Skipped transport request when `requires` is not satisfied, got {:?}",
+            requests[0].transport_request,
+        );
+    }
+
     /// Helper function for full pipeline: parse query → `root_fields()` → apply connector
     /// selection → `apply_operation()`. Returns the final response data.
     fn run_pipeline(query: &str) -> Value {
@@ -2119,6 +2241,7 @@ mod tests {
             Arc::new(ExecutableDocument::parse_and_validate(&schema, query, "op.graphql").unwrap());
         let variables = create_test_variables(serde_json_bytes::json!({}));
         let conn = Connector {
+            requires: Vec::new(),
             spec: ConnectSpec::V0_1,
             schema_subtypes_map: Connector::subtypes_map_from_schema(&schema),
             id: ConnectId::new(

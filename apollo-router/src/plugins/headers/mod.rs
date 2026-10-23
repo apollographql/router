@@ -2037,6 +2037,7 @@ mod test {
         ctx.insert("my_key", "my_value_from_context".to_string())
             .unwrap();
         let connector = Connector {
+            requires: Vec::new(),
             spec: ConnectSpec::V0_1,
             schema_subtypes_map: Default::default(),
             id: ConnectId::new(

@@ -207,6 +207,7 @@ input_file: apollo-federation/src/connectors/expand/tests/schemas/expand/entity_
             connect_extensions: None,
             connect_is_success: None,
         },
+        requires: [],
         output_type: Some(
             Named(
                 "Tractor",
@@ -329,6 +330,7 @@ input_file: apollo-federation/src/connectors/expand/tests/schemas/expand/entity_
             connect_extensions: None,
             connect_is_success: None,
         },
+        requires: [],
         output_type: Some(
             Named(
                 "Tractor",
@@ -543,6 +545,7 @@ input_file: apollo-federation/src/connectors/expand/tests/schemas/expand/entity_
             connect_extensions: None,
             connect_is_success: None,
         },
+        requires: [],
         output_type: None,
         label: Label(
             "connectors.v1 http: GET /tractors/{$this.id}",

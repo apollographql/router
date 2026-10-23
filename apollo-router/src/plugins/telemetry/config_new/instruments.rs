@@ -3361,6 +3361,7 @@ mod tests {
                                             debug: Default::default(),
                                         }));
                                     let connector = Connector {
+                                        requires: Vec::new(),
                                         id: ConnectId::new(
                                             subgraph_name,
                                             Some(SourceName::cast(&source_name)),
