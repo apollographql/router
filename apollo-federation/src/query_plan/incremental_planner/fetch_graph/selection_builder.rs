@@ -77,6 +77,13 @@ impl SelectionBuilder {
                 match element.as_ref() {
                     OpPathElement::Field(field) => {
                         segments.push(field.response_name().to_string());
+                        // The signature captures the field's identity: its
+                        // name and arguments determine the response shape at
+                        // this path. Fields above the entry's leaf count too,
+                        // as entries can start below an argument-carrying field.
+                        let sig =
+                            field_signature(field.field_position.field_name(), &field.arguments);
+                        insert_signature(&mut signatures, segments.clone(), sig)?;
                     }
                     OpPathElement::InlineFragment(frag) => {
                         if let Some(tc) = &frag.type_condition_position {
@@ -84,15 +91,6 @@ impl SelectionBuilder {
                         }
                     }
                 }
-            }
-            // The signature captures the field's identity: its name and
-            // arguments determine the response shape at this path.
-            if let Some(last) = entry.path.last()
-                && let OpPathElement::Field(field) = last.as_ref()
-                && !segments.is_empty()
-            {
-                let sig = field_signature(field.field_position.field_name(), &field.arguments);
-                insert_signature(&mut signatures, segments.clone(), sig)?;
             }
             if let Some(selections) = &entry.selections {
                 collect_selection_signatures(selections, &segments, &mut signatures)?;
