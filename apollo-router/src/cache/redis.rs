@@ -1369,6 +1369,7 @@ mod test {
         use serde_json::json;
         use tower::BoxError;
 
+        use crate::cache::redis::DEFAULT_INTERNAL_REDIS_TIMEOUT;
         use crate::cache::redis::RedisCacheStorage;
         use crate::cache::redis::RedisKey;
         use crate::cache::redis::RedisValue;
@@ -1377,9 +1378,12 @@ mod test {
         use crate::cache::redis::fake_redis::NodeStats;
         use crate::cache::redis::fake_redis::Topology;
 
-        /// Well within fred's 10s internal command timeout, so a client that waits on a broken
-        /// replica while connecting, or keeps retrying a command, misses it.
-        const DEADLINE: Duration = Duration::from_secs(5);
+        /// Half the internal command timeout, so a client that waits on a broken replica while
+        /// connecting, or keeps retrying a command, misses it.
+        const DEADLINE: Duration =
+            Duration::from_secs(DEFAULT_INTERNAL_REDIS_TIMEOUT.as_secs() / 2);
+
+        const CONNECT_STALLED: &str = "connecting should not wait on a replica";
 
         async fn connect(redis: &FakeRedis) -> Result<RedisCacheStorage, BoxError> {
             let config = serde_json::from_value(json!({
@@ -1390,7 +1394,7 @@ mod test {
             let storage = RedisCacheStorage::new(config, "test").await?;
             tokio::time::timeout(DEADLINE, storage.create_client_pool())
                 .await
-                .map_err(|_| "connecting should not wait on a replica")??;
+                .map_err(|_| CONNECT_STALLED)??;
             Ok(storage)
         }
 
@@ -1470,12 +1474,23 @@ mod test {
             let redis = FakeRedis::start(topology, &behaviours).await;
 
             let connected = connect(&redis).await;
+            // KNOWN ISSUE: see the doc comment above.
             if topology.is_cluster()
                 && matches!(first_replica, Behaviour::Dropping | Behaviour::Unresponsive)
             {
-                assert!(
-                    connected.is_err(),
-                    "a cluster replica that can't serve commands is expected to fail the connection"
+                let error = connected
+                    .err()
+                    .expect(
+                        "a cluster replica that can't serve commands is expected to fail the connection",
+                    )
+                    .to_string();
+                // an unresponsive replica stalls the connection until the deadline; a dropping
+                // one fails it at once
+                let stalled = error == CONNECT_STALLED;
+                assert_eq!(
+                    stalled,
+                    matches!(first_replica, Behaviour::Unresponsive),
+                    "{error}"
                 );
                 return Ok(());
             }
