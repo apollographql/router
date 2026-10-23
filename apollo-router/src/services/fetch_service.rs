@@ -281,6 +281,7 @@ impl FetchService {
         // of the fetch; on the subgraph request it's `is_deferred_fetch` to make
         // clear that it describes *this* fetch (not a query-level flag).
         subgraph_request.is_deferred_fetch = is_deferred;
+        subgraph_request.is_aliased_entities_fetch = variables.contextual_arguments.is_some();
         Box::pin(async move {
             Ok(fetch_node
                 .subgraph_fetch(
