@@ -1,19 +1,15 @@
 # Auto-tag a release after the version branch merges to main / main-v*.
 #
-# Sandbox naming convention while we're still validating the logic on
-# real release merges.  Once we've seen a few clean dry-runs, this gets
-# renamed to `auto-tag-release.yml` and the dry-run guard comes out.
-#
 # Two trigger paths:
 #
-#   - `push: branches: [main, 'main-v*']` — fires automatically on every
-#     merge to a release line's main branch.  Always dry-run.  Logs the
-#     decision; does not push the tag.  Use this output to confirm the
-#     workflow picks the right SHA + version before we flip the switch.
+#   - `push: branches: [main, 'main-v*']` — fires on every merge to a
+#     release line's main branch and pushes the tag.  The version gate
+#     below means an ordinary merge that doesn't change the version is a
+#     no-op, so this only acts on an actual release.
 #
-#   - `workflow_dispatch` with `dry_run` input (default `true`).  Set to
-#     `false` to actually push the tag.  Use this when the push-triggered
-#     dry-run printed the right answer and you want to commit to it.
+#   - `workflow_dispatch` with `dry_run` input (default `true`).  Use it
+#     to preview the decision, or with `dry_run=false` to tag a merge that
+#     the push trigger didn't act on.
 #
 # Safety properties:
 #
@@ -30,7 +26,7 @@
 #   - PAT scoped: uses `APOLLO_BOT2_GITHUB_PAT` so the tag is attributed
 #     to apollo-bot2 and bypasses tag-creation rules.
 
-name: Test auto-tag release
+name: "Release: auto-tag"
 
 on:
   push:
@@ -58,9 +54,9 @@ jobs:
           fetch-depth: 0
           # Use apollo-bot2's PAT so the tag push is attributed to bot2
           # (not github-actions[bot]) and bypasses tag-creation rules.
-          # Falls back to the workflow token when the secret isn't set
-          # so push-trigger dry-runs still work in forks / unconfigured
-          # environments.
+          # Falls back to the workflow token when the secret isn't set,
+          # which is enough to reach the dry-run summary in a fork; an
+          # actual tag push needs the PAT and fails without it.
           token: ${{ secrets.APOLLO_BOT2_GITHUB_PAT || github.token }}
 
       - name: Resolve dry-run mode
@@ -70,9 +66,7 @@ jobs:
           if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
             DRY_RUN='${{ inputs.dry_run }}'
           else
-            # Push trigger is always dry-run.  To actually push the tag,
-            # use workflow_dispatch with dry_run=false.
-            DRY_RUN=true
+            DRY_RUN=false
           fi
           echo "Resolved dry_run=$DRY_RUN"
           echo "dry_run=$DRY_RUN" >> "$GITHUB_OUTPUT"
@@ -150,7 +144,7 @@ jobs:
           echo "::endgroup::"
           echo
           echo "To execute for real:"
-          echo "  gh workflow run test-auto-tag-release.yml --ref ${{ github.ref_name }} -f dry_run=false"
+          echo "  gh workflow run auto-tag-release.yml --ref ${{ github.ref_name }} -f dry_run=false"
 
       - name: Push tag
         if: steps.target.outputs.skip != 'true' && steps.vars.outputs.dry_run != 'true'
