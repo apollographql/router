@@ -87,6 +87,10 @@ name = "connectors_validation_profiling"
 path = "tests/dhat_profiling/connectors_validation.rs"
 
 [[test]]
+name = "connectors_validation_scaling_profiling"
+path = "tests/dhat_profiling/connectors_validation_scaling.rs"
+
+[[test]]
 name = "subgraph_expansion_profiling"
 path = "tests/dhat_profiling/subgraph_expansion.rs"
 

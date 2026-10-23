@@ -48,16 +48,13 @@ fn valid_large_body() {
     // handful. They are also short now, `graphql:<FileId>` rather than `graphql:<path>`, which is
     // the 120 bytes between this figure and the 450,627 measured while they carried paths.
     //
-    // 500_000 is ~11% above the measured peak, the margin this file asks for. Note that 420_000
-    // gave only 6% over 395,940, so the guard was already tighter than stated before this change.
-    const MAX_BYTES: usize = 500_000;
-    // Bumped from 27_000 once the fused-trie consumption infrastructure
-    // landed: `compute_output_shape` now records into a `SelectionTrie`
-    // baton on every recursive step, which roughly doubles allocation
-    // count during connector validation. The total bytes are unchanged —
-    // only block count grew, dominated by short-lived `Vec`s that hold
-    // per-segment `Name::locations()` slices in `SelectionTrie::add_name`.
-    const MAX_ALLOCATIONS: u64 = 66_000;
+    // Lowered from 500_000 after the connector validation memory fixes (#10357) took the peak
+    // from 457,244 to 397,562 bytes. 440_000 is ~11% above it.
+    const MAX_BYTES: usize = 440_000;
+    // `compute_output_shape` records into a `SelectionTrie` on every recursive step, so
+    // allocation count is dominated by that bookkeeping. Lowered from 66_000 after the same
+    // fixes took it from 59,470 to 46,790.
+    const MAX_ALLOCATIONS: u64 = 52_000;
 
     let sdl = std::fs::read_to_string(SCHEMA).unwrap();
 
