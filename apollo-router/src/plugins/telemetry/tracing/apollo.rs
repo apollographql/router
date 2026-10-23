@@ -18,7 +18,7 @@ impl TracingConfigurator for Config {
     }
 
     fn is_enabled(&self) -> bool {
-        self.apollo_key.is_some() && self.apollo_graph_ref.is_some()
+        self.exports_to_apollo()
     }
 
     fn configure(&self, builder: &mut TracingBuilder) -> Result<(), BoxError> {

@@ -21,6 +21,7 @@ use crate::plugins::telemetry::SUBGRAPH_FTV1;
 use crate::plugins::telemetry::Telemetry;
 use crate::plugins::telemetry::config;
 use crate::plugins::telemetry::config_new::Selectors;
+use crate::plugins::telemetry::config_new::apollo::instruments::ApolloSubgraphFetchDuration;
 use crate::plugins::telemetry::config_new::apollo::instruments::ApolloSubgraphInstruments;
 use crate::plugins::telemetry::config_new::cache::CacheInstruments;
 use crate::plugins::telemetry::config_new::instruments::Instrumented;
@@ -55,7 +56,7 @@ fn request_ftv1(mut req: SubgraphRequest) -> SubgraphRequest {
     req
 }
 
-fn store_ftv1(subgraph_name: &ByteString, resp: SubgraphResponse) -> SubgraphResponse {
+fn store_ftv1(resp: SubgraphResponse) -> SubgraphResponse {
     // Stash the FTV1 data
     if resp
         .context
@@ -66,6 +67,7 @@ fn store_ftv1(subgraph_name: &ByteString, resp: SubgraphResponse) -> SubgraphRes
     {
         // Record the ftv1 trace for processing later
         Span::current().record("apollo_private.ftv1", ftv1.as_str());
+        let subgraph_name = ByteString::from(resp.subgraph_name.as_str());
         resp.context
             .upsert_json_value(SUBGRAPH_FTV1, move |value: Value| {
                 let mut vec = match value {
@@ -106,10 +108,7 @@ where
     fn layer(&self, inner: S) -> Self::Service {
         ServiceBuilder::new()
             .map_request(request_ftv1)
-            .map_response(|resp: SubgraphResponse| {
-                let subgraph_name = ByteString::from(resp.subgraph_name.as_str());
-                store_ftv1(&subgraph_name, resp)
-            })
+            .map_response(store_ftv1)
             .service(inner)
             .boxed_clone()
     }
@@ -120,7 +119,7 @@ where
 pub(crate) struct InstrumentSubgraphLayer {
     config: Arc<config::Conf>,
     static_subgraph_instruments: Arc<HashMap<String, StaticInstrument>>,
-    static_apollo_subgraph_instruments: Arc<HashMap<String, StaticInstrument>>,
+    apollo_fetch_duration: Option<Arc<ApolloSubgraphFetchDuration>>,
     static_cache_instruments: Arc<HashMap<String, StaticInstrument>>,
 }
 
@@ -128,13 +127,25 @@ impl InstrumentSubgraphLayer {
     fn new(
         config: Arc<config::Conf>,
         static_subgraph_instruments: Arc<HashMap<String, StaticInstrument>>,
-        static_apollo_subgraph_instruments: Arc<HashMap<String, StaticInstrument>>,
+        static_apollo_subgraph_instruments: &HashMap<String, StaticInstrument>,
         static_cache_instruments: Arc<HashMap<String, StaticInstrument>>,
     ) -> Self {
+        // The fetch duration is only exported to Apollo, so don't record it without Apollo.
+        let apollo_fetch_duration = config
+            .apollo
+            .exports_to_apollo()
+            .then(|| {
+                ApolloSubgraphInstruments::fetch_duration(
+                    static_apollo_subgraph_instruments,
+                    &config.apollo,
+                )
+            })
+            .flatten()
+            .map(Arc::new);
         Self {
             config,
             static_subgraph_instruments,
-            static_apollo_subgraph_instruments,
+            apollo_fetch_duration,
             static_cache_instruments,
         }
     }
@@ -154,7 +165,7 @@ where
         let req_fn_config = self.config.clone();
         let res_fn_config = self.config.clone();
         let static_subgraph_instruments = self.static_subgraph_instruments.clone();
-        let static_apollo_subgraph_instruments = self.static_apollo_subgraph_instruments.clone();
+        let apollo_fetch_duration = self.apollo_fetch_duration.clone();
         let static_cache_instruments = self.static_cache_instruments.clone();
 
         ServiceBuilder::new()
@@ -181,10 +192,7 @@ where
                     let apollo_instruments: ApolloSubgraphInstruments = req_fn_config
                         .instrumentation
                         .instruments
-                        .new_apollo_subgraph_instruments(
-                            static_apollo_subgraph_instruments.clone(),
-                            req_fn_config.apollo.clone(),
-                        );
+                        .new_apollo_subgraph_instruments(apollo_fetch_duration.as_deref());
                     apollo_instruments.on_request(sub_request);
 
                     let custom_cache_instruments: CacheInstruments = req_fn_config
@@ -294,7 +302,7 @@ impl Telemetry {
         InstrumentSubgraphLayer::new(
             self.config.clone(),
             static_subgraph_instruments,
-            static_apollo_subgraph_instruments,
+            &static_apollo_subgraph_instruments,
             static_cache_instruments,
         )
     }
@@ -675,6 +683,74 @@ mod tests {
                 "query_from_request" = "query { test }"
             );
             crate::plugin::test::await_mock_driver(driver).await;
+        }
+        .with_metrics()
+        .await;
+    }
+
+    /// Sends one fetch to the `products` subgraph through `instrument_subgraph_layer`.
+    async fn instrumented_fetch(telemetry: &Telemetry) {
+        let (mock_subgraph_service, mut handle) =
+            tower_test::mock::pair::<SubgraphRequest, SubgraphResponse>();
+        let driver = tokio::spawn(async move {
+            let (req, responder) = handle.next_request().await.unwrap();
+            responder.send_response(
+                SubgraphResponse::fake_builder()
+                    .context(req.context)
+                    .subgraph_name("products")
+                    .build(),
+            );
+        });
+        let mut subgraph_service = ServiceBuilder::new()
+            .layer(telemetry.instrument_subgraph_layer())
+            .service(mock_subgraph_service);
+        subgraph_service
+            .ready()
+            .await
+            .unwrap()
+            .call(
+                SubgraphRequest::fake_builder()
+                    .subgraph_name("products")
+                    .build(),
+            )
+            .await
+            .unwrap();
+        crate::plugin::test::await_mock_driver(driver).await;
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn apollo_fetch_duration_is_not_recorded_without_apollo() {
+        async {
+            let test_harness: PluginTestHarness<Telemetry> = PluginTestHarness::builder()
+                .build()
+                .await
+                .expect("test harness");
+
+            instrumented_fetch(&test_harness).await;
+
+            assert!(
+                crate::metrics::collect_metrics()
+                    .find("apollo.router.operations.fetch.duration")
+                    .is_none()
+            );
+        }
+        .with_metrics()
+        .await;
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn apollo_fetch_duration_is_recorded_when_exporting_to_apollo() {
+        async {
+            let telemetry = crate::plugins::telemetry::telemetry_exporting_to_apollo("").await;
+
+            instrumented_fetch(&telemetry).await;
+
+            assert_histogram_count!(
+                "apollo.router.operations.fetch.duration",
+                1,
+                "has_errors" = false,
+                "subgraph.name" = "products"
+            );
         }
         .with_metrics()
         .await;

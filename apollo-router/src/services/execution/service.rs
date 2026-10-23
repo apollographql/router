@@ -37,7 +37,6 @@ use crate::json_ext::PathElement;
 use crate::json_ext::ValueExt;
 use crate::plugins::authentication::APOLLO_AUTHENTICATION_JWT_CLAIMS;
 use crate::plugins::subscription::SubscriptionConfig;
-use crate::plugins::telemetry::apollo::Config as ApolloTelemetryConfig;
 use crate::plugins::telemetry::config::ApolloMetricsReferenceMode;
 use crate::query_planner::SubgraphSchemas;
 use crate::query_planner::subscription::SubscriptionHandle;
@@ -58,7 +57,9 @@ pub(crate) struct ExecutionService {
     pub(crate) configuration: Arc<Configuration>,
     /// Subscription config if enabled
     pub(crate) subscription_config: Option<SubscriptionConfig>,
-    pub(crate) apollo_telemetry_config: Option<ApolloTelemetryConfig>,
+    /// Apollo usage reporting reference mode. `Standard`, which collects no response enum
+    /// values, unless the telemetry plugin is present and the router exports to Apollo.
+    pub(crate) metrics_reference_mode: ApolloMetricsReferenceMode,
 }
 
 type CloseSignal = broadcast::Sender<()>;
@@ -180,10 +181,7 @@ impl ExecutionService {
         let schema = self.schema.clone();
         let mut nullified_paths: Vec<Path> = vec![];
 
-        let metrics_ref_mode = match &self.apollo_telemetry_config {
-            Some(conf) => conf.metrics_reference_mode,
-            _ => ApolloMetricsReferenceMode::default(),
-        };
+        let metrics_ref_mode = self.metrics_reference_mode;
 
         let execution_span = Span::current();
         let insert_result_coercion_errors =

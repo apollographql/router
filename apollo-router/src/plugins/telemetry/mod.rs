@@ -1854,3 +1854,34 @@ mod reports_to_apollo_tests {
         ));
     }
 }
+
+/// Builds the telemetry plugin from a router YAML config, as if `APOLLO_KEY` and
+/// `APOLLO_GRAPH_REF` were set. Router YAML can't carry a key or graph ref, and setting those
+/// globals would leak into other tests, so they go on the parsed config instead. The Apollo
+/// endpoints point at a closed local port, so nothing a test records reaches Apollo.
+#[cfg(test)]
+pub(crate) async fn telemetry_exporting_to_apollo(router_yaml: &str) -> Telemetry {
+    let full_config: serde_json::Value = if router_yaml.trim().is_empty() {
+        serde_json::json!({})
+    } else {
+        serde_yaml::from_str(router_yaml).expect("router yaml must be valid")
+    };
+    let telemetry_config = full_config
+        .get("telemetry")
+        .cloned()
+        .unwrap_or_else(|| serde_json::json!({}));
+    let mut init: PluginInit<config::Conf> = PluginInit::fake_builder()
+        .config(telemetry_config)
+        .full_config(full_config)
+        .build()
+        .with_deserialized_config()
+        .expect("telemetry config must deserialize");
+    let closed_port = url::Url::parse("http://127.0.0.1:0").expect("valid url");
+    init.config.apollo.apollo_key = Some("test-key".to_string());
+    init.config.apollo.apollo_graph_ref = Some("test@current".to_string());
+    init.config.apollo.endpoint = closed_port.clone().into();
+    init.config.apollo.otlp_endpoint = closed_port.into();
+    Telemetry::new(init)
+        .await
+        .expect("telemetry plugin must build")
+}
