@@ -205,16 +205,19 @@ impl Variables {
             let mut inverted_contexts: Vec<Vec<usize>> = Vec::new();
             let mut values: IndexSet<Value> = IndexSet::default();
             data.select_values_and_paths(schema, current_dir, |path, value| {
-                // first get contextual values that are required
-                // - records its context index
-                let context_index = match subgraph_context.as_mut() {
-                    Some(context) => context.execute_on_path(path),
-                    None => 0,
-                };
-
                 let mut value =
                     execute_selection_set(value, requires, schema, None, &boolean_variable);
                 if value.as_object().map(|o| !o.is_empty()).unwrap_or(false) {
+                    // Resolve the contextual values for this entity and record its context
+                    // index. This happens only for entities that produce a representation:
+                    // a `null` or type-mismatched entity is never sent to the subgraph, so it
+                    // must not claim an aliased `_entities_<i>` copy (and its
+                    // `$representations_<i>` variable) in the operation either.
+                    let context_index = match subgraph_context.as_mut() {
+                        Some(context) => context.execute_on_path(path),
+                        None => 0,
+                    };
+
                     rewrites::apply_rewrites(schema, &mut value, input_rewrites);
                     match values.get_index_of(&value) {
                         Some(index) => {
@@ -571,6 +574,14 @@ impl FetchNode {
                 // only the representation needed for that context. For each
                 // `inverted_paths` entry, the correct context index (`i`) is
                 // determined by the corresponding `inverted_contexts` entry.
+                //
+                // NOTE: this loop relies on every path having its own context index, so
+                // that each `_entities_<i>` alias is claimed by exactly one path. It removes
+                // the alias from the response map and consumes its array on first use. If
+                // context indices are ever shared between paths (e.g. by deduplicating
+                // identical context values in `SubgraphContext`), the second path would find
+                // the alias already removed and silently receive no data. In that case this
+                // must be changed to read the alias without removing it.
                 for (paths, contexts) in inverted_paths
                     .into_iter()
                     .zip(inverted_contexts.unwrap_or_default().into_iter())
@@ -722,6 +733,7 @@ mod tests {
     use crate::Context;
     use crate::plugins::connectors::declared_errors::ConnectorDeclaredErrors;
     use crate::plugins::connectors::declared_errors::DECLARED_ERROR_MARKER;
+    use crate::query_planner::subgraph_context::build_operation_with_aliasing;
 
     fn test_schema() -> Schema {
         let sdl = r#"
@@ -1782,6 +1794,221 @@ mod tests {
                 ],
                 vec![Path(vec![key("t"), index(1)])],
             ],
+        );
+    }
+
+    /// Supergraph for the `@fromContext` tests below. `U.field(a:)` takes its
+    /// argument from the `prop` of the enclosing `T`, and `T.uList` is a list
+    /// of nullable `U`, so a `null` list element is a valid response value.
+    fn context_test_schema() -> Schema {
+        let sdl = r#"
+            schema
+                @link(url: "https://specs.apollo.dev/link/v1.0")
+                @link(url: "https://specs.apollo.dev/join/v0.3", for: EXECUTION)
+            {
+                query: Query
+            }
+            directive @link(url: String, as: String, for: link__Purpose, import: [link__Import]) repeatable on SCHEMA
+            directive @join__type(graph: join__Graph!, key: join__FieldSet, extension: Boolean! = false, resolvable: Boolean! = true, isInterfaceObject: Boolean! = false) repeatable on OBJECT | INTERFACE | UNION | ENUM | INPUT_OBJECT | SCALAR
+            directive @join__graph(name: String!, url: String!) on ENUM_VALUE
+
+            scalar link__Import
+            scalar join__FieldSet
+
+            enum link__Purpose { SECURITY EXECUTION }
+
+            enum join__Graph {
+                TEST @join__graph(name: "test", url: "http://localhost:4001/graphql")
+            }
+
+            type Query {
+                tList: [T]
+            }
+
+            type T @join__type(graph: TEST, key: "id") {
+                id: ID!
+                prop: String
+                uList: [U]
+            }
+
+            type U @join__type(graph: TEST, key: "id") {
+                id: ID!
+                field(a: String): Int
+            }
+        "#;
+        Schema::parse(sdl, &Configuration::default()).unwrap()
+    }
+
+    /// The subgraph the entity fetch below is sent to.
+    fn context_test_subgraph_schema() -> Valid<apollo_compiler::Schema> {
+        let sdl = r#"
+            scalar _Any
+            union _Entity = T | U
+
+            type Query {
+                tList: [T]
+                _entities(representations: [_Any!]!): [_Entity]!
+            }
+
+            type T {
+                id: ID!
+                prop: String
+                uList: [U]
+            }
+
+            type U {
+                id: ID!
+                field(a: String): Int
+            }
+        "#;
+        apollo_compiler::Schema::parse_and_validate(sdl, "subgraph.graphql").unwrap()
+    }
+
+    /// `requires` for the entity fetch: `... on U { __typename id }`.
+    fn make_u_requires() -> Vec<requires_selection::Selection> {
+        vec![requires_selection::Selection::InlineFragment(
+            requires_selection::InlineFragment {
+                type_condition: Some(name!("U")),
+                conditions: vec![],
+                selections: vec![
+                    requires_selection::Selection::Field(requires_selection::Field {
+                        alias: None,
+                        name: name!("__typename"),
+                        selections: Vec::new(),
+                    }),
+                    requires_selection::Selection::Field(requires_selection::Field {
+                        alias: None,
+                        name: name!("id"),
+                        selections: Vec::new(),
+                    }),
+                ],
+            },
+        )]
+    }
+
+    /// Regression test for per-context `$representations_<i>` variables.
+    ///
+    /// Mirrors the `tList.@.uList.@` plan from the `set_context` integration
+    /// tests, except that the second `T`'s list has a `null` element. A `null`
+    /// entity produces no representation, but it still visits the context
+    /// resolver and so consumes a context index. The aliased operation must
+    /// not declare a non-null `$representations_<i>` for an index that has no
+    /// value in the variables map, or the subgraph will reject the whole
+    /// request as missing a required variable.
+    #[test]
+    fn aliased_operation_declares_only_variables_that_are_provided() {
+        let schema = context_test_schema();
+        let subgraph_schema = context_test_subgraph_schema();
+        let request = Arc::new(
+            http::Request::builder()
+                .body(graphql::Request::builder().build())
+                .unwrap(),
+        );
+
+        // Data from the first fetch, `{ tList { __typename prop id uList { __typename id } } }`.
+        let data = json!({
+            "tList": [
+                {
+                    "__typename": "T",
+                    "prop": "prop value 1",
+                    "id": "1",
+                    "uList": [{ "__typename": "U", "id": "3" }]
+                },
+                {
+                    "__typename": "T",
+                    "prop": "prop value 2",
+                    "id": "2",
+                    "uList": [null, { "__typename": "U", "id": "4" }]
+                }
+            ]
+        });
+        let current_dir = Path(vec![key("tList"), flatten(), key("uList"), flatten()]);
+        // The plan's context rewrite: from the entity, go up to the enclosing `T` and read
+        // its `prop` into `$contextualArgument_1_0`.
+        let context_rewrites = vec![rewrites::DataRewrite::KeyRenamer(
+            rewrites::DataKeyRenamer {
+                path: Path(vec![
+                    key(".."),
+                    json_ext::PathElement::Fragment("T".to_string()),
+                    key("prop"),
+                ]),
+                rename_key_to: name!("contextualArgument_1_0"),
+            },
+        )];
+
+        let variables = Variables::new(
+            &make_u_requires(),
+            &["contextualArgument_1_0".into()],
+            &data,
+            &current_dir,
+            &request,
+            &Query::empty_for_tests(),
+            &schema,
+            &None,
+            &Some(context_rewrites),
+        )
+        .expect("two entities have representations");
+
+        // The two non-null entities sit under parents with different `prop`
+        // values, so the fetch has to be aliased per context.
+        let contextual_arguments = variables
+            .contextual_arguments
+            .as_ref()
+            .expect("contexts differ, so the operation must be aliased");
+
+        // Only the two entities that produced a representation get a context
+        // index, so there are exactly two aliased copies: index 0 for
+        // tList/0/uList/0 and index 1 for tList/1/uList/1. The `null` at
+        // tList/1/uList/0 claims neither a representation nor a context.
+        assert_eq!(contextual_arguments.count, 2);
+        assert_eq!(
+            variables.inverted_paths,
+            vec![
+                vec![Path(vec![key("tList"), index(0), key("uList"), index(0)])],
+                vec![Path(vec![key("tList"), index(1), key("uList"), index(1)])],
+            ],
+        );
+        assert_eq!(
+            contextual_arguments.inverted_contexts,
+            vec![vec![0], vec![1]]
+        );
+        assert_eq!(
+            variables.variables.get("representations_0"),
+            Some(&json!([{ "__typename": "U", "id": "3" }])),
+        );
+        assert_eq!(
+            variables.variables.get("representations_1"),
+            Some(&json!([{ "__typename": "U", "id": "4" }])),
+        );
+
+        let mut operation = SerializableDocument::from_string(
+            "query QueryLL__Subgraph1__1($representations: [_Any!]!, $contextualArgument_1_0: String) { \
+                _entities(representations: $representations) { \
+                    ... on U { field(a: $contextualArgument_1_0) } \
+                } \
+            }",
+        );
+        operation.init_parsed(&subgraph_schema).unwrap();
+        let aliased =
+            build_operation_with_aliasing(&operation, contextual_arguments, &subgraph_schema)
+                .expect("aliased operation validates against the subgraph schema");
+
+        let declared: Vec<String> = aliased
+            .operations
+            .iter()
+            .flat_map(|op| op.variables.iter())
+            .map(|v| v.name.to_string())
+            .collect();
+        let missing: Vec<&String> = declared
+            .iter()
+            .filter(|name| !variables.variables.contains_key(name.as_str()))
+            .collect();
+        assert!(
+            missing.is_empty(),
+            "aliased operation declares variables with no value: {missing:?}\n\
+             declared: {declared:?}\n\
+             provided: {:?}",
+            variables.variables.keys().collect::<Vec<_>>()
         );
     }
 }
