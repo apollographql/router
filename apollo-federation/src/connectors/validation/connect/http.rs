@@ -14,10 +14,7 @@ use crate::connectors::HTTPMethod;
 use crate::connectors::Namespace;
 use crate::connectors::SourceName;
 use crate::connectors::StreamMode;
-use crate::connectors::id::ConnectedElement;
-use crate::connectors::spec::connect::BATCH_ARGUMENT_NAME;
 use crate::connectors::spec::connect::CONNECT_BODY_ARGUMENT_NAME;
-use crate::connectors::spec::connect::CONNECT_ENTITY_ARGUMENT_NAME;
 use crate::connectors::spec::connect::CONNECT_SOURCE_ARGUMENT_NAME;
 use crate::connectors::spec::http::HTTP_ARGUMENT_NAME;
 use crate::connectors::spec::http::STREAM_ARGUMENT_NAME;
@@ -48,6 +45,7 @@ pub(super) struct Http<'schema> {
     transport: Transport<'schema>,
     body: Option<Body<'schema>>,
     headers: Headers<'schema>,
+    stream: Option<Stream<'schema>>,
 }
 
 impl<'schema> Http<'schema> {
@@ -100,11 +98,17 @@ impl<'schema> Http<'schema> {
                 schema,
             ))
             .map_err(|nested| nested.into_iter().flatten().collect())
-            .map(|(body, _stream, headers, transport)| Self {
+            .map(|(body, stream, headers, transport)| Self {
                 body,
                 headers,
                 transport,
+                stream,
             })
+    }
+
+    /// The `http.stream` argument, which decides what `$` is in the selection.
+    pub(super) const fn stream(&self) -> Option<Stream<'schema>> {
+        self.stream
     }
 
     /// Type-check the `@connect(http:)` directive.
@@ -118,6 +122,7 @@ impl<'schema> Http<'schema> {
             transport,
             body,
             headers,
+            stream: _,
         } = self;
 
         let mut errors = Vec::new();
@@ -222,14 +227,13 @@ impl Display for BodyCoordinate<'_> {
 
 /// Parse `@connect(http: {stream:})`, which only exists from connect/v0.5.
 ///
-/// A stream mode decides the shape of the whole response the selection receives, so it can't be
-/// combined with connectors whose response is split up by entity: `entity: true`, `batch`, or
-/// `@connect` on a type.
+/// The checks that depend on the rest of the connector, that it doesn't use `$batch` and that its
+/// selection picks one value for a field that isn't a list, are in [`super::Connect::type_check`].
 fn parse_stream<'schema>(
     http_arg: &'schema [(Name, Node<Value>)],
     connect: ConnectDirectiveCoordinate<'schema>,
     schema: &'schema SchemaInfo,
-) -> Result<Option<StreamMode>, Message> {
+) -> Result<Option<Stream<'schema>>, Message> {
     let Some((_, value)) = http_arg
         .iter()
         .find(|(name, _)| name == &STREAM_ARGUMENT_NAME)
@@ -269,32 +273,34 @@ fn parse_stream<'schema>(
             locations: locations(),
         })?;
 
-    let is_entity = connect
-        .directive
-        .specified_argument_by_name(&CONNECT_ENTITY_ARGUMENT_NAME)
-        .is_some_and(|value| value.to_bool() == Some(true));
-    let conflict = if matches!(connect.element, ConnectedElement::Type { .. }) {
-        Some(format!("`@{}` on a type", connect.directive.name))
-    } else if is_entity {
-        Some(format!("`{CONNECT_ENTITY_ARGUMENT_NAME}: true`"))
-    } else if connect
-        .directive
-        .specified_argument_by_name(&BATCH_ARGUMENT_NAME)
-        .is_some()
-    {
-        Some(format!("`{BATCH_ARGUMENT_NAME}`"))
-    } else {
-        None
-    };
-    if let Some(conflict) = conflict {
-        return Err(Message {
-            code: Code::InvalidStream,
-            message: format!("{coordinate} can't be used with {conflict}."),
-            locations: locations(),
-        });
-    }
+    Ok(Some(Stream {
+        mode,
+        node: value,
+        coordinate,
+    }))
+}
 
-    Ok(Some(mode))
+/// A valid, parsed `@connect(http: {stream:})`.
+#[derive(Clone, Copy)]
+pub(super) struct Stream<'schema> {
+    pub(super) mode: StreamMode,
+    node: &'schema Node<Value>,
+    coordinate: StreamCoordinate<'schema>,
+}
+
+impl Stream<'_> {
+    /// An `INVALID_STREAM` error about this `stream` argument, pointing at its value.
+    pub(super) fn error(&self, problem: impl Display, schema: &SchemaInfo) -> Message {
+        Message {
+            code: Code::InvalidStream,
+            message: format!("{coordinate} {problem}", coordinate = self.coordinate),
+            locations: self
+                .node
+                .line_column_range(&schema.sources)
+                .into_iter()
+                .collect(),
+        }
+    }
 }
 
 #[derive(Clone, Copy)]
