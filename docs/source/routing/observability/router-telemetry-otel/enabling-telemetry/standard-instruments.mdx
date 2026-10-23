@@ -339,6 +339,15 @@ telemetry:
   - `server.address` - The address that the router is listening on.
   - `server.port` - The port that the router is listening on if not a unix socket.
   - `http.connection.state` - Either `active` or `terminating`.
+- `apollo.router.http2.server.connection.errors` - Number of client HTTP/2 connections the router closed with an HTTP/2 error code. Increments once per connection when the router closes it with a GOAWAY frame carrying an error code. The client receives no HTTP response for requests still in progress on that connection. Connections the client closes, network errors and graceful shutdowns are not counted.
+  - `error.type` - The HTTP/2 error code the router sent when it closed the connection:
+    - `ENHANCE_YOUR_CALM`: the client sent more than the router accepts on one connection, such as a header list far over the configured limit, too many CONTINUATION frames or too many stream resets. The router cannot tell these causes apart.
+    - `COMPRESSION_ERROR`: the router could not continue decoding the client's compressed headers.
+    - `PROTOCOL_ERROR`: the client broke an HTTP/2 framing rule.
+    - `FRAME_SIZE_ERROR`: the client sent a frame larger than the router allows.
+    - `FLOW_CONTROL_ERROR`: the client sent more data than its flow-control window allowed.
+    - `INTERNAL_ERROR`, `SETTINGS_TIMEOUT`, `STREAM_CLOSED`, `REFUSED_STREAM`, `CANCEL`, `CONNECT_ERROR`, `INADEQUATE_SECURITY` and `HTTP_1_1_REQUIRED`: the HTTP/2 error code of the same name.
+    - `_OTHER`: any other HTTP/2 error code.
 
 ## Query parsing
 
