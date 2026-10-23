@@ -32,6 +32,7 @@ use crate::connectors::index::shape_provides;
 use crate::error::FederationError;
 use crate::operation::SelectionSet;
 use crate::operation::TYPENAME_FIELD;
+use crate::query_graph::graph_path::operation::OpGraphPathContext;
 use crate::query_graph::graph_path::operation::OpPathElement;
 use crate::query_plan::FetchDataKeyRenamer;
 use crate::query_plan::FetchDataPathElement;
@@ -90,6 +91,11 @@ pub(crate) enum InputContribution {
         conditions: Arc<SelectionSet>,
         /// Destination type and subgraph, for building the input rewrites.
         rewrite_info: InputRewriteInfo,
+        /// The @skip/@include the parent selects the key fields under. The
+        /// representation is built under them too, so a fetch merged from
+        /// differently gated branches reads only the keys the active branches
+        /// selected.
+        needed_under: OpGraphPathContext,
     },
     /// @requires condition fields riding an existing edge.
     Requires {
@@ -121,6 +127,13 @@ impl InputContribution {
     pub(crate) fn conditions(&self) -> &Arc<SelectionSet> {
         match self {
             Self::Key { conditions, .. } | Self::Requires { conditions, .. } => conditions,
+        }
+    }
+
+    pub(crate) fn needed_under(&self) -> Option<&OpGraphPathContext> {
+        match self {
+            Self::Key { needed_under, .. } => Some(needed_under),
+            Self::Requires { .. } => None,
         }
     }
 
@@ -689,12 +702,23 @@ impl FetchGraph {
         Ok(())
     }
 
-    /// Whether the edge already carries a key input for the given source
-    /// type.
-    pub(crate) fn edge_has_key_input(&self, edge: EdgeIndex, source_type: &Name) -> bool {
+    /// Whether the edge already carries a key input for `input`'s source
+    /// type that covers it: one needed unconditionally, or under the same
+    /// conditions. A key input needed under other conditions doesn't, since
+    /// the representation reads each input only under its own.
+    pub(crate) fn edge_has_key_input(&self, edge: EdgeIndex, input: &InputContribution) -> bool {
+        let InputContribution::Key {
+            source_type_name: source_type,
+            needed_under: needed,
+            ..
+        } = input
+        else {
+            return false;
+        };
         self.graph[edge].inputs.iter().any(|i| {
-            matches!(i, InputContribution::Key { source_type_name, .. }
-                if source_type_name == source_type)
+            matches!(i, InputContribution::Key { source_type_name, needed_under, .. }
+                if source_type_name == source_type
+                    && (needed_under.is_empty() || needed_under == needed))
         })
     }
 
@@ -2281,7 +2305,7 @@ mod tests {
         let root = g.get_or_create_root_group(&sg, dummy_root_type());
         let entity = g.add_entity_group(&sg, vec![]);
         let edge = g.add_dependency(root, entity, vec![]);
-        assert!(!g.edge_has_key_input(edge, &apollo_compiler::name!("User")));
+        assert!(!g.edge_has_key_input(edge, &test_input_contribution()));
     }
 
     #[test]
