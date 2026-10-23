@@ -13,9 +13,9 @@ type Query {
         body: "method: $('tools/call') params: { name: $('weather') arguments: { city: $args.city } }"
         stream: "array"
       }
-      selection: "$->last.result.structuredContent { temp }"
+      selection: "$->last.result.structuredContent { city temp }"
     )
-  # Valid: the selection maps over every event.
+  # Valid: the selection maps over every event into a list field.
   progress: [Progress]
     @connect(
       source: "mcp"
@@ -29,35 +29,93 @@ type Query {
       http: { GET: "/weather", stream: "last" }
       selection: "temp"
     )
-  # Invalid: an entity resolver receives one entity's response, not a stream.
+  # Invalid: maps over every event, so returns a list for a field that isn't one.
+  everyWeather: Weather
+    @connect(
+      source: "mcp"
+      http: { GET: "/weather", stream: "array" }
+      selection: "result.structuredContent { city temp }"
+    )
+  # Valid: an entity resolver with one request per entity picks one event.
   product(id: ID!): Product
     @connect(
       source: "mcp"
       http: { GET: "/products/{$args.id}", stream: "array" }
-      selection: "id"
+      selection: "$->last { id name }"
       entity: true
     )
 }
 
+type Mutation {
+  # Valid: a write that streams progress, mapped from its last event.
+  setAlert(city: String!): Alert
+    @connect(
+      source: "mcp"
+      http: { POST: "/alerts", body: "city: $args.city", stream: "array" }
+      selection: "$->last { id }"
+    )
+}
+
 type Weather {
+  city: String
   temp: Float
+  # Valid: a field connector makes one request per parent, and picks one event.
+  forecast: Forecast
+    @connect(
+      source: "mcp"
+      http: { GET: "/forecast/{$this.city}", stream: "array" }
+      selection: "$->last { high }"
+    )
+}
+
+type Forecast {
+  high: Float
 }
 
 type Progress {
   percent: Float
 }
 
-type Product @key(fields: "id") {
-  id: ID!
+type Alert {
+  id: ID
 }
 
-# Invalid: a connector on a type is a batch or entity resolver.
+type Product @key(fields: "id") {
+  id: ID!
+  name: String
+}
+
+# Valid: a type connector using $this makes one request per entity, and picks one event.
+type Store
+  @key(fields: "id")
+  @connect(
+    source: "mcp"
+    http: { GET: "/stores/{$this.id}", stream: "array" }
+    selection: "$->last { id name }"
+  ) {
+  id: ID!
+  name: String
+}
+
+# Invalid: maps over every event, so returns a list for one entity.
+type Shelf
+  @key(fields: "id")
+  @connect(
+    source: "mcp"
+    http: { GET: "/shelves/{$this.id}", stream: "array" }
+    selection: "id name"
+  ) {
+  id: ID!
+  name: String
+}
+
+# Invalid: $batch splits one response across many entities.
 type Order
   @key(fields: "id")
   @connect(
     source: "mcp"
     http: { POST: "/orders", body: "ids: $batch.id", stream: "array" }
-    selection: "id"
+    selection: "$->last.orders { id }"
   ) {
   id: ID!
 }

@@ -49,8 +49,11 @@ input join__ContextArgument {
 }
 
 type Query @join__type(graph: STREAMS) {
-  weather(city: String!): Weather @join__directive(name: "connect", graphs: [STREAMS], args: {source: "mcp", http: {POST: "/mcp", body: "method: $('tools/call') params: { name: $('weather') arguments: { city: $args.city } }", stream: "array"}, selection: "$->last.result { temp }"})
+  weather(city: String!): Weather @join__directive(name: "connect", graphs: [STREAMS], args: {source: "mcp", http: {POST: "/mcp", body: "method: $('tools/call') params: { name: $('weather') arguments: { city: $args.city } }", stream: "array"}, selection: "$->last.result { temp }", isSuccess: "$($->last.error ?? null)->eq(null)", errors: {message: "$->last.error.message"}})
   progress: [Progress] @join__directive(name: "connect", graphs: [STREAMS], args: {source: "mcp", http: {GET: "/progress", stream: "array"}, selection: "percent: params.progress"})
+  featured: Product @join__directive(name: "connect", graphs: [STREAMS], args: {source: "mcp", http: {GET: "/featured", stream: "array"}, selection: "$->last { id }"})
+  product(id: ID!): Product @join__directive(name: "connect", graphs: [STREAMS], args: {source: "mcp", http: {GET: "/products/{$args.id}", stream: "array"}, selection: "$->last { id name }", entity: true})
+  featuredStore: Store @join__directive(name: "connect", graphs: [STREAMS], args: {source: "mcp", http: {GET: "/featured-store", stream: "array"}, selection: "$->last { id }"})
 }
 
 type Weather @join__type(graph: STREAMS) {
@@ -59,4 +62,14 @@ type Weather @join__type(graph: STREAMS) {
 
 type Progress @join__type(graph: STREAMS) {
   percent: Float
+}
+
+type Product @join__type(graph: STREAMS, key: "id") {
+  id: ID!
+  name: String
+}
+
+type Store @join__type(graph: STREAMS, key: "id") @join__directive(name: "connect", graphs: [STREAMS], args: {source: "mcp", http: {GET: "/stores/{$this.id}", stream: "array"}, selection: "$->last { id name }"}) {
+  id: ID!
+  name: String
 }

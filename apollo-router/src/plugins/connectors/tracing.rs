@@ -180,13 +180,13 @@ mod tests {
     async fn test_connect_stream_mode_instrument() {
         async {
             let config = Arc::default();
-            // Two connectors with `stream: "array"`
+            // Six connectors with `stream: "array"`, five on fields and one on a type
             let schema = Schema::parse(include_str!("./testdata/stream.graphql"), &config).unwrap();
             let _services = ConnectorServices::empty(Arc::from(schema));
 
             assert_gauge!(
                 "apollo.router.schema.connectors.stream",
-                2,
+                6,
                 connect.stream.mode = "array"
             );
         }

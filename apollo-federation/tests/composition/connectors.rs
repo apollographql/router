@@ -641,10 +641,26 @@ mod tests {
                             stream: "array"
                         }
                         selection: "$->last.result { temp }"
+                        isSuccess: "$($->last.error ?? null)->eq(null)"
+                        errors: { message: "$->last.error.message" }
                     )
 
                     progress: [Progress]
                     @connect(source: "mcp", http: { GET: "/progress", stream: "array" }, selection: "percent: params.progress")
+
+                    featured: Product
+                    @connect(source: "mcp", http: { GET: "/featured", stream: "array" }, selection: "$->last { id }")
+
+                    product(id: ID!): Product
+                    @connect(
+                        source: "mcp"
+                        http: { GET: "/products/{$args.id}", stream: "array" }
+                        selection: "$->last { id name }"
+                        entity: true
+                    )
+
+                    featuredStore: Store
+                    @connect(source: "mcp", http: { GET: "/featured-store", stream: "array" }, selection: "$->last { id }")
                 }
 
                 type Weather {
@@ -653,6 +669,22 @@ mod tests {
 
                 type Progress {
                     percent: Float
+                }
+
+                type Product @key(fields: "id") {
+                    id: ID!
+                    name: String
+                }
+
+                type Store
+                @key(fields: "id")
+                @connect(
+                    source: "mcp"
+                    http: { GET: "/stores/{$this.id}", stream: "array" }
+                    selection: "$->last { id name }"
+                ) {
+                    id: ID!
+                    name: String
                 }
             "#,
         };
