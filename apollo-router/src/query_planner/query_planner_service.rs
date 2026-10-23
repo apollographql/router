@@ -1015,6 +1015,27 @@ mod tests {
                 }
             }
         }}"#);
+        // Type condition narrowing an abstract type
+        s!(r#"query Q { topProducts {
+            upc
+            ... on Book {
+                ... @defer(label: "A") { title }
+            }
+        }}"#);
+        s!(r#"query Q { topProducts {
+            upc
+            ... on Book @defer(label: "A") { title }
+        }}"#);
+        s!(r#"
+            query Q { topProducts { upc ... BookTitle @defer(label: "A") }}
+            fragment BookTitle on Book { title }
+        "#);
+        // Without labels, @defer on sibling type conditions share a key and are merged
+        s!(r#"query Q { topProducts {
+            upc
+            ... on Book { ... @defer { title } }
+            ... on Furniture { ... @defer { name } }
+        }}"#);
     }
 
     async fn subselections_keys(query: &str, planner: &QueryPlannerService) -> String {
