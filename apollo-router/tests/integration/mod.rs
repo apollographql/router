@@ -8,6 +8,7 @@ pub(crate) use common::IntegrationTest;
 pub(crate) mod redis_monitor;
 
 mod allowed_features;
+mod config_cli;
 mod connectors;
 mod coprocessor;
 #[cfg(feature = "mock_subgraphs_testing")]
