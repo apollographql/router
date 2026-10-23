@@ -688,6 +688,15 @@ impl CacheService {
         {
             return self.service.call(request).await;
         }
+        // Entity fetches whose entities carry different `@fromContext` values are rewritten into
+        // aliased `_entities_<i>` copies with per-entity `representations_<i>` variables. The
+        // cache only understands the plain `_entities` / `representations` shape: without the
+        // `representations` variable it would treat the request as a root query, caching the
+        // whole batch under a key that entity invalidation can never match. Bypass the cache
+        // for such requests until it can key each alias as its own single-entity fetch.
+        if request.is_aliased_entities_fetch {
+            return self.service.call(request).await;
+        }
         let query = request
             .subgraph_request
             .body()

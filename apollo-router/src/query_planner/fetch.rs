@@ -1,9 +1,9 @@
+use std::collections::HashMap;
 use std::fmt::Display;
 use std::sync::Arc;
 
 use apollo_compiler::ExecutableDocument;
 use apollo_compiler::ast;
-use apollo_compiler::collections::HashMap;
 use apollo_compiler::validation::Valid;
 use apollo_federation::query_plan::requires_selection;
 use apollo_federation::query_plan::serializable_document::SerializableDocument;
@@ -202,25 +202,38 @@ impl Variables {
             }));
 
             let mut inverted_paths: Vec<Vec<Path>> = Vec::new();
+            let mut inverted_contexts: Vec<Vec<usize>> = Vec::new();
             let mut values: IndexSet<Value> = IndexSet::default();
             data.select_values_and_paths(schema, current_dir, |path, value| {
-                // first get contextual values that are required
-                if let Some(context) = subgraph_context.as_mut() {
-                    context.execute_on_path(path);
-                }
-
                 let mut value =
                     execute_selection_set(value, requires, schema, None, &boolean_variable);
                 if value.as_object().map(|o| !o.is_empty()).unwrap_or(false) {
+                    // Resolve the contextual values for this entity and record its context
+                    // index. This happens only for entities that produce a representation:
+                    // a `null` or type-mismatched entity is never sent to the subgraph, so it
+                    // must not claim an aliased `_entities_<i>` copy (and its
+                    // `$representations_<i>` variable) in the operation either.
+                    let context_index = match subgraph_context.as_mut() {
+                        Some(context) => context.execute_on_path(path),
+                        None => 0,
+                    };
+
                     rewrites::apply_rewrites(schema, &mut value, input_rewrites);
                     match values.get_index_of(&value) {
                         Some(index) => {
+                            // Identical representation values are collapsed. Only add the path & context.
                             inverted_paths[index].push(path.clone());
+                            inverted_contexts[index].push(context_index);
+                            debug_assert!(
+                                inverted_paths[index].len() == inverted_contexts[index].len()
+                            );
                         }
                         None => {
                             inverted_paths.push(vec![path.clone()]);
+                            inverted_contexts.push(vec![context_index]);
                             values.insert(value);
                             debug_assert!(inverted_paths.len() == values.len());
+                            debug_assert!(inverted_contexts.len() == values.len());
                         }
                     }
                 }
@@ -230,13 +243,27 @@ impl Variables {
                 return None;
             }
 
-            let representations = Value::Array(Vec::from_iter(values));
+            let representations: Vec<Value> = Vec::from_iter(values);
             let contextual_arguments = match subgraph_context.as_mut() {
-                Some(context) => context.add_variables_and_get_args(&mut variables),
+                Some(context) => {
+                    context.add_variables_and_get_args(&mut variables, inverted_contexts)
+                }
                 None => None,
             };
 
-            variables.insert("representations", representations);
+            if let Some(ref ctx_args) = contextual_arguments {
+                // Per-context singleton representation arrays: each `representations_<ctx>`
+                // holds only the single representation needed for that context.
+                for (rep_idx, ctxs) in ctx_args.inverted_contexts.iter().enumerate() {
+                    for &ctx_idx in ctxs {
+                        let key = format!("representations_{ctx_idx}");
+                        let val = Value::Array(vec![representations[rep_idx].clone()]);
+                        variables.insert(key, val);
+                    }
+                }
+            } else {
+                variables.insert("representations", Value::Array(representations));
+            }
             Some(Variables {
                 variables,
                 inverted_paths,
@@ -273,6 +300,76 @@ impl Variables {
     }
 }
 
+fn insert_entity_at_paths(value: &mut Value, paths: &[Path], entity: Value) {
+    if paths.len() > 1 {
+        for path in &paths[1..] {
+            let _ = value.insert(path, entity.clone());
+        }
+    }
+
+    if let Some(path) = paths.first() {
+        let _ = value.insert(path, entity);
+    }
+}
+
+fn remap_entity_error(error: &Error, values_path: &Path, entity_error_path: &Path) -> Error {
+    Error::builder()
+        .locations(error.locations.clone())
+        // Append to the entity's path the error's path without `_entities` (or aliased
+        // `_entities_<context>`) and the entity index.
+        .path(Path::from_iter(
+            values_path
+                .0
+                .iter()
+                .chain(&entity_error_path.0[2..])
+                .cloned(),
+        ))
+        .message(error.message.clone())
+        .and_extension_code(error.extension_code())
+        .extensions(error.extensions.clone())
+        // Re-use the original ID so we don't double count this error.
+        .apollo_id(error.apollo_id())
+        .build()
+}
+
+enum AliasedErrorHandling {
+    Remap(Path),
+    Ignore,
+    Fallback,
+}
+
+/// Determine how to handle potentially aliased error paths.
+/// - If `path` is accepted, converts it from subgraph response into the supergraph response path
+///   and returns `Remap`.
+/// - If `path` is from a wrong context path, returns `Ignore`.
+/// - If none of them applies, returns `Fallback`.
+///
+/// With singleton representations, error paths have the form
+/// `["_entities_<context>", 0, "field", ...]` where the index is always 0.
+/// Uses a pre-built `context_to_path` map for O(1) lookup per error.
+fn aliased_error_handling(
+    path: &Path,
+    context_to_path: Option<&HashMap<usize, Path>>,
+) -> AliasedErrorHandling {
+    match (path.0.first(), path.0.get(1), context_to_path) {
+        (
+            Some(json_ext::PathElement::Key(alias, None)),
+            Some(json_ext::PathElement::Index(_)),
+            Some(context_to_path),
+        ) if alias.starts_with("_entities_") => {
+            // Parse context index from the alias name "_entities_<ctx>"
+            let Some(context_index) = alias["_entities_".len()..].parse::<usize>().ok() else {
+                return AliasedErrorHandling::Fallback;
+            };
+            match context_to_path.get(&context_index) {
+                Some(p) => AliasedErrorHandling::Remap(p.clone()),
+                None => AliasedErrorHandling::Ignore,
+            }
+        }
+        _ => AliasedErrorHandling::Fallback,
+    }
+}
+
 impl FetchNode {
     #[allow(clippy::too_many_arguments)]
     pub(crate) async fn subgraph_fetch(
@@ -282,6 +379,7 @@ impl FetchNode {
         current_dir: &Path,
         schema: &Schema,
         paths: Vec<Vec<Path>>,
+        contexts: Option<Vec<Vec<usize>>>,
         operation_str: &str,
         variables: Map<ByteString, Value>,
         hoist_orphan_errors: bool,
@@ -312,8 +410,14 @@ impl FetchNode {
             );
         }
 
-        let (value, errors) =
-            self.response_at_path(schema, current_dir, paths, response, hoist_orphan_errors);
+        let (value, errors) = self.response_at_path(
+            schema,
+            current_dir,
+            paths,
+            contexts,
+            response,
+            hoist_orphan_errors,
+        );
 
         (value, errors)
     }
@@ -358,6 +462,7 @@ impl FetchNode {
         schema: &Schema,
         current_dir: &'a Path,
         inverted_paths: Vec<Vec<Path>>,
+        inverted_contexts: Option<Vec<Vec<usize>>>,
         response: graphql::Response,
         hoist_orphan_errors: bool,
     ) -> (Value, Vec<Error>) {
@@ -384,6 +489,20 @@ impl FetchNode {
                 current_dir.clone()
             };
 
+            // Pre-build a mapping from context index to its supergraph path so that
+            // aliased error remapping is O(1) per error instead of a linear scan
+            // through inverted_contexts. Each context index maps to exactly one path.
+            let context_to_path: Option<HashMap<usize, Path>> =
+                inverted_contexts.as_ref().map(|inv_contexts| {
+                    let mut map = HashMap::new();
+                    for (paths, contexts) in inverted_paths.iter().zip(inv_contexts.iter()) {
+                        for (path, &ctx_idx) in paths.iter().zip(contexts.iter()) {
+                            map.insert(ctx_idx, path.clone());
+                        }
+                    }
+                    map
+                });
+
             let mut errors: Vec<Error> = vec![];
             for mut error in response.errors {
                 // the locations correspond to the subgraph query and cannot be linked to locations
@@ -400,21 +519,7 @@ impl FetchNode {
                                 for values_path in
                                     inverted_paths.get(*i).iter().flat_map(|v| v.iter())
                                 {
-                                    errors.push(
-                                        Error::builder()
-                                            .locations(error.locations.clone())
-                                            // append to the entity's path the error's path without
-                                            //`_entities` and the index
-                                            .path(Path::from_iter(
-                                                values_path.0.iter().chain(&path.0[2..]).cloned(),
-                                            ))
-                                            .message(error.message.clone())
-                                            .and_extension_code(error.extension_code())
-                                            .extensions(error.extensions.clone())
-                                            // re-use the original ID so we don't double count this error
-                                            .apollo_id(error.apollo_id())
-                                            .build(),
-                                    )
+                                    errors.push(remap_entity_error(&error, values_path, path))
                                 }
                             }
                             _ => {
@@ -423,8 +528,16 @@ impl FetchNode {
                             }
                         }
                     } else {
-                        error.path = Some(error_dir.clone());
-                        errors.push(error);
+                        match aliased_error_handling(path, context_to_path.as_ref()) {
+                            AliasedErrorHandling::Remap(values_path) => {
+                                errors.push(remap_entity_error(&error, &values_path, path))
+                            }
+                            AliasedErrorHandling::Ignore => {}
+                            AliasedErrorHandling::Fallback => {
+                                error.path = Some(error_dir.clone());
+                                errors.push(error);
+                            }
+                        }
                     }
                 } else {
                     error.path = Some(error_dir.clone());
@@ -434,29 +547,68 @@ impl FetchNode {
 
             // we have to nest conditions and do early returns here
             // because we need to take ownership of the inner value
-            if let Some(Value::Object(mut map)) = response.data
-                && let Some(entities) = map.remove("_entities")
-            {
-                tracing::trace!("received entities: {:?}", &entities);
+            if let Some(Value::Object(mut map)) = response.data {
+                if let Some(entities) = map.remove("_entities") {
+                    tracing::trace!("received entities: {:?}", &entities);
 
-                if let Value::Array(array) = entities {
-                    let mut value = Value::default();
+                    // `_entities` response array must match with the `inverted_paths` vector.
+                    if let Value::Array(array) = entities {
+                        let mut value = Value::default();
 
-                    for (index, mut entity) in array.into_iter().enumerate() {
-                        rewrites::apply_rewrites(schema, &mut entity, &self.output_rewrites);
+                        for (index, mut entity) in array.into_iter().enumerate() {
+                            rewrites::apply_rewrites(schema, &mut entity, &self.output_rewrites);
 
-                        if let Some(paths) = inverted_paths.get(index) {
-                            if paths.len() > 1 {
-                                for path in &paths[1..] {
-                                    let _ = value.insert(path, entity.clone());
-                                }
-                            }
-
-                            if let Some(path) = paths.first() {
-                                let _ = value.insert(path, entity);
+                            if let Some(paths) = inverted_paths.get(index) {
+                                insert_entity_at_paths(&mut value, paths, entity);
                             }
                         }
+                        return (value, errors);
                     }
+                }
+
+                // If `_entities` is not present, then check the aliased versions of it.
+                let mut value = Value::default();
+                let mut saw_aliases = false;
+
+                // Every `_entities_<i>` response array is a singleton containing
+                // only the representation needed for that context. For each
+                // `inverted_paths` entry, the correct context index (`i`) is
+                // determined by the corresponding `inverted_contexts` entry.
+                //
+                // NOTE: this loop relies on every path having its own context index, so
+                // that each `_entities_<i>` alias is claimed by exactly one path. It removes
+                // the alias from the response map and consumes its array on first use. If
+                // context indices are ever shared between paths (e.g. by deduplicating
+                // identical context values in `SubgraphContext`), the second path would find
+                // the alias already removed and silently receive no data. In that case this
+                // must be changed to read the alias without removing it.
+                for (paths, contexts) in inverted_paths
+                    .into_iter()
+                    .zip(inverted_contexts.unwrap_or_default().into_iter())
+                {
+                    for (path, context) in paths.into_iter().zip(contexts.into_iter()) {
+                        let alias = format!("_entities_{context}");
+                        let Some(entities) = map.remove(alias.as_str()) else {
+                            continue;
+                        };
+                        tracing::trace!("received aliased entities (as {alias}): {:?}", &entities);
+                        saw_aliases = true;
+
+                        let Value::Array(array) = entities else {
+                            return (Value::Null, errors);
+                        };
+
+                        // Each alias's representations array is a singleton.
+                        let Some(mut entity) = array.into_iter().next() else {
+                            continue;
+                        };
+
+                        rewrites::apply_rewrites(schema, &mut entity, &self.output_rewrites);
+                        insert_entity_at_paths(&mut value, &[path], entity);
+                    }
+                }
+
+                if saw_aliases {
                     return (value, errors);
                 }
             }
@@ -581,6 +733,7 @@ mod tests {
     use crate::Context;
     use crate::plugins::connectors::declared_errors::ConnectorDeclaredErrors;
     use crate::plugins::connectors::declared_errors::DECLARED_ERROR_MARKER;
+    use crate::query_planner::subgraph_context::build_operation_with_aliasing;
 
     fn test_schema() -> Schema {
         let sdl = r#"
@@ -695,7 +848,8 @@ mod tests {
             data,
             ..Default::default()
         };
-        let (value, errors) = node.response_at_path(&schema, &current_dir, vec![], response, false);
+        let (value, errors) =
+            node.response_at_path(&schema, &current_dir, vec![], None, response, false);
 
         assert!(errors.is_empty());
         assert_eq!(value, expected);
@@ -744,7 +898,8 @@ mod tests {
             .error(make_error(error_path))
             .build();
 
-        let (_, errors) = node.response_at_path(&schema, &current_dir, vec![], response, false);
+        let (_, errors) =
+            node.response_at_path(&schema, &current_dir, vec![], None, response, false);
 
         assert_eq!(errors.len(), 1);
         assert_eq!(errors[0].path.as_ref().unwrap(), &expected_path);
@@ -771,7 +926,8 @@ mod tests {
             .error(graphql::Error::builder().message("error 3").build())
             .build();
 
-        let (_, errors) = node.response_at_path(&schema, &current_dir, vec![], response, false);
+        let (_, errors) =
+            node.response_at_path(&schema, &current_dir, vec![], None, response, false);
 
         assert_eq!(errors.len(), 3);
         assert_eq!(
@@ -800,7 +956,8 @@ mod tests {
             )
             .build();
 
-        let (_, errors) = node.response_at_path(&schema, &current_dir, vec![], response, false);
+        let (_, errors) =
+            node.response_at_path(&schema, &current_dir, vec![], None, response, false);
 
         assert_eq!(errors.len(), 1);
         assert_eq!(errors[0].extension_code().as_deref(), Some("UNAUTHORIZED"));
@@ -850,7 +1007,8 @@ mod tests {
             .error(make_error(error_path))
             .build();
 
-        let (_, errors) = node.response_at_path(&schema, &current_dir, vec![], response, true);
+        let (_, errors) =
+            node.response_at_path(&schema, &current_dir, vec![], None, response, true);
 
         assert_eq!(errors.len(), 1);
         assert_eq!(errors[0].path.as_ref().unwrap(), &expected_path);
@@ -885,7 +1043,8 @@ mod tests {
             .error(make_error(error_path))
             .build();
 
-        let (_, errors) = node.response_at_path(&schema, &current_dir, vec![], response, false);
+        let (_, errors) =
+            node.response_at_path(&schema, &current_dir, vec![], None, response, false);
 
         assert_eq!(errors.len(), 1);
         assert_eq!(errors[0].path.as_ref().unwrap(), &expected_path);
@@ -910,7 +1069,7 @@ mod tests {
             .build();
 
         let (value, errors) =
-            node.response_at_path(&schema, &current_dir, inverted_paths, response, false);
+            node.response_at_path(&schema, &current_dir, inverted_paths, None, response, false);
 
         assert!(errors.is_empty());
         let top = value.as_object().unwrap().get("topField").unwrap();
@@ -935,7 +1094,7 @@ mod tests {
             .build();
 
         let (value, errors) =
-            node.response_at_path(&schema, &current_dir, inverted_paths, response, false);
+            node.response_at_path(&schema, &current_dir, inverted_paths, None, response, false);
 
         assert!(errors.is_empty());
         let arr = value
@@ -981,7 +1140,7 @@ mod tests {
             .build();
 
         let (_value, mut errors) =
-            node.response_at_path(&schema, &current_dir, inverted_paths, response, false);
+            node.response_at_path(&schema, &current_dir, inverted_paths, None, response, false);
 
         // One error per path the entity landed at, each naming that path...
         assert_eq!(errors.len(), 2);
@@ -1019,7 +1178,8 @@ mod tests {
             .data(json!({"_entities": []}))
             .build();
 
-        let (value, errors) = node.response_at_path(&schema, &current_dir, vec![], response, false);
+        let (value, errors) =
+            node.response_at_path(&schema, &current_dir, vec![], None, response, false);
 
         assert!(errors.is_empty());
         assert_eq!(value, Value::default());
@@ -1042,7 +1202,7 @@ mod tests {
             .build();
 
         let (value, errors) =
-            node.response_at_path(&schema, &current_dir, inverted_paths, response, false);
+            node.response_at_path(&schema, &current_dir, inverted_paths, None, response, false);
 
         assert!(errors.is_empty());
         let arr = value
@@ -1053,6 +1213,140 @@ mod tests {
             .as_array()
             .unwrap();
         assert_eq!(arr[0], json!({"name": "Alice"}));
+    }
+
+    #[test]
+    fn entity_fetch_aliased_entities_uses_singleton_representations() {
+        let schema = test_schema();
+        let node = make_fetch_node(make_requires());
+        let current_dir = Path(vec![key("users"), flatten()]);
+        let inverted_paths = vec![
+            vec![Path(vec![key("users"), index(0)])],
+            vec![Path(vec![key("users"), index(1)])],
+            vec![Path(vec![key("users"), index(2)])],
+        ];
+        let inverted_contexts = vec![vec![0], vec![1], vec![2]];
+        // Each context's representations array is a singleton.
+        let response = graphql::Response::builder()
+            .data(json!({
+                "_entities_0": [{"name": "Alice-0"}],
+                "_entities_1": [{"name": "Bob-1"}],
+                "_entities_2": [{"name": "Charlie-2"}]
+            }))
+            .build();
+
+        let (value, errors) = node.response_at_path(
+            &schema,
+            &current_dir,
+            inverted_paths,
+            Some(inverted_contexts),
+            response,
+            false,
+        );
+
+        assert!(errors.is_empty());
+        let arr = value
+            .as_object()
+            .unwrap()
+            .get("users")
+            .unwrap()
+            .as_array()
+            .unwrap();
+        assert_eq!(arr[0], json!({"name": "Alice-0"}));
+        assert_eq!(arr[1], json!({"name": "Bob-1"}));
+        assert_eq!(arr[2], json!({"name": "Charlie-2"}));
+    }
+
+    #[test]
+    fn entity_fetch_aliased_entities_dedup_uses_singleton_representations() {
+        // Test with deduplication: 4 entities collapse into 3 representations.
+        // Entity 0 -> rep 0, context 0
+        // Entity 1 -> rep 1, context 1
+        // Entity 2 -> rep 2, context 2
+        // Entity 3 -> rep 2, context 3 (shares representation with entity 2)
+        let schema = test_schema();
+        let node = make_fetch_node(make_requires());
+        let current_dir = Path(vec![key("users"), flatten()]);
+        let inverted_paths = vec![
+            vec![Path(vec![key("users"), index(0)])],
+            vec![Path(vec![key("users"), index(1)])],
+            vec![
+                Path(vec![key("users"), index(2)]),
+                Path(vec![key("users"), index(3)]),
+            ],
+        ];
+        let inverted_contexts = vec![vec![0], vec![1], vec![2, 3]];
+        let response = graphql::Response::builder()
+            .data(json!({
+                "_entities_0": [{"name": "Alice-0"}],
+                "_entities_1": [{"name": "Bob-1"}],
+                "_entities_2": [{"name": "Charlie-2"}],
+                "_entities_3": [{"name": "Charlie-3"}]
+            }))
+            .build();
+
+        let (value, errors) = node.response_at_path(
+            &schema,
+            &current_dir,
+            inverted_paths,
+            Some(inverted_contexts),
+            response,
+            false,
+        );
+
+        assert!(errors.is_empty());
+        let arr = value
+            .as_object()
+            .unwrap()
+            .get("users")
+            .unwrap()
+            .as_array()
+            .unwrap();
+        assert_eq!(arr[0], json!({"name": "Alice-0"}));
+        assert_eq!(arr[1], json!({"name": "Bob-1"}));
+        assert_eq!(arr[2], json!({"name": "Charlie-2"}));
+        assert_eq!(arr[3], json!({"name": "Charlie-3"}));
+    }
+
+    #[test]
+    fn entity_fetch_error_with_aliased_entities_singleton_representations() {
+        let schema = test_schema();
+        let node = make_fetch_node(make_requires());
+        let current_dir = Path(vec![key("users"), flatten()]);
+        let inverted_paths = vec![
+            vec![Path(vec![key("users"), index(0)])],
+            vec![Path(vec![key("users"), index(1)])],
+        ];
+        let inverted_contexts = vec![vec![0], vec![1]];
+        // With singleton representations, error indices are always 0.
+        let response = graphql::Response::builder()
+            .data(json!({
+                "_entities_0": [null],
+                "_entities_1": [null]
+            }))
+            .error(
+                graphql::Error::builder()
+                    .message("error on context 1")
+                    .path(Path(vec![key("_entities_1"), index(0), key("name")]))
+                    .build(),
+            )
+            .build();
+
+        let (_, errors) = node.response_at_path(
+            &schema,
+            &current_dir,
+            inverted_paths,
+            Some(inverted_contexts),
+            response,
+            false,
+        );
+
+        assert_eq!(errors.len(), 1);
+        assert_eq!(errors[0].message, "error on context 1");
+        assert_eq!(
+            errors[0].path.as_ref().unwrap(),
+            &Path(vec![key("users"), index(1), key("name")])
+        );
     }
 
     #[test]
@@ -1075,7 +1369,7 @@ mod tests {
             .build();
 
         let (_, errors) =
-            node.response_at_path(&schema, &current_dir, inverted_paths, response, false);
+            node.response_at_path(&schema, &current_dir, inverted_paths, None, response, false);
 
         assert_eq!(errors.len(), 1);
         assert_eq!(
@@ -1105,6 +1399,7 @@ mod tests {
             &schema,
             &current_dir,
             vec![vec![Path(vec![key("data"), index(0)])]],
+            None,
             response,
             false,
         );
@@ -1133,7 +1428,7 @@ mod tests {
             .build();
 
         let (_, errors) =
-            node.response_at_path(&schema, &current_dir, inverted_paths, response, false);
+            node.response_at_path(&schema, &current_dir, inverted_paths, None, response, false);
 
         assert_eq!(errors.len(), 2);
         assert_eq!(
@@ -1161,7 +1456,8 @@ mod tests {
             )
             .build();
 
-        let (_, errors) = node.response_at_path(&schema, &current_dir, vec![], response, false);
+        let (_, errors) =
+            node.response_at_path(&schema, &current_dir, vec![], None, response, false);
 
         assert!(errors.is_empty());
     }
@@ -1184,7 +1480,7 @@ mod tests {
             .build();
 
         let (_, errors) =
-            node.response_at_path(&schema, &current_dir, inverted_paths, response, false);
+            node.response_at_path(&schema, &current_dir, inverted_paths, None, response, false);
 
         assert_eq!(errors.len(), 1);
         assert_eq!(errors[0].extension_code().as_deref(), Some("FORBIDDEN"));
@@ -1216,7 +1512,7 @@ mod tests {
             .build();
 
         let (_, errors) =
-            node.response_at_path(&schema, &current_dir, inverted_paths, response, false);
+            node.response_at_path(&schema, &current_dir, inverted_paths, None, response, false);
 
         assert_eq!(errors.len(), 1);
         assert_eq!(
@@ -1239,7 +1535,8 @@ mod tests {
             )
             .build();
 
-        let (value, errors) = node.response_at_path(&schema, &current_dir, vec![], response, false);
+        let (value, errors) =
+            node.response_at_path(&schema, &current_dir, vec![], None, response, false);
 
         assert_eq!(value, Value::Null);
         assert_eq!(errors.len(), 1);
@@ -1255,7 +1552,8 @@ mod tests {
             .data(json!({"something": "else"}))
             .build();
 
-        let (value, errors) = node.response_at_path(&schema, &current_dir, vec![], response, false);
+        let (value, errors) =
+            node.response_at_path(&schema, &current_dir, vec![], None, response, false);
 
         assert_eq!(value, Value::Null);
         assert!(errors.is_empty());
@@ -1270,7 +1568,8 @@ mod tests {
             .error(graphql::Error::builder().message("subgraph error").build())
             .build();
 
-        let (value, errors) = node.response_at_path(&schema, &current_dir, vec![], response, false);
+        let (value, errors) =
+            node.response_at_path(&schema, &current_dir, vec![], None, response, false);
 
         assert_eq!(value, Value::Null);
         assert_eq!(errors.len(), 1);
@@ -1298,7 +1597,8 @@ mod tests {
             )
             .build();
 
-        let (value, errors) = node.response_at_path(&schema, &current_dir, vec![], response, true);
+        let (value, errors) =
+            node.response_at_path(&schema, &current_dir, vec![], None, response, true);
 
         assert_eq!(value, Value::Null);
         assert_eq!(errors.len(), 3);
@@ -1333,7 +1633,8 @@ mod tests {
             )
             .build();
 
-        let (value, errors) = node.response_at_path(&schema, &current_dir, vec![], response, true);
+        let (value, errors) =
+            node.response_at_path(&schema, &current_dir, vec![], None, response, true);
 
         assert_eq!(value, Value::Null);
         assert_eq!(errors.len(), 2);
@@ -1356,7 +1657,8 @@ mod tests {
             .data(json!({"_entities": "not_an_array"}))
             .build();
 
-        let (value, errors) = node.response_at_path(&schema, &current_dir, vec![], response, false);
+        let (value, errors) =
+            node.response_at_path(&schema, &current_dir, vec![], None, response, false);
 
         assert_eq!(value, Value::Null);
         assert!(errors.is_empty());
@@ -1373,7 +1675,8 @@ mod tests {
             .error(graphql::Error::builder().message("bad entities").build())
             .build();
 
-        let (value, errors) = node.response_at_path(&schema, &current_dir, vec![], response, true);
+        let (value, errors) =
+            node.response_at_path(&schema, &current_dir, vec![], None, response, true);
 
         assert_eq!(value, Value::Null);
         assert_eq!(errors.len(), 1);
@@ -1392,7 +1695,8 @@ mod tests {
             ..Default::default()
         };
 
-        let (value, errors) = node.response_at_path(&schema, &current_dir, vec![], response, true);
+        let (value, errors) =
+            node.response_at_path(&schema, &current_dir, vec![], None, response, true);
 
         assert_eq!(value, Value::Null);
         assert_eq!(errors.len(), 1);
@@ -1426,7 +1730,7 @@ mod tests {
             .build();
 
         let (_, errors) =
-            node.response_at_path(&schema, &current_dir, inverted_paths, response, true);
+            node.response_at_path(&schema, &current_dir, inverted_paths, None, response, true);
 
         assert_eq!(errors.len(), 3);
         assert_eq!(
@@ -1490,6 +1794,221 @@ mod tests {
                 ],
                 vec![Path(vec![key("t"), index(1)])],
             ],
+        );
+    }
+
+    /// Supergraph for the `@fromContext` tests below. `U.field(a:)` takes its
+    /// argument from the `prop` of the enclosing `T`, and `T.uList` is a list
+    /// of nullable `U`, so a `null` list element is a valid response value.
+    fn context_test_schema() -> Schema {
+        let sdl = r#"
+            schema
+                @link(url: "https://specs.apollo.dev/link/v1.0")
+                @link(url: "https://specs.apollo.dev/join/v0.3", for: EXECUTION)
+            {
+                query: Query
+            }
+            directive @link(url: String, as: String, for: link__Purpose, import: [link__Import]) repeatable on SCHEMA
+            directive @join__type(graph: join__Graph!, key: join__FieldSet, extension: Boolean! = false, resolvable: Boolean! = true, isInterfaceObject: Boolean! = false) repeatable on OBJECT | INTERFACE | UNION | ENUM | INPUT_OBJECT | SCALAR
+            directive @join__graph(name: String!, url: String!) on ENUM_VALUE
+
+            scalar link__Import
+            scalar join__FieldSet
+
+            enum link__Purpose { SECURITY EXECUTION }
+
+            enum join__Graph {
+                TEST @join__graph(name: "test", url: "http://localhost:4001/graphql")
+            }
+
+            type Query {
+                tList: [T]
+            }
+
+            type T @join__type(graph: TEST, key: "id") {
+                id: ID!
+                prop: String
+                uList: [U]
+            }
+
+            type U @join__type(graph: TEST, key: "id") {
+                id: ID!
+                field(a: String): Int
+            }
+        "#;
+        Schema::parse(sdl, &Configuration::default()).unwrap()
+    }
+
+    /// The subgraph the entity fetch below is sent to.
+    fn context_test_subgraph_schema() -> Valid<apollo_compiler::Schema> {
+        let sdl = r#"
+            scalar _Any
+            union _Entity = T | U
+
+            type Query {
+                tList: [T]
+                _entities(representations: [_Any!]!): [_Entity]!
+            }
+
+            type T {
+                id: ID!
+                prop: String
+                uList: [U]
+            }
+
+            type U {
+                id: ID!
+                field(a: String): Int
+            }
+        "#;
+        apollo_compiler::Schema::parse_and_validate(sdl, "subgraph.graphql").unwrap()
+    }
+
+    /// `requires` for the entity fetch: `... on U { __typename id }`.
+    fn make_u_requires() -> Vec<requires_selection::Selection> {
+        vec![requires_selection::Selection::InlineFragment(
+            requires_selection::InlineFragment {
+                type_condition: Some(name!("U")),
+                conditions: vec![],
+                selections: vec![
+                    requires_selection::Selection::Field(requires_selection::Field {
+                        alias: None,
+                        name: name!("__typename"),
+                        selections: Vec::new(),
+                    }),
+                    requires_selection::Selection::Field(requires_selection::Field {
+                        alias: None,
+                        name: name!("id"),
+                        selections: Vec::new(),
+                    }),
+                ],
+            },
+        )]
+    }
+
+    /// Regression test for per-context `$representations_<i>` variables.
+    ///
+    /// Mirrors the `tList.@.uList.@` plan from the `set_context` integration
+    /// tests, except that the second `T`'s list has a `null` element. A `null`
+    /// entity produces no representation, but it still visits the context
+    /// resolver and so consumes a context index. The aliased operation must
+    /// not declare a non-null `$representations_<i>` for an index that has no
+    /// value in the variables map, or the subgraph will reject the whole
+    /// request as missing a required variable.
+    #[test]
+    fn aliased_operation_declares_only_variables_that_are_provided() {
+        let schema = context_test_schema();
+        let subgraph_schema = context_test_subgraph_schema();
+        let request = Arc::new(
+            http::Request::builder()
+                .body(graphql::Request::builder().build())
+                .unwrap(),
+        );
+
+        // Data from the first fetch, `{ tList { __typename prop id uList { __typename id } } }`.
+        let data = json!({
+            "tList": [
+                {
+                    "__typename": "T",
+                    "prop": "prop value 1",
+                    "id": "1",
+                    "uList": [{ "__typename": "U", "id": "3" }]
+                },
+                {
+                    "__typename": "T",
+                    "prop": "prop value 2",
+                    "id": "2",
+                    "uList": [null, { "__typename": "U", "id": "4" }]
+                }
+            ]
+        });
+        let current_dir = Path(vec![key("tList"), flatten(), key("uList"), flatten()]);
+        // The plan's context rewrite: from the entity, go up to the enclosing `T` and read
+        // its `prop` into `$contextualArgument_1_0`.
+        let context_rewrites = vec![rewrites::DataRewrite::KeyRenamer(
+            rewrites::DataKeyRenamer {
+                path: Path(vec![
+                    key(".."),
+                    json_ext::PathElement::Fragment("T".to_string()),
+                    key("prop"),
+                ]),
+                rename_key_to: name!("contextualArgument_1_0"),
+            },
+        )];
+
+        let variables = Variables::new(
+            &make_u_requires(),
+            &["contextualArgument_1_0".into()],
+            &data,
+            &current_dir,
+            &request,
+            &Query::empty_for_tests(),
+            &schema,
+            &None,
+            &Some(context_rewrites),
+        )
+        .expect("two entities have representations");
+
+        // The two non-null entities sit under parents with different `prop`
+        // values, so the fetch has to be aliased per context.
+        let contextual_arguments = variables
+            .contextual_arguments
+            .as_ref()
+            .expect("contexts differ, so the operation must be aliased");
+
+        // Only the two entities that produced a representation get a context
+        // index, so there are exactly two aliased copies: index 0 for
+        // tList/0/uList/0 and index 1 for tList/1/uList/1. The `null` at
+        // tList/1/uList/0 claims neither a representation nor a context.
+        assert_eq!(contextual_arguments.count, 2);
+        assert_eq!(
+            variables.inverted_paths,
+            vec![
+                vec![Path(vec![key("tList"), index(0), key("uList"), index(0)])],
+                vec![Path(vec![key("tList"), index(1), key("uList"), index(1)])],
+            ],
+        );
+        assert_eq!(
+            contextual_arguments.inverted_contexts,
+            vec![vec![0], vec![1]]
+        );
+        assert_eq!(
+            variables.variables.get("representations_0"),
+            Some(&json!([{ "__typename": "U", "id": "3" }])),
+        );
+        assert_eq!(
+            variables.variables.get("representations_1"),
+            Some(&json!([{ "__typename": "U", "id": "4" }])),
+        );
+
+        let mut operation = SerializableDocument::from_string(
+            "query QueryLL__Subgraph1__1($representations: [_Any!]!, $contextualArgument_1_0: String) { \
+                _entities(representations: $representations) { \
+                    ... on U { field(a: $contextualArgument_1_0) } \
+                } \
+            }",
+        );
+        operation.init_parsed(&subgraph_schema).unwrap();
+        let aliased =
+            build_operation_with_aliasing(&operation, contextual_arguments, &subgraph_schema)
+                .expect("aliased operation validates against the subgraph schema");
+
+        let declared: Vec<String> = aliased
+            .operations
+            .iter()
+            .flat_map(|op| op.variables.iter())
+            .map(|v| v.name.to_string())
+            .collect();
+        let missing: Vec<&String> = declared
+            .iter()
+            .filter(|name| !variables.variables.contains_key(name.as_str()))
+            .collect();
+        assert!(
+            missing.is_empty(),
+            "aliased operation declares variables with no value: {missing:?}\n\
+             declared: {declared:?}\n\
+             provided: {:?}",
+            variables.variables.keys().collect::<Vec<_>>()
         );
     }
 }
