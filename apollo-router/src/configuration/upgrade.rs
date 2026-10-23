@@ -720,6 +720,37 @@ mod test {
         );
     }
 
+    /// Migrations written in Rust rather than YAML return their notices the same way.
+    #[test]
+    fn silent_upgrade_returns_notices_of_rust_migrations_instead_of_logging_them() {
+        let config = json!({
+            "headers": { "all": { "request": [{ "propagate": { "named": "x-foo" } }] } },
+        });
+
+        let upgraded = assert_logs(
+            || upgrade_configuration_silently(&config, UpgradeMode::Minor(3)),
+            |lines| match lines {
+                [] => Ok(()),
+                lines => Err(format!("a silent upgrade must not log: {lines:?}")),
+            },
+        )
+        .expect("the configuration migrates");
+
+        assert_eq!(
+            upgraded.config,
+            json!({ "headers": { "all": { "request": {
+                "operations": [{ "propagate": { "named": "x-foo" } }]
+            } } } })
+        );
+        let [operations] = upgraded.notices.as_slice() else {
+            panic!("expected the `operations` notice: {:?}", upgraded.notices);
+        };
+        assert!(
+            operations.starts_with("`headers.all.request`, per-subgraph equivalents"),
+            "{operations}"
+        );
+    }
+
     /// A description's list items stay on their own lines, and so does the line after the list.
     #[test]
     fn silent_upgrade_keeps_the_lines_of_a_listed_description() {
