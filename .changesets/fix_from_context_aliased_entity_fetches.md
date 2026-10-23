@@ -1,0 +1,9 @@
+### Fix entity fetches whose entities have different `@fromContext` values ([PR #9071](https://github.com/apollographql/router/pull/9071))
+
+When a single entity fetch resolves several entities and a `@fromContext` argument has a different value for each of them, the router rewrites the subgraph operation into one aliased `_entities` copy per entity. The router did not understand its own aliased response shape: the aliased data was discarded as a missing `_entities` key, the affected fields came back `null`, and subgraph errors on those entities could not be attributed to the right path. The router now reads each aliased `_entities_<i>` copy back onto the entity it belongs to, including when identical representations were deduplicated, and remaps aliased error paths the same way.
+
+The rewritten operation has also changed shape. Each `_entities_<i>` alias now receives its own `$representations_<i>` variable holding only the one representation it needs, instead of every alias receiving the full `$representations` list, so a subgraph resolves each entity once rather than once per context. An entity that is `null` or does not match the fetch's type condition no longer claims an alias, which previously produced a request declaring a non-null variable that was never supplied.
+
+Two further changes accompany this. If the aliased operation cannot be built, the fetch now fails with an error for that subgraph instead of silently sending an operation whose variables cannot be satisfied. Entity caching and response caching skip these aliased fetches entirely: neither plugin understands the aliased shape, and before this change such a fetch would have been cached as a root query under a key that entity invalidation could never match.
+
+By [@duckki](https://github.com/duckki) and [@sachindshinde](https://github.com/sachindshinde) in https://github.com/apollographql/router/pull/9071
