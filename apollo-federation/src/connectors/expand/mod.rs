@@ -471,6 +471,13 @@ mod helpers {
                 .mutation
                 .as_ref()
                 .map(|m| (**m).clone());
+            let subscription_alias = self
+                .original_schema
+                .schema()
+                .schema_definition
+                .subscription
+                .as_ref()
+                .map(|s| (**s).clone());
 
             let element = connector
                 .id
@@ -570,6 +577,13 @@ mod helpers {
                         self.ensure_mutation_root_type(
                             &mut schema,
                             &mutation_alias,
+                            parent_type.name(),
+                        )?;
+                    }
+                    if let Some(subscription_alias) = subscription_alias {
+                        self.ensure_subscription_root_type(
+                            &mut schema,
+                            &subscription_alias,
                             parent_type.name(),
                         )?;
                     }
@@ -1032,6 +1046,25 @@ mod helpers {
                     root_kind: SchemaRootDefinitionKind::Mutation,
                 };
                 mutation_root.insert(to_schema, mutation_alias.clone().to_node(None))?;
+            }
+
+            Ok(())
+        }
+
+        /// Adds the subscription root type to the schema definition if necessary
+        fn ensure_subscription_root_type(
+            &self,
+            to_schema: &mut FederationSchema,
+            subscription_alias: &Name,
+            parent_type_name: &Name,
+        ) -> Result<(), FederationError> {
+            if subscription_alias == parent_type_name
+                && to_schema.get_type(subscription_alias).is_ok()
+            {
+                let subscription_root = SchemaRootDefinitionPosition {
+                    root_kind: SchemaRootDefinitionKind::Subscription,
+                };
+                subscription_root.insert(to_schema, subscription_alias.clone().to_node(None))?;
             }
 
             Ok(())
