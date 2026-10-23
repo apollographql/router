@@ -1,0 +1,28 @@
+---
+source: apollo-federation/src/connectors/validation/mod.rs
+expression: errors
+input_file: apollo-federation/src/connectors/validation/test_data/stream/subscription_v0_5.graphql
+---
+[
+    Message {
+        code: InvalidStream,
+        message: "`@connect(http: {stream:})` on `Subscription.everyTick` makes `$` a list of events, and this selection maps every one of them, but `Subscription.everyTick` resolves one value. Pick one event, for example with `$->last`.",
+        locations: [
+            36:38..36:45,
+        ],
+    },
+    Message {
+        code: EntityNotOnRootQuery,
+        message: "`@connect(entity: true)` on `Subscription.tick` is invalid. Entity resolvers can only be declared on root `Query` fields.",
+        locations: [
+            45:7..45:19,
+        ],
+    },
+    Message {
+        code: InvalidUrl,
+        message: "In `GET` in `@connect(http:)` on `Subscription.parentTicks`: $this is not valid here, must be one of $args, $config, $context, $request, $env",
+        locations: [
+            51:29..51:36,
+        ],
+    },
+]
