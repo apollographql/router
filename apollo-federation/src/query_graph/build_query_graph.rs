@@ -94,7 +94,7 @@ pub fn build_federated_query_graph(
                 )?
                 .build()
             })?;
-    FederatedQueryGraphBuilder::new(query_graph, supergraph_schema)?.build()
+    FederatedQueryGraphBuilder::new(query_graph, supergraph_schema, for_query_planning)?.build()
 }
 
 // PORT_NOTE: Corresponds to `buildSupergraphAPIQueryGraph` from JS.
@@ -1155,12 +1155,14 @@ struct FederatedQueryGraphBuilder {
     base: BaseQueryGraphBuilder,
     supergraph_schema: ValidFederationSchema,
     subgraphs: FederatedQueryGraphBuilderSubgraphs,
+    for_query_planning: bool,
 }
 
 impl FederatedQueryGraphBuilder {
     fn new(
         mut query_graph: QueryGraph,
         supergraph_schema: ValidFederationSchema,
+        for_query_planning: bool,
     ) -> Result<Self, FederationError> {
         query_graph.supergraph_schema = Some(supergraph_schema.clone());
         let base = BaseQueryGraphBuilder::new(
@@ -1176,6 +1178,7 @@ impl FederatedQueryGraphBuilder {
             base,
             supergraph_schema,
             subgraphs,
+            for_query_planning,
         })
     }
 
@@ -1196,7 +1199,11 @@ impl FederatedQueryGraphBuilder {
         // more details).
         self.handle_interface_object()?;
         // This method adds no nodes/edges, but just precomputes followup edge information.
-        self.base.precompute_non_trivial_followup_edges()?;
+        // For router startup/query-planning, we skip eager materialization and let callers
+        // fall back to ordinary out-edge traversal when no precomputed entry exists.
+        if !self.for_query_planning {
+            self.base.precompute_non_trivial_followup_edges()?;
+        }
         // This method adds no nodes/edges, but just precomputes metadata for estimating the count
         // of non_local_selections.
         self.base.query_graph.non_local_selection_metadata =
