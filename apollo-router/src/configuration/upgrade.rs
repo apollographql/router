@@ -178,7 +178,7 @@ fn upgrade(
         if new_config != config {
             effective_descriptions.push(migration.description.clone());
             if migration_notices.is_empty() {
-                notices.push(migration.description.trim_end().to_string());
+                notices.push(unwrap_description(&migration.description));
             }
         }
         notices.extend(migration_notices.into_iter().map(|notice| notice.message));
@@ -255,6 +255,26 @@ fn upgrade(
         );
     }
     Ok(Upgraded { config, notices })
+}
+
+/// Joins a migration description's hard-wrapped lines, keeping each `- ` list item on its own line
+/// and starting a new line after the list ends.
+fn unwrap_description(description: &str) -> String {
+    let mut unwrapped = String::new();
+    let mut after_list_item = false;
+    for line in description.trim_end().lines() {
+        let list_item = line.starts_with("- ");
+        if !unwrapped.is_empty() {
+            unwrapped.push(if list_item || after_list_item {
+                '\n'
+            } else {
+                ' '
+            });
+        }
+        unwrapped.push_str(line);
+        after_list_item = list_item;
+    }
+    unwrapped
 }
 
 /// Collapse `connectors.subgraphs.<sub>.sources.<src>` entries into
@@ -693,9 +713,31 @@ mod test {
             sampler,
             "telemetry.apollo.otlp_tracing_sampler has been removed. Router 3 uses OTLP exclusively for traces. Remove this key from your config."
         );
-        assert!(
-            expose_query_plan.starts_with("The `expose_query_plan` plugin has been promoted"),
-            "a migration without a notice is described: {expose_query_plan}"
+        // The description is hard-wrapped in its migration file.
+        assert_eq!(
+            expose_query_plan,
+            "The `expose_query_plan` plugin has been promoted out of experimental in Router 3.0. Its configuration moves to a top-level key."
+        );
+    }
+
+    /// A description's list items stay on their own lines, and so does the line after the list.
+    #[test]
+    fn silent_upgrade_keeps_the_lines_of_a_listed_description() {
+        let config = json!({ "supergraph": { "experimental_log_on_broken_pipe": true } });
+
+        let upgraded = upgrade_configuration_silently(&config, UpgradeMode::Minor(3))
+            .expect("the configuration migrates");
+
+        assert_eq!(
+            upgraded.notices,
+            [
+                "The following fields have been promoted out of experimental in Router 3.0:\n\
+                 - `supergraph.experimental_log_on_broken_pipe` -> `supergraph.log_on_broken_pipe`\n\
+                 - `traffic_shaping.all.experimental_http2` -> `traffic_shaping.all.http2`\n\
+                 - `coprocessor.client.experimental_http2` -> `coprocessor.client.http2`\n\
+                 - `telemetry.exporters.tracing.experimental_response_trace_id` -> `telemetry.exporters.tracing.response_trace_id`\n\
+                 Configurations using the old names are migrated automatically at startup throughout the Router 3.x line, but please update your configuration file."
+            ]
         );
     }
 

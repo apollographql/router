@@ -28,8 +28,7 @@ fn validate_reports_automatic_upgrades_instead_of_logging_them() {
             "Configuration at path {path} is valid.\n\
              It relies on automatic upgrades that the router applies at startup:\n  \
                - telemetry.apollo.otlp_tracing_sampler has been removed. Router 3 uses OTLP exclusively for traces. Remove this key from your config.\n  \
-               - The `expose_query_plan` plugin has been promoted out of experimental in Router\n    \
-                 3.0. Its configuration moves to a top-level key.\n\
+               - The `expose_query_plan` plugin has been promoted out of experimental in Router 3.0. Its configuration moves to a top-level key.\n\
              Run `router config upgrade {path}` to update the file.\n"
         )
     );

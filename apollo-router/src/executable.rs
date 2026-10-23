@@ -834,7 +834,8 @@ fn validation_report(path: &Path, upgrade: &AutomaticUpgrade) -> String {
             "The router logs these notices at startup:\n"
         });
         for notice in &upgrade.notices {
-            // Some migration descriptions span lines; keep them under their bullet.
+            // A description can hold a list, such as the renamed fields of a promotion; indent
+            // its lines under the notice's bullet.
             report.push_str(&format!("  - {}\n", notice.replace('\n', "\n    ")));
         }
     }
