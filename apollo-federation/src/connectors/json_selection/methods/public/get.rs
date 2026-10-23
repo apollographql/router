@@ -132,7 +132,7 @@ fn handle_string_method(
                         format!(
                             "Method ->{} index {index_value} out of bounds in string of length {}",
                             method_name.as_ref(),
-                            input_value.as_str().len()
+                            input_value.as_str().chars().count()
                         ),
                         input_path.to_vec(),
                         method_name.range(),
@@ -166,9 +166,11 @@ fn handle_string_method(
     }
 }
 
+/// Returns the char at `index` (counting chars, not bytes), with negative
+/// indices counting from the end.
 fn get_string(index: i64, value: &str) -> Option<&str> {
     let index_value = if index < 0 {
-        value.len() as i64 + index
+        value.chars().count() as i64 + index
     } else {
         index
     };
@@ -177,8 +179,8 @@ fn get_string(index: i64, value: &str) -> Option<&str> {
         return None;
     }
 
-    let index_value = index_value as usize;
-    value.get(index_value..=index_value)
+    let (start, c) = value.char_indices().nth(index_value as usize)?;
+    Some(&value[start..start + c.len_utf8()])
 }
 
 fn handle_array_method(
@@ -413,7 +415,7 @@ fn handle_string_shape(
             format!(
                 "Method ->{} index {index_value} out of bounds in string of length {}",
                 method_name.as_ref(),
-                input_value.len()
+                input_value.chars().count()
             )
             .as_str(),
             method_name.shape_location(source_id),
@@ -661,6 +663,29 @@ mod tests {
     }
 
     #[test]
+    fn get_should_index_string_by_char_not_byte() {
+        assert_eq!(
+            selection!("$->get(1)").apply_to(&json!("é🙂x")),
+            (Some(json!("🙂")), vec![]),
+        );
+        assert_eq!(
+            selection!("$->get(-3)").apply_to(&json!("é🙂x")),
+            (Some(json!("é")), vec![]),
+        );
+        assert_eq!(
+            selection!("$->get(3)").apply_to(&json!("é🙂x")),
+            (
+                None,
+                vec![ApplyToError::from_json(&json!({
+                    "message": "Method ->get index 3 out of bounds in string of length 3",
+                    "path": ["->get"],
+                    "range": [3, 6],
+                }))]
+            ),
+        );
+    }
+
+    #[test]
     fn get_should_return_error_when_specified_string_index_does_not_exist() {
         assert_eq!(
             selection!("$->get(4)").apply_to(&json!("oyez")),
@@ -878,6 +903,24 @@ mod shape_tests {
                 Shape::string_value("hello", [])
             ),
             Shape::string_value("o", [get_location()])
+        );
+    }
+
+    #[test]
+    fn get_shape_should_index_string_by_char_not_byte() {
+        assert_eq!(
+            get_test_shape(
+                vec![WithRange::new(LitExpr::Number(Number::from(1)), None)],
+                Shape::string_value("é🙂x", [])
+            ),
+            Shape::string_value("🙂", [get_location()])
+        );
+        assert_eq!(
+            get_test_shape(
+                vec![WithRange::new(LitExpr::Number(Number::from(-3)), None)],
+                Shape::string_value("é🙂x", [])
+            ),
+            Shape::string_value("é", [get_location()])
         );
     }
 

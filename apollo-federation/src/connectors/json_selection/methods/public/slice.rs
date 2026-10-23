@@ -33,7 +33,8 @@ fn slice_method(
     let length = if let JSON::Array(array) = data {
         array.len() as i64
     } else if let JSON::String(s) = data {
-        s.as_str().len() as i64
+        // Strings are sliced by char, not byte, as ->first, ->last and ->get index them.
+        s.as_str().chars().count() as i64
     } else {
         return (
             None,
@@ -76,29 +77,22 @@ fn slice_method(
             .max(0)
             .min(length) as usize;
 
+        // An end before the start selects nothing.
+        let count = end.saturating_sub(start);
+
         let array = match data {
             JSON::Array(array) => {
-                if end - start > 0 {
-                    JSON::Array(
-                        array
-                            .iter()
-                            .skip(start)
-                            .take(end - start)
-                            .cloned()
-                            .collect(),
-                    )
-                } else {
-                    JSON::Array(Vec::new())
-                }
+                JSON::Array(array.iter().skip(start).take(count).cloned().collect())
             }
 
-            JSON::String(s) => {
-                if end - start > 0 {
-                    JSON::String(s.as_str()[start..end].to_string().into())
-                } else {
-                    JSON::String("".to_string().into())
-                }
-            }
+            JSON::String(s) => JSON::String(
+                s.as_str()
+                    .chars()
+                    .skip(start)
+                    .take(count)
+                    .collect::<String>()
+                    .into(),
+            ),
 
             _ => unreachable!(),
         };
@@ -211,6 +205,34 @@ mod tests {
         assert_eq!(
             selection!("$->slice(1, 3)").apply_to(&json!("he")),
             (Some(json!("e")), vec![]),
+        );
+    }
+
+    #[test]
+    fn slice_should_return_empty_when_end_is_before_start() {
+        assert_eq!(
+            selection!("$->slice(3, 1)").apply_to(&json!("hello")),
+            (Some(json!("")), vec![]),
+        );
+        assert_eq!(
+            selection!("$->slice(3, 1)").apply_to(&json!([1, 2, 3, 4])),
+            (Some(json!([])), vec![]),
+        );
+    }
+
+    #[test]
+    fn slice_should_slice_string_by_char_not_byte() {
+        assert_eq!(
+            selection!("$->slice(0, 1)").apply_to(&json!("é🙂x")),
+            (Some(json!("é")), vec![]),
+        );
+        assert_eq!(
+            selection!("$->slice(1, 3)").apply_to(&json!("é🙂x")),
+            (Some(json!("🙂x")), vec![]),
+        );
+        assert_eq!(
+            selection!("$->slice(2)").apply_to(&json!("é🙂x")),
+            (Some(json!("x")), vec![]),
         );
     }
 
