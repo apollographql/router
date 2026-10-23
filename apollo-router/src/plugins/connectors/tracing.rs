@@ -31,6 +31,46 @@ pub(crate) fn connect_spec_version_instrument(
     })
 }
 
+/// Create a gauge instrument for the number of connectors with each `http.stream` mode, or `None`
+/// when no connector has one
+///
+/// Streaming is switched on by the schema, not the router config, so this follows the
+/// `apollo.router.schema.connectors` gauge rather than `populate_config_instruments`.
+pub(crate) fn connect_stream_mode_instrument(
+    connectors: Option<&Connectors>,
+) -> Option<ObservableGauge<u64>> {
+    let mode_counts = connect_stream_mode_counts(connectors?);
+    if mode_counts.is_empty() {
+        return None;
+    }
+    Some(
+        meter_provider()
+            .meter("apollo/router")
+            .u64_observable_gauge("apollo.router.schema.connectors.stream")
+            .with_description(
+                "Number of connect directives with an http.stream mode in the supergraph",
+            )
+            .with_callback(move |observer| {
+                mode_counts.iter().for_each(|(&mode, &count)| {
+                    observer.observe(count, &[KeyValue::new("connect.stream.mode", mode)])
+                })
+            })
+            .build(),
+    )
+}
+
+/// Map from `http.stream` mode to the number of connectors with that mode
+fn connect_stream_mode_counts(connectors: &Connectors) -> HashMap<&'static str, u64> {
+    connectors
+        .by_service_name
+        .values()
+        .filter_map(|connector| connector.transport.as_ref()?.stream)
+        .fold(HashMap::new(), |mut acc, mode| {
+            *acc.entry(mode.as_str()).or_insert(0u64) += 1u64;
+            acc
+        })
+}
+
 /// Map from connect spec version to the number of connectors with that version
 fn connect_spec_counts(connectors: &Connectors) -> HashMap<String, u64> {
     connectors
@@ -124,6 +164,30 @@ mod tests {
                 "apollo.router.schema.connectors",
                 6,
                 connect.spec.version = "0.1"
+            );
+            // No connector in this schema has a stream mode.
+            assert!(!crate::metrics::collect_metrics().metric_exists(
+                "apollo.router.schema.connectors.stream",
+                crate::metrics::test_utils::MetricType::Gauge,
+                &[],
+            ));
+        }
+        .with_metrics()
+        .await;
+    }
+
+    #[tokio::test]
+    async fn test_connect_stream_mode_instrument() {
+        async {
+            let config = Arc::default();
+            // Six connectors with `stream: "array"`, five on fields and one on a type
+            let schema = Schema::parse(include_str!("./testdata/stream.graphql"), &config).unwrap();
+            let _services = ConnectorServices::empty(Arc::from(schema));
+
+            assert_gauge!(
+                "apollo.router.schema.connectors.stream",
+                6,
+                connect.stream.mode = "array"
             );
         }
         .with_metrics()

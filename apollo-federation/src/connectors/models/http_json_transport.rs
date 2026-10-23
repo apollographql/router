@@ -43,6 +43,7 @@ pub struct HttpJsonTransport {
     pub source_query_params: Option<JSONSelection>,
     pub connect_path: Option<JSONSelection>,
     pub connect_query_params: Option<JSONSelection>,
+    pub stream: Option<StreamMode>,
 }
 
 impl HttpJsonTransport {
@@ -92,6 +93,7 @@ impl HttpJsonTransport {
             source_query_params: source.and_then(|s| s.query_params.clone()),
             connect_path: http.path,
             connect_query_params: http.query_params,
+            stream: http.stream,
         })
     }
 
@@ -357,6 +359,41 @@ impl FromStr for HTTPMethod {
 }
 
 impl Display for HTTPMethod {
+    fn fmt(&self, f: &mut Formatter) -> std::fmt::Result {
+        write!(f, "{}", self.as_str())
+    }
+}
+
+/// How a connector folds a response that may be a stream of events (`@connect(http.stream:)`).
+///
+/// The mode says what shape the selection receives, not what the server must send: a plain JSON
+/// body is folded the same way as a stream of one event.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum StreamMode {
+    /// The selection receives the list of every JSON event, once the response has ended.
+    Array,
+}
+
+impl StreamMode {
+    pub const fn as_str(&self) -> &'static str {
+        match self {
+            StreamMode::Array => "array",
+        }
+    }
+}
+
+impl FromStr for StreamMode {
+    type Err = String;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        match s {
+            "array" => Ok(StreamMode::Array),
+            _ => Err(format!("Invalid stream mode: {s}")),
+        }
+    }
+}
+
+impl Display for StreamMode {
     fn fmt(&self, f: &mut Formatter) -> std::fmt::Result {
         write!(f, "{}", self.as_str())
     }

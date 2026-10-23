@@ -1,0 +1,75 @@
+schema @link(url: "https://specs.apollo.dev/link/v1.0") @link(url: "https://specs.apollo.dev/join/v0.6", for: EXECUTION) @link(url: "https://specs.apollo.dev/connect/v0.5", for: EXECUTION) @join__directive(name: "link", graphs: [STREAMS], args: {url: "https://specs.apollo.dev/connect/v0.5", import: ["@connect", "@source"]}) @join__directive(name: "source", graphs: [STREAMS], args: {name: "mcp", http: {baseURL: "http://localhost:4001"}}) {
+  query: Query
+}
+
+directive @link(url: String, as: String, for: link__Purpose, import: [link__Import]) repeatable on SCHEMA
+
+directive @join__graph(name: String!, url: String!) on ENUM_VALUE
+
+directive @join__type(graph: join__Graph!, key: join__FieldSet, extension: Boolean! = false, resolvable: Boolean! = true, isInterfaceObject: Boolean! = false) repeatable on OBJECT | INTERFACE | UNION | ENUM | INPUT_OBJECT | SCALAR
+
+directive @join__field(graph: join__Graph, requires: join__FieldSet, provides: join__FieldSet, type: String, external: Boolean, override: String, usedOverridden: Boolean, overrideLabel: String, contextArguments: [join__ContextArgument!]) repeatable on FIELD_DEFINITION | INPUT_FIELD_DEFINITION
+
+directive @join__implements(graph: join__Graph!, interface: String!) repeatable on OBJECT | INTERFACE
+
+directive @join__unionMember(graph: join__Graph!, member: String!) repeatable on UNION
+
+directive @join__enumValue(graph: join__Graph!) repeatable on ENUM_VALUE
+
+directive @join__directive(graphs: [join__Graph!], name: String!, args: join__DirectiveArguments) repeatable on SCHEMA | OBJECT | INTERFACE | FIELD_DEFINITION
+
+enum link__Purpose {
+  """
+  `SECURITY` features provide metadata necessary to securely resolve fields.
+  """
+  SECURITY
+  """
+  `EXECUTION` features provide metadata necessary for operation execution.
+  """
+  EXECUTION
+}
+
+scalar link__Import
+
+enum join__Graph {
+  STREAMS @join__graph(name: "streams", url: "http://streams")
+}
+
+scalar join__FieldSet
+
+scalar join__DirectiveArguments
+
+scalar join__FieldValue
+
+input join__ContextArgument {
+  name: String!
+  type: String!
+  context: String!
+  selection: join__FieldValue!
+}
+
+type Query @join__type(graph: STREAMS) {
+  weather(city: String!): Weather @join__directive(name: "connect", graphs: [STREAMS], args: {source: "mcp", http: {POST: "/mcp", body: "method: $('tools/call') params: { name: $('weather') arguments: { city: $args.city } }", stream: "array"}, selection: "$->last.result { temp }", isSuccess: "$($->last.error ?? null)->eq(null)", errors: {message: "$->last.error.message"}})
+  progress: [Progress] @join__directive(name: "connect", graphs: [STREAMS], args: {source: "mcp", http: {GET: "/progress", stream: "array"}, selection: "percent: params.progress"})
+  featured: Product @join__directive(name: "connect", graphs: [STREAMS], args: {source: "mcp", http: {GET: "/featured", stream: "array"}, selection: "$->last { id }"})
+  product(id: ID!): Product @join__directive(name: "connect", graphs: [STREAMS], args: {source: "mcp", http: {GET: "/products/{$args.id}", stream: "array"}, selection: "$->last { id name }", entity: true})
+  featuredStore: Store @join__directive(name: "connect", graphs: [STREAMS], args: {source: "mcp", http: {GET: "/featured-store", stream: "array"}, selection: "$->last { id }"})
+}
+
+type Weather @join__type(graph: STREAMS) {
+  temp: Float
+}
+
+type Progress @join__type(graph: STREAMS) {
+  percent: Float
+}
+
+type Product @join__type(graph: STREAMS, key: "id") {
+  id: ID!
+  name: String
+}
+
+type Store @join__type(graph: STREAMS, key: "id") @join__directive(name: "connect", graphs: [STREAMS], args: {source: "mcp", http: {GET: "/stores/{$this.id}", stream: "array"}, selection: "$->last { id name }"}) {
+  id: ID!
+  name: String
+}
