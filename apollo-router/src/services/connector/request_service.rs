@@ -32,6 +32,8 @@ use crate::error::FetchError;
 use crate::graphql;
 use crate::layers::unconstrained_buffer::UnconstrainedBuffer;
 use crate::plugins::connectors::handle_responses::process_response;
+use crate::plugins::connectors::subscription::ConnectorSubscriptionStream;
+use crate::plugins::connectors::subscription::stream_response;
 use crate::plugins::connectors::tracing::CONNECTOR_TYPE_HTTP;
 use crate::plugins::telemetry::config_new::attributes::HTTP_REQUEST_BODY;
 use crate::plugins::telemetry::config_new::attributes::HTTP_REQUEST_HEADERS;
@@ -469,6 +471,13 @@ impl tower::Service<Request> for ConnectorRequestService {
             )
         });
 
+        // A subscription asks for the response to be streamed. Taken rather than read, so the
+        // entity fetches resolving each event, which share this context, are buffered as usual.
+        let subscription_stream = request
+            .context
+            .extensions()
+            .with_lock(|lock| lock.remove::<ConnectorSubscriptionStream>());
+
         let log_request_level = connector_request_event.and_then(|s| {
             if s.condition.lock().evaluate_request(&request) == Some(true) {
                 Some(s.level)
@@ -544,6 +553,42 @@ impl tower::Service<Request> for ConnectorRequestService {
                         "connector.type" = CONNECTOR_TYPE_HTTP,
                         "subgraph.name" = original_subgraph_name
                     );
+
+                    // A failed request falls through to `process_response`, which maps the error
+                    let result = match (subscription_stream, result) {
+                        (Some(ConnectorSubscriptionStream(sender)), Ok(response))
+                            if response.status().is_success() =>
+                        {
+                            let (parts, body) = response.into_parts();
+                            let transport_outcome = TransportOutcome::Response(HttpResponse {
+                                inner: parts.clone(),
+                            });
+                            let events = stream_response(
+                                http::Response::from_parts(parts, body),
+                                request.key.clone(),
+                                request.connector.clone(),
+                                request.context.clone(),
+                                request.supergraph_request.clone(),
+                                request.operation.clone(),
+                            );
+                            if sender.send(events).await.is_err() {
+                                tracing::debug!("connector subscription closed before it started");
+                            }
+                            return Ok(Response {
+                                context: request.context,
+                                subgraph_name: request.connector.id.subgraph_name.to_string(),
+                                transport_outcome,
+                                mapped_response: MappedResponse::Data {
+                                    data: Value::Null,
+                                    key: request.key,
+                                    problems: request.mapping_problems,
+                                    declared_errors: Vec::new(),
+                                },
+                                answered_by_router: false,
+                            });
+                        }
+                        (_, result) => result,
+                    };
 
                     Ok(process_response(
                         result,
