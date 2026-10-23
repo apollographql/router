@@ -222,26 +222,27 @@ impl FetchService {
 
         let alias_query_string; // this exists outside the if block to allow the as_str() to be longer lived
         let aliased_operation = if let Some(ctx_arg) = &variables.contextual_arguments {
-            if let Some(subgraph_schema) = subgraph_schemas.get(&service_name.to_string()) {
-                match build_operation_with_aliasing(operation, ctx_arg, &subgraph_schema.schema) {
-                    Ok(op) => {
-                        alias_query_string = op.serialize().no_indent().to_string();
-                        alias_query_string.as_str()
-                    }
-                    Err(errors) => {
-                        tracing::debug!(
-                            "couldn't generate a valid executable document? {:?}",
-                            errors
-                        );
-                        operation.as_serialized()
-                    }
+            // The entities in this fetch have different `@fromContext` values, so the operation
+            // must be rewritten into one aliased `_entities` copy per context. The variables map
+            // only holds the per-context (`_<i>`-suffixed) names at this point, so there is no
+            // operation we could fall back to if the rewrite fails: fail the fetch instead.
+            let Some(subgraph_schema) = subgraph_schemas.get(&service_name.to_string()) else {
+                let reason = format!("no schema found for subgraph '{service_name}'");
+                tracing::error!("cannot build aliased operation: {reason}");
+                return Box::pin(std::future::ready(Err(reason.into())));
+            };
+            match build_operation_with_aliasing(operation, ctx_arg, &subgraph_schema.schema) {
+                Ok(op) => {
+                    alias_query_string = op.serialize().no_indent().to_string();
+                    alias_query_string.as_str()
                 }
-            } else {
-                tracing::debug!(
-                    "couldn't find a subgraph schema for service {:?}",
-                    &service_name
-                );
-                operation.as_serialized()
+                Err(err) => {
+                    let reason = format!(
+                        "failed to build aliased operation for subgraph '{service_name}': {err:?}"
+                    );
+                    tracing::error!("cannot build aliased operation: {reason}");
+                    return Box::pin(std::future::ready(Err(reason.into())));
+                }
             }
         } else {
             operation.as_serialized()
