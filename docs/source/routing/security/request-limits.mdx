@@ -374,7 +374,25 @@ Limit the maximum buffer size for the HTTP1 connection. Default is ~400KiB.
 Limits the total size of the header list for your incoming HTTP/2 requests.
 The default value is 16KiB.
 
-If the router receives a request whose headers exceed the allowed size, Apollo Router rejects the request with `431 Request Header Fields Too Large`.
+The size of a header list is the sum, over every header field, of the name length, the value length and 32 bytes. Pseudo-headers such as `:method` and `:path` count too. Each `cookie` field counts separately, so a browser that splits its cookies into many fields adds 32 bytes per cookie.
+
+The router tells HTTP/2 clients that it accepts header lists somewhat larger than this limit, so that it can reject requests over the limit itself and record them. The advertised size (the HTTP/2 `SETTINGS_MAX_HEADER_LIST_SIZE` setting) is the limit plus three times the limit, with at most 256KiB added. With the default limit, the router advertises 64KiB.
+
+What a client gets depends on how far its header list is over the limit:
+
+| Header list size | What the client gets |
+|---|---|
+| Up to the limit | The request is served. |
+| Over the limit, up to the advertised size | `431 Request Header Fields Too Large` with a GraphQL error body. The response is recorded in `http.server.request.duration` and the `router` span like any other response. |
+| Over the advertised size | A `431` with no body, sent before the request reaches the router, so it isn't recorded. Much larger header lists close the connection without an HTTP response. |
+
+Plugin endpoints, such as the health check, also reject HTTP/2 requests over the limit with a `431`, without a body.
+
+<Note>
+
+HTTP/1.1 and HTTP/2 limit headers differently. For HTTP/1.1, the router limits the number of headers (`http1_max_request_headers`, 100 by default) and the size of the connection's read buffer (`http1_max_request_buf_size`, about 400KiB by default), not the total size of the headers. A request with a 20KiB cookie is therefore accepted over HTTP/1.1 but rejected over HTTP/2 with the default limits.
+
+</Note>
 
 ## Parser-based limits
 
