@@ -14,6 +14,7 @@ use tracing::instrument::Instrumented;
 
 use crate::error::Error;
 use crate::http_ext;
+use crate::plugins::connectors::subscription::ConnectorSubscriptionStream;
 use crate::plugins::subscription::SUBSCRIPTION_SUBGRAPH_NAME_CONTEXT_KEY;
 use crate::plugins::subscription::SubscriptionTaskParams;
 use crate::query_planner::OperationKind;
@@ -23,6 +24,8 @@ use crate::query_planner::subscription::SubscriptionNode;
 use crate::services::FetchResponse;
 use crate::services::SubgraphRequest;
 use crate::services::SubgraphServices;
+use crate::services::connect::Request as ConnectRequest;
+use crate::services::connector_service::ConnectorServices;
 use crate::services::fetch::ErrorMapping;
 use crate::services::fetch::SubscriptionRequest;
 use crate::services::subgraph::BoxGqlStream;
@@ -38,6 +41,7 @@ use crate::spec::Schema;
 pub(crate) fn fetch_service_handle_subscription(
     schema: Arc<Schema>,
     subgraph_services: Arc<SubgraphServices>,
+    connector_services: Arc<ConnectorServices>,
     request: SubscriptionRequest,
 ) -> Instrumented<BoxFuture<'static, Result<FetchResponse, BoxError>>> {
     let SubscriptionRequest {
@@ -57,15 +61,142 @@ pub(crate) fn fetch_service_handle_subscription(
         service_name.to_string(),
     );
 
-    // Subscriptions are not supported for connectors, so they always go to the subgraph service
-    subscription_with_subgraph_service(schema, subgraph_services, request).instrument(
-        tracing::info_span!(
-            SUBSCRIBE_SPAN_NAME,
-            "otel.kind" = "INTERNAL",
-            "apollo.subgraph.name" = service_name.as_ref(),
-            "apollo_private.sent_time_offset" = fetch_time_offset
-        ),
+    let future = if connector_services
+        .connectors_by_service_name
+        .contains_key(service_name.as_ref())
+    {
+        subscription_with_connector_service(connector_services, request)
+    } else {
+        subscription_with_subgraph_service(schema, subgraph_services, request)
+    };
+    future.instrument(tracing::info_span!(
+        SUBSCRIBE_SPAN_NAME,
+        "otel.kind" = "INTERNAL",
+        "apollo.subgraph.name" = service_name.as_ref(),
+        "apollo_private.sent_time_offset" = fetch_time_offset
+    ))
+}
+
+fn subscription_error(message: impl Into<String>, code: &str) -> FetchResponse {
+    (
+        Value::default(),
+        vec![
+            Error::builder()
+                .message(message)
+                .extension_code(code)
+                .build(),
+        ],
     )
+}
+
+/// Opens a subscription whose source is a connector: the connector's HTTP response is read as a
+/// stream of events (see [`crate::plugins::connectors::subscription`]).
+///
+/// Unlike subgraphs there is no callback or passthrough mode to choose, because the router itself
+/// holds the upstream connection, so only the global subscription settings apply.
+fn subscription_with_connector_service(
+    connector_services: Arc<ConnectorServices>,
+    request: SubscriptionRequest,
+) -> BoxFuture<'static, Result<FetchResponse, BoxError>> {
+    let SubscriptionRequest {
+        context,
+        subscription_node,
+        current_dir,
+        sender,
+        variables,
+        supergraph_request,
+        subscription_handle,
+        subscription_config,
+        ..
+    } = request;
+    let service_name = subscription_node.service_name.clone();
+
+    Box::pin(async move {
+        let Some(subscription_config) = subscription_config else {
+            return Ok(subscription_error(
+                "subscription support is not enabled",
+                "SUBSCRIPTION_DISABLED",
+            ));
+        };
+        if let Some(max_opened_subscriptions) = subscription_config.max_opened_subscriptions
+            && OPENED_SUBSCRIPTIONS.load(Ordering::Relaxed) >= max_opened_subscriptions
+        {
+            u64_counter!(
+                "apollo.router.operations.subscriptions.rejected",
+                "Number of subscription requests rejected",
+                1,
+                reason = "max_opened_subscriptions_limit_reached"
+            );
+            return Ok(subscription_error(
+                "can't open new subscription, limit reached",
+                "SUBSCRIPTION_MAX_LIMIT",
+            ));
+        }
+
+        let mut subscription_handle = subscription_handle
+            .as_ref()
+            .expect("checked in PlanNode; qed")
+            .clone();
+        let Some(subscription_conf_tx) = subscription_handle.subscription_conf_tx.take() else {
+            return Ok(subscription_error(
+                "no subscription conf sender provided for a subscription",
+                "NO_SUBSCRIPTION_CONF_TX",
+            ));
+        };
+
+        // Parsed before anything is spawned or planted in the context, so a failure here leaks
+        // nothing
+        let operation = subscription_node.operation.as_parsed()?.clone();
+
+        let (tx_handle, rx_handle) = mpsc::channel::<BoxGqlStream>(1);
+        let subscription_params = SubscriptionTaskParams {
+            client_sender: sender,
+            subscription_handle: subscription_handle.clone(),
+            subscription_config,
+            stream_rx: rx_handle.into(),
+        };
+        if let Err(err) = subscription_conf_tx.send(subscription_params).await {
+            return Ok(subscription_error(
+                format!("cannot send the subscription data: {err:?}"),
+                "SUBSCRIPTION_DATA_SEND_ERROR",
+            ));
+        }
+
+        // Asks the connector request service to stream the response into `tx_handle`
+        context
+            .extensions()
+            .with_lock(|lock| lock.insert(ConnectorSubscriptionStream(tx_handle)));
+
+        let subgraph_name = service_name.to_string();
+        let response = connector_services
+            .get(&service_name)
+            .expect("we already checked that the connector exists for this service name; qed")
+            .oneshot(
+                ConnectRequest::builder()
+                    .service_name(service_name.clone())
+                    .context(context.clone())
+                    .operation(operation)
+                    .supergraph_request(supergraph_request)
+                    .variables(variables)
+                    .build(),
+            )
+            .await
+            .map_to_graphql_error(subgraph_name, &current_dir);
+
+        // The request service takes the sender out when it streams the response. If the request
+        // never reached it, because a layer above rejected it, the sender is still here, and
+        // `subscription_task` holds this same context while it waits on the receiver, so leaving
+        // it would keep that task and everything it holds alive forever.
+        context
+            .extensions()
+            .with_lock(|lock| lock.remove::<ConnectorSubscriptionStream>());
+
+        let errors = match response {
+            Err(e) => vec![e],
+            Ok(response) => response.response.into_parts().1.errors,
+        };
+        Ok((Value::default(), errors))
+    })
 }
 
 fn subscription_with_subgraph_service(

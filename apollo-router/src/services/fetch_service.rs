@@ -80,6 +80,7 @@ impl tower::Service<Request> for FetchService {
             Request::Subscription(request) => fetch_service_handle_subscription(
                 self.schema.clone(),
                 self.subgraph_services.clone(),
+                self.connector_services.clone(),
                 request,
             ),
         }

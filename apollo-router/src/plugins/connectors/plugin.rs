@@ -7,6 +7,7 @@ use futures::StreamExt;
 use http::HeaderValue;
 use itertools::Itertools;
 use parking_lot::Mutex;
+use serde_json_bytes::Value;
 use serde_json_bytes::json;
 use tower::BoxError;
 use tower::ServiceBuilder;
@@ -140,10 +141,19 @@ impl Plugin for Connectors {
                             let (parts, stream) = res.response.into_parts();
 
                             let stream = stream.map(move |mut chunk| {
-                                if let Some(errors) = ConnectorDeclaredErrors::drain(&context) {
-                                    chunk
-                                        .extensions
-                                        .insert(CONNECTOR_ERRORS_EXTENSION_KEY, errors);
+                                if let Some(Value::Array(errors)) =
+                                    ConnectorDeclaredErrors::drain(&context)
+                                {
+                                    // A subscription payload may already carry its own
+                                    match chunk.extensions.get_mut(CONNECTOR_ERRORS_EXTENSION_KEY) {
+                                        Some(Value::Array(existing)) => existing.extend(errors),
+                                        _ => {
+                                            chunk.extensions.insert(
+                                                CONNECTOR_ERRORS_EXTENSION_KEY,
+                                                Value::Array(errors),
+                                            );
+                                        }
+                                    }
                                 }
                                 if let Some(debug) = &debug {
                                     let serialized = { &debug.lock().clone().serialize() };
