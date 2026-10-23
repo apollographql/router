@@ -436,7 +436,7 @@ commands:
                       exit 1
                     fi
                   fi
-                  echo "Failing only on advisories that ${BASE} doesn't have. check_advisories reports all of them."
+                  echo "Failing only on advisories that ${BASE} didn't have where this branch started. check_advisories reports all of them."
                   cargo xtask check-compliance --advisory-base "${BASE}"
       - when:
           condition:

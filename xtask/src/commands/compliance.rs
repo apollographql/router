@@ -67,28 +67,32 @@ fn check_introduced_advisories(base_ref: &str) -> Result<()> {
     if !existing.is_empty() {
         let ids: Vec<_> = existing.iter().map(|(id, _)| id.as_str()).collect();
         eprintln!(
-            "note: {base_ref} already has {}, so this check ignores {}. `cargo deny check advisories` lists them.",
+            "note: {base_ref} already had {} at {base}, where this branch started, so this check ignores {}. `cargo deny check advisories` lists them.",
             ids.join(", "),
             if ids.len() == 1 { "it" } else { "them" },
         );
     }
     ensure!(
         introduced.is_empty(),
-        "this change adds security advisories that {base_ref} does not have:\n\n{}\n\
-         Update or remove the affected crates; `cargo deny check advisories` shows which \
-         dependencies pull them in. If an advisory does not affect the router, add its ID to \
-         `ignore` in deny.toml with a comment saying why.",
+        "this change adds security advisories that {base_ref} did not have at {base}, where this \
+         branch started:\n\n{}\n\
+         If {base_ref} has since fixed or exempted them, rebase onto it. Otherwise update or \
+         remove the affected crates; `cargo deny check advisories` shows which dependencies pull \
+         them in. If an advisory does not affect the router, add its ID to `ignore` in deny.toml \
+         with a comment saying why.",
         introduced
             .iter()
             .map(|(id, advisory)| advisory.describe(id))
             .collect::<String>(),
     );
-    eprintln!("advisories ok: this change adds none that {base_ref} does not have");
+    eprintln!("advisories ok: this change adds none that {base_ref} did not have at {base}");
     Ok(())
 }
 
+/// Returns the abbreviated hash of the merge-base of HEAD and `base_ref`.
 fn merge_base(base_ref: &str) -> Result<String> {
-    Ok(git_out!(["merge-base", "HEAD", base_ref]))
+    let base = git_out!(["merge-base", "HEAD", base_ref]);
+    Ok(git_out!(["rev-parse", "--short", &base]))
 }
 
 /// Writes the files of commit `rev` to `dest`, without touching the checkout.
