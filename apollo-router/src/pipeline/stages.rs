@@ -272,9 +272,9 @@ pub(crate) fn build_subgraph_service(
         .layer(content_negotiation::SubgraphContentNegotiationLayer::default())
         .service(SubgraphService::new(name, http_service));
 
-    // We apply the buffered() here separately so it works on an inner BoxCloneService, which makes
-    // the type easier to name
-    ServiceBuilder::new().buffered().service(service)
+    // ROUTER-2266 scratch variant (b): no outer per-subgraph buffer; each fetch clones the stack
+    // down to the buffer below telemetry, so the layers above it run in the caller's task.
+    parking_lot::Mutex::new(service)
 }
 
 /// Builds the full service stack for every subgraph, keyed by subgraph name.
