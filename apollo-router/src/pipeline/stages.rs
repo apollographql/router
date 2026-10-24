@@ -4,6 +4,7 @@
 use std::collections::HashMap;
 use std::sync::Arc;
 
+use apollo_cache_memory::InMemoryConfig;
 use apollo_federation::query_plan::query_planner::QueryPlanner;
 use indexmap::IndexMap;
 use tower::Service;
@@ -495,8 +496,12 @@ pub(crate) fn build_query_parsing_service(
     let max_recursive_selections = configuration.limits.router.max_recursive_selections;
     let warn_only = configuration.limits.router.warn_only;
 
+    let cache_config = InMemoryConfig {
+        limit: u64::try_from(cache_limit.get()).expect("usize should fit in u64"),
+    };
+
     ServiceBuilder::new()
-        .layer(QueryParsingCacheLayer::new(cache_limit))
+        .layer(QueryParsingCacheLayer::new(cache_config))
         .layer(LimitRecursiveSelectionLayer::new(
             max_recursive_selections,
             warn_only,

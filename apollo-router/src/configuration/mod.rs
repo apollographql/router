@@ -1126,7 +1126,7 @@ impl Default for IncrementalPlanner {
 #[derive(Debug, Clone, Default, Deserialize, Serialize, JsonSchema)]
 #[serde(deny_unknown_fields, default)]
 pub(crate) struct QueryPlanCache {
-    /// Configures the in memory cache (always active)
+    /// Configures the in memory cache.
     pub(crate) in_memory: InMemoryCache,
     /// Configures and activates the Redis cache
     pub(crate) redis: Option<QueryPlanRedisCache>,
@@ -1224,7 +1224,8 @@ impl From<QueryPlanCache> for Cache {
 #[serde(deny_unknown_fields)]
 /// In memory cache configuration
 pub(crate) struct InMemoryCache {
-    /// Number of entries in the Least Recently Used cache
+    /// The maximum number of entries in the cache. The cache will start evicting entries when this
+    /// number is reached.
     pub(crate) limit: NonZeroUsize,
 }
 
