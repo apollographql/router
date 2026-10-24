@@ -109,6 +109,9 @@ pub(crate) enum InputContribution {
         /// input KeyRenamer rewrite undoing the alias before the subgraph
         /// send.
         condition_alias_rewrites: Vec<(Name, Name)>,
+        /// The @skip/@include the edge's key is selected under: the
+        /// representation needs the condition fields only alongside it.
+        needed_under: OpGraphPathContext,
     },
 }
 
@@ -132,8 +135,9 @@ impl InputContribution {
 
     pub(crate) fn needed_under(&self) -> Option<&OpGraphPathContext> {
         match self {
-            Self::Key { needed_under, .. } => Some(needed_under),
-            Self::Requires { .. } => None,
+            Self::Key { needed_under, .. } | Self::Requires { needed_under, .. } => {
+                Some(needed_under)
+            }
         }
     }
 
@@ -1639,6 +1643,7 @@ mod tests {
             source_type_name: apollo_compiler::name!("User"),
             conditions: Arc::new(op.selection_set.clone()),
             condition_alias_rewrites: Vec::new(),
+            needed_under: Default::default(),
         }
     }
 
