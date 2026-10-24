@@ -6,14 +6,12 @@ use std::sync::Arc;
 use http::StatusCode;
 use opentelemetry::global;
 use opentelemetry::trace::TraceContextExt;
-use tower::ServiceBuilder;
 use tower::load_shed::error::Overloaded;
 use tower_http::trace::MakeSpan;
 use tracing::Span;
 
 use crate::Context;
 use crate::graphql;
-use crate::layers::ServiceBuilderExt;
 use crate::plugins::telemetry::consts::OTEL_STATUS_CODE;
 use crate::plugins::telemetry::consts::OTEL_STATUS_CODE_ERROR;
 use crate::plugins::telemetry::pipeline_bypass::record_bypassed_request;
@@ -76,24 +74,19 @@ pub(crate) type ConnectionRouterService =
 pub(crate) fn connection_router_service(
     service: router::BoxCloneService,
 ) -> ConnectionRouterService {
-    ConnectionRouterService::new(
-        ServiceBuilder::new()
-            .map_future_with_request_data(|req: &router::Request| req.context.clone(), shed_as_503)
-            // hyper awaits `poll_ready` inside each request's future, so a layer reporting
-            // `Pending` there stalls that request instead of applying backpressure to the
-            // connection. `load_shed` always reports `Ready`, so it has to sit above the queue
-            // for the shed decision to be immediate.
-            .load_shed()
-            // Unconstrained, so tokio's cooperative budget cannot report a spurious `Pending`
-            // and shed a request the queue had room for.
-            .buffered()
-            .service(service),
-    )
+    // ROUTER-2266 scratch variant (d): no shared buffer worker. Each request clones the
+    // pipeline under a short lock and runs it in its own task.
+    let shared = Arc::new(parking_lot::Mutex::new(service));
+    ConnectionRouterService::new(tower::service_fn(move |req: router::Request| {
+        let svc = shared.lock().clone();
+        tower::ServiceExt::oneshot(svc, req)
+    }))
 }
 
 /// Answers a shed request with a 503 so callers never handle [`Overloaded`] themselves.
 ///
 /// Belongs directly outside the `load_shed` whose errors it renders.
+#[allow(dead_code)]
 async fn shed_as_503(
     context: Context,
     future: impl Future<Output = Result<router::Response, tower::BoxError>>,
