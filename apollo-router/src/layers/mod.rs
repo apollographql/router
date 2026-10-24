@@ -29,6 +29,7 @@ pub mod async_checkpoint;
 pub mod instrument;
 pub mod map_first_graphql_response;
 pub mod map_future_with_request_data;
+pub(crate) mod pooled;
 pub(crate) mod rust_plugins;
 pub mod unconstrained_buffer;
 

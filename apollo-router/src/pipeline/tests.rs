@@ -12,6 +12,7 @@ use crate::spec::Schema;
 
 mod plugin_instantiation;
 mod query_parsing;
+mod stage_clones;
 pub(crate) mod stage_stack;
 mod subgraph_apq;
 mod traffic_shaping;

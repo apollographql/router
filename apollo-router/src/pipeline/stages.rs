@@ -25,6 +25,7 @@ use crate::introspection::IntrospectionService;
 use crate::layers::DEFAULT_BUFFER_SIZE;
 use crate::layers::InternalServiceBuilderExt as _;
 use crate::layers::ServiceBuilderExt as _;
+use crate::layers::pooled::PooledService;
 use crate::layers::unconstrained_buffer::UnconstrainedBuffer;
 use crate::plugins::authorization::AuthorizationPlugin;
 use crate::plugins::batching::BatchingPlugin;
@@ -549,7 +550,7 @@ pub(crate) fn build_supergraph_pipeline(
 
 /// Builds the execution service stack, which executes query plans by dispatching their
 /// fetch nodes to subgraphs and connectors.
-fn build_execution_service(
+pub(super) fn build_execution_service(
     schema: Arc<Schema>,
     subgraph_schemas: Arc<SubgraphSchemas>,
     plugins: Arc<Plugins>,
@@ -583,7 +584,7 @@ fn build_execution_service(
         .map(|t| t.config.apollo.metrics_reference_mode)
         .unwrap_or_default();
 
-    ServiceBuilder::new()
+    let execution_service = ServiceBuilder::new()
         .apply_required_plugin_layer(&plugins, BatchingPlugin::query_plan_analysis_layer)
         .layer(SubscriptionExecutionLayer::new(
             configuration.notify.clone(),
@@ -602,8 +603,10 @@ fn build_execution_service(
                 configuration,
             }
             .boxed_clone(),
-        )
-        .boxed_clone()
+        );
+
+    // The supergraph service and the layers above it clone this per request.
+    PooledService::new(execution_service).boxed_clone()
 }
 
 /// Builds the supergraph service stack, which plans GraphQL requests and dispatches
@@ -624,7 +627,7 @@ fn build_supergraph_service(
         .strict_variable_validation(configuration.supergraph.strict_variable_validation)
         .build();
 
-    ServiceBuilder::new()
+    let supergraph_service = ServiceBuilder::new()
         .layer(content_negotiation::SupergraphContentNegotiationLayer::default())
         .layer(crate::compute_job::ComputeJobMetricsLayer::new())
         .apply_required_plugin_layer(
@@ -637,7 +640,10 @@ fn build_supergraph_service(
         })
         .layer(AllowOnlyHttpPostMutationsLayer::default())
         .apply_required_plugin_layer(&plugins, LimitsPlugin::enforce_operation_limits_layer)
-        .service(supergraph_service)
+        .service(supergraph_service);
+
+    // Most router-stage layers clone this on every call.
+    PooledService::new(supergraph_service).boxed_clone()
 }
 
 /// Builds the router service stack, which turns HTTP requests into GraphQL requests
