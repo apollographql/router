@@ -319,6 +319,8 @@ impl Config {
 
 #[cfg(test)]
 mod test {
+    use std::collections::HashMap;
+    use std::collections::HashSet;
     use std::future::Future;
     use std::sync::Arc;
     use std::time::Duration;
@@ -338,6 +340,7 @@ mod test {
     use crate::plugin::Plugin;
     use crate::plugin::PluginInit;
     use crate::plugin::PluginPrivate;
+    use crate::plugin::test::MockSubgraph;
     use crate::plugins::subscription;
     use crate::plugins::telemetry::STUDIO_EXCLUDE;
     use crate::plugins::telemetry::Telemetry;
@@ -345,6 +348,7 @@ mod test {
     use crate::plugins::telemetry::apollo_exporter::Sender;
     use crate::query_planner::OperationKind;
     use crate::services::SupergraphRequest;
+    use crate::test_harness::MockedSubgraphs;
 
     // Serializes every test in this module. `Telemetry::new` populates
     // `create_builtin_instruments` from the global meter provider, and
@@ -496,6 +500,80 @@ mod test {
             insta::assert_json_snapshot!(results);
         });
 
+        Ok(())
+    }
+
+    /// Enum values in responses are only reported in extended reference mode.
+    #[rstest::rstest]
+    #[case::standard("standard", HashMap::new())]
+    #[case::extended(
+        "extended",
+        HashMap::from([("Status".to_string(), HashSet::from(["ACTIVE".to_string()]))])
+    )]
+    #[tokio::test(flavor = "multi_thread")]
+    async fn apollo_metrics_enum_response_references_follow_reference_mode(
+        #[case] metrics_reference_mode: &str,
+        #[case] expected: HashMap<String, HashSet<String>>,
+    ) -> Result<(), BoxError> {
+        let _guard = TEST.lock().await;
+        let mut plugin = create_telemetry_plugin(&format!(
+            r#"
+            telemetry:
+              apollo:
+                endpoint: "{ENDPOINT_DEFAULT}"
+                apollo_key: "key"
+                apollo_graph_ref: "ref"
+                schema_id: "schema_sha"
+                metrics_reference_mode: {metrics_reference_mode}
+            "#
+        ))
+        .await?;
+        let (tx, rx) = tokio::sync::mpsc::channel(100);
+        plugin.apollo_metrics_sender = Sender::Apollo(tx);
+        let subgraphs = MockedSubgraphs(
+            [(
+                "subgraph-a",
+                MockSubgraph::builder()
+                    .with_json(
+                        serde_json::json!({"query": "{status}"}),
+                        serde_json::json!({"data": {"status": "ACTIVE"}}),
+                    )
+                    .build(),
+            )]
+            .into_iter()
+            .collect(),
+        );
+
+        TestHarness::builder()
+            .schema(include_str!(
+                "../../testdata/enum_response_supergraph.graphql"
+            ))
+            .extra_private_plugin(plugin)
+            .extra_plugin(subgraphs)
+            .build_router()
+            .await?
+            .oneshot(
+                SupergraphRequest::fake_builder()
+                    .query("{ status }")
+                    .build()?
+                    .try_into()
+                    .unwrap(),
+            )
+            .await?
+            .next_response()
+            .await
+            .unwrap()?;
+
+        let reports = ReceiverStream::new(rx).collect::<Vec<_>>().await;
+        let [report] = reports.as_slice() else {
+            panic!("expected one stats report, got {}", reports.len());
+        };
+        let stats = report
+            .stats
+            .values()
+            .next()
+            .expect("stats for the operation");
+        assert_eq!(stats.stats_with_context.enum_response_references, expected);
         Ok(())
     }
 
