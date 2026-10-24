@@ -2,6 +2,257 @@
 
 This project adheres to [Semantic Versioning v2.0.0](https://semver.org/spec/v2.0.0.html).
 
+# [2.16.5] - 2026-10-23
+
+## 🐛 Fixes
+
+### Cache debugger and private queries gauge report what the response cache did ([PR #10436](https://github.com/apollographql/router/pull/10436))
+
+The cache debugger now reports `shouldStore: false` when the response cache did not store the data:
+
+- requests for a query the router has marked as private when no `private_id` is configured, because those requests skip the cache;
+- responses and entities with GraphQL errors, and root-field responses with no data.
+
+`shouldStore` is the cache's decision to store an entry. It does not confirm that the write to Redis succeeded.
+
+The `apollo.router.response_cache.private_queries.lru.size` gauge now also counts queries marked as private by entity fetches, so its value can rise after upgrading.
+
+By [@BrynCooke](https://github.com/BrynCooke) in https://github.com/apollographql/router/pull/10436
+
+### Keep `@deprecated` on fields an interface does not declare ([PR #10460](https://github.com/apollographql/router/pull/10460))
+
+The federation 3 compatibility upgrade strips `@deprecated` from an implementing field when the matching interface field is not deprecated, because the GraphQL September 2025 spec disallows it. It applied that check to every field on the implementing type, so fields the interface does not declare also lost their `@deprecated`, and composition emitted a spurious `DEPRECATED_IMPLEMENTING_FIELD_WITHOUT_INTERFACE` hint.
+
+Only fields the interface declares without `@deprecated` are now stripped.
+
+```graphql
+interface Node { id: ID! }
+type User implements Node {
+  id: ID!
+  # previously lost its @deprecated during composition
+  name: String @deprecated(reason: "use displayName")
+}
+```
+
+By [@tninesling](https://github.com/tninesling) in https://github.com/apollographql/router/pull/10460
+
+### Error responses no longer turn off response caching for a query
+
+With response caching enabled, the router keeps a list of subgraph queries that return private data. Without `private_id`, requests for a query on that list skip the cache. Before this fix, any response with `Cache-Control: private` put its query on the list, including error responses. Many frameworks send `private` on errors, so one failed request could turn off caching for that query, for every variable value, until the entry was evicted or the router restarted.
+
+Now a response marks its query as private only if it succeeded and its `Cache-Control` header allows storing (no `no-store`, and a TTL above zero). A subgraph response succeeds when it has a 2xx status and no GraphQL errors. This applies to root fields and entities.
+
+By [@BrynCooke](https://github.com/BrynCooke) in https://github.com/apollographql/router/pull/10437
+
+### Include the mutation base cost in demand control actual cost
+
+Demand control adds a base cost of 10 to the estimated cost of every mutation, but the actual cost did not include it. Every mutation reported a constant `cost.delta` of 10 even when list size estimates were exact. The actual cost now includes the same base cost.
+
+By [@tninesling](https://github.com/tninesling) in https://github.com/apollographql/router/pull/10521
+
+### Fix `CONNECTORS_CANNOT_RESOLVE_KEY` and router startup failure when a connector reads `` through `->first`
+
+A field-level `@connect` on an entity that read a `` value through `->first` (for example `queryParams: "id: .tagIds->first"`) failed composition with `CONNECTORS_CANNOT_RESOLVE_KEY`. With a supergraph composed by an older version, the router refused to start with `An internal error has occurred, please report this bug to Apollo. Details: error creating resolvable key`.
+
+The cause was in how connectors work out which `` fields an entity key needs. `->first` was recorded as a read of list index `0`, so the synthesized key came out as `tagIds { "0" }`, which is not a valid field set. List indexes are no longer recorded, so the key is now `tagIds`, the same as for `->last` or a plain `.tagIds`. Schemas like this now compose and the router starts.
+
+Reading fields from the first element of a list of objects, such as `.items->first.id` or `.items->first { id }`, also composes now, with the key `items { id }`. This never composed in earlier versions. A bare `.items->first` on a list of objects is still rejected with `CONNECTORS_CANNOT_RESOLVE_KEY`, the same as a bare `.items`, because the key needs to select fields from the objects.
+
+When a connector's key still can't be built, the error now names the connector and includes the field set errors, instead of only saying `error creating resolvable key`.
+
+By [@benjamn](https://github.com/benjamn) in https://github.com/apollographql/router/pull/10403
+
+### Fetch `@requires` fields only when the requiring field is selected
+
+When a field with `@requires` was under `@skip`/`@include` and shared its entity fetch with an unconditional sibling field, the planner correctly fetched the required fields only under that condition, but listed them unconditionally in the `requires` inputs of the entity fetch. When the condition did not hold at runtime, the required fields were absent, the entity representation was invalid, and the entity fetch was skipped for that entity, so the unconditional sibling field silently came back as `null`. When the required fields were nullable, the representation was instead sent with them set to `null`, which some subgraphs reject.
+
+For example, given a subgraph like this, where `weight` is resolved by another subgraph:
+
+```graphql
+type Product @key(fields: "id") {
+  id: ID!
+  inStock: Boolean
+  weight: Int! @external
+  shippingEstimate: Int @requires(fields: "weight")
+}
+```
+
+this query returned `"inStock": null` whenever `` was `false`, even though `inStock` isn't conditional:
+
+```graphql
+query Product(: Boolean!) {
+  product {
+    inStock
+    shippingEstimate @include(if: )
+  }
+}
+```
+
+The inline fragments of a fetch node's `requires` can now carry `@skip`/`@include` conditions (serialized as a `conditions` list on the fragment), and the router evaluates them when building entity representations: a fragment excluded by its conditions contributes nothing to the representation. Fetches shared between conditional and unconditional fields stay merged, so this does not add subgraph requests.
+
+The same mechanism also preserves conditions on the entity fetch following a `@requires` when two sibling selections carry opposite conditions on the same variable (for example `... @include(if: )` and `... @skip(if: )`): those conditions were previously dropped from that fetch, so the subgraph was asked for fields the client had excluded, with the union of both `@requires` field sets as inputs. And when every selection leading to a `@requires` field is conditional, the entity fetch following it is now wrapped in the corresponding `Skip`/`Include` node instead of being executed unconditionally.
+
+By [@sachindshinde](https://github.com/sachindshinde) in https://github.com/apollographql/router/pull/10566
+
+### Fix `connect/v0.4` routing entity resolution through a non-entity `Query` connector
+
+Under `connect/v0.4`, when a `@key` entity had **both** a type-level reference-resolver `@connect` (mapping from ``) **and** a separate `Query` field `@connect` returning that same type (mapping from ``, with `entity` unset), connector expansion copied the entity's declared `@key` onto the `Query`-field connector's generated subgraph as **resolvable**. That gave the query planner a second, spurious entity path, so it could resolve entity references through the `Query`-field connector — where `` is empty during entity resolution — sending a request with the query parameters stripped and surfacing an upstream error (e.g. a `400` reported as `CONNECTOR_FETCH`).
+
+`connect/v0.3` was never affected, so bumping only the `@link` from `v0.3` to `v0.4` could break a previously working schema. Expansion now only copies keys for `@interfaceObject` types, and always as `resolvable: false`, matching the `v0.3` behavior.
+
+By [@benjamn](https://github.com/benjamn) in https://github.com/apollographql/router/pull/9853
+
+### Reduce memory use and repeated work during query graph construction ([PR #10358](https://github.com/apollographql/router/pull/10358))
+
+Dense federated query graphs, including connector-expanded schemas, could reserve excessive memory and repeatedly filter identical outgoing edges during graph construction. This increased the cost of schema composition and query planner initialization.
+
+Root-resolution and subgraph-entry transitions now reuse the final filtered followups for each destination. Filtered key followup vectors grow with the surviving edges instead of reserving space for every candidate. Transitions that retain all candidates keep exact-size preallocation, avoiding excess capacity on wide graphs.
+
+Followup edge membership and ordering are preserved, and no configuration changes are required.
+
+By [@cgati](https://github.com/cgati) in https://github.com/apollographql/router/pull/10358
+
+### Allow nested object literals in requestless connectors ([PR #10394](https://github.com/apollographql/router/pull/10394))
+
+A `@connect` directive with no `http:` (a virtual connector) failed composition with `REQUESTLESS_SELECTION_USES_REQUEST_DATA` when its selection contained a nested object literal, such as `price: { amount: 1395, currencyCode: "USD" }`, even though it reads nothing from a response. These selections now compose as expected. Selections that do read the response body, like `price { amount }` or a bare `$`, are still rejected.
+
+By [@benjamn](https://github.com/benjamn) in https://github.com/apollographql/router/pull/10394
+
+### Restore structured JSON for `valuable` event fields in JSON logs ([PR #10482](https://github.com/apollographql/router/pull/10482))
+
+Event fields recorded with `tracing::field::valuable` are written as nested JSON objects again by the JSON log formatter, instead of flat `Debug` strings.
+
+A router built with `--cfg tracing_unstable` — for example alongside a native Rust plugin that logs a `#[derive(Valuable)]` struct — used to render such a field as structured JSON:
+
+```json
+"log": { "client_id": "abc", "entitlements": { "bypass": true } }
+```
+
+Since the JSON formatter's event visitor was replaced to deduplicate the empty `message` emitted by OpenTelemetry macros, the same field rendered as an opaque string, which log tooling can no longer query:
+
+```json
+"log": "AccessLog { client_id: \"abc\", entitlements: Entitlements { bypass: true } }"
+```
+
+The replacement visitor did not override `record_value`, so it inherited the trait's default implementation, which forwards to the `Debug` rendering. It now converts `valuable` values directly, and the deduplication behavior is unchanged. A value that has no JSON representation, such as a map with non-string keys, still falls back to its `Debug` string, and the reason is recorded under a single `serialization_errors` object keyed by field name (omitted if the event already has its own `serialization_errors` field). The rest of the log line is unaffected.
+
+This applies only to event fields in JSON logs. Span attributes (including the `span` and `spans` entries in JSON logs), the text formatter and exported OpenTelemetry span events still render `valuable` values as `Debug` strings, as they did in 2.15.
+
+Builds that do not set `--cfg tracing_unstable` are unaffected: the supporting crates are declared under that cfg and are not compiled without it.
+
+By [@OriginLeon](https://github.com/OriginLeon) in https://github.com/apollographql/router/pull/10482
+
+### Report `apollo.router.telemetry.metrics.cardinality_overflow` on Prometheus
+
+Each router metric has a cardinality limit: the most distinct attribute combinations it keeps. When a metric goes over its limit, the router reports it on the `apollo.router.telemetry.metrics.cardinality_overflow` counter. Since v2.13.0, routers that export metrics only through Prometheus never showed this counter. Prometheus now reports it, the same way as the other exporters.
+
+The counter goes up by one when a metric first goes over its limit, and not again while that metric stays over it. If the metric later drops back under its limit and goes over it again, the counter goes up again.
+
+The counter's `metric.name` attribute (shown as `metric_name` in Prometheus) is the OpenTelemetry name of the metric that went over its limit, for example `http.server.request.duration`, whichever exporters you use. In v2.12.0 and earlier the counter had no `metric.name` attribute and went up once for each overflow warning, so dashboards and alerts built on v2.12.0 may need adjusting.
+
+By [@bryncooke](https://github.com/bryncooke) in https://github.com/apollographql/router/pull/10309
+
+### Fix connector mappings silently misreading names that begin with a keyword or a number ([PR #10260](https://github.com/apollographql/router/pull/10260))
+
+`JSONSelection` could stop reading a name partway through and treat the rest as a separate selection:
+
+- **Names beginning with `null`, `true`, or `false`.** `displayName: nullableName` parsed as `displayName: null ableName`, assigning `null` to `displayName` and adding a selection for `ableName`. In other positions, such as `$(nullField ?? "fallback")`, it failed with an opaque `nom::error::ErrorKind::Eof`.
+- **Paths rooted at a number.** `alias: 1.foo` parsed as `alias: 1.0 foo`, and `$(1.foo)` failed to parse.
+
+If a connector mapping aliases a field name starting with `null`, `true`, or `false`, or a path rooted at a number, its output changes from `null` to the intended value. Bare keys like `nullableName` or `outer { nullableName }` were never affected.
+
+A selection list also now rejects two items that abut with an identifier character on each side and nothing between them, so input like `alias: 1b: 2` is an error rather than two selections. Minified input like `{a{x}b}` still parses.
+
+By [@benjamn](https://github.com/benjamn) in https://github.com/apollographql/router/pull/10260
+
+### Alias conflicting subgraph fields nested under an aliased field ([PR #10523](https://github.com/apollographql/router/pull/10523))
+
+When a subgraph fetch selects two fields with the same response name but incompatible types, the query planner aliases one of them and renames it back after the fetch. If such a conflict was nested inside a field that was itself aliased (for example `o: P!` on one type and `o: P` on another, with `x: Int!` and `x: Int` selected inside both, as `@requires` inputs can do), the planner recorded the inner rename but never applied the inner alias. Query planning then failed with "Query planning produced an invalid subgraph operation ... must not select different types using the same name".
+
+The inner alias is now applied, and its rename runs after the outer field has been renamed back, so these operations plan and execute normally.
+
+By [@dariuszkuc](https://github.com/dariuszkuc) in https://github.com/apollographql/router/pull/10523
+
+### Shut down the replaced tracer provider off async worker threads during reload ([PR #10276](https://github.com/apollographql/router/pull/10276))
+
+When a schema or configuration reload replaced the tracing configuration, the previous OpenTelemetry tracer provider was shut down by whichever thread released its last reference. Spans hold a reference to their provider, so a span being exported at the exact moment of the swap could run that shutdown on an async worker thread. The batch span processor's shutdown blocks that thread while waiting for a background task that only the same thread could run, so the worker could stall permanently. Everything that worker was holding, including the retired request pipeline with its caches and Redis connections, then stayed in memory until the router was restarted, while the remaining workers kept serving traffic.
+
+The router now shuts down the replaced tracer provider explicitly on a blocking thread straight after the swap. A span that still holds the old provider no longer triggers shutdown when it is dropped. Spans that finish on the retired provider after its shutdown begins are discarded. Spans that finish before shutdown begins can still be exported.
+
+By [@bryncooke](https://github.com/bryncooke) in https://github.com/apollographql/router/pull/10276
+
+### Query deduplication ignores the subgraph operation name
+
+With `traffic_shaping` `deduplicate_query` enabled, subgraph requests that are identical except for their operation name now share one in-flight request. The query planner gives every fetch its own operation name, so fetches within a single client request that sent the same query and variables to the same subgraph were never deduplicated, even though their responses are identical. This happens, for example, when the same entity is reached through several paths in the response.
+
+Subgraph request hooks in coprocessors, Rhai scripts, and plugins run once for each shared request and see the operation name of the first request that started it.
+
+By [@dariuszkuc](https://github.com/dariuszkuc) in https://github.com/apollographql/router/pull/10465
+
+### `cardinality_overflow` counts once per overflow with OTLP
+
+With OTLP, `apollo.router.telemetry.metrics.cardinality_overflow` now goes up once when a metric starts overflowing, not on every export while it stays over its limit. Alerts based on `rate()` or `increase()`, or on a fixed value, may need adjusting. GraphOS usage reporting is unchanged.
+
+By [@bryncooke](https://github.com/bryncooke) in https://github.com/apollographql/router/pull/10309
+
+### Alias conflicting subgraph fields inside a conditional fragment ([PR #10377](https://github.com/apollographql/router/pull/10377))
+
+When a subgraph fetch selects two fields with the same response name but incompatible types (for example `f: Int!` on one type and `f: Int` on another, both needed as `@requires` inputs), the query planner aliases one of them and renames it back after the fetch. If those fields were inside an inline fragment that had no type condition, as happens when a `@skip`/`@include` fragment such as `... on Query @include(if: )` or `... @include(if: )` is turned into a condition in the query plan, the planner recorded the rename but never applied the alias. Query planning then failed with "Query planning produced an invalid subgraph operation ... must not select different types using the same name".
+
+The alias is now applied inside such fragments, so these operations plan normally.
+
+By [@inanna-apollo](https://github.com/inanna-apollo) in https://github.com/apollographql/router/pull/10377
+
+### Return a 400 with `QUERY_PLAN_COMPLEXITY_EXCEEDED` when query planning complexity limits are exceeded
+
+When a query plan was rejected for exceeding a planner complexity limit — the non-local selections limit, the `supergraph.query_planning.experimental_paths_limit` option, or the cap on path combinations — the router returned an HTTP 500 with a generic `INTERNAL_SERVER_ERROR` code, making it indistinguishable from a genuine internal failure. These rejections are now returned as an HTTP 400 response with the `QUERY_PLAN_COMPLEXITY_EXCEEDED` extension code, so clients and monitoring can correctly attribute them to the operation rather than to the router.
+
+By [@apollo-mateuswgoettems](https://github.com/apollo-mateuswgoettems) in https://github.com/apollographql/router/pull/10197
+
+### Keep executable directives and their argument types through connector expansion
+
+Composing connector subgraphs alongside an executable directive whose argument references a custom type (for example `directive @ownership(owners: [Owner!]) on FIELD` with `enum Owner`) failed satisfiability validation with `INTERNAL_ERROR: Cannot wrap an undefined/null type` (Rust: `Directive argument's inner type does not refer to an existing input type`).
+
+Connector expansion builds one synthetic subgraph per connector, but it never copied executable directive definitions, or the types their arguments reference, into those subgraphs. When another subgraph defined the directive, it still reached the expanded supergraph, but the synthetic subgraphs were recorded as lacking its argument types, so extracting subgraphs from the expanded supergraph produced invalid schemas. When every subgraph used connectors, the directive was dropped from the expanded supergraph entirely.
+
+Each synthetic subgraph now carries the executable directive definitions from its source subgraph, along with their argument types (scalars, enums, and input objects, recursively).
+
+By [@benjamn](https://github.com/benjamn) in https://github.com/apollographql/router/pull/9635
+
+### Stop leaking internal error details in supergraph `INTERNAL_SERVER_ERROR` responses ([PR #10048](https://github.com/apollographql/router/pull/10048))
+
+When an unhandled internal failure occurs while processing a request, the router puts the raw error string into the client-facing GraphQL response. These errors describe the router's internal state, such as supergraph and subgraph schema details, that the caller shouldn't have visibility into. Beyond being a security risk, these errors are not generally actionable by clients, so exposing them can often lead to confusion.
+
+The router now returns a generic `internal server error` message for these responses while keeping the `INTERNAL_SERVER_ERROR` extension code and `500` status unchanged. The full error detail is logged server-side at `ERROR` level with `code = "INTERNAL_SERVER_ERROR"`, so operators retain the information for debugging. This matches the existing behavior of the router's transport-level internal-error handler.
+
+By [@TylerBloom](https://github.com/TylerBloom) in https://github.com/apollographql/router/pull/10048
+
+### Metric view names support glob patterns again ([PR #9809](https://github.com/apollographql/router/pull/9809))
+
+Glob patterns (`*`, `?`, `[...]`) and catch-all (`*` or an empty string) patterns in `telemetry.exporters.metrics.common.views[].name` match instruments again.
+
+Since v2.13.0 only exact names matched, so a view targeting several instruments at once no longer worked. For example, custom histogram buckets on a `cost.*` view were not applied, and a catch-all drop rule stopped suppressing anything:
+
+```yaml
+telemetry:
+  exporters:
+    metrics:
+      common:
+        views:
+          - name: cost.*            # custom buckets now apply to cost.estimated, cost.actual, ...
+            aggregation:
+              histogram:
+                buckets: [0, 10, 100, 1000]
+          - name: "*"               # this catch-all now drops everything not matched above
+            aggregation: drop
+```
+
+Views are evaluated in declaration order and the first matching view wins, so you can place more-specific views before wildcards to control precedence.
+
+By [@apollo-mateuswgoettems](https://github.com/apollo-mateuswgoettems) in https://github.com/apollographql/router/pull/9809
+
+
+
 # [2.16.4] - 2026-09-22
 
 ## 🐛 Fixes
