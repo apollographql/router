@@ -8098,3 +8098,71 @@ fn inc_private_chain_nests_under_its_fetch_until_the_shared_level() {
     "###
     );
 }
+
+// ---------------------------------------------------------------------------
+// Union type conditions are not type-exploded when the local union matches
+// ---------------------------------------------------------------------------
+
+#[test]
+fn inc_union_type_condition_with_consistent_union_does_not_type_explode() {
+    let planner = planner!(
+        config = incremental_config(),
+        Subgraph1: r#"
+          type Query {
+            u1: U1
+          }
+
+          union U1 = A | B | C
+          union U2 = A | B
+
+          type A @key(fields: "id") {
+            id: ID!
+          }
+
+          type B @key(fields: "id") {
+            id: ID!
+          }
+
+          type C @key(fields: "id") {
+            id: ID!
+          }
+        "#,
+        Subgraph2: r#"
+          type A @key(fields: "id") {
+            id: ID!
+            v: Int
+          }
+
+          type B @key(fields: "id") {
+            id: ID!
+            v: Int
+          }
+        "#,
+    );
+    assert_plan!(
+        &planner,
+        r#"
+          {
+            u1 {
+              ... on U2 {
+                __typename
+              }
+            }
+          }
+        "#,
+        @r###"
+    QueryPlan {
+      Fetch(service: "Subgraph1") {
+        {
+          u1 {
+            __typename
+            ... on U2 {
+              __typename
+            }
+          }
+        }
+      },
+    }
+    "###
+    );
+}
