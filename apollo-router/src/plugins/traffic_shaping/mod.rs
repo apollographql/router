@@ -339,6 +339,65 @@ impl PluginPrivate for TrafficShaping {
     }
 
     fn router_service(&self, service: router::BoxCloneService) -> router::BoxCloneService {
+        // ROUTER-2266 scratch variant (a): without a router rate limit, nothing below needs a
+        // buffer to be cloned, so skip the router-level buffer from #9169.
+        if self
+            .config
+            .router
+            .as_ref()
+            .is_none_or(|router| router.global_rate_limit.is_none())
+        {
+            return ServiceBuilder::new()
+                .map_future_with_request_data(
+                    |req: &router::Request| req.context.clone(),
+                    move |ctx, future| async {
+                        let response: Result<RouterResponse, BoxError> = future.await;
+                        if matches!(response, Err(ref err) if err.is::<Elapsed>()) {
+                            Ok(RouterResponse::error_builder()
+                                .status_code(StatusCode::GATEWAY_TIMEOUT)
+                                .error(gateway_timeout_error())
+                                .context(ctx)
+                                .build()
+                                .expect("should build overloaded response"))
+                        } else {
+                            response
+                        }
+                    },
+                )
+                .load_shed()
+                .layer(TimeoutLayer::new(
+                    self.config
+                        .router
+                        .as_ref()
+                        .and_then(|r| r.timeout.as_deref().copied())
+                        .unwrap_or(DEFAULT_TIMEOUT),
+                ))
+                .map_future_with_request_data(
+                    |req: &router::Request| req.context.clone(),
+                    move |ctx, future| async {
+                        let response: Result<RouterResponse, BoxError> = future.await;
+                        if matches!(response, Err(ref err) if err.is::<Overloaded>()) {
+                            Ok(RouterResponse::error_builder()
+                                .status_code(StatusCode::SERVICE_UNAVAILABLE)
+                                .error(concurrency_limit_error())
+                                .context(ctx)
+                                .build()
+                                .expect("should build overloaded response"))
+                        } else {
+                            response
+                        }
+                    },
+                )
+                .load_shed()
+                .option_layer(self.config.router.as_ref().and_then(|router| {
+                    router
+                        .concurrency_limit
+                        .as_ref()
+                        .map(|limit| ConcurrencyLimitLayer::new(*limit))
+                }))
+                .service(service)
+                .boxed_clone();
+        }
         // NB: consider each triplet (map_future_with_request_data, load_shed, layer) as a unit of
         //  behavior.
         // The outer buffer before the first load_shed() is required for correct cooperative-
