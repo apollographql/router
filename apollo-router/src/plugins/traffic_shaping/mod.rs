@@ -339,37 +339,43 @@ impl PluginPrivate for TrafficShaping {
     }
 
     fn router_service(&self, service: router::BoxCloneService) -> router::BoxCloneService {
+        let router = self.config.router.as_ref();
+        let timeout = TimeoutLayer::new(
+            router
+                .and_then(|r| r.timeout.as_deref().copied())
+                .unwrap_or(DEFAULT_TIMEOUT),
+        );
+        let concurrency_limit = router.and_then(|r| r.concurrency_limit);
+        let rate_limit = router.and_then(|r| r.global_rate_limit.as_ref());
+
         // NB: consider each triplet (map_future_with_request_data, load_shed, layer) as a unit of
         //  behavior.
-        // The outer buffer before the first load_shed() is required for correct cooperative-
-        // scheduling behaviour: without it, Tokio's budget can cause poll_ready to return
-        // Pending spuriously and the load_shed would emit false Overloaded errors.
+        if concurrency_limit.is_none() && rate_limit.is_none() {
+            // No buffer: it would run every request's synchronous call work on its single worker
+            // task, capping the router's throughput at one core.
+            return ServiceBuilder::new()
+                .map_future_with_request_data(
+                    |req: &router::Request| req.context.clone(),
+                    timeout_as_504,
+                )
+                .load_shed()
+                .layer(timeout)
+                .service(service)
+                .boxed_clone();
+        }
+
+        // The router stack is cloned per request, but a rate limiter keeps its state per instance,
+        // so the buffer gives every request the same one. It also stops Tokio's budget from making
+        // a limiter's poll_ready return Pending spuriously, which the load_shed would turn into
+        // false Overloaded errors.
         ServiceBuilder::new()
             .buffered()
             .map_future_with_request_data(
                 |req: &router::Request| req.context.clone(),
-                move |ctx, future| async {
-                    let response: Result<RouterResponse, BoxError> = future.await;
-                    if matches!(response, Err(ref err) if err.is::<Elapsed>()) {
-                        Ok(RouterResponse::error_builder()
-                            .status_code(StatusCode::GATEWAY_TIMEOUT)
-                            .error(gateway_timeout_error())
-                            .context(ctx)
-                            .build()
-                            .expect("should build overloaded response"))
-                    } else {
-                        response
-                    }
-                },
+                timeout_as_504,
             )
             .load_shed()
-            .layer(TimeoutLayer::new(
-                self.config
-                    .router
-                    .as_ref()
-                    .and_then(|r| r.timeout.as_deref().copied())
-                    .unwrap_or(DEFAULT_TIMEOUT),
-            ))
+            .layer(timeout)
             .map_future_with_request_data(
                 |req: &router::Request| req.context.clone(),
                 move |ctx, future| async {
@@ -387,12 +393,7 @@ impl PluginPrivate for TrafficShaping {
                 },
             )
             .load_shed()
-            .option_layer(self.config.router.as_ref().and_then(|router| {
-                router
-                    .concurrency_limit
-                    .as_ref()
-                    .map(|limit| ConcurrencyLimitLayer::new(*limit))
-            }))
+            .option_layer(concurrency_limit.map(ConcurrencyLimitLayer::new))
             .map_future_with_request_data(
                 |req: &router::Request| req.context.clone(),
                 move |ctx, future| async {
@@ -410,14 +411,27 @@ impl PluginPrivate for TrafficShaping {
                 },
             )
             .load_shed()
-            .option_layer(self.config.router.as_ref().and_then(|router| {
-                router
-                    .global_rate_limit
-                    .as_ref()
-                    .map(|limit| RateLimitLayer::new(limit.capacity.into(), *limit.interval))
-            }))
+            .option_layer(
+                rate_limit.map(|limit| RateLimitLayer::new(limit.capacity.into(), *limit.interval)),
+            )
             .service(service)
             .boxed_clone()
+    }
+}
+
+/// Answers a router request that hit `traffic_shaping.router.timeout` with a 504.
+async fn timeout_as_504(
+    context: crate::Context,
+    future: impl Future<Output = Result<RouterResponse, BoxError>>,
+) -> Result<RouterResponse, BoxError> {
+    match future.await {
+        Err(err) if err.is::<Elapsed>() => Ok(RouterResponse::error_builder()
+            .status_code(StatusCode::GATEWAY_TIMEOUT)
+            .error(gateway_timeout_error())
+            .context(context)
+            .build()
+            .expect("should build overloaded response")),
+        other => other,
     }
 }
 
@@ -1164,6 +1178,78 @@ mod test {
             .unwrap();
         assert_eq!(StatusCode::OK, response.response.status());
         crate::plugin::test::await_mock_driver(driver).await;
+    }
+
+    /// The router stack is cloned per request, so the rate limit only holds if every clone
+    /// shares one limiter.
+    #[tokio::test(flavor = "multi_thread")]
+    async fn it_rate_limits_router_requests_across_clones() {
+        let config = serde_yaml::from_str::<serde_json::Value>(
+            r#"
+        router:
+            global_rate_limit:
+                capacity: 1
+                interval: 10s
+        "#,
+        )
+        .unwrap();
+
+        let plugin = get_traffic_shaping_plugin(&config).await;
+        let inner = ServiceBuilder::new()
+            .service_fn(|_req: router::Request| async { RouterResponse::fake_builder().build() })
+            .boxed_clone();
+        let svc = plugin.router_service(inner);
+
+        let first = svc
+            .clone()
+            .oneshot(RouterRequest::fake_builder().build().unwrap())
+            .await
+            .unwrap();
+        assert_eq!(StatusCode::OK, first.response.status());
+
+        let second = svc
+            .clone()
+            .oneshot(RouterRequest::fake_builder().build().unwrap())
+            .await
+            .unwrap();
+        assert_eq!(StatusCode::SERVICE_UNAVAILABLE, second.response.status());
+    }
+
+    /// Without router limits there is no buffer, so the inner service is called on the request's
+    /// own task rather than queued behind a shared worker task.
+    #[tokio::test(flavor = "multi_thread")]
+    async fn it_calls_the_router_service_on_the_request_task_without_limits() {
+        let config = serde_yaml::from_str::<serde_json::Value>(
+            r#"
+        router:
+            timeout: 10s
+        "#,
+        )
+        .unwrap();
+
+        let plugin = get_traffic_shaping_plugin(&config).await;
+        let called_on = Arc::new(parking_lot::Mutex::new(None));
+        let inner = ServiceBuilder::new()
+            .service_fn({
+                let called_on = called_on.clone();
+                move |_req: router::Request| {
+                    *called_on.lock() = tokio::task::try_id();
+                    async { RouterResponse::fake_builder().build() }
+                }
+            })
+            .boxed_clone();
+        let svc = plugin.router_service(inner);
+
+        let request_task = tokio::spawn(async move {
+            svc.oneshot(RouterRequest::fake_builder().build().unwrap())
+                .await
+                .unwrap();
+            tokio::task::id()
+        })
+        .await
+        .unwrap();
+
+        assert_eq!(*called_on.lock(), Some(request_task));
     }
 
     #[tokio::test(flavor = "multi_thread")]
