@@ -557,7 +557,8 @@ impl RedisCacheStorage {
 
         // fred's heartbeat above only reaches the primary connection (its PING doesn't set
         // `use_replica`). In cluster mode we also hold eager replica connections, so we run a
-        // second heartbeat to keep those sockets warm and prevent server-side idle reaping.
+        // second heartbeat to keep those sockets warm and prevent server-side idle reaping, and to
+        // stop routing to replicas that stop answering.
         let replica_heartbeat_handle = if self.is_cluster {
             let client_heartbeats = client_pool.clone();
             let caller = self.redis_client_config.caller;
@@ -977,36 +978,55 @@ fn configure_cluster_replicas(
 /// counter and can skew a round (one replica pinged twice, another skipped), but that only happens
 /// when replica traffic is flowing and already keeping the sockets warm. When idle -- the case that
 /// causes reaping -- our N pings cover all N replicas.
+///
+/// When a ping fails, the client's replicas are re-synced, so the [`RouteableReplicaFilter`] probes
+/// each one again and leaves out any that stopped answering. fred only notices an unresponsive
+/// connection once nothing has been written to it for `UnresponsiveConfig::max_timeout`, which
+/// steady traffic prevents, so without this a replica that stalls after connecting keeps receiving
+/// (and timing out) its share of reads.
 async fn ping_replicas(pool: &RedisPool, caller: &'static str) {
-    // 3 multiplier is arbitrary (observational) - clusters typically have 2-3 replicas per node
-    let mut tasks = Vec::with_capacity(pool.clients().len() * 3);
+    join_all(
+        pool.clients()
+            .iter()
+            .map(|client| ping_client_replicas(client, caller)),
+    )
+    .await;
+}
 
-    for client in pool.clients() {
-        // `nodes()` maps each replica server to its primary.
-        for (_replica, primary) in client.replicas().nodes() {
-            let client = client.clone();
-            tasks.push(async move {
-                let options = Options {
-                    cluster_node: Some(primary),
-                    fail_fast: true,
-                    ..Default::default()
-                };
+async fn ping_client_replicas(client: &Client, caller: &'static str) {
+    // `nodes()` maps each replica server to its primary.
+    let pings = client.replicas().nodes().into_values().map(|primary| {
+        let options = Options {
+            cluster_node: Some(primary),
+            fail_fast: true,
+            ..Default::default()
+        };
+        async move {
+            client
+                .replicas()
+                .with_options(&options)
+                .ping::<()>(Some(REPLICA_HEARTBEAT_PING_MSG.to_string()))
+                .await
+        }
+    });
 
-                if let Err(err) = client
-                    .replicas()
-                    .with_options(&options)
-                    .ping::<()>(Some(REPLICA_HEARTBEAT_PING_MSG.to_string()))
-                    .await
-                {
-                    // Keep-alive is best-effort; log and move on. We don't record this as a query
-                    // error since it doesn't correspond to a user-facing cache operation.
-                    tracing::info!(caller = caller, error = ?err, "replica heartbeat ping failed");
-                }
-            })
+    let mut all_answered = true;
+    for result in join_all(pings).await {
+        if let Err(err) = result {
+            // Keep-alive is best-effort; log and move on. We don't record this as a query
+            // error since it doesn't correspond to a user-facing cache operation.
+            tracing::info!(caller = caller, error = ?err, "replica heartbeat ping failed");
+            all_answered = false;
         }
     }
 
-    join_all(tasks).await;
+    if !all_answered && let Err(err) = client.replicas().sync(false).await {
+        tracing::info!(
+            caller = caller,
+            error = ?err,
+            "failed to re-sync replicas after a replica heartbeat ping failed"
+        );
+    }
 }
 
 /// Sets up the error, reconnection, and unresponsive event listeners
@@ -1508,6 +1528,33 @@ mod test {
                     "reads should fall back to the primary"
                 );
             }
+            Ok(())
+        }
+
+        /// A cluster replica that stops answering after the pool connected is left out at the
+        /// next replica heartbeat, rather than timing out its share of reads until fred notices.
+        #[tokio::test]
+        async fn replica_that_stalls_is_left_out_at_the_next_heartbeat() -> Result<(), BoxError> {
+            let redis = FakeRedis::start(Topology::Cluster, &[Behaviour::Healthy]).await;
+            let replica = &redis.replicas[0].stats;
+            let storage = connect(&redis).await?;
+            round_trip(&storage).await?;
+            assert!(replica.reads() > 0, "reads should go to the replica");
+
+            replica.stall();
+            let pool = storage.inner.read().as_ref().expect("pool").pool.clone();
+            crate::cache::redis::ping_replicas(&pool, "test").await;
+
+            let primary_reads = redis.primary.reads();
+            round_trip(&storage).await?;
+            assert!(
+                redis.primary.reads() > primary_reads,
+                "reads should fall back to the primary"
+            );
+            assert!(
+                storage.inner.read().is_some(),
+                "the pool should not have been marked for recreation"
+            );
             Ok(())
         }
     }

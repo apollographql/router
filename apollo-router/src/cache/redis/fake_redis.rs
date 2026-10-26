@@ -11,6 +11,7 @@
 use std::collections::HashMap;
 use std::net::Ipv4Addr;
 use std::sync::Arc;
+use std::sync::atomic::AtomicBool;
 use std::sync::atomic::AtomicUsize;
 use std::sync::atomic::Ordering;
 
@@ -64,6 +65,7 @@ pub(crate) enum Behaviour {
 pub(crate) struct NodeStats {
     connections: AtomicUsize,
     reads: AtomicUsize,
+    stalled: AtomicBool,
 }
 
 impl NodeStats {
@@ -75,6 +77,12 @@ impl NodeStats {
     /// `GET` and `MGET` commands served.
     pub(crate) fn reads(&self) -> usize {
         self.reads.load(Ordering::SeqCst)
+    }
+
+    /// Stops answering commands, on open connections and new ones (a replica that's paused after
+    /// the client connected).
+    pub(crate) fn stall(&self) {
+        self.stalled.store(true, Ordering::SeqCst);
     }
 }
 
@@ -250,6 +258,9 @@ async fn serve_connection(
     let (reader, mut writer) = socket.into_split();
     let mut reader = BufReader::new(reader);
     while let Some(args) = read_command(&mut reader).await {
+        if stats.stalled.load(Ordering::SeqCst) {
+            std::future::pending::<()>().await;
+        }
         let reply = respond(&args, &role, &keyspace, &stats);
         if writer.write_all(&reply).await.is_err() {
             return;
