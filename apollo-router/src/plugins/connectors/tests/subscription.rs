@@ -331,6 +331,36 @@ async fn a_plain_json_response_is_a_subscription_of_one_event() {
     "#);
 }
 
+/// A subscription connector asks for a stream even without `http.stream`, because its response
+/// is always read as one. MCP servers, for one, refuse to open an event stream otherwise.
+#[tokio::test]
+async fn a_subscription_connector_accepts_streams_by_default() {
+    let mock_server = MockServer::start().await;
+    Mock::given(method("GET"))
+        .and(path("/stream/APOL"))
+        .respond_with(
+            ResponseTemplate::new(200)
+                .set_body_json(serde_json::json!({ "symbol": "APOL", "amount": 3.0 })),
+        )
+        .expect(1)
+        .mount(&mock_server)
+        .await;
+
+    subscribe(
+        SCHEMA,
+        &mock_server.uri(),
+        r#"subscription { prices(symbol: "APOL") { symbol amount } }"#,
+    )
+    .await;
+
+    let requests = mock_server.received_requests().await.unwrap();
+    assert_eq!(requests.len(), 1);
+    assert_eq!(
+        requests[0].headers.get("accept").unwrap(),
+        "application/json, text/event-stream, application/x-ndjson"
+    );
+}
+
 #[tokio::test]
 async fn each_event_is_completed_by_an_entity_fetch_to_another_subgraph() {
     let mock_server = MockServer::start().await;

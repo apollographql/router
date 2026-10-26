@@ -130,7 +130,9 @@ impl ConnectorPosition {
             || self.on_subscription_type(schema)
     }
 
-    fn on_subscription_type(&self, schema: &Schema) -> bool {
+    /// Whether this is a field of the `Subscription` root type, whose response is read as a
+    /// stream of events.
+    pub(super) fn on_subscription_type(&self, schema: &Schema) -> bool {
         schema
             .schema_definition
             .subscription

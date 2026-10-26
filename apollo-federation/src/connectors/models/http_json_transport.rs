@@ -44,6 +44,9 @@ pub struct HttpJsonTransport {
     pub connect_path: Option<JSONSelection>,
     pub connect_query_params: Option<JSONSelection>,
     pub stream: Option<StreamMode>,
+    /// Whether the connector resolves a `Subscription` field, so its response is read as a
+    /// stream of events whatever `stream` says.
+    pub subscription: bool,
 }
 
 impl HttpJsonTransport {
@@ -51,6 +54,7 @@ impl HttpJsonTransport {
         http: ConnectHTTPArguments,
         source: Option<&SourceHTTPArguments>,
         spec: ConnectSpec,
+        subscription: bool,
     ) -> Result<Self, FederationError> {
         let (method, connect_url) = if let Some(url) = &http.get {
             (HTTPMethod::Get, url)
@@ -94,7 +98,14 @@ impl HttpJsonTransport {
             connect_path: http.path,
             connect_query_params: http.query_params,
             stream: http.stream,
+            subscription,
         })
+    }
+
+    /// Whether the response may be a stream of events that the router knows how to read: the
+    /// connector sets an `http.stream` mode, or resolves a `Subscription` field.
+    pub fn accepts_stream(&self) -> bool {
+        self.stream.is_some() || self.subscription
     }
 
     pub(super) fn label(&self) -> String {
