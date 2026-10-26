@@ -4,6 +4,7 @@ use std::fmt::Debug;
 use std::net::SocketAddr;
 #[cfg(unix)]
 use std::os::unix::fs::MetadataExt;
+use std::path::Path;
 use std::path::PathBuf;
 use std::sync::atomic::AtomicBool;
 use std::sync::atomic::Ordering;
@@ -23,11 +24,10 @@ use url::ParseError;
 use url::Url;
 
 use crate::LicenseSource;
+use crate::configuration::AutomaticUpgrade;
 use crate::configuration::ConfigurationParser;
-use crate::configuration::Migration;
 use crate::configuration::generate_config_schema;
 use crate::configuration::generate_upgrade;
-use crate::configuration::uses_migrated_settings;
 use crate::metrics::meter_provider_internal;
 use crate::plugin::plugins;
 use crate::plugins::telemetry::reload::otel::init_telemetry;
@@ -511,20 +511,11 @@ impl Executable {
                 command: ConfigSubcommand::Validate { config_path },
             })) => {
                 let config_string = std::fs::read_to_string(config_path)?;
-                // Validate what startup would load, including automatic migration. The note below
-                // reports migrations, so the parse omits the "needs to be upgraded" error; each
-                // migration's own notices still print, as they do at startup.
-                ConfigurationParser::new()?
-                    .parse_with_migration(&config_string, Migration::WithinMajorQuietly)?;
-
-                println!("Configuration at path {config_path:?} is valid!");
-                if uses_migrated_settings(&config_string) {
-                    println!(
-                        "Some of its settings are upgraded automatically at startup. Run `router config upgrade {}` to update the file.",
-                        config_path.display()
-                    );
-                }
-
+                // Validate what startup would load, including the automatic upgrade, which is
+                // reported in this command's output rather than logged.
+                let (_, upgrade) =
+                    ConfigurationParser::new()?.parse_reporting_upgrade(&config_string)?;
+                print!("{}", validation_report(config_path, &upgrade));
                 Ok(())
             }
             Some(Commands::Config(ConfigSubcommandArgs {
@@ -831,6 +822,31 @@ impl Executable {
     }
 }
 
+/// What `router config validate` prints for a valid configuration at `path`: the verdict, the
+/// automatic upgrade's notices, and how to update the file when the upgrade changes it.
+fn validation_report(path: &Path, upgrade: &AutomaticUpgrade) -> String {
+    let path = path.display();
+    let mut report = format!("Configuration at path {path} is valid.\n");
+    if !upgrade.notices.is_empty() {
+        report.push_str(if upgrade.changed {
+            "It relies on automatic upgrades that the router applies at startup:\n"
+        } else {
+            "The router logs these notices at startup:\n"
+        });
+        for notice in &upgrade.notices {
+            // A description can hold a list, such as the renamed fields of a promotion; indent
+            // its lines under the notice's bullet.
+            report.push_str(&format!("  - {}\n", notice.replace('\n', "\n    ")));
+        }
+    }
+    if upgrade.changed {
+        report.push_str(&format!(
+            "Run `router config upgrade {path}` to update the file.\n"
+        ));
+    }
+    report
+}
+
 fn graph_os() -> bool {
     crate::services::APOLLO_KEY.lock().is_some()
         && crate::services::APOLLO_GRAPH_REF.lock().is_some()
@@ -884,9 +900,38 @@ fn setup_panic_handler() {
 
 #[cfg(test)]
 mod tests {
+    use std::path::Path;
+
+    use crate::configuration::AutomaticUpgrade;
     use crate::executable::add_log_filter;
     use crate::executable::env_variables_set;
     use crate::executable::reject_environment_variables;
+    use crate::executable::validation_report;
+
+    #[test]
+    fn validation_report_of_a_current_configuration_is_the_verdict() {
+        assert_eq!(
+            validation_report(Path::new("router.yaml"), &AutomaticUpgrade::default()),
+            "Configuration at path router.yaml is valid.\n"
+        );
+    }
+
+    /// A notice can apply to a configuration the upgrade leaves unchanged, such as a deprecation.
+    /// There is then nothing for `router config upgrade` to do.
+    #[test]
+    fn validation_report_lists_notices_without_an_upgrade() {
+        let upgrade = AutomaticUpgrade {
+            changed: false,
+            notices: vec!["First line\nsecond line".to_string()],
+        };
+
+        assert_eq!(
+            validation_report(Path::new("router.yaml"), &upgrade),
+            "Configuration at path router.yaml is valid.\n\
+             The router logs these notices at startup:\n  \
+               - First line\n    second line\n"
+        );
+    }
 
     #[test]
     fn simplest_logging_modifications() {

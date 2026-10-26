@@ -1,7 +1,7 @@
-//! Materializing the winning fetch graph into a query plan: dependency
-//! wavefronts of nested Sequence/Parallel nodes, one subgraph operation per
-//! fetch group, entity representations from edge inputs, and @defer
-//! partitioning.
+//! Materializing the winning fetch graph into a query plan: nested
+//! Sequence/Parallel nodes that start each fetch at its pipeline level, one
+//! subgraph operation per fetch group, entity representations from edge
+//! inputs, and @defer partitioning.
 
 use std::collections::HashMap;
 use std::collections::HashSet;
@@ -15,6 +15,7 @@ use indexmap::IndexMap;
 use petgraph::Direction;
 use petgraph::algo::toposort;
 use petgraph::stable_graph::NodeIndex;
+use petgraph::unionfind::UnionFind;
 use petgraph::visit::EdgeRef;
 
 use super::super::defer::DeferInfo;
@@ -24,6 +25,9 @@ use super::FetchGroupKind;
 use super::pipelining_factor;
 use crate::error::FederationError;
 use crate::operation::DirectiveList;
+use crate::operation::FieldSelection;
+use crate::operation::InlineFragmentSelection;
+use crate::operation::Selection;
 use crate::operation::SelectionMap;
 use crate::operation::SelectionSet;
 use crate::operation::VariableCollector;
@@ -71,10 +75,9 @@ pub(crate) struct PlanBuildContext<'a> {
     pub(crate) skip_validation: bool,
 }
 
-/// The slice of the graph one plan covers (the whole graph, the primary
-/// part, or one deferred block) plus per-node metadata for materialization.
+/// Per-node metadata for materializing one plan's slice of the graph (the
+/// whole graph, the primary part, or one deferred block).
 struct PlanScope<'a> {
-    members: &'a HashSet<NodeIndex>,
     /// Pipeline depth per node over the whole graph, for cost scaling.
     depth: &'a [u32],
     /// Fetch IDs for defer dependency tracking.
@@ -103,91 +106,32 @@ fn stamp_fetch_id(plan_node: &mut PlanNode, id: u64) {
     }
 }
 
-/// A node that cannot be materialized yet because some parents are still
-/// unprocessed.
-struct UnhandledNode {
-    node: NodeIndex,
-    unhandled_parents: Vec<NodeIndex>,
+/// Whether a node with `defer_ref` is planned in the block for `label` or in
+/// a block nested inside it.
+fn is_within_defer_block<'a>(
+    defer_info: &'a DeferInfo,
+    mut defer_ref: Option<&'a str>,
+    label: &str,
+) -> bool {
+    while let Some(current) = defer_ref {
+        if current == label {
+            return true;
+        }
+        defer_ref = defer_info
+            .blocks
+            .get(current)
+            .and_then(|block| block.parent_label.as_deref());
+    }
+    false
 }
 
-/// Wavefront bookkeeping for dependency-order materialization: nodes whose
-/// parents are all processed, and nodes still waiting on some parents.
-struct ProcessingState {
-    next: Vec<NodeIndex>,
-    unhandled: Vec<UnhandledNode>,
-}
-
-impl ProcessingState {
-    fn empty() -> Self {
-        Self {
-            next: Vec::new(),
-            unhandled: Vec::new(),
-        }
-    }
-
-    fn of_ready_nodes(next: Vec<NodeIndex>) -> Self {
-        Self {
-            next,
-            unhandled: Vec::new(),
-        }
-    }
-
-    /// Merge sibling states from one wavefront. A node waiting in both keeps
-    /// only the parents unprocessed on both sides; each side has already
-    /// dropped the parent that discovered it, so an empty intersection means
-    /// every parent is processed and the node is ready.
-    fn merge_with(self, other: ProcessingState) -> ProcessingState {
-        let mut next = self.next;
-        for node in other.next {
-            if !next.contains(&node) {
-                next.push(node);
-            }
-        }
-
-        let mut other_unhandled = other.unhandled;
-        let mut unhandled = Vec::new();
-        for mut entry in self.unhandled {
-            if let Some(pos) = other_unhandled
-                .iter()
-                .position(|other_entry| other_entry.node == entry.node)
-            {
-                let other_entry = other_unhandled.remove(pos);
-                entry
-                    .unhandled_parents
-                    .retain(|parent| other_entry.unhandled_parents.contains(parent));
-            }
-            if entry.unhandled_parents.is_empty() {
-                if !next.contains(&entry.node) {
-                    next.push(entry.node);
-                }
-            } else {
-                unhandled.push(entry);
-            }
-        }
-        unhandled.extend(other_unhandled);
-
-        ProcessingState { next, unhandled }
-    }
-
-    /// Drop just-processed nodes from every waiting entry; entries with no
-    /// remaining parents become ready.
-    fn update_for_processed_nodes(self, processed: &[NodeIndex]) -> ProcessingState {
-        let mut next = self.next;
-        let mut unhandled = Vec::new();
-        for mut entry in self.unhandled {
-            entry
-                .unhandled_parents
-                .retain(|parent| !processed.contains(parent));
-            if entry.unhandled_parents.is_empty() {
-                if !next.contains(&entry.node) {
-                    next.push(entry.node);
-                }
-            } else {
-                unhandled.push(entry);
-            }
-        }
-        ProcessingState { next, unhandled }
-    }
+/// Which wavefront fetch's branch a fetch belongs to: the one wavefront
+/// fetch it depends on (by position in the wavefront), or none when it
+/// depends on several.
+#[derive(Clone, Copy, PartialEq)]
+enum BranchAssignment {
+    Branch(usize),
+    Shared,
 }
 
 /// Push onto a Sequence child list, splicing a nested Sequence's children
@@ -232,12 +176,10 @@ fn reduce_parallel(mut nodes: Vec<PlanNode>) -> Option<PlanNode> {
 
 impl FetchGraph {
     /// Generate a PlanNode tree from the winning fetch graph, wrapped in a
-    /// DeferNode when defer info is provided. Nodes are materialized in
-    /// dependency wavefronts: sole-parented descendants nest in a Sequence
-    /// under their parent, independent branches run in Parallel, and a node
-    /// with parents in several branches is sequenced at the level where its
-    /// last parent's branch completes. This keeps a fetch from waiting on
-    /// unrelated fetches that merely share its depth.
+    /// DeferNode when defer info is provided. Each fetch starts at its level,
+    /// one past its latest parent, so the plan's depth equals the graph's
+    /// critical path. Disconnected parts run in Parallel and never wait on
+    /// each other.
     pub(crate) fn to_query_plan_with_defer(
         &self,
         ctx: &mut PlanBuildContext<'_>,
@@ -411,38 +353,30 @@ impl FetchGraph {
         }
 
         let members: HashSet<NodeIndex> = nodes.iter().copied().collect();
-        let roots: Vec<NodeIndex> = nodes
-            .iter()
-            .copied()
-            .filter(|node| {
-                !self
-                    .graph
-                    .edges_directed(*node, Direction::Incoming)
-                    .any(|e| members.contains(&e.source()))
-            })
-            .collect();
-        let scope = PlanScope {
-            members: &members,
-            depth,
-            fetch_ids,
-        };
+        let scope = PlanScope { depth, fetch_ids };
+
+        // Levels count only parents inside this subset; parents outside it
+        // run in an enclosing or earlier defer block. `nodes` is in
+        // dependency order, so every member parent already has a level.
+        let mut levels: HashMap<NodeIndex, u32> = HashMap::with_capacity(nodes.len());
+        for &node in nodes {
+            let mut level = 0;
+            for edge in self.graph.edges_directed(node, Direction::Incoming) {
+                let parent = edge.source();
+                if !members.contains(&parent) {
+                    continue;
+                }
+                let parent_level = levels.get(&parent).ok_or_else(|| {
+                    FederationError::internal("fetch groups are not in dependency order")
+                })?;
+                level = level.max(parent_level + 1);
+            }
+            levels.insert(node, level);
+        }
 
         let mut cost: QueryPlanCost = 0.0;
-        let (sequence, state) = self.process_wavefronts(
-            ctx,
-            ProcessingState::of_ready_nodes(roots),
-            &scope,
-            &mut cost,
-        )?;
-        // pipeline_depths already rejected cycles, so leftovers mean the
-        // state bookkeeping lost track of a parent.
-        if !state.unhandled.is_empty() {
-            return Err(FederationError::internal(format!(
-                "{} fetch groups still waiting on parents after processing",
-                state.unhandled.len(),
-            )));
-        }
-        Ok((reduce_sequence(sequence), cost))
+        let plan = self.plan_by_level(ctx, nodes, &levels, &scope, &mut cost)?;
+        Ok((plan, cost))
     }
 
     /// Recursively build `DeferredDeferBlock`s for a set of labels; a label
@@ -470,10 +404,20 @@ impl FetchGraph {
             let child_labels = children_of.get(label);
 
             // Dependencies: parent-scope nodes feeding this label's nodes.
+            // Parents planned inside this block only run once it starts, so
+            // waiting on them would hold the block until the enclosing
+            // primary finishes.
             let mut depends: Vec<DeferredDependency> = Vec::new();
             for &deferred_idx in nodes {
                 for edge in self.graph.edges_directed(deferred_idx, Direction::Incoming) {
                     let parent_idx = edge.source();
+                    if is_within_defer_block(
+                        defer_info,
+                        self.graph[parent_idx].defer_ref.as_deref(),
+                        label,
+                    ) {
+                        continue;
+                    }
                     if let Some(&fetch_id) = node_fetch_ids.get(&parent_idx)
                         && !depends.iter().any(|d| d.id == fetch_id.to_string())
                     {
@@ -557,66 +501,167 @@ impl FetchGraph {
         Ok(blocks)
     }
 
-    /// Sequence of parallel wavefronts: materialize every ready node, then
-    /// whatever those unblocked, until nothing is ready. Nodes still waiting
-    /// on parents in other branches are handed back in the returned state.
-    fn process_wavefronts(
+    /// Plan `nodes` so each fetch starts at its level, the length of its
+    /// longest chain of parents within the subset. Disconnected parts run in
+    /// Parallel, so unrelated branches never wait on each other, and the
+    /// plan's depth equals the fetch graph's critical path.
+    fn plan_by_level(
         &self,
         ctx: &mut PlanBuildContext<'_>,
-        mut state: ProcessingState,
+        nodes: &[NodeIndex],
+        levels: &HashMap<NodeIndex, u32>,
         scope: &PlanScope<'_>,
         cost: &mut QueryPlanCost,
-    ) -> Result<(Vec<PlanNode>, ProcessingState), FederationError> {
-        let mut sequence: Vec<PlanNode> = Vec::new();
-        while !state.next.is_empty() {
-            let (parallel, new_state) = self.process_ready_nodes(ctx, state, scope, cost)?;
-            if let Some(plan_node) = reduce_parallel(parallel) {
-                push_into_sequence(&mut sequence, plan_node);
-            }
-            state = new_state;
-        }
-        Ok((sequence, state))
-    }
-
-    /// Materialize one wavefront of ready nodes as parallel branches, each
-    /// with its sole-parented descendants nested beneath it.
-    fn process_ready_nodes(
-        &self,
-        ctx: &mut PlanBuildContext<'_>,
-        state: ProcessingState,
-        scope: &PlanScope<'_>,
-        cost: &mut QueryPlanCost,
-    ) -> Result<(Vec<PlanNode>, ProcessingState), FederationError> {
-        let mut parallel: Vec<PlanNode> = Vec::new();
-        // Waiting nodes carry forward so sibling branches' records of the
-        // same multi-parent child meet here; the child becomes ready at the
-        // merge level where its last parent's record arrives, which is also
-        // where the plan sequences it after all of them.
-        let mut merged = ProcessingState {
-            next: Vec::new(),
-            unhandled: state.unhandled,
-        };
-        for &node_idx in &state.next {
-            let (plan_node, node_state) = self.process_node(ctx, node_idx, scope, cost)?;
-            if let Some(plan_node) = plan_node {
+    ) -> Result<Option<PlanNode>, FederationError> {
+        let mut parallel = Vec::new();
+        for component in self.connected_components(nodes) {
+            if let Some(plan_node) = self.plan_component(ctx, &component, levels, scope, cost)? {
                 push_into_parallel(&mut parallel, plan_node);
             }
-            merged = merged.merge_with(node_state);
         }
-        Ok((parallel, merged.update_for_processed_nodes(&state.next)))
+        Ok(reduce_parallel(parallel))
     }
 
-    /// Materialize one node and, sequenced after it, every descendant only
-    /// it unblocks. Descendants with other unprocessed parents are handed
-    /// back in the state.
-    fn process_node(
+    /// Run a connected part's wavefront (its lowest-level fetches), each
+    /// followed by its branch, then plan the rest after them all. See
+    /// `assign_branches` for which fetches go in a branch.
+    fn plan_component(
+        &self,
+        ctx: &mut PlanBuildContext<'_>,
+        component: &[NodeIndex],
+        levels: &HashMap<NodeIndex, u32>,
+        scope: &PlanScope<'_>,
+        cost: &mut QueryPlanCost,
+    ) -> Result<Option<PlanNode>, FederationError> {
+        let wavefront_level = component
+            .iter()
+            .map(|node| levels[node])
+            .min()
+            .unwrap_or_default();
+        let (wavefront, rest): (Vec<NodeIndex>, Vec<NodeIndex>) = component
+            .iter()
+            .partition(|node| levels[*node] == wavefront_level);
+        let (branches, after) = self.assign_branches(&wavefront, &rest, levels);
+
+        let mut parallel = Vec::new();
+        for (&wavefront_node, branch) in wavefront.iter().zip(&branches) {
+            let mut sequence = Vec::new();
+            if let Some(plan_node) = self.materialize(ctx, wavefront_node, scope, cost)? {
+                push_into_sequence(&mut sequence, plan_node);
+            }
+            if let Some(plan_node) = self.plan_by_level(ctx, branch, levels, scope, cost)? {
+                push_into_sequence(&mut sequence, plan_node);
+            }
+            if let Some(plan_node) = reduce_sequence(sequence) {
+                push_into_parallel(&mut parallel, plan_node);
+            }
+        }
+
+        let mut sequence = Vec::new();
+        if let Some(plan_node) = reduce_parallel(parallel) {
+            push_into_sequence(&mut sequence, plan_node);
+        }
+        if let Some(plan_node) = self.plan_by_level(ctx, &after, levels, scope, cost)? {
+            push_into_sequence(&mut sequence, plan_node);
+        }
+        Ok(reduce_sequence(sequence))
+    }
+
+    /// Assign each fetch after the wavefront to the branch of the one
+    /// wavefront fetch it depends on, or run it after every branch.
+    ///
+    /// ```text
+    /// fetches:  w1 -> p1 -> p2    w2 -> q1    p1, q1 -> s
+    /// plan:     Parallel(w1 -> p1, w2 -> q1) -> Parallel(s, p2)
+    /// ```
+    ///
+    /// `s` needs both wavefront fetches, so it is shared. Branches stop
+    /// below its level, so `p2` waits for the join rather than delaying it.
+    fn assign_branches(
+        &self,
+        wavefront: &[NodeIndex],
+        rest: &[NodeIndex],
+        levels: &HashMap<NodeIndex, u32>,
+    ) -> (Vec<Vec<NodeIndex>>, Vec<NodeIndex>) {
+        // `rest` is in dependency order, so a fetch's parents in the part
+        // are assigned before it is. Parents outside the part are already
+        // done and do not constrain it.
+        let mut assignments: HashMap<NodeIndex, BranchAssignment> = wavefront
+            .iter()
+            .enumerate()
+            .map(|(i, node)| (*node, BranchAssignment::Branch(i)))
+            .collect();
+        for &node in rest {
+            let mut assignment = None;
+            for edge in self.graph.edges_directed(node, Direction::Incoming) {
+                let Some(&parent) = assignments.get(&edge.source()) else {
+                    continue;
+                };
+                assignment = match assignment {
+                    None => Some(parent),
+                    Some(current) if current == parent => Some(current),
+                    Some(_) => Some(BranchAssignment::Shared),
+                };
+            }
+            assignments.insert(node, assignment.unwrap_or(BranchAssignment::Shared));
+        }
+
+        let first_shared_level = rest
+            .iter()
+            .filter(|node| assignments[*node] == BranchAssignment::Shared)
+            .map(|node| levels[node])
+            .min();
+        let mut branches = vec![Vec::new(); wavefront.len()];
+        let mut after = Vec::new();
+        for &node in rest {
+            match assignments[&node] {
+                BranchAssignment::Branch(i)
+                    if first_shared_level.is_none_or(|shared| levels[&node] < shared) =>
+                {
+                    branches[i].push(node);
+                }
+                _ => after.push(node),
+            }
+        }
+        (branches, after)
+    }
+
+    /// Weakly connected parts of `nodes` over the edges between them. Parts,
+    /// and the nodes within each part, keep `nodes` order.
+    fn connected_components(&self, nodes: &[NodeIndex]) -> Vec<Vec<NodeIndex>> {
+        let position: HashMap<NodeIndex, usize> = nodes
+            .iter()
+            .enumerate()
+            .map(|(i, node)| (*node, i))
+            .collect();
+        let mut parts = UnionFind::new(nodes.len());
+        for (i, node) in nodes.iter().enumerate() {
+            for edge in self.graph.edges_directed(*node, Direction::Outgoing) {
+                if let Some(&j) = position.get(&edge.target()) {
+                    parts.union(i, j);
+                }
+            }
+        }
+
+        // Keyed by each part's representative, in order of the part's first
+        // node, so the plan keeps a stable order.
+        let mut components: IndexMap<usize, Vec<NodeIndex>> = IndexMap::new();
+        for (i, node) in nodes.iter().enumerate() {
+            components.entry(parts.find_mut(i)).or_default().push(*node);
+        }
+        components.into_values().collect()
+    }
+
+    /// Materialize one node, adding its pipelined cost and its defer fetch
+    /// ID.
+    fn materialize(
         &self,
         ctx: &mut PlanBuildContext<'_>,
         node_idx: NodeIndex,
         scope: &PlanScope<'_>,
         cost: &mut QueryPlanCost,
-    ) -> Result<(Option<PlanNode>, ProcessingState), FederationError> {
-        let plan_node = self
+    ) -> Result<Option<PlanNode>, FederationError> {
+        Ok(self
             .node_to_plan_node(ctx, node_idx)?
             .map(|(mut plan_node, node_cost)| {
                 *cost += node_cost * pipelining_factor(scope.depth[node_idx.index()]);
@@ -625,45 +670,7 @@ impl FetchGraph {
                     stamp_fetch_id(&mut plan_node, fetch_id);
                 }
                 plan_node
-            });
-
-        let state = self.state_for_children(node_idx, scope);
-        if state.next.is_empty() {
-            return Ok((plan_node, state));
-        }
-
-        let (descendants, new_state) = self.process_wavefronts(ctx, state, scope, cost)?;
-        let mut sequence = Vec::from_iter(plan_node);
-        sequence.extend(descendants);
-        Ok((reduce_sequence(sequence), new_state))
-    }
-
-    /// Classify a just-processed node's children: sole-parented children are
-    /// ready; the rest wait on their remaining parents. Children and parents
-    /// outside the scope are ignored; they belong to a different defer block.
-    fn state_for_children(&self, processed: NodeIndex, scope: &PlanScope<'_>) -> ProcessingState {
-        let mut state = ProcessingState::empty();
-        for edge in self.graph.edges_directed(processed, Direction::Outgoing) {
-            let child = edge.target();
-            if !scope.members.contains(&child) {
-                continue;
-            }
-            let remaining: Vec<NodeIndex> = self
-                .graph
-                .edges_directed(child, Direction::Incoming)
-                .map(|e| e.source())
-                .filter(|parent| *parent != processed && scope.members.contains(parent))
-                .collect();
-            if remaining.is_empty() {
-                state.next.push(child);
-            } else {
-                state.unhandled.push(UnhandledNode {
-                    node: child,
-                    unhandled_parents: remaining,
-                });
-            }
-        }
-        state
+            }))
     }
 
     /// Convert a single FetchGraph node into a PlanNode.
@@ -742,7 +749,8 @@ impl FetchGraph {
 
         // 3. Materialize entity inputs from incoming edges.
         let (requires_selection, input_rewrites) = if is_entity {
-            let (sel, rewrites) = self.materialize_entity_inputs(ctx, node_idx, &parent_type)?;
+            let (sel, rewrites) =
+                self.materialize_entity_inputs(ctx, node_idx, &parent_type, &group_conditions)?;
             // Without representations the router can fetch nothing; an
             // entity group reachable only through input-less edges is an
             // upstream bug, not a plannable fetch.
@@ -888,17 +896,22 @@ impl FetchGraph {
         skip_validation: bool,
     ) -> Result<(SelectionSet, Vec<Arc<FetchDataRewrite>>), FederationError> {
         let stripped = remove_conditions_from_selection_set(selection_set, group_conditions)?;
+        let stripped = if is_entity {
+            drop_covered_condition_fragments_in_casts(&stripped)?
+        } else {
+            drop_covered_condition_fragments(&stripped)?
+        };
         let selection_without_conditions = if is_entity {
             let mut selections = SelectionMap::new();
             for selection in stripped.selections.values() {
                 match selection {
-                    crate::operation::Selection::InlineFragment(frag_sel) => {
+                    Selection::InlineFragment(frag_sel) => {
                         let casted = frag_sel.inline_fragment.casted_type();
                         let flattened = frag_sel
                             .selection_set
                             .flatten_unnecessary_fragments(&casted, subgraph_schema)?;
-                        selections.insert(crate::operation::Selection::InlineFragment(Arc::new(
-                            crate::operation::InlineFragmentSelection::new(
+                        selections.insert(Selection::InlineFragment(Arc::new(
+                            InlineFragmentSelection::new(
                                 frag_sel.inline_fragment.clone(),
                                 flattened,
                             ),
@@ -935,6 +948,7 @@ impl FetchGraph {
         ctx: &PlanBuildContext<'_>,
         node_idx: NodeIndex,
         parent_type: &CompositeTypeDefinitionPosition,
+        group_conditions: &Conditions,
     ) -> Result<(SelectionSet, Vec<Arc<FetchDataRewrite>>), FederationError> {
         let mut per_type: IndexMap<CompositeTypeDefinitionPosition, SelectionSet> =
             IndexMap::default();
@@ -955,8 +969,13 @@ impl FetchGraph {
                     ctx.supergraph_schema,
                     &input_type,
                     input_sel,
-                    &OpGraphPathContext::default(),
+                    input
+                        .needed_under()
+                        .unwrap_or(&OpGraphPathContext::default()),
                 );
+                // The fetch is gated on the conditions all its selections are
+                // under, so the representation needn't check them again.
+                let wrapped = remove_conditions_from_selection_set(&wrapped, group_conditions)?;
                 let entry = per_type
                     .entry(wrapped.type_position.clone())
                     .or_insert_with(|| {
@@ -993,6 +1012,7 @@ impl FetchGraph {
 
         let mut merged_selections = SelectionMap::new();
         for selection_set in per_type.values() {
+            let selection_set = drop_covered_condition_fragments_in_casts(selection_set)?;
             if !ctx.skip_validation {
                 selection_set.validate(ctx.variable_definitions)?;
             }
@@ -1049,6 +1069,137 @@ impl FetchGraph {
         variable_usages.sort();
         (variable_definitions, variable_usages)
     }
+}
+
+/// `selection_set` without the condition-only fragments (no type condition,
+/// or the parent's own, and only @skip/@include) whose selections it already
+/// makes unconditionally, e.g. the `... @include(if: $a) { __typename id }`
+/// a gated key input leaves next to an unconditional `__typename id`. Such
+/// fragments left with no directives once the fetch's own conditions are
+/// removed are inlined.
+fn drop_covered_condition_fragments(
+    selection_set: &SelectionSet,
+) -> Result<SelectionSet, FederationError> {
+    let is_condition_only = |selection: &Selection| match selection {
+        Selection::InlineFragment(frag_sel) => {
+            let fragment = &frag_sel.inline_fragment;
+            fragment
+                .type_condition_position
+                .as_ref()
+                .is_none_or(|type_condition| *type_condition == selection_set.type_position)
+                && fragment
+                    .directives
+                    .iter()
+                    .all(|d| d.name == "skip" || d.name == "include")
+        }
+        Selection::Field(_) => false,
+    };
+    let empty = || {
+        SelectionSet::empty(
+            selection_set.schema.clone(),
+            selection_set.type_position.clone(),
+        )
+    };
+    let mut selections = Vec::with_capacity(selection_set.selections.len());
+    let mut unconditional = empty();
+    for selection in selection_set.selections.values() {
+        let selection = match selection {
+            Selection::Field(field_sel) => match &field_sel.selection_set {
+                Some(sub) => Selection::Field(Arc::new(FieldSelection {
+                    field: field_sel.field.clone(),
+                    selection_set: Some(drop_covered_condition_fragments(sub)?),
+                })),
+                None => selection.clone(),
+            },
+            Selection::InlineFragment(frag_sel) => {
+                Selection::InlineFragment(Arc::new(InlineFragmentSelection::new(
+                    frag_sel.inline_fragment.clone(),
+                    drop_covered_condition_fragments(&frag_sel.selection_set)?,
+                )))
+            }
+        };
+        match &selection {
+            Selection::InlineFragment(frag_sel) if is_condition_only(&selection) => {
+                if frag_sel.inline_fragment.directives.is_empty() {
+                    unconditional.add_local_selection_set(&frag_sel.selection_set)?;
+                }
+            }
+            _ => unconditional.add_local_selection(&selection)?,
+        }
+        selections.push(selection);
+    }
+    let mut result = empty();
+    for selection in &selections {
+        match selection {
+            Selection::InlineFragment(frag_sel) if is_condition_only(selection) => {
+                if frag_sel.inline_fragment.directives.is_empty() {
+                    result.add_local_selection_set(&frag_sel.selection_set)?;
+                } else if !unconditional.contains(&frag_sel.selection_set) {
+                    result.add_local_selection(selection)?;
+                }
+            }
+            _ => result.add_local_selection(selection)?,
+        }
+    }
+    Ok(result)
+}
+
+/// [`drop_covered_condition_fragments`] within the top-level casts of an
+/// entity selection, which stay as they are (see `finalize_selection`),
+/// except that a cast gated only by @skip/@include is dropped when an
+/// ungated cast to the same type already selects what it does.
+fn drop_covered_condition_fragments_in_casts(
+    selection_set: &SelectionSet,
+) -> Result<SelectionSet, FederationError> {
+    let mut selections = Vec::with_capacity(selection_set.selections.len());
+    for selection in selection_set.selections.values() {
+        selections.push(match selection {
+            Selection::InlineFragment(frag_sel) => {
+                Selection::InlineFragment(Arc::new(InlineFragmentSelection::new(
+                    frag_sel.inline_fragment.clone(),
+                    drop_covered_condition_fragments(&frag_sel.selection_set)?,
+                )))
+            }
+            Selection::Field(_) => selection.clone(),
+        });
+    }
+    let ungated_casts: Vec<_> = selections
+        .iter()
+        .filter_map(|selection| match selection {
+            Selection::InlineFragment(frag_sel)
+                if frag_sel.inline_fragment.directives.is_empty() =>
+            {
+                Some(frag_sel)
+            }
+            _ => None,
+        })
+        .collect();
+    let is_covered = |selection: &Selection| match selection {
+        Selection::InlineFragment(frag_sel) => {
+            let fragment = &frag_sel.inline_fragment;
+            !fragment.directives.is_empty()
+                && fragment
+                    .directives
+                    .iter()
+                    .all(|d| d.name == "skip" || d.name == "include")
+                && ungated_casts.iter().any(|cast| {
+                    cast.inline_fragment.type_condition_position == fragment.type_condition_position
+                        && cast.selection_set.contains(&frag_sel.selection_set)
+                })
+        }
+        Selection::Field(_) => false,
+    };
+    let mut result = SelectionMap::new();
+    for selection in &selections {
+        if !is_covered(selection) {
+            result.insert(selection.clone());
+        }
+    }
+    Ok(SelectionSet {
+        schema: selection_set.schema.clone(),
+        type_position: selection_set.type_position.clone(),
+        selections: Arc::new(result),
+    })
 }
 
 /// Trim a `SelectionSet` from `apollo_compiler::executable` down to the
@@ -1286,6 +1437,7 @@ mod tests {
                 source_type_name: name!("T"),
                 conditions: key_conditions,
                 condition_alias_rewrites: Vec::new(),
+                needed_under: Default::default(),
             }],
         );
 
@@ -1384,6 +1536,7 @@ mod tests {
                 source_type_name: name!("T"),
                 conditions: key_conditions,
                 condition_alias_rewrites: Vec::new(),
+                needed_under: Default::default(),
             }],
         );
     }

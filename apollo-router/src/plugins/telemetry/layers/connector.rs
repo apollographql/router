@@ -78,7 +78,7 @@ where
                         .instruments
                         .new_apollo_connector_instruments(
                             static_apollo_connector_instruments.clone(),
-                            req_fn_config.apollo.clone(),
+                            req_fn_config.apollo.subgraph_metrics,
                         );
                     apollo_instruments.on_request(request);
                     let mut custom_events =

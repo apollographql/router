@@ -20,8 +20,11 @@ use super::FieldRoutingSearchSpace;
 use super::NodeSource;
 use super::RoutingSiteKey;
 use super::context;
+use super::requires::gated_input_path;
 use super::requires::trailing_condition_fragments;
+use super::requires::trailing_conditions_context;
 use super::requires::unconditioned_input_path;
+use super::requires::with_own_conditions;
 use super::routing::RoutingChoice;
 use super::selection_label;
 use super::state::CONDITION_DEPTH_LIMIT;
@@ -310,14 +313,19 @@ impl FieldRoutingSearchSpace {
             None => (true, (None, None)),
         };
 
-        // Key fields plus __typename, which identifies the entity type.
-        self.append_entity_inputs(
+        // Key fields plus __typename, which identifies the entity type. The
+        // hop is gated on the trailing conditions and the field's own, so
+        // its inputs keep them (see `gated_input_path`).
+        let gate_path = with_own_conditions(&pending.op_path, &pending.selection);
+        let input_path = gated_input_path(&gate_path);
+        self.append_entity_inputs_at(
             state,
             pending.fetch_node,
-            &pending.op_path,
+            &input_path,
             anchor_key.as_ref(),
             &source,
         );
+        let needed_under = trailing_conditions_context(&gate_path)?;
 
         let merge_at = self.pending_merge_at(state, pending);
 
@@ -369,6 +377,7 @@ impl FieldRoutingSearchSpace {
                     dest_type,
                     dest_subgraph: first_subgraph.clone(),
                 },
+                needed_under,
             })
         } else {
             None
@@ -402,7 +411,13 @@ impl FieldRoutingSearchSpace {
                     new_group,
                 )?;
             } else {
-                self.push_condition_pendings(state, pending, routed_key, new_group)?;
+                self.push_condition_pendings_at(
+                    state,
+                    pending,
+                    routed_key,
+                    new_group,
+                    &input_path,
+                )?;
             }
         }
 
@@ -572,6 +587,7 @@ impl FieldRoutingSearchSpace {
                             dest_type,
                             dest_subgraph: next_subgraph.clone(),
                         },
+                        needed_under: Default::default(),
                     })
                 }
                 None => None,
@@ -706,9 +722,7 @@ impl FieldRoutingSearchSpace {
     ) -> EdgeIndex {
         if let Some(existing_edge) = state.graph.find_edge(anchor, group) {
             if let Some(input) = key_input
-                && !state
-                    .graph
-                    .edge_has_key_input(existing_edge, input.source_type_name())
+                && !state.graph.edge_has_key_input(existing_edge, &input)
             {
                 state.graph.add_input_to_edge(existing_edge, input);
             }
@@ -993,10 +1007,12 @@ impl FieldRoutingSearchSpace {
         let source = self.node_source(pending.query_graph_node)?;
         let subgraph = qg.node_weight(pending.query_graph_node)?.source.clone();
 
-        self.append_entity_inputs(
+        // The redirect target is gated on the trailing conditions
+        // (`defer_redirect_target`), so the inputs keep them.
+        self.append_entity_inputs_at(
             state,
             pending.fetch_node,
-            &pending.op_path,
+            &gated_input_path(&pending.op_path),
             Some(&key_conditions),
             &source,
         );
@@ -1023,6 +1039,7 @@ impl FieldRoutingSearchSpace {
                 dest_type,
                 dest_subgraph: subgraph,
             },
+            needed_under: trailing_conditions_context(&pending.op_path)?,
         });
 
         let edge = self.wire_key_edge(state, pending.fetch_node, new_group, key_input);
@@ -1402,13 +1419,30 @@ impl FieldRoutingSearchSpace {
         key_conditions: Option<&Arc<SelectionSet>>,
         source: &NodeSource,
     ) {
-        let input_path = unconditioned_input_path(op_path);
+        self.append_entity_inputs_at(
+            state,
+            fetch_node,
+            &unconditioned_input_path(op_path),
+            key_conditions,
+            source,
+        );
+    }
+
+    /// Select entity-representation inputs in `fetch_node` at `input_path`.
+    pub(super) fn append_entity_inputs_at(
+        &self,
+        state: &mut PlanState,
+        fetch_node: NodeIndex,
+        input_path: &SharedPath<Arc<OpPathElement>>,
+        key_conditions: Option<&Arc<SelectionSet>>,
+        source: &NodeSource,
+    ) {
         if let Some(key) = key_conditions {
             state
                 .graph
-                .append_selection(fetch_node, &input_path, Some(key));
+                .append_selection(fetch_node, input_path, Some(key));
         }
-        self.append_typename(state, fetch_node, &input_path, source);
+        self.append_typename(state, fetch_node, input_path, source);
     }
 
     /// Handle @fromContext on the routed edge: resolve context values from
@@ -1443,6 +1477,23 @@ impl FieldRoutingSearchSpace {
         conditions_arc: &Arc<SelectionSet>,
         dependent: NodeIndex,
     ) -> Result<(), FederationError> {
+        // Condition data is entity-fetch input: route it unconditionally
+        // (see `unconditioned_input_path`).
+        let input_path = unconditioned_input_path(&anchor.op_path);
+        self.push_condition_pendings_at(state, anchor, conditions_arc, dependent, &input_path)
+    }
+
+    /// [`Self::push_condition_pendings`] at `input_path`, e.g. a
+    /// `gated_input_path` for the key parts of a fetch whose representation
+    /// is built under the conditions that path keeps.
+    pub(super) fn push_condition_pendings_at(
+        &self,
+        state: &mut PlanState,
+        anchor: &PendingSelection,
+        conditions_arc: &Arc<SelectionSet>,
+        dependent: NodeIndex,
+        input_path: &SharedPath<Arc<OpPathElement>>,
+    ) -> Result<(), FederationError> {
         let conditions: &SelectionSet = conditions_arc;
         // Bound requires-of-requires nesting: mutually recursive @requires
         // would otherwise alternate forever, minting fresh entity groups
@@ -1467,9 +1518,6 @@ impl FieldRoutingSearchSpace {
                 selection_label(sel),
             )));
         }
-        // Condition data is entity-fetch input: route it unconditionally
-        // (see `unconditioned_input_path`).
-        let input_path = unconditioned_input_path(&anchor.op_path);
         // Conditions resolve in the anchor group's defer scope, not the
         // dependent's: keys for a deferred fetch merge into the fetches the
         // enclosing scope already makes instead of duplicating them in the

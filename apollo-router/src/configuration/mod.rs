@@ -39,7 +39,11 @@ use serde_json::Value;
 use sha2::Digest;
 use thiserror::Error;
 
+pub(crate) use self::apollo_configuration_parse::AutomaticUpgrade;
 pub(crate) use self::apollo_configuration_parse::ConfigurationParser;
+#[cfg(test)]
+pub(crate) use self::apollo_configuration_parse::ExternalValues;
+#[cfg(test)]
 pub(crate) use self::apollo_configuration_parse::Migration;
 #[cfg(test)]
 pub(crate) use self::apollo_configuration_parse::parse_configuration;
@@ -55,7 +59,6 @@ pub(crate) use self::schema::generate_config_schema;
 pub(crate) use self::schema::generate_upgrade;
 use self::server::Server;
 use self::subgraph::SubgraphConfiguration;
-pub(crate) use self::upgrade::uses_migrated_settings;
 use crate::ApolloRouterError;
 use crate::cache::DEFAULT_CACHE_CAPACITY;
 use crate::configuration::cooperative_cancellation::CooperativeCancellation;
@@ -226,7 +229,6 @@ pub struct Configuration {
 
     /// Plugin configuration
     #[serde(default)]
-    #[schemars(extend("default" = null))]
     pub(crate) plugins: UserPlugins,
 
     /// Built-in plugin configuration. Built in plugins are pushed to the top level of config.
@@ -775,10 +777,7 @@ impl JsonSchema for UserPlugins {
             .filter(|factory| !factory.name.starts_with(APOLLO_PLUGIN_PREFIX))
             .map(|factory| (factory.name.to_string(), factory.create_schema(generator)))
             .collect();
-        let mut schema = gen_schema(plugins, None);
-        // `plugins: null` means no user plugins, as in earlier releases.
-        schema.insert("type".to_string(), serde_json::json!(["object", "null"]));
-        schema
+        gen_schema(plugins, None)
     }
 }
 

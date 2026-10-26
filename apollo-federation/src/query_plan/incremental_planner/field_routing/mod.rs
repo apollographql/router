@@ -17,6 +17,7 @@ mod connect;
 pub(super) mod context;
 mod fork;
 mod requires;
+pub(super) mod response_keys;
 mod routing;
 pub(super) mod state;
 #[cfg(test)]
@@ -195,6 +196,8 @@ pub(crate) struct FieldRoutingSearchSpace {
     pub(super) caches: PlannerCaches,
     /// Subgraphs the caller disabled: enumeration never routes into them.
     pub(crate) disabled_subgraphs: apollo_compiler::collections::IndexSet<Arc<str>>,
+    /// Response keys the client operation claims, for @requires aliasing.
+    pub(crate) response_keys: response_keys::OperationResponseKeys,
 }
 
 /// Identity of the selection a key-hop enumeration serves; paired with the

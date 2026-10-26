@@ -610,7 +610,7 @@ fn requires_unresolvable_locally_hops_through_owning_subgraph() {
                 } =>
                 {
                   ... on Product {
-                    __require_0_weight: weight
+                    weight
                   }
                 }
               },
@@ -621,7 +621,7 @@ fn requires_unresolvable_locally_hops_through_owning_subgraph() {
                   ... on Product {
                     __typename
                     id
-                    __require_0_weight: weight
+                    weight
                   }
                 } =>
                 {
@@ -652,11 +652,11 @@ fn requires_through_local_field_resolves_nested_parts() {
             "Plan should fetch {needle:?}: {plan_str}"
         );
     }
-    // The nested hops must merge at C's `a` (aliased as a @requires
-    // condition), i.e. path a.c.__require_0_a, not at the top-level `a`.
+    // The nested hops must merge at C's `a`, i.e. path a.c.a, not at the
+    // top-level `a`.
     assert!(
-        plan_str.contains("a.c.__require_0_a"),
-        "Nested requires parts should merge under a.c.__require_0_a: {plan_str}"
+        plan_str.contains(r#"Flatten(path: "a.c.a")"#),
+        "Nested requires parts should merge under a.c.a: {plan_str}"
     );
 }
 
@@ -1538,6 +1538,341 @@ fn interface_object_fake_downcast_fetches_concrete_typename() {
     "###);
 }
 
+/// A key hop into an `@interfaceObject` subgraph, which doesn't know `X`:
+/// the gate is carried without the type condition.
+#[test]
+fn interface_object_key_hop_gated_by_typed_include() {
+    let plan_str = plan_query(
+        &interface_object_schema(),
+        "query($x: Boolean!) { items { ... on X @include(if: $x) { desc } } }",
+    );
+    insta::assert_snapshot!(plan_str, @r#"
+    QueryPlan {
+      Sequence {
+        Fetch(service: "a") {
+          {
+            items {
+              __typename
+              ... on X @include(if: $x) {
+                __typename
+                id
+              }
+            }
+          }
+        },
+        Include(if: $x) {
+          Flatten(path: "items.@|[X]") {
+            Fetch(service: "b") {
+              {
+                ... on X {
+                  __typename
+                  id
+                }
+              } =>
+              {
+                ... on I {
+                  desc
+                }
+              }
+            },
+          },
+        },
+      },
+    }
+    "#);
+}
+
+/// `a` resolves `posts` and `User.name`; `b` resolves `email`, and
+/// `emailDomain` with `@requires(fields: "name")`; `c` resolves `score`.
+fn gated_key_hop_schema() -> String {
+    wrap_supergraph(
+        r#"  A @join__graph(name: "a", url: "http://a")
+  B @join__graph(name: "b", url: "http://b")
+  C @join__graph(name: "c", url: "http://c")"#,
+        r#"
+type Query
+  @join__type(graph: A)
+  @join__type(graph: B)
+  @join__type(graph: C)
+{
+  posts: [Post] @join__field(graph: A)
+}
+
+type Post
+  @join__type(graph: A)
+{
+  title: String
+  author: User
+}
+
+type User
+  @join__type(graph: A, key: "id")
+  @join__type(graph: B, key: "id")
+  @join__type(graph: C, key: "id")
+{
+  id: ID!
+  name: String @join__field(graph: A) @join__field(graph: B, external: true)
+  email: String @join__field(graph: B)
+  emailDomain: String @join__field(graph: B, requires: "name")
+  score: Int @join__field(graph: C)
+}
+"#,
+    )
+}
+
+/// The key hop's fetch is gated on the `@include`, so its key inputs are
+/// selected under it too.
+#[test]
+fn key_hop_inputs_gated_by_include() {
+    let plan_str = plan_query(
+        &gated_key_hop_schema(),
+        "query($x: Boolean!) { posts { author { name ... @include(if: $x) { email } } } }",
+    );
+    insta::assert_snapshot!(plan_str, @r#"
+    QueryPlan {
+      Sequence {
+        Fetch(service: "a") {
+          {
+            posts {
+              author {
+                name
+                ... @include(if: $x) {
+                  __typename
+                  id
+                }
+              }
+            }
+          }
+        },
+        Include(if: $x) {
+          Flatten(path: "posts.@.author") {
+            Fetch(service: "b") {
+              {
+                ... on User {
+                  __typename
+                  id
+                }
+              } =>
+              {
+                ... on User {
+                  email
+                }
+              }
+            },
+          },
+        },
+      },
+    }
+    "#);
+}
+
+/// Key hops under different conditions share one fetch, which is not gated.
+/// Each keeps its key input, and its representation is built under its
+/// condition: with both conditions false, the fetch reads no keys.
+#[test]
+fn key_hops_with_different_conditions_build_conditional_representations() {
+    let plan_str = plan_query(
+        &gated_key_hop_schema(),
+        "query($a: Boolean!, $b: Boolean!) { posts { author { ... @include(if: $a) { email } ... @include(if: $b) { email } } } }",
+    );
+    insta::assert_snapshot!(plan_str, @r#"
+    QueryPlan {
+      Sequence {
+        Fetch(service: "a") {
+          {
+            posts {
+              author {
+                ... @include(if: $a) {
+                  __typename
+                  id
+                }
+                ... @include(if: $b) {
+                  __typename
+                  id
+                }
+              }
+            }
+          }
+        },
+        Flatten(path: "posts.@.author") {
+          Fetch(service: "b") {
+            {
+              ... on User @include(if: $a) {
+                __typename
+                id
+              }
+              ... on User @include(if: $b) {
+                __typename
+                id
+              }
+            } =>
+            {
+              ... on User {
+                ... @include(if: $a) {
+                  email
+                }
+                ... @include(if: $b) {
+                  email
+                }
+              }
+            }
+          },
+        },
+      },
+    }
+    "#);
+}
+
+/// The `@requires` condition fields are read under the same condition as the
+/// key. Otherwise, with both conditions false, `__typename` (selected for
+/// `c`) and `name` would form a representation without `id`.
+#[test]
+fn requires_input_built_under_key_conditions() {
+    let plan_str = plan_query(
+        &gated_key_hop_schema(),
+        "query($x: Boolean!, $y: Boolean!) { posts { author { score ... @include(if: $x) { emailDomain } ... @include(if: $y) { email } } } }",
+    );
+    insta::assert_snapshot!(plan_str, @r#"
+    QueryPlan {
+      Sequence {
+        Fetch(service: "a") {
+          {
+            posts {
+              author {
+                __typename
+                id
+                name
+              }
+            }
+          }
+        },
+        Parallel {
+          Flatten(path: "posts.@.author") {
+            Fetch(service: "b") {
+              {
+                ... on User @include(if: $x) {
+                  __typename
+                  id
+                  name
+                }
+                ... on User @include(if: $y) {
+                  __typename
+                  id
+                }
+              } =>
+              {
+                ... on User {
+                  ... @include(if: $x) {
+                    emailDomain
+                  }
+                  ... @include(if: $y) {
+                    email
+                  }
+                }
+              }
+            },
+          },
+          Flatten(path: "posts.@.author") {
+            Fetch(service: "c") {
+              {
+                ... on User {
+                  __typename
+                  id
+                }
+              } =>
+              {
+                ... on User {
+                  score
+                }
+              }
+            },
+          },
+        },
+      },
+    }
+    "#);
+}
+
+/// A deferred field local to the parent subgraph is redirected into an entity
+/// fetch, whose representations are built under each branch's condition.
+#[test]
+fn defer_redirect_inputs_gated_by_include() {
+    let config = QueryPlannerConfig {
+        incremental_delivery: QueryPlanIncrementalDeliveryConfig { enable_defer: true },
+        ..default_config()
+    };
+    let plan_str = plan_query_with_options(
+        &gated_key_hop_schema(),
+        "query($a: Boolean!, $b: Boolean!) { posts { author { email ... @defer { ... @include(if: $a) { name } ... @include(if: $b) { name } } } } }",
+        config,
+        Default::default(),
+    );
+    insta::assert_snapshot!(plan_str, @r#"
+    QueryPlan {
+      Defer {
+        Primary {
+          { posts { author { email } } }:
+          Sequence {
+            Fetch(service: "a", id: 0) {
+              {
+                posts {
+                  author {
+                    __typename
+                    id
+                  }
+                }
+              }
+            },
+            Flatten(path: "posts.@.author") {
+              Fetch(service: "b") {
+                {
+                  ... on User {
+                    __typename
+                    id
+                  }
+                } =>
+                {
+                  ... on User {
+                    email
+                  }
+                }
+              },
+            },
+          },
+        }, [
+          Deferred(depends: [0], path: "posts/author") {
+            { ... @include(if: $a) { name } ... @include(if: $b) { name } }:
+            Flatten(path: "posts.@.author") {
+              Fetch(service: "a") {
+                {
+                  ... on User @include(if: $a) {
+                    __typename
+                    id
+                  }
+                  ... on User @include(if: $b) {
+                    __typename
+                    id
+                  }
+                } =>
+                {
+                  ... on User {
+                    ... @include(if: $a) {
+                      name
+                    }
+                    ... @include(if: $b) {
+                      name
+                    }
+                  }
+                }
+              },
+            },
+          },
+        ]
+      },
+    }
+    "#);
+}
+
 /// A fake downcast whose fragment also selects a field only the concrete
 /// type defines: that field cannot stay under the io type in B, so it is
 /// fetched from A, where the concrete type exists.
@@ -2153,11 +2488,9 @@ fn entity_shareable_field_filters_inconsistent_union_members() {
 /// A field with locally-unresolvable @requires reached through an
 /// @include-gated fragment: the same-subgraph entity re-fetch must carry the
 /// gating fragment into its op path (or the hopped selection loses its
-/// condition), and boolean conditions on the path disable condition-field
-/// sharing.
+/// condition), while the condition input itself is fetched unconditionally.
 /// Targets requires.rs trailing_condition_fragments on the self-key-hop
-/// commit path (routing.rs self_key_hop -> commit.rs target_paths) and
-/// path_has_boolean_conditions in shareable_condition_fields.
+/// commit path (routing.rs self_key_hop -> commit.rs target_paths).
 #[test]
 fn requires_under_include_fragment_keeps_condition_on_entity_fetch() {
     let plan_str = plan_query(
@@ -2185,7 +2518,7 @@ fn requires_under_include_fragment_keeps_condition_on_entity_fetch() {
             } =>
             {
               ... on Product {
-                __require_0_weight: weight
+                weight
               }
             }
           },
@@ -2197,7 +2530,7 @@ fn requires_under_include_fragment_keeps_condition_on_entity_fetch() {
                 ... on Product {
                   __typename
                   id
-                  __require_0_weight: weight
+                  weight
                 }
               } =>
               {
@@ -2213,13 +2546,12 @@ fn requires_under_include_fragment_keeps_condition_on_entity_fetch() {
     "###);
 }
 
-/// A key-hop @requires reached through an @include-gated fragment: boolean
-/// conditions on the anchor path make condition-field sharing unprovable, so
-/// the condition is aliased instead of deduped with any user selection.
-/// Targets requires.rs path_has_boolean_conditions in
-/// shareable_condition_fields.
+/// A key-hop @requires reached through an @include-gated fragment: a gate on
+/// the anchor path does not change which field a response key holds, so the
+/// condition keeps its own name.
+/// Targets response_keys.rs condition_needs_alias.
 #[test]
-fn key_hop_requires_under_include_fragment_uses_alias() {
+fn key_hop_requires_under_include_fragment_shares_condition_key() {
     let plan_str = plan_query(
         &requires_key_hop_schema(),
         "query($v: Boolean!) { product { ... on Product @include(if: $v) { shippingEstimate } } }",
@@ -2229,8 +2561,8 @@ fn key_hop_requires_under_include_fragment_uses_alias() {
         "Plan should fetch shippingEstimate: {plan_str}"
     );
     assert!(
-        plan_str.contains("__require"),
-        "Gated condition must be aliased, not shared: {plan_str}"
+        !plan_str.contains("__require"),
+        "Nothing else uses the condition's key, so it needs no alias: {plan_str}"
     );
 }
 
@@ -2969,7 +3301,7 @@ fn dropped_field_schema(shared_fields: usize) -> String {
         r#"
 schema
   @link(url: "https://specs.apollo.dev/link/v1.0")
-  @link(url: "https://specs.apollo.dev/join/v0.2", for: EXECUTION)
+  @link(url: "https://specs.apollo.dev/join/v0.3", for: EXECUTION)
 {{
   query: Query
 }}
@@ -2977,7 +3309,9 @@ schema
 directive @join__field(graph: join__Graph!, requires: join__FieldSet, provides: join__FieldSet, type: String, external: Boolean, override: String, usedOverridden: Boolean) repeatable on FIELD_DEFINITION | INPUT_FIELD_DEFINITION
 directive @join__graph(name: String!, url: String!) on ENUM_VALUE
 directive @join__implements(graph: join__Graph!, interface: String!) repeatable on OBJECT | INTERFACE
-directive @join__type(graph: join__Graph!, key: join__FieldSet, extension: Boolean! = false, resolvable: Boolean! = true) repeatable on OBJECT | INTERFACE | UNION | ENUM | INPUT_OBJECT | SCALAR
+directive @join__type(graph: join__Graph!, key: join__FieldSet, extension: Boolean! = false, resolvable: Boolean! = true, isInterfaceObject: Boolean! = false) repeatable on OBJECT | INTERFACE | UNION | ENUM | INPUT_OBJECT | SCALAR
+directive @join__unionMember(graph: join__Graph!, member: String!) repeatable on UNION
+directive @join__enumValue(graph: join__Graph!) repeatable on ENUM_VALUE
 directive @link(url: String, as: String, for: link__Purpose, import: [link__Import]) repeatable on SCHEMA
 
 scalar join__FieldSet
@@ -3962,6 +4296,1614 @@ fn connector_field_without_this_beside_this_connector() {
     "#);
 }
 
+/// Two type-level connectors where one returns a superset of the other:
+/// `{ name reviews }` is served by the superset alone.
+#[test]
+fn connector_superset_type_connector_absorbs_sibling_fetch() {
+    let plan_str = plan_query_with_router_specs(
+        include_str!("../fixtures/connector_superset_type_connector.graphql"),
+        "{ topProducts { name reviews { rating comment } } }",
+    );
+    insta::assert_snapshot!(plan_str, @r#"
+    QueryPlan {
+      Sequence {
+        Fetch(service: "catalog") {
+          {
+            topProducts {
+              __typename
+              id
+            }
+          }
+        },
+        Flatten(path: "topProducts.@") {
+          Fetch(service: "products_Product_1") {
+            {
+              ... on Product {
+                __typename
+                id
+              }
+            } =>
+            {
+              ... on Product {
+                reviews {
+                  rating
+                  comment
+                }
+                name
+              }
+            }
+          },
+        },
+      },
+    }
+    "#);
+}
+
+/// Only `name` requested: the narrower connector is enough, and nothing is
+/// absorbed.
+#[test]
+fn connector_superset_type_connector_not_used_when_unneeded() {
+    let plan_str = plan_query_with_router_specs(
+        include_str!("../fixtures/connector_superset_type_connector.graphql"),
+        "{ topProducts { name } }",
+    );
+    insta::assert_snapshot!(plan_str, @r#"
+    QueryPlan {
+      Sequence {
+        Fetch(service: "catalog") {
+          {
+            topProducts {
+              __typename
+              id
+            }
+          }
+        },
+        Flatten(path: "topProducts.@") {
+          Fetch(service: "products_Product_0") {
+            {
+              ... on Product {
+                __typename
+                id
+              }
+            } =>
+            {
+              ... on Product {
+                name
+              }
+            }
+          },
+        },
+      },
+    }
+    "#);
+}
+
+/// A narrow `entity: true` resolver beside a type-level superset:
+/// `{ name reviews }` is served by the superset alone.
+#[test]
+fn connector_superset_type_connector_absorbs_entity_resolver_fetch() {
+    let plan_str = plan_query_with_router_specs(
+        include_str!("../fixtures/connector_superset_entity_resolver.graphql"),
+        "{ topProducts { name reviews { rating comment } } }",
+    );
+    insta::assert_snapshot!(plan_str, @r#"
+    QueryPlan {
+      Sequence {
+        Fetch(service: "catalog") {
+          {
+            topProducts {
+              __typename
+              id
+            }
+          }
+        },
+        Flatten(path: "topProducts.@") {
+          Fetch(service: "products_Product_0") {
+            {
+              ... on Product {
+                __typename
+                id
+              }
+            } =>
+            {
+              ... on Product {
+                reviews {
+                  rating
+                  comment
+                }
+                name
+              }
+            }
+          },
+        },
+      },
+    }
+    "#);
+}
+
+/// Only connectors that already have a fetch can absorb the others: C
+/// returns both `name` and `reviews`, but routing picked A and B, so both
+/// still run.
+#[test]
+fn connector_superset_not_in_plan_does_not_absorb() {
+    let plan_str = plan_query_with_router_specs(
+        include_str!("../fixtures/connector_superset_not_in_plan.graphql"),
+        "{ topProducts { name reviews { rating } } }",
+    );
+    insta::assert_snapshot!(plan_str, @r#"
+    QueryPlan {
+      Sequence {
+        Fetch(service: "catalog") {
+          {
+            topProducts {
+              __typename
+              id
+            }
+          }
+        },
+        Parallel {
+          Flatten(path: "topProducts.@") {
+            Fetch(service: "products_Product_1") {
+              {
+                ... on Product {
+                  __typename
+                  id
+                }
+              } =>
+              {
+                ... on Product {
+                  reviews {
+                    rating
+                  }
+                }
+              }
+            },
+          },
+          Flatten(path: "topProducts.@") {
+            Fetch(service: "products_Product_0") {
+              {
+                ... on Product {
+                  __typename
+                  id
+                }
+              } =>
+              {
+                ... on Product {
+                  name
+                }
+              }
+            },
+          },
+        },
+      },
+    }
+    "#);
+}
+
+/// `Book` and `Movie` connectors share the key `id` and both return `title`,
+/// but each union member's representations go to its own connector.
+#[test]
+fn connector_same_key_union_members_not_absorbed() {
+    let plan_str = plan_query_with_router_specs(
+        include_str!("../fixtures/connector_same_key_union_members.graphql"),
+        "{ media { ... on Book { title } ... on Movie { title } } }",
+    );
+    insta::assert_snapshot!(plan_str, @r#"
+    QueryPlan {
+      Sequence {
+        Fetch(service: "catalog") {
+          {
+            media {
+              __typename
+              ... on Book {
+                __typename
+                id
+              }
+              ... on Movie {
+                __typename
+                id
+              }
+            }
+          }
+        },
+        Parallel {
+          Flatten(path: "media.@|[Movie]") {
+            Fetch(service: "products_Movie_0") {
+              {
+                ... on Movie {
+                  __typename
+                  id
+                }
+              } =>
+              {
+                ... on Movie {
+                  title
+                }
+              }
+            },
+          },
+          Flatten(path: "media.@|[Book]") {
+            Fetch(service: "products_Book_0") {
+              {
+                ... on Book {
+                  __typename
+                  id
+                }
+              } =>
+              {
+                ... on Book {
+                  title
+                }
+              }
+            },
+          },
+        },
+      },
+    }
+    "#);
+}
+
+/// Like the union case, through an interface's implementations.
+#[test]
+fn connector_same_key_interface_implementations_not_absorbed() {
+    let plan_str = plan_query_with_router_specs(
+        include_str!("../fixtures/connector_same_key_interface_implementations.graphql"),
+        "{ media { ... on Book { title } ... on Movie { title } } }",
+    );
+    insta::assert_snapshot!(plan_str, @r#"
+    QueryPlan {
+      Sequence {
+        Fetch(service: "catalog") {
+          {
+            media {
+              __typename
+              ... on Book {
+                __typename
+                id
+              }
+              ... on Movie {
+                __typename
+                id
+              }
+            }
+          }
+        },
+        Parallel {
+          Flatten(path: "media.@|[Movie]") {
+            Fetch(service: "products_Movie_0") {
+              {
+                ... on Movie {
+                  __typename
+                  id
+                }
+              } =>
+              {
+                ... on Movie {
+                  title
+                }
+              }
+            },
+          },
+          Flatten(path: "media.@|[Book]") {
+            Fetch(service: "products_Book_0") {
+              {
+                ... on Book {
+                  __typename
+                  id
+                }
+              } =>
+              {
+                ... on Book {
+                  title
+                }
+              }
+            },
+          },
+        },
+      },
+    }
+    "#);
+}
+
+/// The `Book` connector returns `title` too, but `Media` representations
+/// from the `@interfaceObject` fetch stay on the `Media` connector.
+#[test]
+fn connector_same_key_interface_object_not_absorbed() {
+    let plan_str = plan_query_with_router_specs(
+        include_str!("../fixtures/connector_same_key_interface_object.graphql"),
+        "{ media { title ... on Book { isbn } } }",
+    );
+    insta::assert_snapshot!(plan_str, @r#"
+    QueryPlan {
+      Sequence {
+        Fetch(service: "catalog") {
+          {
+            media {
+              __typename
+              ... on Book {
+                __typename
+                id
+              }
+              id
+            }
+          }
+        },
+        Parallel {
+          Flatten(path: "media.@") {
+            Fetch(service: "products_Media_0") {
+              {
+                ... on Media {
+                  __typename
+                  id
+                }
+              } =>
+              {
+                ... on Media {
+                  title
+                }
+              }
+            },
+          },
+          Flatten(path: "media.@|[Book]") {
+            Fetch(service: "products_Book_0") {
+              {
+                ... on Book {
+                  __typename
+                  id
+                }
+              } =>
+              {
+                ... on Book {
+                  isbn
+                }
+              }
+            },
+          },
+        },
+      },
+    }
+    "#);
+}
+
+/// The connector returns `author` without its key. Re-fetch `author` from
+/// the `Post` level through `post(id:)`, which returns the key, instead of
+/// sending `User` representations with no `id`.
+#[test]
+fn connector_unprovided_key_refetches_parent() {
+    let plan_str = plan_query_with_router_specs(
+        include_str!("../fixtures/connector_nested_reference_without_key.graphql"),
+        "{ posts { title author { name email } } }",
+    );
+    insta::assert_snapshot!(plan_str, @r#"
+    QueryPlan {
+      Sequence {
+        Fetch(service: "blog_Query_posts_0") {
+          {
+            posts {
+              __typename
+              title
+              author {
+                name
+              }
+              id
+            }
+          }
+        },
+        Flatten(path: "posts.@") {
+          Fetch(service: "blog_Query_post_0") {
+            {
+              ... on Post {
+                __typename
+                id
+              }
+            } =>
+            {
+              ... on Post {
+                author {
+                  __typename
+                  id
+                }
+              }
+            }
+          },
+        },
+        Flatten(path: "posts.@.author") {
+          Fetch(service: "blog_User_0") {
+            {
+              ... on User {
+                __typename
+                id
+              }
+            } =>
+            {
+              ... on User {
+                email
+              }
+            }
+          },
+        },
+      },
+    }
+    "#);
+}
+
+/// The connector returns `author` with its key, so `User` is entered
+/// directly. The entity fetch is gated on the `@skip` the field sits under.
+#[test]
+fn connector_entity_fetch_gated_by_skip() {
+    let plan_str = plan_query_with_router_specs(
+        include_str!("../fixtures/connector_nested_reference_with_key.graphql"),
+        "query($x: Boolean!) { posts { title author { name ... @skip(if: $x) { email } } } }",
+    );
+    insta::assert_snapshot!(plan_str, @r#"
+    QueryPlan {
+      Sequence {
+        Fetch(service: "blog_Query_posts_0") {
+          {
+            posts {
+              title
+              author {
+                name
+                ... @skip(if: $x) {
+                  __typename
+                  id
+                }
+              }
+            }
+          }
+        },
+        Skip(if: $x) {
+          Flatten(path: "posts.@.author") {
+            Fetch(service: "blog_User_0") {
+              {
+                ... on User {
+                  __typename
+                  id
+                }
+              } =>
+              {
+                ... on User {
+                  email
+                }
+              }
+            },
+          },
+        },
+      },
+    }
+    "#);
+}
+
+/// A condition on the field itself gates the entity fetch below it.
+#[test]
+fn connector_entity_fetch_gated_by_field_include() {
+    let plan_str = plan_query_with_router_specs(
+        include_str!("../fixtures/connector_nested_reference_with_key.graphql"),
+        "query($a: Boolean!) { posts { title author @include(if: $a) { email } } }",
+    );
+    insta::assert_snapshot!(plan_str, @r#"
+    QueryPlan {
+      Sequence {
+        Fetch(service: "blog_Query_posts_0") {
+          {
+            posts {
+              title
+              author @include(if: $a) {
+                __typename
+                id
+              }
+            }
+          }
+        },
+        Include(if: $a) {
+          Flatten(path: "posts.@.author") {
+            Fetch(service: "blog_User_0") {
+              {
+                ... on User {
+                  __typename
+                  id
+                }
+              } =>
+              {
+                ... on User {
+                  email
+                }
+              }
+            },
+          },
+        },
+      },
+    }
+    "#);
+}
+
+/// An entity fetch gated on a literal `false` is left out of the plan.
+#[test]
+fn connector_entity_fetch_dropped_by_literal_include() {
+    let plan_str = plan_query_with_router_specs(
+        include_str!("../fixtures/connector_nested_reference_with_key.graphql"),
+        "{ posts { title author { name ... @include(if: false) { email } } } }",
+    );
+    insta::assert_snapshot!(plan_str, @r#"
+    QueryPlan {
+      Fetch(service: "blog_Query_posts_0") {
+        {
+          posts {
+            title
+            author {
+              name
+              ... @include(if: false) {
+                __typename
+                id
+              }
+            }
+          }
+        }
+      },
+    }
+    "#);
+}
+
+/// Under `@defer`, the deferred entity fetch is gated on the `@include` too.
+#[test]
+fn connector_entity_fetch_gated_by_include_under_defer() {
+    let supergraph = Supergraph::new_with_router_specs(include_str!(
+        "../fixtures/connector_nested_reference_with_key.graphql"
+    ))
+    .expect("supergraph parse");
+    let config = QueryPlannerConfig {
+        incremental_delivery: QueryPlanIncrementalDeliveryConfig { enable_defer: true },
+        ..default_config()
+    };
+    let planner = QueryPlanner::new(&supergraph, config).expect("planner creation");
+    let document = apollo_compiler::ExecutableDocument::parse_and_validate(
+        planner.api_schema().schema(),
+        "query($x: Boolean!) { posts { author { name ... @defer @include(if: $x) { email } } } }",
+        "test.graphql",
+    )
+    .expect("query parse");
+    let plan = planner
+        .build_query_plan(&document, None, Default::default())
+        .expect("query plan");
+    insta::assert_snapshot!(format!("{plan}"), @r#"
+    QueryPlan {
+      Defer {
+        Primary {
+          { posts { author { name } } }:
+          Fetch(service: "blog_Query_posts_0", id: 0) {
+            {
+              posts {
+                author {
+                  name
+                  ... @include(if: $x) {
+                    __typename
+                    id
+                  }
+                }
+              }
+            }
+          },
+        }, [
+          Deferred(depends: [0], path: "posts/author") {
+            { ... @include(if: $x) { email } }:
+            Include(if: $x) {
+              Flatten(path: "posts.@.author") {
+                Fetch(service: "blog_User_0") {
+                  {
+                    ... on User {
+                      __typename
+                      id
+                    }
+                  } =>
+                  {
+                    ... on User {
+                      email
+                    }
+                  }
+                },
+              },
+            },
+          },
+        ]
+      },
+    }
+    "#);
+}
+
+/// Entity fetches gated on different conditions merge into one ungated
+/// fetch, each keeping its condition, its own gated key inputs, and a
+/// representation built under its condition: with both conditions false,
+/// the fetch reads no keys.
+#[test]
+fn connector_entity_fetches_with_different_conditions_merge_ungated() {
+    let plan_str = plan_query_with_router_specs(
+        include_str!("../fixtures/connector_nested_reference_with_key.graphql"),
+        "query($a: Boolean!, $b: Boolean!) { posts { author { ... @include(if: $a) { email } ... @include(if: $b) { email } } } }",
+    );
+    insta::assert_snapshot!(plan_str, @r#"
+    QueryPlan {
+      Sequence {
+        Fetch(service: "blog_Query_posts_0") {
+          {
+            posts {
+              author {
+                ... @include(if: $b) {
+                  __typename
+                  id
+                }
+                ... @include(if: $a) {
+                  __typename
+                  id
+                }
+              }
+            }
+          }
+        },
+        Flatten(path: "posts.@.author") {
+          Fetch(service: "blog_User_0") {
+            {
+              ... on User @include(if: $b) {
+                __typename
+                id
+              }
+              ... on User @include(if: $a) {
+                __typename
+                id
+              }
+            } =>
+            {
+              ... on User {
+                ... @include(if: $b) {
+                  email
+                }
+                ... @include(if: $a) {
+                  email
+                }
+              }
+            }
+          },
+        },
+      },
+    }
+    "#);
+}
+
+/// A field connector with no key (the non-key branch of
+/// `commit_connector_choice`) is gated too.
+#[test]
+fn connector_field_fetch_gated_by_include() {
+    let plan_str = plan_query_with_router_specs(
+        include_str!("../fixtures/connector_field_without_this.graphql"),
+        "query($x: Boolean!) { products { name ... @include(if: $x) { banner } } }",
+    );
+    insta::assert_snapshot!(plan_str, @r#"
+    QueryPlan {
+      Sequence {
+        Fetch(service: "products_Query_products_0") {
+          {
+            products {
+              name
+              ... @include(if: $x) {
+                __typename
+              }
+            }
+          }
+        },
+        Include(if: $x) {
+          Flatten(path: "products.@") {
+            Fetch(service: "products_Product_banner_0") {
+              {
+                ... on Product {
+                  __typename
+                }
+              } =>
+              {
+                ... on Product {
+                  banner
+                }
+              }
+            },
+          },
+        },
+      },
+    }
+    "#);
+}
+
+/// On an `@interfaceObject`, the connector subgraph doesn't know `T1`: the
+/// gate is carried without the type condition, which the `... on T1` key
+/// inputs already apply.
+#[test]
+fn connector_interface_object_gated_by_typed_include() {
+    let plan_str = plan_query_with_router_specs(
+        include_str!("../fixtures/connector_interface_object.graphql"),
+        "query($x: Boolean!) { itfs { ... on T1 @include(if: $x) { e } } }",
+    );
+    insta::assert_snapshot!(plan_str, @r#"
+    QueryPlan {
+      Sequence {
+        Fetch(service: "connectors_Query_itfs_0") {
+          {
+            itfs {
+              __typename
+              id
+            }
+          }
+        },
+        Include(if: $x) {
+          Flatten(path: "itfs.@") {
+            Fetch(service: "graphql") {
+              {
+                ... on Itf {
+                  __typename
+                  id
+                }
+              } =>
+              {
+                ... on Itf {
+                  __typename
+                  ... on T1 {
+                    __typename
+                    id
+                  }
+                }
+              }
+            },
+          },
+        },
+        Include(if: $x) {
+          Flatten(path: "itfs.@") {
+            Fetch(service: "connectors_Itf_e_0") {
+              {
+                ... on T1 {
+                  __typename
+                  id
+                }
+              } =>
+              {
+                ... on Itf {
+                  e
+                }
+              }
+            },
+          },
+        },
+      },
+    }
+    "#);
+}
+
+/// Same, with the typed fragment under `@defer`.
+#[test]
+fn connector_interface_object_gated_by_typed_include_under_defer() {
+    let supergraph = Supergraph::new_with_router_specs(include_str!(
+        "../fixtures/connector_interface_object.graphql"
+    ))
+    .expect("supergraph parse");
+    let config = QueryPlannerConfig {
+        incremental_delivery: QueryPlanIncrementalDeliveryConfig { enable_defer: true },
+        ..default_config()
+    };
+    let planner = QueryPlanner::new(&supergraph, config).expect("planner creation");
+    let document = apollo_compiler::ExecutableDocument::parse_and_validate(
+        planner.api_schema().schema(),
+        "query($x: Boolean!) { itfs { ... @defer { ... on T1 @include(if: $x) { e } } } }",
+        "test.graphql",
+    )
+    .expect("query parse");
+    let plan = planner
+        .build_query_plan(&document, None, Default::default())
+        .expect("query plan");
+    insta::assert_snapshot!(format!("{plan}"), @r#"
+    QueryPlan {
+      Defer {
+        Primary {
+          Fetch(service: "connectors_Query_itfs_0", id: 0) {
+            {
+              itfs {
+                __typename
+                id
+              }
+            }
+          },
+        }, [
+          Deferred(depends: [0], path: "itfs") {
+            { ... on T1 @include(if: $x) { e } }:
+            Sequence {
+              Include(if: $x) {
+                Flatten(path: "itfs.@") {
+                  Fetch(service: "graphql") {
+                    {
+                      ... on Itf {
+                        __typename
+                        id
+                      }
+                    } =>
+                    {
+                      ... on Itf {
+                        __typename
+                        ... on T1 {
+                          __typename
+                          id
+                        }
+                      }
+                    }
+                  },
+                },
+              },
+              Include(if: $x) {
+                Flatten(path: "itfs.@") {
+                  Fetch(service: "connectors_Itf_e_0") {
+                    {
+                      ... on T1 {
+                        __typename
+                        id
+                      }
+                    } =>
+                    {
+                      ... on Itf {
+                        e
+                      }
+                    }
+                  },
+                },
+              },
+            },
+          },
+        ]
+      },
+    }
+    "#);
+}
+
+/// `author: { name ... authorExtra }` spreads an unknown path, so what it adds
+/// is not known statically. The spread provides no key: `author` is re-fetched
+/// through `post(id:)` as if the spread were absent, which is how composition
+/// and the legacy planner read it.
+#[test]
+fn connector_spread_of_unknown_path_provides_no_key() {
+    let query = "{ posts { title author { name email } } }";
+    let plain = plan_query_with_router_specs(
+        include_str!("../fixtures/connector_nested_reference_without_key.graphql"),
+        query,
+    );
+    let spread = plan_query_with_router_specs(
+        include_str!("../fixtures/connector_nested_reference_spread.graphql"),
+        query,
+    );
+    assert_eq!(spread, plain);
+}
+
+/// A spread at the root of the selection (`id title ... $.extra`) provides
+/// only `id` and `title`: `author` is fetched through `post(id:)` rather than
+/// kept in the `posts` fetch, where it would come back `null`.
+#[test]
+fn connector_root_spread_of_unknown_path_provides_only_known_fields() {
+    let schema = include_str!("../fixtures/connector_nested_reference_spread.graphql").replace(
+        "selection: \"id title author: { name: authorName ... authorExtra }\"",
+        "selection: \"id title ... $.extra\"",
+    );
+    let plan_str = plan_query_with_router_specs(&schema, "{ posts { title author { email } } }");
+    insta::assert_snapshot!(plan_str, @r#"
+    QueryPlan {
+      Sequence {
+        Fetch(service: "blog_Query_posts_0") {
+          {
+            posts {
+              __typename
+              title
+              id
+            }
+          }
+        },
+        Flatten(path: "posts.@") {
+          Fetch(service: "blog_Query_post_0") {
+            {
+              ... on Post {
+                __typename
+                id
+              }
+            } =>
+            {
+              ... on Post {
+                author {
+                  __typename
+                  id
+                }
+              }
+            }
+          },
+        },
+        Flatten(path: "posts.@.author") {
+          Fetch(service: "blog_User_0") {
+            {
+              ... on User {
+                __typename
+                id
+              }
+            } =>
+            {
+              ... on User {
+                email
+              }
+            }
+          },
+        },
+      },
+    }
+    "#);
+}
+
+/// A type-level connector whose selection spreads an unknown path
+/// (`id name email ... $.extra`) still resolves its known fields: without
+/// the normalization it returned nothing, and planning `email` failed.
+#[test]
+fn connector_type_spread_of_unknown_path_resolves_known_fields() {
+    let schema = include_str!("../fixtures/connector_nested_reference_spread.graphql")
+        .replace(
+            "selection: \"id title author: { name: authorName ... authorExtra }\"",
+            "selection: \"id title author: { id: authorId }\"",
+        )
+        .replace(
+            "selection: \"id name email\"",
+            "selection: \"id name email ... $.extra\"",
+        );
+    let plan_str = plan_query_with_router_specs(&schema, "{ posts { title author { email } } }");
+    insta::assert_snapshot!(plan_str, @r#"
+    QueryPlan {
+      Sequence {
+        Fetch(service: "blog_Query_posts_0") {
+          {
+            posts {
+              title
+              author {
+                __typename
+                id
+              }
+            }
+          }
+        },
+        Flatten(path: "posts.@.author") {
+          Fetch(service: "blog_User_0") {
+            {
+              ... on User {
+                __typename
+                id
+              }
+            } =>
+            {
+              ... on User {
+                email
+              }
+            }
+          },
+        },
+      },
+    }
+    "#);
+}
+
+/// A no-`$this` connector on `User` gives it a `__typename` key, but that key
+/// does not resolve `email`: the lift must still re-fetch `author` through
+/// `post(id:)` rather than treat any provided key as enough.
+#[test]
+fn connector_unprovided_key_refetches_parent_despite_typename_key() {
+    let plan_str = plan_query_with_router_specs(
+        include_str!("../fixtures/connector_nested_reference_typename_key.graphql"),
+        "{ posts { title author { name email } } }",
+    );
+    insta::assert_snapshot!(plan_str, @r#"
+    QueryPlan {
+      Sequence {
+        Fetch(service: "blog_Query_posts_0") {
+          {
+            posts {
+              __typename
+              title
+              author {
+                name
+              }
+              id
+            }
+          }
+        },
+        Flatten(path: "posts.@") {
+          Fetch(service: "blog_Query_post_0") {
+            {
+              ... on Post {
+                __typename
+                id
+              }
+            } =>
+            {
+              ... on Post {
+                author {
+                  __typename
+                  id
+                }
+              }
+            }
+          },
+        },
+        Flatten(path: "posts.@.author") {
+          Fetch(service: "blog_User_0") {
+            {
+              ... on User {
+                __typename
+                id
+              }
+            } =>
+            {
+              ... on User {
+                email
+              }
+            }
+          },
+        },
+      },
+    }
+    "#);
+}
+
+/// The unprovided field sits under a conditional fragment of `author`; the
+/// lift must see through it.
+#[test]
+fn connector_unprovided_key_refetches_parent_through_include() {
+    let plan_str = plan_query_with_router_specs(
+        include_str!("../fixtures/connector_nested_reference_without_key.graphql"),
+        "query($x: Boolean!) { posts { title author { name ... @include(if: $x) { email } } } }",
+    );
+    insta::assert_snapshot!(plan_str, @r#"
+    QueryPlan {
+      Sequence {
+        Fetch(service: "blog_Query_posts_0") {
+          {
+            posts {
+              title
+              author {
+                name
+              }
+              ... @include(if: $x) {
+                __typename
+                id
+              }
+            }
+          }
+        },
+        Include(if: $x) {
+          Flatten(path: "posts.@") {
+            Fetch(service: "blog_Query_post_0") {
+              {
+                ... on Post {
+                  __typename
+                  id
+                }
+              } =>
+              {
+                ... on Post {
+                  author {
+                    __typename
+                    id
+                  }
+                }
+              }
+            },
+          },
+        },
+        Include(if: $x) {
+          Flatten(path: "posts.@.author") {
+            Fetch(service: "blog_User_0") {
+              {
+                ... on User {
+                  __typename
+                  id
+                }
+              } =>
+              {
+                ... on User {
+                  email
+                }
+              }
+            },
+          },
+        },
+      },
+    }
+    "#);
+}
+
+/// Same, with the unprovided field under `@defer`.
+#[test]
+fn connector_unprovided_key_refetches_parent_through_defer() {
+    let supergraph = Supergraph::new_with_router_specs(include_str!(
+        "../fixtures/connector_nested_reference_without_key.graphql"
+    ))
+    .expect("supergraph parse");
+    let config = QueryPlannerConfig {
+        incremental_delivery: QueryPlanIncrementalDeliveryConfig { enable_defer: true },
+        ..default_config()
+    };
+    let planner = QueryPlanner::new(&supergraph, config).expect("planner creation");
+    let document = apollo_compiler::ExecutableDocument::parse_and_validate(
+        planner.api_schema().schema(),
+        "{ posts { title author { name ... @defer { email } } } }",
+        "test.graphql",
+    )
+    .expect("query parse");
+    let plan = planner
+        .build_query_plan(&document, None, Default::default())
+        .expect("query plan");
+    insta::assert_snapshot!(format!("{plan}"), @r#"
+    QueryPlan {
+      Defer {
+        Primary {
+          { posts { title author { name } } }:
+          Fetch(service: "blog_Query_posts_0", id: 0) {
+            {
+              posts {
+                __typename
+                title
+                author {
+                  name
+                }
+                id
+              }
+            }
+          },
+        }, [
+          Deferred(depends: [0], path: "posts/author") {
+            { email }:
+            Sequence {
+              Flatten(path: "posts.@") {
+                Fetch(service: "blog_Query_post_0") {
+                  {
+                    ... on Post {
+                      __typename
+                      id
+                    }
+                  } =>
+                  {
+                    ... on Post {
+                      author {
+                        __typename
+                        id
+                      }
+                    }
+                  }
+                },
+              },
+              Flatten(path: "posts.@.author") {
+                Fetch(service: "blog_User_0") {
+                  {
+                    ... on User {
+                      __typename
+                      id
+                    }
+                  } =>
+                  {
+                    ... on User {
+                      email
+                    }
+                  }
+                },
+              },
+            },
+          },
+        ]
+      },
+    }
+    "#);
+}
+
+/// The `User` resolver returns `friend` with only its key: it resolves
+/// `friend { email }` through that key, so the selection stays at `author`
+/// rather than being re-fetched from `Post`.
+#[test]
+fn connector_nested_selection_resolved_through_resolver_key() {
+    let plan_str = plan_query_with_router_specs(
+        include_str!("../fixtures/connector_nested_reference_resolver_key.graphql"),
+        "{ posts { author { friend { email } } } }",
+    );
+    insta::assert_snapshot!(plan_str, @r#"
+    QueryPlan {
+      Sequence {
+        Fetch(service: "blog_Query_posts_0") {
+          {
+            posts {
+              author {
+                __typename
+                id
+              }
+            }
+          }
+        },
+        Flatten(path: "posts.@.author") {
+          Fetch(service: "blog_User_0") {
+            {
+              ... on User {
+                __typename
+                id
+              }
+            } =>
+            {
+              ... on User {
+                friend {
+                  __typename
+                  id
+                }
+              }
+            }
+          },
+        },
+        Flatten(path: "posts.@.author.friend") {
+          Fetch(service: "blog_User_0") {
+            {
+              ... on User {
+                __typename
+                id
+              }
+            } =>
+            {
+              ... on User {
+                email
+              }
+            }
+          },
+        },
+      },
+    }
+    "#);
+}
+
+/// Neither `author` nor `friend` comes with a key: `friend { email }` is
+/// lifted to `author`, then `author { friend { email } }` to `Post`, and
+/// re-entered through `post(id:)` and the `User` resolver's `friend { id }`.
+#[test]
+fn connector_unprovided_key_refetches_through_two_levels() {
+    let plan_str = plan_query_with_router_specs(
+        include_str!("../fixtures/connector_nested_reference_resolver_key_unprovided.graphql"),
+        "{ posts { author { name friend { name email } } } }",
+    );
+    insta::assert_snapshot!(plan_str, @r#"
+    QueryPlan {
+      Sequence {
+        Fetch(service: "blog_Query_posts_0") {
+          {
+            posts {
+              __typename
+              author {
+                name
+                friend {
+                  name
+                }
+              }
+              id
+            }
+          }
+        },
+        Flatten(path: "posts.@") {
+          Fetch(service: "blog_Query_post_0") {
+            {
+              ... on Post {
+                __typename
+                id
+              }
+            } =>
+            {
+              ... on Post {
+                author {
+                  __typename
+                  id
+                }
+              }
+            }
+          },
+        },
+        Flatten(path: "posts.@.author") {
+          Fetch(service: "blog_User_0") {
+            {
+              ... on User {
+                __typename
+                id
+              }
+            } =>
+            {
+              ... on User {
+                friend {
+                  __typename
+                  id
+                }
+              }
+            }
+          },
+        },
+        Flatten(path: "posts.@.author.friend") {
+          Fetch(service: "blog_User_0") {
+            {
+              ... on User {
+                __typename
+                id
+              }
+            } =>
+            {
+              ... on User {
+                email
+              }
+            }
+          },
+        },
+      },
+    }
+    "#);
+}
+
+/// Two lifted items under the same `@include` share one fragment in the
+/// re-fetch. `id` comes back from `post(id:)` under the fragment; `email`
+/// goes on to the `User` resolver.
+#[test]
+fn connector_unprovided_key_refetches_parent_through_shared_include() {
+    let plan_str = plan_query_with_router_specs(
+        include_str!("../fixtures/connector_nested_reference_without_key.graphql"),
+        "query($x: Boolean!) { posts { title author { name ... @include(if: $x) { email id } } } }",
+    );
+    insta::assert_snapshot!(plan_str, @r#"
+    QueryPlan {
+      Sequence {
+        Fetch(service: "blog_Query_posts_0") {
+          {
+            posts {
+              title
+              author {
+                name
+              }
+              ... @include(if: $x) {
+                __typename
+                id
+              }
+            }
+          }
+        },
+        Include(if: $x) {
+          Flatten(path: "posts.@") {
+            Fetch(service: "blog_Query_post_0") {
+              {
+                ... on Post {
+                  __typename
+                  id
+                }
+              } =>
+              {
+                ... on Post {
+                  author {
+                    __typename
+                    id
+                  }
+                }
+              }
+            },
+          },
+        },
+        Include(if: $x) {
+          Flatten(path: "posts.@.author") {
+            Fetch(service: "blog_User_0") {
+              {
+                ... on User {
+                  __typename
+                  id
+                }
+              } =>
+              {
+                ... on User {
+                  email
+                }
+              }
+            },
+          },
+        },
+      },
+    }
+    "#);
+}
+
+/// `author @include(if: $a)`: the re-fetch and the `User` fetch are both
+/// gated on the field's own condition.
+#[test]
+fn connector_unprovided_key_refetches_parent_through_field_include() {
+    let plan_str = plan_query_with_router_specs(
+        include_str!("../fixtures/connector_nested_reference_without_key.graphql"),
+        "query($a: Boolean!) { posts { title author @include(if: $a) { email } } }",
+    );
+    insta::assert_snapshot!(plan_str, @r#"
+    QueryPlan {
+      Sequence {
+        Fetch(service: "blog_Query_posts_0") {
+          {
+            posts {
+              title
+              ... @include(if: $a) {
+                __typename
+                id
+              }
+            }
+          }
+        },
+        Include(if: $a) {
+          Flatten(path: "posts.@") {
+            Fetch(service: "blog_Query_post_0") {
+              {
+                ... on Post {
+                  __typename
+                  id
+                }
+              } =>
+              {
+                ... on Post {
+                  author {
+                    __typename
+                    id
+                  }
+                }
+              }
+            },
+          },
+        },
+        Include(if: $a) {
+          Flatten(path: "posts.@.author") {
+            Fetch(service: "blog_User_0") {
+              {
+                ... on User {
+                  __typename
+                  id
+                }
+              } =>
+              {
+                ... on User {
+                  email
+                }
+              }
+            },
+          },
+        },
+      },
+    }
+    "#);
+}
+
+/// `email @include(if: $x)`: the field's own condition gates the re-fetch
+/// as a fragment's does (`connector_unprovided_key_refetches_parent_through_include`).
+#[test]
+fn connector_unprovided_key_refetches_parent_through_own_include() {
+    let plan_str = plan_query_with_router_specs(
+        include_str!("../fixtures/connector_nested_reference_without_key.graphql"),
+        "query($x: Boolean!) { posts { title author { name email @include(if: $x) } } }",
+    );
+    insta::assert_snapshot!(plan_str, @r#"
+    QueryPlan {
+      Sequence {
+        Fetch(service: "blog_Query_posts_0") {
+          {
+            posts {
+              title
+              author {
+                name
+              }
+              ... @include(if: $x) {
+                __typename
+                id
+              }
+            }
+          }
+        },
+        Include(if: $x) {
+          Flatten(path: "posts.@") {
+            Fetch(service: "blog_Query_post_0") {
+              {
+                ... on Post {
+                  __typename
+                  id
+                }
+              } =>
+              {
+                ... on Post {
+                  author {
+                    __typename
+                    id
+                  }
+                }
+              }
+            },
+          },
+        },
+        Include(if: $x) {
+          Flatten(path: "posts.@.author") {
+            Fetch(service: "blog_User_0") {
+              {
+                ... on User {
+                  __typename
+                  id
+                }
+              } =>
+              {
+                ... on User {
+                  email
+                }
+              }
+            },
+          },
+        },
+      },
+    }
+    "#);
+}
+
+/// The lifted items share no condition, so the re-fetch is needed either
+/// way and stays ungated; the `User` fetch is still gated on `email`'s.
+#[test]
+fn connector_unprovided_key_refetch_ungated_under_different_conditions() {
+    let plan_str = plan_query_with_router_specs(
+        include_str!("../fixtures/connector_nested_reference_without_key.graphql"),
+        "query($x: Boolean!) { posts { title author { name ... @include(if: $x) { email } ... @skip(if: $x) { id } } } }",
+    );
+    insta::assert_snapshot!(plan_str, @r#"
+    QueryPlan {
+      Sequence {
+        Fetch(service: "blog_Query_posts_0") {
+          {
+            posts {
+              __typename
+              title
+              author {
+                name
+              }
+              id
+            }
+          }
+        },
+        Flatten(path: "posts.@") {
+          Fetch(service: "blog_Query_post_0") {
+            {
+              ... on Post {
+                __typename
+                id
+              }
+            } =>
+            {
+              ... on Post {
+                author {
+                  ... @skip(if: $x) {
+                    id
+                  }
+                  ... @include(if: $x) {
+                    __typename
+                    id
+                  }
+                }
+              }
+            }
+          },
+        },
+        Include(if: $x) {
+          Flatten(path: "posts.@.author") {
+            Fetch(service: "blog_User_0") {
+              {
+                ... on User {
+                  __typename
+                  id
+                }
+              } =>
+              {
+                ... on User {
+                  email
+                }
+              }
+            },
+          },
+        },
+      },
+    }
+    "#);
+}
+
 /// `/skus` returns `sku` but not `id`: resolve through the resolver keyed
 /// on `sku`, not the one keyed on `id`.
 #[test]
@@ -4068,7 +6010,7 @@ fn connector_requires_partly_in_shape_routes_only_missing_fields() {
         include_str!("../fixtures/connector_requires_partly_in_shape.graphql"),
         "{ products { shippingEstimate } }",
     );
-    insta::assert_snapshot!(plan_str, @r#"
+    insta::assert_snapshot!(plan_str, @r###"
     QueryPlan {
       Sequence {
         Fetch(service: "products_Query_products_0") {
@@ -4076,7 +6018,7 @@ fn connector_requires_partly_in_shape_routes_only_missing_fields() {
             products {
               __typename
               id
-              __require_1_name: name
+              name
             }
           }
         },
@@ -4090,7 +6032,7 @@ fn connector_requires_partly_in_shape_routes_only_missing_fields() {
             } =>
             {
               ... on Product {
-                __require_0_weight: weight
+                weight
               }
             }
           },
@@ -4101,8 +6043,8 @@ fn connector_requires_partly_in_shape_routes_only_missing_fields() {
               ... on Product {
                 __typename
                 id
-                __require_0_weight: weight
-                __require_1_name: name
+                weight
+                name
               }
             } =>
             {
@@ -4114,7 +6056,7 @@ fn connector_requires_partly_in_shape_routes_only_missing_fields() {
         },
       },
     }
-    "#);
+    "###);
 }
 
 /// `/products` returns `sku` but not `id` of the `id sku` key, and
@@ -4226,6 +6168,311 @@ fn connector_resolver_composite_key_partly_in_shape_routes_only_missing_fields()
                 }
               }
             }
+          },
+        },
+      },
+    }
+    "#);
+}
+
+/// The `productBySku` fetch that supplies the `id` part of the `reviews` key
+/// is gated on the `@skip` that gates `reviews`.
+#[test]
+fn connector_composite_key_part_fetch_gated_by_skip() {
+    let plan_str = plan_query_with_router_specs(
+        include_str!("../fixtures/connector_composite_key_partly_in_shape.graphql"),
+        "query($x: Boolean!) { products { name ... @skip(if: $x) { reviews { body } } } }",
+    );
+    insta::assert_snapshot!(plan_str, @r#"
+    QueryPlan {
+      Sequence {
+        Fetch(service: "products_Query_products_0") {
+          {
+            products {
+              name
+              ... @skip(if: $x) {
+                __typename
+                sku
+              }
+            }
+          }
+        },
+        Skip(if: $x) {
+          Flatten(path: "products.@") {
+            Fetch(service: "products_Query_productBySku_0") {
+              {
+                ... on Product {
+                  __typename
+                  sku
+                }
+              } =>
+              {
+                ... on Product {
+                  id
+                }
+              }
+            },
+          },
+        },
+        Skip(if: $x) {
+          Flatten(path: "products.@") {
+            Fetch(service: "reviews") {
+              {
+                ... on Product {
+                  __typename
+                  id
+                  sku
+                }
+              } =>
+              {
+                ... on Product {
+                  reviews {
+                    body
+                  }
+                }
+              }
+            },
+          },
+        },
+      },
+    }
+    "#);
+}
+
+/// The GraphQL key hops to `reviews` under different conditions merge into
+/// one ungated fetch, which builds each representation under its branch's
+/// condition, as the `productBySku` fetch for the key part does.
+#[test]
+fn graphql_key_hops_with_different_conditions_merge_ungated() {
+    let plan_str = plan_query_with_router_specs(
+        include_str!("../fixtures/connector_composite_key_partly_in_shape.graphql"),
+        "query($a: Boolean!, $b: Boolean!) { products { ... @include(if: $a) { reviews { body } } ... @include(if: $b) { name reviews { body } } } }",
+    );
+    insta::assert_snapshot!(plan_str, @r#"
+    QueryPlan {
+      Sequence {
+        Fetch(service: "products_Query_products_0") {
+          {
+            products {
+              ... @include(if: $b) {
+                __typename
+                name
+                sku
+              }
+              ... @include(if: $a) {
+                __typename
+                sku
+              }
+            }
+          }
+        },
+        Flatten(path: "products.@") {
+          Fetch(service: "products_Query_productBySku_0") {
+            {
+              ... on Product @include(if: $b) {
+                __typename
+                sku
+              }
+              ... on Product @include(if: $a) {
+                __typename
+                sku
+              }
+            } =>
+            {
+              ... on Product {
+                ... @include(if: $b) {
+                  id
+                }
+                ... @include(if: $a) {
+                  id
+                }
+              }
+            }
+          },
+        },
+        Flatten(path: "products.@") {
+          Fetch(service: "reviews") {
+            {
+              ... on Product @include(if: $b) {
+                __typename
+                id
+                sku
+              }
+              ... on Product @include(if: $a) {
+                __typename
+                id
+                sku
+              }
+            } =>
+            {
+              ... on Product {
+                ... @include(if: $b) {
+                  reviews {
+                    body
+                  }
+                }
+                ... @include(if: $a) {
+                  reviews {
+                    body
+                  }
+                }
+              }
+            }
+          },
+        },
+      },
+    }
+    "#);
+}
+
+/// As `connector_composite_key_part_fetch_gated_by_skip`, with `reviews`
+/// resolved by a field connector.
+#[test]
+fn connector_resolver_composite_key_part_fetch_gated_by_skip() {
+    let plan_str = plan_query_with_router_specs(
+        include_str!("../fixtures/connector_resolver_composite_key_partly_in_shape.graphql"),
+        "query($x: Boolean!) { products { name ... @skip(if: $x) { reviews { body } } } }",
+    );
+    insta::assert_snapshot!(plan_str, @r#"
+    QueryPlan {
+      Sequence {
+        Fetch(service: "products_Query_products_0") {
+          {
+            products {
+              name
+              ... @skip(if: $x) {
+                __typename
+                sku
+              }
+            }
+          }
+        },
+        Skip(if: $x) {
+          Flatten(path: "products.@") {
+            Fetch(service: "products_Query_productBySku_0") {
+              {
+                ... on Product {
+                  __typename
+                  sku
+                }
+              } =>
+              {
+                ... on Product {
+                  id
+                }
+              }
+            },
+          },
+        },
+        Skip(if: $x) {
+          Flatten(path: "products.@") {
+            Fetch(service: "products_Product_reviews_0") {
+              {
+                ... on Product {
+                  __typename
+                  id
+                  sku
+                }
+              } =>
+              {
+                ... on Product {
+                  reviews {
+                    body
+                  }
+                }
+              }
+            },
+          },
+        },
+      },
+    }
+    "#);
+}
+
+/// The key inputs are selected unconditionally for `email`, so the copy
+/// gated on `@include(if: $a)` is dropped from the parent fetch and from the
+/// representation.
+#[test]
+fn connector_gated_key_inputs_covered_by_ungated_ones_are_dropped() {
+    let plan_str = plan_query_with_router_specs(
+        include_str!("../fixtures/connector_nested_reference_with_key.graphql"),
+        "query($a: Boolean!) { posts { title author { email ... @include(if: $a) { email } } } }",
+    );
+    insta::assert_snapshot!(plan_str, @r#"
+    QueryPlan {
+      Sequence {
+        Fetch(service: "blog_Query_posts_0") {
+          {
+            posts {
+              title
+              author {
+                __typename
+                id
+              }
+            }
+          }
+        },
+        Flatten(path: "posts.@.author") {
+          Fetch(service: "blog_User_0") {
+            {
+              ... on User {
+                __typename
+                id
+              }
+            } =>
+            {
+              ... on User {
+                email
+              }
+            }
+          },
+        },
+      },
+    }
+    "#);
+}
+
+/// The fetch is gated on both conditions, so its representation is not
+/// wrapped in a condition-less fragment.
+#[test]
+fn connector_entity_fetch_gated_by_skip_and_include() {
+    let plan_str = plan_query_with_router_specs(
+        include_str!("../fixtures/connector_nested_reference_with_key.graphql"),
+        "query($a: Boolean!, $b: Boolean!) { posts { title author { ... @skip(if: $a) @include(if: $b) { email } } } }",
+    );
+    insta::assert_snapshot!(plan_str, @r#"
+    QueryPlan {
+      Sequence {
+        Fetch(service: "blog_Query_posts_0") {
+          {
+            posts {
+              title
+              author {
+                ... @skip(if: $a) @include(if: $b) {
+                  __typename
+                  id
+                }
+              }
+            }
+          }
+        },
+        Include(if: $b) {
+          Skip(if: $a) {
+            Flatten(path: "posts.@.author") {
+              Fetch(service: "blog_User_0") {
+                {
+                  ... on User {
+                    __typename
+                    id
+                  }
+                } =>
+                {
+                  ... on User {
+                    email
+                  }
+                }
+              },
+            },
           },
         },
       },
