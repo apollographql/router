@@ -235,7 +235,7 @@ where
     fn is_sampled(&self) -> bool {
         self.extensions()
             .get::<OtelData>()
-            .is_some_and(|d| d.current_cx.span().is_recording())
+            .is_some_and(|d| d.sampled)
     }
 
     /// Returns the trace ID for this span, or `None` if the span context is invalid.
