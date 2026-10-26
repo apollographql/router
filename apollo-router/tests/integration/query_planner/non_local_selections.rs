@@ -104,7 +104,7 @@ async fn max_non_local_selections_env_var_sets_limit() {
     );
     assert_eq!(
         error.extension_code().as_deref(),
-        Some("INTERNAL_SERVER_ERROR")
+        Some("QUERY_PLAN_COMPLEXITY_EXCEEDED")
     );
 
     router.graceful_shutdown().await;
