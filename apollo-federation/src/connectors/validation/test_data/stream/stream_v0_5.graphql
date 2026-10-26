@@ -36,6 +36,13 @@ type Query {
       http: { GET: "/weather", stream: "array" }
       selection: "result.structuredContent { city temp }"
     )
+  # Invalid: returns null when there are no events, and every event otherwise.
+  maybeWeather: Weather
+    @connect(
+      source: "mcp"
+      http: { GET: "/weather", stream: "array" }
+      selection: "$->size->eq(0)->match([true, null], [@, $ { city temp }])"
+    )
   # Valid: an entity resolver with one request per entity picks one event.
   product(id: ID!): Product
     @connect(

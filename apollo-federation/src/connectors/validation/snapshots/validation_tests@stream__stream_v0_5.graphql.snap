@@ -20,16 +20,23 @@ input_file: apollo-federation/src/connectors/validation/test_data/stream/stream_
     },
     Message {
         code: InvalidStream,
+        message: "`@connect(http: {stream:})` on `Query.maybeWeather` makes `$` a list of events, and this selection maps every one of them, but `Query.maybeWeather` resolves one value. Pick one event, for example with `$->last`.",
+        locations: [
+            43:40..43:47,
+        ],
+    },
+    Message {
+        code: InvalidStream,
         message: "`@connect(http: {stream:})` on `Shelf` makes `$` a list of events, and this selection maps every one of them, but `Shelf` resolves one value. Pick one event, for example with `$->last`.",
         locations: [
-            105:49..105:56,
+            112:49..112:56,
         ],
     },
     Message {
         code: InvalidStream,
         message: "`@connect(http: {stream:})` on `Order` can't be used with `$batch`.",
         locations: [
-            117:62..117:69,
+            124:62..124:69,
         ],
     },
 ]
