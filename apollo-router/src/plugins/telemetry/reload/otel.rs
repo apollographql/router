@@ -17,9 +17,10 @@
 //! The [`init_telemetry`] function sets up the tracing subscriber stack with:
 //! - Dynamic attribute layer for request-scoped attributes
 //! - OpenTelemetry layer for distributed tracing
-//! - Format layer for structured logging (JSON or text based on TTY)
+//! - Format layer for structured logging (JSON or text based on TTY), which only sees events
+//! - Span fields layer, which records the span fields the format layer shows
 //! - Rate limiting layer for OpenTelemetry internal log messages
-//! - Environment filter for log level control
+//! - Environment filter for log level control, which tracks spans only for span-scoped directives
 //!
 //! ## Reloading
 //!
@@ -27,7 +28,10 @@
 //! entire subscriber stack, which would require restarting the application.
 
 use std::io::IsTerminal;
+use std::sync::Arc;
 use std::sync::LazyLock;
+use std::sync::atomic::AtomicBool;
+use std::sync::atomic::Ordering;
 use std::time::Duration;
 
 use anyhow::anyhow;
@@ -44,7 +48,7 @@ use opentelemetry_sdk::trace::SdkTracerProvider;
 use opentelemetry_sdk::trace::Tracer;
 use parking_lot::Mutex;
 use tower::BoxError;
-use tracing_subscriber::EnvFilter;
+use tracing_core::Subscriber;
 use tracing_subscriber::Layer;
 use tracing_subscriber::Registry;
 use tracing_subscriber::layer::Layered;
@@ -55,11 +59,14 @@ use tracing_subscriber::util::SubscriberInitExt;
 
 use crate::plugins::telemetry::dynamic_attribute::DynAttributeLayer;
 use crate::plugins::telemetry::fmt_layer::FmtLayer;
+use crate::plugins::telemetry::fmt_layer::SpanFieldsLayer;
 use crate::plugins::telemetry::formatters::json::Json;
 use crate::plugins::telemetry::formatters::text::Text;
 use crate::plugins::telemetry::otel;
 use crate::plugins::telemetry::otel::OpenTelemetryLayer;
 use crate::plugins::telemetry::otel::OtelData;
+use crate::plugins::telemetry::reload::log_layers::EventsOnly;
+use crate::plugins::telemetry::reload::log_layers::LogFilter;
 use crate::plugins::telemetry::reload::rate_limit::RateLimitLayer;
 use crate::plugins::telemetry::tracing::reload::ReloadTracer;
 use crate::tracer::TraceId;
@@ -80,9 +87,33 @@ pub(in crate::plugins::telemetry) static OPENTELEMETRY_TRACER_HANDLE: OnceCell<
 ///
 /// This handle allows the activation phase to change logging format (e.g., JSON vs text)
 /// without rebuilding the entire tracing subscriber stack.
-static FMT_LAYER_HANDLE: OnceCell<
-    Handle<Box<dyn Layer<LayeredTracer> + Send + Sync>, LayeredTracer>,
-> = OnceCell::new();
+static FMT_LAYER_HANDLE: OnceCell<LogFormatHandle<LayeredTracer>> = OnceCell::new();
+
+/// Swaps the reloadable log format layer, and records span fields only while there is one.
+struct LogFormatHandle<S> {
+    layer: Handle<Box<dyn Layer<S> + Send + Sync>, S>,
+    /// [`SpanFieldsLayer::enabled`]
+    span_fields_enabled: Arc<AtomicBool>,
+}
+
+impl<S: Subscriber> LogFormatHandle<S> {
+    /// Installs `layer` as the log format layer, or a layer that logs nothing when it is `None`.
+    ///
+    /// Without a format layer nothing reads span fields, so they aren't recorded. Logs from a
+    /// request in flight when logging is turned back on therefore lack the fields of spans the
+    /// request created before then.
+    fn reload(&self, layer: Option<Box<dyn Layer<S> + Send + Sync>>) {
+        self.span_fields_enabled
+            .store(layer.is_some(), Ordering::Relaxed);
+        self.layer
+            .reload(layer.unwrap_or_else(|| NoOpLayer.boxed()))
+            .expect("fmt layer reload must succeed");
+    }
+}
+
+struct NoOpLayer;
+
+impl<S: Subscriber> Layer<S> for NoOpLayer {}
 
 /// The tracer provider installed by the most recent activation.
 ///
@@ -113,6 +144,8 @@ pub(crate) fn init_telemetry(log_level: &str) -> anyhow::Result<()> {
     };
 
     let (fmt_layer, fmt_handle) = tracing_subscriber::reload::Layer::new(fmt);
+    let span_fields = SpanFieldsLayer::default();
+    let span_fields_enabled = span_fields.enabled();
 
     // Stash the reload handles so that we can hot reload later
     OPENTELEMETRY_TRACER_HANDLE
@@ -125,30 +158,37 @@ pub(crate) fn init_telemetry(log_level: &str) -> anyhow::Result<()> {
             tracing_subscriber::registry()
                 .with(DynAttributeLayer::new())
                 .with(opentelemetry_layer)
-                .with(fmt_layer)
+                // The reloadable format layer gets events only, so that span callbacks don't take
+                // the reload lock. Span fields for the logs are recorded outside it.
+                .with(EventsOnly::new(fmt_layer))
+                .with(span_fields)
                 // Rate limit OpenTelemetry internal log messages to avoid log spam when things go wrong
                 .with(RateLimitLayer::new(
                     "opentelemetry",
                     Duration::from_secs(10),
                 ))
-                .with(EnvFilter::try_new(log_level)?)
+                .with(LogFilter::try_new(&log_level)?)
                 .try_init()?;
 
             Ok(hot_tracer)
         })
         .map_err(|e: BoxError| anyhow!("failed to set OpenTelemetry tracer: {e}"))?;
     FMT_LAYER_HANDLE
-        .set(fmt_handle)
+        .set(LogFormatHandle {
+            layer: fmt_handle,
+            span_fields_enabled,
+        })
         .map_err(|_| anyhow!("failed to set fmt layer handle"))?;
 
     Ok(())
 }
 
+/// Installs `layer` as the log format layer; `None` turns stdout logging off.
 pub(in crate::plugins::telemetry) fn reload_fmt(
-    layer: Box<dyn Layer<LayeredTracer> + Send + Sync>,
+    layer: Option<Box<dyn Layer<LayeredTracer> + Send + Sync>>,
 ) {
     if let Some(handle) = FMT_LAYER_HANDLE.get() {
-        handle.reload(layer).expect("fmt layer reload must succeed");
+        handle.reload(layer);
     }
 }
 
@@ -256,9 +296,56 @@ where
 mod tests {
     use opentelemetry::trace::Span as _;
     use opentelemetry::trace::Tracer as _;
+    use tracing_subscriber::registry::LookupSpan as _;
 
     use super::*;
+    use crate::plugins::telemetry::dynamic_attribute::LogAttributes;
     use crate::plugins::telemetry::reload::testing::ShutdownProbe;
+
+    /// The names of the fields recorded in `span`'s [`LogAttributes`].
+    fn log_attribute_names(span: &tracing::Span) -> Vec<String> {
+        span.with_subscriber(|(id, dispatch)| {
+            let registry = dispatch.downcast_ref::<Registry>().expect("a registry");
+            let span = registry.span(id).expect("the span");
+            let extensions = span.extensions();
+            let attributes = extensions.get::<LogAttributes>().expect("log attributes");
+            attributes
+                .attributes()
+                .iter()
+                .map(|kv| kv.key.to_string())
+                .collect()
+        })
+        .expect("a subscriber")
+    }
+
+    #[test]
+    fn span_fields_are_recorded_only_while_stdout_logging_is_on() {
+        let span_fields = SpanFieldsLayer::default();
+        let (fmt_layer, layer) = tracing_subscriber::reload::Layer::new(NoOpLayer.boxed());
+        let handle = LogFormatHandle {
+            layer,
+            span_fields_enabled: span_fields.enabled(),
+        };
+        let subscriber = tracing_subscriber::registry()
+            .with(DynAttributeLayer::new())
+            .with(EventsOnly::new(fmt_layer))
+            .with(span_fields);
+
+        tracing::subscriber::with_default(subscriber, || {
+            handle.reload(None);
+            let off = tracing::info_span!("off", field = "value", late = tracing::field::Empty);
+            off.record("late", "value");
+            assert!(log_attribute_names(&off).is_empty());
+
+            handle.reload(Some(FmtLayer::new(Text::default(), std::io::sink).boxed()));
+            let on = tracing::info_span!("on", field = "value", late = tracing::field::Empty);
+            on.record("late", "value");
+            let mut names = log_attribute_names(&on);
+            names.sort();
+            assert_eq!(names, ["field", "late"]);
+            assert!(log_attribute_names(&off).is_empty());
+        });
+    }
 
     /// The provider a batch processor belongs to used to be shut down only by dropping its last
     /// clone — which never happened, because `ReloadTracer` holds a `SdkTracer` (and therefore a
