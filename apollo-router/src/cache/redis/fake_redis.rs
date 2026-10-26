@@ -79,6 +79,7 @@ impl NodeStats {
 }
 
 pub(crate) struct Replica {
+    pub(crate) port: u16,
     pub(crate) behaviour: Behaviour,
     pub(crate) stats: Arc<NodeStats>,
     /// Holds a refusing replica's port for the life of the deployment, so no other listener can
@@ -104,7 +105,8 @@ impl FakeRedis {
         let mut replica_ports = Vec::new();
         for &behaviour in replica_behaviours {
             let socket = reserve();
-            replica_ports.push(socket.local_addr().unwrap().port());
+            let replica_port = socket.local_addr().unwrap().port();
+            replica_ports.push(replica_port);
             let (stats, reserved_port) = match behaviour {
                 Behaviour::Healthy => {
                     let role = Role::Replica {
@@ -119,6 +121,7 @@ impl FakeRedis {
                 Behaviour::Unresponsive => (hold_connections(listen(socket)), None),
             };
             replicas.push(Replica {
+                port: replica_port,
                 behaviour,
                 stats,
                 _reserved_port: reserved_port,

@@ -2,263 +2,206 @@ use std::collections::HashMap;
 use std::sync::Arc;
 use std::time::Duration;
 
+use fred::prelude::ClientLike;
+use fred::types::Builder;
+use fred::types::config::Config;
 use fred::types::config::ReplicaFilter;
 use fred::types::config::Server;
+use fred::types::config::ServerConfig;
 use parking_lot::RwLock;
 use tokio::time::Instant;
 use tracing::debug;
 
-/// Filters calls to replicas based on a filter() fn that returns true if there's a routeable
-/// replica in the replicas cache. Replicas are routeable when we're able to make a TCP Connection
-/// to them. We cache whether we were able to connect for 5 minutes. This applies to each replica,
-/// not all replicas as a unit, so we can have some replicas fail and yet still route to the others
+/// How long a replica that failed its probe is left out of replica routing.
+const UNROUTEABLE_FOR: Duration = Duration::from_secs(300);
+
+/// Filters the replicas fred routes to down to the ones that can serve commands, so that one
+/// broken replica can't fail the whole client.
 ///
-/// NOTE: filtering happens before any actual connections are made by our redis client (fred), so
-/// we shouldn't see any connections errors from replicas that have been filtered out
-#[derive(Default, Debug)]
+/// In cluster mode fred connects to every replica it's allowed to route to while it syncs the
+/// cluster, and a replica that fails to connect fails the sync, and with it the client (see
+/// `configure_cluster_replicas`). fred calls this filter for each replica right before that
+/// connection attempt, so we probe the replica by opening a connection the way fred will: with the
+/// pool's credentials and TLS settings, running the same handshake, and giving up after the Redis
+/// timeout. A replica that refuses connections, drops them, or accepts them and never answers (for
+/// example a paused replica) fails the probe and is left out, and reads go to the other replicas,
+/// or to the primary when there are none.
+///
+/// A replica that fails is left out for 5 minutes, so repeated syncs while it's broken don't each
+/// wait on it. A passing probe isn't cached: fred re-syncs replicas when a replica connection breaks,
+/// and a replica that just broke must be probed again rather than trusted.
+///
+/// NOTE: a replica that's left out is only added back when fred next syncs replicas, which happens
+/// when a connection breaks or the cluster topology changes, not on a timer.
+#[derive(Debug)]
 pub(crate) struct RouteableReplicaFilter {
-    replicas: Arc<RwLock<HashMap<String, Replica>>>,
+    /// The pool's configuration, which the probe connects with.
+    config: Config,
+    timeout: Duration,
+    /// Replicas that failed their probe, with when they may be probed again.
+    unrouteable: Arc<RwLock<HashMap<String, Instant>>>,
 }
 
-#[derive(Debug)]
-struct Replica {
-    expires: Instant,
-    routeable: bool,
+impl RouteableReplicaFilter {
+    pub(crate) fn new(config: Config, timeout: Duration) -> Self {
+        Self {
+            config,
+            timeout,
+            unrouteable: Default::default(),
+        }
+    }
+
+    /// Connects to the replica and completes fred's connection handshake within the timeout.
+    async fn probe(&self, replica: &Server) -> bool {
+        let mut config = self.config.clone();
+        config.server = ServerConfig::Centralized {
+            server: replica.clone(),
+        };
+        let client = match Builder::from_config(config)
+            .with_connection_config(|config| {
+                config.connection_timeout = self.timeout;
+                config.internal_command_timeout = self.timeout;
+            })
+            .build()
+        {
+            Ok(client) => client,
+            Err(err) => {
+                debug!("unable to build a probe client for redis replica {replica}: {err}");
+                return false;
+            }
+        };
+
+        // subscribe before connecting so that the connection result can't be missed
+        let mut connected = client.inner().notifications.connect.load().subscribe();
+        let connection_task = client.connect();
+        let result = tokio::time::timeout(self.timeout, connected.recv()).await;
+        // closes the probe connection, or abandons the attempt if it timed out
+        connection_task.abort();
+
+        match result {
+            Ok(Ok(Ok(()))) => true,
+            Ok(Ok(Err(err))) => {
+                debug!("redis replica {replica} failed its probe: {err}");
+                false
+            }
+            Ok(Err(err)) => {
+                debug!("redis replica {replica} probe ended without a result: {err}");
+                false
+            }
+            Err(_) => {
+                debug!(
+                    "redis replica {replica} didn't answer its probe within {:?}",
+                    self.timeout
+                );
+                false
+            }
+        }
+    }
 }
 
 #[async_trait::async_trait]
 impl ReplicaFilter for RouteableReplicaFilter {
-    // WARN: this is a hot path for fred, keep the instrumentation to trace-level
-    #[tracing::instrument(level = "trace")]
+    #[tracing::instrument(level = "trace", skip(self))]
     async fn filter(&self, _primary: &Server, replica: &Server) -> bool {
         let addr = format!("{}:{}", replica.host, replica.port);
-        // guard block so we drop the read guard before crossing the await boundary below (RwLock
-        // not Send)
-        let cached = {
-            let replicas = self.replicas.read();
-            replicas.get(&addr).map(|rep| (rep.expires, rep.routeable))
-        };
-
-        // if we have a replica
-        if let Some((expires, routeable)) = cached {
-            // that hasn't expired yet
-            if expires > Instant::now() {
-                // return its saved routeability
-                return routeable;
-            }
-            debug!("redis replica filter cache: entry for {addr} expired");
+        let unrouteable_until = self.unrouteable.read().get(&addr).copied();
+        if unrouteable_until.is_some_and(|until| until > Instant::now()) {
+            return false;
         }
 
-        // otherwise, we try to test routeability via tcp connect
-        let routeable = tokio::time::timeout(
-            // with a short timeout, 250ms
-            Duration::from_millis(250),
-            tokio::net::TcpStream::connect(&addr),
-        )
-        .await
-        .map(|res| res.is_ok())
-        .inspect_err(|_e| debug!("{addr} is being broadcast as part of redis but is not currently routeable, which may be intentional if using centralized or high-availabitliy setups with internal IPs for certain nodes or might represent a misconfiguration or infrastructure failure"))
-        .unwrap_or(false);
-
-        let mut replicas = self.replicas.write();
-        replicas.insert(
-            addr,
-            Replica {
-                // 5 minute cache
-                expires: Instant::now() + Duration::from_secs(300),
-                routeable,
-            },
-        );
-
+        let routeable = self.probe(replica).await;
+        if routeable {
+            self.unrouteable.write().remove(&addr);
+        } else {
+            debug!(
+                "redis replica {addr} failed its probe and won't receive reads for {UNROUTEABLE_FOR:?}"
+            );
+            self.unrouteable
+                .write()
+                .insert(addr, Instant::now() + UNROUTEABLE_FOR);
+        }
         routeable
     }
 }
 
 #[cfg(test)]
 mod tests {
-    use tokio::net::TcpListener;
-
     use super::*;
+    use crate::cache::redis::fake_redis::Behaviour;
+    use crate::cache::redis::fake_redis::FakeRedis;
+    use crate::cache::redis::fake_redis::Topology;
 
-    fn dummy_primary() -> Server {
-        Server::new("127.0.0.1", 6379)
+    const TIMEOUT: Duration = Duration::from_millis(500);
+
+    fn filter() -> RouteableReplicaFilter {
+        RouteableReplicaFilter::new(Config::default(), TIMEOUT)
     }
 
     fn server(port: u16) -> Server {
         Server::new("127.0.0.1", port)
     }
 
-    fn seed_cache(filter: &RouteableReplicaFilter, port: u16, routeable: bool, expires: Instant) {
-        let addr = format!("127.0.0.1:{port}");
+    /// Starts a deployment with one replica that behaves as given, and returns it with the
+    /// replica's port.
+    async fn replica(behaviour: Behaviour) -> (FakeRedis, u16) {
+        let redis = FakeRedis::start(Topology::Centralized, &[behaviour]).await;
+        let port = redis.replicas[0].port;
+        (redis, port)
+    }
+
+    fn is_unrouteable(filter: &RouteableReplicaFilter, port: u16) -> bool {
         filter
-            .replicas
+            .unrouteable
+            .read()
+            .contains_key(&format!("127.0.0.1:{port}"))
+    }
+
+    fn mark_unrouteable(filter: &RouteableReplicaFilter, port: u16, until: Instant) {
+        filter
+            .unrouteable
             .write()
-            .insert(addr, Replica { expires, routeable });
+            .insert(format!("127.0.0.1:{port}"), until);
+    }
+
+    /// A passing probe isn't remembered, so the replica is probed again on the next sync.
+    #[tokio::test]
+    async fn healthy_replica_is_routeable() {
+        let (_redis, port) = replica(Behaviour::Healthy).await;
+        let filter = filter();
+
+        assert!(filter.filter(&server(1), &server(port)).await);
+        assert!(!is_unrouteable(&filter, port));
     }
 
     #[tokio::test]
-    async fn reachable_replica_returns_true() {
-        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
-        let port = listener.local_addr().unwrap().port();
-
-        let filter = RouteableReplicaFilter::default();
-        assert!(filter.filter(&dummy_primary(), &server(port)).await);
-    }
-
-    #[tokio::test]
-    async fn unreachable_replica_returns_false() {
-        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
-        let port = listener.local_addr().unwrap().port();
-        drop(listener);
-
-        let filter = RouteableReplicaFilter::default();
-        assert!(!filter.filter(&dummy_primary(), &server(port)).await);
-    }
-
-    #[tokio::test]
-    async fn cached_result_is_returned_without_reconnect() {
-        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
-        let port = listener.local_addr().unwrap().port();
-
-        let filter = RouteableReplicaFilter::default();
-        assert!(filter.filter(&dummy_primary(), &server(port)).await);
-
-        // drop the listener — port is now unreachable
-        drop(listener);
-
-        // should still return true from cache
-        assert!(filter.filter(&dummy_primary(), &server(port)).await);
-    }
-
-    #[tokio::test]
-    async fn result_is_cached_after_filter() {
-        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
-        let port = listener.local_addr().unwrap().port();
-
-        let filter = RouteableReplicaFilter::default();
-        filter.filter(&dummy_primary(), &server(port)).await;
-
-        let replicas = filter.replicas.read();
-        let addr = format!("127.0.0.1:{port}");
-        let entry = replicas.get(&addr).expect("entry should be cached");
-        assert!(entry.routeable);
-        assert!(entry.expires > Instant::now());
-    }
-
-    #[tokio::test]
-    async fn expired_cache_triggers_fresh_connect() {
-        // seed with an already-expired entry that says routeable=true
-        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
-        let port = listener.local_addr().unwrap().port();
-        drop(listener);
-
-        let filter = RouteableReplicaFilter::default();
-        let expired = Instant::now() - Duration::from_secs(1);
-        seed_cache(&filter, port, true, expired);
-
-        // cache says true, but it's expired — fresh connect will fail
-        assert!(!filter.filter(&dummy_primary(), &server(port)).await);
-    }
-
-    #[tokio::test]
-    async fn unexpired_cache_is_used() {
-        // seed with a not-yet-expired entry, no listener needed
-        let filter = RouteableReplicaFilter::default();
-        let port = 1; // doesn't matter, cache will be hit
-        let future = Instant::now() + Duration::from_secs(300);
-        seed_cache(&filter, port, true, future);
-
-        assert!(filter.filter(&dummy_primary(), &server(port)).await);
-    }
-
-    #[tokio::test]
-    async fn unexpired_false_cache_is_used() {
-        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
-        let port = listener.local_addr().unwrap().port();
-
-        // seed with routeable=false even though the port is actually reachable
-        let filter = RouteableReplicaFilter::default();
-        let future = Instant::now() + Duration::from_secs(300);
-        seed_cache(&filter, port, false, future);
-
-        // cache wins — returns false despite the port being open
-        assert!(!filter.filter(&dummy_primary(), &server(port)).await);
-    }
-
-    #[tokio::test]
-    async fn separate_replicas_cached_independently() {
-        let listener_a = TcpListener::bind("127.0.0.1:0").await.unwrap();
-        let port_a = listener_a.local_addr().unwrap().port();
-
-        let listener_b = TcpListener::bind("127.0.0.1:0").await.unwrap();
-        let port_b = listener_b.local_addr().unwrap().port();
-        drop(listener_b);
-
-        let filter = RouteableReplicaFilter::default();
-        assert!(filter.filter(&dummy_primary(), &server(port_a)).await);
-        assert!(!filter.filter(&dummy_primary(), &server(port_b)).await);
-
-        let replicas = filter.replicas.read();
-        assert_eq!(replicas.len(), 2);
-    }
-
-    #[tokio::test]
-    async fn expired_entry_gets_replaced() {
-        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
-        let port = listener.local_addr().unwrap().port();
-
-        let filter = RouteableReplicaFilter::default();
-        let expired = Instant::now() - Duration::from_secs(1);
-        seed_cache(&filter, port, false, expired);
-
-        // expired false entry should be replaced by a fresh true result
-        assert!(filter.filter(&dummy_primary(), &server(port)).await);
-
-        let replicas = filter.replicas.read();
-        let addr = format!("127.0.0.1:{port}");
-        let entry = replicas.get(&addr).unwrap();
-        assert!(entry.routeable);
-        assert!(entry.expires > Instant::now());
-    }
-
-    #[tokio::test]
-    async fn connect_timeout_returns_false() {
-        let filter = RouteableReplicaFilter::default();
-        let primary = dummy_primary();
-        // this is a special non-routeable address (designated for use in documentaton/examples),
-        // rfc 5737, but if this flakes a bunch in ci/cd, we can mark it ignore and just keep it
-        // locally
-        let replica = Server::new("192.0.2.1", 1);
+    #[rstest::rstest]
+    async fn broken_replica_is_not_routeable(
+        #[values(Behaviour::Refusing, Behaviour::Dropping, Behaviour::Unresponsive)]
+        behaviour: Behaviour,
+    ) {
+        let (_redis, port) = replica(behaviour).await;
+        let filter = filter();
 
         let start = Instant::now();
-        let result = filter.filter(&primary, &replica).await;
-        let elapsed = start.elapsed();
-
-        assert!(!result);
-        // Should have waited for the 250ms timeout, not returned instantly
+        assert!(!filter.filter(&server(1), &server(port)).await);
         assert!(
-            elapsed >= Duration::from_millis(200),
-            "expected timeout (~250ms), but returned in {elapsed:?}"
+            start.elapsed() < TIMEOUT * 2,
+            "the probe should give up after the timeout"
         );
+        assert!(is_unrouteable(&filter, port));
     }
 
     #[tokio::test]
-    async fn connect_timeout_result_is_cached() {
-        let filter = RouteableReplicaFilter::default();
-        let primary = dummy_primary();
-        let replica = Server::new("192.0.2.1", 1);
+    async fn unrouteable_replica_is_not_probed_again_until_it_expires() {
+        let (redis, port) = replica(Behaviour::Healthy).await;
+        let filter = filter();
 
-        filter.filter(&primary, &replica).await;
+        mark_unrouteable(&filter, port, Instant::now() + UNROUTEABLE_FOR);
+        assert!(!filter.filter(&server(1), &server(port)).await);
+        assert_eq!(redis.replicas[0].stats.connections(), 0);
 
-        // Second call should return from cache instantly, not wait for timeout
-        let start = Instant::now();
-        let result = filter.filter(&primary, &replica).await;
-        let elapsed = start.elapsed();
-
-        assert!(!result);
-        assert!(
-            elapsed < Duration::from_millis(50),
-            "expected instant cache hit, but took {elapsed:?}"
-        );
+        mark_unrouteable(&filter, port, Instant::now() - Duration::from_secs(1));
+        assert!(filter.filter(&server(1), &server(port)).await);
+        assert!(!is_unrouteable(&filter, port));
     }
 }

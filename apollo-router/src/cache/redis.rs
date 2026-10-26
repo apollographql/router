@@ -49,7 +49,7 @@ use crate::services::subgraph::http::create_certificate_store;
 use crate::services::subgraph::http::generate_tls_client_config;
 
 #[cfg(test)]
-mod fake_redis;
+pub(super) mod fake_redis;
 
 pub(super) static ACTIVE_CLIENT_COUNT: AtomicU64 = AtomicU64::new(0);
 const SUPPORTED_REDIS_SCHEMES: [&str; 6] = [
@@ -430,7 +430,11 @@ impl RedisCacheStorage {
                 // with it. Non-cluster pools keep fred's defaults: lazy replica connections that
                 // are never opened because nothing is routed to them.
                 if self.is_cluster {
-                    configure_cluster_replicas(&mut config.replica);
+                    configure_cluster_replicas(
+                        &mut config.replica,
+                        &self.redis_client_config.client_config,
+                        self.redis_client_config.timeout,
+                    );
                 }
                 config.tcp = TcpConfig {
                     #[cfg(target_os = "linux")]
@@ -928,7 +932,16 @@ impl RedisCacheStorage {
 }
 
 /// Replica settings for cluster mode, where reads are routed to replicas.
-fn configure_cluster_replicas(replica: &mut ReplicaConfig) {
+///
+/// With eager connections and fatal reconnection errors, fred fails the whole client if it can't
+/// connect to a replica it routes to. The [`RouteableReplicaFilter`] prevents that by probing each
+/// replica with the client's `config` before fred connects to it, and leaving out the ones that
+/// can't complete a connection within `timeout`.
+fn configure_cluster_replicas(
+    replica: &mut ReplicaConfig,
+    config: &RedisConfig,
+    timeout: Duration,
+) {
     // NOTE: this defaults to true in fred but we're intentionally paying attention to
     // errors because sometimes fred gets into a funky state with its redis
     // connections. Sometimes, eg, a brief network outage in whatever cloud provider folks are
@@ -950,7 +963,10 @@ fn configure_cluster_replicas(replica: &mut ReplicaConfig) {
     // radius for sync failures but we now have a ReplicaFilter doing that work for us
     // (by removing unrouteable replicas from what we try to route to)
     replica.lazy_connections = false;
-    replica.filter = Some(Arc::new(RouteableReplicaFilter::default()));
+    replica.filter = Some(Arc::new(RouteableReplicaFilter::new(
+        config.clone(),
+        timeout,
+    )));
 }
 
 /// Send a keep-alive `PING` to the replica connections held by the pool, so eager replica sockets
@@ -1448,13 +1464,8 @@ mod test {
         /// replica that never answered recreated the pool in a loop). In a cluster, reads go to
         /// healthy replicas, falling back to the primary when there are none (with lazy replica
         /// connections, fred's round-robin never reached a connected replica when there were two,
-        /// and reads retried forever).
-        ///
-        /// KNOWN ISSUE: a cluster connects to every replica eagerly and treats replica errors as
-        /// fatal (see `configure_cluster_replicas`), so a replica that accepts connections but
-        /// can't serve commands fails the whole connection, and without `required_to_start` the
-        /// pool is recreated in a loop. Only a replica that refuses connections is filtered out.
-        /// Those cases assert the current behaviour so that changing it is deliberate.
+        /// and reads retried forever). A cluster replica that can't serve commands is left out
+        /// rather than failing the connection.
         #[tokio::test]
         #[rstest::rstest]
         async fn pool_stays_usable_and_routes_reads(
@@ -1473,28 +1484,7 @@ mod test {
             behaviours[0] = first_replica;
             let redis = FakeRedis::start(topology, &behaviours).await;
 
-            let connected = connect(&redis).await;
-            // KNOWN ISSUE: see the doc comment above.
-            if topology.is_cluster()
-                && matches!(first_replica, Behaviour::Dropping | Behaviour::Unresponsive)
-            {
-                let error = connected
-                    .err()
-                    .expect(
-                        "a cluster replica that can't serve commands is expected to fail the connection",
-                    )
-                    .to_string();
-                // an unresponsive replica stalls the connection until the deadline; a dropping
-                // one fails it at once
-                let stalled = error == CONNECT_STALLED;
-                assert_eq!(
-                    stalled,
-                    matches!(first_replica, Behaviour::Unresponsive),
-                    "{error}"
-                );
-                return Ok(());
-            }
-            let storage = connected?;
+            let storage = connect(&redis).await?;
             round_trip(&storage).await?;
 
             assert!(
