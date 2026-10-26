@@ -3,6 +3,9 @@ use std::collections::HashMap;
 use std::collections::HashSet;
 use std::io::IsTerminal;
 use std::marker::PhantomData;
+use std::sync::Arc;
+use std::sync::atomic::AtomicBool;
+use std::sync::atomic::Ordering;
 
 use opentelemetry::Key;
 use opentelemetry::KeyValue;
@@ -30,9 +33,10 @@ use crate::plugins::telemetry::reload::otel::IsSampled;
 use crate::plugins::telemetry::reload::otel::LayeredTracer;
 use crate::plugins::telemetry::resource::ConfigResource;
 
+/// Returns the layer that writes logs to stdout, or `None` when stdout logging is disabled.
 pub(crate) fn create_fmt_layer(
     config: &config::Conf,
-) -> Box<dyn Layer<LayeredTracer> + Send + Sync> {
+) -> Option<Box<dyn Layer<LayeredTracer> + Send + Sync>> {
     match &config.exporters.logging.stdout {
         StdOut {
             enabled,
@@ -50,8 +54,10 @@ pub(crate) fn create_fmt_layer(
                         config.exporters.logging.common.to_resource(),
                         format_config.clone(),
                     );
-                    FmtLayer::new(RateLimitFormatter::new(format, rate_limit), std::io::stdout)
-                        .boxed()
+                    Some(
+                        FmtLayer::new(RateLimitFormatter::new(format, rate_limit), std::io::stdout)
+                            .boxed(),
+                    )
                 }
 
                 Format::Text(format_config) => {
@@ -59,18 +65,16 @@ pub(crate) fn create_fmt_layer(
                         config.exporters.logging.common.to_resource(),
                         format_config.clone(),
                     );
-                    FmtLayer::new(RateLimitFormatter::new(format, rate_limit), std::io::stdout)
-                        .boxed()
+                    Some(
+                        FmtLayer::new(RateLimitFormatter::new(format, rate_limit), std::io::stdout)
+                            .boxed(),
+                    )
                 }
             }
         }
-        _ => NoOpLayer.boxed(),
+        _ => None,
     }
 }
-
-struct NoOpLayer;
-
-impl Layer<LayeredTracer> for NoOpLayer {}
 
 pub(crate) struct FmtLayer<T, S, W> {
     fmt_event: T,
@@ -101,52 +105,6 @@ where
     T: EventFormatter<S> + 'static,
     W: for<'writer> MakeWriter<'writer> + 'static,
 {
-    fn on_new_span(
-        &self,
-        attrs: &tracing_core::span::Attributes<'_>,
-        id: &tracing_core::span::Id,
-        ctx: Context<'_, S>,
-    ) {
-        if let Some(span) = ctx.span(id) {
-            let mut visitor = FieldsVisitor::new(&self.excluded_attributes);
-            // We're checking if it's sampled to not add both attributes in OtelData and our LogAttributes
-            if !span.is_sampled() {
-                attrs.record(&mut visitor);
-            }
-            let mut extensions = span.extensions_mut();
-            if let Some(log_attrs) = extensions.get_mut::<LogAttributes>() {
-                log_attrs.extend(visitor.values.into_iter().filter_map(|(k, v)| {
-                    Some(KeyValue::new(Key::new(k), v.maybe_to_otel_value()?))
-                }));
-            } else {
-                let mut fields = LogAttributes::default();
-                fields.extend(visitor.values.into_iter().filter_map(|(k, v)| {
-                    Some(KeyValue::new(Key::new(k), v.maybe_to_otel_value()?))
-                }));
-                extensions.insert(fields);
-            }
-        } else {
-            eprintln!("FmtLayer::on_new_span: Span not found, this is a bug");
-        }
-    }
-
-    fn on_record(&self, id: &Id, values: &Record<'_>, ctx: Context<'_, S>) {
-        if let Some(span) = ctx.span(id) {
-            let mut extensions = span.extensions_mut();
-            if let Some(fields) = extensions.get_mut::<LogAttributes>() {
-                let mut visitor = FieldsVisitor::new(&self.excluded_attributes);
-                values.record(&mut visitor);
-                fields.extend(visitor.values.into_iter().filter_map(|(k, v)| {
-                    Some(KeyValue::new(Key::new(k), v.maybe_to_otel_value()?))
-                }));
-            } else {
-                eprintln!("FmtLayer::on_record: cannot access to LogAttributes, this is a bug");
-            }
-        } else {
-            eprintln!("FmtLayer::on_record: Span not found, this is a bug");
-        }
-    }
-
     fn on_event(&self, event: &Event<'_>, ctx: Context<'_, S>) {
         let mut visitor = FieldsVisitor::new(&self.excluded_attributes);
         event.record(&mut visitor);
@@ -180,6 +138,102 @@ where
             }
             buf.clear();
         });
+    }
+}
+
+/// Records each span's fields in its [`LogAttributes`], where the log formatters find them.
+///
+/// [`FmtLayer`] only formats events, so it needs this layer beside it to show span fields. The
+/// router installs this layer outside the reload layer that holds its `FmtLayer`, so that span
+/// callbacks don't take the reload lock. See
+/// [`EventsOnly`](crate::plugins::telemetry::reload::log_layers::EventsOnly).
+///
+/// Recording can be switched off through [`SpanFieldsLayer::enabled`] while nothing writes logs.
+/// It starts on.
+pub(crate) struct SpanFieldsLayer {
+    excluded_attributes: HashSet<&'static str>,
+    enabled: Arc<AtomicBool>,
+}
+
+impl Default for SpanFieldsLayer {
+    fn default() -> Self {
+        Self {
+            excluded_attributes: EXCLUDED_ATTRIBUTES.into(),
+            enabled: Arc::new(AtomicBool::new(true)),
+        }
+    }
+}
+
+impl SpanFieldsLayer {
+    /// The switch for this layer's recording, shared with the layer.
+    ///
+    /// While it is `false`, the layer records nothing. A span created then keeps none of the
+    /// fields it was created with, even after recording is switched back on.
+    pub(crate) fn enabled(&self) -> Arc<AtomicBool> {
+        self.enabled.clone()
+    }
+
+    fn is_enabled(&self) -> bool {
+        self.enabled.load(Ordering::Relaxed)
+    }
+}
+
+impl<S> Layer<S> for SpanFieldsLayer
+where
+    S: tracing_core::Subscriber + for<'lookup> tracing_subscriber::registry::LookupSpan<'lookup>,
+{
+    fn on_new_span(
+        &self,
+        attrs: &tracing_core::span::Attributes<'_>,
+        id: &tracing_core::span::Id,
+        ctx: Context<'_, S>,
+    ) {
+        if !self.is_enabled() {
+            return;
+        }
+        if let Some(span) = ctx.span(id) {
+            let mut visitor = FieldsVisitor::new(&self.excluded_attributes);
+            // We're checking if it's sampled to not add both attributes in OtelData and our LogAttributes
+            if !span.is_sampled() {
+                attrs.record(&mut visitor);
+            }
+            let mut extensions = span.extensions_mut();
+            if let Some(log_attrs) = extensions.get_mut::<LogAttributes>() {
+                log_attrs.extend(visitor.values.into_iter().filter_map(|(k, v)| {
+                    Some(KeyValue::new(Key::new(k), v.maybe_to_otel_value()?))
+                }));
+            } else {
+                let mut fields = LogAttributes::default();
+                fields.extend(visitor.values.into_iter().filter_map(|(k, v)| {
+                    Some(KeyValue::new(Key::new(k), v.maybe_to_otel_value()?))
+                }));
+                extensions.insert(fields);
+            }
+        } else {
+            eprintln!("SpanFieldsLayer::on_new_span: Span not found, this is a bug");
+        }
+    }
+
+    fn on_record(&self, id: &Id, values: &Record<'_>, ctx: Context<'_, S>) {
+        if !self.is_enabled() {
+            return;
+        }
+        if let Some(span) = ctx.span(id) {
+            let mut extensions = span.extensions_mut();
+            if let Some(fields) = extensions.get_mut::<LogAttributes>() {
+                let mut visitor = FieldsVisitor::new(&self.excluded_attributes);
+                values.record(&mut visitor);
+                fields.extend(visitor.values.into_iter().filter_map(|(k, v)| {
+                    Some(KeyValue::new(Key::new(k), v.maybe_to_otel_value()?))
+                }));
+            } else {
+                eprintln!(
+                    "SpanFieldsLayer::on_record: cannot access to LogAttributes, this is a bug"
+                );
+            }
+        } else {
+            eprintln!("SpanFieldsLayer::on_record: Span not found, this is a bug");
+        }
     }
 }
 
@@ -300,8 +354,10 @@ mod tests {
     use crate::plugins::telemetry::config_new::logging::RateLimit;
     use crate::plugins::telemetry::config_new::logging::TextFormat;
     use crate::plugins::telemetry::config_new::router::events::RouterResponseBodyExtensionType;
+    use crate::plugins::telemetry::dynamic_attribute::DynAttributeLayer;
     use crate::plugins::telemetry::dynamic_attribute::SpanDynAttribute;
     use crate::plugins::telemetry::otel;
+    use crate::plugins::telemetry::reload::log_layers::EventsOnly;
     use crate::services::connector::request_service::Request;
     use crate::services::connector::request_service::Response;
     use crate::services::connector::request_service::TransportOutcome;
@@ -512,11 +568,61 @@ connector:
         info!(event_attr = "foo", "Hello from test");
     }
 
+    /// A [`FmtLayer`] writing to `buff`, with the [`SpanFieldsLayer`] that records the span fields
+    /// it shows.
+    fn log_layers<S, T>(format: T, buff: &LogBuffer) -> impl Layer<S>
+    where
+        S: tracing_core::Subscriber
+            + for<'lookup> tracing_subscriber::registry::LookupSpan<'lookup>,
+        T: EventFormatter<S> + 'static,
+    {
+        FmtLayer::new(format, buff.clone()).and_then(SpanFieldsLayer::default())
+    }
+
+    #[test]
+    fn routers_logging_layers_log_span_fields() {
+        for with_tracer in [false, true] {
+            let buff = LogBuffer::default();
+            let format = Json::new(
+                Resource::builder_empty().build(),
+                JsonFormat {
+                    display_timestamp: false,
+                    ..Default::default()
+                },
+            );
+            let subscriber = tracing_subscriber::Registry::default()
+                .with(DynAttributeLayer::new())
+                .with(with_tracer.then(|| otel::layer().with_tracer(make_tracer())))
+                .with(EventsOnly::new(FmtLayer::new(format, buff.clone())))
+                .with(SpanFieldsLayer::default());
+
+            ::tracing::subscriber::with_default(subscriber, || {
+                let span = info_span!("outer", first = "one", late = ::tracing::field::Empty);
+                let _outer = span.enter();
+                span.record("late", "recorded");
+                span.set_span_dyn_attribute("custom_dyn".into(), "test".into());
+                let nested = info_span!("nested", two = "two");
+                let _nested = nested.enter();
+                info!(event_attr = "foo", "Hello from nested");
+            });
+
+            let logs = buff.to_string();
+            for field in [
+                r#""first":"one""#,
+                r#""late":"recorded""#,
+                r#""custom_dyn":"test""#,
+                r#""two":"two""#,
+            ] {
+                assert!(logs.contains(field), "with_tracer: {with_tracer}, {logs}");
+            }
+        }
+    }
+
     #[tokio::test]
     async fn test_text_logging_attributes() {
         let buff = LogBuffer::default();
         let format = Text::default();
-        let fmt_layer = FmtLayer::new(format, buff.clone()).boxed();
+        let fmt_layer = log_layers(format, &buff);
 
         ::tracing::subscriber::with_default(
             fmt::Subscriber::new().with(fmt_layer),
@@ -529,7 +635,7 @@ connector:
     async fn test_text_logging_attributes_nested_spans() {
         let buff = LogBuffer::default();
         let format = Text::default();
-        let fmt_layer = FmtLayer::new(format, buff.clone()).boxed();
+        let fmt_layer = log_layers(format, &buff);
 
         ::tracing::subscriber::with_default(
             fmt::Subscriber::new().with(fmt_layer),
@@ -554,7 +660,7 @@ connector:
             ..Default::default()
         };
         let format = Json::new(Resource::builder_empty().build(), json_format);
-        let fmt_layer = FmtLayer::new(format, buff.clone()).boxed();
+        let fmt_layer = log_layers(format, &buff);
 
         ::tracing::subscriber::with_default(fmt::Subscriber::new().with(fmt_layer), || {
             error!(
@@ -615,7 +721,7 @@ connector:
                 ..Default::default()
             };
             let format = Json::new(Resource::builder_empty().build(), json_format);
-            let fmt_layer = FmtLayer::new(format, buff.clone()).boxed();
+            let fmt_layer = log_layers(format, &buff);
 
             ::tracing::subscriber::with_default(fmt::Subscriber::new().with(fmt_layer), emit);
 
@@ -722,7 +828,7 @@ connector:
     async fn test_json_logging_attributes() {
         let buff = LogBuffer::default();
         let format = Json::default();
-        let fmt_layer = FmtLayer::new(format, buff.clone()).boxed();
+        let fmt_layer = log_layers(format, &buff);
 
         ::tracing::subscriber::with_default(
             fmt::Subscriber::new().with(fmt_layer),
@@ -737,7 +843,7 @@ connector:
     async fn test_json_logging_attributes_nested_spans() {
         let buff = LogBuffer::default();
         let format = Json::default();
-        let fmt_layer = FmtLayer::new(format, buff.clone()).boxed();
+        let fmt_layer = log_layers(format, &buff);
 
         ::tracing::subscriber::with_default(
             fmt::Subscriber::new().with(fmt_layer),
@@ -759,7 +865,7 @@ connector:
             ..Default::default()
         };
         let format = Json::new(Resource::builder_empty().build(), json_format);
-        let fmt_layer = FmtLayer::new(format, buff.clone()).boxed();
+        let fmt_layer = log_layers(format, &buff);
 
         ::tracing::subscriber::with_default(
             fmt::Subscriber::new().with(fmt_layer),
@@ -782,7 +888,7 @@ connector:
             ..Default::default()
         };
         let format = Text::new(Resource::builder_empty().build(), text_format);
-        let fmt_layer = FmtLayer::new(format, buff.clone()).boxed();
+        let fmt_layer = log_layers(format, &buff);
 
         ::tracing::subscriber::with_default(
             fmt::Subscriber::new().with(fmt_layer),
@@ -800,7 +906,7 @@ connector:
             ..Default::default()
         };
         let format = Text::new(Resource::builder_empty().build(), text_format);
-        let fmt_layer = FmtLayer::new(format, buff.clone()).boxed();
+        let fmt_layer = log_layers(format, &buff);
 
         ::tracing::subscriber::with_default(
             fmt::Subscriber::new()
@@ -849,7 +955,7 @@ connector:
             ..Default::default()
         };
         let format = Json::new(Resource::builder_empty().build(), text_format);
-        let fmt_layer = FmtLayer::new(format, buff.clone()).boxed();
+        let fmt_layer = log_layers(format, &buff);
 
         ::tracing::subscriber::with_default(
             fmt::Subscriber::new()
@@ -900,7 +1006,7 @@ connector:
             ..Default::default()
         };
         let format = Json::new(Resource::builder_empty().build(), text_format);
-        let fmt_layer = FmtLayer::new(format, buff.clone()).boxed();
+        let fmt_layer = log_layers(format, &buff);
 
         let event_config: events::Events = serde_yaml::from_str(EVENT_CONFIGURATION).unwrap();
 
@@ -1155,7 +1261,7 @@ connector:
             ..Default::default()
         };
         let format = Json::new(Resource::builder_empty().build(), text_format);
-        let fmt_layer = FmtLayer::new(format, buff.clone()).boxed();
+        let fmt_layer = log_layers(format, &buff);
 
         ::tracing::subscriber::with_default(
             fmt::Subscriber::new()
@@ -1229,11 +1335,10 @@ connector:
             ..Default::default()
         };
         let format = Json::new(Resource::builder_empty().build(), text_format);
-        let fmt_layer = FmtLayer::new(
+        let fmt_layer = log_layers(
             RateLimitFormatter::new(format, &RateLimit::default()),
-            buff.clone(),
-        )
-        .boxed();
+            &buff,
+        );
 
         let event_config: events::Events = serde_yaml::from_str(
             r#"
@@ -1338,7 +1443,7 @@ subgraph:
             ..Default::default()
         };
         let format = Text::new(Resource::builder_empty().build(), text_format);
-        let fmt_layer = FmtLayer::new(format, buff.clone()).boxed();
+        let fmt_layer = log_layers(format, &buff);
 
         let event_config: events::Events = serde_yaml::from_str(EVENT_CONFIGURATION).unwrap();
 
@@ -1649,7 +1754,7 @@ subgraph:
                 ..Default::default()
             },
         );
-        let fmt_layer = FmtLayer::new(format, buff.clone()).boxed();
+        let fmt_layer = log_layers(format, &buff);
         let subscriber = fmt::Subscriber::new()
             .with(otel::layer().with_tracer(make_tracer()))
             .with(fmt_layer);

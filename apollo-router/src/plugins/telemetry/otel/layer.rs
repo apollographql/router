@@ -687,7 +687,7 @@ where
     fn sampled(span: &SpanRef<S>) -> bool {
         span.extensions()
             .get::<OtelData>()
-            .is_some_and(|d| d.current_cx.span().is_recording())
+            .is_some_and(|d| d.sampled)
     }
 }
 
@@ -707,10 +707,6 @@ where
             // need to make sure that there isn't a lock already in place.
             let parent_cx = self.parent_context(attrs, &ctx);
             let mut extensions = span.extensions_mut();
-
-            if self.tracked_inactivity && extensions.get_mut::<Timings>().is_none() {
-                extensions.insert(Timings::new());
-            }
 
             // Cheap pre-scan: extract fields that must be given to the builder before
             // the span is built (kind can't be changed afterwards; name is just an
@@ -734,9 +730,16 @@ where
             // the parent's recording flag automatically: root spans are always recording;
             // children of non-recording spans are dropped here without any extra work.
             let otel_span = builder.start_with_context(&self.tracer, &parent_cx);
+            let sampled = otel::Span::is_recording(&otel_span);
+
+            // Only recording spans can carry busy and idle times, so only they track them.
+            if sampled && self.tracked_inactivity && extensions.get_mut::<Timings>().is_none() {
+                extensions.insert(Timings::new());
+            }
 
             let mut otel_data = OtelData {
                 current_cx: parent_cx.with_span(otel_span),
+                sampled,
                 attributes: Vec::new(),
                 original_name: attrs.metadata().name(),
                 event_attributes: None,
@@ -745,7 +748,7 @@ where
             };
 
             // Only pay for attribute collection when the span will actually be exported.
-            if otel_data.current_cx.span().is_recording() {
+            if sampled {
                 if self.location {
                     let meta = attrs.metadata();
                     if let Some(filename) = meta.file() {
@@ -786,10 +789,7 @@ where
         }
 
         if let Some(span) = ctx.span(id) {
-            if !Self::sampled(&span) {
-                return;
-            }
-
+            // Only sampled spans have `Timings`, so this needs no separate sampling check.
             let mut extensions = span.extensions_mut();
             if let Some(timings) = extensions.get_mut::<Timings>() {
                 let now = Instant::now();
@@ -807,10 +807,7 @@ where
         }
 
         if let Some(span) = ctx.span(id) {
-            if !Self::sampled(&span) {
-                return;
-            }
-
+            // Only sampled spans have `Timings`, so this needs no separate sampling check.
             let mut extensions = span.extensions_mut();
             if let Some(timings) = extensions.get_mut::<Timings>() {
                 let now = Instant::now();
@@ -1067,6 +1064,9 @@ mod tests {
         builder: otel::SpanBuilder,
         status: otel::Status,
         parent_cx: OtelContext,
+        /// Calls to `is_recording` on the built span. Each one made through the span's
+        /// `Context` locks the span's mutex.
+        is_recording_calls: usize,
     }
 
     /// Test span that records mutations into the shared [`TestSpanRecord`].
@@ -1084,6 +1084,9 @@ mod tests {
             &self.1
         }
         fn is_recording(&self) -> bool {
+            if let Some(record) = self.0.lock().as_mut() {
+                record.is_recording_calls += 1;
+            }
             // `Span::set_attributes`'s default impl only applies attributes when the
             // span reports itself as recording, matching a real active span.
             true
@@ -1144,6 +1147,7 @@ mod tests {
                 builder,
                 status: otel::Status::Unset,
                 parent_cx: parent_cx.clone(),
+                is_recording_calls: 0,
             });
             TestBuiltSpan(self.0.clone(), otel::SpanContext::empty_context())
         }
@@ -1162,6 +1166,13 @@ mod tests {
                 .expect("no span data has been recorded yet")
                 .parent_cx
                 .clone()
+        }
+
+        fn is_recording_calls(&self) -> usize {
+            let lock = self.0.lock();
+            lock.as_ref()
+                .expect("no span data has been recorded yet")
+                .is_recording_calls
         }
     }
 
@@ -1377,6 +1388,90 @@ mod tests {
             .collect::<Vec<&str>>();
         assert!(keys.contains(&"idle_ns"));
         assert!(keys.contains(&"busy_ns"));
+    }
+
+    #[test]
+    fn enter_and_exit_do_not_ask_the_span_whether_it_is_recording() {
+        let tracer = TestTracer(Arc::new(Mutex::new(None)));
+        let subscriber = tracing_subscriber::registry().with(
+            layer()
+                .with_tracer(tracer.clone())
+                .with_tracked_inactivity(true),
+        );
+
+        tracing::subscriber::with_default(subscriber, || {
+            let span = tracing::debug_span!("request");
+            let calls_after_creation = tracer.is_recording_calls();
+            for _ in 0..10 {
+                let _entered = span.enter();
+            }
+            assert_eq!(tracer.is_recording_calls(), calls_after_creation);
+        });
+    }
+
+    /// Runs the same spans through the layer with the real SDK and returns what it exports.
+    fn export_with_sampler(
+        sampler: opentelemetry_sdk::trace::Sampler,
+    ) -> Vec<opentelemetry_sdk::trace::SpanData> {
+        use opentelemetry::trace::TracerProvider as _;
+
+        let exporter = opentelemetry_sdk::trace::InMemorySpanExporterBuilder::new().build();
+        let provider = opentelemetry_sdk::trace::SdkTracerProvider::builder()
+            .with_sampler(sampler)
+            .with_simple_exporter(exporter.clone())
+            .build();
+        let subscriber =
+            tracing_subscriber::registry().with(layer().with_tracer(provider.tracer("test")));
+
+        tracing::subscriber::with_default(subscriber, || {
+            let parent = tracing::info_span!("parent", static_attr = "set at creation");
+            let _parent_entered = parent.enter();
+            let child = tracing::info_span!("child", recorded_attr = tracing::field::Empty);
+            for _ in 0..2 {
+                let _child_entered = child.enter();
+                child.record("recorded_attr", "set later");
+                tracing::info!("an event");
+            }
+        });
+
+        exporter
+            .get_finished_spans()
+            .expect("in-memory exporter should return its spans")
+    }
+
+    #[test]
+    fn sampled_spans_export_attributes_events_and_timings() {
+        let spans = export_with_sampler(opentelemetry_sdk::trace::Sampler::AlwaysOn);
+
+        let names: Vec<_> = spans.iter().map(|span| span.name.as_ref()).collect();
+        assert_eq!(names, ["child", "parent"]);
+        let attribute = |name: &str, key: &str| {
+            spans
+                .iter()
+                .find(|span| span.name == name)
+                .and_then(|span| span.attributes.iter().find(|kv| kv.key.as_str() == key))
+                .map(|kv| kv.value.clone())
+        };
+        for name in ["parent", "child"] {
+            assert!(attribute(name, "busy_ns").is_some(), "{name} has busy_ns");
+            assert!(attribute(name, "idle_ns").is_some(), "{name} has idle_ns");
+        }
+        assert_eq!(
+            attribute("parent", "static_attr"),
+            Some(Value::from("set at creation"))
+        );
+        assert_eq!(
+            attribute("child", "recorded_attr"),
+            Some(Value::from("set later"))
+        );
+        let child = spans.iter().find(|span| span.name == "child").unwrap();
+        assert_eq!(child.events.len(), 2);
+    }
+
+    #[test]
+    fn unsampled_spans_export_nothing() {
+        let spans = export_with_sampler(opentelemetry_sdk::trace::Sampler::AlwaysOff);
+        assert!(spans.is_empty());
     }
 
     #[test]
