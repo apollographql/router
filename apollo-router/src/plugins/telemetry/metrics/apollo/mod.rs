@@ -334,6 +334,7 @@ mod test {
     use super::*;
     use crate::Context;
     use crate::TestHarness;
+    use crate::apollo_studio_interop::ReferencedEnums;
     use crate::context::OPERATION_KIND;
     use crate::plugin::Plugin;
     use crate::plugin::PluginInit;
@@ -345,6 +346,7 @@ mod test {
     use crate::plugins::telemetry::apollo_exporter::Sender;
     use crate::query_planner::OperationKind;
     use crate::services::SupergraphRequest;
+    use crate::services::subgraph;
 
     // Serializes every test in this module. `Telemetry::new` populates
     // `create_builtin_instruments` from the global meter provider, and
@@ -624,6 +626,102 @@ mod test {
         });
 
         Ok(())
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn apollo_metrics_enum_response_references() -> Result<(), BoxError> {
+        let _guard = TEST.lock().await;
+        let references = enum_response_references_for(&format!(
+            r#"
+            telemetry:
+              apollo:
+                endpoint: "{ENDPOINT_DEFAULT}"
+                apollo_key: "key"
+                apollo_graph_ref: "ref"
+                metrics_reference_mode: extended
+            "#
+        ))
+        .await?;
+        let expected = [1, 2, 3, 5, 6, 8, 10, 11, 13, 14].map(|n| format!("SOME_VALUE_{n}"));
+        assert_eq!(
+            references,
+            ReferencedEnums::from([("SomeEnum".to_string(), expected.into())])
+        );
+        Ok(())
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn apollo_metrics_no_enum_response_references_without_apollo() -> Result<(), BoxError> {
+        let _guard = TEST.lock().await;
+        let references = enum_response_references_for(
+            r#"
+            telemetry:
+              apollo:
+                metrics_reference_mode: extended
+            "#,
+        )
+        .await?;
+        assert!(references.is_empty());
+        Ok(())
+    }
+
+    /// Runs a query whose response holds enum values through a router with a telemetry plugin
+    /// built from `config`, and returns the response enum values in its usage reports.
+    async fn enum_response_references_for(config: &str) -> Result<ReferencedEnums, BoxError> {
+        let mut plugin = create_telemetry_plugin(config).await?;
+        let (tx, rx) = tokio::sync::mpsc::channel(100);
+        plugin.apollo_metrics_sender = Sender::Apollo(tx);
+
+        let data: serde_json_bytes::Value = serde_json::from_str(include_str!(
+            "../../../../apollo_studio_interop/testdata/enums_from_response_complex_response_type_response.json"
+        ))?;
+        let router = TestHarness::builder()
+            .schema(include_str!(
+                "../../../../apollo_studio_interop/testdata/schema_interop.graphql"
+            ))
+            .extra_private_plugin(plugin)
+            // The planner's subgraph query differs from the fixture's, so answer every fetch
+            // with the fixture response rather than matching on the query.
+            .subgraph_hook(move |_, _| {
+                let data = data.clone();
+                tower::service_fn(move |request: subgraph::Request| {
+                    let data = data.clone();
+                    async move {
+                        Ok(subgraph::Response::builder()
+                            .data(data)
+                            .extensions(crate::json_ext::Object::new())
+                            .id(request.id)
+                            .context(request.context)
+                            .subgraph_name(request.subgraph_name)
+                            .build())
+                    }
+                })
+                .boxed_clone()
+            })
+            .build_router()
+            .await?;
+        let request = SupergraphRequest::fake_builder()
+            .query(include_str!(
+                "../../../../apollo_studio_interop/testdata/enums_from_response_complex_response_type.graphql"
+            ))
+            .operation_name("EnumResponseQuery")
+            .build()?;
+        let response = router
+            .oneshot(request.try_into().unwrap())
+            .await?
+            .next_response()
+            .await
+            .unwrap()?;
+        let response: Value = serde_json::from_slice(&response)?;
+        assert!(response.get("errors").is_none(), "{response}");
+
+        let reports = ReceiverStream::new(rx).collect::<Vec<_>>().await;
+        assert!(!reports.is_empty(), "no usage report was sent");
+        Ok(reports
+            .into_iter()
+            .flat_map(|report| report.stats.into_values())
+            .flat_map(|stats| stats.stats_with_context.enum_response_references)
+            .collect())
     }
 
     async fn get_metrics_for_request(

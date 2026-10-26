@@ -657,3 +657,22 @@ pub(crate) mod vectorize {
         serde::Serialize::serialize(&container, ser)
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn exports_to_apollo_needs_both_the_key_and_the_graph_ref() {
+        let config = |key: Option<&str>, graph_ref: Option<&str>| Config {
+            apollo_key: key.map(str::to_string),
+            apollo_graph_ref: graph_ref.map(str::to_string),
+            ..Default::default()
+        };
+
+        assert!(!config(None, None).exports_to_apollo());
+        assert!(!config(Some("key"), None).exports_to_apollo());
+        assert!(!config(None, Some("graph@ref")).exports_to_apollo());
+        assert!(config(Some("key"), Some("graph@ref")).exports_to_apollo());
+    }
+}
