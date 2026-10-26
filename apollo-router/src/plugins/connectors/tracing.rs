@@ -93,10 +93,12 @@ mod tests {
     use apollo_federation::connectors::Connector;
     use apollo_federation::connectors::HttpJsonTransport;
     use apollo_federation::connectors::JSONSelection;
+    use apollo_federation::connectors::StreamMode;
     use apollo_federation::connectors::expand::Connectors;
 
     use crate::metrics::FutureMetricsExt as _;
     use crate::plugins::connectors::tracing::connect_spec_counts;
+    use crate::plugins::connectors::tracing::connect_stream_mode_counts;
     use crate::services::connector_service::ConnectorServices;
     use crate::spec::Schema;
 
@@ -151,6 +153,61 @@ mod tests {
         );
     }
 
+    #[test]
+    fn test_connect_stream_mode_counts() {
+        let connector = Connector {
+            spec: ConnectSpec::V0_5,
+            schema_subtypes_map: Default::default(),
+            id: ConnectId::new(
+                "subgraph_name".into(),
+                None,
+                name!(Query),
+                name!(users),
+                None,
+                0,
+            ),
+            transport: Some(HttpJsonTransport {
+                source_template: "http://localhost/".parse().ok(),
+                connect_template: "/path".parse().unwrap(),
+                ..Default::default()
+            }),
+            selection: JSONSelection::parse("$.data").unwrap(),
+            entity_resolver: None,
+            config: Default::default(),
+            max_requests: None,
+            batch_settings: None,
+            request_headers: Default::default(),
+            response_headers: Default::default(),
+            request_variable_keys: Default::default(),
+            response_variable_keys: Default::default(),
+            error_settings: Default::default(),
+            output_type: None,
+            label: "label".into(),
+        };
+        let mut streaming = connector.clone();
+        if let Some(transport) = streaming.transport.as_mut() {
+            transport.stream = Some(StreamMode::Array);
+        }
+
+        let connectors = Connectors {
+            by_service_name: Arc::new(
+                [
+                    ("service_name_1".into(), connector.clone()),
+                    ("service_name_2".into(), streaming),
+                    ("service_name_3".into(), connector),
+                ]
+                .into(),
+            ),
+            labels_by_service_name: Default::default(),
+            source_config_keys: Default::default(),
+        };
+
+        assert_eq!(
+            connect_stream_mode_counts(&connectors),
+            [("array", 1u64)].into()
+        );
+    }
+
     const STEEL_THREAD_SCHEMA: &str = include_str!("./testdata/steelthread.graphql");
 
     #[tokio::test]
@@ -169,7 +226,7 @@ mod tests {
             assert!(!crate::metrics::collect_metrics().metric_exists(
                 "apollo.router.schema.connectors.stream",
                 crate::metrics::test_utils::MetricType::Gauge,
-                &[],
+                &[opentelemetry::KeyValue::new("connect.stream.mode", "array")],
             ));
         }
         .with_metrics()
