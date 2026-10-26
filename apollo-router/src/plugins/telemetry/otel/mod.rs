@@ -19,7 +19,8 @@ pub(crate) struct OtelData {
     /// The otel span and its propagation context.
     pub(crate) current_cx: opentelemetry::Context,
 
-    /// Whether the otel span was recording when it was created, and so will be exported.
+    /// Whether the otel span was recording when it was created. Only recording spans
+    /// collect attributes, events and timings.
     ///
     /// Asking `current_cx` instead locks the span's mutex. The answer can't change while
     /// `OtelData` is attached: a span only stops recording when it ends, and the layer ends

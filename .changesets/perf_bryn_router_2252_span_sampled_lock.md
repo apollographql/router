@@ -4,4 +4,4 @@ Since 3.0.0-alpha.2, the router took an extra lock every time a request entered 
 
 You don't need to change any configuration.
 
-By [@BrynCooke](https://github.com/BrynCooke)
+By [@BrynCooke](https://github.com/BrynCooke) in https://github.com/apollographql/router/pull/10670

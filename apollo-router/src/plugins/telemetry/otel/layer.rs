@@ -732,7 +732,7 @@ where
             let otel_span = builder.start_with_context(&self.tracer, &parent_cx);
             let sampled = otel::Span::is_recording(&otel_span);
 
-            // Only sampled spans export busy and idle times, so only they track them.
+            // Only recording spans can carry busy and idle times, so only they track them.
             if sampled && self.tracked_inactivity && extensions.get_mut::<Timings>().is_none() {
                 extensions.insert(Timings::new());
             }
