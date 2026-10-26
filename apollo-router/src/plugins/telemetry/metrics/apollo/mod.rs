@@ -336,11 +336,12 @@ mod test {
     use super::*;
     use crate::Context;
     use crate::TestHarness;
+    use crate::configuration::ExternalValues;
+    use crate::configuration::expansion::Expansion;
     use crate::context::OPERATION_KIND;
     use crate::plugin::Plugin;
     use crate::plugin::PluginInit;
     use crate::plugin::PluginPrivate;
-    use crate::plugin::test::MockSubgraph;
     use crate::plugins::subscription;
     use crate::plugins::telemetry::STUDIO_EXCLUDE;
     use crate::plugins::telemetry::Telemetry;
@@ -348,7 +349,6 @@ mod test {
     use crate::plugins::telemetry::apollo_exporter::Sender;
     use crate::query_planner::OperationKind;
     use crate::services::SupergraphRequest;
-    use crate::test_harness::MockedSubgraphs;
 
     // Serializes every test in this module. `Telemetry::new` populates
     // `create_builtin_instruments` from the global meter provider, and
@@ -516,40 +516,36 @@ mod test {
         #[case] expected: HashMap<String, HashSet<String>>,
     ) -> Result<(), BoxError> {
         let _guard = TEST.lock().await;
-        let mut plugin = create_telemetry_plugin(&format!(
+        let telemetry_config = ExternalValues::from(
+            Expansion::builder()
+                .supported_mode("env")
+                .mocked_env_var("METRICS_REFERENCE_MODE", metrics_reference_mode)
+                .build(),
+        )
+        .expand_without_schema(
             r#"
             telemetry:
               apollo:
-                endpoint: "{ENDPOINT_DEFAULT}"
                 apollo_key: "key"
                 apollo_graph_ref: "ref"
                 schema_id: "schema_sha"
-                metrics_reference_mode: {metrics_reference_mode}
-            "#
-        ))
-        .await?;
+                metrics_reference_mode: ${env.METRICS_REFERENCE_MODE}
+            "#,
+        )?;
+        let mut plugin = create_telemetry_plugin_from_value(telemetry_config).await?;
         let (tx, rx) = tokio::sync::mpsc::channel(100);
         plugin.apollo_metrics_sender = Sender::Apollo(tx);
-        let subgraphs = MockedSubgraphs(
-            [(
-                "subgraph-a",
-                MockSubgraph::builder()
-                    .with_json(
-                        serde_json::json!({"query": "{status}"}),
-                        serde_json::json!({"data": {"status": "ACTIVE"}}),
-                    )
-                    .build(),
-            )]
-            .into_iter()
-            .collect(),
-        );
 
         TestHarness::builder()
+            .configuration_json(serde_json::json!({
+                "experimental_mock_subgraphs": {
+                    "subgraph-a": { "query": { "status": "ACTIVE" } },
+                },
+            }))?
             .schema(include_str!(
                 "../../testdata/enum_response_supergraph.graphql"
             ))
             .extra_private_plugin(plugin)
-            .extra_plugin(subgraphs)
             .build_router()
             .await?
             .oneshot(
@@ -778,7 +774,13 @@ mod test {
     }
 
     async fn create_telemetry_plugin(full_config: &str) -> Result<Telemetry, BoxError> {
-        let full_config = serde_yaml::from_str::<Value>(full_config).expect("yaml must be valid");
+        create_telemetry_plugin_from_value(
+            serde_yaml::from_str(full_config).expect("yaml must be valid"),
+        )
+        .await
+    }
+
+    async fn create_telemetry_plugin_from_value(full_config: Value) -> Result<Telemetry, BoxError> {
         let telemetry_config = full_config
             .as_object()
             .expect("must be an object")

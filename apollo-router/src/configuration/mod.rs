@@ -42,6 +42,8 @@ use thiserror::Error;
 pub(crate) use self::apollo_configuration_parse::AutomaticUpgrade;
 pub(crate) use self::apollo_configuration_parse::ConfigurationParser;
 #[cfg(test)]
+pub(crate) use self::apollo_configuration_parse::ExternalValues;
+#[cfg(test)]
 pub(crate) use self::apollo_configuration_parse::Migration;
 #[cfg(test)]
 pub(crate) use self::apollo_configuration_parse::parse_configuration;
