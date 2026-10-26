@@ -111,20 +111,29 @@ fn migration_major(major: &str, pre: &str) -> Option<i64> {
         .filter(|&major| major > 0)
 }
 
+/// An upgraded configuration and what the upgrade has to tell the operator about it.
+pub(crate) struct Upgraded {
+    pub(crate) config: Value,
+    /// For each migration that applies, in the order they ran: its `log` notices, or its
+    /// description when it changed the configuration without any. A notice can apply without the
+    /// configuration changing, such as a deprecation warning.
+    pub(crate) notices: Vec<String>,
+}
+
 pub(crate) fn upgrade_configuration(
     config: &serde_json::Value,
     log_warnings: bool,
     upgrade_mode: UpgradeMode,
 ) -> Result<serde_json::Value, super::ConfigurationError> {
-    upgrade(config, log_warnings, true, upgrade_mode)
+    upgrade(config, log_warnings, true, upgrade_mode).map(|upgraded| upgraded.config)
 }
 
-/// Upgrades `config` without logging anything, including each migration's own notices, to check
-/// what an upgrade would change.
+/// Upgrades `config` without logging anything, returning the notices for callers that report
+/// them themselves or only need to know what an upgrade would change.
 pub(crate) fn upgrade_configuration_silently(
     config: &serde_json::Value,
     upgrade_mode: UpgradeMode,
-) -> Result<serde_json::Value, super::ConfigurationError> {
+) -> Result<Upgraded, super::ConfigurationError> {
     upgrade(config, false, false, upgrade_mode)
 }
 
@@ -133,7 +142,7 @@ fn upgrade(
     log_warnings: bool,
     log_notices: bool,
     upgrade_mode: UpgradeMode,
-) -> Result<serde_json::Value, super::ConfigurationError> {
+) -> Result<Upgraded, super::ConfigurationError> {
     // Transformers are loaded from a file and applied in order
     let mut migrations: Vec<Migration> = Vec::new();
     let files = Asset::iter().sorted().filter(|f| match upgrade_mode {
@@ -156,17 +165,23 @@ fn upgrade(
 
     let mut config = config.clone();
     let mut effective_descriptions: Vec<String> = Vec::new();
+    let mut notices: Vec<String> = Vec::new();
 
     for migration in &migrations {
+        let migration_notices = migration_notices(&config, migration)?;
         if log_notices {
-            log_migration_notices(&config, migration)?;
+            migration_notices.iter().for_each(Notice::log);
         }
         let new_config = apply_migration(&config, migration)?;
 
         // If the config has been modified by the migration then let the user know
         if new_config != config {
             effective_descriptions.push(migration.description.clone());
+            if migration_notices.is_empty() {
+                notices.push(unwrap_description(&migration.description));
+            }
         }
+        notices.extend(migration_notices.into_iter().map(|notice| notice.message));
 
         // Get ready for the next migration
         config = new_config;
@@ -182,18 +197,20 @@ fn upgrade(
     let (migrated_connectors_subgraphs, subgraphs_with_unpropagated_config) =
         migrate_connectors_subgraphs_to_sources(&mut config);
     if migrated_connectors_subgraphs {
-        effective_descriptions.push(
-            "Apollo Connectors `connectors.subgraphs` configuration has been replaced by `connectors.sources` keyed by `<subgraph>.<source>`".to_string(),
-        );
+        let description = "Apollo Connectors `connectors.subgraphs` configuration has been replaced by `connectors.sources` keyed by `<subgraph>.<source>`".to_string();
+        notices.push(description.clone());
+        effective_descriptions.push(description);
     }
     if !subgraphs_with_unpropagated_config.is_empty() {
-        effective_descriptions.push(format!(
+        let description = format!(
             "Apollo Connectors: `connectors.subgraphs.<subgraph>.$config` was only copied onto sources listed under that subgraph's `sources` map. If your schema declares additional `@source`s for {}, add `$config` to their `connectors.sources` entries manually",
             subgraphs_with_unpropagated_config
                 .iter()
                 .map(|s| format!("`{s}`"))
                 .join(", ")
-        ));
+        );
+        notices.push(description.clone());
+        effective_descriptions.push(description);
     }
 
     // Custom migration: wrap headers operation lists under an `operations` key.
@@ -201,14 +218,14 @@ fn upgrade(
     // is a prefix of the destination path and subgraph names are dynamic.
     let migrated = migrate_headers_operations(config.clone());
     if migrated != config {
+        let notice = "`headers.all.request`, per-subgraph equivalents, and \
+             `headers.connector.{all,sources.*}.request` now require an `operations` key \
+             wrapping the list of propagation rules. The router has applied this change \
+             automatically. Please update your configuration file.";
         if log_warnings {
-            tracing::warn!(
-                "`headers.all.request`, per-subgraph equivalents, and \
-                 `headers.connector.{{all,sources.*}}.request` now require an `operations` key \
-                 wrapping the list of propagation rules. The router has applied this change \
-                 automatically. Please update your configuration file."
-            );
+            tracing::warn!("{notice}");
         }
+        notices.push(notice.to_string());
         config = migrated;
     }
 
@@ -217,13 +234,13 @@ fn upgrade(
     // and can't be addressed with static dot-notation paths.
     let migrated = migrate_traffic_shaping_subgraph_http2(config.clone());
     if migrated != config {
+        let notice = "`traffic_shaping.subgraphs.<name>.experimental_http2` has been renamed to \
+             `traffic_shaping.subgraphs.<name>.http2`. The router has applied this change \
+             automatically. Please update your configuration file.";
         if log_warnings {
-            tracing::warn!(
-                "`traffic_shaping.subgraphs.<name>.experimental_http2` has been renamed to \
-                 `traffic_shaping.subgraphs.<name>.http2`. The router has applied this change \
-                 automatically. Please update your configuration file."
-            );
+            tracing::warn!("{notice}");
         }
+        notices.push(notice.to_string());
         config = migrated;
     }
 
@@ -237,7 +254,27 @@ fn upgrade(
                 .join("\n\n")
         );
     }
-    Ok(config)
+    Ok(Upgraded { config, notices })
+}
+
+/// Joins a migration description's hard-wrapped lines, keeping each `- ` list item on its own line
+/// and starting a new line after the list ends.
+fn unwrap_description(description: &str) -> String {
+    let mut unwrapped = String::new();
+    let mut after_list_item = false;
+    for line in description.trim_end().lines() {
+        let list_item = line.starts_with("- ");
+        if !unwrapped.is_empty() {
+            unwrapped.push(if list_item || after_list_item {
+                '\n'
+            } else {
+                ' '
+            });
+        }
+        unwrapped.push_str(line);
+        after_list_item = list_item;
+    }
+    unwrapped
 }
 
 /// Collapse `connectors.subgraphs.<sub>.sources.<src>` entries into
@@ -333,8 +370,31 @@ fn migrate_connectors_subgraphs_to_sources(config: &mut Value) -> (bool, Vec<Str
     (migrated_any, subgraphs_with_config)
 }
 
-/// Logs the notices of `migration`'s `Log` actions that apply to `config`.
-fn log_migration_notices(config: &Value, migration: &Migration) -> Result<(), ConfigurationError> {
+/// A migration's `Log` action that applies to the configuration being upgraded.
+struct Notice {
+    level: Level,
+    message: String,
+}
+
+impl Notice {
+    fn log(&self) {
+        let message = &self.message;
+        match self.level {
+            Level::INFO => tracing::info!("{message}"),
+            Level::ERROR => tracing::error!("{message}"),
+            Level::WARN => tracing::warn!("{message}"),
+            Level::TRACE => tracing::trace!("{message}"),
+            Level::DEBUG => tracing::debug!("{message}"),
+        }
+    }
+}
+
+/// The notices of `migration`'s `Log` actions that apply to `config`.
+fn migration_notices(
+    config: &Value,
+    migration: &Migration,
+) -> Result<Vec<Notice>, ConfigurationError> {
+    let mut notices = Vec::new();
     for action in &migration.actions {
         let Action::Log {
             path,
@@ -348,21 +408,18 @@ fn log_migration_notices(config: &Value, migration: &Migration) -> Result<(), Co
         let level = Level::from_str(level).map_err(migration_failure_error)?;
 
         let values = jsonpath_lib::select(config, &format!("$.{path}")).unwrap_or_default();
-        let should_log = match condition {
+        let applies = match condition {
             LogCondition::NonEmpty => !values.is_empty(),
             LogCondition::IsString => values.iter().any(|v| v.is_string()),
         };
-        if should_log {
-            match level {
-                Level::INFO => tracing::info!("{log}"),
-                Level::ERROR => tracing::error!("{log}"),
-                Level::WARN => tracing::warn!("{log}"),
-                Level::TRACE => tracing::trace!("{log}"),
-                Level::DEBUG => tracing::debug!("{log}"),
-            }
+        if applies {
+            notices.push(Notice {
+                level,
+                message: log.clone(),
+            });
         }
     }
-    Ok(())
+    Ok(notices)
 }
 
 fn apply_migration(config: &Value, migration: &Migration) -> Result<Value, ConfigurationError> {
@@ -427,7 +484,7 @@ fn apply_migration(config: &Value, migration: &Migration) -> Result<Value, Confi
                         .add_action(Parser::parse(&format!(r#"const({to})"#), path)?);
                 }
             }
-            // Logged by `log_migration_notices` instead, so an upgrade can run without them.
+            // Collected by `migration_notices` instead, so an upgrade can run without logging them.
             Action::Log { .. } => {}
         }
     }
@@ -438,16 +495,6 @@ fn apply_migration(config: &Value, migration: &Migration) -> Result<Value, Confi
     cleanup(&mut new_config);
 
     Ok(new_config)
-}
-
-/// Whether startup would migrate `config`, meaning it still uses settings that the current major
-/// version has replaced.
-pub(crate) fn uses_migrated_settings(config: &str) -> bool {
-    let Ok(parsed) = serde_yaml::from_str::<serde_json::Value>(config) else {
-        return false;
-    };
-    upgrade_configuration(&parsed, false, UpgradeMode::current_minor())
-        .is_ok_and(|upgraded| upgraded != parsed)
 }
 
 /// Used for upgrade command
@@ -613,6 +660,7 @@ mod test {
     use serde_json::Value;
     use serde_json::json;
 
+    use crate::configuration::apollo_configuration_parse::assert_logs;
     use crate::configuration::upgrade::Action;
     use crate::configuration::upgrade::Migration;
     use crate::configuration::upgrade::UpgradeMode;
@@ -621,6 +669,7 @@ mod test {
     use crate::configuration::upgrade::migrate_connectors_subgraphs_to_sources;
     use crate::configuration::upgrade::migration_major;
     use crate::configuration::upgrade::upgrade_configuration;
+    use crate::configuration::upgrade::upgrade_configuration_silently;
 
     fn source_doc() -> Value {
         json!( {
@@ -635,15 +684,114 @@ mod test {
         })
     }
 
+    /// A silent upgrade returns, in order, a migration's notice and, for a migration without
+    /// one, its description, and logs neither.
     #[test]
-    fn detects_settings_that_startup_migrates() {
-        assert!(super::uses_migrated_settings(
-            crate::configuration::apollo_configuration_parse::STARTUP_MIGRATED_SETTING
-        ));
-        assert!(!super::uses_migrated_settings(indoc::indoc! {"
-            supergraph:
-              listen: 127.0.0.1:4000
-        "}));
+    fn silent_upgrade_returns_notices_instead_of_logging_them() {
+        let config = json!({
+            "telemetry": { "apollo": { "otlp_tracing_sampler": 0.5 } },
+            "plugins": { "experimental.expose_query_plan": true },
+        });
+
+        let upgraded = assert_logs(
+            || upgrade_configuration_silently(&config, UpgradeMode::Minor(3)),
+            |lines| match lines {
+                [] => Ok(()),
+                lines => Err(format!("a silent upgrade must not log: {lines:?}")),
+            },
+        )
+        .expect("the configuration migrates");
+
+        assert_eq!(
+            upgraded.config,
+            json!({ "expose_query_plan": true, "plugins": {}, "telemetry": { "apollo": {} } })
+        );
+        let [sampler, expose_query_plan] = upgraded.notices.as_slice() else {
+            panic!("expected one notice per migration: {:?}", upgraded.notices);
+        };
+        assert_eq!(
+            sampler,
+            "telemetry.apollo.otlp_tracing_sampler has been removed. Router 3 uses OTLP exclusively for traces. Remove this key from your config."
+        );
+        // The description is hard-wrapped in its migration file.
+        assert_eq!(
+            expose_query_plan,
+            "The `expose_query_plan` plugin has been promoted out of experimental in Router 3.0. Its configuration moves to a top-level key."
+        );
+    }
+
+    /// Migrations written in Rust rather than YAML return their notices the same way.
+    #[test]
+    fn silent_upgrade_returns_notices_of_rust_migrations_instead_of_logging_them() {
+        let config = json!({
+            "headers": { "all": { "request": [{ "propagate": { "named": "x-foo" } }] } },
+        });
+
+        let upgraded = assert_logs(
+            || upgrade_configuration_silently(&config, UpgradeMode::Minor(3)),
+            |lines| match lines {
+                [] => Ok(()),
+                lines => Err(format!("a silent upgrade must not log: {lines:?}")),
+            },
+        )
+        .expect("the configuration migrates");
+
+        assert_eq!(
+            upgraded.config,
+            json!({ "headers": { "all": { "request": {
+                "operations": [{ "propagate": { "named": "x-foo" } }]
+            } } } })
+        );
+        let [operations] = upgraded.notices.as_slice() else {
+            panic!("expected the `operations` notice: {:?}", upgraded.notices);
+        };
+        assert!(
+            operations.starts_with("`headers.all.request`, per-subgraph equivalents"),
+            "{operations}"
+        );
+    }
+
+    /// A description's list items stay on their own lines, and so does the line after the list.
+    #[test]
+    fn silent_upgrade_keeps_the_lines_of_a_listed_description() {
+        let config = json!({ "supergraph": { "experimental_log_on_broken_pipe": true } });
+
+        let upgraded = upgrade_configuration_silently(&config, UpgradeMode::Minor(3))
+            .expect("the configuration migrates");
+
+        assert_eq!(
+            upgraded.notices,
+            [
+                "The following fields have been promoted out of experimental in Router 3.0:\n\
+                 - `supergraph.experimental_log_on_broken_pipe` -> `supergraph.log_on_broken_pipe`\n\
+                 - `traffic_shaping.all.experimental_http2` -> `traffic_shaping.all.http2`\n\
+                 - `coprocessor.client.experimental_http2` -> `coprocessor.client.http2`\n\
+                 - `telemetry.exporters.tracing.experimental_response_trace_id` -> `telemetry.exporters.tracing.response_trace_id`\n\
+                 Configurations using the old names are migrated automatically at startup throughout the Router 3.x line, but please update your configuration file."
+            ]
+        );
+    }
+
+    /// A notice can apply without its migration changing anything, such as a deprecation.
+    #[test]
+    fn silent_upgrade_returns_notices_of_migrations_that_change_nothing() {
+        let config = json!({
+            "telemetry": { "instrumentation": { "spans": { "router": {
+                "attributes": { "my_attribute": "value" }
+            } } } },
+        });
+
+        let upgraded = upgrade_configuration_silently(&config, UpgradeMode::Minor(2))
+            .expect("the configuration migrates");
+
+        assert_eq!(upgraded.config, config);
+        let [deprecation] = upgraded.notices.as_slice() else {
+            panic!("expected the deprecation notice: {:?}", upgraded.notices);
+        };
+        assert!(
+            deprecation.starts_with("The string shorthand form of the static telemetry attribute"),
+            "{deprecation}"
+        );
     }
 
     /// Each migration file with its numeric prefix. Like `upgrade`, this only considers `.yaml`

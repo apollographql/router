@@ -229,15 +229,17 @@ fn inc_two_subgraph_key_hop() {
             }
           }
         "#,
-        @r###"
+        @r#"
     QueryPlan {
       Sequence {
         Fetch(service: "a") {
           {
             user {
-              __typename
               name
-              id
+              ... @include(if: $a) @skip(if: $b) {
+                __typename
+                id
+              }
             }
           }
         },
@@ -262,7 +264,7 @@ fn inc_two_subgraph_key_hop() {
         },
       },
     }
-    "###
+    "#
     );
 
     // Disabling the only subgraph that can resolve a field must produce a
@@ -1997,14 +1999,14 @@ type C
 }
 
 // ---------------------------------------------------------------------------
-// @requires: condition aliasing and cross-subgraph routing
+// @requires: condition staging and cross-subgraph routing
 // ---------------------------------------------------------------------------
 
-// @requires chains alias required fields as __require_N_* in generated
-// operations and rename them back with input KeyRenamer rewrites.
+// A @requires chain whose condition fields keep their own names: nothing
+// else in the operation uses those response keys.
 // Based on: requires.rs::it_handles_simple_require_chain
 #[test]
-fn inc_requires_chain_aliases_conditions() {
+fn inc_requires_chain_keeps_condition_names() {
     let planner = planner!(
         config = incremental_config(),
         Subgraph1: r#"
@@ -2032,11 +2034,7 @@ fn inc_requires_chain_aliases_conditions() {
           }
         "#
     );
-    // validate_correctness = false: the correctness checker rejects input
-    // KeyRenamer rewrites, which this plan uses to rename an aliased
-    // @requires condition back to its field name.
     assert_plan!(
-        validate_correctness = false,
         &planner,
         r#"
           {
@@ -2068,7 +2066,7 @@ fn inc_requires_chain_aliases_conditions() {
             } =>
             {
               ... on T {
-                __require_0_inner: inner
+                inner
               }
             }
           },
@@ -2079,7 +2077,7 @@ fn inc_requires_chain_aliases_conditions() {
               ... on T {
                 __typename
                 id
-                __require_0_inner: inner
+                inner
               }
             } =>
             {
@@ -2214,11 +2212,7 @@ fn inc_requires_routes_condition_via_key_hop() {
         }
         "#,
     );
-    // validate_correctness = false: the correctness checker rejects input
-    // KeyRenamer rewrites, which this plan uses to rename an aliased
-    // @requires condition back to its field name.
     assert_plan!(
-        validate_correctness = false,
         &planner,
         r#"
         {
@@ -2248,7 +2242,7 @@ fn inc_requires_routes_condition_via_key_hop() {
             } =>
             {
               ... on Product {
-                __require_0_weight: weight
+                weight
               }
             }
           },
@@ -2259,7 +2253,7 @@ fn inc_requires_routes_condition_via_key_hop() {
               ... on Product {
                 __typename
                 id
-                __require_0_weight: weight
+                weight
               }
             } =>
             {
@@ -3320,7 +3314,7 @@ fn inc_entity_fetches_under_union_members() {
     // Different entity types merge onto a path keeping both members'
     // conditions, so Album items aren't asked for pages. The response shape
     // checker can't match a path condition spanning several union members,
-    // so it can't validate this or the next case.
+    // so it can't validate this case or the next two.
     assert_plan!(
         validate_correctness = false,
         &planner,
@@ -3545,7 +3539,6 @@ fn inc_entity_fetches_under_union_members() {
     // Without every combination selected, the union would also cover Book's
     // Body parts and Film's Front parts, so these stay apart.
     assert_plan!(
-        validate_correctness = false,
         &planner,
         r#"
           { shelf { entries { ... on Book { parts { ... on Front { item { pages } } } } ... on Film { parts { ... on Body { item { pages } } } } } } }
@@ -3611,6 +3604,100 @@ fn inc_entity_fetches_under_union_members() {
               {
                 ... on Item {
                   pages
+                }
+              }
+            },
+          },
+        },
+      },
+    }
+    "###
+    );
+}
+
+/// Union members selecting the same entity field with and without arguments
+/// under one response key. The conditional fragment puts the fetch's
+/// selections below the field, so the field is only a path element there.
+/// Each member's arguments must reach the entity fetch.
+#[test]
+fn inc_same_response_key_with_different_arguments_under_union_members() {
+    let planner = planner!(
+        config = incremental_config(),
+        catalog: r#"
+          type Query { blocks: [Block] }
+          union Block = Summary | Listing
+          type Summary { item: Item }
+          type Listing { item: Item }
+          type Item @key(fields: "id") { id: ID! }
+        "#,
+        ratings: r#"
+          type Item @key(fields: "id") { id: ID! ratings(first: Int): Ratings }
+          type Ratings { total: Int }
+        "#,
+    );
+
+    assert_plan!(
+        &planner,
+        r#"
+          query($f: Boolean!) { blocks { ... on Summary { item { ratings { ... @include(if: $f) { total } } } } ... on Listing { item { ratings(first: 2) { ... @include(if: $f) { total } } } } } }
+        "#,
+        @r###"
+    QueryPlan {
+      Sequence {
+        Fetch(service: "catalog") {
+          {
+            blocks {
+              __typename
+              ... on Summary {
+                item {
+                  __typename
+                  id
+                }
+              }
+              ... on Listing {
+                item {
+                  __typename
+                  id
+                }
+              }
+            }
+          }
+        },
+        Parallel {
+          Flatten(path: "blocks.@|[Listing].item") {
+            Fetch(service: "ratings") {
+              {
+                ... on Item {
+                  __typename
+                  id
+                }
+              } =>
+              {
+                ... on Item {
+                  ratings(first: 2) {
+                    ... @include(if: $f) {
+                      total
+                    }
+                  }
+                }
+              }
+            },
+          },
+          Flatten(path: "blocks.@|[Summary].item") {
+            Fetch(service: "ratings") {
+              {
+                ... on Item {
+                  __typename
+                  id
+                }
+              } =>
+              {
+                ... on Item {
+                  ratings {
+                    ... @include(if: $f) {
+                      total
+                    }
+                  }
                 }
               }
             },
@@ -5243,12 +5330,12 @@ type C
     );
 }
 
-// A plain @requires input arriving after an aliased one on the same edge
-// must not overwrite the plain input at runtime. The KeyRenamer's
-// remove-then-insert replaces whatever sits under the original name, so
-// both inputs cannot share a single entity group.
+// Two @requires on one entity walk the same field: b's condition is
+// fetched from S3 and c's is resolvable from S1. Neither condition field
+// collides with another selection, so both stay unaliased and the
+// consumers share one entity fetch with a merged `a` input.
 #[test]
-fn inc_plain_requires_after_aliased_requires_does_not_overwrite() {
+fn inc_requires_hopped_and_local_conditions_share_one_input() {
     let planner = planner!(
         config = incremental_config(),
         S1: r#"
@@ -5273,13 +5360,9 @@ fn inc_plain_requires_after_aliased_requires_does_not_overwrite() {
         }
         "#,
     );
-    // b's requires needs S3 (aliased), c's requires is resolvable from S1
-    // (plain). Both orderings must produce a valid plan.
-    // validate_correctness = false: the correctness checker rejects input
-    // KeyRenamer rewrites, which this plan uses to rename an aliased
-    // @requires condition back to its field name.
+    // b's requires needs S3, c's requires is resolvable from S1. Both
+    // orderings must produce a valid plan.
     let _plan_bc = assert_plan!(
-        validate_correctness = false,
         &planner,
         "{ t { b c } }",
         @r###"
@@ -5290,69 +5373,47 @@ fn inc_plain_requires_after_aliased_requires_does_not_overwrite() {
             t {
               __typename
               id
-              __require_0_a: a {
+              a {
                 __typename
                 id
-              }
-              __require_1_a: a {
                 y
               }
             }
           }
         },
-        Parallel {
-          Flatten(path: "t") {
-            Fetch(service: "S2") {
-              {
-                ... on T {
-                  __typename
-                  id
-                  __require_1_a: a {
-                    y
-                  }
-                }
-              } =>
-              {
-                ... on T {
-                  c
+        Flatten(path: "t.a") {
+          Fetch(service: "S3") {
+            {
+              ... on A {
+                __typename
+                id
+              }
+            } =>
+            {
+              ... on A {
+                x
+              }
+            }
+          },
+        },
+        Flatten(path: "t") {
+          Fetch(service: "S2") {
+            {
+              ... on T {
+                __typename
+                id
+                a {
+                  x
+                  y
                 }
               }
-            },
-          },
-          Sequence {
-            Flatten(path: "t.__require_0_a") {
-              Fetch(service: "S3") {
-                {
-                  ... on A {
-                    __typename
-                    id
-                  }
-                } =>
-                {
-                  ... on A {
-                    x
-                  }
-                }
-              },
-            },
-            Flatten(path: "t") {
-              Fetch(service: "S2") {
-                {
-                  ... on T {
-                    __typename
-                    id
-                    __require_0_a: a {
-                      x
-                    }
-                  }
-                } =>
-                {
-                  ... on T {
-                    b
-                  }
-                }
-              },
-            },
+            } =>
+            {
+              ... on T {
+                b
+                c
+              }
+            }
           },
         },
       },
@@ -5682,13 +5743,12 @@ fn inc_defer_multi_dependency_deferred_section() {
     );
 }
 
-/// Ordering pair for aliased/plain @requires inputs on one entity edge:
-/// b's condition (a { x }) must be staged and aliased, c's (a { y }) is
-/// resolvable in place and stays plain. Whichever arrives second must not
-/// share a representation with the other, since the KeyRenamer's
-/// remove-then-insert would overwrite the plain `a` at runtime.
+/// Ordering pair for @requires inputs on one entity edge: b's condition
+/// (a { x }) is staged through S3 and c's (a { y }) is resolvable in place.
+/// Neither needs an alias, so whichever arrives second merges into the
+/// other's representation under one `a`.
 #[test]
-fn inc_requires_aliased_then_plain_input_does_not_collide() {
+fn inc_requires_conditions_merge_in_either_order() {
     let planner = planner!(
         config = incremental_config(),
         S1: r#"
@@ -5728,11 +5788,7 @@ fn inc_requires_aliased_then_plain_input_does_not_collide() {
         "#,
     );
 
-    // validate_correctness = false: the correctness checker rejects input
-    // KeyRenamer rewrites, which this plan uses to rename an aliased
-    // @requires condition back to its field name.
     assert_plan!(
-        validate_correctness = false,
         &planner,
         r#"{ t { b c } }"#,
         @r###"
@@ -5743,69 +5799,47 @@ fn inc_requires_aliased_then_plain_input_does_not_collide() {
             t {
               __typename
               id
-              __require_0_a: a {
+              a {
                 __typename
                 id
-              }
-              __require_1_a: a {
                 y
               }
             }
           }
         },
-        Parallel {
-          Flatten(path: "t") {
-            Fetch(service: "S2") {
-              {
-                ... on T {
-                  __typename
-                  id
-                  __require_1_a: a {
-                    y
-                  }
-                }
-              } =>
-              {
-                ... on T {
-                  c
+        Flatten(path: "t.a") {
+          Fetch(service: "S3") {
+            {
+              ... on A {
+                __typename
+                id
+              }
+            } =>
+            {
+              ... on A {
+                x
+              }
+            }
+          },
+        },
+        Flatten(path: "t") {
+          Fetch(service: "S2") {
+            {
+              ... on T {
+                __typename
+                id
+                a {
+                  x
+                  y
                 }
               }
-            },
-          },
-          Sequence {
-            Flatten(path: "t.__require_0_a") {
-              Fetch(service: "S3") {
-                {
-                  ... on A {
-                    __typename
-                    id
-                  }
-                } =>
-                {
-                  ... on A {
-                    x
-                  }
-                }
-              },
-            },
-            Flatten(path: "t") {
-              Fetch(service: "S2") {
-                {
-                  ... on T {
-                    __typename
-                    id
-                    __require_0_a: a {
-                      x
-                    }
-                  }
-                } =>
-                {
-                  ... on T {
-                    b
-                  }
-                }
-              },
-            },
+            } =>
+            {
+              ... on T {
+                b
+                c
+              }
+            }
           },
         },
       },
@@ -5872,9 +5906,8 @@ fn inc_requires_aliased_then_plain_input_does_not_collide() {
     );
 }
 
-/// Identical @requires conditions intern to one alias so their consumers
-/// share a single entity fetch; the rewrite-conflict check must compare
-/// aliases, not just originals, or the second consumer splits needlessly.
+/// Identical @requires conditions stage one fetch for the condition field,
+/// and their consumers share a single entity fetch.
 #[test]
 fn inc_requires_identical_conditions_share_one_fetch() {
     let planner = planner!(
@@ -5904,11 +5937,7 @@ fn inc_requires_identical_conditions_share_one_fetch() {
         "#,
     );
 
-    // validate_correctness = false: the correctness checker rejects input
-    // KeyRenamer rewrites, which this plan uses to rename an aliased
-    // @requires condition back to its field name.
     assert_plan!(
-        validate_correctness = false,
         &planner,
         r#"{ t { b c } }"#,
         @r###"
@@ -5932,7 +5961,7 @@ fn inc_requires_identical_conditions_share_one_fetch() {
             } =>
             {
               ... on T {
-                __require_0_a: a
+                a
               }
             }
           },
@@ -5943,7 +5972,7 @@ fn inc_requires_identical_conditions_share_one_fetch() {
               ... on T {
                 __typename
                 id
-                __require_0_a: a
+                a
               }
             } =>
             {
@@ -5960,10 +5989,9 @@ fn inc_requires_identical_conditions_share_one_fetch() {
     );
 }
 
-/// Overlapping @requires conditions (foo needs a subset of bar's) share
-/// one alias via containment interning, so the common `v { y { isY } }`
-/// chain is staged once instead of once per consumer. Legacy plans this
-/// with 6 fetches; BULB currently uses 7.
+/// Overlapping @requires conditions (foo needs a subset of bar's) stay
+/// unaliased, so the common `v { y { isY } }` chain is staged once for
+/// both consumers. Legacy plans this with 6 fetches; BULB currently uses 7.
 #[test]
 fn inc_requires_overlapping_conditions_fetch_count() {
     let planner = planner!(
@@ -6086,11 +6114,7 @@ fn inc_requires_overlapping_conditions_fetch_count() {
             }
         "#,
     );
-    // validate_correctness = false: the correctness checker rejects input
-    // KeyRenamer rewrites, which this plan uses to rename an aliased
-    // @requires condition back to its field name.
     assert_plan!(
-        validate_correctness = false,
         &planner,
         r#"
         {
@@ -6110,10 +6134,10 @@ fn inc_requires_overlapping_conditions_fetch_count() {
             t {
               __typename
               id
-              __require_0_x: x {
+              x {
                 isX
               }
-              __require_1_v: v {
+              v {
                 __typename
                 id
               }
@@ -6121,7 +6145,7 @@ fn inc_requires_overlapping_conditions_fetch_count() {
           }
         },
         Parallel {
-          Flatten(path: "t.__require_1_v") {
+          Flatten(path: "t.v") {
             Fetch(service: "s4") {
               {
                 ... on V {
@@ -6141,7 +6165,7 @@ fn inc_requires_overlapping_conditions_fetch_count() {
             },
           },
           Sequence {
-            Flatten(path: "t.__require_1_v") {
+            Flatten(path: "t.v") {
               Fetch(service: "s2") {
                 {
                   ... on V {
@@ -6159,7 +6183,7 @@ fn inc_requires_overlapping_conditions_fetch_count() {
                 }
               },
             },
-            Flatten(path: "t.__require_1_v.y") {
+            Flatten(path: "t.v.y") {
               Fetch(service: "s3") {
                 {
                   ... on Y {
@@ -6182,10 +6206,10 @@ fn inc_requires_overlapping_conditions_fetch_count() {
               ... on T {
                 __typename
                 id
-                __require_0_x: x {
+                x {
                   isX
                 }
-                __require_1_v: v {
+                v {
                   y {
                     isY
                   }
@@ -6244,6 +6268,923 @@ fn inc_requires_overlapping_conditions_fetch_count() {
                   name
                 }
               }
+            },
+          },
+        },
+      },
+    }
+    "###
+    );
+}
+
+/// A @requires condition field is aliased only when its response key could
+/// hold a different field. S3 computes several fields of `T` from fields of
+/// `listing`, which S2 owns.
+#[test]
+fn inc_requires_aliases_only_colliding_conditions() {
+    let planner = planner!(
+        config = incremental_config(),
+        S1: r#"
+          type Query { t: T }
+          type T @key(fields: "id") { id: ID! listing: Listing @shareable other: Listing @shareable }
+          type Listing @key(fields: "id") { id: ID! }
+        "#,
+        S2: r#"
+          type Listing @key(fields: "id") {
+            id: ID! name: String @shareable sku: String @shareable dims: String cost(currency: String!): Int
+          }
+        "#,
+        S3: r#"
+          type Query { provided: T @provides(fields: "listing { sku }") }
+          type T @key(fields: "id") {
+            id: ID!
+            listing: Listing @external
+            other: Listing @shareable
+            price: Int @requires(fields: "listing { sku }")
+            weight: Int @requires(fields: "listing { dims }")
+            usd: Int @requires(fields: "listing { cost(currency: \"USD\") }")
+            eur: Int @requires(fields: "listing { cost(currency: \"EUR\") }")
+            tax: Int @requires(fields: "listing { cost(currency: \"USD\") }")
+          }
+          type Listing @key(fields: "id") {
+            id: ID! name: String @shareable sku: String @external dims: String @external
+            cost(currency: String!): Int @external
+          }
+        "#,
+    );
+
+    // Nothing else claims `listing`, so both conditions stay unaliased and
+    // share one listing fetch.
+    assert_plan!(&planner, "{ t { price weight } }", @r###"
+    QueryPlan {
+      Sequence {
+        Fetch(service: "S1") {
+          {
+            t {
+              __typename
+              id
+              listing {
+                __typename
+                id
+              }
+            }
+          }
+        },
+        Flatten(path: "t.listing") {
+          Fetch(service: "S2") {
+            {
+              ... on Listing {
+                __typename
+                id
+              }
+            } =>
+            {
+              ... on Listing {
+                sku
+                dims
+              }
+            }
+          },
+        },
+        Flatten(path: "t") {
+          Fetch(service: "S3") {
+            {
+              ... on T {
+                __typename
+                id
+                listing {
+                  sku
+                  dims
+                }
+              }
+            } =>
+            {
+              ... on T {
+                price
+                weight
+              }
+            }
+          },
+        },
+      },
+    }
+    "###);
+
+    // The client puts `other` under `listing`, so the condition is aliased.
+    // validate_correctness = false: the correctness checker rejects input
+    // KeyRenamer rewrites, which this plan uses to rename an aliased
+    // @requires condition back to its field name.
+    assert_plan!(
+        validate_correctness = false,
+        &planner,
+        "{ t { listing: other { name } price } }",
+        @r###"
+    QueryPlan {
+      Sequence {
+        Fetch(service: "S1") {
+          {
+            t {
+              __typename
+              id
+              __require_0_listing: listing {
+                __typename
+                id
+              }
+            }
+          }
+        },
+        Flatten(path: "t.__require_0_listing") {
+          Fetch(service: "S2") {
+            {
+              ... on Listing {
+                __typename
+                id
+              }
+            } =>
+            {
+              ... on Listing {
+                sku
+              }
+            }
+          },
+        },
+        Flatten(path: "t") {
+          Fetch(service: "S3") {
+            {
+              ... on T {
+                __typename
+                id
+                __require_0_listing: listing {
+                  sku
+                }
+              }
+            } =>
+            {
+              ... on T {
+                price
+                listing: other {
+                  name
+                }
+              }
+            }
+          },
+        },
+      },
+    }
+    "###
+    );
+
+    // The client's `listing` holds `other`, so `usd` and `tax` are both
+    // aliased. They need the same condition and share one alias, so `cost`
+    // is fetched once for both.
+    // validate_correctness = false: as above.
+    assert_plan!(
+        validate_correctness = false,
+        &planner,
+        "{ t { listing: other { name } usd tax } }",
+        @r###"
+    QueryPlan {
+      Sequence {
+        Fetch(service: "S1") {
+          {
+            t {
+              __typename
+              id
+              __require_0_listing: listing {
+                __typename
+                id
+              }
+            }
+          }
+        },
+        Flatten(path: "t.__require_0_listing") {
+          Fetch(service: "S2") {
+            {
+              ... on Listing {
+                __typename
+                id
+              }
+            } =>
+            {
+              ... on Listing {
+                cost(currency: "USD")
+              }
+            }
+          },
+        },
+        Flatten(path: "t") {
+          Fetch(service: "S3") {
+            {
+              ... on T {
+                __typename
+                id
+                __require_0_listing: listing {
+                  cost
+                }
+              }
+            } =>
+            {
+              ... on T {
+                usd
+                tax
+                listing: other {
+                  name
+                }
+              }
+            }
+          },
+        },
+      },
+    }
+    "###
+    );
+
+    // Only `usd` claims `cost(currency: "USD")` under the client's
+    // `listing`, so the condition shares the client's listing fetch.
+    assert_plan!(&planner, "{ t { listing { sku } usd } }", @r###"
+    QueryPlan {
+      Sequence {
+        Fetch(service: "S1") {
+          {
+            t {
+              __typename
+              listing {
+                __typename
+                id
+              }
+              id
+            }
+          }
+        },
+        Flatten(path: "t.listing") {
+          Fetch(service: "S2") {
+            {
+              ... on Listing {
+                __typename
+                id
+              }
+            } =>
+            {
+              ... on Listing {
+                sku
+                cost(currency: "USD")
+              }
+            }
+          },
+        },
+        Flatten(path: "t") {
+          Fetch(service: "S3") {
+            {
+              ... on T {
+                __typename
+                id
+                listing {
+                  cost
+                }
+              }
+            } =>
+            {
+              ... on T {
+                usd
+              }
+            }
+          },
+        },
+      },
+    }
+    "###);
+    assert_plan!(&planner, "{ t { listing { sku } price usd } }", @r###"
+    QueryPlan {
+      Sequence {
+        Fetch(service: "S1") {
+          {
+            t {
+              __typename
+              listing {
+                __typename
+                id
+              }
+              id
+            }
+          }
+        },
+        Flatten(path: "t.listing") {
+          Fetch(service: "S2") {
+            {
+              ... on Listing {
+                __typename
+                id
+              }
+            } =>
+            {
+              ... on Listing {
+                sku
+                cost(currency: "USD")
+              }
+            }
+          },
+        },
+        Flatten(path: "t") {
+          Fetch(service: "S3") {
+            {
+              ... on T {
+                __typename
+                id
+                listing {
+                  sku
+                  cost
+                }
+              }
+            } =>
+            {
+              ... on T {
+                price
+                usd
+              }
+            }
+          },
+        },
+      },
+    }
+    "###);
+
+    // `usd` and `eur` disagree on `cost`'s arguments, so both are aliased,
+    // while `price` stays plain. An alias renamed back onto `listing` would
+    // replace the plain `listing` in the representation, so the consumer
+    // fetch splits. The two orders reach that check from opposite sides.
+    // validate_correctness = false: as above.
+    assert_plan!(
+        validate_correctness = false,
+        &planner,
+        "{ t { usd eur price } }",
+        @r###"
+    QueryPlan {
+      Sequence {
+        Fetch(service: "S1") {
+          {
+            t {
+              __typename
+              id
+              __require_0_listing: listing {
+                __typename
+                id
+              }
+              __require_1_listing: listing {
+                __typename
+                id
+              }
+              listing {
+                __typename
+                id
+              }
+            }
+          }
+        },
+        Parallel {
+          Sequence {
+            Flatten(path: "t.listing") {
+              Fetch(service: "S2") {
+                {
+                  ... on Listing {
+                    __typename
+                    id
+                  }
+                } =>
+                {
+                  ... on Listing {
+                    sku
+                  }
+                }
+              },
+            },
+            Flatten(path: "t") {
+              Fetch(service: "S3") {
+                {
+                  ... on T {
+                    __typename
+                    id
+                    listing {
+                      sku
+                    }
+                  }
+                } =>
+                {
+                  ... on T {
+                    price
+                  }
+                }
+              },
+            },
+          },
+          Sequence {
+            Flatten(path: "t.__require_1_listing") {
+              Fetch(service: "S2") {
+                {
+                  ... on Listing {
+                    __typename
+                    id
+                  }
+                } =>
+                {
+                  ... on Listing {
+                    cost(currency: "EUR")
+                  }
+                }
+              },
+            },
+            Flatten(path: "t") {
+              Fetch(service: "S3") {
+                {
+                  ... on T {
+                    __typename
+                    id
+                    __require_1_listing: listing {
+                      cost
+                    }
+                  }
+                } =>
+                {
+                  ... on T {
+                    eur
+                  }
+                }
+              },
+            },
+          },
+          Sequence {
+            Flatten(path: "t.__require_0_listing") {
+              Fetch(service: "S2") {
+                {
+                  ... on Listing {
+                    __typename
+                    id
+                  }
+                } =>
+                {
+                  ... on Listing {
+                    cost(currency: "USD")
+                  }
+                }
+              },
+            },
+            Flatten(path: "t") {
+              Fetch(service: "S3") {
+                {
+                  ... on T {
+                    __typename
+                    id
+                    __require_0_listing: listing {
+                      cost
+                    }
+                  }
+                } =>
+                {
+                  ... on T {
+                    usd
+                  }
+                }
+              },
+            },
+          },
+        },
+      },
+    }
+    "###
+    );
+    assert_plan!(
+        validate_correctness = false,
+        &planner,
+        "{ t { price usd eur } }",
+        @r###"
+    QueryPlan {
+      Sequence {
+        Fetch(service: "S1") {
+          {
+            t {
+              __typename
+              id
+              listing {
+                __typename
+                id
+              }
+              __require_0_listing: listing {
+                __typename
+                id
+              }
+              __require_1_listing: listing {
+                __typename
+                id
+              }
+            }
+          }
+        },
+        Parallel {
+          Sequence {
+            Flatten(path: "t.__require_1_listing") {
+              Fetch(service: "S2") {
+                {
+                  ... on Listing {
+                    __typename
+                    id
+                  }
+                } =>
+                {
+                  ... on Listing {
+                    cost(currency: "EUR")
+                  }
+                }
+              },
+            },
+            Flatten(path: "t") {
+              Fetch(service: "S3") {
+                {
+                  ... on T {
+                    __typename
+                    id
+                    __require_1_listing: listing {
+                      cost
+                    }
+                  }
+                } =>
+                {
+                  ... on T {
+                    eur
+                  }
+                }
+              },
+            },
+          },
+          Sequence {
+            Flatten(path: "t.__require_0_listing") {
+              Fetch(service: "S2") {
+                {
+                  ... on Listing {
+                    __typename
+                    id
+                  }
+                } =>
+                {
+                  ... on Listing {
+                    cost(currency: "USD")
+                  }
+                }
+              },
+            },
+            Flatten(path: "t") {
+              Fetch(service: "S3") {
+                {
+                  ... on T {
+                    __typename
+                    id
+                    __require_0_listing: listing {
+                      cost
+                    }
+                  }
+                } =>
+                {
+                  ... on T {
+                    usd
+                  }
+                }
+              },
+            },
+          },
+          Sequence {
+            Flatten(path: "t.listing") {
+              Fetch(service: "S2") {
+                {
+                  ... on Listing {
+                    __typename
+                    id
+                  }
+                } =>
+                {
+                  ... on Listing {
+                    sku
+                  }
+                }
+              },
+            },
+            Flatten(path: "t") {
+              Fetch(service: "S3") {
+                {
+                  ... on T {
+                    __typename
+                    id
+                    listing {
+                      sku
+                    }
+                  }
+                } =>
+                {
+                  ... on T {
+                    price
+                  }
+                }
+              },
+            },
+          },
+        },
+      },
+    }
+    "###
+    );
+
+    // A condition resolved in place through @provides is checked the same
+    // way, so it doesn't merge into the client's `listing: other`.
+    assert_plan!(&planner, "{ provided { listing: other { name } price } }", @r###"
+    QueryPlan {
+      Fetch(service: "S3") {
+        {
+          provided {
+            listing: other {
+              name
+            }
+            __require_0_listing: listing {
+              sku
+            }
+            price
+          }
+        }
+      },
+    }
+    "###);
+}
+
+/// An @interfaceObject's @requires sits on the interface field, so its
+/// condition can share the client's copy of the field.
+#[test]
+fn inc_requires_on_interface_object_shares_client_field() {
+    let planner = planner!(
+        config = incremental_config(),
+        S1: r#"
+          type Query { t: I }
+          interface I @key(fields: "id") { id: ID! listing: Listing }
+          type A implements I @key(fields: "id") { id: ID! listing: Listing @shareable }
+          type Listing @key(fields: "id") { id: ID! }
+        "#,
+        S2: r#"
+          type Listing @key(fields: "id") {
+            id: ID!
+            sku: String @shareable
+            cost(currency: String!): Int
+          }
+        "#,
+        S3: r#"
+          type I @key(fields: "id") @interfaceObject {
+            id: ID!
+            listing: Listing @external
+            usd: Int @requires(fields: "listing { cost(currency: \"USD\") }")
+          }
+          type Listing @key(fields: "id") { id: ID! cost(currency: String!): Int @external }
+        "#,
+    );
+    assert_plan!(
+        &planner,
+        "{ t { listing { sku } usd } }",
+        @r###"
+    QueryPlan {
+      Sequence {
+        Fetch(service: "S1") {
+          {
+            t {
+              __typename
+              listing {
+                __typename
+                id
+              }
+              id
+            }
+          }
+        },
+        Flatten(path: "t.listing") {
+          Fetch(service: "S2") {
+            {
+              ... on Listing {
+                __typename
+                id
+              }
+            } =>
+            {
+              ... on Listing {
+                sku
+                cost(currency: "USD")
+              }
+            }
+          },
+        },
+        Flatten(path: "t") {
+          Fetch(service: "S3") {
+            {
+              ... on I {
+                __typename
+                id
+                listing {
+                  cost
+                }
+              }
+            } =>
+            {
+              ... on I {
+                usd
+              }
+            }
+          },
+        },
+      },
+    }
+    "###
+    );
+    assert_plan!(
+        &planner,
+        "{ t { usd } }",
+        @r###"
+    QueryPlan {
+      Sequence {
+        Fetch(service: "S1") {
+          {
+            t {
+              __typename
+              id
+              listing {
+                __typename
+                id
+              }
+            }
+          }
+        },
+        Flatten(path: "t.listing") {
+          Fetch(service: "S2") {
+            {
+              ... on Listing {
+                __typename
+                id
+              }
+            } =>
+            {
+              ... on Listing {
+                cost(currency: "USD")
+              }
+            }
+          },
+        },
+        Flatten(path: "t") {
+          Fetch(service: "S3") {
+            {
+              ... on I {
+                __typename
+                id
+                listing {
+                  cost
+                }
+              }
+            } =>
+            {
+              ... on I {
+                usd
+              }
+            }
+          },
+        },
+      },
+    }
+    "###
+    );
+}
+
+/// An aliased condition renamed back onto a key field must keep the key's
+/// nested fields, or the representation loses part of the key.
+#[test]
+fn inc_requires_alias_keeps_nested_key_fields() {
+    let planner = planner!(
+        config = incremental_config(),
+        S1: r#"
+          type Query { t: T }
+          type T @key(fields: "id owner { id }") { id: ID! owner: Owner }
+          type Owner @key(fields: "id") { id: ID! }
+        "#,
+        S2: r#"
+          type Owner @key(fields: "id") { id: ID! tag(lang: String): String }
+        "#,
+        S3: r#"
+          type T @key(fields: "id owner { id }") {
+            id: ID!
+            owner: Owner
+            label: String @requires(fields: "owner { tag(lang: \"en\") }")
+            note: String @requires(fields: "owner { tag(lang: \"fr\") }")
+          }
+          type Owner @key(fields: "id") { id: ID! tag(lang: String): String @external }
+        "#,
+    );
+    // `label` and `note` disagree on `tag`'s arguments, so both conditions
+    // are aliased. Each alias is renamed back onto `owner`, which is also a
+    // key field, so each must carry `owner { id }` too.
+    // validate_correctness = false: the correctness checker rejects input
+    // KeyRenamer rewrites, which this plan uses to rename an aliased
+    // @requires condition back to its field name.
+    assert_plan!(
+        validate_correctness = false,
+        &planner,
+        "{ t { label note } }",
+        @r###"
+    QueryPlan {
+      Sequence {
+        Fetch(service: "S1") {
+          {
+            t {
+              __typename
+              id
+              owner {
+                id
+              }
+              __require_0_owner: owner {
+                __typename
+                id
+              }
+              __require_1_owner: owner {
+                __typename
+                id
+              }
+            }
+          }
+        },
+        Parallel {
+          Sequence {
+            Flatten(path: "t.__require_1_owner") {
+              Fetch(service: "S2") {
+                {
+                  ... on Owner {
+                    __typename
+                    id
+                  }
+                } =>
+                {
+                  ... on Owner {
+                    tag(lang: "fr")
+                  }
+                }
+              },
+            },
+            Flatten(path: "t") {
+              Fetch(service: "S3") {
+                {
+                  ... on T {
+                    __typename
+                    id
+                    owner {
+                      id
+                    }
+                    __require_1_owner: owner {
+                      tag
+                      id
+                    }
+                  }
+                } =>
+                {
+                  ... on T {
+                    note
+                  }
+                }
+              },
+            },
+          },
+          Sequence {
+            Flatten(path: "t.__require_0_owner") {
+              Fetch(service: "S2") {
+                {
+                  ... on Owner {
+                    __typename
+                    id
+                  }
+                } =>
+                {
+                  ... on Owner {
+                    tag(lang: "en")
+                  }
+                }
+              },
+            },
+            Flatten(path: "t") {
+              Fetch(service: "S3") {
+                {
+                  ... on T {
+                    __typename
+                    id
+                    owner {
+                      id
+                    }
+                    __require_0_owner: owner {
+                      tag
+                      id
+                    }
+                  }
+                } =>
+                {
+                  ... on T {
+                    label
+                  }
+                }
+              },
             },
           },
         },
@@ -6848,10 +7789,7 @@ fn inc_multi_parent_fetch_does_not_wait_for_unrelated_branch() {
         "#,
     );
 
-    // validate_correctness = false: the correctness checker does not follow
-    // aliased @requires inputs (`__require_0_c: c`), so it rejects this plan.
     assert_plan!(
-        validate_correctness = false,
         &planner,
         r#"
           {
@@ -6938,7 +7876,7 @@ fn inc_multi_parent_fetch_does_not_wait_for_unrelated_branch() {
                   } =>
                   {
                     ... on T {
-                      __require_1_d: d
+                      d
                     }
                   }
                 },
@@ -6953,7 +7891,7 @@ fn inc_multi_parent_fetch_does_not_wait_for_unrelated_branch() {
                   } =>
                   {
                     ... on T {
-                      __require_0_c: c
+                      c
                     }
                   }
                 },
@@ -6965,8 +7903,8 @@ fn inc_multi_parent_fetch_does_not_wait_for_unrelated_branch() {
                   ... on T {
                     __typename
                     id
-                    __require_0_c: c
-                    __require_1_d: d
+                    c
+                    d
                   }
                 } =>
                 {
@@ -7026,10 +7964,7 @@ fn inc_private_chain_nests_under_its_fetch_until_the_shared_level() {
         "#,
     );
 
-    // validate_correctness = false: the correctness checker does not follow
-    // aliased @requires inputs (`__require_0_c: c`), so it rejects this plan.
     assert_plan!(
-        validate_correctness = false,
         &planner,
         r#"
           {
@@ -7062,7 +7997,7 @@ fn inc_private_chain_nests_under_its_fetch_until_the_shared_level() {
                 } =>
                 {
                   ... on T {
-                    __require_2_z: z
+                    z
                   }
                 }
               },
@@ -7073,12 +8008,12 @@ fn inc_private_chain_nests_under_its_fetch_until_the_shared_level() {
                   ... on T {
                     __typename
                     id
-                    __require_2_z: z
+                    z
                   }
                 } =>
                 {
                   ... on T {
-                    __require_1_y: y
+                    y
                   }
                 }
               },
@@ -7095,7 +8030,7 @@ fn inc_private_chain_nests_under_its_fetch_until_the_shared_level() {
                 } =>
                 {
                   ... on T {
-                    __require_0_x: x
+                    x
                     u {
                       __typename
                       id
@@ -7146,8 +8081,8 @@ fn inc_private_chain_nests_under_its_fetch_until_the_shared_level() {
                 ... on T {
                   __typename
                   id
-                  __require_0_x: x
-                  __require_1_y: y
+                  x
+                  y
                 }
               } =>
               {

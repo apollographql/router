@@ -25,6 +25,9 @@ use super::FetchGroupKind;
 use super::pipelining_factor;
 use crate::error::FederationError;
 use crate::operation::DirectiveList;
+use crate::operation::FieldSelection;
+use crate::operation::InlineFragmentSelection;
+use crate::operation::Selection;
 use crate::operation::SelectionMap;
 use crate::operation::SelectionSet;
 use crate::operation::VariableCollector;
@@ -746,7 +749,8 @@ impl FetchGraph {
 
         // 3. Materialize entity inputs from incoming edges.
         let (requires_selection, input_rewrites) = if is_entity {
-            let (sel, rewrites) = self.materialize_entity_inputs(ctx, node_idx, &parent_type)?;
+            let (sel, rewrites) =
+                self.materialize_entity_inputs(ctx, node_idx, &parent_type, &group_conditions)?;
             // Without representations the router can fetch nothing; an
             // entity group reachable only through input-less edges is an
             // upstream bug, not a plannable fetch.
@@ -892,17 +896,22 @@ impl FetchGraph {
         skip_validation: bool,
     ) -> Result<(SelectionSet, Vec<Arc<FetchDataRewrite>>), FederationError> {
         let stripped = remove_conditions_from_selection_set(selection_set, group_conditions)?;
+        let stripped = if is_entity {
+            drop_covered_condition_fragments_in_casts(&stripped)?
+        } else {
+            drop_covered_condition_fragments(&stripped)?
+        };
         let selection_without_conditions = if is_entity {
             let mut selections = SelectionMap::new();
             for selection in stripped.selections.values() {
                 match selection {
-                    crate::operation::Selection::InlineFragment(frag_sel) => {
+                    Selection::InlineFragment(frag_sel) => {
                         let casted = frag_sel.inline_fragment.casted_type();
                         let flattened = frag_sel
                             .selection_set
                             .flatten_unnecessary_fragments(&casted, subgraph_schema)?;
-                        selections.insert(crate::operation::Selection::InlineFragment(Arc::new(
-                            crate::operation::InlineFragmentSelection::new(
+                        selections.insert(Selection::InlineFragment(Arc::new(
+                            InlineFragmentSelection::new(
                                 frag_sel.inline_fragment.clone(),
                                 flattened,
                             ),
@@ -939,6 +948,7 @@ impl FetchGraph {
         ctx: &PlanBuildContext<'_>,
         node_idx: NodeIndex,
         parent_type: &CompositeTypeDefinitionPosition,
+        group_conditions: &Conditions,
     ) -> Result<(SelectionSet, Vec<Arc<FetchDataRewrite>>), FederationError> {
         let mut per_type: IndexMap<CompositeTypeDefinitionPosition, SelectionSet> =
             IndexMap::default();
@@ -959,8 +969,13 @@ impl FetchGraph {
                     ctx.supergraph_schema,
                     &input_type,
                     input_sel,
-                    &OpGraphPathContext::default(),
+                    input
+                        .needed_under()
+                        .unwrap_or(&OpGraphPathContext::default()),
                 );
+                // The fetch is gated on the conditions all its selections are
+                // under, so the representation needn't check them again.
+                let wrapped = remove_conditions_from_selection_set(&wrapped, group_conditions)?;
                 let entry = per_type
                     .entry(wrapped.type_position.clone())
                     .or_insert_with(|| {
@@ -997,6 +1012,7 @@ impl FetchGraph {
 
         let mut merged_selections = SelectionMap::new();
         for selection_set in per_type.values() {
+            let selection_set = drop_covered_condition_fragments_in_casts(selection_set)?;
             if !ctx.skip_validation {
                 selection_set.validate(ctx.variable_definitions)?;
             }
@@ -1053,6 +1069,137 @@ impl FetchGraph {
         variable_usages.sort();
         (variable_definitions, variable_usages)
     }
+}
+
+/// `selection_set` without the condition-only fragments (no type condition,
+/// or the parent's own, and only @skip/@include) whose selections it already
+/// makes unconditionally, e.g. the `... @include(if: $a) { __typename id }`
+/// a gated key input leaves next to an unconditional `__typename id`. Such
+/// fragments left with no directives once the fetch's own conditions are
+/// removed are inlined.
+fn drop_covered_condition_fragments(
+    selection_set: &SelectionSet,
+) -> Result<SelectionSet, FederationError> {
+    let is_condition_only = |selection: &Selection| match selection {
+        Selection::InlineFragment(frag_sel) => {
+            let fragment = &frag_sel.inline_fragment;
+            fragment
+                .type_condition_position
+                .as_ref()
+                .is_none_or(|type_condition| *type_condition == selection_set.type_position)
+                && fragment
+                    .directives
+                    .iter()
+                    .all(|d| d.name == "skip" || d.name == "include")
+        }
+        Selection::Field(_) => false,
+    };
+    let empty = || {
+        SelectionSet::empty(
+            selection_set.schema.clone(),
+            selection_set.type_position.clone(),
+        )
+    };
+    let mut selections = Vec::with_capacity(selection_set.selections.len());
+    let mut unconditional = empty();
+    for selection in selection_set.selections.values() {
+        let selection = match selection {
+            Selection::Field(field_sel) => match &field_sel.selection_set {
+                Some(sub) => Selection::Field(Arc::new(FieldSelection {
+                    field: field_sel.field.clone(),
+                    selection_set: Some(drop_covered_condition_fragments(sub)?),
+                })),
+                None => selection.clone(),
+            },
+            Selection::InlineFragment(frag_sel) => {
+                Selection::InlineFragment(Arc::new(InlineFragmentSelection::new(
+                    frag_sel.inline_fragment.clone(),
+                    drop_covered_condition_fragments(&frag_sel.selection_set)?,
+                )))
+            }
+        };
+        match &selection {
+            Selection::InlineFragment(frag_sel) if is_condition_only(&selection) => {
+                if frag_sel.inline_fragment.directives.is_empty() {
+                    unconditional.add_local_selection_set(&frag_sel.selection_set)?;
+                }
+            }
+            _ => unconditional.add_local_selection(&selection)?,
+        }
+        selections.push(selection);
+    }
+    let mut result = empty();
+    for selection in &selections {
+        match selection {
+            Selection::InlineFragment(frag_sel) if is_condition_only(selection) => {
+                if frag_sel.inline_fragment.directives.is_empty() {
+                    result.add_local_selection_set(&frag_sel.selection_set)?;
+                } else if !unconditional.contains(&frag_sel.selection_set) {
+                    result.add_local_selection(selection)?;
+                }
+            }
+            _ => result.add_local_selection(selection)?,
+        }
+    }
+    Ok(result)
+}
+
+/// [`drop_covered_condition_fragments`] within the top-level casts of an
+/// entity selection, which stay as they are (see `finalize_selection`),
+/// except that a cast gated only by @skip/@include is dropped when an
+/// ungated cast to the same type already selects what it does.
+fn drop_covered_condition_fragments_in_casts(
+    selection_set: &SelectionSet,
+) -> Result<SelectionSet, FederationError> {
+    let mut selections = Vec::with_capacity(selection_set.selections.len());
+    for selection in selection_set.selections.values() {
+        selections.push(match selection {
+            Selection::InlineFragment(frag_sel) => {
+                Selection::InlineFragment(Arc::new(InlineFragmentSelection::new(
+                    frag_sel.inline_fragment.clone(),
+                    drop_covered_condition_fragments(&frag_sel.selection_set)?,
+                )))
+            }
+            Selection::Field(_) => selection.clone(),
+        });
+    }
+    let ungated_casts: Vec<_> = selections
+        .iter()
+        .filter_map(|selection| match selection {
+            Selection::InlineFragment(frag_sel)
+                if frag_sel.inline_fragment.directives.is_empty() =>
+            {
+                Some(frag_sel)
+            }
+            _ => None,
+        })
+        .collect();
+    let is_covered = |selection: &Selection| match selection {
+        Selection::InlineFragment(frag_sel) => {
+            let fragment = &frag_sel.inline_fragment;
+            !fragment.directives.is_empty()
+                && fragment
+                    .directives
+                    .iter()
+                    .all(|d| d.name == "skip" || d.name == "include")
+                && ungated_casts.iter().any(|cast| {
+                    cast.inline_fragment.type_condition_position == fragment.type_condition_position
+                        && cast.selection_set.contains(&frag_sel.selection_set)
+                })
+        }
+        Selection::Field(_) => false,
+    };
+    let mut result = SelectionMap::new();
+    for selection in &selections {
+        if !is_covered(selection) {
+            result.insert(selection.clone());
+        }
+    }
+    Ok(SelectionSet {
+        schema: selection_set.schema.clone(),
+        type_position: selection_set.type_position.clone(),
+        selections: Arc::new(result),
+    })
 }
 
 /// Trim a `SelectionSet` from `apollo_compiler::executable` down to the
@@ -1290,6 +1437,7 @@ mod tests {
                 source_type_name: name!("T"),
                 conditions: key_conditions,
                 condition_alias_rewrites: Vec::new(),
+                needed_under: Default::default(),
             }],
         );
 
@@ -1388,6 +1536,7 @@ mod tests {
                 source_type_name: name!("T"),
                 conditions: key_conditions,
                 condition_alias_rewrites: Vec::new(),
+                needed_under: Default::default(),
             }],
         );
     }

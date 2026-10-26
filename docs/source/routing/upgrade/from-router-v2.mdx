@@ -304,7 +304,7 @@ The following describes changes to router configuration, including renamed optio
 The router checks your configuration more thoroughly at startup and on reload, so a configuration that loaded with router v2.x can be rejected.
 
 - **Error messages have a new format.** They quote the offending lines of your file. Errors in plugin configuration are reported together with other errors. Errors in values from substitutions call out the relevant environment variable or CLI flag.
-- **`router config validate` checks what startup would load.** It applies the same automatic upgrades as startup, and says when your file relies on them.
+- **`router config validate` checks what startup would load.** It applies the same automatic upgrades as startup. When your file relies on them, it lists each upgrade in its output, without logging them, and still exits successfully.
 - **A missing file in `${file.PATH}` is an error.** Previously the reference was left in the configuration as literal text.
 - **Plugin sections reject unknown keys.** Some plugins used to ignore unused keys in their configuration. This meant that typos in key names would be ignored silently. Now, these plugins enforce that configuration keys actually exist:
   - `authorization`
@@ -318,7 +318,7 @@ The router checks your configuration more thoroughly at startup and on reload, s
 **Upgrade step**:
 
 - Run `router config validate` against your configuration and fix any errors it reports.
-- If it says your file relies on automatic upgrades, run `router config upgrade` to update the file.
+- If it lists automatic upgrades, run the `router config upgrade` command it suggests to update the file. See [Validating your router configuration](/graphos/routing/configuration/cli#validating-your-router-configuration) for example output.
 - Make sure every file referenced with `${file.PATH}` exists wherever the router runs.
 - Delete an empty `plugins:` key, or write `plugins: {}`.
 
@@ -549,4 +549,4 @@ GraphQL Validation is now enforced _before_ access to `@authenticated` fields is
 Make sure that you are referencing the correct router release: **v{products.router.latest().version}**
 
 [Graph Artifacts]: /graphos/platform/schema-management/delivery/graph-artifacts
-[incremental query planner]: /graphos/routing/query-planning/incremental-query-planner
+[incremental query planner]: /graphos/routing/v3/query-planning/incremental-query-planner
