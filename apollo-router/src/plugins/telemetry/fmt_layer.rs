@@ -3,6 +3,9 @@ use std::collections::HashMap;
 use std::collections::HashSet;
 use std::io::IsTerminal;
 use std::marker::PhantomData;
+use std::sync::Arc;
+use std::sync::atomic::AtomicBool;
+use std::sync::atomic::Ordering;
 
 use opentelemetry::Key;
 use opentelemetry::KeyValue;
@@ -30,9 +33,10 @@ use crate::plugins::telemetry::reload::otel::IsSampled;
 use crate::plugins::telemetry::reload::otel::LayeredTracer;
 use crate::plugins::telemetry::resource::ConfigResource;
 
+/// Returns the layer that writes logs to stdout, or `None` when stdout logging is disabled.
 pub(crate) fn create_fmt_layer(
     config: &config::Conf,
-) -> Box<dyn Layer<LayeredTracer> + Send + Sync> {
+) -> Option<Box<dyn Layer<LayeredTracer> + Send + Sync>> {
     match &config.exporters.logging.stdout {
         StdOut {
             enabled,
@@ -50,8 +54,10 @@ pub(crate) fn create_fmt_layer(
                         config.exporters.logging.common.to_resource(),
                         format_config.clone(),
                     );
-                    FmtLayer::new(RateLimitFormatter::new(format, rate_limit), std::io::stdout)
-                        .boxed()
+                    Some(
+                        FmtLayer::new(RateLimitFormatter::new(format, rate_limit), std::io::stdout)
+                            .boxed(),
+                    )
                 }
 
                 Format::Text(format_config) => {
@@ -59,18 +65,16 @@ pub(crate) fn create_fmt_layer(
                         config.exporters.logging.common.to_resource(),
                         format_config.clone(),
                     );
-                    FmtLayer::new(RateLimitFormatter::new(format, rate_limit), std::io::stdout)
-                        .boxed()
+                    Some(
+                        FmtLayer::new(RateLimitFormatter::new(format, rate_limit), std::io::stdout)
+                            .boxed(),
+                    )
                 }
             }
         }
-        _ => NoOpLayer.boxed(),
+        _ => None,
     }
 }
-
-struct NoOpLayer;
-
-impl Layer<LayeredTracer> for NoOpLayer {}
 
 pub(crate) struct FmtLayer<T, S, W> {
     fmt_event: T,
@@ -143,15 +147,34 @@ where
 /// router installs this layer outside the reload layer that holds its `FmtLayer`, so that span
 /// callbacks don't take the reload lock. See
 /// [`EventsOnly`](crate::plugins::telemetry::reload::log_layers::EventsOnly).
+///
+/// Recording can be switched off through [`SpanFieldsLayer::enabled`] while nothing writes logs.
+/// It starts on.
 pub(crate) struct SpanFieldsLayer {
     excluded_attributes: HashSet<&'static str>,
+    enabled: Arc<AtomicBool>,
 }
 
 impl Default for SpanFieldsLayer {
     fn default() -> Self {
         Self {
             excluded_attributes: EXCLUDED_ATTRIBUTES.into(),
+            enabled: Arc::new(AtomicBool::new(true)),
         }
+    }
+}
+
+impl SpanFieldsLayer {
+    /// The switch for this layer's recording, shared with the layer.
+    ///
+    /// While it is `false`, the layer records nothing. A span created then keeps none of the
+    /// fields it was created with, even after recording is switched back on.
+    pub(crate) fn enabled(&self) -> Arc<AtomicBool> {
+        self.enabled.clone()
+    }
+
+    fn is_enabled(&self) -> bool {
+        self.enabled.load(Ordering::Relaxed)
     }
 }
 
@@ -165,6 +188,9 @@ where
         id: &tracing_core::span::Id,
         ctx: Context<'_, S>,
     ) {
+        if !self.is_enabled() {
+            return;
+        }
         if let Some(span) = ctx.span(id) {
             let mut visitor = FieldsVisitor::new(&self.excluded_attributes);
             // We're checking if it's sampled to not add both attributes in OtelData and our LogAttributes
@@ -189,6 +215,9 @@ where
     }
 
     fn on_record(&self, id: &Id, values: &Record<'_>, ctx: Context<'_, S>) {
+        if !self.is_enabled() {
+            return;
+        }
         if let Some(span) = ctx.span(id) {
             let mut extensions = span.extensions_mut();
             if let Some(fields) = extensions.get_mut::<LogAttributes>() {
