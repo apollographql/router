@@ -387,7 +387,7 @@ List of context keys available from the router's request context, which is share
 
 #### Telemetry control
 
-- `apollo::telemetry::subgraph_ftv1` - JSON-serialized trace data returned by the subgraph when FTV1 is enabled
+- `apollo::telemetry::subgraph_ftv1` - JSON-serialized trace data returned by the subgraph when FTV1 is enabled. The router requests FTV1 traces only when an Apollo key and graph ref are configured; without them, this key isn't set.
 - `apollo::telemetry::studio_exclude` - `true` if the current request's trace details should be excluded from Studio
 - `apollo::telemetry::contains_graphql_error` - `true` if the response contains at least one error
 - `apollo::telemetry::counted_errors` - Map of already-counted errors (internal)

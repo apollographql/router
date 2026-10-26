@@ -101,6 +101,7 @@ pub(crate) struct Config {
     pub(crate) buffer_size: NonZeroUsize,
 
     /// Field level instrumentation for subgraphs via ftv1. ftv1 tracing can cause performance issues as it is transmitted in band with subgraph responses.
+    /// Applies only when an Apollo key and graph ref are configured; without them, the router requests no ftv1 traces.
     #[config(default = default_field_level_instrumentation_sampler())]
     pub(crate) field_level_instrumentation_sampler: SamplerOption,
 
