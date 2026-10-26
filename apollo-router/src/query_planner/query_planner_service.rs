@@ -97,8 +97,8 @@ pub(crate) fn non_local_selections_check_enabled() -> bool {
 
 const ENV_MAX_NON_LOCAL_SELECTIONS: &str = "APOLLO_ROUTER_MAX_NON_LOCAL_SELECTIONS";
 /// Non-local selections limit for query planner configuration. It currently
-/// defaults to 100000 in ([`QueryPlannerDebugConfig::max_non_local_selections`])
-/// and can be overriden with `APOLLO_ROUTER_MAX_NON_LOCAL_SELECTIONS`.
+/// defaults to 100000 in [`QueryPlannerDebugConfig::max_non_local_selections`]
+/// and can be overridden with `APOLLO_ROUTER_MAX_NON_LOCAL_SELECTIONS`.
 ///
 /// This environment variable is intentionally undocumented.
 pub(crate) fn max_non_local_selections() -> NonZeroU64 {
