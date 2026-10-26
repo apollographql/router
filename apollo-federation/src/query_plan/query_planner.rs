@@ -243,8 +243,9 @@ pub struct QueryPlannerDebugConfig {
     /// possibilities. The process is aborted if the estimate exceeds this upper
     /// bound to prevent unbounded planning time.
     ///
-    /// This value currently defaults to 100_000. And is intentionally not part
+    /// This value currently defaults to 100000 and is intentionally not part
     /// of configuration which can be set by users.
+    /// This can be set internally via `APOLLO_ROUTER_MAX_NON_LOCAL_SELECTIONS`.
     pub max_non_local_selections: NonZeroU64,
 }
 

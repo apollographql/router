@@ -89,7 +89,6 @@ async fn query_planner_cache() -> Result<(), BoxError> {
     // If this test fails and the cache key format changed you'll need to update the key here.
     // Look at the top of the file for instructions on getting the new cache key.
     let known_cache_key = &format!(
-        //"{namespace}:plan:router:{}:47939f0e964372951934fc662c9c2be675bc7116ec3e57029abe555284eb10a4:opname:3973e022e93220f9212c18d0d0c543ae7c309e46640da93a4a0314de999f5112:metadata:d9f7a00bc249cb51cfc8599f86b6dc5272967b37b1409dc4717f105b6939fe43",
         "{namespace}:plan:router:{}:47939f0e964372951934fc662c9c2be675bc7116ec3e57029abe555284eb10a4:opname:3973e022e93220f9212c18d0d0c543ae7c309e46640da93a4a0314de999f5112:metadata:f16bdcbfbe4cbc78bc4599b75ca159ade850734316069f5d7e65c6ac10974850",
         env!("CARGO_PKG_VERSION")
     );

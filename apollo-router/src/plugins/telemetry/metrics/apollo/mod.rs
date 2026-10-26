@@ -246,6 +246,9 @@ impl Config {
             .with_reader(MeterProviderType::Apollo, default_reader)
             .with_resource(MeterProviderType::Apollo, resource.clone());
 
+        // Register query planning views with custom buckets
+        crate::query_planner::register_query_planning_views(builder, MeterProviderType::Apollo);
+
         // Configure histogram buckets for Apollo metrics
         let apollo_buckets = default_buckets();
         builder.with_view(MeterProviderType::Apollo, move |instrument: &Instrument| {

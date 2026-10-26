@@ -1,6 +1,13 @@
 //! Calls out to the apollo-federation crate
 
 use std::fmt::Debug;
+<<<<<<< HEAD
+||||||| parent of 53fdb2ae7 (update PR based on Bryn's code review)
+use std::ops::ControlFlow;
+=======
+use std::num::NonZeroU64;
+use std::ops::ControlFlow;
+>>>>>>> 53fdb2ae7 (update PR based on Bryn's code review)
 use std::sync::Arc;
 use std::sync::OnceLock;
 use std::task::Poll;
@@ -12,10 +19,16 @@ use apollo_federation::error::FederationError;
 use apollo_federation::error::SingleFederationError;
 use apollo_federation::query_plan::query_planner::QueryPlanOptions;
 use apollo_federation::query_plan::query_planner::QueryPlanner;
+use apollo_federation::query_plan::query_planner::QueryPlannerDebugConfig;
 use futures::future::BoxFuture;
 use opentelemetry::KeyValue;
 use opentelemetry::metrics::MeterProvider as _;
 use opentelemetry::metrics::ObservableGauge;
+use opentelemetry_sdk::metrics::Aggregation;
+use opentelemetry_sdk::metrics::Instrument;
+use opentelemetry_sdk::metrics::Stream;
+use parking_lot::Mutex;
+use serde_json_bytes::Value;
 use tower::Service;
 
 use super::PlanNode;
@@ -30,6 +43,11 @@ use crate::error::FederationErrorBridge;
 use crate::error::QueryPlannerError;
 use crate::error::ServiceBuildError;
 use crate::error::ValidationErrors;
+use crate::graphql;
+use crate::introspection::IntrospectionCache;
+use crate::json_ext::Object;
+use crate::json_ext::Path;
+use crate::metrics::aggregation::MeterProviderType;
 use crate::metrics::meter_provider;
 use crate::plugins::authorization;
 use crate::plugins::authorization::AuthorizationPlugin;
@@ -38,6 +56,7 @@ use crate::plugins::authorization::FilterResult;
 use crate::plugins::authorization::UnauthorizedPaths;
 use crate::plugins::telemetry::config::ApolloSignatureNormalizationAlgorithm;
 use crate::plugins::telemetry::config::Conf as TelemetryConfig;
+use crate::plugins::telemetry::reload::metrics::MetricsBuilder;
 use crate::query_planner::HashedSubgraphSchemas;
 use crate::query_planner::convert::convert_root_query_plan_node;
 use crate::query_planner::hashed_subgraph_schemas;
@@ -73,6 +92,39 @@ pub(crate) fn non_local_selections_check_enabled() -> bool {
             std::env::var(ENV_DISABLE_NON_LOCAL_SELECTIONS_CHECK).as_deref() == Ok("true");
 
         !disabled
+    })
+}
+
+const ENV_MAX_NON_LOCAL_SELECTIONS: &str = "APOLLO_ROUTER_MAX_NON_LOCAL_SELECTIONS";
+/// Non-local selections limit for query planner configuration. It currently
+/// defaults to 100000 in ([`QueryPlannerDebugConfig::max_non_local_selections`])
+/// and can be overriden with `APOLLO_ROUTER_MAX_NON_LOCAL_SELECTIONS`.
+///
+/// This environment variable is intentionally undocumented.
+pub(crate) fn max_non_local_selections() -> NonZeroU64 {
+    static MAX: OnceLock<NonZeroU64> = OnceLock::new();
+    *MAX.get_or_init(|| {
+        let default = QueryPlannerDebugConfig::default().max_non_local_selections;
+        let Ok(value) = std::env::var(ENV_MAX_NON_LOCAL_SELECTIONS) else {
+            return default;
+        };
+        match value.parse::<NonZeroU64>() {
+            Ok(limit) => {
+                tracing::info!(
+                    limit = limit,
+                    "non-local selections limit set"
+                );
+                limit
+            }
+            Err(_) => {
+                tracing::warn!(
+                    value = value,
+                    default = default,
+                    "falling back to default max non-local selection due to invalid {ENV_MAX_NON_LOCAL_SELECTIONS} value"
+                );
+                default
+            }
+        }
     })
 }
 
@@ -650,10 +702,42 @@ pub(crate) fn metric_query_planning_plan_duration(
 pub(crate) fn metric_query_planning_non_local_selections(count: u64) {
     u64_histogram_with_unit!(
         "apollo.router.query_planning.plan.non_local_selections",
-        "Number of non-local selections estimated during query planning traversal, used for optimizing plan option exploration",
+        "Number of non-local selections estimated during query planning traversal",
         "{selection}",
         count
     );
+}
+
+/// Non-local selections histogram buckets.
+const NON_LOCAL_SELECTIONS_BUCKETS: &[f64] =
+    &[100.0, 1_000.0, 25_000.0, 50_000.0, 100_000.0, 150_000.0];
+
+/// Register query planning metric views with custom bucket boundaries.
+/// This is currently used for non-local selections histogram.
+///
+/// NB (@lrlna): This should likely be used for evaluated plans and evaluated
+/// paths as well.
+pub(crate) fn register_query_planning_views(
+    builder: &mut MetricsBuilder,
+    meter_provider_type: MeterProviderType,
+) {
+    builder.with_view(meter_provider_type, |instrument: &Instrument| {
+        if instrument.name() == "apollo.router.query_planning.plan.non_local_selections" {
+            Some(
+                Stream::builder()
+                    .with_aggregation(Aggregation::ExplicitBucketHistogram {
+                        boundaries: NON_LOCAL_SELECTIONS_BUCKETS.to_vec(),
+                        record_min_max: true,
+                    })
+                    .build()
+                    .expect(
+                        "Failed to create stream for apollo.router.query_planning.plan.non_local_selections metric",
+                    ),
+            )
+        } else {
+            None
+        }
+    });
 }
 
 pub(crate) fn metric_rust_qp_init(init_error_kind: Option<&'static str>) {
