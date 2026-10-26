@@ -67,12 +67,19 @@ impl<S: Subscriber, L: Layer<S>> Layer<S> for EventsOnly<L> {
     }
 }
 
-/// An [`EnvFilter`] that tracks spans only when one of its directives needs them.
+/// An [`EnvFilter`] that receives span callbacks only when a directive could need them.
 ///
-/// A directive like `apollo_router[subgraph]=debug` matches events inside a span, so `EnvFilter`
-/// keeps a table of spans and takes a lock on it on every span enter and exit. It does that even
-/// when no directive names a span or a field, and the table stays empty. Directives can only name
-/// one inside `[...]`, so without a `[` this filter skips the span callbacks.
+/// A span-scoped directive such as `apollo_router[subgraph]=debug` enables events only while a
+/// matching span is entered, so `EnvFilter` tracks entered spans through the span callbacks.
+/// Without those callbacks, such a directive silently never matches and the logs it enables are
+/// dropped. Without such a directive, the tracking still takes a lock on every span enter and
+/// exit, for a table that stays empty.
+///
+/// `EnvFilter` doesn't say whether it has span-scoped directives, so this checks the directive
+/// text as a stand-in: in `tracing-subscriber` 0.3, a directive can only name a span or a field
+/// inside `[...]`. A directive such as `target[{field}]=info` also contains `[` and keeps the
+/// callbacks, which costs time but not correctness. Recheck this when upgrading
+/// `tracing-subscriber`.
 pub(crate) struct LogFilter {
     filter: EnvFilter,
     tracks_spans: bool,
@@ -207,9 +214,9 @@ mod tests {
     #[test]
     fn log_filter_filters_by_level_without_tracking_spans() {
         let counter = Counter::default();
-        let subscriber = Registry::default()
-            .with(counter.clone())
-            .with(LogFilter::try_new("info").unwrap());
+        let filter = LogFilter::try_new("info").unwrap();
+        assert!(!filter.tracks_spans);
+        let subscriber = Registry::default().with(counter.clone()).with(filter);
 
         tracing::subscriber::with_default(subscriber, || {
             let span = tracing::info_span!("request");
