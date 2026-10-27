@@ -107,7 +107,7 @@ Notable changes in this range that may affect router scripts:
 
 - **`stdweb` support removed (1.24.0):** The `stdweb` feature flag is gone; WASM targets now use [`web-time`](https://crates.io/crates/web-time) instead of the unmaintained [`instant`](https://crates.io/crates/instant) crate. This is unlikely to affect typical router Rhai scripts.
 - **String methods `split` / `split_rev` are now `pure`:** They can be called on `const` strings without error.
-- **`\` escape in multi-line literal strings:** You can now write `\` in a multi-line literal string to produce the literal text `` instead of triggering interpolation.
+- **`\${...}` escape in multi-line literal strings:** You can now write `\${...}` in a multi-line literal string to produce the literal text `${...}` instead of triggering interpolation.
 - **`index_of` fallback for string arguments:** When no matching script function is registered, `index_of` now falls back to value comparison for string arguments.
 
 No changes to the router's Rhai API surface are expected. If your scripts relied on the old `stdweb` feature or specific `sort` behavior on non-totally-ordered arrays (which previously could panic), review your scripts before upgrading.
@@ -766,7 +766,7 @@ telemetry:
         sampler: 0.1
       otlp:
         enabled: true
-        endpoint: 
+        endpoint: ${env.DISTRIBUTED_TRACING_ENDPOINT}
         sampler: 0.02
 ```
 
@@ -807,7 +807,7 @@ response_cache:
       enabled: true
       invalidation:
         enabled: true
-        shared_key: ""
+        shared_key: "${env.INVALIDATION_SHARED_KEY}"
         indexes:                # all three default to true; omit fields you want kept on
           subgraph: false       # disable `By subgraph` invalidation for this subgraph
           type: false           # disable `By type` invalidation for this subgraph
@@ -2782,8 +2782,8 @@ type Query{
 }
 
 ## query ##
-query(: MessageInput) {
-    send(message: ) {
+query($msg: MessageInput) {
+    send(message: $msg) {
         id
     }
 }
@@ -3193,7 +3193,7 @@ response_cache:
       products:
         invalidation:
           enabled: true  # Endpoint now starts
-          shared_key: 
+          shared_key: ${env.INVALIDATION_SHARED_KEY}
 ```
 
 By [@bnjjj](https://github.com/bnjjj) in https://github.com/apollographql/router/pull/8680
@@ -4698,8 +4698,8 @@ By [@carodewig](https://github.com/carodewig) in https://github.com/apollographq
 The connectors plugin will no longer error when using a variable in a nested input argument. The following example would error prior to this change:
 
 ```graphql
-query Query (: String){
-    complexInputType(filters: { inSpace: true, search:  })
+query Query ($query: String){
+    complexInputType(filters: { inSpace: true, search: $query })
 }
 ```
 
