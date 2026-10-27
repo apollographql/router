@@ -238,14 +238,29 @@ pub struct QueryPlannerDebugConfig {
     /// The default value is None, which specifies no limit.
     pub paths_limit: Option<u32>,
 
-    /// As the planner traverses the query, it estimates an upper bound on the
-    /// number of "non-local" selection sets it would need to consider as
-    /// possibilities. The process is aborted if the estimate exceeds this upper
-    /// bound to prevent unbounded planning time.
+    /// The default for max number of non-local selections is 100000, but that
+    /// default can be altered with `APOLLO_ROUTER_MAX_NON_LOCAL_SELECTIONS`
+    /// environment variable. The query planning process is aborted if this
+    /// number is reached.
     ///
-    /// This value currently defaults to 100000 and is intentionally not part
-    /// of configuration which can be set by users.
-    /// This can be set internally via `APOLLO_ROUTER_MAX_NON_LOCAL_SELECTIONS`.
+    /// Since query planning configuration is part of the cache key, setting or
+    /// changing the value of this env var will clear the query planner cache and
+    /// cause replanning of the previously cached query plans.
+    ///
+    /// If the env var value is unable to be parsed into a `NonZeroU64`, the default
+    /// value is used and a warn message is emitted which can be found in the logs.
+    /// An info log is emitted when that env var value parsed and is set.
+    ///
+    /// This env var is intentionally undocumented. It is meant for troubleshooting
+    /// purposes when investigating query plan and operation complexity in regards
+    /// to non-local selection sets, an internal to query planner measurement for
+    /// the number of selection sets that cannot be optimized due to not being local
+    /// to the selection set currently being explored.
+    ///
+    /// The number of non-local selections explored for a given plan is tracked in
+    /// `apollo.router.query_planning.plan.non_local_selections` histogram and is
+    /// available to everyone. This histogram uses fixed bucket boundaries of 100,
+    /// 1000, 25000, 50000, 100000, and 150000.
     pub max_non_local_selections: NonZeroU64,
 }
 
