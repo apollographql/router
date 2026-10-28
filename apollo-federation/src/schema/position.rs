@@ -5722,6 +5722,12 @@ impl UnionTypeDefinitionPosition {
         if let Some(union_type_referencers) =
             schema.referencers.union_types.swap_remove(&self.type_name)
         {
+            for pos in union_type_referencers.object_fields.iter() {
+                pos.rename_type(schema, new_name.clone())?;
+            }
+            for pos in union_type_referencers.interface_fields.iter() {
+                pos.rename_type(schema, new_name.clone())?;
+            }
             schema
                 .referencers
                 .union_types
@@ -8382,5 +8388,190 @@ mod tests {
               B
             }
         "#);
+    }
+
+    /// Flattens a referencer index into an order-independent set of facts, so an incrementally
+    /// maintained index can be compared with one rebuilt from scratch.
+    fn referencer_facts(referencers: &Referencers) -> std::collections::BTreeSet<String> {
+        fn add<T: Debug>(
+            facts: &mut std::collections::BTreeSet<String>,
+            kind: &str,
+            key: &Name,
+            slot: &str,
+            positions: impl IntoIterator<Item = T>,
+        ) {
+            facts.insert(format!("{kind} {key}"));
+            for position in positions {
+                facts.insert(format!("{kind} {key} {slot} {position:?}"));
+            }
+        }
+        let mut facts = std::collections::BTreeSet::new();
+        let f = &mut facts;
+        for (key, r) in &referencers.scalar_types {
+            add(f, "scalar", key, "object_fields", &r.object_fields);
+            add(
+                f,
+                "scalar",
+                key,
+                "object_field_arguments",
+                &r.object_field_arguments,
+            );
+            add(f, "scalar", key, "interface_fields", &r.interface_fields);
+            add(
+                f,
+                "scalar",
+                key,
+                "interface_field_arguments",
+                &r.interface_field_arguments,
+            );
+            add(f, "scalar", key, "union_fields", &r.union_fields);
+            add(
+                f,
+                "scalar",
+                key,
+                "input_object_fields",
+                &r.input_object_fields,
+            );
+            add(
+                f,
+                "scalar",
+                key,
+                "directive_arguments",
+                &r.directive_arguments,
+            );
+        }
+        for (key, r) in &referencers.object_types {
+            add(f, "object", key, "schema_roots", &r.schema_roots);
+            add(f, "object", key, "object_fields", &r.object_fields);
+            add(f, "object", key, "interface_fields", &r.interface_fields);
+            add(f, "object", key, "union_types", &r.union_types);
+        }
+        for (key, r) in &referencers.interface_types {
+            add(f, "interface", key, "object_types", &r.object_types);
+            add(f, "interface", key, "object_fields", &r.object_fields);
+            add(f, "interface", key, "interface_types", &r.interface_types);
+            add(f, "interface", key, "interface_fields", &r.interface_fields);
+        }
+        for (key, r) in &referencers.union_types {
+            add(f, "union", key, "object_fields", &r.object_fields);
+            add(f, "union", key, "interface_fields", &r.interface_fields);
+        }
+        for (key, r) in &referencers.enum_types {
+            add(f, "enum", key, "object_fields", &r.object_fields);
+            add(
+                f,
+                "enum",
+                key,
+                "object_field_arguments",
+                &r.object_field_arguments,
+            );
+            add(f, "enum", key, "interface_fields", &r.interface_fields);
+            add(
+                f,
+                "enum",
+                key,
+                "interface_field_arguments",
+                &r.interface_field_arguments,
+            );
+            add(
+                f,
+                "enum",
+                key,
+                "input_object_fields",
+                &r.input_object_fields,
+            );
+            add(
+                f,
+                "enum",
+                key,
+                "directive_arguments",
+                &r.directive_arguments,
+            );
+        }
+        for (key, r) in &referencers.input_object_types {
+            add(
+                f,
+                "input",
+                key,
+                "object_field_arguments",
+                &r.object_field_arguments,
+            );
+            add(
+                f,
+                "input",
+                key,
+                "interface_field_arguments",
+                &r.interface_field_arguments,
+            );
+            add(
+                f,
+                "input",
+                key,
+                "input_object_fields",
+                &r.input_object_fields,
+            );
+            add(
+                f,
+                "input",
+                key,
+                "directive_arguments",
+                &r.directive_arguments,
+            );
+        }
+        for (key, r) in &referencers.directives {
+            add(f, "directive", key, "targets", r.iter());
+        }
+        facts
+    }
+
+    /// Renames a type through the public entry point, then checks the edit contract: the compiler
+    /// schema is still valid, and the incrementally maintained referencers equal referencers
+    /// rebuilt from scratch from the edited schema.
+    fn rename_and_check(sdl: &str, old_name: Name, new_name: Name) -> FederationSchema {
+        let mut schema = FederationSchema::new(
+            Schema::parse_and_validate(sdl, "rename.graphql")
+                .unwrap()
+                .into_inner(),
+        )
+        .unwrap();
+        schema
+            .get_type(&old_name)
+            .unwrap()
+            .rename(&mut schema, new_name)
+            .unwrap();
+        let valid = schema.schema().clone().validate();
+        assert!(valid.is_ok(), "renamed schema is invalid: {valid:?}");
+        let rebuilt = FederationSchema::new(schema.schema().clone()).unwrap();
+        let actual = referencer_facts(schema.referencers());
+        let expected = referencer_facts(rebuilt.referencers());
+        let stale: Vec<_> = actual.difference(&expected).collect();
+        let missing: Vec<_> = expected.difference(&actual).collect();
+        assert!(
+            stale.is_empty() && missing.is_empty(),
+            "referencers diverge from a rebuild after renaming {old_name}\n\
+             stale: {stale:#?}\nmissing: {missing:#?}"
+        );
+        schema
+    }
+
+    #[test]
+    fn renamed_union_updates_output_field_types() {
+        let schema = rename_and_check(
+            "type Member { id: ID! } union Choice = Member \
+             interface Holder { held: [Choice!] } \
+             type Query implements Holder { result: Choice! held: [Choice!] }",
+            name!("Choice"),
+            name!("MovedChoice"),
+        );
+        let query = ObjectTypeDefinitionPosition::new(name!("Query"));
+        let result = query.field(name!("result")).get(schema.schema()).unwrap();
+        assert_eq!(result.ty.to_string(), "MovedChoice!");
+        let held = InterfaceTypeDefinitionPosition {
+            type_name: name!("Holder"),
+        }
+        .field(name!("held"))
+        .get(schema.schema())
+        .unwrap();
+        assert_eq!(held.ty.to_string(), "[MovedChoice!]");
     }
 }
