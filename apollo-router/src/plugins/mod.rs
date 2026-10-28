@@ -22,6 +22,7 @@ pub(crate) mod authorization;
 pub(crate) mod cache;
 pub(crate) mod chaos;
 pub(crate) mod connectors;
+pub(crate) mod continuous_profiling;
 mod coprocessor;
 pub(crate) mod cors;
 pub(crate) mod csrf;
