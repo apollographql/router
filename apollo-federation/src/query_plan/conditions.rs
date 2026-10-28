@@ -441,14 +441,17 @@ mod tests {
     use crate::schema::ValidFederationSchema;
 
     fn parse_operation(schema: &str, query: &str) -> Operation {
-        let schema = Schema::parse_and_validate(schema, "schema.graphql").unwrap();
-        let schema = ValidFederationSchema::new(schema).unwrap();
-        Operation::parse(schema, query, "query.graphql").unwrap()
+        let schema =
+            Schema::parse_and_validate(schema, "schema.graphql").expect("schema should parse");
+        let schema = ValidFederationSchema::new(schema).expect("schema should be valid");
+        Operation::parse(schema, query, "query.graphql").expect("operation should parse")
     }
 
     fn only_child(set: &SelectionSet) -> &Selection {
         let mut selections = set.selections.values();
-        let child = selections.next().unwrap();
+        let child = selections
+            .next()
+            .expect("selection set should not be empty");
         assert!(selections.next().is_none(), "expected one selection: {set}");
         child
     }
@@ -459,7 +462,7 @@ mod tests {
             .find(|s| matches!(s, Selection::Field(f) if f.field.name() == name))
             .unwrap_or_else(|| panic!("no field {name} in {set}"))
             .conditions()
-            .unwrap()
+            .expect("selection should have conditions")
     }
 
     fn parse(directives: &str) -> Conditions {
@@ -635,21 +638,29 @@ mod tests {
                 "type Query { obj: Obj } type Obj { live: Int dead: Int }",
                 query,
             );
-            let handled = op.selection_set.conditions().unwrap();
+            let handled = op
+                .selection_set
+                .conditions()
+                .expect("operation should have conditions");
             assert!(
                 matches!(handled, Conditions::Variables(_)),
                 "fixture must remove a variable guard: {query}"
             );
-            let before = only_child(&op.selection_set).selection_set().unwrap();
+            let before = only_child(&op.selection_set)
+                .selection_set()
+                .expect("obj should have a selection set");
             assert_eq!(field_conditions(before, "dead"), Conditions::never());
 
-            let result = remove_conditions_from_selection_set(&op.selection_set, &handled).unwrap();
+            let result = remove_conditions_from_selection_set(&op.selection_set, &handled)
+                .expect("removing handled conditions should succeed");
             let obj = only_child(&result);
             assert!(
                 obj.element().directives().is_empty(),
                 "handled guard was not removed: {result}"
             );
-            let after = obj.selection_set().unwrap();
+            let after = obj
+                .selection_set()
+                .expect("obj should have a selection set");
             assert_eq!(
                 field_conditions(after, "dead"),
                 Conditions::never(),
@@ -666,8 +677,12 @@ mod tests {
             "type Query { obj: Obj } type Obj { a: Int b: Int }",
             "query($x: Boolean!) { obj @include(if: $x) { a @include(if: true) b @skip(if: false) } }",
         );
-        let handled = op.selection_set.conditions().unwrap();
-        let result = remove_conditions_from_selection_set(&op.selection_set, &handled).unwrap();
+        let handled = op
+            .selection_set
+            .conditions()
+            .expect("operation should have conditions");
+        let result = remove_conditions_from_selection_set(&op.selection_set, &handled)
+            .expect("removing handled conditions should succeed");
         assert_eq!(result.to_string(), "{ obj { a b } }");
     }
 }

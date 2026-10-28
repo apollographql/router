@@ -1186,8 +1186,9 @@ type User
 
     #[test]
     fn plan_keeps_literal_exclusion_under_handled_condition() {
-        let supergraph = Supergraph::new(TEST_SUPERGRAPH).unwrap();
-        let planner = QueryPlanner::new(&supergraph, Default::default()).unwrap();
+        let supergraph = Supergraph::new(TEST_SUPERGRAPH).expect("supergraph should parse");
+        let planner =
+            QueryPlanner::new(&supergraph, Default::default()).expect("planner should be created");
 
         let document = ExecutableDocument::parse_and_validate(
             planner.api_schema().schema(),
@@ -1202,10 +1203,10 @@ type User
             "#,
             "operation.graphql",
         )
-        .unwrap();
+        .expect("document should parse and validate");
         let plan = planner
             .build_query_plan(&document, None, Default::default())
-            .unwrap();
+            .expect("query plan should build");
         // `@include(if: $x)` is handled by the condition node and dropped from the fetch, but the
         // constant exclusions are not handled by anything and must still reach the subgraph.
         insta::assert_snapshot!(plan, @r###"
