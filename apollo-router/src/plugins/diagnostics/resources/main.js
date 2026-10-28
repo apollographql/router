@@ -189,7 +189,7 @@ async function updateCallGraph() {
     try {
         // Parse the heap profile (base64 decoding handled by DataAccess)
         const parser = new BacktraceProcessor.HeapProfileParser();
-        const actualProfile = parser.parse(actualDump.data);
+        const actualProfile = await parser.parse(actualDump.data);
         
         let profile = actualProfile;
         
@@ -212,7 +212,7 @@ async function updateCallGraph() {
             if (baseDump) {
                 
                 // Parse base profile and generate its call graph data (base64 decoding handled by DataAccess)
-                const baseProfile = parser.parse(baseDump.data);
+                const baseProfile = await parser.parse(baseDump.data);
                 const baseCallGraphData = BacktraceProcessor.StackProcessor.buildCallGraphData(baseProfile);
                 
                 // Compute differential call graph using unified approach
@@ -269,7 +269,7 @@ async function updateFlameGraph() {
     try {
         // Parse the heap profile (base64 decoding handled by DataAccess)
         const parser = new BacktraceProcessor.HeapProfileParser();
-        const actualProfile = parser.parse(actualDump.data);
+        const actualProfile = await parser.parse(actualDump.data);
         
         let profile = actualProfile;
         
@@ -293,7 +293,7 @@ async function updateFlameGraph() {
             if (baseDump) {
                 
                 // Parse base profile and generate flame data (base64 decoding handled by DataAccess)
-                const baseProfile = parser.parse(baseDump.data);
+                const baseProfile = await parser.parse(baseDump.data);
                 const baseCollapsedStacks = BacktraceProcessor.StackProcessor.collapseStacks(baseProfile);
                 const baseFlameTree = BacktraceProcessor.StackProcessor.buildFlameTree(baseCollapsedStacks);
                 const baseFlameData = BacktraceProcessor.StackProcessor.convertToFlameData(baseFlameTree);
