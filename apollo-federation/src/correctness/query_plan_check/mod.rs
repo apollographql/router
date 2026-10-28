@@ -15,9 +15,12 @@
 //!   selections at the path it runs at, then ask whether the result includes the client operation.
 //!   That question is [`super::query_compare::includes`], itself a port of the model's
 //!   `includesBool`.
-//! - **Soundness** — every entity fetch's `requires` is matched by its entity cases, checked where
-//!   the fetch is reached, while the state that reached it is in hand. No fetch site is ever
-//!   collected.
+//! - **Soundness** — every fetch is sent to a subgraph that is there and selects only what that
+//!   subgraph resolves; every entity fetch's `requires` is matched by its entity cases, and the
+//!   `__typename` its flatten path tests and the contextual values it reads are already fetched.
+//!   Each is checked where the fetch is reached, while the state that reached it is in hand. No
+//!   fetch site is ever collected, and the model's passes over every fetch of the plan
+//!   (`fetchSubgraphsKnownBool`, `fetchesSelectResolvableBool`) are made at each fetch instead.
 //!
 //! # What a fetch must already have found
 //!
@@ -53,9 +56,12 @@
 //! # Validity of the operations the walk builds
 //!
 //! The model assumes the operations it compares are valid and carries that as a premise of its
-//! correctness statement, `QueryPlanWellFormed`, naming three: the plan read as an operation, what
-//! each entity fetch has already fetched, and what each `@key` demands of it, inverted through the
-//! fetch's input rewrites. The checker does not decide it for any of them.
+//! correctness statement, `QueryPlanWellFormed`, naming four: the plan read as an operation, what
+//! each entity fetch has already fetched, what each `@key` demands of it, inverted through the
+//! fetch's input rewrites, and `__typename` mounted at each type-conditioned element of its path.
+//! It also takes every fetch's own operation to be valid against its subgraph
+//! (`FetchOperationsValid`), as parsing it against that subgraph already requires. The checker
+//! does not decide any of them.
 //!
 //! The first two are read off the buffer of what the plan has fetched, and that buffer is a
 //! *response shape written in selection syntax*: it keys a response name by type condition and has
@@ -66,7 +72,8 @@
 //! renames inside a response shape, where the two never meet.
 //!
 //! The third is assembled out of `@key` and `@requires` field sets, which supergraph composition
-//! has already validated, so re-checking them here would only cost time.
+//! has already validated, so re-checking them here would only cost time, and the fourth is one
+//! field mounted where the plan already reaches.
 //!
 //! # Unfetched introspection
 //!
@@ -89,6 +96,7 @@
 
 mod context;
 mod requires;
+mod resolvable;
 mod selections;
 mod subgraph;
 #[cfg(test)]
@@ -110,6 +118,7 @@ use apollo_compiler::validation::Valid;
 
 use self::context::check_context_rewrites;
 use self::context::context_variables;
+use self::context::display_path;
 use self::context::remove_context_arguments;
 use self::requires::Reading;
 use self::requires::check_requires_conflict;
@@ -120,9 +129,11 @@ use self::requires::key_half;
 use self::requires::requires_half;
 use self::requires::same_keys;
 use self::requires::to_requires_field_set;
+use self::resolvable::check_fetch_selects_resolvable;
 use self::selections::apply_key_renamers;
 use self::selections::inline_fragment_spreads;
 use self::selections::invert_key_renamers;
+use self::selections::narrow_type_conditions;
 use self::selections::selections_at;
 use self::selections::type_filter_admits;
 use self::selections::type_filter_covers;
@@ -301,10 +312,7 @@ fn check_path_reaches_a_type(path: &[FetchDataPathElement]) -> Result<(), Compar
             return Err(ComparisonError::new(format!(
                 "flatten path `{}` narrows `{element}` to no runtime type, \
                  so the fetch under it can never run",
-                path.iter()
-                    .map(|e| e.to_string())
-                    .collect::<Vec<_>>()
-                    .join(".")
+                display_path(path)
             )));
         }
     }
@@ -573,7 +581,15 @@ impl<'a> Checker<'a> {
         available: &[Selection],
         readable: &[Selection],
     ) -> Result<Vec<Selection>, ComparisonError> {
-        let body = self.fetch_body(fetch)?;
+        // Every fetch, root fetches included, is sent to a subgraph that must be there and must
+        // resolve what the fetch selects.
+        let subgraph_schema = self.subgraph_schema(fetch)?;
+        let (root_type, body) = self.fetch_body(fetch, subgraph_schema)?;
+        check_fetch_selects_resolvable(&fetch.subgraph_name, subgraph_schema, &root_type, &body)?;
+        // What the fetch can return under a fragment is what its subgraph admits there, which can
+        // be less than the supergraph does. The entity cases are read off the operation as
+        // written; what it contributes, off the narrowed one.
+        let narrowed = narrow_type_conditions(self.supergraph_schema, subgraph_schema, &body);
         // A root fetch selects its whole operation and requires nothing; an entity fetch selects
         // what its operation asks of the entities it was given, which are those of a type some
         // `requires` entry is written at: `execute_selection_set` keeps an entry's fragment only
@@ -583,11 +599,16 @@ impl<'a> Checker<'a> {
         // implementation, a fetch whose entries cover only some of them resolves nothing for the
         // rest; `interpret_fetch_node` merges every `_entities` fragment regardless.
         let selected = if fetch.requires.is_empty() {
-            body
+            narrowed
         } else {
-            let entity_body = entity_body(fetch, &body)?;
-            self.check_fetch(fetch, &entity_body, reached, available, readable)?;
-            restrict_to_entry_types(&require_types(fetch)?, entity_body)
+            self.check_fetch(
+                fetch,
+                &entity_body(fetch, &body)?,
+                reached,
+                available,
+                readable,
+            )?;
+            restrict_to_entry_types(&require_types(fetch)?, entity_body(fetch, &narrowed)?)
         };
         // The entity cases were read off the fetch's own operation above; what it *contributes*
         // is that selection set under the key renames its output rewrites apply and without the
@@ -610,8 +631,28 @@ impl<'a> Checker<'a> {
         ))
     }
 
-    /// A fetch's own operation, its fragment spreads inlined.
-    fn fetch_body(&self, fetch: &FetchNode) -> Result<Vec<Selection>, ComparisonError> {
+    /// The schema of the subgraph a fetch is sent to.
+    fn subgraph_schema(
+        &self,
+        fetch: &FetchNode,
+    ) -> Result<&'a ValidFederationSchema, ComparisonError> {
+        self.subgraphs_by_name
+            .get(fetch.subgraph_name.as_ref())
+            .ok_or_else(|| {
+                ComparisonError::new(format!(
+                    "fetch to unknown subgraph `{}`",
+                    fetch.subgraph_name
+                ))
+            })
+    }
+
+    /// A fetch's own operation, its fragment spreads inlined, and its root type in the subgraph's
+    /// schema.
+    fn fetch_body(
+        &self,
+        fetch: &FetchNode,
+        subgraph_schema: &ValidFederationSchema,
+    ) -> Result<(Name, Vec<Selection>), ComparisonError> {
         let document = fetch.operation_document.as_parsed().map_err(|e| {
             ComparisonError::new(format!(
                 "fetch to {}: operation document is not parsed: {e}",
@@ -624,9 +665,22 @@ impl<'a> Checker<'a> {
                 fetch.subgraph_name
             ))
         })?;
+        let root_type = subgraph_schema
+            .schema()
+            .root_operation(operation.operation_type)
+            .cloned()
+            .ok_or_else(|| {
+                ComparisonError::new(format!(
+                    "fetch to {}: the subgraph has no {} root",
+                    fetch.subgraph_name, operation.operation_type
+                ))
+            })?;
         // Spreads go here, at the boundary where this fetch's selections join the shared buffer;
         // see `inline_fragment_spreads`.
-        inline_fragment_spreads(&operation.selection_set.selections, &document.fragments)
+        Ok((
+            root_type,
+            inline_fragment_spreads(&operation.selection_set.selections, &document.fragments)?,
+        ))
     }
 }
 
@@ -657,7 +711,8 @@ fn entity_body(fetch: &FetchNode, body: &[Selection]) -> Result<Vec<Selection>, 
 
 impl Checker<'_> {
     /// Whether one entity fetch is well formed, its requirements and entity cases match each
-    /// other, and the contextual data it reads is already fetched.
+    /// other, and the `__typename` its path tests and the contextual data it reads are already
+    /// fetched.
     ///
     /// Each `requires` entry must be matched by some entity case, and each case by some entry.
     /// Legacy checks only the first direction, plus the count kept here, and does not check
@@ -695,16 +750,7 @@ impl Checker<'_> {
             )));
         }
 
-        let subgraph_schema = self
-            .subgraphs_by_name
-            .get(fetch.subgraph_name.as_ref())
-            .ok_or_else(|| {
-                ComparisonError::new(format!(
-                    "fetch to unknown subgraph `{}`",
-                    fetch.subgraph_name
-                ))
-            })?;
-        let subgraph = Subgraph::new(subgraph_schema)?;
+        let subgraph = Subgraph::new(self.subgraph_schema(fetch)?)?;
 
         // What the fetch can read, which every requirement is compared with. Bound once per
         // fetch, not per entry or per `@key`.
@@ -832,6 +878,7 @@ impl Checker<'_> {
                 )));
             }
         }
+        self.check_typenames_readable(fetch, reached, available, &readable_doc)?;
         check_context_rewrites(
             self.supergraph_schema,
             &self.root_type,
@@ -841,6 +888,66 @@ impl Checker<'_> {
             readable,
             fetch,
         )
+    }
+
+    /// Every `__typename` the router tests along an entity fetch's path is there for it to read
+    /// wherever the fetch runs.
+    ///
+    /// `iterate_path` follows a type-conditioned path element into an object only when its
+    /// `__typename` is one the condition names, and skips one with none, so a fetch below a
+    /// condition whose `__typename` the plan never fetched runs nowhere. Mounted at each
+    /// conditioned element, where the condition puts it on the objects it names, `__typename` must
+    /// be in what the fetch can read; an object of a type the condition does not name is skipped
+    /// whether or not its `__typename` is there, so it owes none.
+    fn check_typenames_readable(
+        &self,
+        fetch: &FetchNode,
+        reached: Reached<'_>,
+        available: &[Selection],
+        readable_doc: &Valid<ExecutableDocument>,
+    ) -> Result<(), ComparisonError> {
+        let typename = self.typename_selection()?;
+        for prefix in typename_inspected_paths(reached.path) {
+            let required = under_condition(
+                reached.condition,
+                &self.root_type,
+                selections_at(
+                    self.supergraph_schema,
+                    available,
+                    None,
+                    prefix,
+                    std::slice::from_ref(&typename),
+                ),
+            );
+            if let Err(e) = self.comparator.includes_with_constraint(
+                &self.constraint,
+                readable_doc,
+                &self.operation_with(required),
+            ) {
+                return Err(ComparisonError::new(format!(
+                    "fetch to {}: the flatten path tests `__typename` at `{}`, which the plan has \
+                     not fetched there:\n{}",
+                    fetch.subgraph_name,
+                    display_path(prefix),
+                    indent(&e.to_string())
+                )));
+            }
+        }
+        Ok(())
+    }
+
+    /// The `__typename` field, as a plan selects it.
+    fn typename_selection(&self) -> Result<Selection, ComparisonError> {
+        let definition = self
+            .supergraph_schema
+            .schema()
+            .type_field(&self.root_type, &INTROSPECTION_TYPENAME_FIELD_NAME)
+            .map_err(|_| ComparisonError::new("no `__typename` definition".to_string()))?;
+        Ok(executable::Field::new(
+            INTROSPECTION_TYPENAME_FIELD_NAME.clone(),
+            definition.clone(),
+        )
+        .into())
     }
 
     /// A `requires` entry agrees with the fetch's input rewrites, which link each alias it reads
@@ -1028,6 +1135,21 @@ impl Checker<'_> {
         }
         Ok(Some(unmatched.join("\n")))
     }
+}
+
+/// The prefixes of a flatten path that end at an element carrying a type condition, the condition
+/// kept: one per `__typename` test the router makes along the path.
+fn typename_inspected_paths(
+    path: &[FetchDataPathElement],
+) -> impl Iterator<Item = &[FetchDataPathElement]> {
+    (0..path.len())
+        .filter(|&end| {
+            matches!(
+                &path[end],
+                FetchDataPathElement::Key(_, Some(_)) | FetchDataPathElement::AnyIndex(Some(_))
+            )
+        })
+        .map(|end| &path[..=end])
 }
 
 /// The type condition each `requires` entry declares.

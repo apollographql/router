@@ -246,20 +246,15 @@ impl LevelTypes {
         self.narrowed_to(&possible_types(schema, type_name))
     }
 
-    /// Narrows by a path element's own type condition, which is a disjunction.
-    fn narrow_by_condition(
-        &self,
-        schema: &ValidFederationSchema,
-        type_condition: Option<&TypeCondition>,
-    ) -> Self {
-        let Some(type_names) = type_condition else {
-            return self.clone();
-        };
-        let admitted: Vec<Name> = type_names
-            .iter()
-            .flat_map(|type_name| possible_types(schema, type_name))
-            .collect();
-        self.narrowed_to(&admitted)
+    /// Narrows by a path element's own type condition, a disjunction of object names compared
+    /// literally with each object's `__typename`, as the router's `iterate_path` compares them: the
+    /// level keeps the types it holds that the condition names. A name that is no object type, an
+    /// interface's or a union's, keeps nothing, so a value read below it is read nowhere.
+    fn narrow_by_condition(&self, type_condition: Option<&TypeCondition>) -> Self {
+        match type_condition {
+            None => self.clone(),
+            Some(type_names) => self.narrowed_to(type_names),
+        }
     }
 
     fn narrowed_to(&self, admitted: &[Name]) -> Self {
@@ -388,7 +383,7 @@ fn conditions_reached(
             &narrowed(
                 reached
                     .current
-                    .narrow_by_condition(schema, type_condition.as_deref()),
+                    .narrow_by_condition(type_condition.as_deref()),
             ),
             rest,
             selections,
@@ -402,8 +397,11 @@ fn conditions_reached(
 /// Every copy of a response key at this level, with the rest of the path followed into it.
 ///
 /// A fragment narrows the level the copy sits at, and a key element's own type condition narrows
-/// the level below, where the field's own type takes over. A selection whose directives can never
-/// all hold contributes no copy.
+/// the level below, where the field's own type takes over. A field inside a fragment is a field of
+/// the type the fragment names, which is where its type is looked up when the path descends past
+/// it, a fragment naming no type keeping the enclosing one: below a union, whose members alone
+/// declare the fields a path descends past, such a key is found inside the fragments on its
+/// members. A selection whose directives can never all hold contributes no copy.
 #[allow(clippy::too_many_arguments)]
 fn reached_under_key(
     schema: &ValidFederationSchema,
@@ -431,8 +429,7 @@ fn reached_under_key(
                 let Some(child_type) = field_output_type(schema, parent_type, &field.name) else {
                     continue;
                 };
-                let level =
-                    LevelTypes::of(schema, &child_type).narrow_by_condition(schema, type_condition);
+                let level = LevelTypes::of(schema, &child_type).narrow_by_condition(type_condition);
                 out.extend(conditions_reached(
                     schema,
                     &child_type,
@@ -455,7 +452,7 @@ fn reached_under_key(
                 inner.current = narrowed;
                 out.extend(reached_under_key(
                     schema,
-                    parent_type,
+                    fragment.type_condition.as_ref().unwrap_or(parent_type),
                     &inner,
                     name,
                     type_condition,
@@ -638,7 +635,8 @@ pub(super) fn check_context_rewrites(
     Ok(())
 }
 
-fn display_path(path: &[FetchDataPathElement]) -> String {
+/// A path as the plan prints it.
+pub(super) fn display_path(path: &[FetchDataPathElement]) -> String {
     path.iter()
         .map(|element| element.to_string())
         .collect::<Vec<_>>()

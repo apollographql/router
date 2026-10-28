@@ -1,0 +1,140 @@
+# The supergraph for the owner-profile tests in `tests/context_reads.rs`, composed with
+# `composition::compose` from the two subgraphs below, each prefixed with
+# `extend schema @link(url: "https://specs.apollo.dev/federation/v2.9", import: ["@key",
+# "@shareable", "@external", "@interfaceObject", "@context", "@fromContext"])`. Recompose it
+# when they change.
+#
+# A store's `owner` is an `Owner`, a `Person` or a `Company`, and every product's `price` reads
+# the `locale` on its store's owner's profile, which `profiles` resolves.
+#
+# Subgraph `stores`:
+#
+#   type Query {
+#     stores: [Store]
+#   }
+#
+#   type Store @context(name: "store") {
+#     owner: Owner
+#     products: [Product]
+#   }
+#
+#   interface Owner {
+#     profile: Profile
+#   }
+#
+#   type Person implements Owner {
+#     profile: Profile
+#   }
+#
+#   type Company implements Owner {
+#     profile: Profile
+#   }
+#
+#   type Profile @key(fields: "id") {
+#     id: ID!
+#     locale: String @external
+#   }
+#
+#   type Product @key(fields: "id") {
+#     id: ID!
+#     "The `locale` on the profile of the owner of the store holding the product."
+#     price(locale: String @fromContext(field: "$store { owner { profile { locale } } }")): Int
+#   }
+#
+# Subgraph `profiles`:
+#
+#   type Profile @key(fields: "id") {
+#     id: ID!
+#     locale: String
+#   }
+
+schema @link(url: "https://specs.apollo.dev/link/v1.0") @link(url: "https://specs.apollo.dev/join/v0.5", for: EXECUTION) @link(url: "https://specs.apollo.dev/context/v0.1", for: SECURITY) {
+  query: Query
+}
+
+directive @link(url: String, as: String, for: link__Purpose, import: [link__Import]) repeatable on SCHEMA
+
+directive @join__graph(name: String!, url: String!) on ENUM_VALUE
+
+directive @join__type(graph: join__Graph!, key: join__FieldSet, extension: Boolean! = false, resolvable: Boolean! = true, isInterfaceObject: Boolean! = false) repeatable on OBJECT | INTERFACE | UNION | ENUM | INPUT_OBJECT | SCALAR
+
+directive @join__field(graph: join__Graph, requires: join__FieldSet, provides: join__FieldSet, type: String, external: Boolean, override: String, usedOverridden: Boolean, overrideLabel: String, contextArguments: [join__ContextArgument!]) repeatable on FIELD_DEFINITION | INPUT_FIELD_DEFINITION
+
+directive @join__implements(graph: join__Graph!, interface: String!) repeatable on OBJECT | INTERFACE
+
+directive @join__unionMember(graph: join__Graph!, member: String!) repeatable on UNION
+
+directive @join__enumValue(graph: join__Graph!) repeatable on ENUM_VALUE
+
+directive @join__directive(graphs: [join__Graph!], name: String!, args: join__DirectiveArguments) repeatable on SCHEMA | OBJECT | INTERFACE | FIELD_DEFINITION
+
+directive @context(name: String!) repeatable on INTERFACE | OBJECT | UNION
+
+directive @context__fromContext(field: context__ContextFieldValue) on ARGUMENT_DEFINITION
+
+enum link__Purpose {
+  """
+  `SECURITY` features provide metadata necessary to securely resolve fields.
+  """
+  SECURITY
+  """
+  `EXECUTION` features provide metadata necessary for operation execution.
+  """
+  EXECUTION
+}
+
+scalar link__Import
+
+enum join__Graph {
+  PROFILES @join__graph(name: "profiles", url: "none")
+  STORES @join__graph(name: "stores", url: "none")
+}
+
+scalar join__FieldSet
+
+scalar join__DirectiveArguments
+
+scalar join__FieldValue
+
+input join__ContextArgument {
+  name: String!
+  type: String!
+  context: String!
+  selection: join__FieldValue!
+}
+
+scalar context__ContextFieldValue
+
+type Profile @join__type(graph: PROFILES, key: "id") @join__type(graph: STORES, key: "id") {
+  id: ID!
+  locale: String @join__field(graph: PROFILES) @join__field(graph: STORES, external: true)
+}
+
+type Query @join__type(graph: PROFILES) @join__type(graph: STORES) {
+  stores: [Store] @join__field(graph: STORES)
+}
+
+type Store @join__type(graph: STORES) @context(name: "stores__store") {
+  owner: Owner
+  products: [Product]
+}
+
+interface Owner @join__type(graph: STORES) {
+  profile: Profile
+}
+
+type Person implements Owner @join__implements(graph: STORES, interface: "Owner") @join__type(graph: STORES) {
+  profile: Profile
+}
+
+type Company implements Owner @join__implements(graph: STORES, interface: "Owner") @join__type(graph: STORES) {
+  profile: Profile
+}
+
+type Product @join__type(graph: STORES, key: "id") {
+  id: ID!
+  """
+  The `locale` on the profile of the owner of the store holding the product.
+  """
+  price: Int @join__field(graph: STORES, contextArguments: [{context: "stores__store", name: "locale", type: "String", selection: "{ owner { profile { locale } } }"}])
+}

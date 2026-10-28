@@ -1,4 +1,5 @@
-//! The federation metadata a subgraph schema carries: `@key` and `@requires`.
+//! The federation metadata a subgraph schema carries: `@key`, `@requires`, `@external` and
+//! `@provides`.
 //!
 //! The model keeps these beside the schema (`Subgraph.keys`, `Subgraph.requires`) because its
 //! `Schema` does not model directives. Here they are read from the subgraph schema itself, which
@@ -17,6 +18,8 @@ use super::ComparisonError;
 use crate::link::federation_spec_definition::FederationSpecDefinition;
 use crate::link::federation_spec_definition::get_federation_spec_definition_from_subgraph;
 use crate::schema::ValidFederationSchema;
+use crate::schema::position::FieldDefinitionPosition;
+use crate::schema::position::ObjectFieldDefinitionPosition;
 
 /// One `@key` application on an entity type in a subgraph.
 pub(super) struct KeyDirective {
@@ -93,6 +96,49 @@ impl<'a> Subgraph<'a> {
             .map_err(|e| {
                 ComparisonError::new(format!(
                     "malformed @requires on {type_name}.{field_name}: {e}"
+                ))
+            })?;
+        Ok(Some(arguments.fields.to_string()))
+    }
+
+    /// Whether a field of an object type is `@external`, as `ExternalMetadata::is_external` reads
+    /// it: a fake external, a key field Fed 1 marks external on an extension, is not.
+    pub(super) fn is_external(&self, type_name: &Name, field_name: &Name) -> bool {
+        self.schema.subgraph_metadata().is_some_and(|metadata| {
+            metadata.is_field_external(&FieldDefinitionPosition::Object(
+                ObjectFieldDefinitionPosition {
+                    type_name: type_name.clone(),
+                    field_name: field_name.clone(),
+                },
+            ))
+        })
+    }
+
+    /// The `@provides` field set of a field of an object type, as written.
+    pub(super) fn provides(
+        &self,
+        type_name: &Name,
+        field_name: &Name,
+    ) -> Result<Option<String>, ComparisonError> {
+        let Ok(definition) = self.federation.provides_directive_definition(self.schema) else {
+            return Ok(None);
+        };
+        let Some(ExtendedType::Object(ty)) = self.schema.schema().types.get(type_name) else {
+            return Ok(None);
+        };
+        let Some(directive) = ty
+            .fields
+            .get(field_name)
+            .and_then(|field| field.directives.get(&definition.name))
+        else {
+            return Ok(None);
+        };
+        let arguments = self
+            .federation
+            .provides_directive_arguments(directive)
+            .map_err(|e| {
+                ComparisonError::new(format!(
+                    "malformed @provides on {type_name}.{field_name}: {e}"
                 ))
             })?;
         Ok(Some(arguments.fields.to_string()))
