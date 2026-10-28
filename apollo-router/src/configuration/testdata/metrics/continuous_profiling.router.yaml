@@ -1,0 +1,6 @@
+experimental_continuous_profiling:
+  heap:
+    enabled: true
+  exporters:
+    datadog:
+      enabled: true

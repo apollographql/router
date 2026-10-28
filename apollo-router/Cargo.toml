@@ -220,6 +220,7 @@ reqwest = { workspace = true, default-features = false, features = [
     "rustls-tls-native-roots",
     "gzip",
     "json",
+    "multipart",
     "stream",
 ] }
 
@@ -247,7 +248,13 @@ sysinfo = { version = "0.39.1", features = [
 thiserror = "2.0.0"
 tokio.workspace = true
 tokio-stream = { version = "0.1.15", features = ["sync", "net", "fs"] }
-tokio-util = { version = "0.7.11", features = ["net", "codec", "time", "compat"] }
+tokio-util = { version = "0.7.11", features = [
+    "net",
+    "codec",
+    "time",
+    "compat",
+    "rt",
+] }
 tonic = { version = "0.14.5", features = [
     "transport",
     "tls-ring",
