@@ -129,9 +129,9 @@ By [@iksinski](https://github.com/iksinski) in https://github.com/apollographql/
 
 ### Connector validation no longer rejects some `->` method calls that work at runtime
 
-Composition could reject connector expressions that succeed at runtime, such as `.ids->map(@)->joinNotNull(",")`, because the shape checks for several `->` methods were stricter than the methods themselves. Validation now only rejects a method call when no possible value could make it succeed.
+Composition could reject connector expressions that succeed at runtime, such as `$args.ids->map(@)->joinNotNull(",")`, because the shape checks for several `->` methods were stricter than the methods themselves. Validation now only rejects a method call when no possible value could make it succeed.
 
-The same applies to `isSuccess`, which counts a missing or non-boolean value as failure at runtime. Expressions like `.s?->eq("a")` or a `->match` without a boolean fallback no longer fail composition. Only an `isSuccess` expression that can never be a boolean, like `$.items->size`, is rejected.
+The same applies to `isSuccess`, which counts a missing or non-boolean value as failure at runtime. Expressions like `$args.s?->eq("a")` or a `->match` without a boolean fallback no longer fail composition. Only an `isSuccess` expression that can never be a boolean, like `$.items->size`, is rejected.
 
 Thanks to [@fernando-apollo](https://github.com/fernando-apollo) for reporting the `->joinNotNull` case.
 
@@ -191,13 +191,13 @@ Thanks to [@fernando-apollo](https://github.com/fernando-apollo), [@briannafugat
 
 By [@benjamn](https://github.com/benjamn) in https://github.com/apollographql/router/pull/10316
 
-### Fix `CONNECTORS_CANNOT_RESOLVE_KEY` and router startup failure when a connector reads `` through `->first`
+### Fix `CONNECTORS_CANNOT_RESOLVE_KEY` and router startup failure when a connector reads `$this` through `->first`
 
-A field-level `@connect` on an entity that read a `` value through `->first` (for example `queryParams: "id: .tagIds->first"`) failed composition with `CONNECTORS_CANNOT_RESOLVE_KEY`. With a supergraph composed by an older version, the router refused to start with `An internal error has occurred, please report this bug to Apollo. Details: error creating resolvable key`.
+A field-level `@connect` on an entity that read a `$this` value through `->first` (for example `queryParams: "id: $this.tagIds->first"`) failed composition with `CONNECTORS_CANNOT_RESOLVE_KEY`. With a supergraph composed by an older version, the router refused to start with `An internal error has occurred, please report this bug to Apollo. Details: error creating resolvable key`.
 
-The cause was in how connectors work out which `` fields an entity key needs. `->first` was recorded as a read of list index `0`, so the synthesized key came out as `tagIds { "0" }`, which is not a valid field set. List indexes are no longer recorded, so the key is now `tagIds`, the same as for `->last` or a plain `.tagIds`. Schemas like this now compose and the router starts.
+The cause was in how connectors work out which `$this` fields an entity key needs. `->first` was recorded as a read of list index `0`, so the synthesized key came out as `tagIds { "0" }`, which is not a valid field set. List indexes are no longer recorded, so the key is now `tagIds`, the same as for `->last` or a plain `$this.tagIds`. Schemas like this now compose and the router starts.
 
-Reading fields from the first element of a list of objects, such as `.items->first.id` or `.items->first { id }`, also composes now, with the key `items { id }`. This never composed in earlier versions. A bare `.items->first` on a list of objects is still rejected with `CONNECTORS_CANNOT_RESOLVE_KEY`, the same as a bare `.items`, because the key needs to select fields from the objects.
+Reading fields from the first element of a list of objects, such as `$this.items->first.id` or `$this.items->first { id }`, also composes now, with the key `items { id }`. This never composed in earlier versions. A bare `$this.items->first` on a list of objects is still rejected with `CONNECTORS_CANNOT_RESOLVE_KEY`, the same as a bare `$this.items`, because the key needs to select fields from the objects.
 
 When a connector's key still can't be built, the error now names the connector and includes the field set errors, instead of only saying `error creating resolvable key`.
 
@@ -244,13 +244,13 @@ Errors raised by the router's own Rhai functions, such as `env::get()` on an uns
 Two things to be aware of when upgrading:
 
 - Client-facing messages for a thrown string no longer include the `rhai execution error: 'Runtime error: ... (line N, position M)'` wrapper. Only the string you threw is returned. The full error is still in the logs.
-- A `catch` block that catches an error from one of the router's Rhai functions now receives an error object instead of a string. `` still gives the message, but `type_of(err)` and comparisons such as `err == "..."` change.
+- A `catch` block that catches an error from one of the router's Rhai functions now receives an error object instead of a string. `${err}` still gives the message, but `type_of(err)` and comparisons such as `err == "..."` change.
 
 By [@rohan-b99](https://github.com/rohan-b99) in https://github.com/apollographql/router/pull/10004
 
 ### Fix `connect/v0.4` routing entity resolution through a non-entity `Query` connector
 
-Under `connect/v0.4`, when a `@key` entity had **both** a type-level reference-resolver `@connect` (mapping from ``) **and** a separate `Query` field `@connect` returning that same type (mapping from ``, with `entity` unset), connector expansion copied the entity's declared `@key` onto the `Query`-field connector's generated subgraph as **resolvable**. That gave the query planner a second, spurious entity path, so it could resolve entity references through the `Query`-field connector — where `` is empty during entity resolution — sending a request with the query parameters stripped and surfacing an upstream error (e.g. a `400` reported as `CONNECTOR_FETCH`).
+Under `connect/v0.4`, when a `@key` entity had **both** a type-level reference-resolver `@connect` (mapping from `$this`) **and** a separate `Query` field `@connect` returning that same type (mapping from `$args`, with `entity` unset), connector expansion copied the entity's declared `@key` onto the `Query`-field connector's generated subgraph as **resolvable**. That gave the query planner a second, spurious entity path, so it could resolve entity references through the `Query`-field connector — where `$args` is empty during entity resolution — sending a request with the query parameters stripped and surfacing an upstream error (e.g. a `400` reported as `CONNECTOR_FETCH`).
 
 `connect/v0.3` was never affected, so bumping only the `@link` from `v0.3` to `v0.4` could break a previously working schema. Expansion now only copies keys for `@interfaceObject` types, and always as `resolvable: false`, matching the `v0.3` behavior.
 
@@ -538,7 +538,7 @@ Notable changes in this range that may affect router scripts:
 
 - **`stdweb` support removed (1.24.0):** The `stdweb` feature flag is gone; WASM targets now use [`web-time`](https://crates.io/crates/web-time) instead of the unmaintained [`instant`](https://crates.io/crates/instant) crate. This is unlikely to affect typical router Rhai scripts.
 - **String methods `split` / `split_rev` are now `pure`:** They can be called on `const` strings without error.
-- **`\` escape in multi-line literal strings:** You can now write `\` in a multi-line literal string to produce the literal text `` instead of triggering interpolation.
+- **`\${...}` escape in multi-line literal strings:** You can now write `\${...}` in a multi-line literal string to produce the literal text `${...}` instead of triggering interpolation.
 - **`index_of` fallback for string arguments:** When no matching script function is registered, `index_of` now falls back to value comparison for string arguments.
 
 No changes to the router's Rhai API surface are expected. If your scripts relied on the old `stdweb` feature or specific `sort` behavior on non-totally-ordered arrays (which previously could panic), review your scripts before upgrading.
@@ -1197,7 +1197,7 @@ telemetry:
         sampler: 0.1
       otlp:
         enabled: true
-        endpoint: 
+        endpoint: ${env.DISTRIBUTED_TRACING_ENDPOINT}
         sampler: 0.02
 ```
 
@@ -1238,7 +1238,7 @@ response_cache:
       enabled: true
       invalidation:
         enabled: true
-        shared_key: ""
+        shared_key: "${env.INVALIDATION_SHARED_KEY}"
         indexes:                # all three default to true; omit fields you want kept on
           subgraph: false       # disable `By subgraph` invalidation for this subgraph
           type: false           # disable `By type` invalidation for this subgraph
@@ -3213,8 +3213,8 @@ type Query{
 }
 
 ## query ##
-query(: MessageInput) {
-    send(message: ) {
+query($msg: MessageInput) {
+    send(message: $msg) {
         id
     }
 }
@@ -3624,7 +3624,7 @@ response_cache:
       products:
         invalidation:
           enabled: true  # Endpoint now starts
-          shared_key: 
+          shared_key: ${env.INVALIDATION_SHARED_KEY}
 ```
 
 By [@bnjjj](https://github.com/bnjjj) in https://github.com/apollographql/router/pull/8680
@@ -5129,8 +5129,8 @@ By [@carodewig](https://github.com/carodewig) in https://github.com/apollographq
 The connectors plugin will no longer error when using a variable in a nested input argument. The following example would error prior to this change:
 
 ```graphql
-query Query (: String){
-    complexInputType(filters: { inSpace: true, search:  })
+query Query ($query: String){
+    complexInputType(filters: { inSpace: true, search: $query })
 }
 ```
 
