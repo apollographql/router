@@ -1,13 +1,7 @@
 //! Calls out to the apollo-federation crate
 
 use std::fmt::Debug;
-<<<<<<< HEAD
-||||||| parent of 53fdb2ae7 (update PR based on Bryn's code review)
-use std::ops::ControlFlow;
-=======
 use std::num::NonZeroU64;
-use std::ops::ControlFlow;
->>>>>>> 53fdb2ae7 (update PR based on Bryn's code review)
 use std::sync::Arc;
 use std::sync::OnceLock;
 use std::task::Poll;
@@ -27,8 +21,6 @@ use opentelemetry::metrics::ObservableGauge;
 use opentelemetry_sdk::metrics::Aggregation;
 use opentelemetry_sdk::metrics::Instrument;
 use opentelemetry_sdk::metrics::Stream;
-use parking_lot::Mutex;
-use serde_json_bytes::Value;
 use tower::Service;
 
 use super::PlanNode;
@@ -43,10 +35,6 @@ use crate::error::FederationErrorBridge;
 use crate::error::QueryPlannerError;
 use crate::error::ServiceBuildError;
 use crate::error::ValidationErrors;
-use crate::graphql;
-use crate::introspection::IntrospectionCache;
-use crate::json_ext::Object;
-use crate::json_ext::Path;
 use crate::metrics::aggregation::MeterProviderType;
 use crate::metrics::meter_provider;
 use crate::plugins::authorization;
@@ -1432,19 +1420,11 @@ mod tests {
             .await
             .expect("query plans");
     }
-    
+
     #[test(tokio::test)]
     async fn test_non_local_selections_histogram() {
         async {
-            let _ = plan(
-                EXAMPLE_SCHEMA,
-                include_str!("testdata/query.graphql"),
-                include_str!("testdata/query.graphql"),
-                None,
-                PlanOptions::default(),
-            )
-            .await
-            .unwrap();
+            plan_example_query(Configuration::default()).await;
 
             assert_histogram_exists!(
                 "apollo.router.query_planning.plan.non_local_selections",
