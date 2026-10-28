@@ -71,7 +71,7 @@ impl SecurityValidator {
     /// Validate file extension against allowed types
     ///
     /// This prevents access to sensitive files by restricting operations
-    /// to specific file types (e.g., only .prof files for heap dumps).
+    /// to specific file types (e.g., only .pb.gz files for heap dumps).
     pub(super) fn validate_file_extension(
         filename: &str,
         allowed_extensions: &[&str],
@@ -90,10 +90,10 @@ impl SecurityValidator {
     /// Validate filename for memory dump operations
     ///
     /// Combines path traversal and file extension validation
-    /// specifically for .prof files used by jemalloc.
+    /// specifically for heap dumps (gzipped pprof).
     pub(super) fn validate_memory_dump_filename(filename: &str) -> Result<(), SecurityError> {
         Self::validate_filename(filename)?;
-        Self::validate_file_extension(filename, &[".prof"])?;
+        Self::validate_file_extension(filename, &[super::memory::DUMP_EXTENSION])?;
         Ok(())
     }
 
@@ -180,12 +180,16 @@ mod tests {
     #[test]
     fn test_validate_memory_dump_filename() {
         assert!(
-            SecurityValidator::validate_memory_dump_filename("router_heap_dump_1234.prof").is_ok()
+            SecurityValidator::validate_memory_dump_filename("router_heap_dump_1234.pb.gz").is_ok()
         );
 
-        assert!(SecurityValidator::validate_memory_dump_filename("../test.prof").is_err());
+        assert!(SecurityValidator::validate_memory_dump_filename("../test.pb.gz").is_err());
         assert!(SecurityValidator::validate_memory_dump_filename("test.exe").is_err());
-        assert!(SecurityValidator::validate_memory_dump_filename("path/test.prof").is_err());
+        assert!(SecurityValidator::validate_memory_dump_filename("test.gz").is_err());
+        assert!(
+            SecurityValidator::validate_memory_dump_filename("router_heap_dump_1234.prof").is_err()
+        );
+        assert!(SecurityValidator::validate_memory_dump_filename("path/test.pb.gz").is_err());
     }
 
     #[test]

@@ -302,10 +302,9 @@ impl Exporter {
             })?
             .as_secs();
 
-        let memory_profiling_info = if cfg!(target_family = "unix") {
-            "Memory Profiling: Enabled (jemalloc profiling available)"
-        } else {
-            "Memory Profiling: Not available - Heap dumps require Linux platform with jemalloc"
+        let memory_profiling_info = match crate::heap_profiling::available() {
+            Ok(()) => "Memory Profiling: Available (heap dumps are gzipped pprof)".to_string(),
+            Err(err) => format!("Memory Profiling: Not available - {err}"),
         };
 
         let manifest = format!(

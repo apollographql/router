@@ -34,7 +34,15 @@ default = ["global-allocator"]
 # [dependencies]
 # apollo-router = {version = "1.20", default-features = false}
 # ```
-global-allocator = ["tikv-jemallocator/profiling", "tikv-jemalloc-ctl/stats", "tikv-jemalloc-ctl/profiling"]
+global-allocator = [
+    "tikv-jemallocator/profiling",
+    "tikv-jemalloc-ctl/stats",
+    "tikv-jemalloc-ctl/profiling",
+    "dep:jemalloc_pprof",
+    "dep:pprof_util",
+    "dep:mappings",
+    "dep:backtrace",
+]
 
 # if you are doing heap profiling
 dhat-heap = ["dhat"]
@@ -56,7 +64,6 @@ ci = []
 snapshot = []
 
 [dependencies]
-addr2line = "0.27.0"
 anyhow = "1.0.86"
 apollo-compiler.workspace = true
 apollo-federation = { path = "../apollo-federation", version = "=2.19.0" }
@@ -307,6 +314,14 @@ hyperlocal = { version = "0.9.1", default-features = false, features = [
 tikv-jemallocator = { version = "0.7.0", features = ["profiling"], optional = true }
 tikv-jemalloc-ctl = { version = "0.7.0", features = ["stats", "profiling"], optional = true }
 tikv-jemalloc-sys = { version = "0.7.0", features = ["profiling"] }
+# Heap profiling (see `heap_profiling.rs`): converts jemalloc heap dumps into symbolized pprof.
+jemalloc_pprof = { version = "0.9.0", features = ["symbolize"], optional = true }
+# Parses jemalloc heap dumps where jemalloc_pprof's own parsing would log an error (not Linux).
+pprof_util = { version = "0.8.2", optional = true }
+# The shared object mappings (with build IDs) jemalloc_pprof attaches to profiles on Linux.
+mappings = { version = "0.7.2", optional = true }
+# Releases the symbol cache that jemalloc_pprof's symbolization leaves behind.
+backtrace = { version = "0.3.75", optional = true }
 
 [dev-dependencies]
 axum = { version = "0.8.1", features = ["http2", "ws"] }

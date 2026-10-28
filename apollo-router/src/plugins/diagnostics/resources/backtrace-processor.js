@@ -2,102 +2,215 @@
  * Apollo Router Diagnostics - Backtrace Processing Module
  * 
  * This module handles parsing and processing of memory profile backtraces,
- * including heap profile parsing, stack collapsing, and data structure
+ * including heap profile (pprof) parsing, stack collapsing, and data structure
  * conversion for visualization.
  */
 
-// Heap Profile Parser Class
+// Heap Profile Parser
+
+/**
+ * Minimal protobuf reader: just what decoding pprof needs.
+ */
+class ProtoReader {
+    constructor(bytes) {
+        this.bytes = bytes;
+        this.pos = 0;
+    }
+
+    done() {
+        return this.pos >= this.bytes.length;
+    }
+
+    /** Unsigned varint, exact up to 2^53. */
+    varint() {
+        let result = 0;
+        let multiplier = 1;
+        let byte;
+        do {
+            byte = this.bytes[this.pos++];
+            result += (byte & 0x7f) * multiplier;
+            multiplier *= 128;
+        } while (byte & 0x80);
+        return result;
+    }
+
+    /** A length-delimited field's bytes. */
+    lengthDelimited() {
+        const length = this.varint();
+        const value = this.bytes.subarray(this.pos, this.pos + length);
+        this.pos += length;
+        return value;
+    }
+
+    skip(wireType) {
+        switch (wireType) {
+            case 0: this.varint(); break;
+            case 1: this.pos += 8; break;
+            case 2: {
+                // Read the length before advancing: `this.pos += this.varint()` would add it
+                // to the position from before the length was read.
+                const length = this.varint();
+                this.pos += length;
+                break;
+            }
+            case 5: this.pos += 4; break;
+            default: throw new Error(`Unsupported protobuf wire type ${wireType}`);
+        }
+    }
+
+    /** Calls `onField(fieldNumber, wireType)` for each field; it must consume or skip the value. */
+    forEachField(onField) {
+        while (!this.done()) {
+            const key = this.varint();
+            onField(Math.floor(key / 8), key % 8);
+        }
+    }
+
+    /** Repeated varints, packed or not. */
+    repeatedVarint(wireType, out) {
+        if (wireType === 2) {
+            const packed = new ProtoReader(this.lengthDelimited());
+            while (!packed.done()) {
+                out.push(packed.varint());
+            }
+        } else {
+            out.push(this.varint());
+        }
+    }
+}
+
+/**
+ * Decode the parts of a pprof `Profile` message the dashboard uses.
+ * See https://github.com/google/pprof/blob/main/proto/profile.proto
+ */
+function decodePprof(bytes) {
+    const profile = {sampleTypes: [], samples: [], locations: new Map(), functions: new Map(), strings: []};
+    const decoder = new TextDecoder();
+    const message = (bytes, onField) => {
+        const reader = new ProtoReader(bytes);
+        reader.forEachField((field, wireType) => onField(reader, field, wireType));
+    };
+
+    message(bytes, (reader, field, wireType) => {
+        switch (field) {
+            case 1: { // sample_type: ValueType
+                const valueType = {type: 0, unit: 0};
+                message(reader.lengthDelimited(), (r, f, w) => {
+                    if (f === 1) valueType.type = r.varint();
+                    else if (f === 2) valueType.unit = r.varint();
+                    else r.skip(w);
+                });
+                profile.sampleTypes.push(valueType);
+                break;
+            }
+            case 2: { // sample: Sample
+                const sample = {locationIds: [], values: []};
+                message(reader.lengthDelimited(), (r, f, w) => {
+                    if (f === 1) r.repeatedVarint(w, sample.locationIds);
+                    else if (f === 2) r.repeatedVarint(w, sample.values);
+                    else r.skip(w);
+                });
+                profile.samples.push(sample);
+                break;
+            }
+            case 4: { // location: Location
+                const location = {id: 0, address: 0, functionIds: []};
+                message(reader.lengthDelimited(), (r, f, w) => {
+                    if (f === 1) location.id = r.varint();
+                    else if (f === 3) location.address = r.varint();
+                    else if (f === 4) { // line: Line
+                        message(r.lengthDelimited(), (lr, lf, lw) => {
+                            if (lf === 1) location.functionIds.push(lr.varint());
+                            else lr.skip(lw);
+                        });
+                    } else r.skip(w);
+                });
+                profile.locations.set(location.id, location);
+                break;
+            }
+            case 5: { // function: Function
+                const fn = {id: 0, name: 0};
+                message(reader.lengthDelimited(), (r, f, w) => {
+                    if (f === 1) fn.id = r.varint();
+                    else if (f === 2) fn.name = r.varint();
+                    else r.skip(w);
+                });
+                profile.functions.set(fn.id, fn);
+                break;
+            }
+            case 6: // string_table
+                profile.strings.push(decoder.decode(reader.lengthDelimited()));
+                break;
+            default:
+                reader.skip(wireType);
+        }
+    });
+    return profile;
+}
+
+async function gunzip(bytes) {
+    const stream = new Blob([bytes]).stream().pipeThrough(new DecompressionStream('gzip'));
+    return new Uint8Array(await new Response(stream).arrayBuffer());
+}
+
 class HeapProfileParser {
     /**
-     * Parse heap profile data from jeprof output
-     * @param {string|Uint8Array} profileData - Raw profile data
-     * @returns {Object} Parsed profile with symbols, stacks, and memory data
+     * Parse a heap dump: gzipped pprof, symbolized by the router.
+     *
+     * Returns stacks of frame ids (innermost first), the function name for each frame id, and each
+     * stack's in-use bytes. A location with inlined functions becomes one frame per function.
+     *
+     * @param {Uint8Array} profileData - Gzipped (or plain) pprof
+     * @returns {Promise<Object>} Parsed profile with symbols, stacks, and memory data
      */
-    parse(profileData) {
-        console.log('Parsing heap profile...');
-        
-        // Convert Uint8Array to string if needed
-        if (profileData instanceof Uint8Array) {
-            profileData = new TextDecoder().decode(profileData);
+    async parse(profileData) {
+        let bytes = profileData;
+        if (bytes[0] === 0x1f && bytes[1] === 0x8b) {
+            bytes = await gunzip(bytes);
         }
-        
-        const lines = profileData.split('\n');
-        
+        const pprof = decodePprof(bytes);
+
+        // The in-use bytes value: the first sample type measured in bytes.
+        const valueIndex = Math.max(
+            0,
+            pprof.sampleTypes.findIndex(t => pprof.strings[t.unit] === 'bytes')
+        );
+
         const result = {
             symbols: new Map(),
             stacks: [],
             stackMemory: new Map(),  // Maps stack index to memory usage
-            binary: null
         };
-        
-        let currentSection = 'heap'; // Start in heap mode for compatibility with original format
-        let inSymbolSection = false;
-        let currentStackIndex = -1;
-        
-        for (const line of lines) {
-            if (line.startsWith('--- symbol')) {
-                inSymbolSection = true;
-                currentSection = 'symbol';
-                continue;
+
+        // Frame ids for each location, innermost first. pprof lists a location's inlined
+        // functions innermost first, with the caller they were inlined into last.
+        const framesByLocation = new Map();
+        for (const location of pprof.locations.values()) {
+            const frames = location.functionIds.map((functionId, i) => {
+                const fn = pprof.functions.get(functionId);
+                const frame = `${location.id}.${i}`;
+                result.symbols.set(frame, fn ? pprof.strings[fn.name] : `0x${location.address.toString(16)}`);
+                return frame;
+            });
+            if (frames.length === 0) {
+                const frame = `${location.id}`;
+                result.symbols.set(frame, `0x${location.address.toString(16)}`);
+                frames.push(frame);
             }
-            
-            if (line.startsWith('--- heap')) {
-                inSymbolSection = false;
-                currentSection = 'heap';
-                continue;
-            }
-            
-            if (line === '---') {
-                if (inSymbolSection) {
-                    inSymbolSection = false;
-                    // After symbol section, go back to heap mode
-                    currentSection = 'heap';
-                }
-                continue;
-            }
-            
-            if (inSymbolSection && currentSection === 'symbol') {
-                if (line.startsWith('binary=')) {
-                    result.binary = line.substring(7);
-                } else if (line.match(/^0x[0-9a-fA-F]+\s+/)) {
-                    const parts = line.split(' ');
-                    if (parts.length >= 2) {
-                        const addr = parts[0];
-                        const symbol = parts.slice(1).join(' ');
-                        result.symbols.set(addr, symbol);
-                    }
-                }
-            } else if (currentSection === 'heap' || currentSection === null) {
-                // Parse heap data (works for both original format and enhanced format)
-                if (line.startsWith('@')) {
-                    // Parse stack trace
-                    const addresses = line.substring(1).trim().split(' ');
-                    result.stacks.push(addresses);
-                    currentStackIndex = result.stacks.length - 1;
-                } else if (line.trim().startsWith('t') && currentStackIndex >= 0) {
-                    // Parse memory allocation line: t*: allocations: memory [deallocations: peak]
-                    const match = line.match(/^\s*t[^:]*:\s*(\d+):\s*(\d+)\s*\[/);
-                    if (match) {
-                        const allocations = parseInt(match[1]);
-                        const memory = parseInt(match[2]);
-                        
-                        // Associate memory with the most recent stack
-                        if (!result.stackMemory.has(currentStackIndex)) {
-                            result.stackMemory.set(currentStackIndex, { allocations: 0, memory: 0 });
-                        }
-                        const existing = result.stackMemory.get(currentStackIndex);
-                        existing.allocations += allocations;
-                        existing.memory += memory;
-                    }
-                } else if (line.startsWith('MAPPED_LIBRARIES:')) {
-                    // Skip mapped libraries section (already processed during enhancement)
-                    // Continue parsing to reach the symbol section later
-                    continue;
-                }
-            }
+            framesByLocation.set(location.id, frames);
         }
-        
-        console.log(`Parsed ${result.symbols.size} symbols, ${result.stacks.length} stacks, ${result.stackMemory.size} memory entries`);
+
+        pprof.samples.forEach(sample => {
+            // Sample locations are innermost first, as the stack processing expects.
+            const stack = sample.locationIds.flatMap(id => framesByLocation.get(id) || [`${id}`]);
+            result.stacks.push(stack);
+            result.stackMemory.set(result.stacks.length - 1, {
+                allocations: 0, // pprof heap profiles from jemalloc carry bytes only
+                memory: sample.values[valueIndex] || 0,
+            });
+        });
+
+        console.log(`Parsed ${result.symbols.size} symbols, ${result.stacks.length} stacks`);
         return result;
     }
 }

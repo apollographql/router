@@ -81,6 +81,7 @@ pub mod tracer;
 mod uplink;
 
 pub(crate) mod allocator;
+pub(crate) mod heap_profiling;
 #[doc(hidden)]
 #[deprecated(
     since = "2.16.0",

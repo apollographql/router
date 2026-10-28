@@ -68,22 +68,18 @@ async fn test_create_archive() {
     let temp_dir = tempdir().expect("Failed to create temp dir");
     let output_path = temp_dir.path();
 
-    // On Linux, create memory files; on other platforms, the directory will be handled by the archive function
-    #[cfg(target_family = "unix")]
-    {
-        let memory_path = format!("{}/memory", output_path.to_string_lossy());
-        fs::create_dir_all(&memory_path).expect("Failed to create memory directory");
-        fs::write(
-            format!("{}/test_heap.prof", memory_path),
-            b"test heap dump data",
-        )
-        .expect("Failed to write test file");
-        fs::write(
-            format!("{}/test_profile.prof", memory_path),
-            b"test profile data",
-        )
-        .expect("Failed to write another test file");
-    }
+    let memory_path = format!("{}/memory", output_path.to_string_lossy());
+    fs::create_dir_all(&memory_path).expect("Failed to create memory directory");
+    fs::write(
+        format!("{}/test_heap.pb.gz", memory_path),
+        b"test heap dump data",
+    )
+    .expect("Failed to write test file");
+    fs::write(
+        format!("{}/test_profile.pb.gz", memory_path),
+        b"test profile data",
+    )
+    .expect("Failed to write another test file");
 
     let config = Config {
         enabled: true,
@@ -116,7 +112,6 @@ async fn test_create_archive() {
     let mut found_router_yaml = false;
     let mut found_supergraph = false;
     let mut found_memory_content = false;
-    // Router binary no longer included - enhanced profiles have embedded symbols
     let mut found_system_info = false;
     let mut found_html_report = false;
 
@@ -148,13 +143,12 @@ async fn test_create_archive() {
     assert!(found_system_info, "Archive should contain system_info.txt");
     assert!(
         found_memory_content,
-        "Archive should contain memory/ content (files on Linux, README on other platforms)"
+        "Archive should contain memory/ content"
     );
     assert!(
         found_html_report,
         "Archive should contain diagnostics_report.html"
     );
-    // Router binary no longer included - enhanced profiles have embedded symbols
 }
 
 #[tokio::test]
@@ -202,32 +196,15 @@ async fn test_create_main_manifest() {
         "Should mention diagnostics_report.html"
     );
 
-    // Platform-specific checks
-    #[cfg(target_family = "unix")]
-    {
-        assert!(
-            manifest_str.contains("Memory Profiling: Enabled"),
-            "Should mention memory profiling enabled on Linux"
-        );
-        assert!(
-            manifest_str.contains("jemalloc profiling"),
-            "Should mention jemalloc on Linux"
-        );
-    }
-    #[cfg(not(target_family = "unix"))]
-    {
-        assert!(
-            manifest_str.contains("Memory Profiling: Not available"),
-            "Should mention memory profiling not available on non-Linux"
-        );
-        assert!(
-            manifest_str.contains("Heap dumps require Linux platform"),
-            "Should mention Linux requirement on non-Linux platforms"
-        );
-    }
+    let expected = if crate::heap_profiling::available().is_ok() {
+        "Memory Profiling: Available"
+    } else {
+        "Memory Profiling: Not available"
+    };
+    assert!(manifest_str.contains(expected), "{manifest_str}");
 }
 
-// Test for router binary removed - enhanced profiles now have embedded symbols
+// Test for router binary removed: heap dumps are symbolized in-process
 
 #[cfg(target_family = "unix")]
 #[tokio::test]
@@ -322,12 +299,12 @@ async fn test_tar_gz_format_compatibility() {
     let memory_path = format!("{}/memory", output_path.to_string_lossy());
     fs::create_dir_all(&memory_path).expect("Failed to create memory directory");
     fs::write(
-        format!("{}/heap_dump_1.prof", memory_path),
+        format!("{}/heap_dump_1.pb.gz", memory_path),
         b"heap dump content 1",
     )
     .expect("Failed to write test file");
     fs::write(
-        format!("{}/heap_dump_2.prof", memory_path),
+        format!("{}/heap_dump_2.pb.gz", memory_path),
         b"heap dump content 2",
     )
     .expect("Failed to write test file");
@@ -419,7 +396,7 @@ async fn test_tar_gz_format_compatibility() {
         "Extracted memory directory should exist"
     );
 
-    let heap_dump_1 = memory_dir.join("heap_dump_1.prof");
+    let heap_dump_1 = memory_dir.join("heap_dump_1.pb.gz");
     assert!(heap_dump_1.exists(), "First heap dump should exist");
     let content_1 = fs::read(&heap_dump_1).expect("Failed to read heap dump 1");
     assert_eq!(
@@ -427,15 +404,13 @@ async fn test_tar_gz_format_compatibility() {
         "Heap dump content should match"
     );
 
-    let heap_dump_2 = memory_dir.join("heap_dump_2.prof");
+    let heap_dump_2 = memory_dir.join("heap_dump_2.pb.gz");
     assert!(heap_dump_2.exists(), "Second heap dump should exist");
     let content_2 = fs::read(&heap_dump_2).expect("Failed to read heap dump 2");
     assert_eq!(
         content_2, b"heap dump content 2",
         "Heap dump content should match"
     );
-
-    // Router binary no longer included - enhanced profiles have embedded symbols
 
     // Verify that the archive is a valid gzip file by checking magic bytes
     assert!(
@@ -459,7 +434,7 @@ async fn test_manual_archive_inspection() {
     // Create some test data
     let memory_path = format!("{}/memory", output_path.to_string_lossy());
     fs::create_dir_all(&memory_path).expect("Failed to create memory directory");
-    fs::write(format!("{}/test.prof", memory_path), b"test profile data")
+    fs::write(format!("{}/test.pb.gz", memory_path), b"test profile data")
         .expect("Failed to write test file");
 
     let config = Config {
@@ -641,15 +616,13 @@ async fn test_tar_gz_structure_validation() {
             .any(|p| p == "memory/" || p.starts_with("memory/")),
         "Should contain memory directory or files"
     );
-    // Router binary no longer included - enhanced profiles have embedded symbols
-
     // Verify file metadata
     for entry in entries {
         let path = entry.path().unwrap().to_string_lossy().to_string();
         let header = entry.header();
 
         // Verify proper file permissions
-        if path == "manifest.txt" || path.ends_with(".prof") || path.contains("router") {
+        if path == "manifest.txt" || path.ends_with(".pb.gz") || path.contains("router") {
             assert_ne!(
                 header.mode().unwrap(),
                 0,
@@ -670,69 +643,6 @@ async fn test_tar_gz_structure_validation() {
             );
         }
     }
-}
-
-#[tokio::test]
-async fn test_non_unix_memory_handling() {
-    // Test specifically for non-Linux platforms to ensure they get the README file
-    let temp_dir = tempdir().expect("Failed to create temp dir");
-    let output_path = temp_dir.path();
-
-    let config = Config {
-        enabled: true,
-        listen: SocketAddr::from_str("127.0.0.1:8089").unwrap().into(),
-        output_directory: output_path.to_path_buf(),
-    };
-
-    let test_full_config = serde_json::json!({"test": "config"});
-    let archive_data = collect_streaming_archive(&config, "supergraph_schema", &test_full_config)
-        .await
-        .expect("Archive creation should succeed");
-    let reader = BufReader::new(archive_data.as_slice());
-    let decoder = GzipDecoder::new(reader);
-    let mut archive = Archive::new(decoder);
-
-    let mut entries = archive
-        .entries()
-        .expect("Should be able to read archive entries");
-
-    let mut found_memory_content = false;
-    while let Some(entry) = entries
-        .try_next()
-        .await
-        .expect("Should be able to read entry")
-    {
-        let path = entry
-            .path()
-            .expect("Should have path")
-            .to_string_lossy()
-            .to_string();
-
-        if path.starts_with("memory/") {
-            found_memory_content = true;
-            #[cfg(target_family = "unix")]
-            {
-                // On Linux, we might have actual profile files if they exist
-                assert!(
-                    path.ends_with(".prof") || path == "memory/" || path == "memory/README.txt",
-                    "Memory files should be profile files or directories on Linux"
-                );
-            }
-            #[cfg(not(target_family = "unix"))]
-            {
-                // On non-Linux, we should only have the README
-                assert_eq!(
-                    path, "memory/README.txt",
-                    "Non-Linux should only have README in memory directory"
-                );
-            }
-        }
-    }
-
-    assert!(
-        found_memory_content,
-        "Should have some memory-related content"
-    );
 }
 
 #[tokio::test]

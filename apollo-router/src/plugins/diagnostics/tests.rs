@@ -132,7 +132,7 @@ async fn test_diagnostics_enabled_creates_endpoint() {
         .expect("valid request");
 
     let response = service.ready().await.unwrap().call(request).await.unwrap();
-    // Should be able to access the endpoint (200 on Linux, 501 Not Implemented on other platforms)
+    // Should be able to access the endpoint (501 Not Implemented where heap profiling is unavailable)
     assert!(response.status().is_success() || response.status() == StatusCode::NOT_IMPLEMENTED);
 }
 
@@ -169,7 +169,7 @@ async fn test_diagnostics_endpoints_accessible() {
         .expect("valid request");
 
     let response = service.ready().await.unwrap().call(request).await.unwrap();
-    // Should be able to access the endpoint now (200 on Linux, 501 Not Implemented on other platforms)
+    // Should be able to access the endpoint now (501 Not Implemented where heap profiling is unavailable)
     assert!(response.status().is_success() || response.status() == StatusCode::NOT_IMPLEMENTED);
 
     // Test invalid endpoint returns 404
@@ -181,4 +181,22 @@ async fn test_diagnostics_endpoints_accessible() {
 
     let response = service.ready().await.unwrap().call(request).await.unwrap();
     assert_eq!(response.status(), StatusCode::NOT_FOUND);
+}
+
+/// A reload that disables diagnostics ends a memory profiling session, since nothing could stop it.
+#[cfg(all(feature = "global-allocator", not(feature = "dhat-heap"), unix))]
+#[tokio::test]
+async fn disabling_diagnostics_ends_a_memory_profiling_session() {
+    let _lock = crate::heap_profiling::TEST_LOCK.lock().await;
+    let temp_dir = tempfile::tempdir().unwrap();
+    let service = memory::MemoryService::new(temp_dir.path());
+    service.handle_start().await.unwrap();
+    assert!(crate::heap_profiling::is_sampling().unwrap());
+
+    let disabled =
+        DiagnosticsPlugin::new(PluginInit::fake_new(Config::default(), Default::default()))
+            .await
+            .unwrap();
+    disabled.activate();
+    assert!(!crate::heap_profiling::is_sampling().unwrap());
 }
