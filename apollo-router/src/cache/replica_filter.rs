@@ -15,6 +15,7 @@ use parking_lot::Mutex;
 use parking_lot::RwLock;
 use tokio::time::Instant;
 use tracing::debug;
+use tracing::warn;
 
 /// How long a replica that failed its probe is left out of replica routing.
 const UNROUTEABLE_FOR: Duration = Duration::from_secs(300);
@@ -98,8 +99,9 @@ impl RouteableReplicaFilter {
                     if routeable {
                         unrouteable.write().remove(&addr);
                     } else {
-                        debug!(
-                            "redis replica {addr} failed its probe and won't receive reads for {UNROUTEABLE_FOR:?}"
+                        // once per failed probe, which is at most once per replica per period
+                        warn!(
+                            "redis replica {addr} failed its probe and won't receive reads until it's probed again in {UNROUTEABLE_FOR:?}"
                         );
                         unrouteable
                             .write()
@@ -181,6 +183,7 @@ mod tests {
     use crate::cache::redis::fake_redis::Behaviour;
     use crate::cache::redis::fake_redis::FakeRedis;
     use crate::cache::redis::fake_redis::Topology;
+    use crate::test_harness::tracing_test;
 
     const TIMEOUT: Duration = Duration::from_millis(500);
 
@@ -212,6 +215,33 @@ mod tests {
             .unrouteable
             .write()
             .insert(format!("127.0.0.1:{port}"), until);
+    }
+
+    /// Operators see one warning when a replica is left out, however many clients asked about it.
+    #[tokio::test]
+    async fn left_out_replica_is_logged_once_as_a_warning() {
+        let _guard = tracing_test::dispatcher_guard();
+        let (_redis, port) = replica(Behaviour::Unresponsive).await;
+        let filter = filter();
+
+        let (primary, replica) = (server(1), server(port));
+        join_all((0..4).map(|_| filter.filter(&primary, &replica))).await;
+
+        let left_out = format!(
+            "redis replica 127.0.0.1:{port} failed its probe and won't receive reads until it's \
+             probed again in {UNROUTEABLE_FOR:?}"
+        );
+        tracing_test::logs_assert(|lines| {
+            let warnings: Vec<_> = lines
+                .iter()
+                .filter(|line| line.contains(&left_out))
+                .collect();
+            match warnings.as_slice() {
+                [line] if line.contains("WARN") => Ok(()),
+                _ => Err(format!("expected one warning, got {warnings:?}")),
+            }
+        })
+        .unwrap();
     }
 
     /// A passing probe isn't remembered, so the replica is probed again on the next sync.
