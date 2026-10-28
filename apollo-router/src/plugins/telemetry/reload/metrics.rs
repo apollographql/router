@@ -283,6 +283,24 @@ fn resolve_view(
     Some(view.into_stream())
 }
 
+<<<<<<< HEAD
+=======
+/// Buckets for histograms that don't measure durations, where the global
+/// buckets would put nearly every sample in the overflow bucket.
+pub(crate) fn instrument_default_buckets(name: &str) -> Option<&'static [f64]> {
+    match name {
+        "apollo.router.query_planning.plan.fuel_consumed"
+        | "apollo.router.query_planning.plan.fuel_remaining" => {
+            Some(crate::query_planner::FUEL_BUCKETS)
+        }
+        "apollo.router.query_planning.plan.non_local_selections" => {
+            Some(crate::query_planner::NON_LOCAL_SELECTIONS_BUCKETS)
+        }
+        _ => None,
+    }
+}
+
+>>>>>>> 9b773a4 (feat(federation): add APOLLO_ROUTER_MAX_NON_LOCAL_SELECTIONS env var and non_local_selections histogram (#10349))
 #[cfg(test)]
 mod overflow_counting_tests {
     use opentelemetry_sdk::metrics::InMemoryMetricExporter;
@@ -476,6 +494,96 @@ mod view_selection_tests {
         });
     }
 
+<<<<<<< HEAD
+=======
+    fn u64_histogram_bounds(exporter: &InMemoryMetricExporter, name: &str) -> Vec<f64> {
+        with_metric(exporter, name, |data| {
+            let AggregatedMetrics::U64(MetricData::Histogram(hist)) = data else {
+                panic!("expected Histogram aggregation, got {data:?}")
+            };
+            hist.data_points()
+                .next()
+                .map(|dp| dp.bounds().collect())
+                .unwrap_or_default()
+        })
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn fuel_histograms_default_to_fuel_buckets() {
+        let exporter = InMemoryMetricExporter::default();
+        let provider = meter_provider_with(exporter.clone(), vec![], None);
+
+        for name in [
+            "apollo.router.query_planning.plan.fuel_consumed",
+            "apollo.router.query_planning.plan.fuel_remaining",
+        ] {
+            let histogram = provider.meter("t").u64_histogram(name).build();
+            histogram.record(42, &[]);
+        }
+        provider.force_flush().unwrap();
+
+        for name in [
+            "apollo.router.query_planning.plan.fuel_consumed",
+            "apollo.router.query_planning.plan.fuel_remaining",
+        ] {
+            assert_eq!(
+                u64_histogram_bounds(&exporter, name),
+                crate::query_planner::FUEL_BUCKETS
+            );
+        }
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn non_local_selections_histogram_defaults_to_non_local_selections_buckets() {
+        let exporter = InMemoryMetricExporter::default();
+        let provider = meter_provider_with(exporter.clone(), vec![], None);
+
+        let name = "apollo.router.query_planning.plan.non_local_selections";
+        let histogram = provider.meter("t").u64_histogram(name).build();
+        histogram.record(42, &[]);
+        provider.force_flush().unwrap();
+
+        assert_eq!(
+            u64_histogram_bounds(&exporter, name),
+            crate::query_planner::NON_LOCAL_SELECTIONS_BUCKETS
+        );
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn user_view_buckets_override_non_local_selections_buckets() {
+        let exporter = InMemoryMetricExporter::default();
+        let mut view = empty_view("apollo.router.query_planning.plan.non_local_selections");
+        view.aggregation = Some(MetricAggregation::Histogram {
+            buckets: vec![10.0, 100.0],
+        });
+        let provider = meter_provider_with(exporter.clone(), vec![view], None);
+
+        let name = "apollo.router.query_planning.plan.non_local_selections";
+        let histogram = provider.meter("t").u64_histogram(name).build();
+        histogram.record(42, &[]);
+        provider.force_flush().unwrap();
+
+        assert_eq!(u64_histogram_bounds(&exporter, name), vec![10.0, 100.0]);
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn user_view_buckets_override_fuel_buckets() {
+        let exporter = InMemoryMetricExporter::default();
+        let mut view = empty_view("apollo.router.query_planning.plan.fuel_*");
+        view.aggregation = Some(MetricAggregation::Histogram {
+            buckets: vec![10.0, 100.0],
+        });
+        let provider = meter_provider_with(exporter.clone(), vec![view], None);
+
+        let name = "apollo.router.query_planning.plan.fuel_consumed";
+        let histogram = provider.meter("t").u64_histogram(name).build();
+        histogram.record(42, &[]);
+        provider.force_flush().unwrap();
+
+        assert_eq!(u64_histogram_bounds(&exporter, name), vec![10.0, 100.0]);
+    }
+
+>>>>>>> 9b773a4 (feat(federation): add APOLLO_ROUTER_MAX_NON_LOCAL_SELECTIONS env var and non_local_selections histogram (#10349))
     #[tokio::test(flavor = "multi_thread")]
     async fn counter_without_user_view_or_global_limit_falls_through_to_sdk_default() {
         let exporter = InMemoryMetricExporter::default();
