@@ -46,7 +46,7 @@ type Probe = Shared<BoxFuture<'static, bool>>;
 /// NOTE: fred only asks the filter about a replica when it syncs replicas, so a left-out replica
 /// is only probed again at a sync. Syncs happen when a connection breaks or the cluster topology
 /// changes, and the replica heartbeat starts one once a left-out replica's 5 minutes are up (see
-/// [`Self::has_replicas_to_recheck`]).
+/// [`Self::take_replicas_to_recheck`]).
 pub(crate) struct RouteableReplicaFilter {
     /// The pool's configuration, which the probe connects with.
     config: Config,
@@ -67,11 +67,18 @@ impl RouteableReplicaFilter {
         }
     }
 
-    /// Whether a left-out replica has waited out its period, so the next replica sync probes it
-    /// again.
-    pub(crate) fn has_replicas_to_recheck(&self) -> bool {
+    /// Forgets the left-out replicas that have waited out their period, and returns whether there
+    /// were any, in which case the next replica sync should run soon.
+    ///
+    /// A forgotten replica that's still listed is probed at that sync, and left out again if it
+    /// fails. One the cluster no longer lists (a replaced pod, a removed replica) is never asked
+    /// about again, so its entry must go here or it would call for a sync at every heartbeat.
+    pub(crate) fn take_replicas_to_recheck(&self) -> bool {
         let now = Instant::now();
-        self.unrouteable.read().values().any(|until| *until <= now)
+        let mut unrouteable = self.unrouteable.write();
+        let left_out = unrouteable.len();
+        unrouteable.retain(|_, until| *until > now);
+        unrouteable.len() < left_out
     }
 
     /// Ends the period every left-out replica must wait before it's probed again.
@@ -309,12 +316,30 @@ mod tests {
     #[test]
     fn replica_is_due_a_recheck_once_its_left_out_period_ends() {
         let filter = filter();
-        assert!(!filter.has_replicas_to_recheck());
+        assert!(!filter.take_replicas_to_recheck());
 
         mark_unrouteable(&filter, 1, Instant::now() + UNROUTEABLE_FOR);
-        assert!(!filter.has_replicas_to_recheck());
+        assert!(!filter.take_replicas_to_recheck());
+        assert!(is_unrouteable(&filter, 1));
 
         filter.end_left_out_period();
-        assert!(filter.has_replicas_to_recheck());
+        assert!(filter.take_replicas_to_recheck());
+    }
+
+    /// fred never asks about a replica the cluster no longer lists, so no probe will clear its
+    /// entry. Taking the recheck must, or every heartbeat would re-sync every client.
+    #[test]
+    fn replica_is_rechecked_once_per_left_out_period() {
+        let filter = filter();
+        mark_unrouteable(&filter, 1, Instant::now() - Duration::from_secs(1));
+        mark_unrouteable(&filter, 2, Instant::now() + UNROUTEABLE_FOR);
+
+        assert!(filter.take_replicas_to_recheck());
+        assert!(!filter.take_replicas_to_recheck());
+        assert!(!is_unrouteable(&filter, 1));
+        assert!(
+            is_unrouteable(&filter, 2),
+            "replicas still left out are kept"
+        );
     }
 }

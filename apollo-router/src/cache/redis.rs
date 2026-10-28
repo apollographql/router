@@ -988,12 +988,13 @@ fn configure_cluster_replicas(replica: &mut ReplicaConfig, filter: Arc<Routeable
 /// Every client whose ping failed re-syncs, but they share one probe of each replica.
 ///
 /// A left-out replica isn't pinged, since no client routes to it, so nothing else would bring it
-/// back once it recovers. Once its left-out period is up, every client re-syncs and the filter
-/// probes it again. A replica that's still broken costs that Redis `timeout` once per period.
+/// back once it recovers. Once its left-out period is up, the filter forgets it and every client
+/// re-syncs once, which probes it again. A replica that's still broken is left out again, so it
+/// costs one Redis `timeout` and one re-sync of every client per period. A replica the cluster no
+/// longer lists costs one re-sync of every client, after which it's forgotten.
 async fn ping_replicas(pool: &RedisPool, filter: &RouteableReplicaFilter, caller: &'static str) {
-    // Checked once for the whole pool: the first client to re-sync probes the replica again and
-    // clears its entry, but every client must re-sync to route to it.
-    let recheck = filter.has_replicas_to_recheck();
+    // Taken once for the whole pool, since every client must re-sync to route to the replica again.
+    let recheck = filter.take_replicas_to_recheck();
     join_all(
         pool.clients()
             .iter()
