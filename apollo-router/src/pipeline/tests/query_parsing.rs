@@ -157,7 +157,7 @@ async fn different_operation_name_is_cache_miss() {
 }
 
 #[tokio::test]
-async fn parse_error_is_cached() {
+async fn validation_error_is_cached() {
     async {
         let configuration = test_configuration();
         let schema = test_schema(&configuration);
