@@ -1,4 +1,4 @@
-### Connectors validation no longer reports a missing field when a key is mapped over an empty array
+### Connectors validation no longer reports a missing field when a key is mapped over an empty array ([PR #10362](https://github.com/apollographql/router/pull/10362))
 
 Selecting a key from an array maps the key over the array's elements, so `$([]).name` evaluates to `[]` with no errors. Static shape checking treated the empty array as if every element lacked the field and reported `field `name` not found`, so composition rejected valid mappings such as `names: $([]).name` in `@connect(selection:)` or in a URL template. The same happened for empty arrays nested inside other arrays (`[[]]`).
 

@@ -7433,7 +7433,7 @@ mod tests {
             ),
             ("$([]).a", json!(null)),
         ] {
-            let selection = JSONSelection::parse_with_spec(source, spec).unwrap();
+            let selection = JSONSelection::parse_with_spec(source, spec).expect("valid selection");
             let (output, errors) = selection.apply_to(&input);
             assert_eq!(errors, vec![], "{source} on {input}");
             let output = output.unwrap_or_else(|| panic!("{source} on {input}: no output"));
@@ -7451,7 +7451,7 @@ mod tests {
     #[test]
     fn field_missing_from_every_array_element_is_still_an_error_shape() {
         for input in [json!([{ "b": 1 }]), json!([[{ "b": 1 }]])] {
-            let selection = JSONSelection::parse("$.a").unwrap();
+            let selection = JSONSelection::parse("$.a").expect("valid selection");
             let context = ShapeContext::new(SourceId::Other("test".into()));
             let shape = selection.compute_output_shape(&context, Shape::from_json_bytes(&input));
             assert!(
