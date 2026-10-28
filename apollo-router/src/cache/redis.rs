@@ -1023,7 +1023,7 @@ async fn ping_client_replicas(client: &Client, recheck: bool, caller: &'static s
     let mut all_answered = true;
     for result in join_all(pings).await {
         if let Err(err) = result {
-            // Keep-alive is best-effort; log and move on. We don't record this as a query
+            // A failed ping only re-syncs this client's replicas; it isn't recorded as a query
             // error since it doesn't correspond to a user-facing cache operation.
             tracing::info!(caller = caller, error = ?err, "replica heartbeat ping failed");
             all_answered = false;
