@@ -65,9 +65,9 @@ The tag format must always generate a valid string value. For nested objects in 
 
 ### Why does a connector response with no `Cache-Control` get cached when a subgraph response doesn't?
 
-Because you usually own your subgraphs and usually don't own the APIs behind your connectors. A subgraph that sends no `Cache-Control` hasn't been configured to describe its freshness yet, so the router doesn't guess. Many REST APIs never send `Cache-Control` at all, and refusing to cache them would rule out the APIs that benefit most from caching, so the router uses the `ttl` you configured instead.
+Because you typically control your subgraphs but not the APIs behind your connectors, a subgraph that sends no `Cache-Control` hasn't been configured to describe its freshness yet, so Router doesn't guess. Many REST APIs never send `Cache-Control` at all, and refusing to cache them would rule out the APIs that benefit most from caching, so Router uses the `ttl` you've configured instead.
 
-The router keeps that decision to itself. It caches the response for your configured `ttl`, but sends `no-store` on the client-facing response, because an API that said nothing about caching hasn't authorized anyone downstream to hold the payload. See [Responses with no `Cache-Control`](./connectors#responses-with-no-cache-control).
+Router keeps that decision to itself. It caches the response for your configured `ttl` but sends `no-store` on the client-facing response because an API that says nothing about caching hasn't authorized anyone downstream to hold the payload. For more information, go to [Responses with no `Cache-Control`](./connectors#responses-with-no-cache-control).
 
 ### How does `@cacheControl` work?
 
