@@ -62,7 +62,6 @@ fn first_method(
         ),
     }
 }
-#[allow(dead_code)] // method type-checking disabled until we add name resolution
 fn first_shape(
     context: &ShapeContext,
     method_name: &WithRange<String>,
