@@ -15,6 +15,7 @@ use parking_lot::Mutex;
 use parking_lot::RwLock;
 use tokio::time::Instant;
 use tracing::debug;
+use tracing::instrument::WithSubscriber;
 use tracing::warn;
 
 /// How long a replica that failed its probe is left out of replica routing.
@@ -92,6 +93,10 @@ impl RouteableReplicaFilter {
 
     /// Returns the probe in progress for the replica, starting one if there isn't one. The probe
     /// records its result before it completes.
+    ///
+    /// The probe runs on its own task, so it finishes and clears its entry even if every caller
+    /// awaiting it is dropped (for example when a client's router task is aborted). Otherwise a
+    /// later caller would resume it after its timeout had passed and leave the replica out.
     fn probe(&self, addr: &str, replica: &Server) -> Probe {
         self.probes
             .lock()
@@ -101,7 +106,7 @@ impl RouteableReplicaFilter {
                 let unrouteable = self.unrouteable.clone();
                 let probes = self.probes.clone();
                 let addr = addr.to_string();
-                async move {
+                let record = async move {
                     let routeable = probe.await;
                     if routeable {
                         unrouteable.write().remove(&addr);
@@ -117,9 +122,12 @@ impl RouteableReplicaFilter {
                     // after recording the result, so a caller arriving now sees it
                     probes.lock().remove(&addr);
                     routeable
-                }
-                .boxed()
-                .shared()
+                };
+                // a probe that panicked or was cancelled with the runtime didn't pass
+                tokio::spawn(record.with_current_subscriber())
+                    .map(|result| result.unwrap_or(false))
+                    .boxed()
+                    .shared()
             })
             .clone()
     }
@@ -295,6 +303,23 @@ mod tests {
             start.elapsed() < TIMEOUT * 2,
             "the probes should finish after one timeout"
         );
+    }
+
+    /// A probe whose callers were all dropped (for example with an aborted router task) must still
+    /// finish and record its result, rather than wait for a later caller to resume it after its
+    /// timeout has passed.
+    #[tokio::test]
+    async fn probe_finishes_when_its_callers_are_dropped() {
+        let (_redis, port) = replica(Behaviour::Unresponsive).await;
+        let filter = filter();
+
+        let abandoned =
+            tokio::time::timeout(TIMEOUT / 5, filter.filter(&server(1), &server(port))).await;
+        assert!(abandoned.is_err(), "the probe should still be running");
+
+        tokio::time::sleep(TIMEOUT * 2).await;
+        assert!(filter.probes.lock().is_empty());
+        assert!(is_unrouteable(&filter, port));
     }
 
     #[tokio::test]
