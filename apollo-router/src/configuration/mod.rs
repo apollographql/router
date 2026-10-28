@@ -524,6 +524,7 @@ impl Configuration {
             debug: QueryPlannerDebugConfig {
                 max_evaluated_plans,
                 paths_limit: self.supergraph.query_planning.experimental_paths_limit,
+                max_non_local_selections: crate::query_planner::max_non_local_selections(),
             },
             incremental_planner:
                 apollo_federation::query_plan::query_planner::IncrementalPlannerConfig {

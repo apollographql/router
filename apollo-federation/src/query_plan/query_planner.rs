@@ -1,5 +1,6 @@
 use std::cell::Cell;
 use std::num::NonZeroU32;
+use std::num::NonZeroU64;
 use std::ops::ControlFlow;
 use std::sync::Arc;
 use std::time::Duration;
@@ -236,6 +237,31 @@ pub struct QueryPlannerDebugConfig {
     ///
     /// The default value is None, which specifies no limit.
     pub paths_limit: Option<u32>,
+
+    /// The default for max number of non-local selections is 100000, but that
+    /// default can be altered with `APOLLO_ROUTER_MAX_NON_LOCAL_SELECTIONS`
+    /// environment variable. The query planning process is aborted if this
+    /// number is reached.
+    ///
+    /// Since query planning configuration is part of the cache key, setting or
+    /// changing the value of this env var will clear the query planner cache and
+    /// cause replanning of the previously cached query plans.
+    ///
+    /// If the env var value is unable to be parsed into a `NonZeroU64`, the default
+    /// value is used and a warn message is emitted which can be found in the logs.
+    /// An info log is emitted when that env var value parsed and is set.
+    ///
+    /// This env var is intentionally undocumented. It is meant for troubleshooting
+    /// purposes when investigating query plan and operation complexity in regards
+    /// to non-local selection sets, an internal to query planner measurement for
+    /// the number of selection sets that cannot be optimized due to not being local
+    /// to the selection set currently being explored.
+    ///
+    /// The number of non-local selections explored for a given plan is tracked in
+    /// `apollo.router.query_planning.plan.non_local_selections` histogram and is
+    /// available to everyone. This histogram uses fixed bucket boundaries of 100,
+    /// 1000, 25000, 50000, 100000, and 150000.
+    pub max_non_local_selections: NonZeroU64,
 }
 
 impl Default for QueryPlannerDebugConfig {
@@ -243,6 +269,7 @@ impl Default for QueryPlannerDebugConfig {
         Self {
             max_evaluated_plans: NonZeroU32::new(10_000).unwrap(),
             paths_limit: None,
+            max_non_local_selections: NonZeroU64::new(100_000).unwrap(),
         }
     }
 }
@@ -264,6 +291,9 @@ pub struct QueryPlanningStatistics {
     /// the budget ran out.
     #[serde(default, skip_serializing_if = "cell_is_none")]
     pub fuel_remaining: Cell<Option<u64>>,
+    /// `non_local_selections_count` can be `None`, if
+    /// `QueryPlanOptions::non_local_selections_limit_enabled` is `false`
+    pub non_local_selections_count: Option<u64>,
 }
 
 fn cell_is_none(cell: &Cell<Option<u64>>) -> bool {
@@ -687,6 +717,7 @@ impl QueryPlanner {
             node: root_node,
             statistics: QueryPlanningStatistics {
                 best_plan_cost: cost,
+                non_local_selections_count: non_local_selection_state.as_ref().map(|s| s.count),
                 ..statistics
             },
         };
@@ -1645,6 +1676,7 @@ type User
             evaluated_plan_count: Cell::new(10),
             evaluated_plan_paths: Cell::new(20),
             best_plan_cost: f64::NAN,
+            non_local_selections_count: Some(30),
             ..Default::default()
         };
         let serialized = serde_json::to_string_pretty(&stats).expect("Serializing");
@@ -1652,7 +1684,8 @@ type User
         {
           "evaluated_plan_count": 10,
           "evaluated_plan_paths": 20,
-          "best_plan_cost": null
+          "best_plan_cost": null,
+          "non_local_selections_count": 30
         }
         "###);
 
