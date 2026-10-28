@@ -34,16 +34,18 @@ type Probe = Shared<BoxFuture<'static, bool>>;
 /// example a paused replica) fails the probe and is left out, and reads go to the other replicas,
 /// or to the primary when there are none.
 ///
-/// A replica that fails is left out for 5 minutes, so repeated syncs while it's broken don't each
-/// wait on it. A passing probe isn't cached: fred re-syncs replicas when a replica connection breaks,
-/// and a replica that just broke must be probed again rather than trusted.
+/// A replica that fails is left out for at least 5 minutes, so repeated syncs while it's broken
+/// don't each wait on it. A passing probe isn't cached: fred re-syncs replicas when a replica
+/// connection breaks, and a replica that just broke must be probed again rather than trusted.
 ///
 /// Every client in a pool shares one filter, and they tend to sync at the same moment (when a
 /// replica stalls, every client's heartbeat ping to it fails together), so callers asking about a
 /// replica that's already being probed wait for that probe rather than starting their own.
 ///
-/// NOTE: a replica that's left out is only added back when fred next syncs replicas, which happens
-/// when a connection breaks or the cluster topology changes, not on a timer.
+/// NOTE: fred only asks the filter about a replica when it syncs replicas, so a left-out replica
+/// is only probed again at a sync. Syncs happen when a connection breaks or the cluster topology
+/// changes, and the replica heartbeat starts one once a left-out replica's 5 minutes are up (see
+/// [`Self::has_replicas_to_recheck`]).
 pub(crate) struct RouteableReplicaFilter {
     /// The pool's configuration, which the probe connects with.
     config: Config,
@@ -61,6 +63,22 @@ impl RouteableReplicaFilter {
             timeout,
             unrouteable: Default::default(),
             probes: Default::default(),
+        }
+    }
+
+    /// Whether a left-out replica has waited out its period, so the next replica sync probes it
+    /// again.
+    pub(crate) fn has_replicas_to_recheck(&self) -> bool {
+        let now = Instant::now();
+        self.unrouteable.read().values().any(|until| *until <= now)
+    }
+
+    /// Ends the period every left-out replica must wait before it's probed again.
+    #[cfg(test)]
+    pub(crate) fn end_left_out_period(&self) {
+        let now = Instant::now();
+        for until in self.unrouteable.write().values_mut() {
+            *until = now;
         }
     }
 
@@ -254,5 +272,19 @@ mod tests {
         mark_unrouteable(&filter, port, Instant::now() - Duration::from_secs(1));
         assert!(filter.filter(&server(1), &server(port)).await);
         assert!(!is_unrouteable(&filter, port));
+    }
+
+    /// The replica heartbeat starts a sync once this is true, which is what brings a recovered
+    /// replica back.
+    #[test]
+    fn replica_is_due_a_recheck_once_its_left_out_period_ends() {
+        let filter = filter();
+        assert!(!filter.has_replicas_to_recheck());
+
+        mark_unrouteable(&filter, 1, Instant::now() + UNROUTEABLE_FOR);
+        assert!(!filter.has_replicas_to_recheck());
+
+        filter.end_left_out_period();
+        assert!(filter.has_replicas_to_recheck());
     }
 }
