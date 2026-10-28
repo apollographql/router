@@ -56,6 +56,9 @@ pub(crate) struct RouteableReplicaFilter {
     unrouteable: Arc<RwLock<HashMap<String, Instant>>>,
     /// Probes in progress, by replica address.
     probes: Arc<Mutex<HashMap<String, Probe>>>,
+    /// Makes every probe panic, to test that a panicking probe still records its result.
+    #[cfg(test)]
+    panic_in_probe: bool,
 }
 
 impl RouteableReplicaFilter {
@@ -65,6 +68,8 @@ impl RouteableReplicaFilter {
             timeout,
             unrouteable: Default::default(),
             probes: Default::default(),
+            #[cfg(test)]
+            panic_in_probe: false,
         }
     }
 
@@ -97,6 +102,10 @@ impl RouteableReplicaFilter {
     /// The probe runs on its own task, so it finishes and clears its entry even if every caller
     /// awaiting it is dropped (for example when a client's router task is aborted). Otherwise a
     /// later caller would resume it after its timeout had passed and leave the replica out.
+    ///
+    /// The result is recorded however the task ends. A probe that panics, or whose task is
+    /// cancelled, counts as failed: the replica is left out and probed again after its period,
+    /// rather than its entry staying here and answering `false` until the pool is recreated.
     fn probe(&self, addr: &str, replica: &Server) -> Probe {
         self.probes
             .lock()
@@ -106,24 +115,32 @@ impl RouteableReplicaFilter {
                 let unrouteable = self.unrouteable.clone();
                 let probes = self.probes.clone();
                 let addr = addr.to_string();
+                #[cfg(test)]
+                let panic_in_probe = self.panic_in_probe;
                 let record = async move {
-                    let routeable = probe.await;
-                    if routeable {
-                        unrouteable.write().remove(&addr);
-                    } else {
-                        // once per failed probe, which is at most once per replica per period
-                        warn!(
-                            "redis replica {addr} failed its probe and won't receive reads until it's probed again in {UNROUTEABLE_FOR:?}"
-                        );
-                        unrouteable
-                            .write()
-                            .insert(addr.clone(), Instant::now() + UNROUTEABLE_FOR);
+                    let mut routeable = scopeguard::guard(false, move |routeable| {
+                        if routeable {
+                            unrouteable.write().remove(&addr);
+                        } else {
+                            // once per failed probe, which is at most once per replica per period
+                            warn!(
+                                "redis replica {addr} failed its probe and won't receive reads until it's probed again in {UNROUTEABLE_FOR:?}"
+                            );
+                            unrouteable
+                                .write()
+                                .insert(addr.clone(), Instant::now() + UNROUTEABLE_FOR);
+                        }
+                        // after recording the result, so a caller arriving now sees it
+                        probes.lock().remove(&addr);
+                    });
+                    #[cfg(test)]
+                    if panic_in_probe {
+                        panic!("probe panicked");
                     }
-                    // after recording the result, so a caller arriving now sees it
-                    probes.lock().remove(&addr);
-                    routeable
+                    *routeable = probe.await;
+                    *routeable
                 };
-                // a probe that panicked or was cancelled with the runtime didn't pass
+                // the guard above has recorded a failure for a probe that panicked or was cancelled
                 tokio::spawn(record.with_current_subscriber())
                     .map(|result| result.unwrap_or(false))
                     .boxed()
@@ -320,6 +337,24 @@ mod tests {
         tokio::time::sleep(TIMEOUT * 2).await;
         assert!(filter.probes.lock().is_empty());
         assert!(is_unrouteable(&filter, port));
+    }
+
+    /// A probe that panics is recorded as a failed probe, so the replica is rechecked after its
+    /// period rather than answered `false` from the stale probe until the pool is recreated.
+    #[tokio::test]
+    async fn panicking_probe_counts_as_failed() {
+        let (_redis, port) = replica(Behaviour::Healthy).await;
+        let mut filter = filter();
+        filter.panic_in_probe = true;
+
+        assert!(!filter.filter(&server(1), &server(port)).await);
+        assert!(filter.probes.lock().is_empty());
+        assert!(is_unrouteable(&filter, port));
+
+        filter.panic_in_probe = false;
+        filter.end_left_out_period();
+        assert!(filter.take_replicas_to_recheck());
+        assert!(filter.filter(&server(1), &server(port)).await);
     }
 
     #[tokio::test]
