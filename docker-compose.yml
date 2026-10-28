@@ -24,7 +24,7 @@ services:
   # network namespace, as all services do in the CI executor, so the addresses they report to clients (the replica in
   # the primary's `ROLE` reply, the primary in the sentinel's) are 127.0.0.1 addresses that also work from the host
   redis-primary:
-    image: cimg/redis:7.4.11
+    image: cimg/redis:7.4.12
     command: ["redis-server", "--protected-mode", "no", "--port", "6380"]
     ports:
       - 6380:6380
@@ -32,7 +32,7 @@ services:
       - 26379:26379
 
   redis-replica:
-    image: cimg/redis:7.4.11
+    image: cimg/redis:7.4.12
     network_mode: service:redis-primary
     depends_on:
       - redis-primary
@@ -40,7 +40,7 @@ services:
 
   # sentinel rewrites its config file, so it's written at startup rather than mounted
   redis-sentinel:
-    image: cimg/redis:7.4.11
+    image: cimg/redis:7.4.12
     network_mode: service:redis-primary
     depends_on:
       - redis-primary
@@ -53,7 +53,7 @@ services:
 
   # redis cluster
   redis-cluster-7000:
-    image: cimg/redis:7.4.11
+    image: cimg/redis:7.4.12
     command:
       [
         "redis-server",
@@ -71,7 +71,7 @@ services:
       - redis-net
 
   redis-cluster-7001:
-    image: cimg/redis:7.4.11
+    image: cimg/redis:7.4.12
     command:
       [
         "redis-server",
@@ -89,7 +89,7 @@ services:
       - redis-net
 
   redis-cluster-7002:
-    image: cimg/redis:7.4.11
+    image: cimg/redis:7.4.12
     command:
       [
         "redis-server",
@@ -107,7 +107,7 @@ services:
       - redis-net
 
   redis-cluster-7003:
-    image: cimg/redis:7.4.11
+    image: cimg/redis:7.4.12
     command:
       [
         "redis-server",
@@ -125,7 +125,7 @@ services:
       - redis-net
 
   redis-cluster-7004:
-    image: cimg/redis:7.4.11
+    image: cimg/redis:7.4.12
     command:
       [
         "redis-server",
@@ -143,7 +143,7 @@ services:
       - redis-net
 
   redis-cluster-7005:
-    image: cimg/redis:7.4.11
+    image: cimg/redis:7.4.12
     command:
       [
         "redis-server",
@@ -174,7 +174,7 @@ services:
   # internal networking (in particular, different IPs for the services) but redis will hold on to cluster info (that's the
   # working theory, it might be wrong)
   redis-cluster-startup:
-    image: cimg/redis:7.4.11
+    image: cimg/redis:7.4.12
     depends_on:
       - redis-cluster-7000
       - redis-cluster-7001
