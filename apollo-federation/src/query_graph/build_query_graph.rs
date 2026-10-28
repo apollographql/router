@@ -1002,37 +1002,22 @@ impl SchemaQueryGraphBuilder {
                             other_type.subgraph_runtime_type_positions.contains(type_pos) &&
                                 !intersecting_local_runtime_type_positions.contains(type_pos)
                         };
-                        // TODO: we're currently _never_ adding the edge if the target/"to" type is
-                        // a union. We shouldn't be doing that, this will genuinely make some cases
-                        // less efficient than they could be (though those cases are admittedly a
-                        // bit convoluted), but this make sense *until*
-                        // https://github.com/apollographql/federation/issues/2256 gets fixed.
-                        // Because until then, we do not properly track unions through composition,
-                        // and that means there is never a difference (in the query planner) between
-                        // a local union definition and the supergraph one, even if that different
-                        // actually exists. And so, never type-exploding in that case is somewhat
-                        // safer, as not-type-exploding is ultimately an optimisation. Please note
-                        // that this is *not* a fix for #2256, and most of the issues created by
-                        // #2256 still needs fixing, but it avoids making it even worth for a few
-                        // corner cases. We should remove the `isUnionType` below once the
-                        // fix for #2256 is implemented.
-                        if !(matches!(
-                            t2.abstract_type_definition_position,
-                            AbstractTypeDefinitionPosition::Union(_)
-                        ) || t2
+                        // This relies on the local union members being accurate, which requires a
+                        // supergraph recording them with `@join__unionMember` (join v0.3+, see
+                        // https://github.com/apollographql/federation/issues/2256). Union members
+                        // extracted from older supergraphs are synthesized from the supergraph's
+                        // and may claim members the subgraph never declared.
+                        if !t2
                             .api_runtime_type_positions
                             .iter()
-                            .any(|rt| is_in_local_other_type_but_not_local_intersection(rt, t1)))
+                            .any(|rt| is_in_local_other_type_but_not_local_intersection(rt, t1))
                         {
                             add_t1_to_t2 = true;
                         }
-                        if !(matches!(
-                            t1.abstract_type_definition_position,
-                            AbstractTypeDefinitionPosition::Union(_)
-                        ) || t1
+                        if !t1
                             .api_runtime_type_positions
                             .iter()
-                            .any(|rt| is_in_local_other_type_but_not_local_intersection(rt, t2)))
+                            .any(|rt| is_in_local_other_type_but_not_local_intersection(rt, t2))
                         {
                             add_t2_to_t1 = true;
                         }
