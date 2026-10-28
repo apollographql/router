@@ -18,9 +18,6 @@ use futures::future::BoxFuture;
 use opentelemetry::KeyValue;
 use opentelemetry::metrics::MeterProvider as _;
 use opentelemetry::metrics::ObservableGauge;
-use opentelemetry_sdk::metrics::Aggregation;
-use opentelemetry_sdk::metrics::Instrument;
-use opentelemetry_sdk::metrics::Stream;
 use tower::Service;
 
 use super::PlanNode;
@@ -35,7 +32,6 @@ use crate::error::FederationErrorBridge;
 use crate::error::QueryPlannerError;
 use crate::error::ServiceBuildError;
 use crate::error::ValidationErrors;
-use crate::metrics::aggregation::MeterProviderType;
 use crate::metrics::meter_provider;
 use crate::plugins::authorization;
 use crate::plugins::authorization::AuthorizationPlugin;
@@ -44,7 +40,6 @@ use crate::plugins::authorization::FilterResult;
 use crate::plugins::authorization::UnauthorizedPaths;
 use crate::plugins::telemetry::config::ApolloSignatureNormalizationAlgorithm;
 use crate::plugins::telemetry::config::Conf as TelemetryConfig;
-use crate::plugins::telemetry::reload::metrics::MetricsBuilder;
 use crate::query_planner::HashedSubgraphSchemas;
 use crate::query_planner::convert::convert_root_query_plan_node;
 use crate::query_planner::hashed_subgraph_schemas;
@@ -105,8 +100,8 @@ const ENV_MAX_NON_LOCAL_SELECTIONS: &str = "APOLLO_ROUTER_MAX_NON_LOCAL_SELECTIO
 ///
 /// The number of non-local selections explored for a given plan is tracked in
 /// `apollo.router.query_planning.plan.non_local_selections` histogram and is
-/// available to everyone. This histogram uses fixed bucket boundaries of 100,
-/// 1000, 25000, 50000, 100000, and 150000.
+/// available to everyone. This histogram defaults to bucket boundaries of 100,
+/// 1000, 25000, 50000, 100000, and 150000 (see [`NON_LOCAL_SELECTIONS_BUCKETS`]).
 pub(crate) fn max_non_local_selections() -> NonZeroU64 {
     static MAX: OnceLock<NonZeroU64> = OnceLock::new();
     *MAX.get_or_init(|| {
@@ -639,6 +634,13 @@ pub(crate) const FUEL_BUCKETS: &[f64] = &[
     1_000_000.0,
 ];
 
+/// Default buckets for the non-local selections histogram. They bracket the
+/// default limit of 100,000 to observe how close operations get to it. The
+/// 150,000 bucket catches plans allowed by a raised
+/// `APOLLO_ROUTER_MAX_NON_LOCAL_SELECTIONS`.
+pub(crate) const NON_LOCAL_SELECTIONS_BUCKETS: &[f64] =
+    &[100.0, 1_000.0, 25_000.0, 50_000.0, 100_000.0, 150_000.0];
+
 #[derive(Debug, Clone, PartialEq)]
 pub(crate) struct QueryPlanResult {
     pub(super) formatted_query_plan: Option<Arc<String>>,
@@ -712,38 +714,6 @@ pub(crate) fn metric_query_planning_non_local_selections(count: u64) {
         "{selection}",
         count
     );
-}
-
-/// Non-local selections histogram buckets.
-const NON_LOCAL_SELECTIONS_BUCKETS: &[f64] =
-    &[100.0, 1_000.0, 25_000.0, 50_000.0, 100_000.0, 150_000.0];
-
-/// Register query planning metric views with custom bucket boundaries.
-/// This is currently used for non-local selections histogram.
-///
-/// NB (@lrlna): This should likely be used for evaluated plans and evaluated
-/// paths as well.
-pub(crate) fn register_query_planning_views(
-    builder: &mut MetricsBuilder,
-    meter_provider_type: MeterProviderType,
-) {
-    builder.with_view(meter_provider_type, |instrument: &Instrument| {
-        if instrument.name() == "apollo.router.query_planning.plan.non_local_selections" {
-            Some(
-                Stream::builder()
-                    .with_aggregation(Aggregation::ExplicitBucketHistogram {
-                        boundaries: NON_LOCAL_SELECTIONS_BUCKETS.to_vec(),
-                        record_min_max: true,
-                    })
-                    .build()
-                    .expect(
-                        "Failed to create stream for apollo.router.query_planning.plan.non_local_selections metric",
-                    ),
-            )
-        } else {
-            None
-        }
-    });
 }
 
 pub(crate) fn metric_rust_qp_init(init_error_kind: Option<&'static str>) {

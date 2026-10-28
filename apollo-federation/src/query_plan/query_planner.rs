@@ -291,7 +291,7 @@ pub struct QueryPlanningStatistics {
     /// the budget ran out.
     #[serde(default, skip_serializing_if = "cell_is_none")]
     pub fuel_remaining: Cell<Option<u64>>,
-    /// `non_local_selections_count` can be `None`, if 
+    /// `non_local_selections_count` can be `None`, if
     /// `QueryPlanOptions::non_local_selections_limit_enabled` is `false`
     pub non_local_selections_count: Option<u64>,
 }

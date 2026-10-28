@@ -289,11 +289,14 @@ fn resolve_view(
 
 /// Buckets for histograms that don't measure durations, where the global
 /// buckets would put nearly every sample in the overflow bucket.
-fn instrument_default_buckets(name: &str) -> Option<&'static [f64]> {
+pub(crate) fn instrument_default_buckets(name: &str) -> Option<&'static [f64]> {
     match name {
         "apollo.router.query_planning.plan.fuel_consumed"
         | "apollo.router.query_planning.plan.fuel_remaining" => {
             Some(crate::query_planner::FUEL_BUCKETS)
+        }
+        "apollo.router.query_planning.plan.non_local_selections" => {
+            Some(crate::query_planner::NON_LOCAL_SELECTIONS_BUCKETS)
         }
         _ => None,
     }
@@ -527,6 +530,39 @@ mod view_selection_tests {
                 crate::query_planner::FUEL_BUCKETS
             );
         }
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn non_local_selections_histogram_defaults_to_non_local_selections_buckets() {
+        let exporter = InMemoryMetricExporter::default();
+        let provider = meter_provider_with(exporter.clone(), vec![], None);
+
+        let name = "apollo.router.query_planning.plan.non_local_selections";
+        let histogram = provider.meter("t").u64_histogram(name).build();
+        histogram.record(42, &[]);
+        provider.force_flush().unwrap();
+
+        assert_eq!(
+            u64_histogram_bounds(&exporter, name),
+            crate::query_planner::NON_LOCAL_SELECTIONS_BUCKETS
+        );
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn user_view_buckets_override_non_local_selections_buckets() {
+        let exporter = InMemoryMetricExporter::default();
+        let mut view = empty_view("apollo.router.query_planning.plan.non_local_selections");
+        view.aggregation = Some(MetricAggregation::Histogram {
+            buckets: vec![10.0, 100.0],
+        });
+        let provider = meter_provider_with(exporter.clone(), vec![view], None);
+
+        let name = "apollo.router.query_planning.plan.non_local_selections";
+        let histogram = provider.meter("t").u64_histogram(name).build();
+        histogram.record(42, &[]);
+        provider.force_flush().unwrap();
+
+        assert_eq!(u64_histogram_bounds(&exporter, name), vec![10.0, 100.0]);
     }
 
     #[tokio::test(flavor = "multi_thread")]

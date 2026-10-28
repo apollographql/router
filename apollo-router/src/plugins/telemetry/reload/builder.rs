@@ -96,13 +96,9 @@ impl<'a> Builder<'a> {
             let mut builder = MetricsBuilder::new(self.config);
             builder.configure(&self.config.exporters.metrics.prometheus)?;
             builder.configure(&self.config.exporters.metrics.otlp)?;
-            // Register memory allocation and query planning views with custom buckets
+            // Register memory allocation views with custom buckets
             crate::plugins::telemetry::metrics::allocation::register_memory_allocation_views(
                 &mut builder,
-            );
-            crate::query_planner::register_query_planning_views(
-                &mut builder,
-                MeterProviderType::Public,
             );
             builder.configure_views(MeterProviderType::Public)?;
 
