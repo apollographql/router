@@ -1,0 +1,143 @@
+# The supergraph for the path-condition tests in `tests/path_conditions.rs`, composed with
+# `Supergraph::compose` from the two subgraphs below. Recompose it when they change.
+#
+# An item is a `Book` or a `Film`; `featured` is one item and `items` a list of them. `reviews`
+# resolves both, and an item's `Author`, by `id`, serving `blurb` and `name`. `Person` is an object
+# type no item is.
+#
+# Subgraph `catalog`:
+#
+#   extend schema @link(url: "https://specs.apollo.dev/federation/v2.3", import: ["@key"])
+#
+#   type Query {
+#     featured: Item!
+#     items: [Item]
+#     people: [Person]
+#   }
+#
+#   interface Item {
+#     id: ID!
+#     author: Author
+#   }
+#
+#   type Book implements Item @key(fields: "id") {
+#     id: ID!
+#     author: Author
+#   }
+#
+#   type Film implements Item @key(fields: "id") {
+#     id: ID!
+#     author: Author
+#   }
+#
+#   type Author @key(fields: "id") {
+#     id: ID!
+#   }
+#
+#   "An object type no item is."
+#   type Person {
+#     id: ID!
+#   }
+#
+# Subgraph `reviews`:
+#
+#   extend schema @link(url: "https://specs.apollo.dev/federation/v2.3", import: ["@key"])
+#
+#   type Book @key(fields: "id") {
+#     id: ID!
+#     blurb: String
+#   }
+#
+#   type Film @key(fields: "id") {
+#     id: ID!
+#     blurb: String
+#   }
+#
+#   type Author @key(fields: "id") {
+#     id: ID!
+#     name: String
+#   }
+
+schema @link(url: "https://specs.apollo.dev/link/v1.0") @link(url: "https://specs.apollo.dev/join/v0.5", for: EXECUTION) {
+  query: Query
+}
+
+directive @link(url: String, as: String, for: link__Purpose, import: [link__Import]) repeatable on SCHEMA
+
+directive @join__graph(name: String!, url: String!) on ENUM_VALUE
+
+directive @join__type(graph: join__Graph!, key: join__FieldSet, extension: Boolean! = false, resolvable: Boolean! = true, isInterfaceObject: Boolean! = false) repeatable on ENUM | INPUT_OBJECT | INTERFACE | OBJECT | SCALAR | UNION
+
+directive @join__field(graph: join__Graph, requires: join__FieldSet, provides: join__FieldSet, type: String, external: Boolean, override: String, overrideLabel: String, usedOverridden: Boolean, contextArguments: [join__ContextArgument!]) repeatable on FIELD_DEFINITION | INPUT_FIELD_DEFINITION
+
+directive @join__implements(graph: join__Graph!, interface: String!) repeatable on INTERFACE | OBJECT
+
+directive @join__unionMember(graph: join__Graph!, member: String!) repeatable on UNION
+
+directive @join__enumValue(graph: join__Graph!) repeatable on ENUM_VALUE
+
+directive @join__directive(graphs: [join__Graph!], name: String!, args: join__DirectiveArguments!) repeatable on SCHEMA | OBJECT | INTERFACE | FIELD_DEFINITION
+
+enum link__Purpose {
+  """
+  SECURITY features provide metadata necessary to securely resolve fields.
+  """
+  SECURITY
+  """EXECUTION features provide metadata necessary for operation execution."""
+  EXECUTION
+}
+
+scalar link__Import
+
+scalar join__FieldSet
+
+scalar join__FieldValue
+
+input join__ContextArgument {
+  name: String!
+  type: String!
+  context: String!
+  selection: join__FieldValue!
+}
+
+scalar join__DirectiveArguments
+
+enum join__Graph {
+  CATALOG @join__graph(name: "catalog", url: "http://catalog")
+  REVIEWS @join__graph(name: "reviews", url: "http://reviews")
+}
+
+type Query @join__type(graph: CATALOG) @join__type(graph: REVIEWS) {
+  featured: Item! @join__field(graph: CATALOG, type: "Item!")
+  items: [Item] @join__field(graph: CATALOG, type: "[Item]")
+  people: [Person] @join__field(graph: CATALOG, type: "[Person]")
+}
+
+interface Item @join__type(graph: CATALOG) {
+  id: ID! @join__field(graph: CATALOG, type: "ID!")
+  author: Author @join__field(graph: CATALOG, type: "Author")
+}
+
+type Book implements Item @join__type(graph: CATALOG, key: "id") @join__implements(graph: CATALOG, interface: "Item") @join__type(graph: REVIEWS, key: "id") {
+  id: ID! @join__field(graph: CATALOG, type: "ID!") @join__field(graph: REVIEWS, type: "ID!")
+  author: Author @join__field(graph: CATALOG, type: "Author")
+  blurb: String @join__field(graph: REVIEWS, type: "String")
+}
+
+type Film implements Item @join__type(graph: CATALOG, key: "id") @join__implements(graph: CATALOG, interface: "Item") @join__type(graph: REVIEWS, key: "id") {
+  id: ID! @join__field(graph: CATALOG, type: "ID!") @join__field(graph: REVIEWS, type: "ID!")
+  author: Author @join__field(graph: CATALOG, type: "Author")
+  blurb: String @join__field(graph: REVIEWS, type: "String")
+}
+
+type Author @join__type(graph: CATALOG, key: "id") @join__type(graph: REVIEWS, key: "id") {
+  id: ID! @join__field(graph: CATALOG, type: "ID!") @join__field(graph: REVIEWS, type: "ID!")
+  name: String @join__field(graph: REVIEWS, type: "String")
+}
+
+"""An object type no item is."""
+type Person @join__type(graph: CATALOG) {
+  id: ID! @join__field(graph: CATALOG, type: "ID!")
+}
+
+scalar Import @join__type(graph: CATALOG) @join__type(graph: REVIEWS)

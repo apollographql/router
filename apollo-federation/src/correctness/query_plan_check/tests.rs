@@ -647,3 +647,10 @@ fn a_field_returning_an_interface_object_is_still_checked() {
         "{error}"
     );
 }
+
+//==================================================================================================
+// Ports of the model's tests, by what they cover
+
+mod context_reads;
+mod path_conditions;
+mod resolvable;

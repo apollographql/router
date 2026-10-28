@@ -7,11 +7,17 @@
 //!
 //! A fetch data path names **response keys, not fields**, so the field a path element stands for
 //! can only be recovered by following the path through what has already been fetched. A key may
-//! also be reached by more than one field, so following it reproduces *every* copy. Two elements
-//! reach nothing and appear in no flatten path: `TypenameEquals` addresses data by runtime type
-//! rather than by response key, and `Parent` moves up, so it cannot be followed downwards. Both
-//! are used only by fetch data rewrites — and by `@context`, which this checker does not verify,
-//! as the legacy one does not either.
+//! also be reached by more than one field, so following it reproduces *every* copy.
+//!
+//! A path element's type condition names **object types, compared literally** with each object's
+//! `__typename`, along the path and where it ends, as the router's `iterate_path` compares them: an
+//! interface's or a union's name selects nothing, and a key that an index follows selects nothing
+//! below it if it carries a condition, a list having no `__typename`. Grounding a name through its
+//! possible types would credit fetches the router never runs.
+//!
+//! Two elements reach nothing and appear in no flatten path: `TypenameEquals` addresses data by
+//! runtime type rather than by response key, and `Parent` moves up, so it cannot be followed
+//! downwards. Both are used only by fetch data rewrites, whose paths `context` reads instead.
 //!
 //! # Fragment spreads
 //!
@@ -108,14 +114,85 @@ pub(super) fn inline_fragment_spreads(
     Ok(out)
 }
 
+/// A fetch's selections with every fragment's type condition narrowed to the object types its
+/// subgraph admits there, which is all the fetch can return under it.
+///
+/// A type condition is nominal, and the subgraph's schema, which the fetch is written in, can admit
+/// fewer object types at it than the supergraph's, where the plan is compared: a member another
+/// subgraph adds to a union, or an implementation it adds to an interface. Left as written, the
+/// fragment would be credited in the supergraph with objects the subgraph never returns from it.
+/// So a fragment on a type the supergraph admits more objects at becomes one fragment per object
+/// type the subgraph admits there; one the two agree on is kept as written. A subgraph object type
+/// that is a supergraph interface, an interface object, still reads as every implementation, which
+/// it stands for.
+///
+/// `interpret_fetch_node` computes the response shape in the supergraph schema and does not do
+/// this.
+pub(super) fn narrow_type_conditions(
+    schema: &ValidFederationSchema,
+    subgraph_schema: &ValidFederationSchema,
+    selections: &[Selection],
+) -> Vec<Selection> {
+    let mut out = Vec::with_capacity(selections.len());
+    for selection in selections {
+        match selection {
+            Selection::Field(field) => {
+                let mut copy = (**field).clone();
+                copy.selection_set.selections = narrow_type_conditions(
+                    schema,
+                    subgraph_schema,
+                    &field.selection_set.selections,
+                );
+                out.push(Selection::Field(Node::new(copy)));
+            }
+            Selection::InlineFragment(fragment) => {
+                let below = narrow_type_conditions(
+                    schema,
+                    subgraph_schema,
+                    &fragment.selection_set.selections,
+                );
+                let Some(type_condition) = &fragment.type_condition else {
+                    let mut copy = (**fragment).clone();
+                    copy.selection_set.selections = below;
+                    out.push(Selection::InlineFragment(Node::new(copy)));
+                    continue;
+                };
+                let applied = possible_types(subgraph_schema, type_condition);
+                if possible_types(schema, type_condition)
+                    .iter()
+                    .all(|ty| applied.contains(ty))
+                {
+                    let mut copy = (**fragment).clone();
+                    copy.selection_set.selections = below;
+                    out.push(Selection::InlineFragment(Node::new(copy)));
+                } else {
+                    out.extend(applied.into_iter().map(|object_type| {
+                        Selection::InlineFragment(Node::new(InlineFragment {
+                            type_condition: Some(object_type.clone()),
+                            directives: fragment.directives.clone(),
+                            selection_set: selection_set(object_type, below.clone()),
+                        }))
+                    }));
+                }
+            }
+            // Spreads are inlined before a fetch's selections are read.
+            Selection::FragmentSpread(_) => out.push(selection.clone()),
+        }
+    }
+    out
+}
+
 /// Guards selections by the runtime types a path element narrowed the position to, so that a
 /// requirement is mounted only where the fetch runs.
 /// - A selection written under a fragment already carries its own condition; this is for the
 ///   unguarded case, where the narrowing would otherwise be lost.
-/// - Several types are a disjunction, so each takes its own copy.
+/// - Several types are a disjunction, so each takes its own copy. Only an object name takes one:
+///   the router compares each name literally with an object's `__typename`, so an abstract name
+///   selects nothing.
 /// - An unnarrowed position is returned untouched, which is every position in a plan built
 ///   without `--type-conditioned-fetching`.
 fn under_reached_types(
+    schema: &ValidFederationSchema,
     reached: Option<&TypeCondition>,
     selections: Vec<Selection>,
 ) -> Vec<Selection> {
@@ -127,6 +204,7 @@ fn under_reached_types(
     }
     type_names
         .iter()
+        .filter(|type_name| is_object_type(schema, type_name))
         .map(|type_name| {
             Selection::InlineFragment(Node::new(InlineFragment {
                 type_condition: Some(type_name.clone()),
@@ -160,44 +238,40 @@ pub(super) fn under_condition(
     parent_type: &Name,
     selections: Vec<Selection>,
 ) -> Vec<Selection> {
-    // One fragment per literal, nested: conjoining them would repeat `@include` or `@skip`,
-    // which are not repeatable.
-    condition
+    let directives = condition
         .iter()
-        .rev()
-        .fold(selections, |selections, literal| {
-            under_directives(
-                &ast::DirectiveList(vec![literal.to_directive().into()]),
-                parent_type,
-                selections,
-            )
-        })
+        .map(|literal| literal.to_directive().into())
+        .collect();
+    under_directives(&ast::DirectiveList(directives), parent_type, selections)
 }
 
-/// Guards a selection set by a list of directives, on one inline fragment with no type condition.
+/// Guards a selection set by a list of directives, one inline fragment with no type condition per
+/// directive, nested, the first outermost.
 ///
-/// No directives means no guard, and an empty selection set stays empty rather than becoming an
-/// empty guarded fragment.
+/// `@skip` and `@include` are not repeatable, so one fragment holding two of either is invalid; the
+/// planner nests one fragment per condition in force (`wrap_selection_with_type_and_conditions`),
+/// which reads the same, every directive having to admit the selections. No directives means no
+/// guard, and an empty selection set stays empty rather than becoming an empty guarded fragment.
 pub(super) fn under_directives(
     directives: &ast::DirectiveList,
     parent_type: &Name,
     selections: Vec<Selection>,
 ) -> Vec<Selection> {
-    if directives.is_empty() {
-        return selections;
-    }
-    let directives = directives.clone();
-    let parent_type = parent_type.clone();
-    wrap_non_empty(
-        move |selections| {
-            Selection::InlineFragment(Node::new(InlineFragment {
-                type_condition: None,
-                directives,
-                selection_set: selection_set(parent_type, selections),
-            }))
-        },
-        selections,
-    )
+    directives
+        .iter()
+        .rev()
+        .fold(selections, |selections, directive| {
+            wrap_non_empty(
+                |selections| {
+                    Selection::InlineFragment(Node::new(InlineFragment {
+                        type_condition: None,
+                        directives: ast::DirectiveList(vec![directive.clone()]),
+                        selection_set: selection_set(parent_type.clone(), selections),
+                    }))
+                },
+                selections,
+            )
+        })
 }
 
 fn selection_set(ty: Name, selections: Vec<Selection>) -> SelectionSet {
@@ -218,10 +292,10 @@ fn type_condition_admits(
     let (Some(type_names), Some(fragment_type)) = (pending, fragment_type) else {
         return true;
     };
-    // The path's condition names the concrete types the data there is narrowed to; the fragment's
-    // own condition may be abstract. So the question is whether the fragment reaches those types,
-    // not whether they reach it -- asking it the other way admits only a fragment written on the
-    // exact same object type, and skips one written on any interface or union above it.
+    // The path's condition names object types, compared literally with each object's `__typename`
+    // as the router's `iterate_path` compares them; the fragment's own condition may be abstract.
+    // So the question is whether one of the names is an object type the fragment reaches -- a name
+    // that is no object type, an interface's or a union's, admits nothing.
     type_names
         .iter()
         .any(|type_name| type_includes_object(schema, fragment_type, type_name))
@@ -279,10 +353,109 @@ fn type_includes_object(
         .unwrap_or(false)
 }
 
+/// Is `type_name` an object type of the schema?
+fn is_object_type(schema: &ValidFederationSchema, type_name: &Name) -> bool {
+    matches!(
+        schema.schema().types.get(type_name),
+        Some(apollo_compiler::schema::ExtendedType::Object(_))
+    )
+}
+
+/// What a path element's narrowing comes to inside an inline fragment it admits: the names the
+/// path narrowed to that the fragment reaches.
+///
+/// A fragment whose runtime types are all among those names states the narrowing itself, so
+/// nothing is left for a field below it to be guarded by, and the field is reproduced under the
+/// fragments alone. Guarding it again would add a copy per name: `n` names over `n` sibling
+/// fragments would mount `n²` copies, each narrowed apart, where a reader needs one copy admitting
+/// every type. A fragment with no type condition narrows nothing.
+fn pending_inside(
+    schema: &ValidFederationSchema,
+    pending: Option<&TypeCondition>,
+    fragment_type: Option<&Name>,
+) -> Option<Vec<Name>> {
+    let type_names = pending?;
+    let Some(fragment_type) = fragment_type else {
+        return Some(type_names.to_vec());
+    };
+    let reached = possible_types(schema, fragment_type);
+    if reached.iter().all(|ty| type_names.contains(ty)) {
+        None
+    } else {
+        Some(
+            type_names
+                .iter()
+                .filter(|ty| reached.contains(ty))
+                .cloned()
+                .collect(),
+        )
+    }
+}
+
+/// Guards what is mounted where a path ends by the type condition of its last element, as
+/// [`selections_under_key`] guards what it finds below one.
+///
+/// A fragment the condition admits is kept, with what is inside it guarded by what the two leave
+/// between them ([`pending_inside`]); one it does not admit is dropped; an unguarded field takes
+/// [`under_reached_types`]'s copies. The router's `iterate_path` selects the objects at the end of
+/// a path by the same literal comparison as along it, so a fetch below a condition naming no object
+/// of its position never runs. An unnarrowed end mounts what it is given, and so does one whose
+/// fragments state the condition, which is how an entity fetch's selections arrive.
+///
+/// `interpret_plan_node_at_path` carries an element's condition to the next element and so leaves
+/// the last one unread; this follows the executor instead.
+fn under_type_condition(
+    schema: &ValidFederationSchema,
+    pending: Option<&TypeCondition>,
+    selections: Vec<Selection>,
+) -> Vec<Selection> {
+    let Some(type_names) = pending else {
+        return selections;
+    };
+    let mut out = Vec::new();
+    for selection in selections {
+        match &selection {
+            Selection::Field(_) => out.extend(under_reached_types(
+                schema,
+                Some(type_names),
+                vec![selection],
+            )),
+            Selection::InlineFragment(fragment) => {
+                if !type_condition_admits(
+                    schema,
+                    Some(type_names),
+                    fragment.type_condition.as_ref(),
+                ) {
+                    continue;
+                }
+                let inside =
+                    pending_inside(schema, Some(type_names), fragment.type_condition.as_ref());
+                let inner = under_type_condition(
+                    schema,
+                    inside.as_deref(),
+                    fragment.selection_set.selections.clone(),
+                );
+                out.extend(wrap_non_empty(
+                    |selections| {
+                        let mut copy = (**fragment).clone();
+                        copy.selection_set =
+                            selection_set(fragment.selection_set.ty.clone(), selections);
+                        Selection::InlineFragment(Node::new(copy))
+                    },
+                    inner,
+                ));
+            }
+            // Unreachable: spreads are inlined before a fetch's selections are mounted.
+            Selection::FragmentSpread(_) => out.push(selection),
+        }
+    }
+    out
+}
+
 /// The selections that `mounted` becomes when placed at `path` inside `available`.
 ///
 /// `pending` is the type condition carried from the previous path element. It filters *where* the
-/// next key may be found rather than adding a guard of its own.
+/// next key may be found, or what is mounted where the path ends ([`under_type_condition`]).
 pub(super) fn selections_at(
     schema: &ValidFederationSchema,
     available: &[Selection],
@@ -291,7 +464,7 @@ pub(super) fn selections_at(
     mounted: &[Selection],
 ) -> Vec<Selection> {
     let Some((head, rest)) = path.split_first() else {
-        return mounted.to_vec();
+        return under_type_condition(schema, pending, mounted.to_vec());
     };
     match head {
         FetchDataPathElement::Key(name, type_condition) => selections_under_key(
@@ -303,6 +476,9 @@ pub(super) fn selections_at(
             rest,
             mounted,
         ),
+        // A key's condition is compared with the value it holds, and a list has no `__typename`,
+        // so one carried into an index selects nothing.
+        FetchDataPathElement::AnyIndex(_) if pending.is_some() => Vec::new(),
         FetchDataPathElement::AnyIndex(type_condition) => {
             selections_at(schema, available, type_condition.as_deref(), rest, mounted)
         }
@@ -313,7 +489,10 @@ pub(super) fn selections_at(
 /// Every copy of a response key reachable in `available`, carrying the rest of the path.
 ///
 /// Inline fragments admitted by `pending` are descended into and reproduced, so a reached field
-/// keeps the type condition that guarded it.
+/// keeps the type condition that guarded it, and `pending` also guards a field written without
+/// one. Inside a fragment what is carried is what the path and the fragment leave between them
+/// ([`pending_inside`]), so a field found below fragments that state the narrowing is reproduced
+/// under them alone.
 #[allow(clippy::too_many_arguments)]
 fn selections_under_key(
     schema: &ValidFederationSchema,
@@ -348,16 +527,17 @@ fn selections_under_key(
                     inner,
                 );
                 // An unguarded field is selected on every type the path narrowed away.
-                out.extend(under_reached_types(pending, reproduced));
+                out.extend(under_reached_types(schema, pending, reproduced));
             }
             Selection::InlineFragment(fragment) => {
                 if !type_condition_admits(schema, pending, fragment.type_condition.as_ref()) {
                     continue;
                 }
+                let inside = pending_inside(schema, pending, fragment.type_condition.as_ref());
                 let inner = selections_under_key(
                     schema,
                     &fragment.selection_set.selections,
-                    pending,
+                    inside.as_deref(),
                     name,
                     type_condition,
                     path,
