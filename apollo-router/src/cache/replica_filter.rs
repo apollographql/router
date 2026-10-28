@@ -8,12 +8,19 @@ use fred::types::config::Config;
 use fred::types::config::ReplicaFilter;
 use fred::types::config::Server;
 use fred::types::config::ServerConfig;
+use futures::FutureExt;
+use futures::future::BoxFuture;
+use futures::future::Shared;
+use parking_lot::Mutex;
 use parking_lot::RwLock;
 use tokio::time::Instant;
 use tracing::debug;
 
 /// How long a replica that failed its probe is left out of replica routing.
 const UNROUTEABLE_FOR: Duration = Duration::from_secs(300);
+
+/// A probe of one replica, which every caller asking about that replica while it runs awaits.
+type Probe = Shared<BoxFuture<'static, bool>>;
 
 /// Filters the replicas fred routes to down to the ones that can serve commands, so that one
 /// broken replica can't fail the whole client.
@@ -31,15 +38,20 @@ const UNROUTEABLE_FOR: Duration = Duration::from_secs(300);
 /// wait on it. A passing probe isn't cached: fred re-syncs replicas when a replica connection breaks,
 /// and a replica that just broke must be probed again rather than trusted.
 ///
+/// Every client in a pool shares one filter, and they tend to sync at the same moment (when a
+/// replica stalls, every client's heartbeat ping to it fails together), so callers asking about a
+/// replica that's already being probed wait for that probe rather than starting their own.
+///
 /// NOTE: a replica that's left out is only added back when fred next syncs replicas, which happens
 /// when a connection breaks or the cluster topology changes, not on a timer.
-#[derive(Debug)]
 pub(crate) struct RouteableReplicaFilter {
     /// The pool's configuration, which the probe connects with.
     config: Config,
     timeout: Duration,
     /// Replicas that failed their probe, with when they may be probed again.
     unrouteable: Arc<RwLock<HashMap<String, Instant>>>,
+    /// Probes in progress, by replica address.
+    probes: Arc<Mutex<HashMap<String, Probe>>>,
 }
 
 impl RouteableReplicaFilter {
@@ -48,53 +60,83 @@ impl RouteableReplicaFilter {
             config,
             timeout,
             unrouteable: Default::default(),
+            probes: Default::default(),
         }
     }
 
-    /// Connects to the replica and completes fred's connection handshake within the timeout.
-    async fn probe(&self, replica: &Server) -> bool {
-        let mut config = self.config.clone();
-        config.server = ServerConfig::Centralized {
-            server: replica.clone(),
-        };
-        let client = match Builder::from_config(config)
-            .with_connection_config(|config| {
-                config.connection_timeout = self.timeout;
-                config.internal_command_timeout = self.timeout;
+    /// Returns the probe in progress for the replica, starting one if there isn't one. The probe
+    /// records its result before it completes.
+    fn probe(&self, addr: &str, replica: &Server) -> Probe {
+        self.probes
+            .lock()
+            .entry(addr.to_string())
+            .or_insert_with(|| {
+                let probe = probe(self.config.clone(), self.timeout, replica.clone());
+                let unrouteable = self.unrouteable.clone();
+                let probes = self.probes.clone();
+                let addr = addr.to_string();
+                async move {
+                    let routeable = probe.await;
+                    if routeable {
+                        unrouteable.write().remove(&addr);
+                    } else {
+                        debug!(
+                            "redis replica {addr} failed its probe and won't receive reads for {UNROUTEABLE_FOR:?}"
+                        );
+                        unrouteable
+                            .write()
+                            .insert(addr.clone(), Instant::now() + UNROUTEABLE_FOR);
+                    }
+                    // after recording the result, so a caller arriving now sees it
+                    probes.lock().remove(&addr);
+                    routeable
+                }
+                .boxed()
+                .shared()
             })
-            .build()
-        {
-            Ok(client) => client,
-            Err(err) => {
-                debug!("unable to build a probe client for redis replica {replica}: {err}");
-                return false;
-            }
-        };
+            .clone()
+    }
+}
 
-        // subscribe before connecting so that the connection result can't be missed
-        let mut connected = client.inner().notifications.connect.load().subscribe();
-        let connection_task = client.connect();
-        let result = tokio::time::timeout(self.timeout, connected.recv()).await;
-        // closes the probe connection, or abandons the attempt if it timed out
-        connection_task.abort();
+/// Connects to the replica and completes fred's connection handshake within the timeout.
+async fn probe(mut config: Config, timeout: Duration, replica: Server) -> bool {
+    config.server = ServerConfig::Centralized {
+        server: replica.clone(),
+    };
+    let client = match Builder::from_config(config)
+        .with_connection_config(|config| {
+            config.connection_timeout = timeout;
+            config.internal_command_timeout = timeout;
+        })
+        .build()
+    {
+        Ok(client) => client,
+        Err(err) => {
+            debug!("unable to build a probe client for redis replica {replica}: {err}");
+            return false;
+        }
+    };
 
-        match result {
-            Ok(Ok(Ok(()))) => true,
-            Ok(Ok(Err(err))) => {
-                debug!("redis replica {replica} failed its probe: {err}");
-                false
-            }
-            Ok(Err(err)) => {
-                debug!("redis replica {replica} probe ended without a result: {err}");
-                false
-            }
-            Err(_) => {
-                debug!(
-                    "redis replica {replica} didn't answer its probe within {:?}",
-                    self.timeout
-                );
-                false
-            }
+    // subscribe before connecting so that the connection result can't be missed
+    let mut connected = client.inner().notifications.connect.load().subscribe();
+    let connection_task = client.connect();
+    let result = tokio::time::timeout(timeout, connected.recv()).await;
+    // closes the probe connection, or abandons the attempt if it timed out
+    connection_task.abort();
+
+    match result {
+        Ok(Ok(Ok(()))) => true,
+        Ok(Ok(Err(err))) => {
+            debug!("redis replica {replica} failed its probe: {err}");
+            false
+        }
+        Ok(Err(err)) => {
+            debug!("redis replica {replica} probe ended without a result: {err}");
+            false
+        }
+        Err(_) => {
+            debug!("redis replica {replica} didn't answer its probe within {timeout:?}");
+            false
         }
     }
 }
@@ -109,23 +151,14 @@ impl ReplicaFilter for RouteableReplicaFilter {
             return false;
         }
 
-        let routeable = self.probe(replica).await;
-        if routeable {
-            self.unrouteable.write().remove(&addr);
-        } else {
-            debug!(
-                "redis replica {addr} failed its probe and won't receive reads for {UNROUTEABLE_FOR:?}"
-            );
-            self.unrouteable
-                .write()
-                .insert(addr, Instant::now() + UNROUTEABLE_FOR);
-        }
-        routeable
+        self.probe(&addr, replica).await
     }
 }
 
 #[cfg(test)]
 mod tests {
+    use futures::future::join_all;
+
     use super::*;
     use crate::cache::redis::fake_redis::Behaviour;
     use crate::cache::redis::fake_redis::FakeRedis;
@@ -189,6 +222,24 @@ mod tests {
             "the probe should give up after the timeout"
         );
         assert!(is_unrouteable(&filter, port));
+    }
+
+    /// Every client in a pool shares the filter and re-syncs at the same heartbeat, so they must
+    /// share one probe of a broken replica rather than each opening a connection and waiting on it.
+    #[tokio::test]
+    async fn concurrent_probes_of_a_replica_share_one_result() {
+        let (redis, port) = replica(Behaviour::Unresponsive).await;
+        let filter = filter();
+
+        let (primary, replica) = (server(1), server(port));
+        let start = Instant::now();
+        let results = join_all((0..4).map(|_| filter.filter(&primary, &replica))).await;
+        assert_eq!(results, [false; 4]);
+        assert_eq!(redis.replicas[0].stats.connections(), 1);
+        assert!(
+            start.elapsed() < TIMEOUT * 2,
+            "the probes should finish after one timeout"
+        );
     }
 
     #[tokio::test]

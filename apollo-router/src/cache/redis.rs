@@ -984,6 +984,11 @@ fn configure_cluster_replicas(
 /// connection once nothing has been written to it for `UnresponsiveConfig::max_timeout`, which
 /// steady traffic prevents, so without this a replica that stalls after connecting keeps receiving
 /// (and timing out) its share of reads.
+///
+/// One failed ping is enough to re-sync, which has a cost: fred re-syncs inside the client's
+/// router task, so the client's other commands wait while it probes each replica and reopens its
+/// connection to every one that passes. A stalled replica holds that up for one Redis `timeout`.
+/// Every client whose ping failed re-syncs, but they share one probe of each replica.
 async fn ping_replicas(pool: &RedisPool, caller: &'static str) {
     join_all(
         pool.clients()
@@ -1422,12 +1427,24 @@ mod test {
         const CONNECT_STALLED: &str = "connecting should not wait on a replica";
 
         async fn connect(redis: &FakeRedis) -> Result<RedisCacheStorage, BoxError> {
-            let config = serde_json::from_value(json!({
+            connect_with(redis, json!({})).await
+        }
+
+        /// Connects with the fields of `overrides` replacing the matrix's defaults.
+        async fn connect_with(
+            redis: &FakeRedis,
+            overrides: serde_json::Value,
+        ) -> Result<RedisCacheStorage, BoxError> {
+            let mut config = json!({
                 "urls": [redis.url],
                 "required_to_start": true,
                 "timeout": "1s",
-            }))?;
-            let storage = RedisCacheStorage::new(config, "test").await?;
+            });
+            if let (Some(config), Some(overrides)) = (config.as_object_mut(), overrides.as_object())
+            {
+                config.extend(overrides.clone());
+            }
+            let storage = RedisCacheStorage::new(serde_json::from_value(config)?, "test").await?;
             tokio::time::timeout(DEADLINE, storage.create_client_pool())
                 .await
                 .map_err(|_| CONNECT_STALLED)??;
@@ -1592,6 +1609,34 @@ mod test {
                 redis.primary.reads(),
                 primary_reads,
                 "reads should stay off the primary"
+            );
+            assert_pool_kept(&storage);
+            Ok(())
+        }
+
+        /// When a replica stalls, every client in the pool fails its heartbeat ping and re-syncs at
+        /// once. They share one probe of the stalled replica, so it gets one new connection
+        /// rather than one per client.
+        #[tokio::test]
+        async fn pool_clients_share_one_probe_of_a_stalled_replica() -> Result<(), BoxError> {
+            let redis = FakeRedis::start(Topology::Cluster, &[Behaviour::Healthy]).await;
+            let replica = &redis.replicas[0].stats;
+            let storage = connect_with(&redis, json!({ "pool_size": 4 })).await?;
+
+            replica.stall();
+            let connections = replica.connections();
+            ping_replicas(&storage).await;
+            assert_eq!(
+                replica.connections() - connections,
+                1,
+                "the clients should share one probe"
+            );
+
+            let primary_reads = redis.primary.reads();
+            round_trip(&storage).await?;
+            assert!(
+                redis.primary.reads() > primary_reads,
+                "reads should fall back to the primary"
             );
             assert_pool_kept(&storage);
             Ok(())
