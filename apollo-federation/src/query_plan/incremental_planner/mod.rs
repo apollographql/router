@@ -123,6 +123,12 @@ pub(crate) fn build_bulb_plan(
         connector_index: parameters.connector_index.clone(),
         caches: field_routing::PlannerCaches::new(),
         disabled_subgraphs: parameters.disabled_subgraphs.clone(),
+        // The whole operation, not just this search's selections: mutation
+        // planning runs one search per top-level field.
+        response_keys: field_routing::response_keys::OperationResponseKeys::new(
+            &parameters.operation.selection_set,
+            supergraph_schema,
+        ),
     };
 
     let root_qg_node = parameters.head;

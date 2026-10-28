@@ -39,7 +39,11 @@ use serde_json::Value;
 use sha2::Digest;
 use thiserror::Error;
 
+pub(crate) use self::apollo_configuration_parse::AutomaticUpgrade;
 pub(crate) use self::apollo_configuration_parse::ConfigurationParser;
+#[cfg(test)]
+pub(crate) use self::apollo_configuration_parse::ExternalValues;
+#[cfg(test)]
 pub(crate) use self::apollo_configuration_parse::Migration;
 #[cfg(test)]
 pub(crate) use self::apollo_configuration_parse::parse_configuration;
@@ -55,7 +59,6 @@ pub(crate) use self::schema::generate_config_schema;
 pub(crate) use self::schema::generate_upgrade;
 use self::server::Server;
 use self::subgraph::SubgraphConfiguration;
-pub(crate) use self::upgrade::uses_migrated_settings;
 use crate::ApolloRouterError;
 use crate::cache::DEFAULT_CACHE_CAPACITY;
 use crate::configuration::cooperative_cancellation::CooperativeCancellation;

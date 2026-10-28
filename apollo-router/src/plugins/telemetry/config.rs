@@ -11,8 +11,6 @@ use opentelemetry_sdk::metrics::Aggregation;
 use opentelemetry_sdk::metrics::Instrument;
 use opentelemetry_sdk::metrics::Stream;
 use opentelemetry_sdk::trace::SpanLimits;
-use schemars::JsonSchema;
-use serde::Deserialize;
 use serde::Serialize;
 use tower::BoxError;
 
@@ -123,8 +121,7 @@ pub(crate) struct MetricsCommon {
     #[config(skip_validate)]
     pub(crate) resource: BTreeMap<String, AttributeValue>,
     /// Custom buckets for all histograms
-    // f64 has no Validate impl.
-    #[config(default = default_buckets(), skip_validate)]
+    #[config(default = default_buckets())]
     pub(crate) buckets: Vec<f64>,
     /// Views applied on metrics
     pub(crate) views: Vec<MetricView>,
@@ -318,8 +315,7 @@ pub(crate) enum MetricAggregation {
     /// An aggregation that summarizes a set of measurements as an histogram with
     /// explicitly defined buckets.
     Histogram {
-        // f64 has no Validate impl.
-        #[config(required, skip_validate)]
+        #[config(required)]
         buckets: Vec<f64>,
     },
     /// Simply drop the metrics matching this view
@@ -529,8 +525,9 @@ fn default_sampler() -> SamplerOption {
     SamplerOption::Always(Sampler::AlwaysOn)
 }
 
-#[derive(Debug, Clone, Deserialize, Serialize, JsonSchema, PartialEq)]
-#[serde(untagged, deny_unknown_fields)]
+#[apollo_configuration::configuration]
+#[derive(Serialize, PartialEq)]
+#[serde(untagged)]
 #[allow(missing_docs)] // only public-but-hidden for tests
 pub enum AttributeValue {
     /// bool values
@@ -554,20 +551,6 @@ impl AttributeValue {
             AttributeValue::F64(v) => Some(*v),
             AttributeValue::String(v) => v.parse::<f64>().ok(),
             AttributeValue::Array(_) => None,
-        }
-    }
-}
-
-// f64 has no Validate impl, so the configuration attribute can't derive one for the F64 variant.
-// This validates every other variant; the enum is untagged, so each value keeps its own path.
-impl apollo_configuration::Validate for AttributeValue {
-    fn validate(&self, errors: apollo_configuration::ErrorCollector<'_>) {
-        match self {
-            AttributeValue::Bool(value) => value.validate(errors),
-            AttributeValue::I64(value) => value.validate(errors),
-            AttributeValue::F64(_) => {}
-            AttributeValue::String(value) => value.validate(errors),
-            AttributeValue::Array(values) => values.validate(errors),
         }
     }
 }
@@ -692,8 +675,9 @@ impl From<AttributeValue> for opentelemetry::Value {
     }
 }
 
-#[derive(Debug, Clone, Deserialize, Serialize, JsonSchema, PartialEq)]
-#[serde(untagged, deny_unknown_fields)]
+#[apollo_configuration::configuration]
+#[derive(Serialize, PartialEq)]
+#[serde(untagged)]
 pub(crate) enum AttributeArray {
     /// Array of bools
     Bool(Vec<bool>),
@@ -712,19 +696,6 @@ impl std::fmt::Display for AttributeArray {
             AttributeArray::I64(val) => write!(f, "{val:?}"),
             AttributeArray::F64(val) => write!(f, "{val:?}"),
             AttributeArray::String(val) => write!(f, "{val:?}"),
-        }
-    }
-}
-
-// f64 has no Validate impl, so the configuration attribute can't derive one for the F64 variant.
-// This validates every other variant; the enum is untagged, so each array keeps its own path.
-impl apollo_configuration::Validate for AttributeArray {
-    fn validate(&self, errors: apollo_configuration::ErrorCollector<'_>) {
-        match self {
-            AttributeArray::Bool(values) => values.validate(errors),
-            AttributeArray::I64(values) => values.validate(errors),
-            AttributeArray::F64(_) => {}
-            AttributeArray::String(values) => values.validate(errors),
         }
     }
 }
@@ -754,23 +725,13 @@ impl From<opentelemetry::Array> for AttributeArray {
     }
 }
 
-#[derive(Clone, Debug, Deserialize, JsonSchema, PartialEq)]
-#[serde(deny_unknown_fields, untagged)]
+#[apollo_configuration::configuration]
+#[derive(PartialEq)]
+#[serde(untagged)]
 pub(crate) enum SamplerOption {
     /// Sample a given fraction. Fractions >= 1 will always sample.
     TraceIdRatioBased(f64),
     Always(Sampler),
-}
-
-// f64 has no Validate impl, so the configuration attribute can't derive one for the
-// TraceIdRatioBased variant. The enum is untagged, so the sampler keeps its own path.
-impl apollo_configuration::Validate for SamplerOption {
-    fn validate(&self, errors: apollo_configuration::ErrorCollector<'_>) {
-        match self {
-            SamplerOption::TraceIdRatioBased(_) => {}
-            SamplerOption::Always(sampler) => sampler.validate(errors),
-        }
-    }
 }
 
 #[apollo_configuration::configuration]

@@ -185,21 +185,30 @@ const DEV_MODE_SETTINGS: [(&[&str], bool); 6] = [
 const UPGRADE_GUIDE: &str =
     "https://www.apollographql.com/docs/graphos/routing/upgrade/from-router-v2";
 
-/// Whether parsing first applies the current major version's migrations. Startup, reload and
-/// `router config validate` do; tests can check a document as written.
+/// Whether parsing first applies the current major version's migrations. Startup and reload do;
+/// tests can check a document as written. `router config validate` applies them too, through
+/// [`ConfigurationParser::parse_reporting_upgrade`].
 #[derive(Clone, Copy, PartialEq, Eq)]
 pub(crate) enum Migration {
     WithinMajor,
-    /// Applies the same migrations without the summary "needs to be upgraded" error or the
-    /// Rust-side migration logs, for callers that report migrations themselves. Each migration's
-    /// own notices (`Action::Log`) still print, as they do at startup.
-    WithinMajorQuietly,
     /// Applies another major version's within-major migrations, for tests of outcomes that none
     /// of the current major version's migrations produce.
     #[cfg(test)]
     WithinMajorOf(i64),
     /// Parses the document as written, for configurations built in code.
     None,
+}
+
+/// What the automatic upgrade did to a configuration, as
+/// [`ConfigurationParser::parse_reporting_upgrade`] returns it.
+#[derive(Debug, Default)]
+pub(crate) struct AutomaticUpgrade {
+    /// Whether the upgrade changed the configuration, so `router config upgrade` would update the
+    /// file.
+    pub(crate) changed: bool,
+    /// What the upgrade has to tell the operator, as
+    /// [`Upgraded::notices`](super::upgrade::Upgraded::notices) describes.
+    pub(crate) notices: Vec<String>,
 }
 
 /// Values the adapter reads from outside the document: expansion providers and injected
@@ -378,6 +387,37 @@ impl ConfigurationParser {
         text: &str,
         migration: Migration,
     ) -> Result<Configuration, ConfigurationError> {
+        self.parse_migrated(text, |file| migrate(file, migration))
+    }
+
+    /// Parses `text` as startup does, but returns what the automatic upgrade has to tell the
+    /// operator instead of logging it, for `router config validate` to report itself.
+    ///
+    /// When the upgrade itself fails, the text is parsed as written, with the same warning as at
+    /// startup, and the returned [`AutomaticUpgrade`] is empty.
+    pub(crate) fn parse_reporting_upgrade(
+        &mut self,
+        text: &str,
+    ) -> Result<(Configuration, AutomaticUpgrade), ConfigurationError> {
+        let mut upgrade = AutomaticUpgrade::default();
+        let config = self.parse_migrated(text, |file| {
+            let upgraded = upgrade_configuration_silently(file, UpgradeMode::current_minor())?;
+            upgrade = AutomaticUpgrade {
+                changed: upgraded.config != *file,
+                notices: upgraded.notices,
+            };
+            serialize_if_changed(file, upgraded.config)
+        })?;
+        Ok((config, upgrade))
+    }
+
+    /// Parses the document that `migrate` returns, or the text as written when it returns `None`
+    /// or fails.
+    fn parse_migrated(
+        &mut self,
+        text: &str,
+        migrate: impl FnOnce(&Value) -> Result<Option<String>, ConfigurationError>,
+    ) -> Result<Configuration, ConfigurationError> {
         // Clear on both success and failure (including unwinding), before another load can start.
         // In particular, a missing or rotated file must be read again on the next reload.
         scopeguard::defer! {
@@ -397,7 +437,7 @@ impl ConfigurationParser {
                 }
             })?
         };
-        let mut config = match migrate(&file, migration) {
+        let mut config = match migrate(&file) {
             Ok(None) => parse_document(text, self).map_err(|error| report_error(error, &file)),
             Ok(Some(migrated)) => parse_document(&migrated, self).map_err(|error| {
                 tracing::warn!(
@@ -428,15 +468,20 @@ impl ConfigurationParser {
 fn migrate(file: &Value, migration: Migration) -> Result<Option<String>, ConfigurationError> {
     let migrated = match migration {
         Migration::WithinMajor => upgrade_configuration(file, true, UpgradeMode::current_minor())?,
-        Migration::WithinMajorQuietly => {
-            upgrade_configuration(file, false, UpgradeMode::current_minor())?
-        }
         #[cfg(test)]
         Migration::WithinMajorOf(major) => {
             upgrade_configuration(file, true, UpgradeMode::Minor(major))?
         }
         Migration::None => return Ok(None),
     };
+    serialize_if_changed(file, migrated)
+}
+
+/// `migrated` serialized for parsing, or `None` when it is the same as `file`.
+fn serialize_if_changed(
+    file: &Value,
+    migrated: Value,
+) -> Result<Option<String>, ConfigurationError> {
     if migrated == *file {
         return Ok(None);
     }
@@ -565,7 +610,8 @@ fn report_error(error: ConfigError, file: &Value) -> ConfigurationError {
 
 /// Whether the upgrade `router config upgrade` performs changes `file`.
 fn upgrade_would_change(file: &Value) -> bool {
-    upgrade_configuration_silently(file, UpgradeMode::Major).is_ok_and(|upgraded| upgraded != *file)
+    upgrade_configuration_silently(file, UpgradeMode::Major)
+        .is_ok_and(|upgraded| upgraded.config != *file)
 }
 
 /// Parses the typed configuration, then the expanded document, with the same options.
@@ -644,6 +690,14 @@ mod tests {
 
     fn parse(text: &str) -> Result<Configuration, ConfigurationError> {
         parse_configuration(text, ExternalValues::default(), Migration::WithinMajor)
+    }
+
+    fn parse_reporting_upgrade(
+        text: &str,
+    ) -> Result<(Configuration, AutomaticUpgrade), ConfigurationError> {
+        ExternalValues::default()
+            .into_parser()?
+            .parse_reporting_upgrade(text)
     }
 
     fn env(name: &str, value: &str) -> ExternalValues {
@@ -941,7 +995,8 @@ mod tests {
         ] {
             let file: Value = serde_yaml::from_str(text).expect("test inputs are YAML");
             let migrated = upgrade_configuration_silently(&file, UpgradeMode::current_minor())
-                .expect("test inputs migrate");
+                .expect("test inputs migrate")
+                .config;
             assert_ne!(migrated, file, "startup no longer migrates:\n{text}");
         }
     }
@@ -964,33 +1019,37 @@ mod tests {
         .expect("the adapter migrates the removed setting");
     }
 
-    /// `router config validate` reports migrations itself, so its parse omits the summary error.
-    /// Each migration's own notice still prints, as it does at startup.
+    /// `router config validate` reports the upgrade itself, so its parse logs nothing about it at
+    /// any level and returns the migration's notice instead.
     #[test]
-    fn quiet_migration_omits_the_upgrade_required_error() {
-        assert_logs(
-            || {
-                parse_configuration(
-                    STARTUP_MIGRATED_SETTING,
-                    ExternalValues::default(),
-                    Migration::WithinMajorQuietly,
-                )
-            },
-            |lines| {
-                if let Some(line) = lines
-                    .iter()
-                    .find(|line| line.contains("needs to be upgraded"))
-                {
-                    return Err(format!("unexpected upgrade-required error: {line}"));
-                }
-                lines
-                    .iter()
-                    .any(|line| line.contains(STARTUP_MIGRATION_NOTICE))
-                    .then_some(())
-                    .ok_or_else(|| "the migration's own notice must still print".to_string())
+    fn reporting_upgrade_returns_notices_instead_of_logging_them() {
+        let (_, upgrade) = assert_logs(
+            || parse_reporting_upgrade(STARTUP_MIGRATED_SETTING),
+            |lines| match lines.iter().find(|line| {
+                line.contains("apollo_router::configuration::upgrade")
+                    || line.contains(STARTUP_MIGRATION_NOTICE)
+                    || line.contains("needs to be upgraded")
+            }) {
+                Some(line) => Err(format!("the upgrade must not be logged: {line}")),
+                None => Ok(()),
             },
         )
         .expect("the adapter migrates the removed setting");
+
+        assert!(upgrade.changed);
+        let [notice] = upgrade.notices.as_slice() else {
+            panic!("expected the migration's notice: {upgrade:?}");
+        };
+        assert!(notice.contains(STARTUP_MIGRATION_NOTICE), "{notice}");
+    }
+
+    #[test]
+    fn reporting_upgrade_of_a_current_configuration_is_empty() {
+        let (_, upgrade) = parse_reporting_upgrade("supergraph:\n  introspection: true\n")
+            .expect("the configuration is valid");
+
+        assert!(!upgrade.changed);
+        assert!(upgrade.notices.is_empty(), "{upgrade:?}");
     }
 
     #[test]

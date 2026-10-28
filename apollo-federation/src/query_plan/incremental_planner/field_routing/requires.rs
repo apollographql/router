@@ -13,110 +13,72 @@ use super::super::shared_path::SharedPath;
 use super::FieldRoutingSearchSpace;
 use super::commit::CommitCtx;
 use super::commit::CommitTarget;
+use super::response_keys::AliasIdentity;
 use super::state::PendingSelection;
 use super::state::PlanState;
 use crate::error::FederationError;
 use crate::operation::DirectiveList;
 use crate::operation::Field;
 use crate::operation::FieldSelection;
+use crate::operation::InlineFragment;
 use crate::operation::Selection;
+use crate::operation::SelectionId;
 use crate::operation::SelectionMap;
 use crate::operation::SelectionSet;
-use crate::operation::TYPENAME_FIELD;
+use crate::query_graph::graph_path::operation::OpGraphPathContext;
 use crate::query_graph::graph_path::operation::OpPathElement;
+use crate::schema::position::CompositeTypeDefinitionPosition;
 
 // ---------------------------------------------------------------------------
 // Free functions
 // ---------------------------------------------------------------------------
 
-/// Whether any top-level condition field carries arguments. Such fields can
-/// collide with a user selection of the same field under different arguments
-/// (the conflict-alias rename-back would clobber the condition data), so
-/// they must be aliased; argument-less ones safely share the user
-/// selection's key and stay un-aliased to avoid duplicate fetching.
-fn condition_fields_take_arguments(conditions: &SelectionSet) -> bool {
-    conditions.selections.values().any(|sel| {
-        let Selection::Field(field_sel) = sel else {
-            return false;
-        };
-        if *field_sel.field.name() == TYPENAME_FIELD {
-            return false;
-        }
-        !field_sel.field.arguments.is_empty()
-    })
-}
-
 /// An aliased condition SelectionSet plus (alias, original_name) pairs for
 /// generating input rewrites on the consuming entity fetch.
 type AliasedConditions = (Arc<SelectionSet>, Vec<(Name, Name)>);
 
-/// Alias top-level field selections in a @requires condition set so their
-/// response data lands under a unique key, avoiding collisions with
-/// user-requested fields at the same response path.
+/// Alias the top-level condition fields `needs_alias` picks, so their data
+/// lands under a key no other selection uses. The rest keep their own name
+/// and merge with any selection of the same field.
 ///
-/// Fields named in `keep_raw` stay un-aliased: they deliberately share the
-/// user selection's response key so the condition rides (and dedupes with)
-/// the user fetch chain instead of staging an aliased duplicate.
+/// Fields with the same [`AliasIdentity`] share an alias, so conditions on
+/// the same field stage one fetch chain between them.
 pub(super) fn alias_condition_fields(
     conditions: &Arc<SelectionSet>,
-    alias_ids: &mut Vec<Selection>,
-    keep_raw: &[Name],
+    alias_ids: &mut Vec<AliasIdentity>,
+    needs_alias: impl Fn(&FieldSelection) -> bool,
 ) -> Result<AliasedConditions, FederationError> {
     let mut alias_rewrites = Vec::new();
     let mut new_map = SelectionMap::new();
     for sel in conditions.selections.values() {
-        match sel {
-            Selection::Field(field_sel) => {
-                if *field_sel.field.name() == TYPENAME_FIELD
-                    || keep_raw.contains(field_sel.field.name())
-                {
-                    new_map.insert(sel.clone());
-                    continue;
-                }
-                let original_name = field_sel.field.response_name().clone();
-                // Intern the alias id by selection containment: a condition
-                // shares an alias with any interned entry it contains or is
-                // contained by, so overlapping conditions stage their shared
-                // prefix once (the fetch graph dedupes re-routed selections
-                // under the same alias path). Conditions differing in
-                // arguments get distinct aliases (containment requires
-                // argument equality).
-                let idx = match alias_ids
-                    .iter()
-                    .position(|canon| canon.contains(sel) || sel.contains(canon))
-                {
-                    Some(i) => {
-                        if sel.contains(&alias_ids[i]) {
-                            alias_ids[i] = sel.clone();
-                        }
-                        i
-                    }
-                    None => {
-                        alias_ids.push(sel.clone());
-                        alias_ids.len() - 1
-                    }
-                };
-                let alias = Name::new(&format!("__require_{idx}_{original_name}"))
-                    .map_err(|_| FederationError::internal("invalid condition alias name"))?;
-                let aliased_field = Field {
-                    alias: Some(alias.clone()),
-                    schema: field_sel.field.schema.clone(),
-                    field_position: field_sel.field.field_position.clone(),
-                    arguments: field_sel.field.arguments.clone(),
-                    directives: field_sel.field.directives.clone(),
-                    sibling_typename: field_sel.field.sibling_typename.clone(),
-                };
-                let aliased_sel = Selection::Field(Arc::new(FieldSelection {
-                    field: aliased_field,
-                    selection_set: field_sel.selection_set.clone(),
-                }));
-                alias_rewrites.push((alias, original_name));
-                new_map.insert(aliased_sel);
-            }
-            other => {
-                new_map.insert(other.clone());
-            }
+        let Selection::Field(field_sel) = sel else {
+            new_map.insert(sel.clone());
+            continue;
+        };
+        if !needs_alias(field_sel) {
+            new_map.insert(sel.clone());
+            continue;
         }
+        let identity = AliasIdentity::of(field_sel);
+        let idx = match alias_ids.iter().position(|known| *known == identity) {
+            Some(i) => i,
+            None => {
+                alias_ids.push(identity);
+                alias_ids.len() - 1
+            }
+        };
+        let original_name = field_sel.field.response_name().clone();
+        let alias = Name::new(&format!("__require_{idx}_{original_name}"))
+            .map_err(|_| FederationError::internal("invalid condition alias name"))?;
+        let aliased_sel = Selection::Field(Arc::new(FieldSelection {
+            field: Field {
+                alias: Some(alias.clone()),
+                ..field_sel.field.clone()
+            },
+            selection_set: field_sel.selection_set.clone(),
+        }));
+        alias_rewrites.push((alias, original_name));
+        new_map.insert(aliased_sel);
     }
     let aliased_ss = SelectionSet {
         schema: conditions.schema.clone(),
@@ -126,53 +88,44 @@ pub(super) fn alias_condition_fields(
     Ok((Arc::new(aliased_ss), alias_rewrites))
 }
 
-/// Widen `conditions` so each top-level field sharing a response name with a
-/// plain (un-aliased) input field already riding `node`'s representation for
-/// `source_type` also selects that sibling's sub-fields. The alias's
-/// rename-back on the consuming fetch is a remove+insert on the response
-/// object, so the aliased data replaces whatever the plain sibling put under
-/// that key. Carrying the sibling's selection inside the aliased field keeps
-/// the post-rename object complete. Fields named in `keep_raw` are exempt:
-/// they stay un-aliased, so no rename-back ever removes the sibling's data
-/// from under the shared key.
-fn widen_conditions_with_plain_sibling_inputs(
+/// Widen each aliased condition field whose original name is also a field
+/// of a key input on `edge` with that key field's sub-selection. The alias is
+/// renamed back by removing and reinserting the key, so without it the rename
+/// would drop the key's nested fields from the representation.
+fn widen_aliases_with_key_inputs(
     conditions: &Arc<SelectionSet>,
+    alias_rewrites: &[(Name, Name)],
     graph: &super::super::fetch_graph::FetchGraph,
-    node: petgraph::graph::NodeIndex,
+    edge: EdgeIndex,
     source_type: &Name,
-    keep_raw: &[Name],
 ) -> Result<Arc<SelectionSet>, FederationError> {
     let mut widened: Option<SelectionSet> = None;
-    for input in graph.incoming_inputs(node) {
-        if !input.condition_alias_rewrites().is_empty() || *input.source_type_name() != *source_type
-        {
+    for input in &graph.edge_weight_raw(edge).inputs {
+        if input.rewrite_info().is_none() || input.source_type_name() != source_type {
             continue;
         }
-        for sibling in input.conditions().selections.values() {
-            let Selection::Field(sibling_field) = sibling else {
+        for key_sel in input.conditions().selections.values() {
+            let Selection::Field(key_field) = key_sel else {
                 continue;
             };
-            let Some(sibling_sub) = &sibling_field.selection_set else {
+            let Some(key_sub) = &key_field.selection_set else {
                 continue;
             };
-            let name = sibling_field.field.response_name();
-            let collides = !keep_raw.contains(name)
-                && conditions.selections.values().any(|sel| {
-                    matches!(sel, Selection::Field(f)
-                        if f.field.response_name() == name && f.selection_set.is_some())
-                });
-            if !collides {
+            let Some((alias, _)) = alias_rewrites
+                .iter()
+                .find(|(_, original)| original == key_field.field.response_name())
+            else {
                 continue;
-            }
+            };
             let target = widened.get_or_insert_with(|| (**conditions).clone());
             let mut new_map = SelectionMap::new();
             for sel in target.selections.values() {
                 if let Selection::Field(f) = sel
-                    && f.field.response_name() == name
+                    && f.field.response_name() == alias
                     && let Some(sub) = &f.selection_set
                 {
                     let mut merged = sub.clone();
-                    merged.add_selection_set(sibling_sub)?;
+                    merged.add_selection_set(key_sub)?;
                     new_map.insert(Selection::Field(Arc::new(FieldSelection {
                         field: f.field.clone(),
                         selection_set: Some(merged),
@@ -187,36 +140,59 @@ fn widen_conditions_with_plain_sibling_inputs(
     Ok(widened.map(Arc::new).unwrap_or_else(|| conditions.clone()))
 }
 
-/// Trailing inline-fragment elements of `op_path` (after the last field)
-/// that carry @skip/@include, which a key hop must carry into the entity
-/// fetch's op path. Only condition directives are kept.
+/// The @skip/@include directives of `directives`.
+pub(super) fn condition_directives(directives: &DirectiveList) -> DirectiveList {
+    directives
+        .iter()
+        .filter(|d| d.name == "skip" || d.name == "include")
+        .cloned()
+        .collect()
+}
+
+/// The @skip/@include conditions on the last field of `op_path` and on the
+/// inline fragments after it, as condition-only fragments, which a key hop
+/// must carry into the entity fetch's op path. Type conditions are dropped:
+/// the entity root and the key inputs already narrow the type, and the type
+/// may not exist in the entity's subgraph (an @interfaceObject's
+/// implementations).
 ///
-/// FIXME: non-trailing conditions are not propagated across key hops.
-/// See `non_trailing_skip_is_dropped`.
+/// FIXME: conditions above the last field are not propagated across key
+/// hops. See `non_trailing_skip_is_dropped`.
 pub(super) fn trailing_condition_fragments(
     op_path: &SharedPath<Arc<OpPathElement>>,
 ) -> Vec<Arc<OpPathElement>> {
     let mut trailing = Vec::new();
     for element in op_path.iter() {
         match element.as_ref() {
-            OpPathElement::Field(_) => trailing.clear(),
-            OpPathElement::InlineFragment(frag) => {
-                let conditions: DirectiveList = frag
-                    .directives
-                    .iter()
-                    .filter(|d| d.name == "skip" || d.name == "include")
-                    .cloned()
-                    .collect();
+            OpPathElement::Field(field) => {
+                trailing.clear();
+                let conditions = condition_directives(&field.directives);
                 if conditions.is_empty() {
                     continue;
                 }
-                if conditions.len() == frag.directives.len() {
-                    trailing.push(element.clone());
-                } else {
-                    trailing.push(Arc::new(OpPathElement::InlineFragment(
-                        frag.with_updated_directives(conditions),
-                    )));
+                let Ok(Ok(field_type)) = field
+                    .output_base_type()
+                    .map(CompositeTypeDefinitionPosition::try_from)
+                else {
+                    continue;
+                };
+                trailing.push(Arc::new(OpPathElement::InlineFragment(InlineFragment {
+                    schema: field.schema.clone(),
+                    parent_type_position: field_type,
+                    type_condition_position: None,
+                    directives: conditions,
+                    selection_id: SelectionId::new(),
+                })));
+            }
+            OpPathElement::InlineFragment(frag) => {
+                let conditions = condition_directives(&frag.directives);
+                if conditions.is_empty() {
+                    continue;
                 }
+                trailing.push(Arc::new(OpPathElement::InlineFragment(
+                    frag.with_updated_directives(conditions)
+                        .with_updated_type_condition(None),
+                )));
             }
         }
     }
@@ -232,6 +208,75 @@ pub(super) fn trailing_condition_fragments(
 pub(super) fn unconditioned_input_path(
     op_path: &SharedPath<Arc<OpPathElement>>,
 ) -> SharedPath<Arc<OpPathElement>> {
+    input_path_keeping(op_path, &DirectiveList::new())
+}
+
+/// `op_path` for appending the key inputs of an entity fetch gated on the
+/// @skip/@include of `trailing_condition_fragments(op_path)`: like
+/// `unconditioned_input_path`, but the conditions the fetch is gated on are
+/// kept, so that a fetch whose selections all sit under one such condition
+/// (a re-fetch lifted under it) can be gated on it as well. The entity
+/// fetch's representation must be built under the same conditions
+/// (`trailing_conditions_context`): it is not gated on them once it merges
+/// with a differently gated fetch, and must then read only the keys of the
+/// branches that hold.
+pub(super) fn gated_input_path(
+    op_path: &SharedPath<Arc<OpPathElement>>,
+) -> SharedPath<Arc<OpPathElement>> {
+    let gate: DirectiveList = trailing_condition_fragments(op_path)
+        .iter()
+        .flat_map(|element| match element.as_ref() {
+            OpPathElement::InlineFragment(frag) => frag.directives.iter().cloned().collect(),
+            OpPathElement::Field(_) => Vec::new(),
+        })
+        .collect();
+    input_path_keeping(op_path, &gate)
+}
+
+/// `op_path` followed by the @skip/@include on the `selection` field itself
+/// (`email @include(if: $x)`) as a condition-only fragment, so that
+/// `gated_input_path` and `trailing_conditions_context` also keep the
+/// conditions that gate the field's fetch through the field.
+pub(super) fn with_own_conditions(
+    op_path: &SharedPath<Arc<OpPathElement>>,
+    selection: &Selection,
+) -> SharedPath<Arc<OpPathElement>> {
+    let Selection::Field(field_sel) = selection else {
+        return op_path.clone();
+    };
+    let field = &field_sel.field;
+    let conditions = condition_directives(&field.directives);
+    if conditions.is_empty() {
+        return op_path.clone();
+    }
+    op_path.pushed(Arc::new(OpPathElement::InlineFragment(InlineFragment {
+        schema: field.schema.clone(),
+        parent_type_position: field.field_position.parent(),
+        type_condition_position: None,
+        directives: conditions,
+        selection_id: SelectionId::new(),
+    })))
+}
+
+/// The @skip/@include of `trailing_condition_fragments(op_path)`, which
+/// `gated_input_path` keeps on the key inputs, as the context to build the
+/// entity representation under.
+pub(super) fn trailing_conditions_context(
+    op_path: &SharedPath<Arc<OpPathElement>>,
+) -> Result<OpGraphPathContext, FederationError> {
+    trailing_condition_fragments(op_path)
+        .iter()
+        .try_fold(OpGraphPathContext::default(), |context, element| {
+            context.with_context_of(element)
+        })
+}
+
+/// `op_path` with the @skip/@include not in `kept` stripped from its
+/// inline-fragment elements.
+fn input_path_keeping(
+    op_path: &SharedPath<Arc<OpPathElement>>,
+    kept: &DirectiveList,
+) -> SharedPath<Arc<OpPathElement>> {
     let mut elements = Vec::with_capacity(op_path.len());
     for element in op_path.iter() {
         match element.as_ref() {
@@ -240,7 +285,9 @@ pub(super) fn unconditioned_input_path(
                 let stripped: DirectiveList = frag
                     .directives
                     .iter()
-                    .filter(|d| d.name != "skip" && d.name != "include")
+                    .filter(|d| {
+                        (d.name != "skip" && d.name != "include") || kept.iter().any(|k| k == *d)
+                    })
                     .cloned()
                     .collect();
                 if stripped.len() == frag.directives.len() {
@@ -256,230 +303,25 @@ pub(super) fn unconditioned_input_path(
     SharedPath::from_vec(elements)
 }
 
-/// Whether any element of `path` is gated by @skip/@include.
-fn path_has_boolean_conditions(path: &SharedPath<Arc<OpPathElement>>) -> bool {
-    path.iter().any(|element| {
-        let directives = match element.as_ref() {
-            OpPathElement::Field(field) => &field.directives,
-            OpPathElement::InlineFragment(frag) => &frag.directives,
-        };
-        directives
-            .iter()
-            .any(|d| d.name == "skip" || d.name == "include")
-    })
-}
-
-/// A user field a @requires condition field named `name` can safely share a
-/// response key with: same name, un-aliased, argument-less, and not gated
-/// by @skip/@include (inputs must be unconditional).
-fn is_shareable_user_field(field: &Field, name: &Name) -> bool {
-    field.alias.is_none()
-        && field.name() == name
-        && field.arguments.is_empty()
-        && !field
-            .directives
-            .iter()
-            .any(|d| d.name == "skip" || d.name == "include")
-}
-
-/// Structural equality of op-path elements, with an `Arc` fast path (sibling
-/// pendings share their parent's path `Arc`s).
-fn same_op_element(a: &Arc<OpPathElement>, b: &Arc<OpPathElement>) -> bool {
-    if Arc::ptr_eq(a, b) {
-        return true;
-    }
-    match (a.as_ref(), b.as_ref()) {
-        (OpPathElement::Field(x), OpPathElement::Field(y)) => {
-            x.response_name() == y.response_name()
-                && x.name() == y.name()
-                && x.arguments == y.arguments
-                && x.directives == y.directives
-        }
-        (OpPathElement::InlineFragment(x), OpPathElement::InlineFragment(y)) => {
-            x.type_condition_position == y.type_condition_position && x.directives == y.directives
-        }
-        _ => false,
-    }
-}
-
-/// Walk `selections` down the op-path `elements`, matching fields by
-/// response name/name/arguments and inline fragments by type condition.
-/// `None` when any element has no matching selection.
-fn descend_selections<'a>(
-    mut selections: &'a SelectionSet,
-    elements: &[&Arc<OpPathElement>],
-) -> Option<&'a SelectionSet> {
-    for element in elements {
-        let next = match element.as_ref() {
-            OpPathElement::Field(f) => selections.selections.values().find_map(|sel| match sel {
-                Selection::Field(fs)
-                    if fs.field.response_name() == f.response_name()
-                        && fs.field.name() == f.name()
-                        && fs.field.arguments == f.arguments =>
-                {
-                    fs.selection_set.as_ref()
-                }
-                _ => None,
-            }),
-            OpPathElement::InlineFragment(fr) => {
-                selections.selections.values().find_map(|sel| match sel {
-                    Selection::InlineFragment(is)
-                        if is.inline_fragment.type_condition_position
-                            == fr.type_condition_position =>
-                    {
-                        Some(&is.selection_set)
-                    }
-                    _ => None,
-                })
-            }
-        };
-        selections = next?;
-    }
-    Some(selections)
-}
-
-/// Whether a fetch group's committed selections include a shareable user
-/// selection of `name` at exactly position `anchor`.
-fn committed_selects_field(
-    entries: &[super::super::fetch_graph::selection_builder::SelectionEntry],
-    anchor: &[&Arc<OpPathElement>],
-    name: &Name,
-) -> bool {
-    'entries: for entry in entries {
-        let path: Vec<&Arc<OpPathElement>> = entry.path().iter().collect();
-        let common = path.len().min(anchor.len());
-        if !path[..common]
-            .iter()
-            .zip(&anchor[..common])
-            .all(|(e, a)| same_op_element(e, a))
-        {
-            continue 'entries;
-        }
-        if path.len() > anchor.len() {
-            if let OpPathElement::Field(field) = path[anchor.len()].as_ref()
-                && is_shareable_user_field(field, name)
-            {
-                return true;
-            }
-            continue 'entries;
-        }
-        let Some(root) = entry.selections().map(|arc| arc.as_ref()) else {
-            continue 'entries;
-        };
-        let Some(selections) = descend_selections(root, &anchor[path.len()..]) else {
-            continue 'entries;
-        };
-        if selections.selections.values().any(
-            |sel| matches!(sel, Selection::Field(fs) if is_shareable_user_field(&fs.field, name)),
-        ) {
-            return true;
-        }
-    }
-    false
-}
-
 // ---------------------------------------------------------------------------
 // Methods on FieldRoutingSearchSpace
 // ---------------------------------------------------------------------------
 
 impl FieldRoutingSearchSpace {
-    /// Top-level @requires condition fields that can reuse the user
-    /// selection's response key instead of staging an aliased duplicate.
-    fn shareable_condition_fields(
-        &self,
-        state: &PlanState,
-        pending: &PendingSelection,
-        source: &super::NodeSource,
-        conditions: &SelectionSet,
-    ) -> Vec<Name> {
-        use super::super::fetch_graph::FetchGroupKind;
-
-        if path_has_boolean_conditions(&pending.op_path) {
-            return Vec::new();
-        }
-        let anchor: Vec<&Arc<OpPathElement>> = pending.op_path.iter().collect();
-        let sibling_scan: Option<(Vec<crate::query_plan::FetchDataPathElement>, _)> = self
-            .entity_root_path(source.type_pos.type_name())
-            .ok()
-            .map(|root| (self.pending_merge_at(state, pending), root));
-        let mut shared = Vec::new();
-        for sel in conditions.selections.values() {
-            let Selection::Field(cond_field) = sel else {
-                continue;
-            };
-            let name = cond_field.field.name();
-            if *name == TYPENAME_FIELD || !cond_field.field.arguments.is_empty() {
-                continue;
-            }
-            let on_stack = state.pending.iter().any(|p| {
-                p.fetch_node == pending.fetch_node
-                    && p.condition.is_none()
-                    && matches!(
-                        &p.selection,
-                        Selection::Field(user) if is_shareable_user_field(&user.field, name)
-                    )
-                    && p.op_path.len() == anchor.len()
-                    && p.op_path
-                        .iter()
-                        .zip(anchor.iter())
-                        .all(|(a, b)| same_op_element(a, b))
-            });
-            let committed = on_stack
-                || committed_selects_field(
-                    state
-                        .graph
-                        .node(pending.fetch_node)
-                        .selection_builder
-                        .entries(),
-                    &anchor,
-                    name,
-                );
-            let in_sibling_entity = committed
-                || sibling_scan.as_ref().is_some_and(|(merge_at, root)| {
-                    let root_anchor: Vec<&Arc<OpPathElement>> = root.iter().collect();
-                    state.graph.node_indices().any(|idx| {
-                        idx != pending.fetch_node
-                            && matches!(state.graph.node(idx).kind, FetchGroupKind::Entity { .. })
-                            && state.graph.merge_at(idx) == *merge_at
-                            && committed_selects_field(
-                                state.graph.node(idx).selection_builder.entries(),
-                                &root_anchor,
-                                name,
-                            )
-                    })
-                });
-            if in_sibling_entity {
-                shared.push(name.clone());
-            }
-        }
-        shared
-    }
-
-    /// Conditions staged for a key hop that needs aliasing. Shared fields
-    /// stay un-aliased; the remaining (aliased) fields are widened against
-    /// plain sibling inputs in the same representation.
-    fn stage_aliased_conditions(
+    /// Alias the condition fields whose response key, at the position the
+    /// conditions are selected, could hold a different field.
+    fn stage_condition_aliases(
         &self,
         state: &mut PlanState,
         pending: &PendingSelection,
-        source: &super::NodeSource,
         requires_conditions: &Arc<SelectionSet>,
-        target_fetch_node: petgraph::graph::NodeIndex,
-        resolvable_in_place: bool,
     ) -> Result<AliasedConditions, FederationError> {
-        let shared = if resolvable_in_place {
-            Vec::new()
-        } else {
-            self.shareable_condition_fields(state, pending, source, requires_conditions)
-        };
-        let widened = widen_conditions_with_plain_sibling_inputs(
+        let merge_at = self.pending_merge_at(state, pending);
+        alias_condition_fields(
             requires_conditions,
-            &state.graph,
-            target_fetch_node,
-            source.type_pos.type_name(),
-            &shared,
-        )?;
-        alias_condition_fields(&widened, &mut state.condition_alias_ids, &shared)
+            &mut state.condition_alias_ids,
+            |field| self.response_keys.condition_needs_alias(&merge_at, field),
+        )
     }
 
     /// Handle @requires on the routed edge, applying the resolution strategy
@@ -499,49 +341,32 @@ impl FieldRoutingSearchSpace {
 
         if choice.is_key_hop() {
             let source = self.node_source(pending.query_graph_node)?;
-            // A connector anchor returns only the conditions its selection
-            // maps; the rest are routed.
-            let resolvable_in_place = choice.requires_resolvable_in_place()
-                && self
-                    .connector_unprovided(
-                        state,
-                        pending.fetch_node,
-                        &pending.op_path,
-                        requires_conditions,
-                    )
-                    .is_none();
-
-            let has_input_conflict = resolvable_in_place
-                && key_hop_edge.is_some_and(|e| {
-                    self.has_conflicting_requires_inputs(&state.graph, e, requires_conditions)
-                });
-            let needs_alias = !resolvable_in_place
-                || has_input_conflict
-                || condition_fields_take_arguments(requires_conditions);
-            let (conditions, alias_rewrites) = if needs_alias {
-                self.stage_aliased_conditions(
-                    state,
-                    pending,
-                    &source,
-                    requires_conditions,
-                    target.fetch_node,
-                    resolvable_in_place,
-                )?
-            } else {
-                (requires_conditions.clone(), Vec::new())
+            let (conditions, alias_rewrites) =
+                self.stage_condition_aliases(state, pending, requires_conditions)?;
+            let conditions = match key_hop_edge {
+                Some(edge) => widen_aliases_with_key_inputs(
+                    &conditions,
+                    &alias_rewrites,
+                    &state.graph,
+                    edge,
+                    source.type_pos.type_name(),
+                )?,
+                None => conditions,
             };
-
-            let rewrites_collide = key_hop_edge.is_some_and(|e| {
-                state
-                    .graph
-                    .has_conflicting_condition_rewrites(e, &alias_rewrites)
+            let input_conflict = key_hop_edge.is_some_and(|e| {
+                Self::has_conflicting_requires_inputs(&state.graph, e, &conditions, &alias_rewrites)
             });
             let input = InputContribution::Requires {
                 source_type_name: source.type_pos.type_name().clone(),
                 conditions: conditions.clone(),
                 condition_alias_rewrites: alias_rewrites,
+                // Under the same conditions as the key (`commit_key_hop`).
+                needed_under: trailing_conditions_context(&with_own_conditions(
+                    &pending.op_path,
+                    &pending.selection,
+                ))?,
             };
-            let dest = if has_input_conflict || rewrites_collide {
+            let dest = if input_conflict {
                 // The original target.fetch_node is abandoned: it retains its
                 // key-hop edge and inputs but receives no query selections, so
                 // plan_builder's empty-selection pruning drops it.
@@ -565,8 +390,7 @@ impl FieldRoutingSearchSpace {
             };
 
             // Split the staged conditions: aliasing keeps field names, so a
-            // connector anchor's split matches the one that cleared
-            // `resolvable_in_place`.
+            // connector anchor maps the same fields with or without aliases.
             let (in_place, routed) = self.split_in_place(
                 state,
                 pending,
@@ -598,38 +422,42 @@ impl FieldRoutingSearchSpace {
             ));
         }
 
-        // In place: the fields sit alongside the field.
+        // In place: the fields sit alongside the field. No entity
+        // representation reads them, so aliases need no rename back.
+        let (conditions, _) = self.stage_condition_aliases(state, pending, requires_conditions)?;
         state.graph.append_selection(
             target.fetch_node,
             &unconditioned_input_path(&pending.op_path),
-            Some(requires_conditions),
+            Some(&conditions),
         );
         Ok(target)
     }
 
-    /// Whether adding `new_conditions` to `edge` would collide in the entity
-    /// representation: two conditions sharing a response name but differing
-    /// in arguments, or a plain condition whose response name matches the
-    /// original name of an existing alias rewrite (the rename-back would
-    /// overwrite the plain data).
+    /// Whether adding these inputs to `edge` would put two different fields
+    /// under one key of the entity representation. An alias is renamed back
+    /// by removing and reinserting the key, so it replaces whatever another
+    /// input put there.
     fn has_conflicting_requires_inputs(
-        &self,
         graph: &super::super::fetch_graph::FetchGraph,
         edge: EdgeIndex,
         new_conditions: &Arc<SelectionSet>,
+        new_rewrites: &[(Name, Name)],
     ) -> bool {
-        let existing = &graph.edge_weight_raw(edge).inputs;
-        for input in existing {
-            let rewrites = input.condition_alias_rewrites();
-            if rewrites.is_empty() {
-                if Self::plain_input_has_argument_conflict(input.conditions(), new_conditions) {
-                    return true;
-                }
-            } else if Self::aliased_input_collides_with_plain(rewrites, new_conditions) {
-                return true;
-            }
+        if graph.has_conflicting_condition_rewrites(edge, new_rewrites) {
+            return true;
         }
-        false
+        graph.edge_weight_raw(edge).inputs.iter().any(|input| {
+            let rewrites = input.condition_alias_rewrites();
+            if !rewrites.is_empty() {
+                return Self::aliased_input_collides_with_plain(rewrites, new_conditions);
+            }
+            Self::plain_input_has_argument_conflict(input.conditions(), new_conditions)
+                // Splitting cannot separate a condition from the key it
+                // enters with, so key inputs are handled by widening the
+                // alias instead (`widen_aliases_with_key_inputs`).
+                || (input.rewrite_info().is_none()
+                    && Self::aliased_input_collides_with_plain(new_rewrites, input.conditions()))
+        })
     }
 
     /// Two plain inputs share a response name but differ in arguments.
@@ -656,23 +484,17 @@ impl FieldRoutingSearchSpace {
         false
     }
 
-    /// A new plain condition's response name matches a rewrite's original
-    /// name, so the rename-back would overwrite the plain data at runtime.
+    /// A plain condition's response name matches a rewrite's original name,
+    /// so the rename-back would overwrite the plain data at runtime.
     fn aliased_input_collides_with_plain(
         rewrites: &[(Name, Name)],
-        new_conditions: &Arc<SelectionSet>,
+        plain_conditions: &SelectionSet,
     ) -> bool {
-        for (_alias, original) in rewrites {
-            for new_sel in new_conditions.selections.values() {
-                let Selection::Field(new_field) = new_sel else {
-                    continue;
-                };
-                if new_field.field.response_name() == original {
-                    return true;
-                }
-            }
-        }
-        false
+        rewrites.iter().any(|(_alias, original)| {
+            plain_conditions.selections.values().any(
+                |sel| matches!(sel, Selection::Field(field) if field.field.response_name() == original),
+            )
+        })
     }
 }
 
@@ -766,5 +588,31 @@ mod tests {
             0,
             "known gap: non-trailing @skip is not propagated across key hops",
         );
+    }
+
+    /// Only top-level fields get aliases; a fragment keeps the names of the
+    /// fields inside it. A field with the same identity reuses its alias.
+    #[test]
+    fn alias_condition_fields_aliases_fields_and_keeps_fragments() {
+        let sdl =
+            "type Query { i: I } interface I { a: Int } type A implements I { a: Int b: Int }";
+        let schema = apollo_compiler::schema::Schema::parse_and_validate(sdl, "schema.graphql")
+            .expect("valid schema");
+        let schema = ValidFederationSchema::new(schema).expect("valid federation schema");
+        let interface = schema.get_type(&name!("I")).expect("I exists");
+        let conditions = SelectionSet::parse(
+            schema,
+            interface.try_into().expect("I is composite"),
+            "a ... on A { b }",
+        )
+        .expect("conditions parse");
+        let conditions = Arc::new(conditions);
+        let mut alias_ids = Vec::new();
+        for _ in 0..2 {
+            let (aliased, rewrites) =
+                alias_condition_fields(&conditions, &mut alias_ids, |_| true).expect("aliases");
+            assert_eq!(aliased.to_string(), "{ __require_0_a: a ... on A { b } }");
+            assert_eq!(rewrites, vec![(name!("__require_0_a"), name!("a"))]);
+        }
     }
 }

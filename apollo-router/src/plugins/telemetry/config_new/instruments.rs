@@ -43,7 +43,6 @@ use crate::Context;
 use crate::metrics;
 use crate::plugins::subscription::SUBSCRIPTION_SUBGRAPH_NAME_CONTEXT_KEY;
 use crate::plugins::telemetry::CLIENT_NAME;
-use crate::plugins::telemetry::apollo::Config;
 use crate::plugins::telemetry::config_new::Selectors;
 use crate::plugins::telemetry::config_new::apollo::instruments::ApolloConnectorInstruments;
 use crate::plugins::telemetry::config_new::apollo::instruments::ApolloSubgraphInstruments;
@@ -782,9 +781,9 @@ impl InstrumentsConfig {
     pub(crate) fn new_apollo_subgraph_instruments(
         &self,
         static_instruments: Arc<HashMap<String, StaticInstrument>>,
-        apollo_config: Config,
+        subgraph_metrics: bool,
     ) -> ApolloSubgraphInstruments {
-        ApolloSubgraphInstruments::new(static_instruments, apollo_config)
+        ApolloSubgraphInstruments::new(static_instruments, subgraph_metrics)
     }
 
     pub(crate) fn new_connector_instruments(
@@ -839,9 +838,9 @@ impl InstrumentsConfig {
     pub(crate) fn new_apollo_connector_instruments(
         &self,
         static_instruments: Arc<HashMap<String, StaticInstrument>>,
-        apollo_config: Config,
+        subgraph_metrics: bool,
     ) -> ApolloConnectorInstruments {
-        ApolloConnectorInstruments::new(static_instruments, apollo_config)
+        ApolloConnectorInstruments::new(static_instruments, subgraph_metrics)
     }
 
     pub(crate) fn new_builtin_graphql_instruments(&self) -> HashMap<String, StaticInstrument> {
@@ -2756,6 +2755,7 @@ mod tests {
     use crate::plugins::telemetry::APOLLO_PRIVATE_QUERY_DEPTH;
     use crate::plugins::telemetry::APOLLO_PRIVATE_QUERY_HEIGHT;
     use crate::plugins::telemetry::APOLLO_PRIVATE_QUERY_ROOT_FIELDS;
+    use crate::plugins::telemetry::apollo::Config;
     use crate::plugins::telemetry::config_new::cache::CacheInstruments;
     use crate::plugins::telemetry::config_new::graphql::GraphQLInstruments;
     use crate::plugins::telemetry::config_new::instruments::Instrumented;
@@ -3206,7 +3206,7 @@ mod tests {
                                             Arc::new(
                                                 config.new_builtin_apollo_subgraph_instruments(),
                                             ),
-                                            apollo_config.clone(),
+                                            apollo_config.subgraph_metrics,
                                         ));
                                     cache_instruments = Some(config.new_cache_instruments(
                                         Arc::new(config.new_builtin_cache_instruments()),
@@ -3449,7 +3449,7 @@ mod tests {
                                                     config
                                                         .new_builtin_apollo_connector_instruments(),
                                                 ),
-                                                apollo_config.clone(),
+                                                apollo_config.subgraph_metrics,
                                             );
                                         apollo_connector_instruments.on_request(&request);
                                         apollo_connector_instruments

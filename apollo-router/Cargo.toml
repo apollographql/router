@@ -63,7 +63,7 @@ apollo-cache-memory.workspace = true
 apollo-compiler.workspace = true
 apollo-configuration.workspace = true
 apollo-federation = { path = "../apollo-federation", version = "=3.0.0-preview.0" }
-apollo-qos = "0.10.1"
+apollo-qos = "0.10.4"
 apollo-redaction = { version = "0.3.2", features = ["schemars"] }
 async-compression = { version = "0.4.6", features = [
     "tokio",

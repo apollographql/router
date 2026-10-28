@@ -33,6 +33,24 @@ async fn fed1_schema_with_new_qp() {
 }
 
 #[tokio::test(flavor = "multi_thread")]
+async fn join_v0_2_schema_with_new_qp() {
+    let mut router = IntegrationTest::builder()
+        .config("{}") // Default config
+        .supergraph("tests/fixtures/supergraph-join-v0.2.graphql")
+        .build()
+        .await;
+    router.start().await;
+    router
+        .wait_for_log_message(
+            "could not create router: \
+             failed to initialize the query planner: \
+             Supergraphs using join spec v0.2 are not supported",
+        )
+        .await;
+    router.assert_shutdown().await;
+}
+
+#[tokio::test(flavor = "multi_thread")]
 async fn fed2_schema_with_new_qp() {
     let mut router = IntegrationTest::builder()
         .config(PROMETHEUS_METRICS_CONFIG)

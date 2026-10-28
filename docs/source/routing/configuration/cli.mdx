@@ -326,10 +326,21 @@ The router can be used to validate an existing configuration file. This can be u
 ./router config validate <path-to-config-file.yaml>
 ```
 
-This command takes a config file and validates it against the router's full supported configuration format.
+This command checks the file the way the router does when it loads its configuration at startup, including the automatic upgrades the router applies to settings that have changed within its major version. It exits with a non-zero status and prints the errors if the configuration is invalid.
+
+If a valid file relies on automatic upgrades, the command lists them and still exits successfully:
+
+```
+Configuration at path router.yaml is valid.
+It relies on automatic upgrades that the router applies at startup:
+  - telemetry.apollo.otlp_tracing_sampler has been removed. Router 3 uses OTLP exclusively for traces. Remove this key from your config.
+Run `router config upgrade router.yaml` to update the file.
+```
+
+To stop the router applying these upgrades at every startup, run `router config upgrade` to write them to the file.
 
 <Note>
 
-This is a static validation that checks if it is syntactically correct using the JSON schema. The router does additional logical checks on startup against the config that this command does not capture.
+The router does additional checks at startup that need the supergraph schema or external services. This command does not capture them.
 
 </Note>

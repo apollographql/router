@@ -570,11 +570,12 @@ fn build_execution_service(
         Arc::new(configuration.experimental_hoist_orphan_errors.clone()),
     );
 
-    let apollo_telemetry_conf = plugins
+    let metrics_reference_mode = plugins
         .iter()
         .find(|i| i.0.as_str() == "apollo.telemetry")
         .and_then(|plugin| (*plugin.1).as_any().downcast_ref::<Telemetry>())
-        .map(|t| t.config.apollo.clone());
+        .map(|t| t.config.apollo.metrics_reference_mode)
+        .unwrap_or_default();
 
     ServiceBuilder::new()
         .layer(BatchQueryPlanAnalysisLayer::new())
@@ -591,7 +592,7 @@ fn build_execution_service(
                 fetch_service,
                 subscription_config: subscription_plugin_conf,
                 subgraph_schemas,
-                apollo_telemetry_config: apollo_telemetry_conf,
+                metrics_reference_mode,
                 configuration,
             }
             .boxed_clone(),

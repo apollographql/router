@@ -1,0 +1,85 @@
+{
+  "Sequence": {
+    "nodes": [
+      {
+        "Fetch": {
+          "subgraph_name": "locations",
+          "id": null,
+          "variable_usages": [],
+          "operation_document": "{ feed { __typename ... on Book { __typename id isbn } ... on Film { __typename code minutes } } }",
+          "operation_name": null,
+          "operation_kind": "query",
+          "input_rewrites": [],
+          "output_rewrites": [],
+          "context_rewrites": []
+        }
+      },
+      {
+        "Flatten": {
+          "path": [
+            {
+              "Key": [
+                "feed",
+                null
+              ]
+            },
+            {
+              "AnyIndex": null
+            }
+          ],
+          "node": {
+            "Fetch": {
+              "subgraph_name": "reviews",
+              "id": null,
+              "variable_usages": [],
+              "requires": [
+                {
+                  "kind": "InlineFragment",
+                  "typeCondition": "Book",
+                  "selections": [
+                    {
+                      "kind": "Field",
+                      "name": "__typename"
+                    },
+                    {
+                      "kind": "Field",
+                      "name": "id"
+                    },
+                    {
+                      "kind": "Field",
+                      "name": "isbn"
+                    }
+                  ]
+                },
+                {
+                  "kind": "InlineFragment",
+                  "typeCondition": "Film",
+                  "selections": [
+                    {
+                      "kind": "Field",
+                      "name": "__typename"
+                    },
+                    {
+                      "kind": "Field",
+                      "name": "code"
+                    },
+                    {
+                      "kind": "Field",
+                      "name": "minutes"
+                    }
+                  ]
+                }
+              ],
+              "operation_document": "query($representations: [_Any!]!) { _entities(representations: $representations) { ... on Book { blurb } ... on Film { summary } } }",
+              "operation_name": null,
+              "operation_kind": "query",
+              "input_rewrites": [],
+              "output_rewrites": [],
+              "context_rewrites": []
+            }
+          }
+        }
+      }
+    ]
+  }
+}

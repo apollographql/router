@@ -12,6 +12,7 @@ use apollo_compiler::collections::HashSet;
 use apollo_compiler::collections::IndexMap;
 use apollo_compiler::parser::LineColumn;
 use itertools::Itertools;
+use shape::PrintLimits;
 use shape::Shape;
 use shape::ShapeCase;
 use shape::location::Location;
@@ -301,8 +302,12 @@ pub(crate) fn validate(
                 "expected {} but received incompatible {}\nDetails: `{}` does not accept `{}`",
                 short_shape_name(&mismatch.expected),
                 short_shape_name(&mismatch.received),
-                mismatch.expected.pretty_print(),
-                mismatch.received.pretty_print(),
+                mismatch
+                    .expected
+                    .pretty_print_bounded(PrintLimits::default()),
+                mismatch
+                    .received
+                    .pretty_print_bounded(PrintLimits::default()),
             ),
             locations: transform_locations(mismatch.received.locations(), context, expression),
         })
@@ -334,8 +339,8 @@ pub(crate) fn validate_could_satisfy(
                 "expected {} but received incompatible {}\nDetails: `{}` is never `{}`",
                 short_shape_name(expected_shape),
                 short_shape_name(&actual_shape),
-                actual_shape.pretty_print(),
-                expected_shape.pretty_print(),
+                actual_shape.pretty_print_bounded(PrintLimits::default()),
+                expected_shape.pretty_print_bounded(PrintLimits::default()),
             ),
             locations: transform_locations(actual_shape.locations(), context, expression),
         })
@@ -383,6 +388,39 @@ fn resolved_output_shape(expression: &Expression, context: &Context) -> Result<S
 
     let mut resolving = HashSet::default();
     resolve_shape(&shape, context, expression, &mut resolving)
+}
+
+/// Replace a reference to a schema type (as `shape_lookup` entries hold for
+/// their nested composite fields) with that type's shape, looking through
+/// unions such as the `One<Type, null>` of a nullable field. Walking a path one
+/// key at a time needs the referenced type's fields, and resolving references
+/// only along the path keeps the cost proportional to the path rather than to
+/// everything reachable from the type.
+fn expand_schema_refs(shape: &Shape, context: &Context, resolving: &HashSet<String>) -> Shape {
+    match shape.case() {
+        ShapeCase::Name(name, _) => match name.case() {
+            NameCase::Base(base) if !base.starts_with('$') && !resolving.contains(base) => context
+                .schema
+                .shape_lookup
+                .get(base)
+                .map(|resolved| resolved.clone().with_locations(shape.locations()))
+                .unwrap_or_else(|| shape.clone()),
+            _ => shape.clone(),
+        },
+        ShapeCase::One(shapes) => Shape::one(
+            shapes
+                .iter()
+                .map(|member| expand_schema_refs(member, context, resolving)),
+            shape.locations().cloned(),
+        ),
+        ShapeCase::All(shapes) => Shape::all(
+            shapes
+                .iter()
+                .map(|member| expand_schema_refs(member, context, resolving)),
+            shape.locations().cloned(),
+        ),
+        _ => shape.clone(),
+    }
 }
 
 /// Validate that the shape is an acceptable output shape for an Expression.
@@ -545,8 +583,23 @@ fn resolve_shape(
             // has already been resolved to shape above. All Name chains begin
             // logically with a ::Base case, and the ::Base case cannot appear
             // later in the subpath chain, so .skip(1) handles it reliably.
+            // Inside a schema type, expand the references `shape_lookup` uses for
+            // nested composite fields as the path reaches them, so errors name the
+            // full path from that type. `$this` and `$batch` do the same for the
+            // references `SchemaTypeRef::shape` leaves at cycles: where a memoized
+            // shape was cut depends on which path built it first, and expanding
+            // here keeps errors naming the full `$this` path regardless. Other
+            // variables keep their references, which resolve (and report) from
+            // the referenced type instead.
+            let is_schema_name = !base_shape_name.starts_with('$');
+            let expands_refs = is_schema_name || matches!(base_shape_name, "$this" | "$batch");
             for key in name.iter().skip(1) {
-                let child = resolved.apply_name(key);
+                let child = if expands_refs {
+                    expand_schema_refs(&resolved, context, resolving)
+                } else {
+                    resolved
+                }
+                .apply_name(key);
                 if child.is_none() {
                     let message = match key.case() {
                         NameCase::AnyItem(parent) | NameCase::Item(parent, _) => {
@@ -586,7 +639,6 @@ fn resolve_shape(
             // re-entry through it (directly or transitively) short-circuits.
             // Variables ($args, $this, $root, ...) aren't tracked because
             // they can't self-recurse the same way.
-            let is_schema_name = !base_shape_name.starts_with('$');
             let added = is_schema_name && resolving.insert(base_shape_name.to_string());
             let result = resolve_shape(&resolved, context, expression, resolving);
             if added {
@@ -977,6 +1029,7 @@ mod tests {
     #[case::this_on_query("$this.something")]
     #[case::bare_field_no_var("something")]
     #[case::recursive_input_whole("$args.recursive")]
+    #[case::unknown_field_through_recursive_input("$args.recursive.child.unknown")]
     fn common_invalid_expressions(#[case] selection: &str) {
         // If this fails, another ConnectSpec version has probably been added,
         // and should be accounted for in the loop below.
@@ -1408,6 +1461,61 @@ mod tests {
         );
     }
 
+    /// A nested input field's type is a reference to its own `shape_lookup`
+    /// entry. Resolving it must not add the field definition's location
+    /// (`inner: MultiLevel`) to the error, which points at the expression and
+    /// the type.
+    #[test]
+    fn nested_object_in_url_has_no_field_definition_location() {
+        let selection = "$args.multiLevel.inner";
+        let err = validate_with_context(selection, scalars(), ConnectSpec::latest())
+            .expect_err("objects are not allowed");
+        let schema_str = schema_for(selection, ConnectSpec::latest());
+        let schema = Schema::parse(&schema_str, "schema").expect("test schema parses");
+        let file = schema
+            .sources
+            .values()
+            .find(|file| file.path() == std::path::Path::new("schema"))
+            .expect("the parsed schema is among its own sources");
+        let field_type_offset = schema_str
+            .find("inner: MultiLevel")
+            .expect("`MultiLevelInput.inner` is defined")
+            + "inner: ".len();
+        let field_type_location = file
+            .get_line_column_range(field_type_offset..field_type_offset + "MultiLevel".len())
+            .expect("offsets are within the schema");
+        assert!(
+            !err.locations.contains(&field_type_location),
+            "{:?}",
+            err.locations
+        );
+        assert!(
+            err.locations.contains(&location_of_expression(
+                "inner",
+                selection,
+                ConnectSpec::latest()
+            )),
+            "{:?}",
+            err.locations
+        );
+    }
+
+    #[test]
+    fn mismatch_message_bounds_the_printed_shape() {
+        // Deeper and wider than `PrintLimits::default()` prints.
+        let fields = (0..20)
+            .map(|i| format!("f{i}: {i}"))
+            .collect::<Vec<_>>()
+            .join(", ");
+        let selection =
+            format!("$({{ a: {{ b: {{ c: {{ d: {{ deepest: 1 }} }} }} }}, {fields} }})");
+        let err = validate_with_context(&selection, scalars(), ConnectSpec::latest())
+            .expect_err("objects are not allowed");
+        assert!(err.message.contains('…'), "{}", err.message);
+        assert!(!err.message.contains("deepest"), "{}", err.message);
+        assert!(!err.message.contains("f19"), "{}", err.message);
+    }
+
     #[test]
     fn nested_unknown_property() {
         let selection = "$args.multiLevel.inner.unknown";
@@ -1473,6 +1581,61 @@ mod tests {
             )),
             "The relevant piece of the expression wasn't included in {:?}",
             err.locations
+        );
+    }
+
+    /// `T.a` is walked first, so `SchemaTypeRef::shape` memoizes `B` with its `a`
+    /// field cut to a reference while `A` is on the path, and `T.b` reuses it.
+    /// Errors must still name the full `$this` path, as they do for `T.a`, and
+    /// for paths that go around the cycle more than once.
+    #[rstest]
+    #[case::through_reused_type("$this.b.a")]
+    #[case::through_first_built_type("$this.a.b")]
+    #[case::around_cycle_twice("$this.b.a.b.a")]
+    fn this_path_error_names_full_path_through_cycle(#[case] path: &str) {
+        let sdl = format!(
+            r#"
+            extend schema
+              @link(url: "https://specs.apollo.dev/federation/v2.11")
+              @link(url: "https://specs.apollo.dev/connect/v0.4", import: ["@connect"])
+
+            type Query {{
+              t: T @connect(http: {{GET: "http://127.0.0.1/t"}}, selection: "id a {{ id b {{ id }} }} b {{ id a {{ id }} }}")
+            }}
+
+            type T {{
+              id: ID
+              a: A
+              b: B
+              via: String @connect(http: {{GET: "http://127.0.0.1/x/{{{path}.missing}}"}}, selection: "$")
+            }}
+
+            type A {{ id: ID b: B }}
+            type B {{ id: ID a: A }}
+            "#
+        );
+        let subgraph = crate::subgraph::typestate::Subgraph::parse("s", "http://test", &sdl)
+            .unwrap()
+            .expand_links()
+            .unwrap();
+        let messages = crate::connectors::validation::validate(&subgraph);
+        let message = messages
+            .iter()
+            .find(|m| m.message.contains("T.via"))
+            .expect("T.via reports the missing field");
+        assert!(
+            message
+                .message
+                .contains(&format!("`{path}` doesn't have a field named `missing`")),
+            "{}",
+            message.message
+        );
+        // One location per path segment, plus `missing`.
+        assert_eq!(
+            message.locations.len(),
+            path.split('.').count() + 1,
+            "{:?}",
+            message.locations
         );
     }
 

@@ -67,8 +67,9 @@ pub(crate) struct Activation {
     /// We can remove this static if eventually we have a facility for plugins to maintain state across reloads.
     prometheus_registry: Option<PrometheusEndpoint>,
 
-    /// The new format layer
-    new_logging_fmt_layer: Option<Box<dyn Layer<LayeredTracer> + Send + Sync>>,
+    /// The new format layer. None means leave the existing one, and `Some(None)` turns stdout
+    /// logging off
+    new_logging_fmt_layer: Option<Option<Box<dyn Layer<LayeredTracer> + Send + Sync>>>,
 
     /// Test instrumentation to track what components were set
     #[cfg(test)]
@@ -105,7 +106,7 @@ impl Activation {
 
     pub(crate) fn with_logging(
         &mut self,
-        logging_layer: Box<dyn Layer<LayeredTracer> + Send + Sync>,
+        logging_layer: Option<Box<dyn Layer<LayeredTracer> + Send + Sync>>,
     ) {
         self.new_logging_fmt_layer = Some(logging_layer);
         #[cfg(test)]
