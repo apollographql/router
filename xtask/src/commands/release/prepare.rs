@@ -358,24 +358,14 @@ impl Prepare {
     fn finalize_changelog(&self, version: &str) -> Result<()> {
         println!("finalizing changelog");
         let changelog = std::fs::read_to_string("./CHANGELOG.md")?;
-
-        let semver_heading = "This project adheres to [Semantic Versioning v2.0.0](https://semver.org/spec/v2.0.0.html).";
-
         let new_changelog = slurp_and_remove_changesets();
-
-        let update_regex =
-            regex::Regex::new(format!("(?ms){}\n", regex::escape(semver_heading)).as_str())?;
-        let updated = update_regex.replace(
+        let updated = insert_release_section(
             &changelog,
-            format!(
-                "{}\n\n# [{}] - {}\n\n{}\n",
-                semver_heading,
-                version,
-                chrono::Utc::now().date_naive(),
-                &new_changelog,
-            ),
+            version,
+            &chrono::Utc::now().date_naive().to_string(),
+            &new_changelog,
         );
-        std::fs::write("./CHANGELOG.md", updated.to_string())?;
+        std::fs::write("./CHANGELOG.md", updated)?;
         Ok(())
     }
     /// Update the license list with `cargo about generate --workspace -o licenses.html about.hbs`.
@@ -396,5 +386,66 @@ impl Prepare {
         println!("updating lock file");
         cargo!(["check"]);
         Ok(())
+    }
+}
+
+/// Insert a `# [<version>] - <date>` section holding `new_changelog` directly below the
+/// semver heading of `changelog`.
+fn insert_release_section(
+    changelog: &str,
+    version: &str,
+    date: &str,
+    new_changelog: &str,
+) -> String {
+    let semver_heading = "This project adheres to [Semantic Versioning v2.0.0](https://semver.org/spec/v2.0.0.html).\n";
+    // Plain string replacement: a regex replacement would expand `$name` in changeset text
+    // (GraphQL variables, connectors `$this`) as capture-group references.
+    changelog.replacen(
+        semver_heading,
+        &format!("{semver_heading}\n# [{version}] - {date}\n\n{new_changelog}\n"),
+        1,
+    )
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn insert_release_section_keeps_dollar_tokens_verbatim() {
+        let changelog = "\
+# Changelog
+
+This project adheres to [Semantic Versioning v2.0.0](https://semver.org/spec/v2.0.0.html).
+
+# [1.0.0] - 2026-01-01
+";
+        let new_changelog = "\
+### Fix ([PR #1](https://example/1))
+
+```graphql
+query Q($v: Boolean!) { f @include(if: $v) }
+```
+
+Connectors `${this}` and a literal `$$` survive.
+";
+        let updated = insert_release_section(changelog, "1.0.1", "2026-10-27", new_changelog);
+
+        assert_eq!(
+            updated,
+            format!(
+                "\
+# Changelog
+
+This project adheres to [Semantic Versioning v2.0.0](https://semver.org/spec/v2.0.0.html).
+
+# [1.0.1] - 2026-10-27
+
+{new_changelog}
+
+# [1.0.0] - 2026-01-01
+"
+            )
+        );
     }
 }
