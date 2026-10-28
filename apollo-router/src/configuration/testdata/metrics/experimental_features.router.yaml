@@ -7,6 +7,9 @@ experimental_hoist_orphan_errors:
 experimental_chaos:
   force_schema_reload: 10s
 
+experimental_diagnostics:
+  enabled: true
+
 experimental_mock_subgraphs:
   test_subgraph:
     query:
