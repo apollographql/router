@@ -17,7 +17,7 @@
  * - System information (OS, CPU, memory)
  * - Router configuration (YAML)
  * - Supergraph schema (GraphQL)
- * - Memory heap dumps (.prof files)
+ * - Memory heap dumps (gzipped pprof, .pb.gz files)
  *
  * ## Security
  *
@@ -49,8 +49,8 @@ const DATA_CONFIG = {
         routerConfig: 'router.yaml',
         schema: 'supergraph.graphql',
         memoryDumps: [
-            'memory/router_heap_dump_1757588839.prof',
-            'memory/router_heap_dump_1757588881.prof'
+            'memory/router_heap_dump_1757588839.pb.gz',
+            'memory/router_heap_dump_1757588881.pb.gz'
         ]
     }
 };
@@ -356,7 +356,7 @@ const DataAccess = {
         }
     },
 
-    // Get memory dump content by name (handles base64 decoding internally)
+    // Get memory dump content by name, as bytes (handles base64 decoding internally)
     async getMemoryDump(dumpName) {
         let dump;
         if (this.isDashboardMode()) {
@@ -366,7 +366,7 @@ const DataAccess = {
                 if (!response.ok) {
                     throw new Error(`Failed to fetch dump: ${response.status}`);
                 }
-                const dumpContent = await response.text();
+                const dumpContent = new Uint8Array(await response.arrayBuffer());
                 dump = {name: dumpName, data: dumpContent};
             } catch (error) {
                 console.error('Failed to fetch dump:', error);
@@ -381,11 +381,11 @@ const DataAccess = {
             }
         }
 
-        // Handle base64 decoding if needed (centralized here)
-        if (typeof dump.data === 'string' && dump.data.match(/^[A-Za-z0-9+/]+=*$/)) {
+        // Dumps are binary (gzipped pprof); embedded dumps are base64.
+        if (typeof dump.data === 'string') {
             return {
                 ...dump,
-                data: base64Decode(dump.data)
+                data: Uint8Array.from(atob(dump.data), c => c.charCodeAt(0))
             };
         }
 

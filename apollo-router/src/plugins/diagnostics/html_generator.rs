@@ -305,14 +305,13 @@ type Review @key(fields: "id") {
 }"#;
 
         // Create mock memory dumps data
-        let mock_memory_dumps = vec![
-            MemoryDump {
-                name: "router_heap_dump_1234567890.prof".to_string(),
-                data: base64::engine::general_purpose::STANDARD.encode("heap profile: 1024:   8192 [  1024:   8192] @   0x1234 0x5678\n\nMAPPED_LIBRARIES:\n7f0000000000-7f0000001000 r-xp 00000000 08:01 123456 /usr/bin/router\n\n"),
-                size: 150,
-                timestamp: Some(1704110400), // 2024-01-01 12:00:00 UTC
-            }
-        ];
+        let mock_memory_dumps = vec![MemoryDump {
+            name: "router_heap_dump_1234567890.pb.gz".to_string(),
+            // The report embeds dumps as-is, so the contents don't matter here
+            data: base64::engine::general_purpose::STANDARD.encode("gzipped pprof"),
+            size: 13,
+            timestamp: Some(1704110400), // 2024-01-01 12:00:00 UTC
+        }];
 
         // Generate HTML report
         let report_data = ReportData::new(
@@ -366,7 +365,7 @@ type Review @key(fields: "id") {
         // Should contain JSON structure for memory dumps
         assert!(html_content.contains("\"name\""));
         assert!(html_content.contains("\"data\""));
-        assert!(html_content.contains("router_heap_dump_1234567890.prof"));
+        assert!(html_content.contains("router_heap_dump_1234567890.pb.gz"));
 
         // Verify the HTML is substantial (contains all embedded content)
         assert!(
