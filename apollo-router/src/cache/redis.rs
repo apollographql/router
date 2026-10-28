@@ -1462,6 +1462,20 @@ mod test {
                 .map_err(|_| "commands should not wait on a replica")?
         }
 
+        /// Runs one round of the replica heartbeat, as the pool's heartbeat task does every
+        /// `REDIS_HEARTBEAT_INTERVAL`.
+        async fn ping_replicas(storage: &RedisCacheStorage) {
+            let pool = storage.inner.read().as_ref().expect("pool").pool.clone();
+            crate::cache::redis::ping_replicas(&pool, "test").await;
+        }
+
+        fn assert_pool_kept(storage: &RedisCacheStorage) {
+            assert!(
+                storage.inner.read().is_some(),
+                "the pool should not have been marked for recreation"
+            );
+        }
+
         #[tokio::test]
         #[rstest::rstest]
         async fn pool_without_replicas_serves_commands(
@@ -1542,8 +1556,7 @@ mod test {
             assert!(replica.reads() > 0, "reads should go to the replica");
 
             replica.stall();
-            let pool = storage.inner.read().as_ref().expect("pool").pool.clone();
-            crate::cache::redis::ping_replicas(&pool, "test").await;
+            ping_replicas(&storage).await;
 
             let primary_reads = redis.primary.reads();
             round_trip(&storage).await?;
@@ -1551,10 +1564,58 @@ mod test {
                 redis.primary.reads() > primary_reads,
                 "reads should fall back to the primary"
             );
+            assert_pool_kept(&storage);
+            Ok(())
+        }
+
+        /// When one of two cluster replicas stalls, reads move to the other replica rather than
+        /// to the primary.
+        #[tokio::test]
+        async fn reads_move_to_the_other_replica_when_one_stalls() -> Result<(), BoxError> {
+            let redis =
+                FakeRedis::start(Topology::Cluster, &[Behaviour::Healthy, Behaviour::Healthy])
+                    .await;
+            let (stalled, healthy) = (&redis.replicas[0].stats, &redis.replicas[1].stats);
+            let storage = connect(&redis).await?;
+
+            stalled.stall();
+            ping_replicas(&storage).await;
+
+            let primary_reads = redis.primary.reads();
+            let healthy_reads = healthy.reads();
+            round_trip(&storage).await?;
             assert!(
-                storage.inner.read().is_some(),
-                "the pool should not have been marked for recreation"
+                healthy.reads() > healthy_reads,
+                "reads should go to the healthy replica"
             );
+            assert_eq!(
+                redis.primary.reads(),
+                primary_reads,
+                "reads should stay off the primary"
+            );
+            assert_pool_kept(&storage);
+            Ok(())
+        }
+
+        /// A cluster replica that restarts after the pool connected (closing its connections and
+        /// refusing to serve new ones) doesn't fail the client.
+        #[tokio::test]
+        async fn replica_that_restarts_does_not_fail_the_pool() -> Result<(), BoxError> {
+            let redis = FakeRedis::start(Topology::Cluster, &[Behaviour::Healthy]).await;
+            let replica = &redis.replicas[0].stats;
+            let storage = connect(&redis).await?;
+            round_trip(&storage).await?;
+
+            replica.restart();
+            ping_replicas(&storage).await;
+
+            let primary_reads = redis.primary.reads();
+            round_trip(&storage).await?;
+            assert!(
+                redis.primary.reads() > primary_reads,
+                "reads should fall back to the primary"
+            );
+            assert_pool_kept(&storage);
             Ok(())
         }
     }

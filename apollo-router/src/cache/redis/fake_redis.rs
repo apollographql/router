@@ -11,7 +11,6 @@
 use std::collections::HashMap;
 use std::net::Ipv4Addr;
 use std::sync::Arc;
-use std::sync::atomic::AtomicBool;
 use std::sync::atomic::AtomicUsize;
 use std::sync::atomic::Ordering;
 
@@ -24,6 +23,7 @@ use tokio::net::TcpListener;
 use tokio::net::TcpSocket;
 use tokio::net::TcpStream;
 use tokio::net::tcp::OwnedReadHalf;
+use tokio::sync::watch;
 
 const HOST: &str = "127.0.0.1";
 const SENTINEL_SERVICE_NAME: &str = "fake-primary";
@@ -60,12 +60,34 @@ pub(crate) enum Behaviour {
     Unresponsive,
 }
 
-/// What a node has seen, for asserting which nodes the client used.
-#[derive(Default, Debug)]
+/// How a serving node currently treats its connections, changed by tests while the client is
+/// connected.
+#[derive(Clone, Copy, Debug, PartialEq)]
+enum State {
+    Serving,
+    /// Holds every command unanswered until the node serves again.
+    Stalled,
+    /// Closes every open and new connection until the node serves again.
+    Restarting,
+}
+
+/// What a node has seen, for asserting which nodes the client used, and controls for breaking it
+/// after the client connected.
+#[derive(Debug)]
 pub(crate) struct NodeStats {
     connections: AtomicUsize,
     reads: AtomicUsize,
-    stalled: AtomicBool,
+    state: watch::Sender<State>,
+}
+
+impl Default for NodeStats {
+    fn default() -> Self {
+        Self {
+            connections: AtomicUsize::default(),
+            reads: AtomicUsize::default(),
+            state: watch::Sender::new(State::Serving),
+        }
+    }
 }
 
 impl NodeStats {
@@ -79,10 +101,19 @@ impl NodeStats {
         self.reads.load(Ordering::SeqCst)
     }
 
-    /// Stops answering commands, on open connections and new ones (a replica that's paused after
-    /// the client connected).
+    /// Stops answering commands, on open connections and new ones (a paused replica).
     pub(crate) fn stall(&self) {
-        self.stalled.store(true, Ordering::SeqCst);
+        self.state.send_replace(State::Stalled);
+    }
+
+    /// Closes open connections and new ones (a replica that's restarting).
+    pub(crate) fn restart(&self) {
+        self.state.send_replace(State::Restarting);
+    }
+
+    /// Serves commands again, answering any held by [`Self::stall`].
+    pub(crate) fn resume(&self) {
+        self.state.send_replace(State::Serving);
     }
 }
 
@@ -257,9 +288,21 @@ async fn serve_connection(
 ) {
     let (reader, mut writer) = socket.into_split();
     let mut reader = BufReader::new(reader);
-    while let Some(args) = read_command(&mut reader).await {
-        if stats.stalled.load(Ordering::SeqCst) {
-            std::future::pending::<()>().await;
+    let mut node_state = stats.state.subscribe();
+    loop {
+        let args = tokio::select! {
+            args = read_command(&mut reader) => match args {
+                Some(args) => args,
+                None => return,
+            },
+            _ = node_state.wait_for(|state| *state == State::Restarting) => return,
+        };
+        let state_after_stall = node_state
+            .wait_for(|state| *state != State::Stalled)
+            .await
+            .map(|state| *state);
+        if !matches!(state_after_stall, Ok(State::Serving)) {
+            return;
         }
         let reply = respond(&args, &role, &keyspace, &stats);
         if writer.write_all(&reply).await.is_err() {
