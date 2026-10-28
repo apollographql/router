@@ -5,9 +5,9 @@ description: The differences between caching Apollo Connector responses and cach
 minVersion: Router v2.18.0
 ---
 
-Response caching broadly works the same way for [Apollo Connectors](/graphos/connectors) as it does for subgraphs: the same Redis storage, the same `Cache-Control` semantics, the same invalidation endpoint, the same metrics.
+Response caching for [Apollo Connectors](/graphos/connectors) works similarly to how caching works for subgraphs, with the same Redis storage, the same `Cache-Control` semantics, the same invalidation endpoint, and the same metrics.
 
-This page covers only what differs. Each entry links to where the concept is documented in full.
+This reference covers the differences that do exist, and each entry links to detailed documentation.
 
 ## What differs
 
@@ -15,10 +15,10 @@ This page covers only what differs. Each entry links to where the concept is doc
 |---|---|---|
 | Naming | Sources are `subgraph_name.source_name`, since one subgraph can declare several `@source`s | [Quickstart](./quickstart#configure-caching-for-apollo-connectors) |
 | Configuration block | `response_cache.connector.all` and `.sources`, mirroring `subgraph.all` and `.subgraphs` | [Quickstart](./quickstart#configure-caching-for-apollo-connectors) |
-| TTL | Comes from your API's `Cache-Control` response header; `@cacheControl` does not apply | [Control TTL](./invalidation#control-ttl-with-cachecontrol) |
-| No `Cache-Control` at all | Cached using the `ttl` you configured, but not advertised downstream | [below](#responses-with-no-cache-control) |
+| TTL | Comes from your API's `Cache-Control` response header; `@cacheControl` doesn't apply | [Control TTL](./invalidation#control-ttl-with-cachecontrol) |
+| No `Cache-Control` at all | Cached using the `ttl` you've configured but not advertised downstream | [below](#responses-with-no-cache-control) |
 | Cache key | `cache_key_headers` is required; there is no subgraph equivalent | [Connector cache-key headers](./customization#connector-cache-key-headers) |
-| Invalidation requests | `connector` kind; `type` takes `source`; `cache_tag` takes `sources` | [Connector invalidation methods](./invalidation#connector-invalidation-methods) |
+| Invalidation requests | `connector` kind; `type` accepts `source`; `cache_tag` accepts `sources` | [Connector invalidation methods](./invalidation#connector-invalidation-methods) |
 | Invalidation scope | Connector and subgraph entries are isolated from each other | [below](#invalidation-is-scoped) |
 | Customization on a hit | Depends on whether the hit is a root field or an entity fetch; no Rhai hook | [When to customize](./customization#when-to-customize) |
 | Observability | Fixed attribute set; `subgraph.name` carries the source name | [Observability](./observability) |
@@ -27,18 +27,18 @@ Private data caching, Redis configuration, TLS, invalidation indexes, and the ca
 
 ## Responses with no `Cache-Control`
 
-If your API returns no `Cache-Control` header at all, the router still caches the response using the `ttl` you configured. A subgraph response with no `Cache-Control` isn't cached, so expect your connector sources to cache more readily than your subgraphs do.
+If your API returns no `Cache-Control` header at all, Router still caches the response using the `ttl` you've configured. A subgraph response with no `Cache-Control` isn't cached, so expect your connector sources to cache more readily than your subgraphs do.
 
-The router doesn't pass that decision on to your clients. It stores the response for the configured `ttl` and serves later requests from the cache, but it sends `no-store` on the client-facing response, so neither your clients nor a CDN in front of the router holds the payload. For why the router treats the two origins differently, see the [FAQ](./faq#why-does-a-connector-response-with-no-cache-control-get-cached-when-a-subgraph-response-doesnt).
+Router doesn't pass that decision on to your clients. Instead, Router stores the response for the configured `ttl` and serves later requests from the cache, but sends `no-store` on the client-facing response, so neither your clients nor a CDN in front of Router holds the payload. For more information about why Router treats the two origins differently, go to [FAQ](./faq#why-does-a-connector-response-with-no-cache-control-get-cached-when-a-subgraph-response-doesnt).
 
-Set `ttl` on `connector.all`, or on every source you cache. Because a silent API would otherwise leave the router with no freshness value to use, the router refuses to start if a source it would cache has no `ttl` available to it.
+Set `ttl` on `connector.all` or on every source you cache. Because a silent API would otherwise leave Router with no freshness value to use, Router refuses to start if a source to be cached has no `ttl` available.
 
 ## Invalidation is scoped
 
-The router stores connector and subgraph entries under separate key scopes, so a connector source and a subgraph that happen to share a name never read or invalidate each other's entries. This changes how you write and authorize invalidation requests:
+Router stores connector and subgraph entries under separate key scopes, so a connector source and a subgraph that happen to share a name never read or invalidate each other's entries. That changes how you write and authorize invalidation requests:
 
 - **State the scope:** For `cache_tag` requests, use `subgraphs` to target subgraph entries and `sources` to target connector entries. The same tag string refers to different entries in each scope.
-- **Authorize per scope:** The router checks a request against the shared key of the scope it names and never consults the other scope's configuration. Your connector shared key can't invalidate subgraph entries, and your subgraph shared key can't invalidate connector entries, even when the names match.
+- **Authorize per scope:** Router checks a request against the shared key of the named scope and never consults the other scope's configuration. Your connector shared key can't invalidate subgraph entries, and your subgraph shared key can't invalidate connector entries, even when the names match.
 
 ```json
 [
@@ -50,7 +50,7 @@ The router stores connector and subgraph entries under separate key scopes, so a
 ]
 ```
 
-Tag your connector fields and types with `@cacheTag` as you would for a subgraph, including `{$key.id}` and `{$args.XXX}` interpolation:
+Tag your connector fields and types with `@cacheTag` like you would for a subgraph, including `{$key.id}` and `{$args.XXX}` interpolation:
 
 ```graphql title="products.graphql"
 type Query {
