@@ -881,6 +881,9 @@ pub(crate) async fn create_plugins(
     add_mandatory_apollo_plugin!("fleet_detector");
     add_mandatory_apollo_plugin!("enhanced_client_awareness");
     add_mandatory_apollo_plugin!("experimental_diagnostics");
+    // Mandatory, so that a reload removing its config still activates a (disabled) instance,
+    // which stops a running collection loop.
+    add_mandatory_apollo_plugin!("experimental_continuous_profiling");
 
     add_oss_apollo_plugin!("forbid_mutations");
     add_optional_apollo_plugin!("subscription");
