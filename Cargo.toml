@@ -55,7 +55,7 @@ debug = 1
 [workspace.dependencies]
 ahash = "0.8.11"
 apollo-compiler = "1.33.0"
-apollo-parser = "0.8.6"
+apollo-parser = "0.8.7"
 apollo-smith = "0.16.0"
 async-trait = "0.1.77"
 encoding_rs = "0.8"

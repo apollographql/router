@@ -2,6 +2,437 @@
 
 This project adheres to [Semantic Versioning v2.0.0](https://semver.org/spec/v2.0.0.html).
 
+# [2.19.0] - 2026-10-21
+
+## 🚀 Features
+
+### Response caching for Apollo Connectors
+
+Response caching now applies to Apollo Connectors, not just GraphQL subgraph fetches. Connector (REST/HTTP) responses can be cached in Redis and reused across requests, driven by the same `Cache-Control` semantics as the existing subgraph feature. Configure it under a new `response_cache.connector` block, keyed by connector source (`subgraph_name.source_name`):
+
+```yaml title="router.yaml"
+response_cache:
+  enabled: true
+  connector:
+    all:
+      enabled: true
+      ttl: 60s
+      redis:
+        urls: ["redis://..."]
+    sources:
+      products.ecom_api:
+        ttl: 5m
+```
+
+Behavior mirrors subgraph response caching:
+
+- **TTL** comes from the upstream `Cache-Control` header (`max-age`/`s-maxage`, adjusted for `Age`), falling back to the configured `ttl` when the REST API sends no `Cache-Control` header. That fallback governs the router's own storage only: a response with no `Cache-Control` header contributes `no-store` to the client-facing `Cache-Control` header, so the router never advertises a lifetime to clients or CDNs that the API did not ask for. `ttl` is therefore required configuration wherever connector caching is enabled with Redis.
+- **Cache-key request headers** are explicit and required. Because a connector calls your REST API directly, the router cannot infer which request headers change the API's response, so you declare them with `cache_key_headers` (on `connector.all`, per source, or both). Only listed headers partition cache entries; an empty list is a valid "no header partitions the cache" choice; and the router refuses to start if a storage-backed, enabled source has no resolved value. Omitting a header your API varies on shares one caller's cached response with another (a data-disclosure risk); listing a header that doesn't affect the response needlessly fragments the cache — so list exactly the headers whose values change the response. See [Connector cache-key headers](https://www.apollographql.com/docs/graphos/routing/performance/caching/response-caching/customization#connector-cache-key-headers).
+- **Per-user caching** via `private_id` when a response is `Cache-Control: private`.
+- **Invalidation** through the existing `/invalidation` endpoint. Connector entries are addressed with `sources` (for `cache_tag` requests) or the `connector`/`type`-with-`source` kinds, and are authorized by the connector source's own shared key — separately from subgraph invalidation.
+- **Not cached:** mutations and client-batched GraphQL requests.
+
+**Customization on a cache hit.** Connector root fields are cached at the connector HTTP request level, so a coprocessor's `ConnectorRequest`/`ConnectorResponse` stages still run when a root field is served from cache. A cached response is replayed as an ordinary connector response, carrying the status the API returned when the entry was stored along with its cache-control headers, so a coprocessor does not need to distinguish a cache hit from a live call; response headers other than cache-control are not stored and so are absent on a hit. Connector *entity* fetches are cached above the point where one GraphQL fetch fans out into HTTP requests, so a fully cached entity fetch runs no connector coprocessor stages at all, and no connector-level telemetry, header propagation, traffic shaping or request limits. Rhai has no connector hook in either case. See [Response Cache Customization](https://www.apollographql.com/docs/graphos/routing/performance/caching/response-caching/customization).
+
+Connector and subgraph caching can share a Redis instance without collision: connector cache keys and their invalidation indexes are namespaced separately from subgraph entries.
+
+Off by default; existing deployments see no behavior change. In particular, a config that sets only `response_cache.connector` (a connectors-only deployment) does not implicitly enable subgraph-side caching.
+
+By [@andrewmcgivery](https://github.com/andrewmcgivery), [@TylerBloom](https://github.com/TylerBloom), [@briannafugate408](https://github.com/briannafugate408) and [@benjamn](https://github.com/benjamn) in https://github.com/apollographql/router/pull/9171
+
+### Add the `->withWarning` and `->withError` mapping methods for connectors
+
+Connector mappings can now flag a suspect value without failing the field. Both methods pass their input through unchanged:
+
+- `->withWarning("...")` records a diagnostic for the mapping author, visible in the connectors debugger and the `connector_response_mapping_problems` telemetry selector. It never reaches clients.
+- `->withError("...")` (or `->withError({ message, extensions })`) reports an error to the client in the response's `extensions.connectorErrors` array, alongside the data. It is counted by the `apollo.router.graphql_error` metric.
+
+```graphql
+availability: stock_code->match(
+  ["A", "IN_STOCK"],
+  [@, @->withError("Unrecognized stock code")]
+)
+```
+
+Declared errors follow the [`include_subgraph_errors`](https://www.apollographql.com/docs/graphos/routing/observability/subgraph-error-inclusion) setting for the connector's subgraph, so they are redacted by default. See [Connectors error handling](https://www.apollographql.com/docs/graphos/connectors/responses/error-handling#report-errors-without-failing-a-field) for details.
+
+By [@benjamn](https://github.com/benjamn) in https://github.com/apollographql/router/pull/10050 and [@dariuszkuc](https://github.com/dariuszkuc) in https://github.com/apollographql/router/pull/10160
+
+### Report how often subgraph query deduplication shares a response ([PR #10391](https://github.com/apollographql/router/pull/10391))
+
+Subgraphs with `traffic_shaping` `deduplicate_query` enabled now report `apollo.router.subgraph_deduplication.requests`. It counts each subgraph request that reaches query deduplication once. Its `apollo.router.subgraph_deduplication.outcome` attribute says what happened to the request:
+
+- `leader`: the request was sent, and any identical requests in flight at the same time reused its response.
+- `follower`: the request reused the response of an identical in-flight request.
+- `bypassed_batch`: the request is a query that is part of a batch, so it wasn't eligible.
+- `bypassed_operation`: the request is a mutation or subscription, so it wasn't eligible, whether or not it is batched.
+
+Each count also has a `subgraph.name` attribute.
+
+Use the counter to see how much of your subgraph traffic deduplication actually saves. The metric is reported to your configured metrics exporters and to GraphOS. Subgraphs without query deduplication don't report it.
+
+By [@rohan-b99](https://github.com/rohan-b99) in https://github.com/apollographql/router/pull/10391
+
+### Promote `connector_request_service` to the public plugin interface ([PR #10049](https://github.com/apollographql/router/pull/10049))
+
+`connector_request_service` is now available on the public `PluginUnstable` trait, so a custom Rust plugin can wrap the service that makes individual connector HTTP requests. It receives the boxed service and the `@source` name, matching the shape of `subgraph_service`:
+
+```rust
+fn connector_request_service(
+    &self,
+    service: connector::request_service::BoxService,
+    source_name: String,
+) -> connector::request_service::BoxService {
+    // wrap `service` to inspect or rewrite the outgoing request
+    service
+}
+```
+
+`apollo_router::services::connector::request_service` is public along with what a plugin needs to read and change. One GraphQL operation can produce many connector requests, so this service runs once per outbound HTTP request rather than once per operation.
+
+On the request:
+
+- `Request.transport_request` carries the underlying `http::Request`, so a plugin can read and rewrite the URI, method, headers and body.
+- `Request.supergraph_request()` returns the router request that produced this connector call, for reading.
+- `Request.context` is readable and writable for request-scoped state.
+- `Request::into_error_response(message, code, extensions)` fails a connector request without making it, for cases like circuit breaking on an upstream the plugin knows to be unhealthy.
+
+On the response:
+
+- `Response.context` is readable and writable.
+- `Response.transport_outcome` exposes the raw transport outcome, naming each state it can be in: `Response` (the call was made over HTTP and the upstream responded — the only state carrying a status and headers), `MappingOnly` (a mapping-only connector, which has no transport at all), or `Error` (the call was attempted and failed at the transport level).
+- `Response::data()` / `set_data()` and `Response::error()` / `set_error_message()` / `set_error_code()` read and change what is returned to the client.
+
+Two things are worth knowing when moving a customization between a coprocessor and a plugin:
+
+- The coprocessor `ConnectorRequest` stage cannot change the HTTP method; a plugin can.
+- Changing `Response.transport_outcome` does not recompute the mapped response, so telemetry will report the transport outcome you set while the client receives the unchanged mapped data. Change both, or neither.
+
+The coprocessor `ConnectorRequest` and `ConnectorResponse` stages already covered this, and still do. The difference is that this runs in process, without a round trip per connector request.
+
+By [@andrewmcgivery](https://github.com/andrewmcgivery) in https://github.com/apollographql/router/pull/10049
+
+## 🐛 Fixes
+
+### Fix Helm `Service` rendering a duplicate port when the health check listener shares the main port ([PR #10020](https://github.com/apollographql/router/pull/10020))
+
+When `router.configuration.health_check.listen` is configured on the same port as `service.port`, the chart rendered two `Service` port entries with the same `(port, protocol)` pair. Kubernetes rejects that on a fresh apply:
+
+```
+Service "apollo-router" is invalid: spec.ports[1]: Duplicate value:
+{"Name":"","Protocol":"TCP","AppProtocol":null,"Port":22216,"TargetPort":0,"NodePort":0}
+```
+
+The `health` port entry is now only rendered when it differs from `service.port`. In the co-located case the health endpoint stays reachable through the main `http` port; the default split setup (health check on `8088`) renders exactly as before.
+
+By [@iksinski](https://github.com/iksinski) in https://github.com/apollographql/router/pull/10020
+
+### Connector validation no longer rejects some `->` method calls that work at runtime
+
+Composition could reject connector expressions that succeed at runtime, such as `$args.ids->map(@)->joinNotNull(",")`, because the shape checks for several `->` methods were stricter than the methods themselves. Validation now only rejects a method call when no possible value could make it succeed.
+
+The same applies to `isSuccess`, which counts a missing or non-boolean value as failure at runtime. Expressions like `$args.s?->eq("a")` or a `->match` without a boolean fallback no longer fail composition. Only an `isSuccess` expression that can never be a boolean, like `$.items->size`, is rejected.
+
+Thanks to [@fernando-apollo](https://github.com/fernando-apollo) for reporting the `->joinNotNull` case.
+
+By [@benjamn](https://github.com/benjamn) in https://github.com/apollographql/router/pull/10286
+
+### Cache debugger and private queries gauge report what the response cache did ([PR #10436](https://github.com/apollographql/router/pull/10436))
+
+The cache debugger now reports `shouldStore: false` when the response cache did not store the data:
+
+- requests for a query the router has marked as private when no `private_id` is configured, because those requests skip the cache;
+- responses and entities with GraphQL errors, root-field responses with no data, and connector entities that came back null.
+
+`shouldStore` is the cache's decision to store an entry. It does not confirm that the write to Redis succeeded.
+
+The `apollo.router.response_cache.private_queries.lru.size` gauge now also counts queries marked as private by entity fetches, so its value can rise after upgrading.
+
+By [@BrynCooke](https://github.com/BrynCooke) in https://github.com/apollographql/router/pull/10436
+
+### Keep `@deprecated` on fields an interface does not declare ([PR #10460](https://github.com/apollographql/router/pull/10460))
+
+The federation 3 compatibility upgrade strips `@deprecated` from an implementing field when the matching interface field is not deprecated, because the GraphQL September 2025 spec disallows it. It applied that check to every field on the implementing type, so fields the interface does not declare also lost their `@deprecated`, and composition emitted a spurious `DEPRECATED_IMPLEMENTING_FIELD_WITHOUT_INTERFACE` hint.
+
+Only fields the interface declares without `@deprecated` are now stripped.
+
+```graphql
+interface Node { id: ID! }
+type User implements Node {
+  id: ID!
+  # previously lost its @deprecated during composition
+  name: String @deprecated(reason: "use displayName")
+}
+```
+
+By [@tninesling](https://github.com/tninesling) in https://github.com/apollographql/router/pull/10460
+
+### Error responses no longer turn off response caching for a query
+
+With response caching enabled, the router keeps a list of subgraph queries that return private data. Without `private_id`, requests for a query on that list skip the cache. Before this fix, any response with `Cache-Control: private` put its query on the list, including error responses. Many frameworks send `private` on errors, so one failed request could turn off caching for that query, for every variable value, until the entry was evicted or the router restarted.
+
+Now a response marks its query as private only if it succeeded and its `Cache-Control` header allows storing (no `no-store`, and a TTL above zero). A subgraph response succeeds when it has a 2xx status and no GraphQL errors. A connector response succeeds when the connector treats it as a success (by default a 2xx status, or whatever its `isSuccess` setting accepts) and its mapping declares no errors. This applies to root fields and entities.
+
+If a connector's mapping declares an error with `->withError` in an entity response, the router now caches none of the entities in that response, whether or not `include_subgraph_errors` shows the error to the client. Before, it could cache the entity that had the error, or skip a different one.
+
+By [@BrynCooke](https://github.com/BrynCooke) in https://github.com/apollographql/router/pull/10437
+
+### Correct the `MAX_HEIGHT_LIMIT` error code in the `max_height` config description ([PR #10209](https://github.com/apollographql/router/pull/10209))
+
+The `limits.router.max_height` documentation now correctly names `MAX_HEIGHT_LIMIT` as the error code returned when a query exceeds the height limit. This corrects the config doc comment and its generated schema description.
+
+By [@bryncooke](https://github.com/bryncooke) in https://github.com/apollographql/router/pull/10209
+
+### Connector validation reports errors in `->` method arguments and accepts `null` array elements
+
+Composition now rejects expressions with an error inside most `->` method arguments, like `$(true)->and($(1)->gt("x"))`, which always fail at runtime. `->in`, `->contains` and `->joinNotNull` no longer reject array elements that are `null` or have no value, which the runtime skips.
+
+Thanks to [@fernando-apollo](https://github.com/fernando-apollo), [@briannafugate408](https://github.com/briannafugate408) and [@TylerBloom](https://github.com/TylerBloom) for the reviews.
+
+By [@benjamn](https://github.com/benjamn) in https://github.com/apollographql/router/pull/10316
+
+### Fix `CONNECTORS_CANNOT_RESOLVE_KEY` and router startup failure when a connector reads `$this` through `->first`
+
+A field-level `@connect` on an entity that read a `$this` value through `->first` (for example `queryParams: "id: $this.tagIds->first"`) failed composition with `CONNECTORS_CANNOT_RESOLVE_KEY`. With a supergraph composed by an older version, the router refused to start with `An internal error has occurred, please report this bug to Apollo. Details: error creating resolvable key`.
+
+The cause was in how connectors work out which `$this` fields an entity key needs. `->first` was recorded as a read of list index `0`, so the synthesized key came out as `tagIds { "0" }`, which is not a valid field set. List indexes are no longer recorded, so the key is now `tagIds`, the same as for `->last` or a plain `$this.tagIds`. Schemas like this now compose and the router starts.
+
+Reading fields from the first element of a list of objects, such as `$this.items->first.id` or `$this.items->first { id }`, also composes now, with the key `items { id }`. This never composed in earlier versions. A bare `$this.items->first` on a list of objects is still rejected with `CONNECTORS_CANNOT_RESOLVE_KEY`, the same as a bare `$this.items`, because the key needs to select fields from the objects.
+
+When a connector's key still can't be built, the error now names the connector and includes the field set errors, instead of only saying `error creating resolvable key`.
+
+By [@benjamn](https://github.com/benjamn) in https://github.com/apollographql/router/pull/10403
+
+### Store response-cached entities under their own TTL on partial `_entities` hits ([PR #10422](https://github.com/apollographql/router/pull/10422))
+
+When an `_entities` fetch mixed cache hits with misses, the response cache stored the entities it fetched from the subgraph with the `Cache-Control` merged across the whole fetch. That merge takes the shortest remaining lifetime, so a freshly fetched entity was stored with whatever time its oldest cached sibling had left instead of the lifetime the subgraph advertised. Because the shortened lifetime was stored, the next partial hit shortened it again. Over time, related entities converged on one shared expiry and were refetched from the subgraph all at once.
+
+Fetched entities are now stored under the `Cache-Control` of the subgraph response they came from. The client-facing `Cache-Control` header is unchanged: it still never advertises more time than the oldest cached entity in the response has left.
+
+By [@jeffutter](https://github.com/jeffutter) and [@rohan-b99](https://github.com/rohan-b99) in https://github.com/apollographql/router/pull/10422
+
+### Stop disclosing Rhai internals in client-facing error responses ([PR #10004](https://github.com/apollographql/router/pull/10004))
+
+When a Rhai script failed, the router wrapped the failure in its own error text before returning it to the client. That revealed that the router runs Rhai, the names of the script's callbacks, and the line and position of the failure:
+
+```json
+{
+  "errors": [
+    {
+      "message": "rhai execution error: 'Runtime error: Invalid request (line 25, position 39)\nin call to function 'process_router_request' @ 'process_router_request' (line 6, position 29)'"
+    }
+  ]
+}
+```
+
+Clients now receive only the message the script author chose. A thrown string is returned as written, with the Rhai wrapper stripped:
+
+```rhai
+throw "Invalid request";                          // client sees: Invalid request
+throw #{ status: 403, message: "Forbidden" };     // client sees: Forbidden
+throw #{ status: 403, body: #{ errors: [...] } }; // client sees the custom body
+```
+
+Anything the script did *not* choose is replaced with the status code's reason phrase, and the underlying error is logged at `ERROR` level instead. This covers:
+
+- Failures raised by the Rhai engine itself, such as calling an undefined function or a type mismatch.
+- A `throw` carrying only a status: `throw #{ status: 400 }` now reads `Bad Request` rather than dumping the thrown object.
+- A `throw` the router cannot read as a message: a value that is not a string or an object map, such as `throw 42`, or a map with an unreadable field, such as `throw #{ status: "four hundred", message: "Invalid request" }`. The whole map is discarded, so the `message` beside the bad status goes with it.
+
+Errors raised by the router's own Rhai functions, such as `env::get()` on an unset variable or `base64::decode()` and `json::decode()` on malformed input, are no longer sent to clients. Clients see the status code's reason phrase, and the full error is logged.
+
+Two things to be aware of when upgrading:
+
+- Client-facing messages for a thrown string no longer include the `rhai execution error: 'Runtime error: ... (line N, position M)'` wrapper. Only the string you threw is returned. The full error is still in the logs.
+- A `catch` block that catches an error from one of the router's Rhai functions now receives an error object instead of a string. `${err}` still gives the message, but `type_of(err)` and comparisons such as `err == "..."` change.
+
+By [@rohan-b99](https://github.com/rohan-b99) in https://github.com/apollographql/router/pull/10004
+
+### Fix `connect/v0.4` routing entity resolution through a non-entity `Query` connector
+
+Under `connect/v0.4`, when a `@key` entity had **both** a type-level reference-resolver `@connect` (mapping from `$this`) **and** a separate `Query` field `@connect` returning that same type (mapping from `$args`, with `entity` unset), connector expansion copied the entity's declared `@key` onto the `Query`-field connector's generated subgraph as **resolvable**. That gave the query planner a second, spurious entity path, so it could resolve entity references through the `Query`-field connector — where `$args` is empty during entity resolution — sending a request with the query parameters stripped and surfacing an upstream error (e.g. a `400` reported as `CONNECTOR_FETCH`).
+
+`connect/v0.3` was never affected, so bumping only the `@link` from `v0.3` to `v0.4` could break a previously working schema. Expansion now only copies keys for `@interfaceObject` types, and always as `resolvable: false`, matching the `v0.3` behavior.
+
+By [@benjamn](https://github.com/benjamn) in https://github.com/apollographql/router/pull/9853
+
+### Reduce memory use and repeated work during query graph construction ([PR #10358](https://github.com/apollographql/router/pull/10358))
+
+Dense federated query graphs, including connector-expanded schemas, could reserve excessive memory and repeatedly filter identical outgoing edges during graph construction. This increased the cost of schema composition and query planner initialization.
+
+Root-resolution and subgraph-entry transitions now reuse the final filtered followups for each destination. Filtered key followup vectors grow with the surviving edges instead of reserving space for every candidate. Transitions that retain all candidates keep exact-size preallocation, avoiding excess capacity on wide graphs.
+
+Followup edge membership and ordering are preserved, and no configuration changes are required.
+
+By [@cgati](https://github.com/cgati) in https://github.com/apollographql/router/pull/10358
+
+### Accept `@defer` labels reused via fragment spreads ([PR #10178](https://github.com/apollographql/router/pull/10178))
+
+The duplicate `@defer(label:)` check from the [GHSA-gr6h-4wpf-xp52](https://github.com/apollographql/router/security/advisories/GHSA-gr6h-4wpf-xp52) fix ran after fragment expansion, rejecting valid operations where a fragment containing a labeled `@defer` is spread more than once. The incremental delivery specification defines label uniqueness over the document as written, where such a label occurs only once; clients like Relay derive defer labels from fragment names and rely on this.
+
+Label uniqueness is now validated on the document, before fragment expansion, still rejecting the operations behind the original security advisory. Operations that reuse a labeled `@defer` via fragment spreads plan and execute correctly: one incremental response per spread position, each carrying the user-provided label and distinguished by its `path`.
+
+Example query that was rejected but now is correctly processed
+
+```graphql
+{
+    currentUser { ...UserFragment }
+    otherUser { ...UserFragment }
+}
+fragment UserFragment on User {
+    id
+    ... @defer(label: "UserFragmentLabel") {
+        name
+    }
+}
+```
+
+By [@tninesling](https://github.com/tninesling) in https://github.com/apollographql/router/pull/10178/
+
+### Allow nested object literals in requestless connectors ([PR #10394](https://github.com/apollographql/router/pull/10394))
+
+A `@connect` directive with no `http:` (a virtual connector) failed composition with `REQUESTLESS_SELECTION_USES_REQUEST_DATA` when its selection contained a nested object literal, such as `price: { amount: 1395, currencyCode: "USD" }`, even though it reads nothing from a response. These selections now compose as expected. Selections that do read the response body, like `price { amount }` or a bare `$`, are still rejected.
+
+By [@benjamn](https://github.com/benjamn) in https://github.com/apollographql/router/pull/10394
+
+### Restore structured JSON for `valuable` event fields in JSON logs ([PR #10195](https://github.com/apollographql/router/pull/10195))
+
+Event fields recorded with `tracing::field::valuable` are written as nested JSON objects again by the JSON log formatter, instead of flat `Debug` strings.
+
+A router built with `--cfg tracing_unstable` — for example alongside a native Rust plugin that logs a `#[derive(Valuable)]` struct — used to render such a field as structured JSON:
+
+```json
+"log": { "client_id": "abc", "entitlements": { "bypass": true } }
+```
+
+Since the JSON formatter's event visitor was replaced to deduplicate the empty `message` emitted by OpenTelemetry macros, the same field rendered as an opaque string, which log tooling can no longer query:
+
+```json
+"log": "AccessLog { client_id: \"abc\", entitlements: Entitlements { bypass: true } }"
+```
+
+The replacement visitor did not override `record_value`, so it inherited the trait's default implementation, which forwards to the `Debug` rendering. It now converts `valuable` values directly, and the deduplication behavior is unchanged. A value that has no JSON representation, such as a map with non-string keys, still falls back to its `Debug` string, and the reason is recorded under a single `serialization_errors` object keyed by field name (omitted if the event already has its own `serialization_errors` field). The rest of the log line is unaffected.
+
+This applies only to event fields in JSON logs. Span attributes (including the `span` and `spans` entries in JSON logs), the text formatter and exported OpenTelemetry span events still render `valuable` values as `Debug` strings, as they did in 2.15.
+
+Builds that do not set `--cfg tracing_unstable` are unaffected: the supporting crates are declared under that cfg and are neither resolved nor compiled without it.
+
+By [@OriginLeon](https://github.com/OriginLeon) in https://github.com/apollographql/router/pull/10195
+
+### Report `apollo.router.telemetry.metrics.cardinality_overflow` on Prometheus
+
+Each router metric has a cardinality limit: the most distinct attribute combinations it keeps. When a metric goes over its limit, the router reports it on the `apollo.router.telemetry.metrics.cardinality_overflow` counter. Since v2.13.0, routers that export metrics only through Prometheus never showed this counter. Prometheus now reports it, the same way as the other exporters.
+
+The counter goes up by one when a metric first goes over its limit, and not again while that metric stays over it. If the metric later drops back under its limit and goes over it again, the counter goes up again.
+
+The counter's `metric.name` attribute (shown as `metric_name` in Prometheus) is the OpenTelemetry name of the metric that went over its limit, for example `http.server.request.duration`, whichever exporters you use. In v2.12.0 and earlier the counter had no `metric.name` attribute and went up once for each overflow warning, so dashboards and alerts built on v2.12.0 may need adjusting.
+
+By [@bryncooke](https://github.com/bryncooke) in https://github.com/apollographql/router/pull/10309
+
+### Fix connector mappings silently misreading names that begin with a keyword or a number ([PR #10260](https://github.com/apollographql/router/pull/10260))
+
+`JSONSelection` could stop reading a name partway through and treat the rest as a separate selection:
+
+- **Names beginning with `null`, `true`, or `false`.** `displayName: nullableName` parsed as `displayName: null ableName`, assigning `null` to `displayName` and adding a selection for `ableName`. In other positions, such as `$(nullField ?? "fallback")`, it failed with an opaque `nom::error::ErrorKind::Eof`.
+- **Paths rooted at a number.** `alias: 1.foo` parsed as `alias: 1.0 foo`, and `$(1.foo)` failed to parse.
+
+If a connector mapping aliases a field name starting with `null`, `true`, or `false`, or a path rooted at a number, its output changes from `null` to the intended value. Bare keys like `nullableName` or `outer { nullableName }` were never affected.
+
+A selection list also now rejects two items that abut with an identifier character on each side and nothing between them, so input like `alias: 1b: 2` is an error rather than two selections. Minified input like `{a{x}b}` still parses.
+
+By [@benjamn](https://github.com/benjamn) in https://github.com/apollographql/router/pull/10260
+
+### Apply the documented `pool_idle_timeout` default and inherit it from `traffic_shaping.all`
+
+`pool_idle_timeout` now resolves as documented:
+
+- A `subgraphs.<name>` or `connector.sources.<name>` block that omits it uses the value from `all` (or `connector.all`). Previously it got 15s.
+- Subgraphs and connector sources with no matching block and no `all` block, and coprocessors with no `client` block, get the 15s default. Previously their idle connections never expired.
+- `null` in a per-subgraph or per-source block disables idle eviction for it. Previously the `all` value was used.
+
+```yaml
+traffic_shaping:
+  all:
+    pool_idle_timeout: 5s
+  subgraphs:
+    products:
+      experimental_http2: disable # now uses 5s from `all`, instead of 15s
+```
+
+By [@bryncooke](https://github.com/bryncooke) in https://github.com/apollographql/router/pull/10315
+
+### Shut down the replaced tracer provider off async worker threads during reload ([PR #10276](https://github.com/apollographql/router/pull/10276))
+
+When a schema or configuration reload replaced the tracing configuration, the previous OpenTelemetry tracer provider was shut down by whichever thread released its last reference. Spans hold a reference to their provider, so a span being exported at the exact moment of the swap could run that shutdown on an async worker thread. The batch span processor's shutdown blocks that thread while waiting for a background task that only the same thread could run, so the worker could stall permanently. Everything that worker was holding, including the retired request pipeline with its caches and Redis connections, then stayed in memory until the router was restarted, while the remaining workers kept serving traffic.
+
+The router now shuts down the replaced tracer provider explicitly on a blocking thread straight after the swap. A span that still holds the old provider no longer triggers shutdown when it is dropped. Spans that finish on the old provider after the swap are discarded rather than exported.
+
+By [@bryncooke](https://github.com/bryncooke) in https://github.com/apollographql/router/pull/10276
+
+### Query deduplication ignores the subgraph operation name
+
+With `traffic_shaping` `deduplicate_query` enabled, subgraph requests that are identical except for their operation name now share one in-flight request. The query planner gives every fetch its own operation name, so fetches within a single client request that sent the same query and variables to the same subgraph were never deduplicated, even though their responses are identical. This happens, for example, when the same entity is reached through several paths in the response.
+
+Subgraph request hooks in coprocessors, Rhai scripts, and plugins run once for each shared request and see the operation name of the first request that started it.
+
+By [@dariuszkuc](https://github.com/dariuszkuc) in https://github.com/apollographql/router/pull/10465
+
+### `cardinality_overflow` counts once per overflow with OTLP
+
+With OTLP, `apollo.router.telemetry.metrics.cardinality_overflow` now goes up once when a metric starts overflowing, not on every export while it stays over its limit. Alerts based on `rate()` or `increase()`, or on a fixed value, may need adjusting. GraphOS usage reporting is unchanged.
+
+By [@bryncooke](https://github.com/bryncooke) in https://github.com/apollographql/router/pull/10309
+
+### Query plan warm-up no longer logs a false "Authorization error" ([PR #10222](https://github.com/apollographql/router/pull/10222))
+
+When query plan warm-up loads persisted operations, it plans them without auth context. Authorization filtering can remove every field from a `@policy`-protected operation, causing warm-up to log an ERROR-level "Authorization error" during startup or reload.
+
+Warm-up now suppresses this log event. Client requests still log the event when authorization filtering rejects the entire operation on a query plan cache miss and authorization error logging is enabled. Cache hits, including cached rejections populated by warm-up, bypass this log.
+
+By [@bryncooke](https://github.com/bryncooke) in https://github.com/apollographql/router/pull/10222
+
+### Stop leaking internal error details in supergraph `INTERNAL_SERVER_ERROR` responses
+
+When an unhandled internal failure occurs while processing a request, the router puts the raw error string into the client-facing GraphQL response. These errors describe the router's internal state, such as supergraph and subgraph schema details, that the caller shouldn't have visibility into. Beyond being a security risk, these errors are not generally actionable by clients, so exposing them can often lead to confusion.
+
+The router now returns a generic `internal server error` message for these responses while keeping the `INTERNAL_SERVER_ERROR` extension code and `500` status unchanged. The full error detail is logged server-side at `ERROR` level with `code = "INTERNAL_SERVER_ERROR"`, so operators retain the information for debugging. This matches the existing behavior of the router's transport-level internal-error handler.
+
+By [@TylerBloom](https://github.com/TylerBloom) in https://github.com/apollographql/router/pull/9999
+
+### Metric view names support glob patterns again ([PR #9809](https://github.com/apollographql/router/pull/9809))
+
+Glob patterns (`*`, `?`, `[...]`) and catch-all (`*` or an empty string) patterns in `telemetry.exporters.metrics.common.views[].name` match instruments again.
+
+Since v2.13.0 only exact names matched, so a view targeting several instruments at once no longer worked. For example, custom histogram buckets on a `cost.*` view were not applied, and a catch-all drop rule stopped suppressing anything:
+
+```yaml
+telemetry:
+  exporters:
+    metrics:
+      common:
+        views:
+          - name: cost.*            # custom buckets now apply to cost.estimated, cost.actual, ...
+            aggregation:
+              histogram:
+                buckets: [0, 10, 100, 1000]
+          - name: "*"               # this catch-all now drops everything not matched above
+            aggregation: drop
+```
+
+Views are evaluated in declaration order and the first matching view wins, so you can place more-specific views before wildcards to control precedence.
+
+By [@apollo-mateuswgoettems](https://github.com/apollo-mateuswgoettems) in https://github.com/apollographql/router/pull/9809
+
+## 🛠 Maintenance
+
+### Fix flaky `license_expander` unit tests
+
+License expiry unit tests use longer deadlines and paused Tokio time to reduce failures caused by scheduler delays. Production licensing behavior is unchanged.
+
+By [@BrynCooke](https://github.com/BrynCooke) in https://github.com/apollographql/router/pull/10387
+
+
+
 # [2.18.0] - 2026-09-29
 
 ## 🚀 Features
@@ -107,7 +538,7 @@ Notable changes in this range that may affect router scripts:
 
 - **`stdweb` support removed (1.24.0):** The `stdweb` feature flag is gone; WASM targets now use [`web-time`](https://crates.io/crates/web-time) instead of the unmaintained [`instant`](https://crates.io/crates/instant) crate. This is unlikely to affect typical router Rhai scripts.
 - **String methods `split` / `split_rev` are now `pure`:** They can be called on `const` strings without error.
-- **`\` escape in multi-line literal strings:** You can now write `\` in a multi-line literal string to produce the literal text `` instead of triggering interpolation.
+- **`\${...}` escape in multi-line literal strings:** You can now write `\${...}` in a multi-line literal string to produce the literal text `${...}` instead of triggering interpolation.
 - **`index_of` fallback for string arguments:** When no matching script function is registered, `index_of` now falls back to value comparison for string arguments.
 
 No changes to the router's Rhai API surface are expected. If your scripts relied on the old `stdweb` feature or specific `sort` behavior on non-totally-ordered arrays (which previously could panic), review your scripts before upgrading.
@@ -766,7 +1197,7 @@ telemetry:
         sampler: 0.1
       otlp:
         enabled: true
-        endpoint: 
+        endpoint: ${env.DISTRIBUTED_TRACING_ENDPOINT}
         sampler: 0.02
 ```
 
@@ -807,7 +1238,7 @@ response_cache:
       enabled: true
       invalidation:
         enabled: true
-        shared_key: ""
+        shared_key: "${env.INVALIDATION_SHARED_KEY}"
         indexes:                # all three default to true; omit fields you want kept on
           subgraph: false       # disable `By subgraph` invalidation for this subgraph
           type: false           # disable `By type` invalidation for this subgraph
@@ -2782,8 +3213,8 @@ type Query{
 }
 
 ## query ##
-query(: MessageInput) {
-    send(message: ) {
+query($msg: MessageInput) {
+    send(message: $msg) {
         id
     }
 }
@@ -3193,7 +3624,7 @@ response_cache:
       products:
         invalidation:
           enabled: true  # Endpoint now starts
-          shared_key: 
+          shared_key: ${env.INVALIDATION_SHARED_KEY}
 ```
 
 By [@bnjjj](https://github.com/bnjjj) in https://github.com/apollographql/router/pull/8680
@@ -4698,8 +5129,8 @@ By [@carodewig](https://github.com/carodewig) in https://github.com/apollographq
 The connectors plugin will no longer error when using a variable in a nested input argument. The following example would error prior to this change:
 
 ```graphql
-query Query (: String){
-    complexInputType(filters: { inSpace: true, search:  })
+query Query ($query: String){
+    complexInputType(filters: { inSpace: true, search: $query })
 }
 ```
 
