@@ -30,7 +30,7 @@
 //! ## Platform Support
 //!
 //! Available on all platforms. Memory profiling endpoints return "not supported" responses
-//! on non-Linux platforms or when jemalloc is not enabled.
+//! where heap profiling isn't available (see [`crate::heap_profiling`]).
 
 use std::path::PathBuf;
 use std::sync::Arc;

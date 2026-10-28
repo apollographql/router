@@ -161,6 +161,7 @@ async fn test_memory_status_endpoint_returns_json() {
 
 #[tokio::test]
 async fn test_memory_start_endpoint() {
+    let _lock = crate::heap_profiling::TEST_LOCK.lock().await;
     let mut router = create_test_router();
     let (status, body, _) = make_request(&mut router, Method::POST, "/memory/start").await;
 
@@ -173,10 +174,13 @@ async fn test_memory_start_endpoint() {
 
     let json: Result<Value, _> = serde_json::from_str(&body);
     assert!(json.is_ok(), "Response should be valid JSON");
+    // Don't leave a session running for later tests.
+    make_request(&mut router, Method::POST, "/memory/stop").await;
 }
 
 #[tokio::test]
 async fn test_memory_stop_endpoint() {
+    let _lock = crate::heap_profiling::TEST_LOCK.lock().await;
     let mut router = create_test_router();
     let (status, body, _) = make_request(&mut router, Method::POST, "/memory/stop").await;
 
@@ -241,10 +245,10 @@ async fn test_memory_clear_dumps_endpoint() {
 async fn test_memory_download_dump_not_found() {
     let mut router = create_test_router();
     let (status, _, _) =
-        make_request(&mut router, Method::GET, "/memory/dumps/nonexistent.prof").await;
+        make_request(&mut router, Method::GET, "/memory/dumps/nonexistent.pb.gz").await;
 
-    // Should return 404 or NOT_IMPLEMENTED
-    assert!(status == StatusCode::NOT_FOUND || status == StatusCode::NOT_IMPLEMENTED);
+    // Should return 404
+    assert_eq!(status, StatusCode::NOT_FOUND);
 }
 
 #[tokio::test]
@@ -417,6 +421,7 @@ async fn test_router_with_empty_config() {
 
 #[tokio::test]
 async fn test_json_responses_are_valid_json() {
+    let _lock = crate::heap_profiling::TEST_LOCK.lock().await;
     let mut router = create_test_router();
     let json_endpoints = vec![
         (Method::GET, "/memory/status"),
