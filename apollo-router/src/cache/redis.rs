@@ -49,7 +49,7 @@ use crate::services::subgraph::http::create_certificate_store;
 use crate::services::subgraph::http::generate_tls_client_config;
 
 #[cfg(test)]
-mod fake_redis;
+pub(super) mod fake_redis;
 
 pub(super) static ACTIVE_CLIENT_COUNT: AtomicU64 = AtomicU64::new(0);
 const SUPPORTED_REDIS_SCHEMES: [&str; 6] = [
@@ -143,6 +143,9 @@ struct DropSafeRedisPool {
     // Keep-alive for replica connections; only present in cluster mode, where the router
     // establishes replica connections. `None` otherwise.
     replica_heartbeat_abort_handle: Option<AbortHandle>,
+    // The replica filter the pool's clients share, so tests can run the replica heartbeat.
+    #[cfg(test)]
+    replica_filter: Option<Arc<RouteableReplicaFilter>>,
     watcher_abort_handle: AbortHandle,
     // Held so the metrics polling task is aborted (via the collector's Drop) when the
     // pool is dropped.
@@ -400,6 +403,12 @@ impl RedisCacheStorage {
 
     /// Initializes an inner client pool
     pub(crate) async fn create_client_pool(&self) -> Result<(), BoxError> {
+        let replica_filter = self.is_cluster.then(|| {
+            Arc::new(RouteableReplicaFilter::new(
+                self.redis_client_config.client_config.clone(),
+                self.redis_client_config.timeout,
+            ))
+        });
         let client_pool = Builder::from_config(self.redis_client_config.client_config.clone())
             .with_config(|client_config| {
                 if self.is_cluster {
@@ -429,8 +438,8 @@ impl RedisCacheStorage {
                 // attempt, aborts the client and recreates the whole pool, taking the primary down
                 // with it. Non-cluster pools keep fred's defaults: lazy replica connections that
                 // are never opened because nothing is routed to them.
-                if self.is_cluster {
-                    configure_cluster_replicas(&mut config.replica);
+                if let Some(filter) = &replica_filter {
+                    configure_cluster_replicas(&mut config.replica, filter.clone());
                 }
                 config.tcp = TcpConfig {
                     #[cfg(target_os = "linux")]
@@ -553,11 +562,12 @@ impl RedisCacheStorage {
 
         // fred's heartbeat above only reaches the primary connection (its PING doesn't set
         // `use_replica`). In cluster mode we also hold eager replica connections, so we run a
-        // second heartbeat to keep those sockets warm and prevent server-side idle reaping.
-        let replica_heartbeat_handle = if self.is_cluster {
+        // second heartbeat to keep those sockets warm and prevent server-side idle reaping, and to
+        // stop routing to replicas that stop answering.
+        let replica_heartbeat_handle = replica_filter.clone().map(|filter| {
             let client_heartbeats = client_pool.clone();
             let caller = self.redis_client_config.caller;
-            Some(tokio::spawn(async move {
+            tokio::spawn(async move {
                 let mut ticker = tokio::time::interval_at(
                     Instant::now() + REDIS_HEARTBEAT_INTERVAL,
                     REDIS_HEARTBEAT_INTERVAL,
@@ -566,12 +576,10 @@ impl RedisCacheStorage {
 
                 loop {
                     ticker.tick().await;
-                    ping_replicas(&client_heartbeats, caller).await;
+                    ping_replicas(&client_heartbeats, &filter, caller).await;
                 }
-            }))
-        } else {
-            None
-        };
+            })
+        });
 
         let pooled_client_arc = Arc::new(client_pool);
         let metrics_collector = RedisMetricsCollector::new(
@@ -587,6 +595,8 @@ impl RedisCacheStorage {
             replica_heartbeat_abort_handle: replica_heartbeat_handle
                 .as_ref()
                 .map(|h| h.abort_handle()),
+            #[cfg(test)]
+            replica_filter,
             watcher_abort_handle: watcher_handle.abort_handle(),
             _metrics_collector: metrics_collector,
         };
@@ -928,7 +938,11 @@ impl RedisCacheStorage {
 }
 
 /// Replica settings for cluster mode, where reads are routed to replicas.
-fn configure_cluster_replicas(replica: &mut ReplicaConfig) {
+///
+/// With eager connections and fatal reconnection errors, fred fails the whole client if it can't
+/// connect to a replica it routes to. The [`RouteableReplicaFilter`] prevents that by probing each
+/// replica before fred connects to it, and leaving out the ones that can't complete a connection.
+fn configure_cluster_replicas(replica: &mut ReplicaConfig, filter: Arc<RouteableReplicaFilter>) {
     // NOTE: this defaults to true in fred but we're intentionally paying attention to
     // errors because sometimes fred gets into a funky state with its redis
     // connections. Sometimes, eg, a brief network outage in whatever cloud provider folks are
@@ -950,7 +964,7 @@ fn configure_cluster_replicas(replica: &mut ReplicaConfig) {
     // radius for sync failures but we now have a ReplicaFilter doing that work for us
     // (by removing unrouteable replicas from what we try to route to)
     replica.lazy_connections = false;
-    replica.filter = Some(Arc::new(RouteableReplicaFilter::default()));
+    replica.filter = Some(filter);
 }
 
 /// Send a keep-alive `PING` to the replica connections held by the pool, so eager replica sockets
@@ -961,36 +975,70 @@ fn configure_cluster_replicas(replica: &mut ReplicaConfig) {
 /// counter and can skew a round (one replica pinged twice, another skipped), but that only happens
 /// when replica traffic is flowing and already keeping the sockets warm. When idle -- the case that
 /// causes reaping -- our N pings cover all N replicas.
-async fn ping_replicas(pool: &RedisPool, caller: &'static str) {
-    // 3 multiplier is arbitrary (observational) - clusters typically have 2-3 replicas per node
-    let mut tasks = Vec::with_capacity(pool.clients().len() * 3);
+///
+/// When a ping fails, the client's replicas are re-synced, so the [`RouteableReplicaFilter`] probes
+/// each one again and leaves out any that stopped answering. fred only notices an unresponsive
+/// connection once nothing has been written to it for `UnresponsiveConfig::max_timeout`, which
+/// steady traffic prevents, so without this a replica that stalls after connecting keeps receiving
+/// (and timing out) its share of reads.
+///
+/// One failed ping is enough to re-sync, which has a cost: fred re-syncs inside the client's
+/// router task, so the client's other commands wait while it probes each replica and reopens its
+/// connection to every one that passes. A stalled replica holds that up for one Redis `timeout`.
+/// Every client whose ping failed re-syncs, but they share one probe of each replica.
+///
+/// A left-out replica isn't pinged, since no client routes to it, so nothing else would bring it
+/// back once it recovers. Once its left-out period is up, the filter forgets it and every client
+/// re-syncs once, which probes it again. A replica that's still broken is left out again, so it
+/// costs one Redis `timeout` and one re-sync of every client per period. A replica the cluster no
+/// longer lists costs one re-sync of every client, after which it's forgotten.
+async fn ping_replicas(pool: &RedisPool, filter: &RouteableReplicaFilter, caller: &'static str) {
+    // Taken once for the whole pool, since every client must re-sync to route to the replica again.
+    let recheck = filter.take_replicas_to_recheck();
+    join_all(
+        pool.clients()
+            .iter()
+            .map(|client| ping_client_replicas(client, recheck, caller)),
+    )
+    .await;
+}
 
-    for client in pool.clients() {
-        // `nodes()` maps each replica server to its primary.
-        for (_replica, primary) in client.replicas().nodes() {
-            let client = client.clone();
-            tasks.push(async move {
-                let options = Options {
-                    cluster_node: Some(primary),
-                    fail_fast: true,
-                    ..Default::default()
-                };
+async fn ping_client_replicas(client: &Client, recheck: bool, caller: &'static str) {
+    // `nodes()` maps each replica server to its primary.
+    let pings = client.replicas().nodes().into_values().map(|primary| {
+        let options = Options {
+            cluster_node: Some(primary),
+            fail_fast: true,
+            ..Default::default()
+        };
+        async move {
+            client
+                .replicas()
+                .with_options(&options)
+                .ping::<()>(Some(REPLICA_HEARTBEAT_PING_MSG.to_string()))
+                .await
+        }
+    });
 
-                if let Err(err) = client
-                    .replicas()
-                    .with_options(&options)
-                    .ping::<()>(Some(REPLICA_HEARTBEAT_PING_MSG.to_string()))
-                    .await
-                {
-                    // Keep-alive is best-effort; log and move on. We don't record this as a query
-                    // error since it doesn't correspond to a user-facing cache operation.
-                    tracing::info!(caller = caller, error = ?err, "replica heartbeat ping failed");
-                }
-            })
+    let mut all_answered = true;
+    for result in join_all(pings).await {
+        if let Err(err) = result {
+            // A failed ping only re-syncs this client's replicas; it isn't recorded as a query
+            // error since it doesn't correspond to a user-facing cache operation.
+            tracing::info!(caller = caller, error = ?err, "replica heartbeat ping failed");
+            all_answered = false;
         }
     }
 
-    join_all(tasks).await;
+    if (!all_answered || recheck)
+        && let Err(err) = client.replicas().sync(false).await
+    {
+        tracing::info!(
+            caller = caller,
+            error = ?err,
+            "failed to re-sync replicas at the replica heartbeat"
+        );
+    }
 }
 
 /// Sets up the error, reconnection, and unresponsive event listeners
@@ -1386,12 +1434,24 @@ mod test {
         const CONNECT_STALLED: &str = "connecting should not wait on a replica";
 
         async fn connect(redis: &FakeRedis) -> Result<RedisCacheStorage, BoxError> {
-            let config = serde_json::from_value(json!({
+            connect_with(redis, json!({})).await
+        }
+
+        /// Connects with the fields of `overrides` replacing the matrix's defaults.
+        async fn connect_with(
+            redis: &FakeRedis,
+            overrides: serde_json::Value,
+        ) -> Result<RedisCacheStorage, BoxError> {
+            let mut config = json!({
                 "urls": [redis.url],
                 "required_to_start": true,
                 "timeout": "1s",
-            }))?;
-            let storage = RedisCacheStorage::new(config, "test").await?;
+            });
+            if let (Some(config), Some(overrides)) = (config.as_object_mut(), overrides.as_object())
+            {
+                config.extend(overrides.clone());
+            }
+            let storage = RedisCacheStorage::new(serde_json::from_value(config)?, "test").await?;
             tokio::time::timeout(DEADLINE, storage.create_client_pool())
                 .await
                 .map_err(|_| CONNECT_STALLED)??;
@@ -1426,6 +1486,37 @@ mod test {
                 .map_err(|_| "commands should not wait on a replica")?
         }
 
+        /// Runs one round of the replica heartbeat, as the pool's heartbeat task does every
+        /// `REDIS_HEARTBEAT_INTERVAL`.
+        async fn ping_replicas(storage: &RedisCacheStorage) {
+            let (pool, filter) = {
+                let inner = storage.inner.read();
+                let inner = inner.as_ref().expect("pool");
+                (inner.pool.clone(), inner.replica_filter.clone())
+            };
+            let filter = filter.expect("a cluster pool has a replica filter");
+            crate::cache::redis::ping_replicas(&pool, &filter, "test").await;
+        }
+
+        /// Ends the time left-out replicas must wait before they're probed again, as if it had
+        /// passed.
+        fn end_left_out_period(storage: &RedisCacheStorage) {
+            storage
+                .inner
+                .read()
+                .as_ref()
+                .and_then(|inner| inner.replica_filter.as_ref())
+                .expect("a cluster pool has a replica filter")
+                .end_left_out_period();
+        }
+
+        fn assert_pool_kept(storage: &RedisCacheStorage) {
+            assert!(
+                storage.inner.read().is_some(),
+                "the pool should not have been marked for recreation"
+            );
+        }
+
         #[tokio::test]
         #[rstest::rstest]
         async fn pool_without_replicas_serves_commands(
@@ -1448,13 +1539,8 @@ mod test {
         /// replica that never answered recreated the pool in a loop). In a cluster, reads go to
         /// healthy replicas, falling back to the primary when there are none (with lazy replica
         /// connections, fred's round-robin never reached a connected replica when there were two,
-        /// and reads retried forever).
-        ///
-        /// KNOWN ISSUE: a cluster connects to every replica eagerly and treats replica errors as
-        /// fatal (see `configure_cluster_replicas`), so a replica that accepts connections but
-        /// can't serve commands fails the whole connection, and without `required_to_start` the
-        /// pool is recreated in a loop. Only a replica that refuses connections is filtered out.
-        /// Those cases assert the current behaviour so that changing it is deliberate.
+        /// and reads retried forever). A cluster replica that can't serve commands is left out
+        /// rather than failing the connection.
         #[tokio::test]
         #[rstest::rstest]
         async fn pool_stays_usable_and_routes_reads(
@@ -1473,28 +1559,7 @@ mod test {
             behaviours[0] = first_replica;
             let redis = FakeRedis::start(topology, &behaviours).await;
 
-            let connected = connect(&redis).await;
-            // KNOWN ISSUE: see the doc comment above.
-            if topology.is_cluster()
-                && matches!(first_replica, Behaviour::Dropping | Behaviour::Unresponsive)
-            {
-                let error = connected
-                    .err()
-                    .expect(
-                        "a cluster replica that can't serve commands is expected to fail the connection",
-                    )
-                    .to_string();
-                // an unresponsive replica stalls the connection until the deadline; a dropping
-                // one fails it at once
-                let stalled = error == CONNECT_STALLED;
-                assert_eq!(
-                    stalled,
-                    matches!(first_replica, Behaviour::Unresponsive),
-                    "{error}"
-                );
-                return Ok(());
-            }
-            let storage = connected?;
+            let storage = connect(&redis).await?;
             round_trip(&storage).await?;
 
             assert!(
@@ -1518,6 +1583,176 @@ mod test {
                     "reads should fall back to the primary"
                 );
             }
+            Ok(())
+        }
+
+        /// A cluster replica that stops answering after the pool connected is left out at the
+        /// next replica heartbeat, rather than timing out its share of reads until fred notices.
+        #[tokio::test]
+        async fn replica_that_stalls_is_left_out_at_the_next_heartbeat() -> Result<(), BoxError> {
+            let redis = FakeRedis::start(Topology::Cluster, &[Behaviour::Healthy]).await;
+            let replica = &redis.replicas[0].stats;
+            let storage = connect(&redis).await?;
+            round_trip(&storage).await?;
+            assert!(replica.reads() > 0, "reads should go to the replica");
+
+            replica.stall();
+            ping_replicas(&storage).await;
+
+            let primary_reads = redis.primary.reads();
+            round_trip(&storage).await?;
+            assert!(
+                redis.primary.reads() > primary_reads,
+                "reads should fall back to the primary"
+            );
+            assert_pool_kept(&storage);
+            Ok(())
+        }
+
+        /// When one of two cluster replicas stalls, reads move to the other replica rather than
+        /// to the primary.
+        #[tokio::test]
+        async fn reads_move_to_the_other_replica_when_one_stalls() -> Result<(), BoxError> {
+            let redis =
+                FakeRedis::start(Topology::Cluster, &[Behaviour::Healthy, Behaviour::Healthy])
+                    .await;
+            let (stalled, healthy) = (&redis.replicas[0].stats, &redis.replicas[1].stats);
+            let storage = connect(&redis).await?;
+
+            stalled.stall();
+            ping_replicas(&storage).await;
+
+            let primary_reads = redis.primary.reads();
+            let healthy_reads = healthy.reads();
+            round_trip(&storage).await?;
+            assert!(
+                healthy.reads() > healthy_reads,
+                "reads should go to the healthy replica"
+            );
+            assert_eq!(
+                redis.primary.reads(),
+                primary_reads,
+                "reads should stay off the primary"
+            );
+            assert_pool_kept(&storage);
+            Ok(())
+        }
+
+        /// When a replica stalls, every client in the pool fails its heartbeat ping and re-syncs at
+        /// once. They share one probe of the stalled replica, so it gets one new connection
+        /// rather than one per client.
+        #[tokio::test]
+        async fn pool_clients_share_one_probe_of_a_stalled_replica() -> Result<(), BoxError> {
+            let redis = FakeRedis::start(Topology::Cluster, &[Behaviour::Healthy]).await;
+            let replica = &redis.replicas[0].stats;
+            let storage = connect_with(&redis, json!({ "pool_size": 4 })).await?;
+
+            replica.stall();
+            let connections = replica.connections();
+            ping_replicas(&storage).await;
+            assert_eq!(
+                replica.connections() - connections,
+                1,
+                "the clients should share one probe"
+            );
+
+            let primary_reads = redis.primary.reads();
+            round_trip(&storage).await?;
+            assert!(
+                redis.primary.reads() > primary_reads,
+                "reads should fall back to the primary"
+            );
+            assert_pool_kept(&storage);
+            Ok(())
+        }
+
+        /// A replica left out after it stalled gets reads again once it recovers: when its left-out
+        /// period ends, the next heartbeat re-syncs every client, so each one probes it again.
+        #[tokio::test]
+        async fn stalled_replica_gets_reads_again_once_it_recovers() -> Result<(), BoxError> {
+            let redis = FakeRedis::start(Topology::Cluster, &[Behaviour::Healthy]).await;
+            let replica = &redis.replicas[0].stats;
+            let storage = connect_with(&redis, json!({ "pool_size": 2 })).await?;
+
+            replica.stall();
+            ping_replicas(&storage).await;
+            replica.resume();
+
+            // still left out until its period ends
+            ping_replicas(&storage).await;
+            let replica_reads = replica.reads();
+            round_trip(&storage).await?;
+            assert_eq!(
+                replica.reads(),
+                replica_reads,
+                "the replica should be left out"
+            );
+
+            end_left_out_period(&storage);
+            ping_replicas(&storage).await;
+            assert_reads_go_only_to_replicas(&redis, &storage).await?;
+            assert!(replica.reads() > replica_reads);
+            Ok(())
+        }
+
+        /// A replica that couldn't serve commands when the pool connected gets reads once it
+        /// recovers.
+        #[tokio::test]
+        async fn replica_unhealthy_at_startup_gets_reads_once_it_recovers() -> Result<(), BoxError>
+        {
+            let redis = FakeRedis::start(Topology::Cluster, &[Behaviour::Healthy]).await;
+            let replica = &redis.replicas[0].stats;
+            replica.stall();
+            let storage = connect_with(&redis, json!({ "pool_size": 2 })).await?;
+            round_trip(&storage).await?;
+            assert_eq!(replica.reads(), 0, "the replica should be left out");
+
+            replica.resume();
+            end_left_out_period(&storage);
+            ping_replicas(&storage).await;
+            assert_reads_go_only_to_replicas(&redis, &storage).await?;
+            assert!(replica.reads() > 0);
+            Ok(())
+        }
+
+        /// Runs enough round trips to use every client in the pool, and checks none of them
+        /// read from the primary.
+        async fn assert_reads_go_only_to_replicas(
+            redis: &FakeRedis,
+            storage: &RedisCacheStorage,
+        ) -> Result<(), BoxError> {
+            let primary_reads = redis.primary.reads();
+            for _ in 0..storage.redis_client_config.pool_size {
+                round_trip(storage).await?;
+            }
+            assert_eq!(
+                redis.primary.reads(),
+                primary_reads,
+                "every client should read from the replicas"
+            );
+            assert_pool_kept(storage);
+            Ok(())
+        }
+
+        /// A cluster replica that restarts after the pool connected (closing its connections and
+        /// refusing to serve new ones) doesn't fail the client.
+        #[tokio::test]
+        async fn replica_that_restarts_does_not_fail_the_pool() -> Result<(), BoxError> {
+            let redis = FakeRedis::start(Topology::Cluster, &[Behaviour::Healthy]).await;
+            let replica = &redis.replicas[0].stats;
+            let storage = connect(&redis).await?;
+            round_trip(&storage).await?;
+
+            replica.restart();
+            ping_replicas(&storage).await;
+
+            let primary_reads = redis.primary.reads();
+            round_trip(&storage).await?;
+            assert!(
+                redis.primary.reads() > primary_reads,
+                "reads should fall back to the primary"
+            );
+            assert_pool_kept(&storage);
             Ok(())
         }
     }
