@@ -19,9 +19,8 @@ use super::super::shared_path::SharedPath;
 use super::FieldRoutingSearchSpace;
 use super::commit::field_response_elements;
 use super::requires::condition_directives;
-use super::requires::gated_input_path;
-use super::requires::trailing_condition_fragments;
-use super::requires::trailing_conditions_context;
+use super::requires::path_condition_fragments;
+use super::requires::path_conditions_context;
 use super::requires::unconditioned_input_path;
 use super::requires::with_own_conditions;
 use super::routing::IntermediateKeyHop;
@@ -128,11 +127,11 @@ enum ConnectorOutputAt {
 /// The op path of a connector entity fetch for `pending`: the entity root plus
 /// the `@skip`/`@include` conditions the pending sits under, so that the
 /// fetch is gated on them.
-fn with_trailing_conditions(
+fn with_path_conditions(
     entity_root: SharedPath<Arc<OpPathElement>>,
     pending: &PendingSelection,
 ) -> SharedPath<Arc<OpPathElement>> {
-    trailing_condition_fragments(&pending.op_path)
+    path_condition_fragments(&pending.op_path)
         .into_iter()
         .fold(entity_root, |path, element| path.pushed(element))
 }
@@ -177,13 +176,12 @@ impl FieldRoutingSearchSpace {
                     self.can_resolve_in_place(pending.query_graph_node, key_conditions, &source)?;
                 let (local_key, routed_key) =
                     self.split_anchor_key(state, pending, key_conditions, key_locally_resolvable)?;
-                // The connector fetch is gated on the trailing conditions
-                // (`with_trailing_conditions` below) and the field's own, so
+                // The connector fetch is gated on the path conditions
+                // (`with_path_conditions` below) and the field's own, so
                 // its inputs keep them, including the key parts routed to
                 // other fetches, and so does its representation, in case the
                 // fetch merges with a differently gated one.
-                let gate_path = with_own_conditions(&pending.op_path, &pending.selection);
-                let input_path = gated_input_path(&gate_path);
+                let input_path = with_own_conditions(&pending.op_path, &pending.selection);
                 self.append_entity_inputs_at(
                     state,
                     pending.fetch_node,
@@ -191,7 +189,7 @@ impl FieldRoutingSearchSpace {
                     local_key.as_ref(),
                     &source,
                 );
-                let needed_under = trailing_conditions_context(&gate_path)?;
+                let needed_under = path_conditions_context(&input_path)?;
 
                 let merge_at = self.pending_merge_at(state, pending);
 
@@ -231,7 +229,7 @@ impl FieldRoutingSearchSpace {
                 let entity_base_path = self.entity_root_path(entity_type.type_name())?;
                 (
                     new_group,
-                    with_trailing_conditions(entity_base_path, pending).pushed(field_op_element),
+                    with_path_conditions(entity_base_path, pending).pushed(field_op_element),
                     SharedPath::new(),
                 )
             } else if matches!(
@@ -283,7 +281,7 @@ impl FieldRoutingSearchSpace {
                 let entity_base_path = self.entity_root_path(source.type_pos.type_name())?;
                 (
                     new_group,
-                    with_trailing_conditions(entity_base_path, pending).pushed(field_op_element),
+                    with_path_conditions(entity_base_path, pending).pushed(field_op_element),
                     SharedPath::new(),
                 )
             };

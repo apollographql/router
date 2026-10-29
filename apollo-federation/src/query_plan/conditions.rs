@@ -274,6 +274,23 @@ impl Conditions {
             }
         }
     }
+
+    /// Conservatively approximate OR by retaining shared conjunctive factors.
+    /// For `(a && b) || (a && c)`, this returns `a`, since conditions cannot
+    /// represent the remaining disjunction. An impossible alternative does
+    /// not constrain the result.
+    pub(crate) fn common_factors_with(self, other: Self) -> Self {
+        match (self, other) {
+            (Self::Boolean(false), other) | (other, Self::Boolean(false)) => other,
+            (Self::Boolean(true), _) | (_, Self::Boolean(true)) => Self::always(),
+            (Self::Variables(left), Self::Variables(right)) => Self::from_variables(
+                left.iter()
+                    .filter(|(name, kind)| right.condition_kind(name) == Some(*kind))
+                    .map(|(name, kind)| (name.clone(), kind))
+                    .collect(),
+            ),
+        }
+    }
 }
 
 pub(crate) fn remove_conditions_from_selection_set(
@@ -431,6 +448,69 @@ mod tests {
     use apollo_compiler::Schema;
 
     use super::*;
+
+    #[test]
+    fn ancestor_conditions_must_be_applied_before_approximating_alternatives() {
+        let parent = parse("@skip(if: $a)").merge(parse("@skip(if: $b)"));
+        let left = parse("@include(if: $a)");
+        let right = parse("@include(if: $b)");
+
+        assert_eq!(
+            parent
+                .clone()
+                .merge(left.clone().common_factors_with(right.clone())),
+            parent,
+        );
+        assert_eq!(
+            parent
+                .clone()
+                .merge(left)
+                .common_factors_with(parent.merge(right)),
+            Conditions::never(),
+        );
+    }
+
+    #[test]
+    fn common_conditions_of_alternative_branches() {
+        let enabled = parse("@include(if: $enabled)");
+        assert_eq!(
+            enabled
+                .clone()
+                .merge(parse("@include(if: $left)"))
+                .common_factors_with(enabled.clone().merge(parse("@include(if: $right)"))),
+            enabled,
+        );
+        assert_eq!(
+            parse("@include(if: $left)").common_factors_with(parse("@include(if: $right)")),
+            Conditions::always(),
+        );
+        assert_eq!(
+            parse("@include(if: $branch)")
+                .merge(enabled.clone())
+                .common_factors_with(parse("@skip(if: $branch)").merge(enabled.clone())),
+            enabled,
+        );
+        assert_eq!(
+            enabled.clone().common_factors_with(Conditions::never()),
+            enabled
+        );
+        assert_eq!(
+            Conditions::never().common_factors_with(enabled.clone()),
+            enabled
+        );
+        assert_eq!(
+            enabled.clone().common_factors_with(Conditions::always()),
+            Conditions::always()
+        );
+        assert_eq!(
+            enabled.common_factors_with(parse("@skip(if: $enabled)")),
+            Conditions::always(),
+        );
+        assert_eq!(
+            Conditions::never().common_factors_with(Conditions::never()),
+            Conditions::never()
+        );
+    }
 
     fn parse(directives: &str) -> Conditions {
         let schema =

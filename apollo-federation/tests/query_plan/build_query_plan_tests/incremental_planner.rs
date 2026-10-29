@@ -8174,3 +8174,95 @@ fn inc_union_type_condition_with_consistent_union_does_not_type_explode() {
     "###
     );
 }
+
+#[rstest::rstest]
+#[case::complementary_branches(
+    "path_conditions_complementary_branches",
+    r#"
+      query Test($branch: Boolean!, $enabled: Boolean!) {
+        foo {
+          bar
+          ... @include(if: $branch) { t { f1 @include(if: $enabled) } }
+          ... @skip(if: $branch) { t { f1 @include(if: $enabled) } }
+        }
+      }
+    "#
+)]
+#[case::contradictory_conditions(
+    "path_conditions_contradictory_conditions",
+    r#"
+      query Test($enabled: Boolean!) {
+        foo {
+          bar
+          ... @skip(if: $enabled) { t { f1 @include(if: $enabled) } }
+        }
+      }
+    "#
+)]
+#[case::single_branch(
+    "path_conditions_single_branch",
+    r#"
+      query Test($enabled: Boolean!) {
+        foo { bar t { f1 @include(if: $enabled) } }
+      }
+    "#
+)]
+#[case::ancestor_condition(
+    "path_conditions_ancestor_condition",
+    r#"
+      query Test($ancestor: Boolean!, $enabled: Boolean!) {
+        foo {
+          bar
+          ... @skip(if: $ancestor) { t { f1 @include(if: $enabled) } }
+        }
+      }
+    "#
+)]
+#[case::field_ancestor_condition(
+    "path_conditions_field_ancestor_condition",
+    r#"
+      query Test($ancestor: Boolean!, $enabled: Boolean!) {
+        foo @skip(if: $ancestor) { bar t { f1 @include(if: $enabled) } }
+      }
+    "#
+)]
+#[case::unconditional_sibling(
+    "path_conditions_unconditional_sibling",
+    r#"
+      query Test($ancestor: Boolean!) {
+        foo {
+          t { always: f1 }
+          ... @skip(if: $ancestor) { t { conditional: f1 } }
+        }
+      }
+    "#
+)]
+fn inc_preserves_path_conditions(#[case] name: &str, #[case] operation: &str) {
+    let supergraph = apollo_federation::Supergraph::new_with_router_specs(include_str!(
+        "../supergraphs/test_if_directives_at_the_operation_level_are_passed_down_to_subgraph_queries.graphql"
+    ))
+    .unwrap();
+    let planner = apollo_federation::query_plan::query_planner::QueryPlanner::new(
+        &supergraph,
+        incremental_config(),
+    )
+    .unwrap();
+    let document = apollo_compiler::ExecutableDocument::parse_and_validate(
+        planner.api_schema().schema(),
+        operation,
+        "operation.graphql",
+    )
+    .unwrap();
+    let plan = planner
+        .build_query_plan(&document, None, Default::default())
+        .unwrap();
+    apollo_federation::correctness::check_plan(
+        planner.api_schema(),
+        planner.supergraph_schema(),
+        planner.subgraph_schemas(),
+        &document,
+        &plan,
+    )
+    .unwrap();
+    insta::assert_snapshot!(name, plan);
+}
