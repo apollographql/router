@@ -6,8 +6,6 @@
 use std::ops::ControlFlow;
 use std::task::Poll;
 
-use futures::FutureExt;
-use futures::future::BoxFuture;
 use http::HeaderMap;
 use http::Method;
 use http::StatusCode;
@@ -26,14 +24,13 @@ use mime::APPLICATION_JSON;
 use tower::BoxError;
 use tower::Layer;
 use tower::Service;
-use tower::ServiceBuilder;
 use tower::ServiceExt;
 
 use crate::error::FetchError;
 use crate::graphql;
-use crate::layers::ServiceBuilderExt;
 use crate::layers::ServiceExt as _;
-use crate::layers::async_checkpoint::AsyncCheckpointService;
+use crate::layers::sync_checkpoint::SyncCheckpointLayer;
+use crate::layers::sync_checkpoint::SyncCheckpointService;
 use crate::services::MULTIPART_DEFER_ACCEPT;
 use crate::services::MULTIPART_DEFER_SPEC_PARAMETER;
 use crate::services::MULTIPART_DEFER_SPEC_VALUE;
@@ -183,110 +180,98 @@ pub(crate) struct RouterContentNegotiationLayer {}
 
 impl<S> Layer<S> for RouterContentNegotiationLayer
 where
-    S: Service<router::Request, Response = router::Response, Error = BoxError>
-        + Send
-        + Clone
-        + 'static,
-    <S as Service<router::Request>>::Future: Send + 'static,
+    S: Service<router::Request, Response = router::Response, Error = BoxError>,
 {
-    type Service = AsyncCheckpointService<
-        S,
-        BoxFuture<'static, Result<ControlFlow<router::Response, router::Request>, BoxError>>,
-        router::Request,
-    >;
+    type Service = SyncCheckpointService<S, router::Request>;
 
     fn layer(&self, service: S) -> Self::Service {
-        ServiceBuilder::new()
-            .checkpoint_async(move |req: router::Request| {
-                async move {
-                    if req.router_request.method() != Method::GET
-                        && !content_type_is_json(req.router_request.headers())
-                    {
-                        let response = http::Response::builder()
-                        .status(StatusCode::UNSUPPORTED_MEDIA_TYPE)
-                        .header(CONTENT_TYPE, APPLICATION_JSON.essence_str())
-                        .body(router::body::from_bytes(
-                            serde_json::json!({
-                                "errors": [
-                                    graphql::Error::builder()
-                                        .message(format!(
-                                            r#"'content-type' header must be one of: {:?} or {:?}"#,
-                                            APPLICATION_JSON.essence_str(),
-                                            GRAPHQL_JSON_RESPONSE_HEADER_VALUE,
-                                        ))
-                                        .extension_code("INVALID_CONTENT_TYPE_HEADER")
-                                        .build()
-                                ]
-                            })
-                            .to_string(),
-                        ))
-                        .expect("cannot fail");
+        SyncCheckpointLayer::new(move |req: router::Request| {
+                if req.router_request.method() != Method::GET
+                    && !content_type_is_json(req.router_request.headers())
+                {
+                    let response = http::Response::builder()
+                    .status(StatusCode::UNSUPPORTED_MEDIA_TYPE)
+                    .header(CONTENT_TYPE, APPLICATION_JSON.essence_str())
+                    .body(router::body::from_bytes(
+                        serde_json::json!({
+                            "errors": [
+                                graphql::Error::builder()
+                                    .message(format!(
+                                        r#"'content-type' header must be one of: {:?} or {:?}"#,
+                                        APPLICATION_JSON.essence_str(),
+                                        GRAPHQL_JSON_RESPONSE_HEADER_VALUE,
+                                    ))
+                                    .extension_code("INVALID_CONTENT_TYPE_HEADER")
+                                    .build()
+                            ]
+                        })
+                        .to_string(),
+                    ))
+                    .expect("cannot fail");
 
-                        return Ok(ControlFlow::Break(response.into()));
-                    }
-
-                    if req.router_request.method() == Method::GET
-                        && !content_type_is_strictly_json_or_missing(req.router_request.headers())
-                    {
-                        let response = http::Response::builder()
-                        .status(StatusCode::UNSUPPORTED_MEDIA_TYPE)
-                        .header(CONTENT_TYPE, APPLICATION_JSON.essence_str())
-                        .body(router::body::from_bytes(
-                            serde_json::json!({
-                                "errors": [
-                                    graphql::Error::builder()
-                                        .message(format!("GET request 'content-type' header may only contain: {:?}", APPLICATION_JSON.essence_str()))
-                                        .extension_code("INVALID_CONTENT_TYPE_HEADER")
-                                        .build()
-                                ]
-                            })
-                            .to_string(),
-                        ))
-                        .expect("cannot fail");
-
-                        return Ok(ControlFlow::Break(response.into()));
-                    }
-
-                    let accepts = parse_accept(req.router_request.headers());
-
-                    if accepts.wildcard
-                        || accepts.multipart_defer
-                        || accepts.multipart_subscription
-                        || accepts.json
-                    {
-                        req.context
-                            .extensions()
-                            .with_lock(|lock| lock.insert(accepts));
-
-                        Ok(ControlFlow::Continue(req))
-                    } else {
-                        let response = http::Response::builder()
-                        .status(StatusCode::NOT_ACCEPTABLE)
-                        .header(CONTENT_TYPE, APPLICATION_JSON.essence_str())
-                        .body(router::body::from_bytes(
-                            serde_json::json!({
-                                "errors": [
-                                    graphql::Error::builder()
-                                        .message(format!(
-                                            r#"'accept' header must be one of: \"*/*\", {:?}, {:?}, {:?} or {:?}"#,
-                                            APPLICATION_JSON.essence_str(),
-                                            GRAPHQL_JSON_RESPONSE_HEADER_VALUE,
-                                            MULTIPART_SUBSCRIPTION_ACCEPT,
-                                            MULTIPART_DEFER_ACCEPT
-                                        ))
-                                        .extension_code("INVALID_ACCEPT_HEADER")
-                                        .build()
-                                ]
-                            })
-                            .to_string()
-                        )).expect("cannot fail");
-
-                        Ok(ControlFlow::Break(response.into()))
-                    }
+                    return Ok(ControlFlow::Break(response.into()));
                 }
-                .boxed()
-            })
-            .service(service)
+
+                if req.router_request.method() == Method::GET
+                    && !content_type_is_strictly_json_or_missing(req.router_request.headers())
+                {
+                    let response = http::Response::builder()
+                    .status(StatusCode::UNSUPPORTED_MEDIA_TYPE)
+                    .header(CONTENT_TYPE, APPLICATION_JSON.essence_str())
+                    .body(router::body::from_bytes(
+                        serde_json::json!({
+                            "errors": [
+                                graphql::Error::builder()
+                                    .message(format!("GET request 'content-type' header may only contain: {:?}", APPLICATION_JSON.essence_str()))
+                                    .extension_code("INVALID_CONTENT_TYPE_HEADER")
+                                    .build()
+                            ]
+                        })
+                        .to_string(),
+                    ))
+                    .expect("cannot fail");
+
+                    return Ok(ControlFlow::Break(response.into()));
+                }
+
+                let accepts = parse_accept(req.router_request.headers());
+
+                if accepts.wildcard
+                    || accepts.multipart_defer
+                    || accepts.multipart_subscription
+                    || accepts.json
+                {
+                    req.context
+                        .extensions()
+                        .with_lock(|lock| lock.insert(accepts));
+
+                    Ok(ControlFlow::Continue(req))
+                } else {
+                    let response = http::Response::builder()
+                    .status(StatusCode::NOT_ACCEPTABLE)
+                    .header(CONTENT_TYPE, APPLICATION_JSON.essence_str())
+                    .body(router::body::from_bytes(
+                        serde_json::json!({
+                            "errors": [
+                                graphql::Error::builder()
+                                    .message(format!(
+                                        r#"'accept' header must be one of: \"*/*\", {:?}, {:?}, {:?} or {:?}"#,
+                                        APPLICATION_JSON.essence_str(),
+                                        GRAPHQL_JSON_RESPONSE_HEADER_VALUE,
+                                        MULTIPART_SUBSCRIPTION_ACCEPT,
+                                        MULTIPART_DEFER_ACCEPT
+                                    ))
+                                    .extension_code("INVALID_ACCEPT_HEADER")
+                                    .build()
+                            ]
+                        })
+                        .to_string()
+                    )).expect("cannot fail");
+
+                    Ok(ControlFlow::Break(response.into()))
+                }
+        })
+        .layer(service)
     }
 }
 
