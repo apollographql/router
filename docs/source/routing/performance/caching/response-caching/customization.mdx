@@ -418,7 +418,7 @@ response_cache:
       ttl: 6h
 ```
 
-For connector sources, configure TTL with `connector.all.ttl` or per source. Connectors respect `Cache-Control` headers from the upstream HTTP response directly—the configured TTL is used as a fallback when no header is present:
+For connector sources, configure TTL with `connector.all.ttl` or per source. Connectors respect `Cache-Control` headers from the upstream HTTP response directly—the configured TTL is used as a fallback when no header is present and is required once connector Redis has been configured. A response with no `Cache-Control` is cached but not advertised downstream; for more information, go to [Responses with no `Cache-Control`](./connectors#responses-with-no-cache-control).
 
 ```yaml title="router.yaml"
 response_cache:

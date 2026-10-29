@@ -1,0 +1,69 @@
+---
+title: Response Caching for Apollo Connectors
+subtitle: Where connector caching differs from subgraph caching
+description: The differences between caching Apollo Connector responses and caching subgraph responses in GraphOS Router, and where each is documented.
+minVersion: Router v2.18.0
+---
+
+Response caching for [Apollo Connectors](/graphos/connectors) works similarly to how caching works for subgraphs, with the same Redis storage, the same `Cache-Control` semantics, the same invalidation endpoint, and the same metrics.
+
+This reference covers the differences that do exist, and each entry links to detailed documentation.
+
+## What differs
+
+| Concept | For connectors | Where |
+|---|---|---|
+| Naming | Sources are `subgraph_name.source_name`, since one subgraph can declare several `@source`s | [Quickstart](./quickstart#configure-caching-for-apollo-connectors) |
+| Configuration block | `response_cache.connector.all` and `.sources`, mirroring `subgraph.all` and `.subgraphs` | [Quickstart](./quickstart#configure-caching-for-apollo-connectors) |
+| TTL | Comes from your API's `Cache-Control` response header; `@cacheControl` doesn't apply | [Control TTL](./invalidation#control-ttl-with-cachecontrol) |
+| No `Cache-Control` at all | Cached using the `ttl` you've configured but not advertised downstream | [below](#responses-with-no-cache-control) |
+| Cache key | `cache_key_headers` is required; there is no subgraph equivalent | [Connector cache-key headers](./customization#connector-cache-key-headers) |
+| Invalidation requests | `connector` kind; `type` accepts `source`; `cache_tag` accepts `sources` | [Connector invalidation methods](./invalidation#connector-invalidation-methods) |
+| Invalidation scope | Connector and subgraph entries are isolated from each other | [below](#invalidation-is-scoped) |
+| Customization on a hit | Depends on whether the hit is a root field or an entity fetch; no Rhai hook | [When to customize](./customization#when-to-customize) |
+| Observability | Fixed attribute set; `subgraph.name` carries the source name | [Observability](./observability) |
+
+Private data caching, Redis configuration, TLS, invalidation indexes, and the cache debugger behave identically. Configure them under `connector` instead of `subgraph`.
+
+## Responses with no `Cache-Control`
+
+If your API returns no `Cache-Control` header at all, Router still caches the response using the `ttl` you've configured. A subgraph response with no `Cache-Control` isn't cached, so expect your connector sources to cache more readily than your subgraphs do.
+
+Router doesn't pass that decision on to your clients. Instead, Router stores the response for the configured `ttl` and serves later requests from the cache, but sends `no-store` on the client-facing response, so neither your clients nor a CDN in front of Router holds the payload. For more information about why Router treats the two origins differently, go to [FAQ](./faq#why-does-a-connector-response-with-no-cache-control-get-cached-when-a-subgraph-response-doesnt).
+
+Set `ttl` on `connector.all` or on every source you cache. Because a silent API would otherwise leave Router with no freshness value to use, Router refuses to start if a source to be cached has no `ttl` available.
+
+## Invalidation is scoped
+
+Router stores connector and subgraph entries under separate key scopes, so a connector source and a subgraph that happen to share a name never read or invalidate each other's entries. That changes how you write and authorize invalidation requests:
+
+- **State the scope:** For `cache_tag` requests, use `subgraphs` to target subgraph entries and `sources` to target connector entries. The same tag string refers to different entries in each scope.
+- **Authorize per scope:** Router checks a request against the shared key of the named scope and never consults the other scope's configuration. Your connector shared key can't invalidate subgraph entries, and your subgraph shared key can't invalidate connector entries, even when the names match.
+
+```json
+[
+  {
+    "kind": "cache_tag",
+    "sources": ["products.catalog"],
+    "cache_tag": "product-42"
+  }
+]
+```
+
+Tag your connector fields and types with `@cacheTag` like you would for a subgraph, including `{$key.id}` and `{$args.XXX}` interpolation:
+
+```graphql title="products.graphql"
+type Query {
+  products: [Product!]!
+    @connect(source: "catalog", http: { GET: "/products" }, selection: "id name price")
+    @cacheTag(format: "products")
+}
+
+type Product @key(fields: "id") @cacheTag(format: "product-{$key.id}") {
+  id: ID!
+  name: String!
+  price: Int!
+}
+```
+
+You can also supply tags through the `apolloCacheTags` and `apolloEntityCacheTags` response extensions, but your API has to return them. Most third-party REST APIs don't, so rely on `@cacheTag` together with the `connector` and `type` request kinds instead.
