@@ -188,6 +188,8 @@ For default behavior and possible values, see [Apollo Uplink](/federation/manage
 
 An OCI reference to a graph artifact that contains the supergraph schema for the router to run.<br/><br/>
 
+The reference can use a SHA256 digest or a [tag](/graphos/platform/schema-management/delivery/graph-artifacts/tags). Tag references require `--hot-reload`. Digest references can't be used with `--hot-reload`.<br/><br/>
+
 When you set this option, the router uses the schema from the specified graph artifact instead of Apollo Uplink.
 The router also fetches its entitlement from the same registry when the graph artifact manifest carries an entitlement identifier; persisted queries still come from Uplink.<br/><br/>
 
