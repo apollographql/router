@@ -1,11 +1,8 @@
 //! Calls out to the apollo-federation crate
 
 use std::fmt::Debug;
-<<<<<<< HEAD
-use std::ops::ControlFlow;
-=======
 use std::num::NonZeroU64;
->>>>>>> 9b773a4 (feat(federation): add APOLLO_ROUTER_MAX_NON_LOCAL_SELECTIONS env var and non_local_selections histogram (#10349))
+use std::ops::ControlFlow;
 use std::sync::Arc;
 use std::sync::OnceLock;
 use std::task::Poll;
@@ -269,12 +266,7 @@ impl QueryPlannerService {
             query_plan_root_node: root_node.map(Arc::new),
             evaluated_plan_count: plan.statistics.evaluated_plan_count.clone().into_inner() as u64,
             evaluated_plan_paths: plan.statistics.evaluated_plan_paths.clone().into_inner() as u64,
-<<<<<<< HEAD
-=======
-            fuel_consumed: plan.statistics.fuel_consumed.get(),
-            fuel_remaining: plan.statistics.fuel_remaining.get(),
             non_local_selections_count: plan.statistics.non_local_selections_count,
->>>>>>> 9b773a4 (feat(federation): add APOLLO_ROUTER_MAX_NON_LOCAL_SELECTIONS env var and non_local_selections histogram (#10349))
         })
     }
 
@@ -398,12 +390,7 @@ impl QueryPlannerService {
             formatted_query_plan,
             evaluated_plan_count,
             evaluated_plan_paths,
-<<<<<<< HEAD
-=======
-            fuel_consumed,
-            fuel_remaining,
             non_local_selections_count,
->>>>>>> 9b773a4 (feat(federation): add APOLLO_ROUTER_MAX_NON_LOCAL_SELECTIONS env var and non_local_selections histogram (#10349))
         } = plan_result;
 
         // If the query is filtered, we want to generate the signature using the original query and generate the
@@ -428,26 +415,7 @@ impl QueryPlannerService {
             &self.signature_normalization_algorithm,
         );
 
-<<<<<<< HEAD
         if let Some(node) = query_plan_root_node {
-=======
-        u64_histogram!(
-            "apollo.router.query_planning.plan.evaluated_plans",
-            "Number of query plans evaluated for a query before choosing the best one",
-            evaluated_plan_count
-        );
-        u64_histogram!(
-            "apollo.router.query_planning.plan.evaluated_paths",
-            "Number of paths (including intermediate ones) considered to plan a query before starting to generate a plan",
-            evaluated_plan_paths
-        );
-        if let Some(non_local_selections_count) = non_local_selections_count {
-            metric_query_planning_non_local_selections(non_local_selections_count);
-        }
-        let span = tracing::Span::current();
-        if let Some(fuel_consumed) = fuel_consumed {
-            span.record("query_planning.fuel_consumed", fuel_consumed);
->>>>>>> 9b773a4 (feat(federation): add APOLLO_ROUTER_MAX_NON_LOCAL_SELECTIONS env var and non_local_selections histogram (#10349))
             u64_histogram!(
                 "apollo.router.query_planning.plan.evaluated_plans",
                 "Number of query plans evaluated for a query before choosing the best one",
@@ -458,6 +426,9 @@ impl QueryPlannerService {
                 "Number of paths (including intermediate ones) considered to plan a query before starting to generate a plan",
                 evaluated_plan_paths
             );
+            if let Some(non_local_selections_count) = non_local_selections_count {
+                metric_query_planning_non_local_selections(non_local_selections_count);
+            }
 
             Ok(QueryPlannerContent::Plan {
                 plan: Arc::new(super::QueryPlan {
@@ -707,50 +678,7 @@ pub(crate) struct QueryPlanResult {
     pub(super) query_plan_root_node: Option<Arc<PlanNode>>,
     pub(super) evaluated_plan_count: u64,
     pub(super) evaluated_plan_paths: u64,
-<<<<<<< HEAD
-=======
-    pub(super) fuel_consumed: Option<u64>,
-    pub(super) fuel_remaining: Option<u64>,
     pub(super) non_local_selections_count: Option<u64>,
-}
-
-/// The outcome of a query-planning attempt. Shared across query-planning metrics (e.g.
-/// `apollo.router.query_planning.plan.duration` and `apollo.router.query_planning.warmup.*`) so
-/// they use a single vocabulary. Not every value is produced by every code path.
-#[derive(Copy, Clone, Debug, strum::IntoStaticStr)]
-#[strum(serialize_all = "snake_case")]
-pub(crate) enum QueryPlanningOutcome {
-    Success,
-    Timeout,
-    Cancelled,
-    Error,
-    MemoryLimit,
-}
-
-impl_otel_value_from_static_str!(QueryPlanningOutcome);
-
-impl From<&FederationErrorBridge> for QueryPlanningOutcome {
-    fn from(err: &FederationErrorBridge) -> Self {
-        match err {
-            FederationErrorBridge::Cancellation(msg) if msg.contains("timeout") => {
-                QueryPlanningOutcome::Timeout
-            }
-            FederationErrorBridge::Cancellation(_) => QueryPlanningOutcome::Cancelled,
-            _ => QueryPlanningOutcome::Error,
-        }
-    }
-}
-
-impl From<&QueryPlannerError> for QueryPlanningOutcome {
-    fn from(err: &QueryPlannerError) -> Self {
-        match err {
-            QueryPlannerError::Timeout(_) => QueryPlanningOutcome::Timeout,
-            QueryPlannerError::MemoryLimitExceeded(_) => QueryPlanningOutcome::MemoryLimit,
-            QueryPlannerError::FederationError(bridge) => QueryPlanningOutcome::from(bridge),
-            _ => QueryPlanningOutcome::Error,
-        }
-    }
->>>>>>> 9b773a4 (feat(federation): add APOLLO_ROUTER_MAX_NON_LOCAL_SELECTIONS env var and non_local_selections histogram (#10349))
 }
 
 pub(crate) fn metric_query_planning_plan_duration(
@@ -1421,37 +1349,19 @@ mod tests {
         .with_metrics()
         .await;
     }
-<<<<<<< HEAD
-=======
-
-    async fn plan_example_query(config: Configuration) {
-        let config = Arc::new(config);
-        let schema = Arc::new(Schema::parse(EXAMPLE_SCHEMA, &config).unwrap());
-        let mut service = QueryPlannerService::for_test(schema.clone(), config.clone()).unwrap();
-        let query = include_str!("testdata/query.graphql");
-        let document = Query::parse_document(query, None, &schema, &config).unwrap();
-        service
-            .ready()
-            .await
-            .unwrap()
-            .call(
-                QueryPlannerRequest::builder()
-                    .query(query)
-                    .and_operation_name(document.operation.name.as_deref())
-                    .document(document)
-                    .compute_job_type(ComputeJobType::QueryPlanning)
-                    .metadata(CacheKeyMetadata::default())
-                    .plan_options(PlanOptions::default())
-                    .build(),
-            )
-            .await
-            .expect("query plans");
-    }
 
     #[test(tokio::test)]
     async fn test_non_local_selections_histogram() {
         async {
-            plan_example_query(Configuration::default()).await;
+            let _ = plan(
+                EXAMPLE_SCHEMA,
+                include_str!("testdata/query.graphql"),
+                include_str!("testdata/query.graphql"),
+                None,
+                PlanOptions::default(),
+            )
+            .await
+            .unwrap();
 
             assert_histogram_exists!(
                 "apollo.router.query_planning.plan.non_local_selections",
@@ -1463,100 +1373,4 @@ mod tests {
         .with_metrics()
         .await;
     }
-
-    #[test(tokio::test)]
-    async fn test_fuel_histograms_with_incremental_planner() {
-        async {
-            let config = Configuration::from_str(indoc::indoc! {"
-                supergraph:
-                  query_planning:
-                    incremental_planner:
-                      enabled: true
-            "})
-            .expect("valid configuration");
-            plan_example_query(config).await;
-
-            assert_histogram_exists!("apollo.router.query_planning.plan.fuel_consumed", u64);
-            assert_histogram_exists!("apollo.router.query_planning.plan.fuel_remaining", u64);
-        }
-        .with_metrics()
-        .await;
-    }
-
-    #[test(tokio::test)]
-    async fn test_no_fuel_histograms_without_incremental_planner() {
-        async {
-            plan_example_query(Configuration::default()).await;
-
-            assert_histogram_not_exists!("apollo.router.query_planning.plan.fuel_consumed", u64);
-            assert_histogram_not_exists!("apollo.router.query_planning.plan.fuel_remaining", u64);
-        }
-        .with_metrics()
-        .await;
-    }
-
-    /// Captures u64 values recorded on spans after creation.
-    #[derive(Clone, Default)]
-    struct RecordedU64s(Arc<parking_lot::Mutex<HashMap<String, u64>>>);
-
-    impl<S: tracing::Subscriber> tracing_subscriber::Layer<S> for RecordedU64s {
-        fn on_record(
-            &self,
-            _span: &tracing::span::Id,
-            values: &tracing::span::Record<'_>,
-            _ctx: tracing_subscriber::layer::Context<'_, S>,
-        ) {
-            struct Visitor<'a>(&'a mut HashMap<String, u64>);
-            impl tracing_core::field::Visit for Visitor<'_> {
-                fn record_u64(&mut self, field: &tracing_core::Field, value: u64) {
-                    self.0.insert(field.name().to_string(), value);
-                }
-                fn record_debug(&mut self, _: &tracing_core::Field, _: &dyn std::fmt::Debug) {}
-            }
-            values.record(&mut Visitor(&mut self.0.lock()));
-        }
-    }
-
-    async fn recorded_on_query_planning_span(config: Configuration) -> HashMap<String, u64> {
-        use tracing_futures::Instrument as _;
-        use tracing_subscriber::layer::SubscriberExt as _;
-
-        let recorded = RecordedU64s::default();
-        let subscriber = tracing_subscriber::Registry::default().with(recorded.clone());
-        let _guard = tracing::subscriber::set_default(subscriber);
-        plan_example_query(config)
-            .instrument(crate::services::supergraph::service::query_planning_span())
-            .await;
-        recorded.0.lock().clone()
-    }
-
-    #[test(tokio::test)]
-    async fn test_fuel_recorded_on_query_planning_span_with_incremental_planner() {
-        let config = Configuration::from_str(indoc::indoc! {"
-            supergraph:
-              query_planning:
-                incremental_planner:
-                  enabled: true
-                  fuel: 5000
-        "})
-        .expect("valid configuration");
-        let recorded = recorded_on_query_planning_span(config).await;
-
-        let consumed = recorded
-            .get("query_planning.fuel_consumed")
-            .expect("fuel consumed is recorded");
-        let remaining = recorded
-            .get("query_planning.fuel_remaining")
-            .expect("fuel remaining is recorded");
-        assert_eq!(consumed + remaining, 5000);
-    }
-
-    #[test(tokio::test)]
-    async fn test_no_fuel_on_query_planning_span_without_incremental_planner() {
-        let recorded = recorded_on_query_planning_span(Configuration::default()).await;
-
-        assert!(!recorded.contains_key("query_planning.fuel_consumed"));
-        assert!(!recorded.contains_key("query_planning.fuel_remaining"));
-    }
->>>>>>> 9b773a4 (feat(federation): add APOLLO_ROUTER_MAX_NON_LOCAL_SELECTIONS env var and non_local_selections histogram (#10349))
 }
