@@ -1,6 +1,7 @@
 //! Calls out to the apollo-federation crate
 
 use std::fmt::Debug;
+use std::num::NonZeroU64;
 use std::ops::ControlFlow;
 use std::sync::Arc;
 use std::sync::OnceLock;
@@ -13,6 +14,7 @@ use apollo_federation::error::FederationError;
 use apollo_federation::error::SingleFederationError;
 use apollo_federation::query_plan::query_planner::QueryPlanOptions;
 use apollo_federation::query_plan::query_planner::QueryPlanner;
+use apollo_federation::query_plan::query_planner::QueryPlannerDebugConfig;
 use futures::future::BoxFuture;
 use opentelemetry::KeyValue;
 use opentelemetry::metrics::MeterProvider as _;
@@ -78,6 +80,57 @@ pub(crate) fn non_local_selections_check_enabled() -> bool {
             std::env::var(ENV_DISABLE_NON_LOCAL_SELECTIONS_CHECK).as_deref() == Ok("true");
 
         !disabled
+    })
+}
+
+const ENV_MAX_NON_LOCAL_SELECTIONS: &str = "APOLLO_ROUTER_MAX_NON_LOCAL_SELECTIONS";
+/// The default for max number of non-local selections is 100000 defined in
+/// [`QueryPlannerDebugConfig::max_non_local_selections`], but that default can
+/// be altered with `APOLLO_ROUTER_MAX_NON_LOCAL_SELECTIONS` environment
+/// variable. The query planning process is aborted if this number is reached.
+///
+/// Since query planning configuration is part of the cache key, setting or
+/// changing the value of this env var will clear the query planner cache and
+/// cause replanning of the previously cached query plans.
+///
+/// If the env var value is unable to be parsed into a `NonZeroU64`, the default
+/// value is used and a warn message is emitted which can be found in the logs.
+/// An info log is emitted when that env var value parsed and is set.
+///
+/// This env var is intentionally undocumented. It is meant for troubleshooting
+/// purposes when investigating query plan and operation complexity in regards
+/// to non-local selection sets, an internal to query planner measurement for
+/// the number of selection sets that cannot be optimized due to not being local
+/// to the selection set currently being explored.
+///
+/// The number of non-local selections explored for a given plan is tracked in
+/// `apollo.router.query_planning.plan.non_local_selections` histogram and is
+/// available to everyone. This histogram defaults to bucket boundaries of 100,
+/// 1000, 25000, 50000, 100000, and 150000 (see [`NON_LOCAL_SELECTIONS_BUCKETS`]).
+pub(crate) fn max_non_local_selections() -> NonZeroU64 {
+    static MAX: OnceLock<NonZeroU64> = OnceLock::new();
+    *MAX.get_or_init(|| {
+        let default = QueryPlannerDebugConfig::default().max_non_local_selections;
+        let Ok(value) = std::env::var(ENV_MAX_NON_LOCAL_SELECTIONS) else {
+            return default;
+        };
+        match value.parse::<NonZeroU64>() {
+            Ok(limit) => {
+                tracing::info!(
+                    limit = limit,
+                    "non-local selections limit set"
+                );
+                limit
+            }
+            Err(_) => {
+                tracing::warn!(
+                    value = value,
+                    default = default,
+                    "falling back to default max non-local selection due to invalid {ENV_MAX_NON_LOCAL_SELECTIONS} value"
+                );
+                default
+            }
+        }
     })
 }
 
@@ -213,6 +266,7 @@ impl QueryPlannerService {
             query_plan_root_node: root_node.map(Arc::new),
             evaluated_plan_count: plan.statistics.evaluated_plan_count.clone().into_inner() as u64,
             evaluated_plan_paths: plan.statistics.evaluated_plan_paths.clone().into_inner() as u64,
+            non_local_selections_count: plan.statistics.non_local_selections_count,
         })
     }
 
@@ -336,6 +390,7 @@ impl QueryPlannerService {
             formatted_query_plan,
             evaluated_plan_count,
             evaluated_plan_paths,
+            non_local_selections_count,
         } = plan_result;
 
         // If the query is filtered, we want to generate the signature using the original query and generate the
@@ -371,6 +426,9 @@ impl QueryPlannerService {
                 "Number of paths (including intermediate ones) considered to plan a query before starting to generate a plan",
                 evaluated_plan_paths
             );
+            if let Some(non_local_selections_count) = non_local_selections_count {
+                metric_query_planning_non_local_selections(non_local_selections_count);
+            }
 
             Ok(QueryPlannerContent::Plan {
                 plan: Arc::new(super::QueryPlan {
@@ -607,12 +665,20 @@ impl QueryPlannerService {
     }
 }
 
+/// Default buckets for the non-local selections histogram. They bracket the
+/// default limit of 100,000 to observe how close operations get to it. The
+/// 150,000 bucket catches plans allowed by a raised
+/// `APOLLO_ROUTER_MAX_NON_LOCAL_SELECTIONS`.
+pub(crate) const NON_LOCAL_SELECTIONS_BUCKETS: &[f64] =
+    &[100.0, 1_000.0, 25_000.0, 50_000.0, 100_000.0, 150_000.0];
+
 #[derive(Debug, Clone, PartialEq)]
 pub(crate) struct QueryPlanResult {
     pub(super) formatted_query_plan: Option<Arc<String>>,
     pub(super) query_plan_root_node: Option<Arc<PlanNode>>,
     pub(super) evaluated_plan_count: u64,
     pub(super) evaluated_plan_paths: u64,
+    pub(super) non_local_selections_count: Option<u64>,
 }
 
 pub(crate) fn metric_query_planning_plan_duration(
@@ -626,6 +692,15 @@ pub(crate) fn metric_query_planning_plan_duration(
         elapsed,
         "planner" = planner,
         "outcome" = outcome
+    );
+}
+
+pub(crate) fn metric_query_planning_non_local_selections(count: u64) {
+    u64_histogram_with_unit!(
+        "apollo.router.query_planning.plan.non_local_selections",
+        "Number of non-local selections estimated during query planning traversal",
+        "{selection}",
+        count
     );
 }
 
@@ -1270,6 +1345,30 @@ mod tests {
             .unwrap();
 
             assert_histogram_exists!("apollo.router.query_planning.plan.evaluated_plans", u64);
+        }
+        .with_metrics()
+        .await;
+    }
+
+    #[test(tokio::test)]
+    async fn test_non_local_selections_histogram() {
+        async {
+            let _ = plan(
+                EXAMPLE_SCHEMA,
+                include_str!("testdata/query.graphql"),
+                include_str!("testdata/query.graphql"),
+                None,
+                PlanOptions::default(),
+            )
+            .await
+            .unwrap();
+
+            assert_histogram_exists!(
+                "apollo.router.query_planning.plan.non_local_selections",
+                u64
+            );
+            assert_histogram_count!("apollo.router.query_planning.plan.non_local_selections", 1);
+            assert_histogram_sum!("apollo.router.query_planning.plan.non_local_selections", 7);
         }
         .with_metrics()
         .await;
