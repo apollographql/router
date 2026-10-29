@@ -31,10 +31,10 @@ fn valid_supergraph_schema() {
     const MAX_ALLOCATIONS_API_SCHEMA: u64 = 6_898;
 
     // Number of bytes when the heap size reached its global maximum with a 5% buffer.
-    // Actual number: 686_993.
+    // Actual number: 861_960.
     //
-    // Extract subgraphs allocates additional 445_857 bytes (686_993-241_136=445_857).
-    const MAX_BYTES_SUBGRAPHS: usize = 721_342; // ~679 KiB
+    // Extract subgraphs allocates additional 620_824 bytes (861_960-241_136=620_824).
+    const MAX_BYTES_SUBGRAPHS: usize = 905_058; // ~884 KiB
 
     // Total number of allocations with a 5% buffer.
     // Actual number: 14_740.
