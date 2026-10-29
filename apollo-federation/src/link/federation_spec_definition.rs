@@ -945,6 +945,7 @@ impl FederationSpecDefinition {
         )
     }
 
+    /// `directive @lookup on FIELD_DEFINITION`
     fn lookup_directive_specification() -> DirectiveSpecification {
         DirectiveSpecification::new(
             FEDERATION_LOOKUP_DIRECTIVE_NAME_IN_SPEC,
@@ -955,6 +956,7 @@ impl FederationSpecDefinition {
         )
     }
 
+    /// `directive @internal on OBJECT | FIELD_DEFINITION`
     fn internal_directive_specification() -> DirectiveSpecification {
         DirectiveSpecification::new(
             FEDERATION_INTERNAL_DIRECTIVE_NAME_IN_SPEC,
@@ -968,7 +970,8 @@ impl FederationSpecDefinition {
         )
     }
 
-    /// `@is(field: FieldSelectionMap!)` and `@require(field: FieldSelectionMap!)`.
+    /// `directive @is(field: FieldSelectionMap!) on ARGUMENT_DEFINITION` and
+    /// `directive @require(field: FieldSelectionMap!) on ARGUMENT_DEFINITION`
     fn field_selection_map_directive_specification(name: Name) -> DirectiveSpecification {
         DirectiveSpecification::new(
             name,
