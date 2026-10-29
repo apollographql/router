@@ -17,6 +17,8 @@ Before enabling hot reload, consult the [support matrix](#hot-reload-support-mat
 | Apollo Uplink | 🟢 Yes | Automatically polls every 10 seconds for updates |
 | Local file | 🟢 Yes | Requires `--hot-reload` flag or `APOLLO_ROUTER_HOT_RELOAD=true` |
 | Remote URLs | ❌ No | Schema fetched once at startup |
+| Graph artifact (tag reference) | 🟢 Yes | Requires `--hot-reload` flag or `APOLLO_ROUTER_HOT_RELOAD=true`. Without it, the router exits at startup. |
+| Graph artifact (digest reference) | ❌ No | Digests are immutable. The router rejects `--hot-reload` with a digest reference. |
 
 ## Performance considerations
 
