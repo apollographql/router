@@ -832,15 +832,45 @@ pub(super) struct Work {
     /// Demand entries made, and merged into one with the same selections.
     pub(super) demand_entries: Counter,
     pub(super) demand_merges: Counter,
-    /// The widths hashed finding a demand's entry: its selections, and its region's literals.
+    /// The widths hashed finding a demand's entry: the names it is sent under and its selections,
+    /// and its region's literals.
     pub(super) demand_key_width: Counter,
     /// Demanded fields compared with the calls of their key, and fields of different calls
     /// compared for being active together.
     pub(super) call_comparisons: Counter,
+    // Representations.
+    /// Boolean variable references read at the boundary, before any literal is folded: a
+    /// condition node's, each `@skip`/`@include` of a fetch's operation, and each condition of a
+    /// `requires` entry at any depth, excluded entries included. Each is one lookup among the
+    /// declared names.
+    pub(super) boolean_references: Counter,
+    /// `requires` selections the projection read, once per scope they are read in, and the
+    /// condition slots of the fragments among them, nested ones included, each fragment's counted
+    /// whole before its literals are folded, an excluding literal stopping the fold short.
+    pub(super) entry_selections: Counter,
+    pub(super) entry_literals: Counter,
+    /// Location regions the projection wrote: a write added to a location, a field's removal
+    /// from one below it, a fragment's removal from an explicit selection it overwrites.
+    pub(super) projection_writes: Counter,
+    /// Locations a field examined for being below its key, clearing what an earlier write left
+    /// there: every location of its scope, once per field whose key holds a copy.
+    pub(super) projection_scans: Counter,
+    /// Readable locations a bare field copied.
+    pub(super) copied_locations: Counter,
+    /// Rename states the rewrite agreement followed, one per renamer and state it was asked of.
+    pub(super) agreement_states: Counter,
+    /// Resolvable keys tried per runtime type, and the clauses of the failure regions their
+    /// intersection read where no one key covers every configuration.
+    pub(super) key_candidates: Counter,
+    pub(super) key_failure_clauses: Counter,
     // Storage.
     /// Contributions stored, and the literals of their guards.
     pub(super) contributions: Counter,
     pub(super) guard_literals: Counter,
+    /// The contributions a representation holds, each a readable one narrowed to where its location
+    /// is present, and the literals of their guards.
+    pub(super) held_contributions: Counter,
+    pub(super) held_guard_literals: Counter,
 }
 
 /// A count, or a maximum.
