@@ -110,7 +110,7 @@ imagePullSecrets: []
 nameOverride: ""
 fullnameOverride: ""
 
-# -- A map of dnsConfig options,
+# -- Sets the [DNS config](https://kubernetes.io/docs/concepts/services-networking/dns-pod-service/#pod-dns-config) for Deployment pods
 # Example:
 # dnsConfig:
 #   options:
