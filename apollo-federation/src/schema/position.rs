@@ -7980,12 +7980,6 @@ impl FederationSchema {
         }
     }
 
-    pub(crate) fn recompute_referencers(&mut self) -> Result<(), FederationError> {
-        self.referencers = Default::default();
-        self.collect_shallow_references();
-        self.collect_deep_references()
-    }
-
     /// Collects schema referencers.
     pub(crate) fn collect_deep_references(&mut self) -> Result<(), FederationError> {
         let mut errors = MultipleFederationErrors { errors: vec![] };
