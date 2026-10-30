@@ -47,6 +47,7 @@ pub type Body = RouterBody;
 pub type Error = hyper::Error;
 
 pub mod body;
+pub(crate) mod client_connection;
 pub(crate) mod parse_query;
 pub(crate) mod pipeline_handle;
 pub(crate) mod service;

@@ -60,6 +60,7 @@ use crate::plugins::telemetry::config_new::router::instruments::ResponseBodySize
 use crate::router::ApolloRouterError;
 use crate::router_factory::RouterFactory;
 use crate::services::router;
+use crate::services::router::client_connection::ClientConnection;
 use crate::uplink::license_enforcement::LicenseState;
 
 static BARE_WILDCARD_PATH_REGEX: Lazy<Regex> = Lazy::new(|| {
@@ -415,6 +416,9 @@ async fn handle_graphql(
         // means it went through the entire pipeline at least once (not looking at deferred responses or
         // subscription events). This is a bit wasteful, so to avoid unneeded subgraph calls, we insert in
         // the context a flag to indicate that the request is canceled and subgraph calls should not be made
+        context
+            .extensions()
+            .with_lock(|lock| lock.insert(ClientConnection::default()));
         let mut cancel_handler = CancelHandler::new(&context, log_on_broken_pipe);
         let task = service
             .oneshot(request)
@@ -523,14 +527,16 @@ impl Drop for CancelHandler<'_> {
                 self.span
                     .in_scope(|| tracing::error!("broken pipe: the client closed the connection"));
             }
-            self.context
+            if let Some(connection) = self
+                .context
                 .extensions()
-                .with_lock(|lock| lock.insert(CanceledRequest));
+                .with_lock(|lock| lock.get::<ClientConnection>().cloned())
+            {
+                connection.close();
+            }
         }
     }
 }
-
-pub(crate) struct CanceledRequest;
 
 #[cfg(test)]
 mod tests {

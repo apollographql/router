@@ -16,7 +16,6 @@ use super::QueryPlan;
 use super::log;
 use super::subscription::SubscriptionHandle;
 use crate::Context;
-use crate::axum_factory::CanceledRequest;
 use crate::error::Error;
 use crate::graphql::Request;
 use crate::graphql::Response;
@@ -45,6 +44,7 @@ use crate::services::fetch;
 use crate::services::fetch::ErrorMapping;
 use crate::services::fetch::SubscriptionRequest;
 use crate::services::fetch_service::FetchService;
+use crate::services::router::client_connection::ClientConnection;
 use crate::spec::Query;
 use crate::spec::Schema;
 
@@ -293,11 +293,10 @@ impl PlanNode {
                 PlanNode::Fetch(fetch_node) => {
                     // The client closed the connection, we are still executing the request pipeline,
                     // but we won't send unused trafic to subgraph
-                    if parameters
-                        .context
-                        .extensions()
-                        .with_lock(|lock| lock.get::<CanceledRequest>().is_some())
-                    {
+                    if parameters.context.extensions().with_lock(|lock| {
+                        lock.get::<ClientConnection>()
+                            .is_some_and(ClientConnection::is_closed)
+                    }) {
                         value = Value::Object(Object::default());
                         errors = Vec::new();
                     } else {
