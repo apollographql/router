@@ -61,6 +61,7 @@ use crate::router::ApolloRouterError;
 use crate::router_factory::RouterFactory;
 use crate::services::router;
 use crate::services::router::client_connection::ClientConnection;
+use crate::services::router::client_connection::ClientConnectionLayer;
 use crate::uplink::license_enforcement::LicenseState;
 
 static BARE_WILDCARD_PATH_REGEX: Lazy<Regex> = Lazy::new(|| {
@@ -317,6 +318,9 @@ fn main_endpoint(
 
     let mut main_route = main_router(configuration).layer(
         ServiceBuilder::new()
+            // Watching the client connection comes first, so the router sees the client's body
+            // exactly as hyper delivers it, before decompression or any other layer.
+            .layer(ClientConnectionLayer)
             // Telemetry layers MUST be first. This means that they will be hit first during execution of the pipeline
             // Adding layers before telemetry will cause us to lose metrics and spans.
             .layer(middleware::from_fn(metrics_handler))
@@ -416,9 +420,6 @@ async fn handle_graphql(
         // means it went through the entire pipeline at least once (not looking at deferred responses or
         // subscription events). This is a bit wasteful, so to avoid unneeded subgraph calls, we insert in
         // the context a flag to indicate that the request is canceled and subgraph calls should not be made
-        context
-            .extensions()
-            .with_lock(|lock| lock.insert(ClientConnection::default()));
         let mut cancel_handler = CancelHandler::new(&context, log_on_broken_pipe);
         let task = service
             .oneshot(request)

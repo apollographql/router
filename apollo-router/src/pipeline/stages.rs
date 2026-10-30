@@ -79,6 +79,7 @@ use crate::services::query_parsing::recursive_selections_limit::LimitRecursiveSe
 use crate::services::query_parsing::service::QueryParsingService;
 use crate::services::query_planner;
 use crate::services::router;
+use crate::services::router::client_connection::apply_client_connection_status;
 use crate::services::router::parse_query::ParseQueryLayer;
 use crate::services::router::service::DisplayRouterRequestLayer;
 use crate::services::router::service::RouterToSupergraphRequestLayer;
@@ -655,6 +656,12 @@ pub(crate) fn build_router_service(
         .apply_required_plugin_layer(&plugins, Headers::router_masking_layer)
         .apply_plugin_layer(&plugins, Telemetry::allocation_metrics_layer)
         .apply_plugin_layer(&plugins, Telemetry::instrument_router_layer)
+        // Directly inside router telemetry, so its spans and instruments record the status that
+        // describes a client that left or sent a malformed body.
+        .map_future_with_request_data(
+            |request: &router::Request| request.context.clone(),
+            apply_client_connection_status,
+        )
         .rust_plugins(plugins, |plugin, service| plugin.router_service(service))
         .layer(content_negotiation::RouterContentNegotiationLayer::default())
         .layer(DisplayRouterRequestLayer)

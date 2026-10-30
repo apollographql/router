@@ -8,6 +8,7 @@ pub(crate) use common::IntegrationTest;
 pub(crate) mod redis_monitor;
 
 mod allowed_features;
+mod client_disconnect;
 mod config_cli;
 mod connectors;
 mod coprocessor;
