@@ -65,6 +65,8 @@ response_cache:
 
 Apollo Connectors don't use `@cacheControl` directives because they call HTTP APIs directly. Instead, the router reads the `Cache-Control` HTTP headers returned by the upstream REST API. If the API returns `Cache-Control: max-age=300`, the router caches the response for 300 seconds. The configured `ttl` serves as a fallback when no `Cache-Control` header is present.
 
+Unlike a subgraph response, a connector response with no `Cache-Control` header at all is still cached. For more information, go to [Responses with no `Cache-Control`](./connectors#responses-with-no-cache-control).
+
 </Note>
 
 ### Control TTL with `@cacheControl`
@@ -552,6 +554,8 @@ In this example, both tags (`homepage` and `user-9001-homepage`) are applied to 
 ### Connector invalidation methods
 
 For Apollo Connectors, the invalidation endpoint supports connector-specific request formats. Connector sources are identified using the `subgraph_name.source_name` format.
+
+Connector and subgraph entries are invalidated independently, and each scope is authorized by its own shared key. For more information, go to [Invalidation is scoped](./connectors#invalidation-is-scoped).
 
 #### By connector source
 

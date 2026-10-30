@@ -11,11 +11,17 @@ use crate::json_ext::ValueExt;
 use crate::spec::Schema;
 use crate::spec::TYPENAME;
 
+/// Projects `input_content` onto `selections`, producing an entity representation.
+///
+/// `boolean_variable` resolves the value of boolean variables of the operation. It is used to
+/// evaluate the `@skip`/`@include` conditions carried by inline fragments in `selections`: a
+/// fragment whose conditions exclude it contributes nothing to the representation.
 pub(crate) fn execute_selection_set<'a>(
     input_content: &'a Value,
     selections: &[Selection],
     schema: &Schema,
     mut current_type: Option<&'a str>,
+    boolean_variable: &dyn Fn(&str) -> Option<bool>,
 ) -> Value {
     let content = match input_content.as_object() {
         Some(o) => o,
@@ -92,6 +98,7 @@ pub(crate) fn execute_selection_set<'a>(
                                             field_type
                                                 .as_ref()
                                                 .map(|ty| ty.inner_named_type().as_str()),
+                                            boolean_variable,
                                         )
                                     } else {
                                         element.clone()
@@ -107,6 +114,7 @@ pub(crate) fn execute_selection_set<'a>(
                                     selections,
                                     schema,
                                     field_type.as_ref().map(|ty| ty.inner_named_type().as_str()),
+                                    boolean_variable,
                                 ),
                             );
                         } else {
@@ -115,29 +123,43 @@ pub(crate) fn execute_selection_set<'a>(
                     }
                 }
             }
-            Selection::InlineFragment(InlineFragment {
-                type_condition,
-                selections,
-            }) => match type_condition {
-                None => continue,
-                Some(condition) => {
-                    if type_condition_matches(schema, current_type, condition)
-                        && let Value::Object(selected) =
-                            execute_selection_set(input_content, selections, schema, current_type)
-                    {
-                        for (key, value) in selected.into_iter() {
-                            match output.entry(key) {
-                                Entry::Vacant(e) => {
-                                    e.insert(value);
-                                }
-                                Entry::Occupied(e) => {
-                                    e.into_mut().type_aware_deep_merge(value, schema);
-                                }
+            Selection::InlineFragment(inline_fragment) => {
+                let InlineFragment {
+                    type_condition,
+                    conditions: _,
+                    selections,
+                } = inline_fragment;
+                // A fragment excluded by its `@skip`/`@include` conditions contributes nothing:
+                // its selections are only required when the fields they are required by are
+                // actually selected.
+                if !inline_fragment.is_included(boolean_variable) {
+                    continue;
+                }
+                let type_matches = match type_condition {
+                    None => true,
+                    Some(condition) => type_condition_matches(schema, current_type, condition),
+                };
+                if type_matches
+                    && let Value::Object(selected) = execute_selection_set(
+                        input_content,
+                        selections,
+                        schema,
+                        current_type,
+                        boolean_variable,
+                    )
+                {
+                    for (key, value) in selected.into_iter() {
+                        match output.entry(key) {
+                            Entry::Vacant(e) => {
+                                e.insert(value);
+                            }
+                            Entry::Occupied(e) => {
+                                e.into_mut().type_aware_deep_merge(value, schema);
                             }
                         }
                     }
                 }
-            },
+            }
         }
     }
 
@@ -240,7 +262,7 @@ mod tests {
         Ok(Value::Array(
             values
                 .into_iter()
-                .map(|value| execute_selection_set(value, selections, schema, None))
+                .map(|value| execute_selection_set(value, selections, schema, None, &|_| None))
                 .collect::<Vec<_>>(),
         ))
     }
@@ -388,7 +410,7 @@ mod tests {
         ]);
         let selection: Vec<Selection> = serde_json::from_value(requires).unwrap();
 
-        let value = execute_selection_set(&response, &selection, &schema, None);
+        let value = execute_selection_set(&response, &selection, &schema, None, &|_| None);
         println!(
             "response\n{}\nand selection\n{:?}\n returns:\n{}",
             serde_json::to_string_pretty(&response).unwrap(),
@@ -653,7 +675,7 @@ mod tests {
 
         let selection: Vec<Selection> = serde_json::from_value(requires).unwrap();
 
-        let value = execute_selection_set(&response, &selection, &schema, None);
+        let value = execute_selection_set(&response, &selection, &schema, None, &|_| None);
 
         assert_eq!(
             value,
@@ -746,5 +768,155 @@ mod tests {
         "#,
             content
         )
+    }
+}
+
+#[cfg(test)]
+mod condition_tests {
+    use apollo_federation::query_plan::requires_selection::Selection;
+    use serde_json_bytes::json as bjson;
+
+    use super::*;
+    use crate::Configuration;
+
+    fn schema() -> Schema {
+        let sdl = r#"
+            schema
+                @link(url: "https://specs.apollo.dev/link/v1.0")
+                @link(url: "https://specs.apollo.dev/join/v0.3", for: EXECUTION)
+            {
+                query: Query
+            }
+            directive @link(url: String, as: String, for: link__Purpose, import: [link__Import]) repeatable on SCHEMA
+            directive @join__type(graph: join__Graph!, key: join__FieldSet, extension: Boolean! = false, resolvable: Boolean! = true, isInterfaceObject: Boolean! = false) repeatable on OBJECT | INTERFACE | UNION | ENUM | INPUT_OBJECT | SCALAR
+            directive @join__graph(name: String!, url: String!) on ENUM_VALUE
+            directive @join__field(graph: join__Graph, requires: join__FieldSet, provides: join__FieldSet, type: String, external: Boolean, override: String, usedOverridden: Boolean) repeatable on FIELD_DEFINITION | INPUT_FIELD_DEFINITION
+
+            scalar link__Import
+            scalar join__FieldSet
+            enum link__Purpose { SECURITY EXECUTION }
+            enum join__Graph {
+                TEST @join__graph(name: "test", url: "http://localhost:4001/graphql")
+            }
+
+            type Query @join__type(graph: TEST) {
+                t: T
+            }
+
+            type T @join__type(graph: TEST, key: "id") {
+                id: ID!
+                a: Int!
+                u: U
+            }
+
+            type U @join__type(graph: TEST) {
+                x: Int!
+            }
+        "#;
+        Schema::parse(sdl, &Configuration::default()).unwrap()
+    }
+
+    /// Inputs mirroring a `@requires(fields: "a")` on a field under `@include(if: $c)`, next to
+    /// a `@requires(fields: "u { x }")` on a field under `@skip(if: $s)`.
+    fn requires() -> Vec<Selection> {
+        serde_json::from_value(serde_json::json!([
+            {
+                "kind": "InlineFragment",
+                "typeCondition": "T",
+                "selections": [
+                    { "kind": "Field", "name": "__typename" },
+                    { "kind": "Field", "name": "id" },
+                ],
+            },
+            {
+                "kind": "InlineFragment",
+                "typeCondition": "T",
+                "conditions": [{ "kind": "include", "if": "c" }],
+                "selections": [
+                    { "kind": "Field", "name": "__typename" },
+                    { "kind": "Field", "name": "a" },
+                ],
+            },
+            {
+                "kind": "InlineFragment",
+                "typeCondition": "T",
+                "conditions": [{ "kind": "skip", "if": "s" }],
+                "selections": [
+                    { "kind": "Field", "name": "u", "selections": [
+                        { "kind": "Field", "name": "x" },
+                    ] },
+                ],
+            },
+        ]))
+        .unwrap()
+    }
+
+    #[test]
+    fn excluded_fragments_do_not_contribute_to_the_representation() {
+        let schema = schema();
+        // The parent fetch only selected `a` and `u` under the conditions, so they are absent.
+        let data = bjson!({ "__typename": "T", "id": "1" });
+
+        let value = execute_selection_set(&data, &requires(), &schema, None, &|name| match name {
+            "c" => Some(false),
+            "s" => Some(true),
+            _ => None,
+        });
+        assert_eq!(value, bjson!({ "__typename": "T", "id": "1" }));
+    }
+
+    #[test]
+    fn included_fragments_contribute_to_the_representation() {
+        let schema = schema();
+        let data = bjson!({ "__typename": "T", "id": "1", "a": 42, "u": { "x": 7 } });
+
+        let value = execute_selection_set(&data, &requires(), &schema, None, &|name| match name {
+            "c" => Some(true),
+            "s" => Some(false),
+            _ => None,
+        });
+        assert_eq!(
+            value,
+            bjson!({ "__typename": "T", "id": "1", "a": 42, "u": { "x": 7 } })
+        );
+    }
+
+    #[test]
+    fn included_fragment_with_missing_non_null_field_invalidates_the_representation() {
+        let schema = schema();
+        // `a` is non-null and required, but the parent response lacks it: the entity is invalid.
+        let data = bjson!({ "__typename": "T", "id": "1" });
+
+        let value = execute_selection_set(&data, &requires(), &schema, None, &|name| match name {
+            "c" => Some(true),
+            "s" => Some(true),
+            _ => None,
+        });
+        assert_eq!(value, bjson!({ "__typename": "T", "id": "1" }));
+    }
+
+    #[test]
+    fn literal_and_unresolvable_conditions() {
+        let schema = schema();
+        let data = bjson!({ "__typename": "T", "id": "1", "a": 42 });
+        let requires: Vec<Selection> = serde_json::from_value(serde_json::json!([
+            {
+                "kind": "InlineFragment",
+                "typeCondition": "T",
+                "conditions": [{ "kind": "include", "if": false }],
+                "selections": [{ "kind": "Field", "name": "id" }],
+            },
+            {
+                "kind": "InlineFragment",
+                "typeCondition": "T",
+                "conditions": [{ "kind": "skip", "if": "unknown" }],
+                "selections": [{ "kind": "Field", "name": "a" }],
+            },
+        ]))
+        .unwrap();
+
+        let value = execute_selection_set(&data, &requires, &schema, None, &|_| None);
+        // `@include(if: false)` excludes `id`; an unresolvable variable does not exclude `a`.
+        assert_eq!(value, bjson!({ "a": 42 }));
     }
 }
