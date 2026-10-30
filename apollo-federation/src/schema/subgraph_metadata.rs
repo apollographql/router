@@ -322,11 +322,10 @@ impl SubgraphMetadata {
         schema: &FederationSchema,
     ) -> Result<IndexSet<FieldDefinitionPosition>, FederationError> {
         let mut interface_constraint_fields = IndexSet::default();
+        let implementers_map = schema.schema().implementers_map();
         for ty in schema.schema().types.values() {
             if let ExtendedType::Interface(itf) = ty {
-                let possible_runtime_types: Vec<_> = schema
-                    .schema()
-                    .implementers_map()
+                let possible_runtime_types: Vec<_> = implementers_map
                     .get(&itf.name)
                     .map_or(&Default::default(), |impls| &impls.objects)
                     .iter()
