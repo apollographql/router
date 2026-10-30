@@ -1,0 +1,127 @@
+{
+  "Sequence": {
+    "nodes": [
+      {
+        "Fetch": {
+          "subgraph_name": "sup",
+          "id": null,
+          "variable_usages": [],
+          "operation_document": "{ product { __typename id } }",
+          "operation_name": null,
+          "operation_kind": "query",
+          "input_rewrites": [],
+          "output_rewrites": [],
+          "context_rewrites": []
+        }
+      },
+      {
+        "Flatten": {
+          "path": [
+            {
+              "Key": [
+                "product",
+                null
+              ]
+            }
+          ],
+          "node": {
+            "Fetch": {
+              "subgraph_name": "oth",
+              "id": null,
+              "variable_usages": [],
+              "requires": [
+                {
+                  "kind": "InlineFragment",
+                  "typeCondition": "Product",
+                  "selections": [
+                    {
+                      "kind": "Field",
+                      "name": "__typename"
+                    },
+                    {
+                      "kind": "Field",
+                      "name": "id"
+                    }
+                  ]
+                }
+              ],
+              "operation_document": "query($representations: [_Any!]!) { _entities(representations: $representations) { ... on Product { price { __typename ... on FixedPrice { value } } } } }",
+              "operation_name": null,
+              "operation_kind": "query",
+              "input_rewrites": [],
+              "output_rewrites": [],
+              "context_rewrites": []
+            }
+          }
+        }
+      },
+      {
+        "Flatten": {
+          "path": [
+            {
+              "Key": [
+                "product",
+                null
+              ]
+            }
+          ],
+          "node": {
+            "Fetch": {
+              "subgraph_name": "req",
+              "id": null,
+              "variable_usages": [],
+              "requires": [
+                {
+                  "kind": "InlineFragment",
+                  "typeCondition": "Product",
+                  "selections": [
+                    {
+                      "kind": "Field",
+                      "name": "__typename"
+                    },
+                    {
+                      "kind": "Field",
+                      "name": "price",
+                      "selections": [
+                        {
+                          "kind": "InlineFragment",
+                          "typeCondition": "FixedPrice",
+                          "selections": [
+                            {
+                              "kind": "Field",
+                              "name": "value"
+                            }
+                          ]
+                        },
+                        {
+                          "kind": "InlineFragment",
+                          "typeCondition": "RangePrice",
+                          "selections": [
+                            {
+                              "kind": "Field",
+                              "name": "minValue"
+                            }
+                          ]
+                        }
+                      ]
+                    },
+                    {
+                      "kind": "Field",
+                      "name": "id"
+                    }
+                  ]
+                }
+              ],
+              "operation_document": "query($representations: [_Any!]!) { _entities(representations: $representations) { ... on Product { estimate } } }",
+              "operation_name": null,
+              "operation_kind": "query",
+              "input_rewrites": [],
+              "output_rewrites": [],
+              "context_rewrites": []
+            }
+          }
+        }
+      }
+    ]
+  }
+}

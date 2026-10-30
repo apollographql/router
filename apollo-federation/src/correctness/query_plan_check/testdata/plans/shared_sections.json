@@ -1,0 +1,13 @@
+{
+  "Fetch": {
+    "subgraph_name": "catalog",
+    "id": null,
+    "variable_usages": [],
+    "operation_document": "query Sections__catalog__0 { sections { __typename ... on Hero { title } id } }",
+    "operation_name": "Sections__catalog__0",
+    "operation_kind": "query",
+    "input_rewrites": [],
+    "output_rewrites": [],
+    "context_rewrites": []
+  }
+}

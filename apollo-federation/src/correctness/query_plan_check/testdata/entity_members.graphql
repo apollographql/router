@@ -1,0 +1,486 @@
+# Entities reached through interfaces of three widths: `base` serves `items8`, `items16` and
+# `items32`, lists of an `N8`, an `N16` and an `N32`, interfaces implemented by the entities `E1`
+# to `E8`, `E1` to `E16` and `E1` to `E32`, each with its `id`; `extra` resolves each entity's `x1`
+# to `x8` by `id`.
+#
+# Composed with `apollo_federation::composition::compose` from the two subgraphs below, written
+# here with their members elided. Recompose it when they change.
+#
+# Subgraph `base`:
+#
+#   extend schema @link(url: "https://specs.apollo.dev/federation/v2.7", import: ["@key"])
+#
+#   type Query {
+#     items8: [N8]
+#     items16: [N16]
+#     items32: [N32]
+#   }
+#
+#   interface N8 {
+#     id: ID!
+#   }
+#
+#   … and `N16` and `N32` alike
+#
+#   type E1 implements N32 & N16 & N8 @key(fields: "id") {
+#     id: ID!
+#   }
+#
+#   … and so on to `E32`, `E9` to `E16` implementing `N32 & N16` and `E17` to `E32` `N32` alone
+#
+# Subgraph `extra`:
+#
+#   extend schema @link(url: "https://specs.apollo.dev/federation/v2.7", import: ["@key"])
+#
+#   type E1 @key(fields: "id") {
+#     id: ID!
+#     x1: Int
+#     …
+#     x8: Int
+#   }
+#
+#   … and so on to `E32`
+
+schema @link(url: "https://specs.apollo.dev/link/v1.0") @link(url: "https://specs.apollo.dev/join/v0.4", for: EXECUTION) {
+  query: Query
+}
+
+directive @link(url: String, as: String, for: link__Purpose, import: [link__Import]) repeatable on SCHEMA
+
+directive @join__graph(name: String!, url: String!) on ENUM_VALUE
+
+directive @join__type(graph: join__Graph!, key: join__FieldSet, extension: Boolean! = false, resolvable: Boolean! = true, isInterfaceObject: Boolean! = false) repeatable on OBJECT | INTERFACE | UNION | ENUM | INPUT_OBJECT | SCALAR
+
+directive @join__field(graph: join__Graph, requires: join__FieldSet, provides: join__FieldSet, type: String, external: Boolean, override: String, usedOverridden: Boolean, overrideLabel: String) repeatable on FIELD_DEFINITION | INPUT_FIELD_DEFINITION
+
+directive @join__implements(graph: join__Graph!, interface: String!) repeatable on OBJECT | INTERFACE
+
+directive @join__unionMember(graph: join__Graph!, member: String!) repeatable on UNION
+
+directive @join__enumValue(graph: join__Graph!) repeatable on ENUM_VALUE
+
+directive @join__directive(graphs: [join__Graph!], name: String!, args: join__DirectiveArguments) repeatable on SCHEMA | OBJECT | INTERFACE | FIELD_DEFINITION
+
+enum link__Purpose {
+  """
+  `SECURITY` features provide metadata necessary to securely resolve fields.
+  """
+  SECURITY
+  """
+  `EXECUTION` features provide metadata necessary for operation execution.
+  """
+  EXECUTION
+}
+
+scalar link__Import
+
+enum join__Graph {
+  BASE @join__graph(name: "base", url: "http://base")
+  EXTRA @join__graph(name: "extra", url: "http://extra")
+}
+
+scalar join__FieldSet
+
+scalar join__DirectiveArguments
+
+type Query @join__type(graph: BASE) @join__type(graph: EXTRA) {
+  items8: [N8] @join__field(graph: BASE)
+  items16: [N16] @join__field(graph: BASE)
+  items32: [N32] @join__field(graph: BASE)
+}
+
+interface N8 @join__type(graph: BASE) {
+  id: ID!
+}
+
+interface N16 @join__type(graph: BASE) {
+  id: ID!
+}
+
+interface N32 @join__type(graph: BASE) {
+  id: ID!
+}
+
+type E1 implements N8 & N16 & N32 @join__implements(graph: BASE, interface: "N8") @join__implements(graph: BASE, interface: "N16") @join__implements(graph: BASE, interface: "N32") @join__type(graph: BASE, key: "id") @join__type(graph: EXTRA, key: "id") {
+  id: ID!
+  x1: Int @join__field(graph: EXTRA)
+  x2: Int @join__field(graph: EXTRA)
+  x3: Int @join__field(graph: EXTRA)
+  x4: Int @join__field(graph: EXTRA)
+  x5: Int @join__field(graph: EXTRA)
+  x6: Int @join__field(graph: EXTRA)
+  x7: Int @join__field(graph: EXTRA)
+  x8: Int @join__field(graph: EXTRA)
+}
+
+type E2 implements N8 & N16 & N32 @join__implements(graph: BASE, interface: "N8") @join__implements(graph: BASE, interface: "N16") @join__implements(graph: BASE, interface: "N32") @join__type(graph: BASE, key: "id") @join__type(graph: EXTRA, key: "id") {
+  id: ID!
+  x1: Int @join__field(graph: EXTRA)
+  x2: Int @join__field(graph: EXTRA)
+  x3: Int @join__field(graph: EXTRA)
+  x4: Int @join__field(graph: EXTRA)
+  x5: Int @join__field(graph: EXTRA)
+  x6: Int @join__field(graph: EXTRA)
+  x7: Int @join__field(graph: EXTRA)
+  x8: Int @join__field(graph: EXTRA)
+}
+
+type E3 implements N8 & N16 & N32 @join__implements(graph: BASE, interface: "N8") @join__implements(graph: BASE, interface: "N16") @join__implements(graph: BASE, interface: "N32") @join__type(graph: BASE, key: "id") @join__type(graph: EXTRA, key: "id") {
+  id: ID!
+  x1: Int @join__field(graph: EXTRA)
+  x2: Int @join__field(graph: EXTRA)
+  x3: Int @join__field(graph: EXTRA)
+  x4: Int @join__field(graph: EXTRA)
+  x5: Int @join__field(graph: EXTRA)
+  x6: Int @join__field(graph: EXTRA)
+  x7: Int @join__field(graph: EXTRA)
+  x8: Int @join__field(graph: EXTRA)
+}
+
+type E4 implements N8 & N16 & N32 @join__implements(graph: BASE, interface: "N8") @join__implements(graph: BASE, interface: "N16") @join__implements(graph: BASE, interface: "N32") @join__type(graph: BASE, key: "id") @join__type(graph: EXTRA, key: "id") {
+  id: ID!
+  x1: Int @join__field(graph: EXTRA)
+  x2: Int @join__field(graph: EXTRA)
+  x3: Int @join__field(graph: EXTRA)
+  x4: Int @join__field(graph: EXTRA)
+  x5: Int @join__field(graph: EXTRA)
+  x6: Int @join__field(graph: EXTRA)
+  x7: Int @join__field(graph: EXTRA)
+  x8: Int @join__field(graph: EXTRA)
+}
+
+type E5 implements N8 & N16 & N32 @join__implements(graph: BASE, interface: "N8") @join__implements(graph: BASE, interface: "N16") @join__implements(graph: BASE, interface: "N32") @join__type(graph: BASE, key: "id") @join__type(graph: EXTRA, key: "id") {
+  id: ID!
+  x1: Int @join__field(graph: EXTRA)
+  x2: Int @join__field(graph: EXTRA)
+  x3: Int @join__field(graph: EXTRA)
+  x4: Int @join__field(graph: EXTRA)
+  x5: Int @join__field(graph: EXTRA)
+  x6: Int @join__field(graph: EXTRA)
+  x7: Int @join__field(graph: EXTRA)
+  x8: Int @join__field(graph: EXTRA)
+}
+
+type E6 implements N8 & N16 & N32 @join__implements(graph: BASE, interface: "N8") @join__implements(graph: BASE, interface: "N16") @join__implements(graph: BASE, interface: "N32") @join__type(graph: BASE, key: "id") @join__type(graph: EXTRA, key: "id") {
+  id: ID!
+  x1: Int @join__field(graph: EXTRA)
+  x2: Int @join__field(graph: EXTRA)
+  x3: Int @join__field(graph: EXTRA)
+  x4: Int @join__field(graph: EXTRA)
+  x5: Int @join__field(graph: EXTRA)
+  x6: Int @join__field(graph: EXTRA)
+  x7: Int @join__field(graph: EXTRA)
+  x8: Int @join__field(graph: EXTRA)
+}
+
+type E7 implements N8 & N16 & N32 @join__implements(graph: BASE, interface: "N8") @join__implements(graph: BASE, interface: "N16") @join__implements(graph: BASE, interface: "N32") @join__type(graph: BASE, key: "id") @join__type(graph: EXTRA, key: "id") {
+  id: ID!
+  x1: Int @join__field(graph: EXTRA)
+  x2: Int @join__field(graph: EXTRA)
+  x3: Int @join__field(graph: EXTRA)
+  x4: Int @join__field(graph: EXTRA)
+  x5: Int @join__field(graph: EXTRA)
+  x6: Int @join__field(graph: EXTRA)
+  x7: Int @join__field(graph: EXTRA)
+  x8: Int @join__field(graph: EXTRA)
+}
+
+type E8 implements N8 & N16 & N32 @join__implements(graph: BASE, interface: "N8") @join__implements(graph: BASE, interface: "N16") @join__implements(graph: BASE, interface: "N32") @join__type(graph: BASE, key: "id") @join__type(graph: EXTRA, key: "id") {
+  id: ID!
+  x1: Int @join__field(graph: EXTRA)
+  x2: Int @join__field(graph: EXTRA)
+  x3: Int @join__field(graph: EXTRA)
+  x4: Int @join__field(graph: EXTRA)
+  x5: Int @join__field(graph: EXTRA)
+  x6: Int @join__field(graph: EXTRA)
+  x7: Int @join__field(graph: EXTRA)
+  x8: Int @join__field(graph: EXTRA)
+}
+
+type E9 implements N16 & N32 @join__implements(graph: BASE, interface: "N16") @join__implements(graph: BASE, interface: "N32") @join__type(graph: BASE, key: "id") @join__type(graph: EXTRA, key: "id") {
+  id: ID!
+  x1: Int @join__field(graph: EXTRA)
+  x2: Int @join__field(graph: EXTRA)
+  x3: Int @join__field(graph: EXTRA)
+  x4: Int @join__field(graph: EXTRA)
+  x5: Int @join__field(graph: EXTRA)
+  x6: Int @join__field(graph: EXTRA)
+  x7: Int @join__field(graph: EXTRA)
+  x8: Int @join__field(graph: EXTRA)
+}
+
+type E10 implements N16 & N32 @join__implements(graph: BASE, interface: "N16") @join__implements(graph: BASE, interface: "N32") @join__type(graph: BASE, key: "id") @join__type(graph: EXTRA, key: "id") {
+  id: ID!
+  x1: Int @join__field(graph: EXTRA)
+  x2: Int @join__field(graph: EXTRA)
+  x3: Int @join__field(graph: EXTRA)
+  x4: Int @join__field(graph: EXTRA)
+  x5: Int @join__field(graph: EXTRA)
+  x6: Int @join__field(graph: EXTRA)
+  x7: Int @join__field(graph: EXTRA)
+  x8: Int @join__field(graph: EXTRA)
+}
+
+type E11 implements N16 & N32 @join__implements(graph: BASE, interface: "N16") @join__implements(graph: BASE, interface: "N32") @join__type(graph: BASE, key: "id") @join__type(graph: EXTRA, key: "id") {
+  id: ID!
+  x1: Int @join__field(graph: EXTRA)
+  x2: Int @join__field(graph: EXTRA)
+  x3: Int @join__field(graph: EXTRA)
+  x4: Int @join__field(graph: EXTRA)
+  x5: Int @join__field(graph: EXTRA)
+  x6: Int @join__field(graph: EXTRA)
+  x7: Int @join__field(graph: EXTRA)
+  x8: Int @join__field(graph: EXTRA)
+}
+
+type E12 implements N16 & N32 @join__implements(graph: BASE, interface: "N16") @join__implements(graph: BASE, interface: "N32") @join__type(graph: BASE, key: "id") @join__type(graph: EXTRA, key: "id") {
+  id: ID!
+  x1: Int @join__field(graph: EXTRA)
+  x2: Int @join__field(graph: EXTRA)
+  x3: Int @join__field(graph: EXTRA)
+  x4: Int @join__field(graph: EXTRA)
+  x5: Int @join__field(graph: EXTRA)
+  x6: Int @join__field(graph: EXTRA)
+  x7: Int @join__field(graph: EXTRA)
+  x8: Int @join__field(graph: EXTRA)
+}
+
+type E13 implements N16 & N32 @join__implements(graph: BASE, interface: "N16") @join__implements(graph: BASE, interface: "N32") @join__type(graph: BASE, key: "id") @join__type(graph: EXTRA, key: "id") {
+  id: ID!
+  x1: Int @join__field(graph: EXTRA)
+  x2: Int @join__field(graph: EXTRA)
+  x3: Int @join__field(graph: EXTRA)
+  x4: Int @join__field(graph: EXTRA)
+  x5: Int @join__field(graph: EXTRA)
+  x6: Int @join__field(graph: EXTRA)
+  x7: Int @join__field(graph: EXTRA)
+  x8: Int @join__field(graph: EXTRA)
+}
+
+type E14 implements N16 & N32 @join__implements(graph: BASE, interface: "N16") @join__implements(graph: BASE, interface: "N32") @join__type(graph: BASE, key: "id") @join__type(graph: EXTRA, key: "id") {
+  id: ID!
+  x1: Int @join__field(graph: EXTRA)
+  x2: Int @join__field(graph: EXTRA)
+  x3: Int @join__field(graph: EXTRA)
+  x4: Int @join__field(graph: EXTRA)
+  x5: Int @join__field(graph: EXTRA)
+  x6: Int @join__field(graph: EXTRA)
+  x7: Int @join__field(graph: EXTRA)
+  x8: Int @join__field(graph: EXTRA)
+}
+
+type E15 implements N16 & N32 @join__implements(graph: BASE, interface: "N16") @join__implements(graph: BASE, interface: "N32") @join__type(graph: BASE, key: "id") @join__type(graph: EXTRA, key: "id") {
+  id: ID!
+  x1: Int @join__field(graph: EXTRA)
+  x2: Int @join__field(graph: EXTRA)
+  x3: Int @join__field(graph: EXTRA)
+  x4: Int @join__field(graph: EXTRA)
+  x5: Int @join__field(graph: EXTRA)
+  x6: Int @join__field(graph: EXTRA)
+  x7: Int @join__field(graph: EXTRA)
+  x8: Int @join__field(graph: EXTRA)
+}
+
+type E16 implements N16 & N32 @join__implements(graph: BASE, interface: "N16") @join__implements(graph: BASE, interface: "N32") @join__type(graph: BASE, key: "id") @join__type(graph: EXTRA, key: "id") {
+  id: ID!
+  x1: Int @join__field(graph: EXTRA)
+  x2: Int @join__field(graph: EXTRA)
+  x3: Int @join__field(graph: EXTRA)
+  x4: Int @join__field(graph: EXTRA)
+  x5: Int @join__field(graph: EXTRA)
+  x6: Int @join__field(graph: EXTRA)
+  x7: Int @join__field(graph: EXTRA)
+  x8: Int @join__field(graph: EXTRA)
+}
+
+type E17 implements N32 @join__implements(graph: BASE, interface: "N32") @join__type(graph: BASE, key: "id") @join__type(graph: EXTRA, key: "id") {
+  id: ID!
+  x1: Int @join__field(graph: EXTRA)
+  x2: Int @join__field(graph: EXTRA)
+  x3: Int @join__field(graph: EXTRA)
+  x4: Int @join__field(graph: EXTRA)
+  x5: Int @join__field(graph: EXTRA)
+  x6: Int @join__field(graph: EXTRA)
+  x7: Int @join__field(graph: EXTRA)
+  x8: Int @join__field(graph: EXTRA)
+}
+
+type E18 implements N32 @join__implements(graph: BASE, interface: "N32") @join__type(graph: BASE, key: "id") @join__type(graph: EXTRA, key: "id") {
+  id: ID!
+  x1: Int @join__field(graph: EXTRA)
+  x2: Int @join__field(graph: EXTRA)
+  x3: Int @join__field(graph: EXTRA)
+  x4: Int @join__field(graph: EXTRA)
+  x5: Int @join__field(graph: EXTRA)
+  x6: Int @join__field(graph: EXTRA)
+  x7: Int @join__field(graph: EXTRA)
+  x8: Int @join__field(graph: EXTRA)
+}
+
+type E19 implements N32 @join__implements(graph: BASE, interface: "N32") @join__type(graph: BASE, key: "id") @join__type(graph: EXTRA, key: "id") {
+  id: ID!
+  x1: Int @join__field(graph: EXTRA)
+  x2: Int @join__field(graph: EXTRA)
+  x3: Int @join__field(graph: EXTRA)
+  x4: Int @join__field(graph: EXTRA)
+  x5: Int @join__field(graph: EXTRA)
+  x6: Int @join__field(graph: EXTRA)
+  x7: Int @join__field(graph: EXTRA)
+  x8: Int @join__field(graph: EXTRA)
+}
+
+type E20 implements N32 @join__implements(graph: BASE, interface: "N32") @join__type(graph: BASE, key: "id") @join__type(graph: EXTRA, key: "id") {
+  id: ID!
+  x1: Int @join__field(graph: EXTRA)
+  x2: Int @join__field(graph: EXTRA)
+  x3: Int @join__field(graph: EXTRA)
+  x4: Int @join__field(graph: EXTRA)
+  x5: Int @join__field(graph: EXTRA)
+  x6: Int @join__field(graph: EXTRA)
+  x7: Int @join__field(graph: EXTRA)
+  x8: Int @join__field(graph: EXTRA)
+}
+
+type E21 implements N32 @join__implements(graph: BASE, interface: "N32") @join__type(graph: BASE, key: "id") @join__type(graph: EXTRA, key: "id") {
+  id: ID!
+  x1: Int @join__field(graph: EXTRA)
+  x2: Int @join__field(graph: EXTRA)
+  x3: Int @join__field(graph: EXTRA)
+  x4: Int @join__field(graph: EXTRA)
+  x5: Int @join__field(graph: EXTRA)
+  x6: Int @join__field(graph: EXTRA)
+  x7: Int @join__field(graph: EXTRA)
+  x8: Int @join__field(graph: EXTRA)
+}
+
+type E22 implements N32 @join__implements(graph: BASE, interface: "N32") @join__type(graph: BASE, key: "id") @join__type(graph: EXTRA, key: "id") {
+  id: ID!
+  x1: Int @join__field(graph: EXTRA)
+  x2: Int @join__field(graph: EXTRA)
+  x3: Int @join__field(graph: EXTRA)
+  x4: Int @join__field(graph: EXTRA)
+  x5: Int @join__field(graph: EXTRA)
+  x6: Int @join__field(graph: EXTRA)
+  x7: Int @join__field(graph: EXTRA)
+  x8: Int @join__field(graph: EXTRA)
+}
+
+type E23 implements N32 @join__implements(graph: BASE, interface: "N32") @join__type(graph: BASE, key: "id") @join__type(graph: EXTRA, key: "id") {
+  id: ID!
+  x1: Int @join__field(graph: EXTRA)
+  x2: Int @join__field(graph: EXTRA)
+  x3: Int @join__field(graph: EXTRA)
+  x4: Int @join__field(graph: EXTRA)
+  x5: Int @join__field(graph: EXTRA)
+  x6: Int @join__field(graph: EXTRA)
+  x7: Int @join__field(graph: EXTRA)
+  x8: Int @join__field(graph: EXTRA)
+}
+
+type E24 implements N32 @join__implements(graph: BASE, interface: "N32") @join__type(graph: BASE, key: "id") @join__type(graph: EXTRA, key: "id") {
+  id: ID!
+  x1: Int @join__field(graph: EXTRA)
+  x2: Int @join__field(graph: EXTRA)
+  x3: Int @join__field(graph: EXTRA)
+  x4: Int @join__field(graph: EXTRA)
+  x5: Int @join__field(graph: EXTRA)
+  x6: Int @join__field(graph: EXTRA)
+  x7: Int @join__field(graph: EXTRA)
+  x8: Int @join__field(graph: EXTRA)
+}
+
+type E25 implements N32 @join__implements(graph: BASE, interface: "N32") @join__type(graph: BASE, key: "id") @join__type(graph: EXTRA, key: "id") {
+  id: ID!
+  x1: Int @join__field(graph: EXTRA)
+  x2: Int @join__field(graph: EXTRA)
+  x3: Int @join__field(graph: EXTRA)
+  x4: Int @join__field(graph: EXTRA)
+  x5: Int @join__field(graph: EXTRA)
+  x6: Int @join__field(graph: EXTRA)
+  x7: Int @join__field(graph: EXTRA)
+  x8: Int @join__field(graph: EXTRA)
+}
+
+type E26 implements N32 @join__implements(graph: BASE, interface: "N32") @join__type(graph: BASE, key: "id") @join__type(graph: EXTRA, key: "id") {
+  id: ID!
+  x1: Int @join__field(graph: EXTRA)
+  x2: Int @join__field(graph: EXTRA)
+  x3: Int @join__field(graph: EXTRA)
+  x4: Int @join__field(graph: EXTRA)
+  x5: Int @join__field(graph: EXTRA)
+  x6: Int @join__field(graph: EXTRA)
+  x7: Int @join__field(graph: EXTRA)
+  x8: Int @join__field(graph: EXTRA)
+}
+
+type E27 implements N32 @join__implements(graph: BASE, interface: "N32") @join__type(graph: BASE, key: "id") @join__type(graph: EXTRA, key: "id") {
+  id: ID!
+  x1: Int @join__field(graph: EXTRA)
+  x2: Int @join__field(graph: EXTRA)
+  x3: Int @join__field(graph: EXTRA)
+  x4: Int @join__field(graph: EXTRA)
+  x5: Int @join__field(graph: EXTRA)
+  x6: Int @join__field(graph: EXTRA)
+  x7: Int @join__field(graph: EXTRA)
+  x8: Int @join__field(graph: EXTRA)
+}
+
+type E28 implements N32 @join__implements(graph: BASE, interface: "N32") @join__type(graph: BASE, key: "id") @join__type(graph: EXTRA, key: "id") {
+  id: ID!
+  x1: Int @join__field(graph: EXTRA)
+  x2: Int @join__field(graph: EXTRA)
+  x3: Int @join__field(graph: EXTRA)
+  x4: Int @join__field(graph: EXTRA)
+  x5: Int @join__field(graph: EXTRA)
+  x6: Int @join__field(graph: EXTRA)
+  x7: Int @join__field(graph: EXTRA)
+  x8: Int @join__field(graph: EXTRA)
+}
+
+type E29 implements N32 @join__implements(graph: BASE, interface: "N32") @join__type(graph: BASE, key: "id") @join__type(graph: EXTRA, key: "id") {
+  id: ID!
+  x1: Int @join__field(graph: EXTRA)
+  x2: Int @join__field(graph: EXTRA)
+  x3: Int @join__field(graph: EXTRA)
+  x4: Int @join__field(graph: EXTRA)
+  x5: Int @join__field(graph: EXTRA)
+  x6: Int @join__field(graph: EXTRA)
+  x7: Int @join__field(graph: EXTRA)
+  x8: Int @join__field(graph: EXTRA)
+}
+
+type E30 implements N32 @join__implements(graph: BASE, interface: "N32") @join__type(graph: BASE, key: "id") @join__type(graph: EXTRA, key: "id") {
+  id: ID!
+  x1: Int @join__field(graph: EXTRA)
+  x2: Int @join__field(graph: EXTRA)
+  x3: Int @join__field(graph: EXTRA)
+  x4: Int @join__field(graph: EXTRA)
+  x5: Int @join__field(graph: EXTRA)
+  x6: Int @join__field(graph: EXTRA)
+  x7: Int @join__field(graph: EXTRA)
+  x8: Int @join__field(graph: EXTRA)
+}
+
+type E31 implements N32 @join__implements(graph: BASE, interface: "N32") @join__type(graph: BASE, key: "id") @join__type(graph: EXTRA, key: "id") {
+  id: ID!
+  x1: Int @join__field(graph: EXTRA)
+  x2: Int @join__field(graph: EXTRA)
+  x3: Int @join__field(graph: EXTRA)
+  x4: Int @join__field(graph: EXTRA)
+  x5: Int @join__field(graph: EXTRA)
+  x6: Int @join__field(graph: EXTRA)
+  x7: Int @join__field(graph: EXTRA)
+  x8: Int @join__field(graph: EXTRA)
+}
+
+type E32 implements N32 @join__implements(graph: BASE, interface: "N32") @join__type(graph: BASE, key: "id") @join__type(graph: EXTRA, key: "id") {
+  id: ID!
+  x1: Int @join__field(graph: EXTRA)
+  x2: Int @join__field(graph: EXTRA)
+  x3: Int @join__field(graph: EXTRA)
+  x4: Int @join__field(graph: EXTRA)
+  x5: Int @join__field(graph: EXTRA)
+  x6: Int @join__field(graph: EXTRA)
+  x7: Int @join__field(graph: EXTRA)
+  x8: Int @join__field(graph: EXTRA)
+}
