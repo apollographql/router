@@ -5,4 +5,4 @@ referencer sets spanning the whole schema. Contract variants that hide most of a
 took quadratic time, reaching tens of seconds. The removal now filters the schema in a single pass
 and rebuilds referencers once, producing the same API schema.
 
-By [@tninesling](https://github.com/tninesling)
+By [@tninesling](https://github.com/tninesling) in https://github.com/apollographql/router/pull/10715
