@@ -13,7 +13,6 @@ use std::sync::OnceLock;
 
 use axum::Router;
 pub(crate) use axum_http_server_factory::AxumHttpServerFactory;
-pub(crate) use axum_http_server_factory::CanceledRequest;
 pub use endpoint::Endpoint;
 pub(crate) use listeners::ListenAddrAndRouter;
 

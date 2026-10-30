@@ -26,8 +26,9 @@ use tracing::Instrument;
 
 use super::Body;
 use super::ClientRequestAccepts;
+use super::client_connection::ClientConnection;
+use super::client_connection::client_closed_request;
 use crate::Context;
-use crate::axum_factory::CanceledRequest;
 use crate::graphql;
 use crate::plugins::telemetry::config_new::attributes::HTTP_REQUEST_BODY;
 use crate::plugins::telemetry::config_new::attributes::HTTP_REQUEST_HEADERS;
@@ -281,12 +282,11 @@ where
         let (mut parts, mut body) = response.into_parts();
         process_vary_header(&mut parts.headers);
 
-        if context
-            .extensions()
-            .with_lock(|lock| lock.get::<CanceledRequest>().is_some())
-        {
-            parts.status = StatusCode::from_u16(499)
-                .expect("499 is not a standard status code but common enough");
+        if context.extensions().with_lock(|lock| {
+            lock.get::<ClientConnection>()
+                .is_some_and(ClientConnection::is_closed)
+        }) {
+            parts.status = client_closed_request();
         }
 
         match body.next().await {
