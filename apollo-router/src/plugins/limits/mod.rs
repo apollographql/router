@@ -1,12 +1,16 @@
+pub(crate) mod http2_header_list;
 mod layer;
 mod limited;
 
 use std::error::Error;
+use std::ops::ControlFlow;
 
 use async_trait::async_trait;
 use bytesize::ByteSize;
 use http::StatusCode;
+use http::header::CONTENT_TYPE;
 pub(crate) use layer::BodyLimitControl;
+use mime::APPLICATION_JSON;
 use schemars::JsonSchema;
 use serde::Deserialize;
 use serde::Serialize;
@@ -157,6 +161,20 @@ pub(crate) struct RouterLimitsConfig {
     pub(crate) introspection_max_depth: bool,
 }
 
+/// The HTTP/2 header-list limit when `http2_max_headers_list_bytes` is unset.
+///
+/// This is hyper's own default. The Router names it so it doesn't depend on a private hyper
+/// constant to know which limit applies.
+pub(crate) const DEFAULT_HTTP2_MAX_HEADERS_LIST_BYTES: ByteSize = ByteSize::kib(16);
+
+impl RouterLimitsConfig {
+    /// The HTTP/2 header-list limit in effect: the configured value or the default.
+    pub(crate) fn http2_header_list_limit(&self) -> ByteSize {
+        self.http2_max_headers_list_bytes
+            .unwrap_or(DEFAULT_HTTP2_MAX_HEADERS_LIST_BYTES)
+    }
+}
+
 impl Default for RouterLimitsConfig {
     fn default() -> Self {
         Self {
@@ -266,7 +284,22 @@ impl PluginPrivate for LimitsPlugin {
     }
 
     fn router_service(&self, service: BoxService) -> BoxService {
+        let http2_header_list_limit = self.config.router.http2_header_list_limit();
         ServiceBuilder::new()
+            // Runs ahead of the body limit and of the plugins after this one (CSRF, authentication,
+            // Rhai, coprocessors), so none of them reads or forwards an oversized header list.
+            .checkpoint(move |request: router::Request| {
+                if http2_header_list::exceeds_limit(
+                    &request.router_request,
+                    http2_header_list_limit,
+                ) {
+                    Ok(ControlFlow::Break(
+                        RequestSizeLimitError::OversizedHeaderList.into_response(request.context),
+                    ))
+                } else {
+                    Ok(ControlFlow::Continue(request))
+                }
+            })
             .map_future_with_request_data(
                 |r: &router::Request| r.context.clone(),
                 |ctx, f| async { Self::map_error_to_graphql(f.await, ctx) },
@@ -354,11 +387,15 @@ impl LimitsPlugin {
 
 impl RequestSizeLimitError {
     /// 413 for an oversized body; 414 for an oversized URI, per RFC 9110 (the query string is
-    /// part of the request-target, not the content, so `Payload Too Large` doesn't apply to it).
+    /// part of the request-target, not the content, so `Payload Too Large` doesn't apply to it);
+    /// 431 for an oversized header list, per RFC 6585.
     fn status_code(&self) -> StatusCode {
         match self {
             RequestSizeLimitError::BodyTooLarge => StatusCode::PAYLOAD_TOO_LARGE,
             RequestSizeLimitError::QueryTooLarge => StatusCode::URI_TOO_LONG,
+            RequestSizeLimitError::OversizedHeaderList => {
+                StatusCode::REQUEST_HEADER_FIELDS_TOO_LARGE
+            }
         }
     }
 
@@ -372,6 +409,7 @@ impl RequestSizeLimitError {
                     .build(),
             )
             .status_code(self.status_code())
+            .header(CONTENT_TYPE, APPLICATION_JSON.essence_str())
             .context(ctx)
             .build()
             .unwrap()
@@ -404,8 +442,13 @@ impl From<ConnectorConfiguration<ConnectorLimits>> for Config {
 mod test {
     use http::StatusCode;
     use tower::BoxError;
+    use tower::ServiceExt;
+    use tower::service_fn;
 
     use crate::Context;
+    use crate::metrics::FutureMetricsExt;
+    use crate::plugin::DynPlugin;
+    use crate::plugin::PluginInit;
     use crate::plugins::limits::LimitsPlugin;
     use crate::plugins::limits::SubgraphResponseSizeLimit;
     use crate::plugins::limits::layer::BodyLimitControl;
@@ -432,6 +475,10 @@ mod test {
         assert!(resp.is_ok());
         let resp = resp.unwrap();
         assert_eq!(resp.response.status(), expected_status);
+        assert_eq!(
+            resp.response.headers().get(http::header::CONTENT_TYPE),
+            Some(&http::HeaderValue::from_static("application/json"))
+        );
         let expected_body = format!(
             r#"{{"errors":[{{"message":"{expected_message}","extensions":{{"details":"{expected_message}","code":"INVALID_GRAPHQL_REQUEST"}}}}]}}"#
         );
@@ -467,6 +514,97 @@ mod test {
             StatusCode::PAYLOAD_TOO_LARGE,
             "Request body payload too large",
         )
+        .await;
+    }
+
+    /// A request whose header list is just over the default 16 KiB HTTP/2 limit.
+    fn oversized_header_list_request(version: http::Version) -> router::Request {
+        http::Request::builder()
+            .version(version)
+            .uri("http://localhost:4000/")
+            .header("cookie", "v".repeat(16 * 1024))
+            .body(router::body::empty())
+            .unwrap()
+            .into()
+    }
+
+    #[tokio::test]
+    async fn test_http2_header_list_limit_exceeded() {
+        let plugin = plugin().await;
+        let resp = plugin
+            .router_service(|_| async { panic!("the request should have been rejected") })
+            .call(oversized_header_list_request(http::Version::HTTP_2))
+            .await;
+        assert_rejected(
+            resp,
+            StatusCode::REQUEST_HEADER_FIELDS_TOO_LARGE,
+            "Request header fields too large",
+        )
+        .await;
+    }
+
+    #[tokio::test]
+    async fn test_http2_header_list_limit_ignores_http1() {
+        let plugin = plugin().await;
+        let resp = plugin
+            .router_service(|_| async { Ok(router::Response::fake_builder().build().unwrap()) })
+            .call(oversized_header_list_request(http::Version::HTTP_11))
+            .await;
+        assert_ok(resp).await;
+    }
+
+    /// Creates the `apollo.<name>` plugin as the Router would, from its config section.
+    async fn create_plugin(name: &str, config: serde_json::Value) -> Box<dyn DynPlugin> {
+        let init = PluginInit::fake_builder()
+            .config(config.clone())
+            .full_config(serde_json::json!({ name: config }))
+            .build()
+            .with_deserialized_config()
+            .unwrap();
+        crate::plugin::plugins()
+            .find(|factory| factory.name == format!("apollo.{name}"))
+            .unwrap()
+            .create_instance(init)
+            .await
+            .unwrap()
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn test_http2_header_list_limit_exceeded_is_recorded() {
+        async {
+            let telemetry = create_plugin(
+                "telemetry",
+                serde_json::json!({
+                    "instrumentation": {
+                        "instruments": {
+                            "router": { "http.server.request.duration": true }
+                        }
+                    }
+                }),
+            )
+            .await;
+            let limits = create_plugin("limits", serde_json::json!({})).await;
+            let service = telemetry.router_service(limits.router_service(
+                service_fn(|_| async { panic!("the request should have been rejected") }).boxed(),
+            ));
+
+            let resp = service
+                .oneshot(oversized_header_list_request(http::Version::HTTP_2))
+                .await
+                .unwrap();
+            assert_eq!(
+                resp.response.status(),
+                StatusCode::REQUEST_HEADER_FIELDS_TOO_LARGE
+            );
+            assert_histogram_count!(
+                "http.server.request.duration",
+                1,
+                "error.type" = "Request Header Fields Too Large",
+                "http.request.method" = "GET",
+                "http.response.status_code" = 431
+            );
+        }
+        .with_metrics()
         .await;
     }
 
