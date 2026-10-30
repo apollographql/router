@@ -1,0 +1,53 @@
+fragment EnumUsageFragment on Query {
+  fromFragment: enumUsageQuery(
+    nonNullEnumInput: $singleEnum,
+    enumInputObjectList: $enumInputObjectList,
+  ) {
+    id
+  }
+}
+
+query MixedExtendedReferencesQuery(
+  $singleEnum: SomeEnum!,
+  $enumList: [SomeEnum],
+  $missingEnum: SomeEnum,
+  $enumInputObject: EnumInputType,
+  $enumInputObjectList: [EnumInputType],
+  $input: InputType!,
+) {
+  literals: enumUsageQuery(
+    nonNullEnumInput: SOME_VALUE_1,
+    enumInputListOfLists: [[SOME_VALUE_2], [SOME_VALUE_3, SOME_VALUE_4]],
+    enumInputObject: {
+      enumInput: SOME_VALUE_5,
+      enumListInput: [SOME_VALUE_6],
+      nestedEnumType: [{ someEnum: SOME_VALUE_7, someNullableEnum: null }],
+    },
+    anotherEnumList: [ANOTHER_VALUE_1],
+  ) {
+    id
+  }
+  variables: enumUsageQuery(
+    nonNullEnumInput: $singleEnum,
+    nullableEnumInput: $missingEnum,
+    enumInputList: $enumList,
+    enumInputObject: $enumInputObject,
+  ) {
+    id
+  }
+  literalWithVariables: enumUsageQuery(
+    nonNullEnumInput: SOME_VALUE_8,
+    enumInputObjectList: [{ enumInput: $singleEnum, enumListInput: [$singleEnum, SOME_VALUE_21] }],
+  ) {
+    id
+  }
+  inputTypeQuery(input: $input) {
+    ... on EverythingResponse {
+      enumResponse
+    }
+  }
+  basicInputTypeQuery(input: { someFloat: 1.5 }) {
+    id
+  }
+  ...EnumUsageFragment
+}

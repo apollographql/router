@@ -1,0 +1,26 @@
+{
+  "singleEnum": "SOME_VALUE_9",
+  "enumList": ["SOME_VALUE_10", null, "SOME_VALUE_11"],
+  "enumInputObject": {
+    "enumInput": "SOME_VALUE_12",
+    "nullableEnumInput": null,
+    "enumListInput": ["SOME_VALUE_13"],
+    "enumListOfListInput": [["SOME_VALUE_14"], []],
+    "nestedEnumType": [
+      { "someEnum": "SOME_VALUE_15", "someEnumList": ["SOME_VALUE_16"] },
+      null
+    ]
+  },
+  "enumInputObjectList": [
+    { "enumInput": "SOME_VALUE_17", "enumListInput": [] },
+    { "enumInput": "SOME_VALUE_18", "enumListInput": ["SOME_VALUE_19"], "nestedEnumType": null }
+  ],
+  "input": {
+    "inputString": "x",
+    "inputInt": 1,
+    "nestedType": { "someFloat": 2 },
+    "enumInput": "SOME_VALUE_20",
+    "listInput": [1, 2],
+    "nestedTypeList": [{ "someFloat": 3, "someNullableFloat": null }]
+  }
+}

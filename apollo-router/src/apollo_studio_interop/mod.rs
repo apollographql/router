@@ -346,40 +346,34 @@ pub(crate) fn generate_usage_reporting(
         operation_name,
         schema,
         normalization_algorithm,
-        variables: &Object::new(),
         fragments_map: HashMap::new(),
         fields_by_type: HashMap::new(),
         fields_by_interface: HashMap::new(),
-        enums_by_name: HashMap::new(),
-        input_field_references: HashMap::new(),
         fragment_spread_set: HashSet::new(),
     };
 
     generator.generate_usage_reporting()
 }
 
+/// Collects the input object fields and enum values that one execution of an operation
+/// references, from both literal arguments and the request's variables.
 pub(crate) fn generate_extended_references(
     doc: Arc<Valid<ExecutableDocument>>,
     operation_name: Option<String>,
     schema: &Valid<Schema>,
     variables: &Object,
 ) -> ExtendedReferenceStats {
-    let mut generator = UsageGenerator {
-        signature_doc: &doc,
-        references_doc: &doc,
-        operation_name: &operation_name,
+    let mut generator = ExtendedReferencesGenerator {
+        doc: &doc,
         schema,
-        normalization_algorithm: &ApolloSignatureNormalizationAlgorithm::default(),
         variables,
-        fragments_map: HashMap::new(),
-        fields_by_type: HashMap::new(),
-        fields_by_interface: HashMap::new(),
-        enums_by_name: HashMap::new(),
-        input_field_references: HashMap::new(),
-        fragment_spread_set: HashSet::new(),
+        visited_fragments: HashSet::new(),
+        stats: ExtendedReferenceStats::default(),
     };
-
-    generator.generate_extended_references()
+    if let Ok(operation) = doc.operations.get(operation_name.as_deref()) {
+        generator.process_selection_set(&operation.selection_set);
+    }
+    generator.stats
 }
 
 pub(crate) fn extract_enums_from_response(
@@ -508,12 +502,9 @@ struct UsageGenerator<'a> {
     operation_name: &'a Option<String>,
     schema: &'a Valid<Schema>,
     normalization_algorithm: &'a ApolloSignatureNormalizationAlgorithm,
-    variables: &'a Object,
     fragments_map: HashMap<String, Node<Fragment>>,
     fields_by_type: HashMap<String, HashSet<String>>,
     fields_by_interface: HashMap<String, bool>,
-    enums_by_name: HashMap<String, HashSet<String>>,
-    input_field_references: HashMap<String, HashMap<String, InputObjectFieldStats>>,
     fragment_spread_set: HashSet<Name>,
 }
 
@@ -690,69 +681,56 @@ impl UsageGenerator<'_> {
             }
         }
     }
+}
 
-    fn generate_extended_references(&mut self) -> ExtendedReferenceStats {
-        self.fragment_spread_set.clear();
-        self.enums_by_name.clear();
-        self.input_field_references.clear();
+struct ExtendedReferencesGenerator<'a> {
+    doc: &'a ExecutableDocument,
+    schema: &'a Valid<Schema>,
+    variables: &'a Object,
+    visited_fragments: HashSet<&'a Name>,
+    stats: ExtendedReferenceStats,
+}
 
-        if let Ok(operation) = self
-            .references_doc
-            .operations
-            .get(self.operation_name.as_deref())
-        {
-            self.process_extended_refs_for_selection_set(&operation.selection_set);
-        }
-
-        ExtendedReferenceStats {
-            referenced_input_fields: self.input_field_references.clone(),
-            referenced_enums: self.enums_by_name.clone(),
-        }
-    }
-
-    fn add_enum_reference(&mut self, enum_name: String, enum_value: String) {
-        // Not using entry API here due to performance impact
-        let enum_name_stats = match self.enums_by_name.get_mut(&enum_name) {
-            Some(existing_stats) => existing_stats,
-            None => {
-                self.enums_by_name
-                    .insert(enum_name.to_string(), HashSet::new());
-                self.enums_by_name
-                    .get_mut(&enum_name)
-                    .expect("value is expected to be in map")
-            }
+impl<'a> ExtendedReferencesGenerator<'a> {
+    // Look keys up by `&str` before inserting so a key is only allocated when it is new.
+    fn add_enum_reference(&mut self, enum_name: &str, enum_value: &str) {
+        let enum_values = match self.stats.referenced_enums.get_mut(enum_name) {
+            Some(enum_values) => enum_values,
+            None => self
+                .stats
+                .referenced_enums
+                .entry(enum_name.to_string())
+                .or_default(),
         };
-
-        enum_name_stats.insert(enum_value.to_string());
+        if !enum_values.contains(enum_value) {
+            enum_values.insert(enum_value.to_string());
+        }
     }
 
     fn add_input_object_reference(
         &mut self,
-        type_name: String,
-        field_name: String,
+        type_name: &str,
+        field_name: &str,
         is_referenced: bool,
         is_null_reference: bool,
     ) {
-        // Not using entry API here due to performance impact
-        let type_name_stats = match self.input_field_references.get_mut(&type_name) {
-            Some(existing_stats) => existing_stats,
-            None => {
-                self.input_field_references
-                    .insert(type_name.to_string(), HashMap::new());
-                self.input_field_references
-                    .get_mut(&type_name)
-                    .expect("value is expected to be in map")
-            }
+        let type_stats = match self.stats.referenced_input_fields.get_mut(type_name) {
+            Some(type_stats) => type_stats,
+            None => self
+                .stats
+                .referenced_input_fields
+                .entry(type_name.to_string())
+                .or_default(),
         };
 
-        match type_name_stats.get_mut(&field_name) {
+        match type_stats.get_mut(field_name) {
             Some(stats) => {
                 stats.referenced = stats.referenced || is_referenced;
                 stats.null_reference = stats.null_reference || is_null_reference;
                 stats.undefined_reference = stats.undefined_reference || !is_referenced;
             }
             None => {
-                type_name_stats.insert(
+                type_stats.insert(
                     field_name.to_string(),
                     InputObjectFieldStats {
                         referenced: is_referenced,
@@ -764,131 +742,99 @@ impl UsageGenerator<'_> {
         };
     }
 
-    fn process_extended_refs_for_selection_set(&mut self, selection_set: &SelectionSet) {
+    fn process_selection_set(&mut self, selection_set: &'a SelectionSet) {
         for selection in &selection_set.selections {
             match selection {
                 Selection::Field(field) => {
                     for arg in &field.arguments {
-                        if let Some(arg_def) = field.definition.argument_by_name(arg.name.as_str())
-                        {
-                            let type_name = arg_def.ty.inner_named_type();
-                            self.process_extended_refs_for_value(type_name.to_string(), &arg.value);
+                        if let Some(arg_def) = field.definition.argument_by_name(&arg.name) {
+                            self.process_value(arg_def.ty.inner_named_type(), &arg.value);
                         }
                     }
-                    self.process_extended_refs_for_selection_set(&field.selection_set);
+                    self.process_selection_set(&field.selection_set);
                 }
                 Selection::InlineFragment(fragment) => {
-                    self.process_extended_refs_for_selection_set(&fragment.selection_set);
+                    self.process_selection_set(&fragment.selection_set);
                 }
-                Selection::FragmentSpread(fragment) => {
-                    if !self.fragment_spread_set.contains(&fragment.fragment_name) {
-                        self.fragment_spread_set
-                            .insert(fragment.fragment_name.clone());
-
-                        if let Some(fragment) =
-                            self.references_doc.fragments.get(&fragment.fragment_name)
-                        {
-                            self.process_extended_refs_for_selection_set(&fragment.selection_set);
-                        }
+                Selection::FragmentSpread(spread) => {
+                    if self.visited_fragments.insert(&spread.fragment_name)
+                        && let Some(fragment) = self.doc.fragments.get(&spread.fragment_name)
+                    {
+                        self.process_selection_set(&fragment.selection_set);
                     }
                 }
             }
         }
     }
 
-    fn process_extended_refs_for_value(&mut self, type_name: String, value: &Node<Value>) {
-        match value.as_ref() {
-            Value::Enum(enum_value) => {
-                self.add_enum_reference(type_name.clone(), enum_value.to_string());
-            }
+    fn process_value(&mut self, type_name: &str, value: &Value) {
+        match value {
+            Value::Enum(enum_value) => self.add_enum_reference(type_name, enum_value),
             Value::List(list_values) => {
                 for list_value in list_values {
-                    self.process_extended_refs_for_value(type_name.to_string(), list_value);
+                    self.process_value(type_name, list_value);
                 }
             }
-            Value::Object(obj_value) => {
-                self.process_extended_refs_for_object(type_name.to_string(), obj_value);
-            }
+            Value::Object(obj_value) => self.process_object(type_name, obj_value),
             Value::Variable(var_name) => {
-                let var_value = self.variables.get(var_name.to_string().as_str());
-                self.process_extended_refs_for_variable(type_name.to_string(), var_value);
+                let var_value = self.variables.get(var_name.as_str());
+                self.process_variable(type_name, var_value);
             }
             _ => (),
         }
     }
 
-    fn process_extended_refs_for_object(
-        &mut self,
-        type_name: String,
-        obj_value: &[(Name, Node<Value>)],
-    ) {
+    fn process_object(&mut self, type_name: &str, obj_value: &[(Name, Node<Value>)]) {
         // For object references, we're only interested in input object types
-        if let Some(ExtendedType::InputObject(input_object_type)) =
-            self.schema.types.get(type_name.to_string().as_str())
-        {
-            let obj_value_map: HashMap<String, &Node<Value>> = obj_value
+        let Some(ExtendedType::InputObject(input_object_type)) = self.schema.types.get(type_name)
+        else {
+            return;
+        };
+        for (field_name, field_def) in &input_object_type.fields {
+            // Literal objects are short, so a scan is cheaper than building a lookup map
+            let field_val = obj_value
                 .iter()
-                .map(|(name, val)| (name.to_string(), val))
-                .collect();
-            for (field_name, field_def) in &input_object_type.fields {
-                let field_type = field_def.ty.inner_named_type().to_string();
-                let maybe_field_val = obj_value_map.get(&field_name.to_string());
+                .find(|(name, _)| name == field_name)
+                .map(|(_, val)| val);
 
-                self.add_input_object_reference(
-                    type_name.to_string(),
-                    field_name.to_string(),
-                    maybe_field_val.is_some(),
-                    maybe_field_val.is_some_and(|v| v.is_null()),
-                );
+            self.add_input_object_reference(
+                type_name,
+                field_name,
+                field_val.is_some(),
+                field_val.is_some_and(|v| v.is_null()),
+            );
 
-                if let Some(field_val) = maybe_field_val {
-                    self.process_extended_refs_for_value(field_type, field_val);
-                }
+            if let Some(field_val) = field_val {
+                self.process_value(field_def.ty.inner_named_type(), field_val);
             }
         }
     }
 
-    fn process_extended_refs_for_variable(
-        &mut self,
-        type_name: String,
-        var_value: Option<&JsonValue>,
-    ) {
-        match self.schema.types.get(type_name.to_string().as_str()) {
+    fn process_variable(&mut self, type_name: &str, var_value: Option<&JsonValue>) {
+        match self.schema.types.get(type_name) {
             Some(ExtendedType::InputObject(input_object_type)) => {
                 match var_value {
                     // For input objects, we store input object references and process each of the field variables
                     Some(JsonValue::Object(json_obj)) => {
-                        let var_value_map: HashMap<String, &JsonValue> = json_obj
-                            .iter()
-                            .map(|(name, val)| (name.as_str().to_string(), val))
-                            .collect();
-
                         for (field_name, field_def) in &input_object_type.fields {
-                            let field_type = field_def.ty.inner_named_type().to_string();
-                            let maybe_field_val = var_value_map.get(&field_name.to_string());
+                            let field_val = json_obj.get(field_name.as_str());
 
                             self.add_input_object_reference(
-                                type_name.to_string(),
-                                field_name.to_string(),
-                                maybe_field_val.is_some(),
-                                maybe_field_val.is_some_and(|v| v.is_null()),
+                                type_name,
+                                field_name,
+                                field_val.is_some(),
+                                field_val.is_some_and(|v| v.is_null()),
                             );
 
-                            if let Some(&field_val) = maybe_field_val {
-                                self.process_extended_refs_for_variable(
-                                    field_type,
-                                    Some(field_val),
-                                );
+                            if field_val.is_some() {
+                                self.process_variable(field_def.ty.inner_named_type(), field_val);
                             }
                         }
                     }
                     // For arrays of objects, we process each array value separately
                     Some(JsonValue::Array(json_array)) => {
                         for array_val in json_array {
-                            self.process_extended_refs_for_variable(
-                                type_name.clone(),
-                                Some(array_val),
-                            );
+                            self.process_variable(type_name, Some(array_val));
                         }
                     }
                     _ => {}
@@ -896,14 +842,11 @@ impl UsageGenerator<'_> {
             }
             Some(ExtendedType::Enum(enum_type)) => match var_value {
                 Some(JsonValue::String(enum_value)) => {
-                    self.add_enum_reference(
-                        enum_type.name.to_string(),
-                        enum_value.as_str().to_string(),
-                    );
+                    self.add_enum_reference(&enum_type.name, enum_value.as_str());
                 }
                 Some(JsonValue::Array(array_values)) => {
                     for array_val in array_values {
-                        self.process_extended_refs_for_variable(type_name.clone(), Some(array_val));
+                        self.process_variable(type_name, Some(array_val));
                     }
                 }
                 _ => {}
