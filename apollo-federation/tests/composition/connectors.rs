@@ -617,6 +617,83 @@ mod tests {
         assert_snapshot!(api_schema_string);
     }
 
+    /// `http.stream` is carried into the supergraph like any other `@connect` argument. The
+    /// composed schema is the router's `testdata/stream.graphql` fixture.
+    #[test]
+    fn composes_stream_v0_5() {
+        let streams = ServiceDefinition {
+            name: "streams",
+            type_defs: r#"
+                extend schema
+                @link(
+                    url: "https://specs.apollo.dev/connect/v0.5"
+                    import: ["@connect", "@source"]
+                )
+                @source(name: "mcp", http: { baseURL: "http://localhost:4001" })
+
+                type Query {
+                    weather(city: String!): Weather
+                    @connect(
+                        source: "mcp"
+                        http: {
+                            POST: "/mcp"
+                            body: "method: $('tools/call') params: { name: $('weather') arguments: { city: $args.city } }"
+                            stream: "array"
+                        }
+                        selection: "$->last.result { temp }"
+                        isSuccess: "$($->last.error ?? null)->eq(null)"
+                        errors: { message: "$->last.error.message" }
+                    )
+
+                    progress: [Progress]
+                    @connect(source: "mcp", http: { GET: "/progress", stream: "array" }, selection: "percent: params.progress")
+
+                    featured: Product
+                    @connect(source: "mcp", http: { GET: "/featured", stream: "array" }, selection: "$->last { id }")
+
+                    product(id: ID!): Product
+                    @connect(
+                        source: "mcp"
+                        http: { GET: "/products/{$args.id}", stream: "array" }
+                        selection: "$->last { id name }"
+                        entity: true
+                    )
+
+                    featuredStore: Store
+                    @connect(source: "mcp", http: { GET: "/featured-store", stream: "array" }, selection: "$->last { id }")
+                }
+
+                type Weather {
+                    temp: Float
+                }
+
+                type Progress {
+                    percent: Float
+                }
+
+                type Product @key(fields: "id") {
+                    id: ID!
+                    name: String
+                }
+
+                type Store
+                @key(fields: "id")
+                @connect(
+                    source: "mcp"
+                    http: { GET: "/stores/{$this.id}", stream: "array" }
+                    selection: "$->last { id name }"
+                ) {
+                    id: ID!
+                    name: String
+                }
+            "#,
+        };
+
+        let result = compose_as_fed2_connectors_subgraphs(&[streams]);
+        let supergraph = result.expect("Expected composition to succeed");
+        assert_snapshot!(supergraph.schema().schema().to_string());
+    }
+
     #[test]
     fn connectors_validation_errors_fail_composition() {
         let with_connectors = ServiceDefinition {
