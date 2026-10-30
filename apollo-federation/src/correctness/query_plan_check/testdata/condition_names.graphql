@@ -1,0 +1,199 @@
+# A path condition's names, compared as the router compares them.
+#
+# An `Item` is a `Book` or a `Film`, `featured` one item and `items` a list of them; `reviews`
+# resolves both and an item's `Author` by `id`. Every product's `price` reads its store's owner's
+# `label` as context, an `Owner` being a `Person` or a `Company`. The tests write a condition on
+# the path of the only fetch supplying a field, or on the path a contextual value is read through,
+# naming the interface, its members, or an object type the position cannot hold.
+#
+# Composed with `apollo_federation::composition::compose` from the two subgraphs below. Recompose
+# it when they change. The four plans beside it in `plans/` are the planner's plans over it, with
+# default options, produced by the revision that added the files:
+#
+#   featured_author_name.json         { featured { author { name } } }
+#   featured_blurb.json               { featured { ... on Book { blurb } ... on Film { blurb } } }
+#   items_blurb.json                  { items { ... on Book { blurb } ... on Film { blurb } } }
+#   stores_products_label_price.json  { stores { products { price } } }
+#
+# Subgraph `catalog`:
+#
+#   extend schema
+#     @link(
+#       url: "https://specs.apollo.dev/federation/v2.8"
+#       import: ["@key", "@context", "@fromContext"]
+#     )
+#
+#   type Query {
+#     featured: Item!
+#     items: [Item!]!
+#     stores: [Store!]!
+#   }
+#
+#   interface Item {
+#     id: ID!
+#     author: Author!
+#   }
+#
+#   type Book implements Item @key(fields: "id") {
+#     id: ID!
+#     author: Author!
+#   }
+#
+#   type Film implements Item @key(fields: "id") {
+#     id: ID!
+#     author: Author!
+#   }
+#
+#   type Author @key(fields: "id") {
+#     id: ID!
+#   }
+#
+#   type Store @key(fields: "id") @context(name: "store") {
+#     id: ID!
+#     owner: Owner!
+#     products: [Product!]!
+#   }
+#
+#   interface Owner {
+#     label: String
+#   }
+#
+#   type Person implements Owner {
+#     label: String
+#   }
+#
+#   type Company implements Owner {
+#     label: String
+#   }
+#
+#   type Product @key(fields: "id") {
+#     id: ID!
+#     price(label: String @fromContext(field: "$store { owner { label } }")): Int
+#   }
+#
+# Subgraph `reviews`:
+#
+#   extend schema @link(url: "https://specs.apollo.dev/federation/v2.8", import: ["@key"])
+#
+#   type Book @key(fields: "id") {
+#     id: ID!
+#     blurb: String
+#   }
+#
+#   type Film @key(fields: "id") {
+#     id: ID!
+#     blurb: String
+#   }
+#
+#   type Author @key(fields: "id") {
+#     id: ID!
+#     name: String
+#   }
+
+schema @link(url: "https://specs.apollo.dev/link/v1.0") @link(url: "https://specs.apollo.dev/join/v0.5", for: EXECUTION) @link(url: "https://specs.apollo.dev/context/v0.1", for: SECURITY) {
+  query: Query
+}
+
+directive @link(url: String, as: String, for: link__Purpose, import: [link__Import]) repeatable on SCHEMA
+
+directive @join__graph(name: String!, url: String!) on ENUM_VALUE
+
+directive @join__type(graph: join__Graph!, key: join__FieldSet, extension: Boolean! = false, resolvable: Boolean! = true, isInterfaceObject: Boolean! = false) repeatable on OBJECT | INTERFACE | UNION | ENUM | INPUT_OBJECT | SCALAR
+
+directive @join__field(graph: join__Graph, requires: join__FieldSet, provides: join__FieldSet, type: String, external: Boolean, override: String, usedOverridden: Boolean, overrideLabel: String, contextArguments: [join__ContextArgument!]) repeatable on FIELD_DEFINITION | INPUT_FIELD_DEFINITION
+
+directive @join__implements(graph: join__Graph!, interface: String!) repeatable on OBJECT | INTERFACE
+
+directive @join__unionMember(graph: join__Graph!, member: String!) repeatable on UNION
+
+directive @join__enumValue(graph: join__Graph!) repeatable on ENUM_VALUE
+
+directive @join__directive(graphs: [join__Graph!], name: String!, args: join__DirectiveArguments) repeatable on SCHEMA | OBJECT | INTERFACE | FIELD_DEFINITION
+
+directive @context(name: String!) repeatable on INTERFACE | OBJECT | UNION
+
+directive @context__fromContext(field: context__ContextFieldValue) on ARGUMENT_DEFINITION
+
+enum link__Purpose {
+  """
+  `SECURITY` features provide metadata necessary to securely resolve fields.
+  """
+  SECURITY
+  """
+  `EXECUTION` features provide metadata necessary for operation execution.
+  """
+  EXECUTION
+}
+
+scalar link__Import
+
+enum join__Graph {
+  CATALOG @join__graph(name: "catalog", url: "http://catalog")
+  REVIEWS @join__graph(name: "reviews", url: "http://reviews")
+}
+
+scalar join__FieldSet
+
+scalar join__DirectiveArguments
+
+scalar join__FieldValue
+
+input join__ContextArgument {
+  name: String!
+  type: String!
+  context: String!
+  selection: join__FieldValue!
+}
+
+scalar context__ContextFieldValue
+
+type Query @join__type(graph: CATALOG) @join__type(graph: REVIEWS) {
+  featured: Item! @join__field(graph: CATALOG)
+  items: [Item!]! @join__field(graph: CATALOG)
+  stores: [Store!]! @join__field(graph: CATALOG)
+}
+
+interface Item @join__type(graph: CATALOG) {
+  id: ID!
+  author: Author!
+}
+
+type Book implements Item @join__implements(graph: CATALOG, interface: "Item") @join__type(graph: CATALOG, key: "id") @join__type(graph: REVIEWS, key: "id") {
+  id: ID!
+  author: Author! @join__field(graph: CATALOG)
+  blurb: String @join__field(graph: REVIEWS)
+}
+
+type Film implements Item @join__implements(graph: CATALOG, interface: "Item") @join__type(graph: CATALOG, key: "id") @join__type(graph: REVIEWS, key: "id") {
+  id: ID!
+  author: Author! @join__field(graph: CATALOG)
+  blurb: String @join__field(graph: REVIEWS)
+}
+
+type Author @join__type(graph: CATALOG, key: "id") @join__type(graph: REVIEWS, key: "id") {
+  id: ID!
+  name: String @join__field(graph: REVIEWS)
+}
+
+type Store @join__type(graph: CATALOG, key: "id") @context(name: "catalog__store") {
+  id: ID!
+  owner: Owner!
+  products: [Product!]!
+}
+
+interface Owner @join__type(graph: CATALOG) {
+  label: String
+}
+
+type Person implements Owner @join__implements(graph: CATALOG, interface: "Owner") @join__type(graph: CATALOG) {
+  label: String
+}
+
+type Company implements Owner @join__implements(graph: CATALOG, interface: "Owner") @join__type(graph: CATALOG) {
+  label: String
+}
+
+type Product @join__type(graph: CATALOG, key: "id") {
+  id: ID!
+  price: Int @join__field(graph: CATALOG, contextArguments: [{context: "catalog__store", name: "label", type: "String", selection: "{ owner { label } }"}])
+}

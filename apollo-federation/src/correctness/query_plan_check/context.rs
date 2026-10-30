@@ -251,20 +251,16 @@ impl LevelTypes {
         self.narrowed_to(&possible_types(schema, type_name))
     }
 
-    /// Narrows by a path element's own type condition, which is a disjunction.
-    fn narrow_by_condition(
-        &self,
-        schema: &ValidFederationSchema,
-        type_condition: Option<&TypeCondition>,
-    ) -> Self {
+    /// Narrows by a path element's own type condition, a disjunction of object names compared
+    /// literally with each object's `__typename`, as the router's `iterate_path` compares them: the
+    /// level keeps the types it holds that the condition names. A name that is no object type, an
+    /// interface's or a union's, keeps nothing, so a condition naming no type the level holds
+    /// narrows it to none, and a value read below it is read nowhere.
+    fn narrow_by_condition(&self, type_condition: Option<&TypeCondition>) -> Self {
         let Some(type_names) = type_condition else {
             return self.clone();
         };
-        let admitted: Vec<Name> = type_names
-            .iter()
-            .flat_map(|type_name| possible_types(schema, type_name))
-            .collect();
-        self.narrowed_to(&admitted)
+        self.narrowed_to(type_names)
     }
 
     fn narrowed_to(&self, admitted: &[Name]) -> Self {
@@ -393,7 +389,7 @@ fn conditions_reached(
             &narrowed(
                 reached
                     .current
-                    .narrow_by_condition(schema, type_condition.as_deref()),
+                    .narrow_by_condition(type_condition.as_deref()),
             ),
             rest,
             selections,
@@ -439,8 +435,7 @@ fn reached_under_key(
                 let Some(child_type) = field_output_type(schema, parent_type, &field.name) else {
                     continue;
                 };
-                let level =
-                    LevelTypes::of(schema, &child_type).narrow_by_condition(schema, type_condition);
+                let level = LevelTypes::of(schema, &child_type).narrow_by_condition(type_condition);
                 out.extend(conditions_reached(
                     schema,
                     &child_type,

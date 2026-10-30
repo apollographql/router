@@ -52,6 +52,20 @@
 //! - **`@context` data availability.** Every contextual value a fetch reads must already be
 //!   fetched wherever the fetch runs. The legacy checker does not check this at all: at run time
 //!   a rewrite path that reaches nothing simply drops the argument, so nothing notices.
+//! - **A flatten path written to reach no type.**
+//!   [`CheckerOptions::check_empty_flatten_path_type_condition`], on by default, reports a flatten
+//!   path element whose condition is the empty list, `…|[]`, a fetch the planner decided can never
+//!   run. The model reads that condition as it reads any condition naming no object of its
+//!   position, an interface's or a union's name among them: the fetch below contributes nothing
+//!   and the requirements mounted for it disappear, while its structural checks remain and, where
+//!   its path ends at a key, its contextual values are still asked for, its own position being
+//!   read without that key's condition. This checker decides the same with the option off. The
+//!   report is this port's own and reads only whether the written list is empty, so a nonempty
+//!   condition naming no object of its position is not reported.
+//! - **A key's condition before an index**, a limit this port shares with the model: a condition
+//!   on a key whose value is a list is read as carrying into the index, so `items|[Book, Film].@`
+//!   is credited, while Router's executor compares the list itself, which has no `__typename`,
+//!   and selects nothing there, a shape no planner writes.
 //! - **Validity** and **condition variables** — the two sections below.
 //!
 //! # Validity of the operations the walk builds
