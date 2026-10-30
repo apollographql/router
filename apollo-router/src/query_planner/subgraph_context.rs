@@ -1,4 +1,3 @@
-use std::collections::HashMap;
 use std::collections::HashSet;
 
 use apollo_compiler::ExecutableDocument;
@@ -13,6 +12,7 @@ use apollo_compiler::executable::SelectionSet;
 use apollo_compiler::validation::Valid;
 use apollo_compiler::validation::WithErrors;
 use apollo_federation::query_plan::serializable_document::SerializableDocument;
+use indexmap::IndexMap;
 use serde_json_bytes::ByteString;
 use serde_json_bytes::Map;
 
@@ -28,13 +28,14 @@ use crate::spec::Schema;
 pub(crate) struct ContextualArguments {
     pub(crate) arguments: HashSet<String>, // a set of all argument names that will be passed to the subgraph. This is the unmodified name from the query plan
     pub(crate) count: usize, // the number of different sets of arguments that exist. This will either be 1 or the number of entities
+    pub(crate) inverted_contexts: Vec<Vec<usize>>, // Mapping from the representations to their context indices.
 }
 
 pub(crate) struct SubgraphContext<'a> {
     pub(crate) data: &'a Value,
     pub(crate) schema: &'a Schema,
     pub(crate) context_rewrites: &'a Vec<DataRewrite>,
-    pub(crate) named_args: Vec<HashMap<String, Value>>,
+    pub(crate) named_args: Vec<IndexMap<String, Value>>,
 }
 
 // context_path is a non-standard relative path which may navigate up the tree
@@ -102,9 +103,10 @@ impl<'a> SubgraphContext<'a> {
     // For each of the rewrites, start collecting data for the data at path.
     // Once we find a Value for a given variable, skip additional rewrites that
     // reference the same variable
-    pub(crate) fn execute_on_path(&mut self, path: &Path) {
+    // - Returns the context index (the index of `self.named_args`) to use for this path.
+    pub(crate) fn execute_on_path(&mut self, path: &Path) -> usize {
         let mut found_rewrites: HashSet<String> = HashSet::new();
-        let hash_map: HashMap<String, Value> = self
+        let hash_map: IndexMap<String, Value> = self
             .context_rewrites
             .iter()
             .filter_map(|rewrite| {
@@ -149,7 +151,9 @@ impl<'a> SubgraphContext<'a> {
                 }
             })
             .collect();
+        let index = self.named_args.len();
         self.named_args.push(hash_map);
+        index
     }
 
     // Once all a value has been extracted for every variable, go ahead and add all
@@ -158,6 +162,7 @@ impl<'a> SubgraphContext<'a> {
     pub(crate) fn add_variables_and_get_args(
         &self,
         variables: &mut Map<ByteString, Value>,
+        inverted_contexts: Vec<Vec<usize>>,
     ) -> Option<ContextualArguments> {
         let (extended_vars, contextual_args) = if let Some(first_map) = self.named_args.first() {
             if self.named_args.iter().all(|map| map == first_map) {
@@ -169,7 +174,7 @@ impl<'a> SubgraphContext<'a> {
                     None,
                 )
             } else {
-                let mut hash_map: HashMap<String, Value> = HashMap::new();
+                let mut hash_map: IndexMap<String, Value> = IndexMap::new();
                 let arg_names: HashSet<_> = first_map.keys().cloned().collect();
                 for (index, item) in self.named_args.iter().enumerate() {
                     // append _<index> to each of the arguments and push all the values into hash_map
@@ -184,11 +189,12 @@ impl<'a> SubgraphContext<'a> {
                     Some(ContextualArguments {
                         arguments: arg_names,
                         count: self.named_args.len(),
+                        inverted_contexts,
                     }),
                 )
             }
         } else {
-            (HashMap::new(), None)
+            (IndexMap::new(), None)
         };
 
         variables.extend(
@@ -208,7 +214,11 @@ pub(crate) fn build_operation_with_aliasing(
     contextual_arguments: &ContextualArguments,
     subgraph_schema: &Valid<apollo_compiler::Schema>,
 ) -> Result<Valid<ExecutableDocument>, ContextBatchingError> {
-    let ContextualArguments { arguments, count } = contextual_arguments;
+    let ContextualArguments {
+        arguments,
+        count,
+        inverted_contexts: _, // not used here (only used for interpreting the response data)
+    } = contextual_arguments;
     let parsed_document = subgraph_operation.as_parsed();
 
     let mut ed = ExecutableDocument::new();
@@ -242,7 +252,9 @@ fn transform_operation(
     let mut selections: Vec<Selection> = vec![];
     let mut new_variables: Vec<Node<VariableDefinition>> = vec![];
     operation.variables.iter().for_each(|v| {
-        if arguments.contains(v.name.as_str()) {
+        if v.name.as_str() == "representations" || arguments.contains(v.name.as_str()) {
+            // Clone both contextual arguments and the representations variable
+            // into per-context copies (e.g. representations_0, representations_1, ...).
             for i in 0..*count {
                 new_variables.push(Node::new(VariableDefinition {
                     name: Name::new_unchecked(&format!("{}_{}", v.name.as_str(), i)),
@@ -284,8 +296,24 @@ fn transform_operation(
         // it is a field selection for _entities, so it's ok to reach in and give it an alias
         let mut cloned = field_selection.clone();
         let cfs = cloned.make_mut();
-        cfs.alias = Some(Name::new_unchecked(&format!("_{i}")));
+        // Prefix the alias with the original operation name to make it clearer, even if it's
+        // expected to always be `_entities`.
+        cfs.alias = Some(Name::new_unchecked(&format!(
+            "{op}_{i}",
+            op = field_selection.name
+        )));
 
+        // Rename $representations to $representations_i for this alias
+        for arg in cfs.arguments.iter_mut() {
+            let arg = arg.make_mut();
+            if let Some(v) = arg.value.as_variable()
+                && v.as_str() == "representations"
+            {
+                arg.value = Node::new(ast::Value::Variable(Name::new_unchecked(&format!(
+                    "representations_{i}"
+                ))));
+            }
+        }
         transform_field_arguments(&mut cfs.arguments, arguments, i);
         transform_selection_set(&mut cfs.selection_set, arguments, i);
         selections.push(Selection::Field(cloned));
@@ -449,7 +477,7 @@ mod subgraph_context_unit_tests {
         let count = 3;
         transform_operation(&mut operation, &hash_set, &count).unwrap();
         assert_eq!(
-            "{ _0: f(param: $variable_0) _1: f(param: $variable_1) _2: f(param: $variable_2) }",
+            "{ f_0: f(param: $variable_0) f_1: f(param: $variable_1) f_2: f(param: $variable_2) }",
             operation.serialize().no_indent().to_string()
         );
     }

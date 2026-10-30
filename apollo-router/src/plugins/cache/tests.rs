@@ -47,6 +47,14 @@ impl MockStore {
     pub(crate) fn len(&self) -> usize {
         self.map.lock().len()
     }
+
+    pub(crate) fn keys(&self) -> Vec<String> {
+        self.map
+            .lock()
+            .keys()
+            .map(|k| String::from_utf8_lossy(k).into_owned())
+            .collect()
+    }
 }
 
 impl Mocks for MockStore {
@@ -664,6 +672,127 @@ async fn no_cache_control() {
     let response = response.next_response().await.unwrap();
 
     insta::assert_json_snapshot!(response);
+}
+
+/// An entity fetch whose entities carry different `@fromContext` values is rewritten into
+/// aliased `_entities_<i>` copies with per-entity `representations_<i>` variables. The cache
+/// does not understand that shape, so such fetches must bypass it entirely: nothing is looked
+/// up or stored for them, and the response still carries the per-context values.
+#[tokio::test]
+async fn aliased_context_entity_fetch_bypasses_cache() {
+    const SCHEMA_SET_CONTEXT: &str =
+        include_str!("../../../tests/fixtures/set_context/supergraph.graphql");
+    let valid_schema =
+        Arc::new(Schema::parse_and_validate(SCHEMA_SET_CONTEXT, "test.graphql").unwrap());
+    let query = "query QueryLL { tList { id uList { field } } }";
+
+    // The first fetch is a plain root query, cached as such. The second fetch has two `U`
+    // entities whose enclosing `T` has a different `prop`, so it is sent aliased per context.
+    const ALIASED_QUERY: &str = "query QueryLL__Subgraph1__1($representations_0: [_Any!]!, $representations_1: [_Any!]!, $contextualArgument_1_0_0: String, $contextualArgument_1_0_1: String) { _entities_0: _entities(representations: $representations_0) { ... on U { field(a: $contextualArgument_1_0_0) } } _entities_1: _entities(representations: $representations_1) { ... on U { field(a: $contextualArgument_1_0_1) } } }";
+    let subgraph1 = MockSubgraph::builder()
+        .with_json(
+            serde_json::json!({
+                "query": "query QueryLL__Subgraph1__0{tList{__typename prop id uList{__typename id}}}",
+                "operationName": "QueryLL__Subgraph1__0"
+            }),
+            serde_json::json!({
+                "data": {
+                    "tList": [
+                        {
+                            "__typename": "T",
+                            "prop": "prop value 1",
+                            "id": "1",
+                            "uList": [{ "__typename": "U", "id": "3" }]
+                        },
+                        {
+                            "__typename": "T",
+                            "prop": "prop value 2",
+                            "id": "2",
+                            "uList": [{ "__typename": "U", "id": "4" }]
+                        }
+                    ]
+                }
+            }),
+        )
+        .with_json(
+            serde_json::json!({
+                "query": ALIASED_QUERY,
+                "operationName": "QueryLL__Subgraph1__1",
+                "variables": {
+                    "contextualArgument_1_0_0": "prop value 1",
+                    "contextualArgument_1_0_1": "prop value 2",
+                    "representations_0": [{ "__typename": "U", "id": "3" }],
+                    "representations_1": [{ "__typename": "U", "id": "4" }]
+                }
+            }),
+            serde_json::json!({
+                "data": {
+                    "_entities_0": [{ "id": "3", "field": 3456 }],
+                    "_entities_1": [{ "id": "4", "field": 222 }]
+                }
+            }),
+        )
+        .with_header(CACHE_CONTROL, HeaderValue::from_static("public"))
+        .build();
+    let subgraphs = MockedSubgraphs([("Subgraph1", subgraph1)].into_iter().collect());
+
+    let store = Arc::new(MockStore::new());
+    let redis_cache = RedisCacheStorage::from_mocks(store.clone()).await.unwrap();
+    let map = [(
+        "Subgraph1".to_string(),
+        Subgraph {
+            redis: None,
+            private_id: None,
+            enabled: true.into(),
+            ttl: None,
+            ..Default::default()
+        },
+    )]
+    .into_iter()
+    .collect();
+    let entity_cache = EntityCache::with_mocks(redis_cache.clone(), map, valid_schema.clone())
+        .await
+        .unwrap();
+
+    let service = TestHarness::builder()
+        .configuration_json(serde_json::json!({"include_subgraph_errors": { "all": true } }))
+        .unwrap()
+        .schema(SCHEMA_SET_CONTEXT)
+        .extra_private_plugin(entity_cache)
+        .extra_plugin(subgraphs)
+        .build_supergraph()
+        .await
+        .unwrap();
+
+    let request = supergraph::Request::fake_builder()
+        .query(query)
+        .context(Context::new())
+        .build()
+        .unwrap();
+    let mut response = service.oneshot(request).await.unwrap();
+    let response = response.next_response().await.unwrap();
+
+    assert!(response.errors.is_empty(), "{:?}", response.errors);
+    assert_eq!(
+        response.data,
+        Some(serde_json_bytes::json!({
+            "tList": [
+                { "id": "1", "uList": [{ "field": 3456 }] },
+                { "id": "2", "uList": [{ "field": 222 }] }
+            ]
+        }))
+    );
+
+    // Only the root `tList` fetch was stored. The aliased entity fetch was neither stored
+    // under a root-query key (which entity invalidation could never match) nor under
+    // per-entity keys.
+    let keys = store.keys();
+    assert_eq!(keys.len(), 1, "unexpected cache entries: {keys:?}");
+    assert!(
+        keys[0].contains(":subgraph:Subgraph1:type:Query:"),
+        "expected a root-query cache entry, got {}",
+        keys[0]
+    );
 }
 
 #[tokio::test]
