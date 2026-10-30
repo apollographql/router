@@ -183,7 +183,7 @@ where
                         .instruments
                         .new_apollo_subgraph_instruments(
                             static_apollo_subgraph_instruments.clone(),
-                            req_fn_config.apollo.clone(),
+                            req_fn_config.apollo.subgraph_metrics,
                         );
                     apollo_instruments.on_request(sub_request);
 

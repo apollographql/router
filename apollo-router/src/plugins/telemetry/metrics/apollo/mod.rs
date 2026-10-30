@@ -42,6 +42,7 @@ use crate::plugins::telemetry::otlp::no_retries;
 use crate::plugins::telemetry::otlp::process_endpoint;
 use crate::plugins::telemetry::reload::metrics::MetricsBuilder;
 use crate::plugins::telemetry::reload::metrics::MetricsConfigurator;
+use crate::plugins::telemetry::reload::metrics::instrument_default_buckets;
 
 pub(crate) mod histogram;
 pub(crate) mod studio;
@@ -246,14 +247,18 @@ impl Config {
             .with_reader(MeterProviderType::Apollo, default_reader)
             .with_resource(MeterProviderType::Apollo, resource.clone());
 
-        // Configure histogram buckets for Apollo metrics
+        // Configure histogram buckets for Apollo metrics, preferring per-instrument
+        // defaults for histograms that don't measure durations
         let apollo_buckets = default_buckets();
         builder.with_view(MeterProviderType::Apollo, move |instrument: &Instrument| {
             if instrument.kind() == InstrumentKind::Histogram {
+                let boundaries = instrument_default_buckets(instrument.name())
+                    .map(<[f64]>::to_vec)
+                    .unwrap_or_else(|| apollo_buckets.clone());
                 Some(
                     Stream::builder()
                         .with_aggregation(Aggregation::ExplicitBucketHistogram {
-                            boundaries: apollo_buckets.clone(),
+                            boundaries,
                             record_min_max: true,
                         })
                         .build()
@@ -319,6 +324,8 @@ impl Config {
 
 #[cfg(test)]
 mod test {
+    use std::collections::HashMap;
+    use std::collections::HashSet;
     use std::future::Future;
     use std::sync::Arc;
     use std::time::Duration;
@@ -334,6 +341,8 @@ mod test {
     use super::*;
     use crate::Context;
     use crate::TestHarness;
+    use crate::configuration::ExternalValues;
+    use crate::configuration::expansion::Expansion;
     use crate::context::OPERATION_KIND;
     use crate::plugin::Plugin;
     use crate::plugin::PluginInit;
@@ -496,6 +505,76 @@ mod test {
             insta::assert_json_snapshot!(results);
         });
 
+        Ok(())
+    }
+
+    /// Enum values in responses are only reported in extended reference mode.
+    #[rstest::rstest]
+    #[case::standard("standard", HashMap::new())]
+    #[case::extended(
+        "extended",
+        HashMap::from([("Status".to_string(), HashSet::from(["ACTIVE".to_string()]))])
+    )]
+    #[tokio::test(flavor = "multi_thread")]
+    async fn apollo_metrics_enum_response_references_follow_reference_mode(
+        #[case] metrics_reference_mode: &str,
+        #[case] expected: HashMap<String, HashSet<String>>,
+    ) -> Result<(), BoxError> {
+        let _guard = TEST.lock().await;
+        let telemetry_config = ExternalValues::from(
+            Expansion::builder()
+                .supported_mode("env")
+                .mocked_env_var("METRICS_REFERENCE_MODE", metrics_reference_mode)
+                .build(),
+        )
+        .expand_without_schema(
+            r#"
+            telemetry:
+              apollo:
+                apollo_key: "key"
+                apollo_graph_ref: "ref"
+                schema_id: "schema_sha"
+                metrics_reference_mode: ${env.METRICS_REFERENCE_MODE}
+            "#,
+        )?;
+        let mut plugin = create_telemetry_plugin_from_value(telemetry_config).await?;
+        let (tx, rx) = tokio::sync::mpsc::channel(100);
+        plugin.apollo_metrics_sender = Sender::Apollo(tx);
+
+        TestHarness::builder()
+            .configuration_json(serde_json::json!({
+                "experimental_mock_subgraphs": {
+                    "subgraph-a": { "query": { "status": "ACTIVE" } },
+                },
+            }))?
+            .schema(include_str!(
+                "../../testdata/enum_response_supergraph.graphql"
+            ))
+            .extra_private_plugin(plugin)
+            .build_router()
+            .await?
+            .oneshot(
+                SupergraphRequest::fake_builder()
+                    .query("{ status }")
+                    .build()?
+                    .try_into()
+                    .unwrap(),
+            )
+            .await?
+            .next_response()
+            .await
+            .unwrap()?;
+
+        let reports = ReceiverStream::new(rx).collect::<Vec<_>>().await;
+        let [report] = reports.as_slice() else {
+            panic!("expected one stats report, got {}", reports.len());
+        };
+        let stats = report
+            .stats
+            .values()
+            .next()
+            .expect("stats for the operation");
+        assert_eq!(stats.stats_with_context.enum_response_references, expected);
         Ok(())
     }
 
@@ -700,7 +779,13 @@ mod test {
     }
 
     async fn create_telemetry_plugin(full_config: &str) -> Result<Telemetry, BoxError> {
-        let full_config = serde_yaml::from_str::<Value>(full_config).expect("yaml must be valid");
+        create_telemetry_plugin_from_value(
+            serde_yaml::from_str(full_config).expect("yaml must be valid"),
+        )
+        .await
+    }
+
+    async fn create_telemetry_plugin_from_value(full_config: Value) -> Result<Telemetry, BoxError> {
         let telemetry_config = full_config
             .as_object()
             .expect("must be an object")

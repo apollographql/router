@@ -83,7 +83,9 @@ A path to a file containing the [graph API key](/graphos/platform/access-managem
 </td>
 <td>
 
-An OCI reference to a graph artifact that contains the supergraph schema. The reference must use a SHA256 digest format.
+An OCI reference to a graph artifact that contains the supergraph schema. The reference can use a SHA256 digest (`@sha256:...`) or a [tag](/graphos/platform/schema-management/delivery/graph-artifacts/tags) (`:production`).
+
+Tag references require hot reload: set `APOLLO_ROUTER_HOT_RELOAD=true` or pass `--hot-reload`, or the router exits at startup. Digest references can't be used with hot reload.
 
 When you set this option, the router uses the schema from the specified graph artifact instead of Apollo Uplink. The router also fetches its entitlement from the same registry when the graph artifact manifest carries an entitlement identifier; persisted queries still come from Uplink.
 

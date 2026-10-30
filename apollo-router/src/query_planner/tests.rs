@@ -2858,3 +2858,136 @@ async fn conditional_requires_next_to_unconditional_sibling() {
         );
     }
 }
+
+#[tokio::test]
+async fn conditional_key_and_requires_inputs_next_to_unconditional_hop() {
+    // Two fetches from B under different conditions merge into one ungated fetch, and one of them
+    // has a `@requires`. The hop to C selects `__typename` unconditionally, so a `@requires` input
+    // read regardless of the conditions would make `{ __typename name }`, a representation with
+    // no key, whenever both conditions are false. The representations sent to B are recorded to
+    // check that each one has its key, since the mock would match the keyless one by `name`.
+    let schema = supergraph_schema(
+        r#"
+        enum join__Graph {
+            A @join__graph(name: "a", url: "http://localhost/a")
+            B @join__graph(name: "b", url: "http://localhost/b")
+            C @join__graph(name: "c", url: "http://localhost/c")
+        }
+
+        type Query @join__type(graph: A) @join__type(graph: B) @join__type(graph: C) {
+            posts: [Post] @join__field(graph: A)
+        }
+
+        type Post @join__type(graph: A) {
+            author: User
+        }
+
+        type User @join__type(graph: A, key: "id") @join__type(graph: B, key: "id") @join__type(graph: C, key: "id") {
+            id: ID!
+            name: String @join__field(graph: A) @join__field(graph: B, external: true)
+            email: String @join__field(graph: B)
+            emailDomain: String @join__field(graph: B, requires: "name")
+            score: Int @join__field(graph: C)
+        }
+        "#,
+    );
+    let query = "query Q($x: Boolean!, $y: Boolean!) { posts { author { score ... @include(if: $x) { emailDomain } ... @include(if: $y) { email } } } }";
+
+    for incremental_planner in [false, true] {
+        let config = serde_json::json!({
+            "include_subgraph_errors": { "all": true },
+            "supergraph": {
+                "query_planning": {
+                    "incremental_planner": { "enabled": incremental_planner },
+                },
+            },
+            "experimental_mock_subgraphs": {
+                "a": {
+                    "query": {
+                        "posts": [
+                            { "author": { "__typename": "User", "id": "1", "name": "Ann" } },
+                        ],
+                    },
+                },
+                "b": {
+                    "entities": [
+                        { "__typename": "User", "id": "1", "name": "Ann", "email": "ann@x", "emailDomain": "x" },
+                    ],
+                },
+                "c": {
+                    "entities": [
+                        { "__typename": "User", "id": "1", "score": 3 },
+                    ],
+                },
+            },
+        });
+
+        for (x, y) in [(false, false), (true, false), (false, true), (true, true)] {
+            let representations_to_b = Arc::new(std::sync::Mutex::new(Vec::new()));
+            let recorded = representations_to_b.clone();
+            let service = TestHarness::builder()
+                .configuration_json(config.clone())
+                .unwrap()
+                .schema(&schema)
+                .subgraph_hook(move |name, service| {
+                    let recorded = recorded.clone();
+                    let is_b = name == "b";
+                    service
+                        .map_request(move |request: subgraph::Request| {
+                            if is_b {
+                                let representations = request
+                                    .subgraph_request
+                                    .body()
+                                    .variables
+                                    .get("representations")
+                                    .and_then(|r| r.as_array())
+                                    .cloned()
+                                    .unwrap_or_default();
+                                recorded.lock().unwrap().push(representations);
+                            }
+                            request
+                        })
+                        .boxed_clone()
+                })
+                .build_supergraph()
+                .await
+                .unwrap();
+            let request = supergraph::Request::fake_builder()
+                .context(Context::new())
+                .query(query)
+                .variables(json!({ "x": x, "y": y }).as_object().unwrap().clone())
+                .build()
+                .unwrap();
+            let response = service
+                .oneshot(request)
+                .await
+                .unwrap()
+                .next_response()
+                .await
+                .unwrap();
+
+            let mut author = serde_json::json!({ "score": 3 });
+            if x {
+                author["emailDomain"] = "x".into();
+            }
+            if y {
+                author["email"] = "ann@x".into();
+            }
+            let context = format!("incremental_planner: {incremental_planner}, x: {x}, y: {y}");
+            assert_eq!(
+                serde_json::to_value(&response).unwrap(),
+                serde_json::json!({ "data": { "posts": [{ "author": author }] } }),
+                "{context}"
+            );
+            let calls_to_b = representations_to_b.lock().unwrap().clone();
+            assert_eq!(calls_to_b.is_empty(), !x && !y, "{context}: {calls_to_b:?}");
+            for representation in calls_to_b.iter().flatten() {
+                assert!(
+                    representation.get("__typename").is_some()
+                        && representation.get("id").is_some(),
+                    "{context}: representation without its key: {representation:?}"
+                );
+            }
+        }
+    }
+}

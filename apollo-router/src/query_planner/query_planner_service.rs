@@ -1,6 +1,7 @@
 //! Calls out to the apollo-federation crate
 
 use std::fmt::Debug;
+use std::num::NonZeroU64;
 use std::sync::Arc;
 use std::sync::OnceLock;
 use std::task::Poll;
@@ -12,6 +13,7 @@ use apollo_federation::error::FederationError;
 use apollo_federation::error::SingleFederationError;
 use apollo_federation::query_plan::query_planner::QueryPlanOptions;
 use apollo_federation::query_plan::query_planner::QueryPlanner;
+use apollo_federation::query_plan::query_planner::QueryPlannerDebugConfig;
 use futures::future::BoxFuture;
 use opentelemetry::KeyValue;
 use opentelemetry::metrics::MeterProvider as _;
@@ -54,6 +56,7 @@ use crate::spec::SpecError;
 
 pub(crate) const RUST_QP_MODE: &str = "rust";
 const UNSUPPORTED_FED1: &str = "fed1";
+const UNSUPPORTED_FEDERATION_VERSION: &str = "unsupported_federation_version";
 const INTERNAL_INIT_ERROR: &str = "internal";
 
 const ENV_DISABLE_NON_LOCAL_SELECTIONS_CHECK: &str =
@@ -72,6 +75,57 @@ pub(crate) fn non_local_selections_check_enabled() -> bool {
             std::env::var(ENV_DISABLE_NON_LOCAL_SELECTIONS_CHECK).as_deref() == Ok("true");
 
         !disabled
+    })
+}
+
+const ENV_MAX_NON_LOCAL_SELECTIONS: &str = "APOLLO_ROUTER_MAX_NON_LOCAL_SELECTIONS";
+/// The default for max number of non-local selections is 100000 defined in
+/// [`QueryPlannerDebugConfig::max_non_local_selections`], but that default can
+/// be altered with `APOLLO_ROUTER_MAX_NON_LOCAL_SELECTIONS` environment
+/// variable. The query planning process is aborted if this number is reached.
+///
+/// Since query planning configuration is part of the cache key, setting or
+/// changing the value of this env var will clear the query planner cache and
+/// cause replanning of the previously cached query plans.
+///
+/// If the env var value is unable to be parsed into a `NonZeroU64`, the default
+/// value is used and a warn message is emitted which can be found in the logs.
+/// An info log is emitted when that env var value parsed and is set.
+///
+/// This env var is intentionally undocumented. It is meant for troubleshooting
+/// purposes when investigating query plan and operation complexity in regards
+/// to non-local selection sets, an internal to query planner measurement for
+/// the number of selection sets that cannot be optimized due to not being local
+/// to the selection set currently being explored.
+///
+/// The number of non-local selections explored for a given plan is tracked in
+/// `apollo.router.query_planning.plan.non_local_selections` histogram and is
+/// available to everyone. This histogram defaults to bucket boundaries of 100,
+/// 1000, 25000, 50000, 100000, and 150000 (see [`NON_LOCAL_SELECTIONS_BUCKETS`]).
+pub(crate) fn max_non_local_selections() -> NonZeroU64 {
+    static MAX: OnceLock<NonZeroU64> = OnceLock::new();
+    *MAX.get_or_init(|| {
+        let default = QueryPlannerDebugConfig::default().max_non_local_selections;
+        let Ok(value) = std::env::var(ENV_MAX_NON_LOCAL_SELECTIONS) else {
+            return default;
+        };
+        match value.parse::<NonZeroU64>() {
+            Ok(limit) => {
+                tracing::info!(
+                    limit = limit,
+                    "non-local selections limit set"
+                );
+                limit
+            }
+            Err(_) => {
+                tracing::warn!(
+                    value = value,
+                    default = default,
+                    "falling back to default max non-local selection due to invalid {ENV_MAX_NON_LOCAL_SELECTIONS} value"
+                );
+                default
+            }
+        }
     })
 }
 
@@ -117,7 +171,11 @@ impl QueryPlannerService {
         match &result {
             Err(FederationError::SingleFederationError(error)) => match error {
                 SingleFederationError::UnsupportedFederationVersion { .. } => {
-                    metric_rust_qp_init(Some(UNSUPPORTED_FED1));
+                    if schema.federation_version() == Some(1) {
+                        metric_rust_qp_init(Some(UNSUPPORTED_FED1));
+                    } else {
+                        metric_rust_qp_init(Some(UNSUPPORTED_FEDERATION_VERSION));
+                    }
                 }
                 SingleFederationError::UnsupportedFeature {
                     message: _,
@@ -202,6 +260,7 @@ impl QueryPlannerService {
             evaluated_plan_paths: plan.statistics.evaluated_plan_paths.clone().into_inner() as u64,
             fuel_consumed: plan.statistics.fuel_consumed.get(),
             fuel_remaining: plan.statistics.fuel_remaining.get(),
+            non_local_selections_count: plan.statistics.non_local_selections_count,
         })
     }
 
@@ -307,6 +366,7 @@ impl QueryPlannerService {
             evaluated_plan_paths,
             fuel_consumed,
             fuel_remaining,
+            non_local_selections_count,
         } = plan_result;
 
         // If the query is filtered, we want to generate the signature using the original query and generate the
@@ -341,6 +401,9 @@ impl QueryPlannerService {
             "Number of paths (including intermediate ones) considered to plan a query before starting to generate a plan",
             evaluated_plan_paths
         );
+        if let Some(non_local_selections_count) = non_local_selections_count {
+            metric_query_planning_non_local_selections(non_local_selections_count);
+        }
         let span = tracing::Span::current();
         if let Some(fuel_consumed) = fuel_consumed {
             span.record("query_planning.fuel_consumed", fuel_consumed);
@@ -571,6 +634,13 @@ pub(crate) const FUEL_BUCKETS: &[f64] = &[
     1_000_000.0,
 ];
 
+/// Default buckets for the non-local selections histogram. They bracket the
+/// default limit of 100,000 to observe how close operations get to it. The
+/// 150,000 bucket catches plans allowed by a raised
+/// `APOLLO_ROUTER_MAX_NON_LOCAL_SELECTIONS`.
+pub(crate) const NON_LOCAL_SELECTIONS_BUCKETS: &[f64] =
+    &[100.0, 1_000.0, 25_000.0, 50_000.0, 100_000.0, 150_000.0];
+
 #[derive(Debug, Clone, PartialEq)]
 pub(crate) struct QueryPlanResult {
     pub(super) formatted_query_plan: Option<Arc<String>>,
@@ -579,6 +649,7 @@ pub(crate) struct QueryPlanResult {
     pub(super) evaluated_plan_paths: u64,
     pub(super) fuel_consumed: Option<u64>,
     pub(super) fuel_remaining: Option<u64>,
+    pub(super) non_local_selections_count: Option<u64>,
 }
 
 /// The outcome of a query-planning attempt. Shared across query-planning metrics (e.g.
@@ -633,6 +704,15 @@ pub(crate) fn metric_query_planning_plan_duration(
         "planner" = planner,
         "outcome" = outcome,
         "job.type" = compute_job_type
+    );
+}
+
+pub(crate) fn metric_query_planning_non_local_selections(count: u64) {
+    u64_histogram_with_unit!(
+        "apollo.router.query_planning.plan.non_local_selections",
+        "Number of non-local selections estimated during query planning traversal",
+        "{selection}",
+        count
     );
 }
 
@@ -718,6 +798,27 @@ mod tests {
             error.to_string(),
             "failed to initialize the query planner: Supergraphs composed with federation version 1 are not supported. Please recompose your supergraph with federation version 2 or greater"
         );
+
+        async {
+            let sdl = include_str!("../../tests/fixtures/supergraph-join-v0.2.graphql");
+            let config = Arc::default();
+            let schema = Schema::parse(sdl, &config).unwrap();
+            let error = QueryPlannerService::for_test(schema.into(), config)
+                .err()
+                .expect("expected error for join v0.2 supergraph");
+            assert_eq!(
+                error.to_string(),
+                "failed to initialize the query planner: Supergraphs using join spec v0.2 are not supported (minimum supported version is v0.3). Please recompose your supergraph with federation version 2.3 or greater"
+            );
+            assert_counter!(
+                "apollo.router.lifecycle.query_planner.init",
+                1,
+                "init.error_kind" = "unsupported_federation_version",
+                "init.is_success" = false
+            );
+        }
+        .with_metrics()
+        .await;
 
         async {
             let sdl = include_str!("../testdata/minimal_supergraph.graphql");
@@ -1215,6 +1316,13 @@ mod tests {
             "init.error_kind" = "fed1",
             "init.is_success" = false
         );
+        metric_rust_qp_init(Some(UNSUPPORTED_FEDERATION_VERSION));
+        assert_counter!(
+            "apollo.router.lifecycle.query_planner.init",
+            1,
+            "init.error_kind" = "unsupported_federation_version",
+            "init.is_success" = false
+        );
         metric_rust_qp_init(Some(INTERNAL_INIT_ERROR));
         assert_counter!(
             "apollo.router.lifecycle.query_planner.init",
@@ -1281,6 +1389,22 @@ mod tests {
             )
             .await
             .expect("query plans");
+    }
+
+    #[test(tokio::test)]
+    async fn test_non_local_selections_histogram() {
+        async {
+            plan_example_query(Configuration::default()).await;
+
+            assert_histogram_exists!(
+                "apollo.router.query_planning.plan.non_local_selections",
+                u64
+            );
+            assert_histogram_count!("apollo.router.query_planning.plan.non_local_selections", 1);
+            assert_histogram_sum!("apollo.router.query_planning.plan.non_local_selections", 7);
+        }
+        .with_metrics()
+        .await;
     }
 
     #[test(tokio::test)]
