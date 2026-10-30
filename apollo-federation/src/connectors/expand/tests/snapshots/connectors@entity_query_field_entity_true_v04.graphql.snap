@@ -104,6 +104,7 @@ input_file: apollo-federation/src/connectors/expand/tests/schemas/expand/entity_
                 connect_path: None,
                 connect_query_params: None,
                 stream: None,
+                subscription: false,
             },
         ),
         selection: JSONSelection {

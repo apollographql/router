@@ -46,6 +46,8 @@ impl ConnectorPosition {
                     ObjectCategory::Query
                 } else if self.on_mutation_type(schema) {
                     ObjectCategory::Mutation
+                } else if self.on_subscription_type(schema) {
+                    ObjectCategory::Subscription
                 } else {
                     ObjectCategory::Other
                 },
@@ -123,7 +125,22 @@ impl ConnectorPosition {
     }
 
     pub(super) fn on_root_type(&self, schema: &Schema) -> bool {
-        self.on_query_type(schema) || self.on_mutation_type(schema)
+        self.on_query_type(schema)
+            || self.on_mutation_type(schema)
+            || self.on_subscription_type(schema)
+    }
+
+    /// Whether this is a field of the `Subscription` root type, whose response is read as a
+    /// stream of events.
+    pub(super) fn on_subscription_type(&self, schema: &Schema) -> bool {
+        schema
+            .schema_definition
+            .subscription
+            .as_ref()
+            .is_some_and(|subscription| match self {
+                ConnectorPosition::Field(pos) => *pos.field.type_name() == **subscription,
+                ConnectorPosition::Type(_) => false,
+            })
     }
 
     fn on_query_type(&self, schema: &Schema) -> bool {
@@ -171,7 +188,20 @@ impl ConnectedElement<'_> {
     }
 
     pub(super) fn is_root_type(&self, schema: &Schema) -> bool {
-        self.is_query_type(schema) || self.is_mutation_type(schema)
+        self.is_query_type(schema)
+            || self.is_mutation_type(schema)
+            || self.is_subscription_type(schema)
+    }
+
+    fn is_subscription_type(&self, schema: &Schema) -> bool {
+        schema
+            .schema_definition
+            .subscription
+            .as_ref()
+            .is_some_and(|subscription| match self {
+                ConnectedElement::Field { .. } => false,
+                ConnectedElement::Type { type_ref } => type_ref.name() == subscription.as_str(),
+            })
     }
 
     fn is_query_type(&self, schema: &Schema) -> bool {
@@ -201,6 +231,7 @@ impl ConnectedElement<'_> {
 pub(crate) enum ObjectCategory {
     Query,
     Mutation,
+    Subscription,
     Other,
 }
 

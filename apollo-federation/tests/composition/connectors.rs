@@ -1090,4 +1090,163 @@ type Resource @key(fields: "id") {
             "Expected the merge hint to survive expansion, got: {codes:?}"
         );
     }
+
+    #[test]
+    fn composes_subscription_root_v0_5() {
+        let (sdl, services, plan) = compose_expand_and_plan(
+            &[ServiceDefinition {
+                name: "streams",
+                type_defs: r#"
+            extend schema
+            @link(
+                url: "https://specs.apollo.dev/connect/v0.5"
+                import: ["@connect", "@source"]
+            )
+            @source(name: "market", http: { baseURL: "http://market" })
+
+            type Query {
+                price(symbol: String!): Price
+                @connect(source: "market", http: { GET: "/prices/{$args.symbol}" }, selection: "symbol amount")
+            }
+
+            type Subscription {
+                prices(symbol: String!): Price
+                @connect(source: "market", http: { GET: "/stream/{$args.symbol}" }, selection: "symbol amount")
+
+                quotes(symbol: String!): Price
+                @connect(source: "market", http: { GET: "/quotes/{$args.symbol}" }, selection: "$.quote { symbol amount }")
+
+                history(symbol: String!): [Price]
+                @connect(source: "market", http: { GET: "/stream/{$args.symbol}", stream: "array" }, selection: "symbol amount")
+
+                checked(symbol: String!): Price
+                @connect(
+                    source: "market"
+                    http: { GET: "/stream/{$args.symbol}" }
+                    selection: "symbol amount: amount->match([0, @->withError('Zero price')], [@, @])"
+                )
+            }
+
+            type Price {
+                symbol: String!
+                amount: Float
+            }
+        "#,
+            }],
+            r#"subscription { prices(symbol: "APOL") { symbol amount } }"#,
+        );
+        // One synthetic subgraph per connector, the subscriptions' included
+        assert_eq!(
+            services,
+            [
+                "streams_Query_price_0",
+                "streams_Subscription_checked_0",
+                "streams_Subscription_history_0",
+                "streams_Subscription_prices_0",
+                "streams_Subscription_quotes_0"
+            ]
+        );
+        assert_snapshot!(sdl);
+        assert_snapshot!(plan);
+    }
+
+    /// A connector-backed `Subscription` whose events are entities that
+    /// another subgraph contributes fields to: each event needs an entity fetch.
+    #[test]
+    fn composes_subscription_entity_v0_5() {
+        let (sdl, services, plan) = compose_expand_and_plan(
+            &[
+                ServiceDefinition {
+                    name: "streams",
+                    type_defs: r#"
+            extend schema
+            @link(
+                url: "https://specs.apollo.dev/connect/v0.5"
+                import: ["@connect", "@source"]
+            )
+            @source(name: "market", http: { baseURL: "http://market" })
+
+            type Query {
+                price(symbol: String!): Price
+                @connect(source: "market", http: { GET: "/prices/{$args.symbol}" }, selection: "symbol amount")
+            }
+
+            type Subscription {
+                prices(symbol: String!): Price
+                @connect(source: "market", http: { GET: "/stream/{$args.symbol}" }, selection: "symbol amount")
+            }
+
+            type Price @key(fields: "symbol", resolvable: false) {
+                symbol: String!
+                amount: Float
+            }
+        "#,
+                },
+                ServiceDefinition {
+                    name: "catalog",
+                    type_defs: r#"
+            type Price @key(fields: "symbol") {
+                symbol: String!
+                name: String
+            }
+        "#,
+                },
+            ],
+            r#"subscription { prices(symbol: "APOL") { symbol amount name } }"#,
+        );
+        // `catalog` is a plain subgraph, so it is not among the connector services
+        assert_eq!(
+            services,
+            ["streams_Query_price_0", "streams_Subscription_prices_0"]
+        );
+        assert_snapshot!(sdl);
+        assert_snapshot!(plan);
+    }
+
+    /// Composes the subgraphs, expands the supergraph the way the router does
+    /// (one synthetic subgraph per connector) and plans `operation` against
+    /// it. Returns the composed supergraph SDL, the sorted service names of
+    /// the expanded supergraph, and the query plan.
+    fn compose_expand_and_plan(
+        services: &[ServiceDefinition<'_>],
+        operation: &str,
+    ) -> (String, Vec<String>, String) {
+        let supergraph = compose_as_fed2_connectors_subgraphs(services)
+            .expect("Expected composition to succeed");
+        let sdl = supergraph.schema().schema().to_string();
+
+        let apollo_federation::connectors::expand::ExpansionResult::Expanded {
+            raw_sdl: expanded_sdl,
+            connectors,
+            ..
+        } = apollo_federation::connectors::expand::expand_connectors(&sdl, &Default::default())
+            .expect("Expected expansion to succeed")
+        else {
+            panic!("Expected the supergraph to contain connectors");
+        };
+        let mut service_names: Vec<String> = connectors
+            .by_service_name
+            .keys()
+            .map(|name| name.to_string())
+            .collect();
+        service_names.sort();
+
+        let supergraph = apollo_federation::Supergraph::new_with_router_specs(&expanded_sdl)
+            .expect("Expected the expanded supergraph to be valid");
+        let planner = apollo_federation::query_plan::query_planner::QueryPlanner::new(
+            &supergraph,
+            Default::default(),
+        )
+        .expect("Expected the planner to accept the expanded supergraph");
+        let document = apollo_compiler::ExecutableDocument::parse_and_validate(
+            planner.api_schema().schema(),
+            operation,
+            "op.graphql",
+        )
+        .expect("Expected the operation to be valid");
+        let plan = planner
+            .build_query_plan(&document, None, Default::default())
+            .expect("Expected planning to succeed");
+        (sdl, service_names, plan.to_string())
+    }
 }

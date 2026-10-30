@@ -110,6 +110,7 @@ input_file: apollo-federation/src/connectors/expand/tests/schemas/expand/interfa
                 connect_path: None,
                 connect_query_params: None,
                 stream: None,
+                subscription: false,
             },
         ),
         selection: JSONSelection {
@@ -227,6 +228,7 @@ input_file: apollo-federation/src/connectors/expand/tests/schemas/expand/interfa
                 connect_path: None,
                 connect_query_params: None,
                 stream: None,
+                subscription: false,
             },
         ),
         selection: JSONSelection {
@@ -438,6 +440,7 @@ input_file: apollo-federation/src/connectors/expand/tests/schemas/expand/interfa
                 connect_path: None,
                 connect_query_params: None,
                 stream: None,
+                subscription: false,
             },
         ),
         selection: JSONSelection {

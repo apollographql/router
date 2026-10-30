@@ -30,6 +30,8 @@ use crate::plugins::connectors::tracing::CONNECTOR_TYPE_HTTP;
 use crate::plugins::connectors::tracing::connect_spec_version_instrument;
 #[cfg(test)]
 use crate::plugins::connectors::tracing::connect_stream_mode_instrument;
+#[cfg(test)]
+use crate::plugins::connectors::tracing::connector_subscriptions_instrument;
 use crate::plugins::subscription::SubscriptionConfig;
 use crate::plugins::telemetry::consts::CONNECT_SPAN_NAME;
 use crate::query_planner::SubgraphSchemas;
@@ -241,6 +243,7 @@ pub(crate) struct ConnectorServices {
     pub(crate) connectors_by_service_name: Arc<IndexMap<Arc<str>, Connector>>,
     pub(crate) _connect_spec_version_instrument: Option<ObservableGauge<u64>>,
     pub(crate) _connect_stream_mode_instrument: Option<ObservableGauge<u64>>,
+    pub(crate) _connector_subscriptions_instrument: Option<ObservableGauge<u64>>,
     /// Pre-built services for each connector.
     pub(crate) services: Arc<
         HashMap<String, UnconstrainedBuffer<ConnectRequest, BoxFuture<'static, ServiceResult>>>,
@@ -258,6 +261,7 @@ impl ConnectorServices {
             _connect_stream_mode_instrument: connect_stream_mode_instrument(
                 schema.connectors.as_ref(),
             ),
+            _connector_subscriptions_instrument: connector_subscriptions_instrument(&schema),
             services: Default::default(),
         }
     }
