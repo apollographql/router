@@ -3,14 +3,17 @@ use std::sync::LazyLock;
 
 use apollo_compiler::Name;
 use apollo_compiler::Node;
+use apollo_compiler::ast;
 use apollo_compiler::collections::IndexMap;
 use apollo_compiler::collections::IndexSet;
 use apollo_compiler::name;
 use apollo_compiler::schema::DirectiveDefinition;
 use apollo_compiler::schema::DirectiveLocation;
+use apollo_compiler::schema::EnumValueDefinition;
 use apollo_compiler::schema::ExtendedType;
 use apollo_compiler::schema::FieldDefinition;
 use apollo_compiler::schema::InputValueDefinition;
+use apollo_compiler::schema::SchemaDefinition;
 use apollo_compiler::schema::Value;
 
 use crate::error::FederationError;
@@ -1131,6 +1134,150 @@ fn validate_inaccessible(
     Ok(())
 }
 
+/// Drops elements marked `@inaccessible` and elements whose type is removed.
+struct InaccessibleFilter {
+    directive_name: Name,
+    removed_types: IndexSet<Name>,
+}
+
+impl InaccessibleFilter {
+    fn removes(&self, directives: &ast::DirectiveList, ty: &Name) -> bool {
+        directives.has(&self.directive_name) || self.removed_types.contains(ty)
+    }
+
+    fn removes_input_value(&self, value: &InputValueDefinition) -> bool {
+        self.removes(&value.directives, value.ty.inner_named_type())
+    }
+
+    fn removes_field(&self, field: &FieldDefinition) -> bool {
+        self.removes(&field.directives, field.ty.inner_named_type())
+    }
+
+    fn removes_from_field(&self, field: &FieldDefinition) -> bool {
+        self.removes_field(field)
+            || field
+                .arguments
+                .iter()
+                .any(|argument| self.removes_input_value(argument))
+    }
+
+    fn removes_from_fields(&self, fields: &IndexMap<Name, Node<FieldDefinition>>) -> bool {
+        fields.values().any(|field| self.removes_from_field(field))
+    }
+
+    fn removes_named_type(&self, names: &IndexSet<Node<Name>>) -> bool {
+        names
+            .iter()
+            .any(|name| self.removed_types.contains(&**name))
+    }
+
+    fn filter_fields(&self, fields: &mut IndexMap<Name, Node<FieldDefinition>>) {
+        fields.retain(|_, field| !self.removes_field(field));
+        for field in fields.values_mut() {
+            if self.removes_from_field(field) {
+                field
+                    .make_mut()
+                    .arguments
+                    .retain(|argument| !self.removes_input_value(argument));
+            }
+        }
+    }
+
+    fn filter_named_types(&self, names: &mut IndexSet<Node<Name>>) {
+        names.retain(|name| !self.removed_types.contains(&**name));
+    }
+
+    fn filter_type(&self, ty: &mut ExtendedType) {
+        match ty {
+            ExtendedType::Scalar(_) => {}
+            ExtendedType::Object(object) => {
+                if self.removes_from_fields(&object.fields)
+                    || self.removes_named_type(&object.implements_interfaces)
+                {
+                    let object = object.make_mut();
+                    self.filter_fields(&mut object.fields);
+                    self.filter_named_types(&mut object.implements_interfaces);
+                }
+            }
+            ExtendedType::Interface(interface) => {
+                if self.removes_from_fields(&interface.fields)
+                    || self.removes_named_type(&interface.implements_interfaces)
+                {
+                    let interface = interface.make_mut();
+                    self.filter_fields(&mut interface.fields);
+                    self.filter_named_types(&mut interface.implements_interfaces);
+                }
+            }
+            ExtendedType::Union(union_) => {
+                if self.removes_named_type(&union_.members) {
+                    self.filter_named_types(&mut union_.make_mut().members);
+                }
+            }
+            ExtendedType::Enum(enum_) => {
+                let removes_value =
+                    |value: &EnumValueDefinition| value.directives.has(&self.directive_name);
+                if enum_.values.values().any(|value| removes_value(value)) {
+                    enum_
+                        .make_mut()
+                        .values
+                        .retain(|_, value| !removes_value(value));
+                }
+            }
+            ExtendedType::InputObject(input_object) => {
+                if input_object
+                    .fields
+                    .values()
+                    .any(|field| self.removes_input_value(field))
+                {
+                    input_object
+                        .make_mut()
+                        .fields
+                        .retain(|_, field| !self.removes_input_value(field));
+                }
+            }
+        }
+    }
+
+    fn filter_directive_definition(&self, directive: &mut Node<DirectiveDefinition>) {
+        if directive
+            .arguments
+            .iter()
+            .any(|argument| self.removes_input_value(argument))
+        {
+            directive
+                .make_mut()
+                .arguments
+                .retain(|argument| !self.removes_input_value(argument));
+        }
+    }
+
+    fn filter_schema_definition(&self, definition: &mut Node<SchemaDefinition>) {
+        let removes_root = |root: &Option<Node<Name>>| {
+            root.as_ref()
+                .is_some_and(|root| self.removed_types.contains(&**root))
+        };
+        if [
+            &definition.query,
+            &definition.mutation,
+            &definition.subscription,
+        ]
+        .into_iter()
+        .any(removes_root)
+        {
+            let definition = definition.make_mut();
+            for root in [
+                &mut definition.query,
+                &mut definition.mutation,
+                &mut definition.subscription,
+            ] {
+                if removes_root(root) {
+                    *root = None;
+                }
+            }
+        }
+    }
+}
+
 fn remove_inaccessible_elements(
     schema: &mut FederationSchema,
     inaccessible_spec: &InaccessibleSpecDefinition,
@@ -1140,124 +1287,41 @@ fn remove_inaccessible_elements(
         .ok_or_else(|| SingleFederationError::Internal {
             message: "Unexpectedly could not find inaccessible spec in schema".to_owned(),
         })?;
-
-    // Find all elements that use @inaccessible. Clone so there's no live borrow.
-    let inaccessible_referencers = schema.referencers().get_directive(&directive_name).clone();
-
-    // Remove fields and arguments from inaccessible types first. If any inaccessible type has a field
-    // that references another inaccessible type, it would prevent the other type from being
-    // removed.
-    // We need an intermediate allocation as `.remove()` requires mutable access to the schema and
-    // looking up fields requires immutable access.
-    //
-    // This is a lot more verbose than in the JS implementation, but the JS implementation relies on
-    // being able to set references to `undefined`, and the types all working out in the end once
-    // the removal is complete, which our Rust data structures don't support.
-    let mut inaccessible_children: Vec<ObjectFieldDefinitionPosition> = vec![];
-    for position in &inaccessible_referencers.object_types {
-        let object = position.get(schema.schema())?;
-        inaccessible_children.extend(
-            object
-                .fields
-                .keys()
-                .map(|field_name| position.field(field_name.clone())),
-        );
-    }
-    let mut inaccessible_arguments: Vec<ObjectFieldArgumentDefinitionPosition> = vec![];
-    for position in inaccessible_children {
-        let field = position.get(schema.schema())?;
-        inaccessible_arguments.extend(
-            field
-                .arguments
-                .iter()
-                .map(|argument| position.argument(argument.name.clone())),
-        );
-
-        position.remove(schema)?;
-    }
-    for position in inaccessible_arguments {
-        position.remove(schema)?;
+    let no_inaccessible_elements = schema
+        .referencers()
+        .get_directive(&directive_name)
+        .iter()
+        .next()
+        .is_none();
+    if no_inaccessible_elements {
+        return Ok(());
     }
 
-    let mut inaccessible_children: Vec<InterfaceFieldDefinitionPosition> = vec![];
-    for position in &inaccessible_referencers.interface_types {
-        let object = position.get(schema.schema())?;
-        inaccessible_children.extend(
-            object
-                .fields
-                .keys()
-                .map(|field_name| position.field(field_name.clone())),
-        );
-    }
-    let mut inaccessible_arguments: Vec<InterfaceFieldArgumentDefinitionPosition> = vec![];
-    for position in inaccessible_children {
-        let field = position.get(schema.schema())?;
-        inaccessible_arguments.extend(
-            field
-                .arguments
-                .iter()
-                .map(|argument| position.argument(argument.name.clone())),
-        );
+    // Removing through positions updates schema-wide referencers on every removal, which is
+    // quadratic when contracts hide most of the schema.
+    let removed_types = schema
+        .schema()
+        .types
+        .iter()
+        .filter(|(_, ty)| ty.directives().has(&directive_name))
+        .map(|(name, _)| name.clone())
+        .collect();
+    let filter = InaccessibleFilter {
+        directive_name,
+        removed_types,
+    };
 
-        position.remove(schema)?;
+    let inner = schema.schema_mut();
+    inner
+        .types
+        .retain(|name, _| !filter.removed_types.contains(name));
+    for ty in inner.types.values_mut() {
+        filter.filter_type(ty);
     }
-    for position in inaccessible_arguments {
-        position.remove(schema)?;
+    for directive in inner.directive_definitions.values_mut() {
+        filter.filter_directive_definition(directive);
     }
+    filter.filter_schema_definition(&mut inner.schema_definition);
 
-    let mut inaccessible_children: Vec<InputObjectFieldDefinitionPosition> = vec![];
-    for position in &inaccessible_referencers.input_object_types {
-        let object = position.get(schema.schema())?;
-        inaccessible_children.extend(
-            object
-                .fields
-                .keys()
-                .map(|field_name| position.field(field_name.clone())),
-        );
-    }
-    for position in inaccessible_children {
-        position.remove(schema)?;
-    }
-
-    for argument in inaccessible_referencers.directive_arguments {
-        argument.remove(schema)?;
-    }
-    for argument in inaccessible_referencers.interface_field_arguments {
-        argument.remove(schema)?;
-    }
-    for argument in inaccessible_referencers.object_field_arguments {
-        argument.remove(schema)?;
-    }
-    for field in inaccessible_referencers.input_object_fields {
-        field.remove(schema)?;
-    }
-    for field in inaccessible_referencers.interface_fields {
-        field.remove(schema)?;
-    }
-    for field in inaccessible_referencers.object_fields {
-        field.remove(schema)?;
-    }
-    for ty in inaccessible_referencers.union_types {
-        ty.remove(schema)?;
-    }
-    for ty in inaccessible_referencers.object_types {
-        ty.remove(schema)?;
-    }
-    for ty in inaccessible_referencers.interface_types {
-        ty.remove(schema)?;
-    }
-    for ty in inaccessible_referencers.input_object_types {
-        ty.remove(schema)?;
-    }
-    for value in inaccessible_referencers.enum_values {
-        value.remove(schema)?;
-    }
-    for ty in inaccessible_referencers.enum_types {
-        ty.remove(schema)?;
-    }
-    for ty in inaccessible_referencers.scalar_types {
-        ty.remove(schema)?;
-    }
-
-    Ok(())
+    schema.recompute_referencers()
 }
