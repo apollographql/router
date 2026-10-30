@@ -56,6 +56,7 @@ use crate::plugins::telemetry::tracing::apollo_telemetry::CLIENT_NAME_KEY;
 use crate::plugins::telemetry::tracing::apollo_telemetry::CLIENT_VERSION_KEY;
 use crate::query_planner::OperationKind;
 use crate::services::router;
+use crate::services::router::client_connection::client_closed_response;
 
 const SUPERGRAPH_SCHEMA_ID_CONTEXT_KEY: &str = "apollo::supergraph_schema_id";
 
@@ -419,6 +420,7 @@ where
                             metrics_sender: sender,
                             enabled_features,
                             field_level_instrumentation_ratio,
+                            recorded: false,
                         };
                         let response: Result<router::Response, BoxError> = fut.await;
                         recorder.record(&response);
@@ -436,7 +438,8 @@ where
     }
 }
 
-/// Records router telemetry for one request once its response, or error, is known.
+/// Records router telemetry for one request exactly once: when its response or error is known,
+/// or, if it is dropped before then, as a 499.
 struct RouterTelemetryRecorder {
     span: Span,
     start: Instant,
@@ -449,10 +452,15 @@ struct RouterTelemetryRecorder {
     metrics_sender: apollo_exporter::Sender,
     enabled_features: EnabledFeatures,
     field_level_instrumentation_ratio: f64,
+    recorded: bool,
 }
 
 impl RouterTelemetryRecorder {
     fn record(&mut self, response: &Result<router::Response, BoxError>) {
+        if std::mem::replace(&mut self.recorded, true) {
+            return;
+        }
+
         // Client name and version must be picked up after awaiting
         // the inner service future, because router service plugins
         // (e.g. rhai) may modify these values in the shared context
@@ -556,6 +564,16 @@ impl RouterTelemetryRecorder {
             );
             self.custom_instruments.on_error(err, &self.ctx);
             self.custom_events.on_error(err, &self.ctx);
+        }
+    }
+}
+
+impl Drop for RouterTelemetryRecorder {
+    fn drop(&mut self) {
+        // hyper drops a request's future when its client disconnects before the response is
+        // ready, so a request dropped unanswered is recorded as a 499.
+        if !self.recorded {
+            self.record(&Ok(client_closed_response(self.ctx.clone())));
         }
     }
 }

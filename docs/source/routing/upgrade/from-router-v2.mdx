@@ -348,7 +348,7 @@ When a client disconnects, the Router now cancels the request immediately by def
 
 Previously the default was `false`, which caused requests to continue running in a background task even after the client disconnected.
 
-To restore the previous behavior (e.g. to preserve telemetry for canceled requests), set `early_cancel: false` in your router config.
+To keep requests running after the client disconnects, set `early_cancel: false` in your router config.
 
 ### Stabilized `supergraph.log_on_broken_pipe`
 
