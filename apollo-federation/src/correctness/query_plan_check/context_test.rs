@@ -203,12 +203,13 @@ fn context_met(
         protocol: Default::default(),
     };
     // Outside a deferred block, what a fetch can read is everything fetched before it.
+    let positions = fetch_positions(&schema, &name!("Query"), &available, path, &fetch);
     check_context_rewrites(
         &schema,
         &name!("Query"),
         path,
         condition,
-        &available,
+        &positions,
         &available,
         &fetch,
     )

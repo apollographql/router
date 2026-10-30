@@ -22,10 +22,18 @@
 //! never bound — so nothing notices that the plan asked for data it never fetched. This checks it,
 //! which the legacy checker does not.
 //!
-//! [`path_conditions`] follows a path and returns one entry per copy of what it addresses, holding
-//! what guards that copy. The obligation compares two of those — the value's, and the fetch's own
-//! position. The context object is an ancestor of the fetch, so the shared prefix guards both
-//! sides and cancels; what is left to check is that wherever the fetch runs, the value is there.
+//! [`path_conditions`] follows a rewrite's path to the value it reads and returns one entry per
+//! copy of that value, holding what guards the copy. [`fetch_positions`] follows the fetch's own
+//! path to the object the fetch runs on, one level per response key, the root's first and the
+//! object's last. The router applies the fetch's `requires` selection to each object the path
+//! selects and sends a representation only where it yields a non-empty object, so that last level
+//! is narrowed to the types the `requires` entries are written at, and a copy narrowed to none of
+//! them is one the fetch never runs at, and no copy. The obligation compares the two: the context
+//! object is the fetch's own object or an ancestor of it, so the shared prefix guards both sides
+//! and cancels, and what is left to check is that wherever the fetch runs, and for no object it is
+//! not sent, the value is there. A rewrite reading off the object the fetch runs on, with no
+//! climb, shares that object's level with the fetch, so a value fetched under the member the fetch
+//! is sent serves the configuration naming it.
 //!
 //! The two kinds of condition are not compared the same way, because a Boolean variable is global
 //! while a type condition is about one object. Boolean literals are one conjunction for the whole
@@ -40,6 +48,15 @@
 //! the fetch saying what those deeper objects are; the fetch's own narrowing past the shared
 //! levels is ignored, restricting when it runs and not where the value is. What is left is
 //! Boolean, and [`boolean_condition_covered_by`] decides that symbolically.
+//!
+//! What the obligation does not reach: a fetch that requires nothing is not asked its contextual
+//! availability, and nothing enforces that it carries no context rewrites, the planner writing
+//! them only on a fetch given its key inputs and the router resolving none for a fetch that
+//! requires nothing, while the readings below still judge any it carries; a subscription's primary
+//! fetch is outside what the model states. Whether the router answers a list holding both kinds of
+//! member correctly is shown by no run: it collects each object's context values before it filters
+//! and deduplicates the representations, and these checks establish neither that the two stay
+//! aligned nor the list's response.
 //!
 //! Past the shared levels the copies are read one at a time, so a value split into copies, each
 //! narrowed to some of the types a level allows, serves no configuration even where between them
@@ -88,20 +105,23 @@
 //! ([`check_context_readings`], the model's `ContextReadings`): its path is resolved against the
 //! fetch's and followed through what was fetched as availability follows it, each copy carrying
 //! the field each key stands for, and in each copy an execution of the fetch reads, the copies
-//! admitting a runtime configuration of its position as availability admits them, the object the
-//! climb reaches has a runtime type some type declaring the context admits, on itself, an
-//! interface it implements or a union it belongs to, as the query graph matches a context, and the
-//! fields under the copy's keys below it read, by name, down to a leaf of the declaration's
-//! selection at that type. At the fetch's own position, which no configuration reaches, the object
-//! is any type the copy has there among those the fetch's `requires` entries are written at.
+//! admitting a runtime configuration of the fetch's position as availability admits them, over the
+//! same positions, the object the climb reaches has a runtime type some type declaring the context
+//! admits, on itself, an interface it implements or a union it belongs to, as the query graph
+//! matches a context, and the fields under the copy's keys below it read, by name, down to a leaf
+//! of the declaration's selection at that type. The object's runtime type is the configuration's at
+//! the level the climb reaches, the fetch's own object included, so a wrong field read off the
+//! object the fetch runs on is rejected by the reading where availability admits the copy.
 //!
 //! The declaring types and the declaration are the subgraph's, where `@context` and `@fromContext`
 //! are declared; the members a declaring type admits, the fields the selection names and the types
 //! they return are read in the supergraph, where the fetch's position and the data it reads are
-//! written. The resolution check, by contrast, reads the subgraph's types throughout. A declaration
-//! is one composition accepts, which validates its selection at every type declaring the context,
-//! so the reading is the same at each declaring type admitting the object, and the first in the
-//! order the subgraph holds them is the one read.
+//! written, and so are the object types a `requires` entry's type condition stands for, an
+//! interface's being its object types, where a path element's own condition is compared literally.
+//! The resolution check, by contrast, reads the subgraph's types throughout. A declaration is one
+//! composition accepts, which validates its selection at every type declaring the context, so the
+//! reading is the same at each declaring type admitting the object, and the first in the order the
+//! subgraph holds them is the one read.
 //!
 //! Which object setting the context is the nearest is not asked: a rewrite climbing past the
 //! nearest object setting it to another that sets it too reads a value of the declared shape from
@@ -383,10 +403,75 @@ impl ReachedCondition {
     }
 }
 
-/// The conditions under which a fetch data path is there to be read, one entry per copy of what it
-/// addresses in what the plan has already fetched. Empty when the path addresses nothing.
+/// What a path addresses: the value its last key holds, or the object that value is. A rewrite
+/// reads a value, and the copy is returned at the level the key sits at; a fetch runs on an object,
+/// whose own level, the runtime types the value can have, is descended into. The model's
+/// `PathEnd`.
+#[derive(Clone, Copy, PartialEq)]
+enum PathEnd {
+    Value,
+    Object,
+}
+
+/// The conditions under which a fetch data path is there to be read, one entry per copy of the
+/// value it addresses in what the plan has already fetched: what is asked of the value a context
+/// rewrite reads. Empty when the path addresses nothing. Where a fetch itself runs is
+/// [`fetch_positions`].
 pub(super) fn path_conditions(
     schema: &ValidFederationSchema,
+    root_type: &Name,
+    available: &[Selection],
+    path: &[FetchDataPathElement],
+) -> Vec<ReachedCondition> {
+    follow_path(schema, PathEnd::Value, root_type, available, path)
+}
+
+/// Where a fetch runs: one entry per copy of the object its path addresses in what the plan has
+/// already fetched, one level per response key of the path, the root's first and the fetch's own
+/// object last. The model's `fetchPositions`.
+///
+/// The router applies the fetch's `requires` selection to each object the path selects and sends
+/// a representation only where the selection yields a non-empty object (`Variables::new` in the
+/// router's `query_planner/fetch.rs`), so an entity fetch runs on the objects of a type some
+/// `requires` entry is written at and no other: its own level is narrowed to those types, an
+/// interface entry standing for its object types, and a copy narrowed to none of them is one the
+/// fetch never runs at, and no copy. A path element's own condition is read literally, as
+/// everywhere along a path.
+pub(super) fn fetch_positions(
+    schema: &ValidFederationSchema,
+    root_type: &Name,
+    available: &[Selection],
+    path: &[FetchDataPathElement],
+    fetch: &FetchNode,
+) -> Vec<ReachedCondition> {
+    let positions = follow_path(schema, PathEnd::Object, root_type, available, path);
+    if fetch.requires.is_empty() {
+        return positions;
+    }
+    let sent: Vec<Name> = fetch
+        .requires
+        .iter()
+        .filter_map(|entry| match entry {
+            requires_selection::Selection::InlineFragment(fragment) => {
+                fragment.type_condition.as_ref()
+            }
+            requires_selection::Selection::Field(_) => None,
+        })
+        .flat_map(|type_name| possible_types(schema, type_name))
+        .collect();
+    positions
+        .into_iter()
+        .filter_map(|mut position| {
+            position.current = position.current.narrowed_to(&sent);
+            (!position.current.narrowed.is_empty()).then_some(position)
+        })
+        .collect()
+}
+
+/// Follows a path from the root through what the plan has fetched, to its value or its object.
+fn follow_path(
+    schema: &ValidFederationSchema,
+    end: PathEnd,
     root_type: &Name,
     available: &[Selection],
     path: &[FetchDataPathElement],
@@ -397,15 +482,17 @@ pub(super) fn path_conditions(
         condition: BooleanCondition::new(),
         fields: Vec::new(),
     };
-    conditions_reached(schema, root_type, &reached, path, available)
+    conditions_reached(schema, end, root_type, &reached, path, available)
 }
 
 /// A `TypenameEquals` narrows the level it stands at, the rewrite reading the value only off data
 /// of that runtime type. A copy narrowed to nothing at any level is no copy at all, the level the
 /// path ends at included: a type guard after the last key that nothing there matches reaches
 /// nothing, as the router's path reader, finding no object matching it, supplies no argument.
+/// `end` says whether the path addresses the value its last key holds or the object that value is.
 fn conditions_reached(
     schema: &ValidFederationSchema,
+    end: PathEnd,
     parent_type: &Name,
     reached: &ReachedCondition,
     path: &[FetchDataPathElement],
@@ -426,6 +513,7 @@ fn conditions_reached(
     match head {
         FetchDataPathElement::Key(name, type_condition) => reached_under_key(
             schema,
+            end,
             parent_type,
             reached,
             name,
@@ -435,6 +523,7 @@ fn conditions_reached(
         ),
         FetchDataPathElement::TypenameEquals(type_name) => conditions_reached(
             schema,
+            end,
             parent_type,
             &narrowed(reached.current.narrow_by(schema, type_name)),
             rest,
@@ -442,6 +531,7 @@ fn conditions_reached(
         ),
         FetchDataPathElement::AnyIndex(type_condition) => conditions_reached(
             schema,
+            end,
             parent_type,
             &narrowed(
                 reached
@@ -465,10 +555,13 @@ fn conditions_reached(
 /// it, a fragment naming no type keeping the enclosing one; below a union, whose members alone
 /// declare the fields a path descends past, such a key is found inside the fragments on its
 /// members. A selection whose directives can never all hold contributes no copy. The field a
-/// matched key stands for is recorded, whether the path ends at it or descends past it.
+/// matched key stands for is recorded, whether the path ends at it or descends past it. A path
+/// ending at a value stops at the key that holds it; one ending at an object descends into that
+/// key's own level, its condition narrowing it.
 #[allow(clippy::too_many_arguments)]
 fn reached_under_key(
     schema: &ValidFederationSchema,
+    end: PathEnd,
     parent_type: &Name,
     reached: &ReachedCondition,
     name: &Name,
@@ -487,7 +580,7 @@ fn reached_under_key(
                     continue;
                 };
                 carried.fields.push(field.name.clone());
-                if path.is_empty() {
+                if path.is_empty() && end == PathEnd::Value {
                     out.push(carried);
                     continue;
                 }
@@ -497,6 +590,7 @@ fn reached_under_key(
                 let level = LevelTypes::of(schema, &child_type).narrow_by_condition(type_condition);
                 out.extend(conditions_reached(
                     schema,
+                    end,
                     &child_type,
                     &carried.descend(level),
                     path,
@@ -517,6 +611,7 @@ fn reached_under_key(
                 inner.current = narrowed;
                 out.extend(reached_under_key(
                     schema,
+                    end,
                     fragment.type_condition.as_ref().unwrap_or(parent_type),
                     &inner,
                     name,
@@ -639,16 +734,19 @@ fn context_value_clauses(
     clauses
 }
 
-/// Is every contextual value a fetch reads already fetched wherever the fetch runs?
+/// Is every contextual value a fetch reads already fetched wherever the fetch runs, and owed
+/// nowhere else? The model's `FetchSiteContextMet`.
 ///
-/// Deciding this per copy of the fetch's own position is what makes the shared prefix cancel; see
-/// the module docs.
+/// `positions` are where the fetch runs, found by [`fetch_positions`] in everything fetched before
+/// it; the values it reads are found in what it can read, `readable`. The two differ only inside a
+/// deferred block. Deciding this per copy of the fetch's own position is what makes the shared
+/// prefix cancel; see the module docs.
 pub(super) fn check_context_rewrites(
     schema: &ValidFederationSchema,
     root_type: &Name,
     path: &[FetchDataPathElement],
     condition: &[BooleanLiteral],
-    available: &[Selection],
+    positions: &[ReachedCondition],
     readable: &[Selection],
     fetch: &FetchNode,
 ) -> Result<(), ComparisonError> {
@@ -658,12 +756,9 @@ pub(super) fn check_context_rewrites(
     if variables.is_empty() {
         return Ok(());
     }
-    // Where the fetch runs is found in everything fetched before it; the values it reads, in what
-    // it can read. The two differ only inside a deferred block.
-    let positions = path_conditions(schema, root_type, available, path);
     for variable in &variables {
         let shared = context_shared_levels(path, &fetch.context_rewrites, variable);
-        for fetch_condition in &positions {
+        for fetch_condition in positions {
             for runtime_types in runtime_combinations(shared, &fetch_condition.type_levels()) {
                 let covers = context_value_clauses(
                     schema,
@@ -865,7 +960,8 @@ pub(super) fn check_context_arguments(
 /// Each such rewrite is held to it, availability being a disjunction over the rewrites binding a
 /// variable and this not; a rewrite binding a variable no argument passes has no declaration to be
 /// read against. `schema` is the supergraph's, where the fetch's position and the data it reads
-/// are written.
+/// are written; `positions` are where the fetch runs, as [`fetch_positions`] finds them for
+/// availability, and the copies the rewrites reach are found in `available`.
 #[allow(clippy::too_many_arguments)]
 pub(super) fn check_context_readings(
     schema: &ValidFederationSchema,
@@ -873,10 +969,10 @@ pub(super) fn check_context_readings(
     root_type: &Name,
     path: &[FetchDataPathElement],
     available: &[Selection],
+    positions: &[ReachedCondition],
     fetch: &FetchNode,
     uses: &[ContextUse],
 ) -> Result<(), ComparisonError> {
-    let mut fetch_positions = None;
     for context_use in uses {
         let Some(variable) = &context_use.variable else {
             continue;
@@ -888,9 +984,6 @@ pub(super) fn check_context_readings(
             if renamer.rename_key_to != *variable {
                 continue;
             }
-            // Where the fetch runs, found as availability finds it, once per fetch.
-            let positions = fetch_positions
-                .get_or_insert_with(|| path_conditions(schema, root_type, available, path));
             check_context_rewrite_reads(
                 schema,
                 subgraph,
@@ -911,10 +1004,12 @@ pub(super) fn check_context_readings(
 ///
 /// In every runtime configuration of the fetch's position over the levels it shares with the
 /// rewrite's path, in every copy of the value an execution there reads, for the runtime type the
-/// object the rewrite climbs to has there, a type declaring the context admits that type, the first
-/// in declaration order, and the fields the copy's keys stand for below that object read a leaf of
-/// the declaration at that type. A rewrite reading no copy is held to nothing here; whether it
-/// reads one is availability's question.
+/// configuration gives the object the rewrite climbs to, a type declaring the context admits that
+/// type, the first in declaration order, and the fields the copy's keys stand for below that
+/// object read a leaf of the declaration at that type. The object the climb reaches is `depth`
+/// keys below the root, the fetch's own when the rewrite climbs nothing, whose level the position
+/// carries narrowed to the types the fetch's `requires` entries are written at. A rewrite reading
+/// no copy is held to nothing here; whether it reads one is availability's question.
 #[allow(clippy::too_many_arguments)]
 fn check_context_rewrite_reads(
     schema: &ValidFederationSchema,
@@ -955,44 +1050,45 @@ fn check_context_rewrite_reads(
     };
     for position in positions {
         for runtime_types in runtime_combinations(shared, &position.type_levels()) {
+            // The configuration names the object's type at the level the climb reaches, the
+            // fetch's own object included; one that does not reach that level reads nothing.
+            let Some(object_type) = runtime_types.get(depth) else {
+                continue;
+            };
             for copy in context_read_copies(&copies, &runtime_types) {
+                let Some(declaring_type) = declaring.iter().find(|declaring_type| {
+                    possible_types(schema, declaring_type).contains(object_type)
+                }) else {
+                    return Err(misread(format!(
+                        "which climbs to `{object_type}`, a type declaring no context `{}` in the \
+                         subgraph",
+                        context_use.declaration.context
+                    )));
+                };
                 let levels = copy.type_levels();
-                for object_type in
-                    context_object_types(schema, fetch, climbed, depth, &runtime_types, &levels)
-                {
-                    let Some(declaring_type) = declaring.iter().find(|declaring_type| {
-                        possible_types(schema, declaring_type).contains(&object_type)
-                    }) else {
-                        return Err(misread(format!(
-                            "which climbs to `{object_type}`, a type declaring no context `{}` \
-                             in the subgraph",
-                            context_use.declaration.context
-                        )));
-                    };
-                    let fields = copy.fields.get(depth..).unwrap_or_default();
-                    let below = levels.get(depth + 1..).unwrap_or_default();
-                    let object = LevelTypes {
-                        allowed: vec![object_type.clone()],
-                        narrowed: vec![object_type.clone()],
-                    };
-                    if !reads_declared_leaf(
-                        schema,
-                        declaring_type,
-                        &object,
-                        &context_use.declaration.selection,
-                        fields,
-                        below,
-                    ) {
-                        return Err(misread(format!(
-                            "which on `{object_type}` holds `{}`, not a leaf of the declaration's \
-                             selection there",
-                            fields
-                                .iter()
-                                .map(|field| field.as_str())
-                                .collect::<Vec<_>>()
-                                .join(".")
-                        )));
-                    }
+                let fields = copy.fields.get(depth..).unwrap_or_default();
+                let below = levels.get(depth + 1..).unwrap_or_default();
+                let object = LevelTypes {
+                    allowed: vec![object_type.clone()],
+                    narrowed: vec![object_type.clone()],
+                };
+                if !reads_declared_leaf(
+                    schema,
+                    declaring_type,
+                    &object,
+                    &context_use.declaration.selection,
+                    fields,
+                    below,
+                ) {
+                    return Err(misread(format!(
+                        "which on `{object_type}` holds `{}`, not a leaf of the declaration's \
+                         selection there",
+                        fields
+                            .iter()
+                            .map(|field| field.as_str())
+                            .collect::<Vec<_>>()
+                            .join(".")
+                    )));
                 }
             }
         }
@@ -1028,49 +1124,6 @@ fn context_read_copies<'c>(
     copies
         .iter()
         .filter(|copy| type_levels_admit(&copy.type_levels(), runtime_types))
-        .collect()
-}
-
-/// The runtime types one copy gives the object a rewrite climbed to, in one configuration of the
-/// fetch's position: the configuration's type at the level the climb reaches, `depth` keys below
-/// the root, which the copy admits there; at the fetch's own position, which a configuration does
-/// not reach, the copy's own types there, narrowed to the ones the fetch's `requires` entries are
-/// written at, an entity of no other type being sent. The model's `contextObjectTypes`.
-fn context_object_types(
-    schema: &ValidFederationSchema,
-    fetch: &FetchNode,
-    climbed: usize,
-    depth: usize,
-    runtime_types: &[Name],
-    levels: &[&LevelTypes],
-) -> Vec<Name> {
-    let reached = levels
-        .get(depth)
-        .map(|level| level.narrowed.clone())
-        .unwrap_or_default();
-    if climbed > 0 {
-        return reached
-            .into_iter()
-            .filter(|type_name| runtime_types.get(depth) == Some(type_name))
-            .collect();
-    }
-    if fetch.requires.is_empty() {
-        return reached;
-    }
-    let entry_types: Vec<Name> = fetch
-        .requires
-        .iter()
-        .filter_map(|entry| match entry {
-            requires_selection::Selection::InlineFragment(fragment) => {
-                fragment.type_condition.as_ref()
-            }
-            requires_selection::Selection::Field(_) => None,
-        })
-        .flat_map(|type_name| possible_types(schema, type_name))
-        .collect();
-    reached
-        .into_iter()
-        .filter(|type_name| entry_types.contains(type_name))
         .collect()
 }
 
