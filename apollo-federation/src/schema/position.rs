@@ -8524,18 +8524,19 @@ mod tests {
     fn rename_and_check(sdl: &str, old_name: Name, new_name: Name) -> FederationSchema {
         let mut schema = FederationSchema::new(
             Schema::parse_and_validate(sdl, "rename.graphql")
-                .unwrap()
+                .expect("valid schema")
                 .into_inner(),
         )
-        .unwrap();
+        .expect("valid federation schema");
         schema
             .get_type(&old_name)
-            .unwrap()
+            .expect("type to rename should exist")
             .rename(&mut schema, new_name)
-            .unwrap();
+            .expect("rename should succeed");
         let valid = schema.schema().clone().validate();
         assert!(valid.is_ok(), "renamed schema is invalid: {valid:?}");
-        let rebuilt = FederationSchema::new(schema.schema().clone()).unwrap();
+        let rebuilt =
+            FederationSchema::new(schema.schema().clone()).expect("rebuilt federation schema");
         let actual = referencer_facts(schema.referencers());
         let expected = referencer_facts(rebuilt.referencers());
         let stale: Vec<_> = actual.difference(&expected).collect();

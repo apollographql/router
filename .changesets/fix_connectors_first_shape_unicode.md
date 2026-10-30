@@ -1,4 +1,4 @@
-### Connector validation no longer panics on `->first` of an empty or non-ASCII string literal
+### Connector validation no longer panics on `->first` of an empty or non-ASCII string literal ([PR #10365](https://github.com/apollographql/router/pull/10365))
 
 Static shape checking of a connector selection such as `$("")->first` or `$("é")->first` panicked because the inferred result took the first UTF-8 byte rather than the first character. This affected composition and loading a supergraph containing such a selection. The inferred shape now matches runtime: the first character, or no value for an empty string.
 

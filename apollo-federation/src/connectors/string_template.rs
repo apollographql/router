@@ -702,7 +702,7 @@ mod test_interpolate {
                 let parsed = StringTemplate::parse_with_spec(template, spec)
                     .unwrap_or_else(|e| panic!("{template:?} ({spec:?}): {e:?}"));
                 assert_eq!(
-                    parsed.interpolate(&vars).unwrap(),
+                    parsed.interpolate(&vars).expect("Failed to interpolate"),
                     (expected.to_string(), vec![]),
                     "{template:?} ({spec:?})"
                 );
