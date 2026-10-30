@@ -368,7 +368,7 @@ where
                         request.context.clone(),
                     )
                 },
-                move |(custom_attributes, custom_instruments, mut custom_events, ctx): (
+                move |(custom_attributes, custom_instruments, custom_events, ctx): (
                     Vec<KeyValue>,
                     RouterInstruments,
                     RouterEvents,
@@ -407,121 +407,21 @@ where
 
                         let span = Span::current();
                         span.set_span_dyn_attributes(custom_attributes);
+                        let mut recorder = RouterTelemetryRecorder {
+                            span,
+                            start,
+                            config: config.clone(),
+                            ctx,
+                            custom_instruments,
+                            custom_events,
+                            client_name_key,
+                            client_version_key,
+                            metrics_sender: sender,
+                            enabled_features,
+                            field_level_instrumentation_ratio,
+                        };
                         let response: Result<router::Response, BoxError> = fut.await;
-
-                        // Client name and version must be picked up after awaiting
-                        // the inner service future, because router service plugins
-                        // (e.g. rhai) may modify these values in the shared context
-                        // during request processing. With buffered service layers,
-                        // that processing is deferred until the future is polled.
-                        let get_from_context =
-                            |ctx: &Context, key| ctx.get::<&str, String>(key).ok().flatten();
-                        let client_name = get_from_context(&ctx, CLIENT_NAME);
-                        let client_version = get_from_context(&ctx, CLIENT_VERSION);
-
-                        if let Some(key) = client_name_key {
-                            span.set_span_dyn_attribute(
-                                key,
-                                opentelemetry::Value::String(
-                                    client_name.unwrap_or_default().into(),
-                                ),
-                            );
-                        }
-
-                        if let Some(key) = client_version_key {
-                            span.set_span_dyn_attribute(
-                                key,
-                                opentelemetry::Value::String(
-                                    client_version.unwrap_or_default().into(),
-                                ),
-                            );
-                        }
-
-                        span.record(
-                            APOLLO_PRIVATE_DURATION_NS,
-                            start.elapsed().as_nanos() as i64,
-                        );
-
-                        let expose_trace_id = &config.exporters.tracing.response_trace_id;
-                        if let Ok(response) = &response {
-                            span.set_span_dyn_attributes(
-                                config
-                                    .instrumentation
-                                    .spans
-                                    .router
-                                    .attributes
-                                    .on_response(response),
-                            );
-                            custom_instruments.on_response(response);
-                            custom_events.on_response(response);
-
-                            let mut headers: HashMap<String, Vec<String>> =
-                                HashMap::with_capacity(2);
-                            if expose_trace_id.enabled {
-                                let header_name = expose_trace_id
-                                    .header_name
-                                    .as_deref()
-                                    .unwrap_or(&DEFAULT_EXPOSE_TRACE_ID_HEADER_NAME);
-
-                                if let Some(value) = response.response.headers().get(header_name) {
-                                    headers.insert(
-                                        header_name.to_string(),
-                                        vec![value.to_str().unwrap_or_default().to_string()],
-                                    );
-                                }
-                            }
-                            if let Some(value) = response.response.headers().get(&CACHE_CONTROL) {
-                                headers.insert(
-                                    CACHE_CONTROL.to_string(),
-                                    vec![value.to_str().unwrap_or_default().to_string()],
-                                );
-                            }
-                            if !headers.is_empty() {
-                                let response_headers =
-                                    serde_json::to_string(&headers).unwrap_or_default();
-                                span.record(
-                                    "apollo_private.http.response_headers",
-                                    &response_headers,
-                                );
-                            }
-
-                            if response.context.extensions().with_lock(|lock| {
-                                lock.get::<Arc<UsageReporting>>()
-                                    .map(|u| matches!(**u, UsageReporting::Error { .. }))
-                                    .unwrap_or(false)
-                            }) {
-                                Telemetry::update_apollo_metrics(
-                                    &response.context,
-                                    field_level_instrumentation_ratio,
-                                    sender,
-                                    true,
-                                    start.elapsed(),
-                                    // the query is invalid, we did not parse the operation kind
-                                    OperationKind::Query,
-                                    None,
-                                    Default::default(),
-                                    enabled_features.clone(),
-                                );
-                            }
-
-                            if response.response.status() >= StatusCode::BAD_REQUEST {
-                                span.record(OTEL_STATUS_CODE, OTEL_STATUS_CODE_ERROR);
-                            } else {
-                                span.record(OTEL_STATUS_CODE, OTEL_STATUS_CODE_OK);
-                            }
-                        } else if let Err(err) = &response {
-                            span.record(OTEL_STATUS_CODE, OTEL_STATUS_CODE_ERROR);
-                            span.set_span_dyn_attributes(
-                                config
-                                    .instrumentation
-                                    .spans
-                                    .router
-                                    .attributes
-                                    .on_error(err, &ctx),
-                            );
-                            custom_instruments.on_error(err, &ctx);
-                            custom_events.on_error(err, &ctx);
-                        }
+                        recorder.record(&response);
 
                         if let Ok(resp) = response {
                             Ok(count_router_errors(resp, &config.apollo.errors).await)
@@ -533,6 +433,130 @@ where
             )
             .service(service)
             .boxed_clone()
+    }
+}
+
+/// Records router telemetry for one request once its response, or error, is known.
+struct RouterTelemetryRecorder {
+    span: Span,
+    start: Instant,
+    config: Arc<config::Conf>,
+    ctx: Context,
+    custom_instruments: RouterInstruments,
+    custom_events: RouterEvents,
+    client_name_key: Option<Key>,
+    client_version_key: Option<Key>,
+    metrics_sender: apollo_exporter::Sender,
+    enabled_features: EnabledFeatures,
+    field_level_instrumentation_ratio: f64,
+}
+
+impl RouterTelemetryRecorder {
+    fn record(&mut self, response: &Result<router::Response, BoxError>) {
+        // Client name and version must be picked up after awaiting
+        // the inner service future, because router service plugins
+        // (e.g. rhai) may modify these values in the shared context
+        // during request processing. With buffered service layers,
+        // that processing is deferred until the future is polled.
+        let get_from_context = |ctx: &Context, key| ctx.get::<&str, String>(key).ok().flatten();
+        let client_name = get_from_context(&self.ctx, CLIENT_NAME);
+        let client_version = get_from_context(&self.ctx, CLIENT_VERSION);
+
+        if let Some(key) = &self.client_name_key {
+            self.span.set_span_dyn_attribute(
+                key.clone(),
+                opentelemetry::Value::String(client_name.unwrap_or_default().into()),
+            );
+        }
+
+        if let Some(key) = &self.client_version_key {
+            self.span.set_span_dyn_attribute(
+                key.clone(),
+                opentelemetry::Value::String(client_version.unwrap_or_default().into()),
+            );
+        }
+
+        self.span.record(
+            APOLLO_PRIVATE_DURATION_NS,
+            self.start.elapsed().as_nanos() as i64,
+        );
+
+        let expose_trace_id = &self.config.exporters.tracing.response_trace_id;
+        if let Ok(response) = response {
+            self.span.set_span_dyn_attributes(
+                self.config
+                    .instrumentation
+                    .spans
+                    .router
+                    .attributes
+                    .on_response(response),
+            );
+            self.custom_instruments.on_response(response);
+            self.custom_events.on_response(response);
+
+            let mut headers: HashMap<String, Vec<String>> = HashMap::with_capacity(2);
+            if expose_trace_id.enabled {
+                let header_name = expose_trace_id
+                    .header_name
+                    .as_deref()
+                    .unwrap_or(&DEFAULT_EXPOSE_TRACE_ID_HEADER_NAME);
+
+                if let Some(value) = response.response.headers().get(header_name) {
+                    headers.insert(
+                        header_name.to_string(),
+                        vec![value.to_str().unwrap_or_default().to_string()],
+                    );
+                }
+            }
+            if let Some(value) = response.response.headers().get(&CACHE_CONTROL) {
+                headers.insert(
+                    CACHE_CONTROL.to_string(),
+                    vec![value.to_str().unwrap_or_default().to_string()],
+                );
+            }
+            if !headers.is_empty() {
+                let response_headers = serde_json::to_string(&headers).unwrap_or_default();
+                self.span
+                    .record("apollo_private.http.response_headers", &response_headers);
+            }
+
+            if response.context.extensions().with_lock(|lock| {
+                lock.get::<Arc<UsageReporting>>()
+                    .map(|u| matches!(**u, UsageReporting::Error { .. }))
+                    .unwrap_or(false)
+            }) {
+                Telemetry::update_apollo_metrics(
+                    &response.context,
+                    self.field_level_instrumentation_ratio,
+                    self.metrics_sender.clone(),
+                    true,
+                    self.start.elapsed(),
+                    // the query is invalid, we did not parse the operation kind
+                    OperationKind::Query,
+                    None,
+                    Default::default(),
+                    self.enabled_features.clone(),
+                );
+            }
+
+            if response.response.status() >= StatusCode::BAD_REQUEST {
+                self.span.record(OTEL_STATUS_CODE, OTEL_STATUS_CODE_ERROR);
+            } else {
+                self.span.record(OTEL_STATUS_CODE, OTEL_STATUS_CODE_OK);
+            }
+        } else if let Err(err) = response {
+            self.span.record(OTEL_STATUS_CODE, OTEL_STATUS_CODE_ERROR);
+            self.span.set_span_dyn_attributes(
+                self.config
+                    .instrumentation
+                    .spans
+                    .router
+                    .attributes
+                    .on_error(err, &self.ctx),
+            );
+            self.custom_instruments.on_error(err, &self.ctx);
+            self.custom_events.on_error(err, &self.ctx);
+        }
     }
 }
 
