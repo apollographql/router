@@ -1,4 +1,4 @@
-### Make API schema generation linear in the number of `@inaccessible` elements
+### Fix quadratic API schema generation for contracts that hide most of a supergraph
 
 Generating an API schema removed `@inaccessible` elements one at a time, and each removal updated
 referencer sets spanning the whole schema. Contract variants that hide most of a large supergraph
