@@ -357,13 +357,17 @@ fn main_endpoint(
 
 async fn metrics_handler(request: Request<axum::body::Body>, next: Next) -> Response {
     let resp = next.run(request).await;
+    record_operation(resp.status());
+    resp
+}
+
+fn record_operation(status: StatusCode) {
     u64_counter!(
         "apollo.router.operations",
         "The number of graphql operations performed by the Router",
         1,
-        "http.response.status_code" = resp.status().as_u16() as i64
+        "http.response.status_code" = status.as_u16() as i64
     );
-    resp
 }
 
 #[derive(Clone)]
