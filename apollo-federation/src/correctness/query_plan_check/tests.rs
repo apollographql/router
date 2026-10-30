@@ -6,10 +6,10 @@
 //! inline to reach shapes the planner does not emit. That every plan the planner produces is
 //! accepted is the planner tests' concern: `assert_plan!` checks each one.
 //!
-//! The supergraph beside this file carries the subgraph SDL it was composed from, so the fixture
-//! has a visible source. It is deliberately close to the shape a corpus graph had when it found a
-//! defect here: an entity whose `@requires` field set wraps its body in a type condition that is
-//! already the field's own type.
+//! The supergraphs beside this file each say in a header where they come from, so every fixture
+//! has a visible source. `entity_requires.graphql` is deliberately close to the shape a corpus
+//! graph had when it found a defect here: an entity whose `@requires` field set wraps its body in a
+//! type condition that is already the field's own type.
 
 use std::sync::Arc;
 
@@ -68,6 +68,13 @@ impl Fixture {
             &self.operation(operation),
             plan,
         )
+    }
+
+    fn rejection(&self, plan: &QueryPlan, operation: &str) -> String {
+        match self.check(plan, operation) {
+            Ok(()) => panic!("expected the check to reject this plan"),
+            Err(error) => error.to_string(),
+        }
     }
 
     /// Parses every fetch's operation against its own subgraph, which a plan read from JSON has
@@ -152,10 +159,8 @@ fn check(plan: &str, operation: &str) -> Result<(), CorrectnessError> {
 }
 
 fn rejection(plan: &str, operation: &str) -> String {
-    match check(plan, operation) {
-        Ok(()) => panic!("expected the check to reject this plan"),
-        Err(error) => error.to_string(),
-    }
+    let fixture = fixture();
+    fixture.rejection(&fixture.written_plan(plan), operation)
 }
 
 // A `@requires` field set may wrap its body in a type condition that admits everything the
@@ -644,6 +649,92 @@ fn a_field_returning_an_interface_object_is_still_checked() {
         .expect_err("the plan never fetches `data`");
     assert!(
         error.to_string().contains("does not select `data`"),
+        "{error}"
+    );
+}
+
+//==================================================================================================
+// A contextual value below a union's members
+
+fn union_member_context_fixture() -> Fixture {
+    Fixture::new(include_str!("testdata/union_member_context.graphql"))
+}
+
+const OUTLETS_PRODUCTS_PRICE: &str =
+    "{ outlets { ... on Store { products { price } } ... on Kiosk { products { price } } } }";
+
+const OUTLETS_FEATURED_DELIVERY: &str =
+    "{ outlets { ... on Store { featured { delivery } } ... on Kiosk { featured { delivery } } } }";
+
+/// A plan from `testdata/plans/` with the rewrite reading off a kiosk dropped from its entity
+/// fetch, the second node of its sequence.
+fn without_the_kiosk_rewrite(plan: &str) -> String {
+    let mut plan: serde_json::Value = serde_json::from_str(plan).expect("valid plan json");
+    let rewrites = plan
+        .pointer_mut("/Sequence/nodes/1/Flatten/node/Fetch/context_rewrites")
+        .and_then(serde_json::Value::as_array_mut)
+        .expect("the entity fetch's context rewrites");
+    rewrites.retain(|rewrite| {
+        rewrite
+            .pointer("/KeyRenamer/path/1/TypenameEquals")
+            .and_then(serde_json::Value::as_str)
+            != Some("Kiosk")
+    });
+    assert_eq!(rewrites.len(), 1, "only the store's rewrite is left");
+    plan.to_string()
+}
+
+// The planner binds `price`'s `locale` with a rewrite per member, each climbing from a product to
+// its outlet, so whichever an outlet is, its products are sent its `locale`. Accepted either way:
+// on the union the fetch would run nowhere, and on the members each of its positions is covered.
+#[test]
+fn a_context_rewrite_per_union_member_is_accepted() {
+    let fixture = union_member_context_fixture();
+    let plan = fixture.written_plan(plan_json!("outlets_products_price"));
+    fixture.check(&plan, OUTLETS_PRODUCTS_PRICE).unwrap();
+}
+
+// The same with the kiosk's rewrite dropped: a kiosk's products are sent no `locale`. The lookup
+// on the member decides this verdict: the fetch runs below `products`, found only on the member
+// each fragment names, and on the union it is found nowhere, leaving no position to cover.
+#[test]
+fn a_union_member_without_a_context_rewrite_is_rejected() {
+    let fixture = union_member_context_fixture();
+    let plan = fixture.written_plan(&without_the_kiosk_rewrite(plan_json!(
+        "outlets_products_price"
+    )));
+    let error = fixture.rejection(&plan, OUTLETS_PRODUCTS_PRICE);
+    assert!(
+        error.contains("is not always fetched where the fetch runs"),
+        "{error}"
+    );
+}
+
+// The planner binds `delivery`'s `locale` with a rewrite per member descending past `address`, so
+// every featured product is sent its outlet's address's `locale`. The lookup on the member decides
+// this verdict, on the value's side: the fetch runs at `featured`, which ends its path and is found
+// without one, but `address` is found only on the member, and on the union no value is found. A
+// fetch below a member's own field cannot show this, its position being found nowhere on the
+// union either.
+#[test]
+fn a_context_value_below_a_union_members_field_is_accepted() {
+    let fixture = union_member_context_fixture();
+    let plan = fixture.written_plan(plan_json!("outlets_featured_delivery"));
+    fixture.check(&plan, OUTLETS_FEATURED_DELIVERY).unwrap();
+}
+
+// The same with the kiosk's rewrite dropped: a kiosk's featured product is sent no `locale`, the
+// store's address serving no kiosk, since the member's narrowing is carried past `address`.
+// Rejected either way, with no value on the union and only the store's on the members.
+#[test]
+fn a_context_value_below_another_union_members_field_is_rejected() {
+    let fixture = union_member_context_fixture();
+    let plan = fixture.written_plan(&without_the_kiosk_rewrite(plan_json!(
+        "outlets_featured_delivery"
+    )));
+    let error = fixture.rejection(&plan, OUTLETS_FEATURED_DELIVERY);
+    assert!(
+        error.contains("is not always fetched where the fetch runs"),
         "{error}"
     );
 }

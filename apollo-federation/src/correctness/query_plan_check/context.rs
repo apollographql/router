@@ -402,8 +402,11 @@ fn conditions_reached(
 /// Every copy of a response key at this level, with the rest of the path followed into it.
 ///
 /// A fragment narrows the level the copy sits at, and a key element's own type condition narrows
-/// the level below, where the field's own type takes over. A selection whose directives can never
-/// all hold contributes no copy.
+/// the level below, where the field's own type takes over. A field inside a fragment is a field of
+/// the type the fragment names, which is where its type is looked up when the path descends past
+/// it, a fragment naming no type keeping the enclosing one; below a union, whose members alone
+/// declare the fields a path descends past, such a key is found inside the fragments on its
+/// members. A selection whose directives can never all hold contributes no copy.
 #[allow(clippy::too_many_arguments)]
 fn reached_under_key(
     schema: &ValidFederationSchema,
@@ -455,7 +458,7 @@ fn reached_under_key(
                 inner.current = narrowed;
                 out.extend(reached_under_key(
                     schema,
-                    parent_type,
+                    fragment.type_condition.as_ref().unwrap_or(parent_type),
                     &inner,
                     name,
                     type_condition,
