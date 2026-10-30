@@ -1,3 +1,4 @@
+pub(crate) mod json_fields;
 mod registration;
 mod types;
 
@@ -61,11 +62,12 @@ mod rhai_imports {
     pub(super) use rhai::exported_module;
     pub(super) use rhai::module_resolvers::FileModuleResolver;
     pub(super) use rhai::plugin::export_module;
-    pub(super) use rhai::serde::from_dynamic;
     pub(super) use rhai::serde::to_dynamic;
 }
 
 use rhai_imports::*;
+
+use self::json_fields::JsonField;
 
 const CANNOT_ACCESS_HEADERS_ON_A_DEFERRED_RESPONSE: &str =
     "cannot access headers on a deferred response";
@@ -1119,7 +1121,7 @@ mod router_plugin {
     // Request.variables
     #[rhai_fn(get = "variables", pure, return_raw)]
     pub(crate) fn request_variables_get(x: &mut Request) -> Result<Dynamic, Box<EvalAltResult>> {
-        to_dynamic(x.variables.clone())
+        json_fields::to_rhai(JsonField::RequestVariables, &x.variables)
     }
 
     #[rhai_fn(set = "variables", return_raw)]
@@ -1127,14 +1129,14 @@ mod router_plugin {
         x: &mut Request,
         om: Map,
     ) -> Result<(), Box<EvalAltResult>> {
-        x.variables = from_dynamic(&om.into())?;
+        x.variables = json_fields::from_rhai(JsonField::RequestVariables, &om.into())?;
         Ok(())
     }
 
     // Request.extensions
     #[rhai_fn(get = "extensions", pure, return_raw)]
     pub(crate) fn request_extensions_get(x: &mut Request) -> Result<Dynamic, Box<EvalAltResult>> {
-        to_dynamic(x.extensions.clone())
+        json_fields::to_rhai(JsonField::RequestExtensions, &x.extensions)
     }
 
     #[rhai_fn(set = "extensions", return_raw)]
@@ -1142,7 +1144,7 @@ mod router_plugin {
         x: &mut Request,
         om: Map,
     ) -> Result<(), Box<EvalAltResult>> {
-        x.extensions = from_dynamic(&om.into())?;
+        x.extensions = json_fields::from_rhai(JsonField::RequestExtensions, &om.into())?;
         Ok(())
     }
 
@@ -1258,12 +1260,12 @@ mod router_plugin {
     // Response.data
     #[rhai_fn(get = "data", pure, return_raw)]
     pub(crate) fn response_data_get(x: &mut Response) -> Result<Dynamic, Box<EvalAltResult>> {
-        to_dynamic(x.data.clone())
+        json_fields::to_rhai(JsonField::ResponseData, &x.data)
     }
 
     #[rhai_fn(set = "data", return_raw)]
     pub(crate) fn response_data_set(x: &mut Response, om: Map) -> Result<(), Box<EvalAltResult>> {
-        x.data = from_dynamic(&om.into())?;
+        x.data = json_fields::from_rhai(JsonField::ResponseData, &om.into())?;
         Ok(())
     }
 
@@ -1271,7 +1273,7 @@ mod router_plugin {
     // Response.errors
     #[rhai_fn(get = "errors", pure, return_raw)]
     pub(crate) fn response_errors_get(x: &mut Response) -> Result<Dynamic, Box<EvalAltResult>> {
-        to_dynamic(x.errors.clone())
+        json_fields::to_rhai(JsonField::ResponseErrors, &x.errors)
     }
 
     #[rhai_fn(set = "errors", return_raw)]
@@ -1279,14 +1281,14 @@ mod router_plugin {
         x: &mut Response,
         value: Dynamic,
     ) -> Result<(), Box<EvalAltResult>> {
-        x.errors = from_dynamic(&value)?;
+        x.errors = json_fields::from_rhai(JsonField::ResponseErrors, &value)?;
         Ok(())
     }
 
     // Response.extensions
     #[rhai_fn(get = "extensions", pure, return_raw)]
     pub(crate) fn response_extensions_get(x: &mut Response) -> Result<Dynamic, Box<EvalAltResult>> {
-        to_dynamic(x.extensions.clone())
+        json_fields::to_rhai(JsonField::ResponseExtensions, &x.extensions)
     }
 
     #[rhai_fn(set = "extensions", return_raw)]
@@ -1294,7 +1296,7 @@ mod router_plugin {
         x: &mut Response,
         om: Map,
     ) -> Result<(), Box<EvalAltResult>> {
-        x.extensions = from_dynamic(&om.into())?;
+        x.extensions = json_fields::from_rhai(JsonField::ResponseExtensions, &om.into())?;
         Ok(())
     }
 
