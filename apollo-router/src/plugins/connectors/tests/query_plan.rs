@@ -97,7 +97,7 @@ async fn basic_batch() {
                   "inputRewrites": null,
                   "outputRewrites": null,
                   "contextRewrites": null,
-                  "schemaAwareHash": "a007fe6b64151f22eec7a890ced1f46247b4ba204152f6f8124c78d15e88a43f",
+                  "schemaAwareHash": "00c5b457d7930b0517d06ba98689b1beba27d013090e0c4d235bb698e56a0a37",
                   "authorization": {
                     "is_authenticated": false,
                     "scopes": [],
@@ -137,7 +137,7 @@ async fn basic_batch() {
                     "inputRewrites": null,
                     "outputRewrites": null,
                     "contextRewrites": null,
-                    "schemaAwareHash": "41f36eae15604daa2f7adaf6756099d7f7f24d33476948720df7c18eabf57a16",
+                    "schemaAwareHash": "d1987fad12ca11dc953e7933661cd0c60f5bca8f460e069df752e1aaa1f52edd",
                     "authorization": {
                       "is_authenticated": false,
                       "scopes": [],

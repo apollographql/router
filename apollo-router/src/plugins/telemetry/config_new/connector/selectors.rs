@@ -298,7 +298,9 @@ impl Selector for ConnectorSelector {
                     .or_else(|| default.clone())
                     .map(Into::into)
                 }
-                TransportOutcome::MappingOnly | TransportOutcome::Error(_) => None,
+                TransportOutcome::MappingOnly
+                | TransportOutcome::Skipped
+                | TransportOutcome::Error(_) => None,
             },
             ConnectorSelector::ConnectorResponseStatus {
                 connector_http_response_status: response_status,
@@ -314,7 +316,9 @@ impl Selector for ConnectorSelector {
                         }
                     }
                     // No HTTP call was made, so there is no status to report.
-                    TransportOutcome::MappingOnly | TransportOutcome::Error(_) => None,
+                    TransportOutcome::MappingOnly
+                    | TransportOutcome::Skipped
+                    | TransportOutcome::Error(_) => None,
                 }
             }
             ConnectorSelector::ConnectorResponseBodySize {
@@ -327,7 +331,9 @@ impl Selector for ConnectorSelector {
                         .get::<WireByteCount>()
                         .map(|c| Value::I64(c.0.load(Ordering::Relaxed) as i64)),
                     // Nothing went over the wire, so there are no wire bytes to count.
-                    TransportOutcome::MappingOnly | TransportOutcome::Error(_) => None,
+                    TransportOutcome::MappingOnly
+                    | TransportOutcome::Skipped
+                    | TransportOutcome::Error(_) => None,
                 }
             }
             ConnectorSelector::ResponseMappingProblems {
@@ -482,6 +488,7 @@ mod tests {
 
     fn connector() -> Connector {
         Connector {
+            requires: Vec::new(),
             id: ConnectId::new(
                 TEST_SUBGRAPH_NAME.into(),
                 Some(SourceName::cast(TEST_SOURCE_NAME)),

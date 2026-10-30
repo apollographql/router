@@ -590,6 +590,7 @@ input_file: apollo-federation/src/connectors/expand/tests/schemas/expand/realist
             connect_extensions: None,
             connect_is_success: None,
         },
+        requires: [],
         output_type: Some(
             Named(
                 "User",
@@ -822,6 +823,7 @@ input_file: apollo-federation/src/connectors/expand/tests/schemas/expand/realist
             connect_extensions: None,
             connect_is_success: None,
         },
+        requires: [],
         output_type: Some(
             List(
                 Named(
@@ -1191,6 +1193,7 @@ input_file: apollo-federation/src/connectors/expand/tests/schemas/expand/realist
             connect_extensions: None,
             connect_is_success: None,
         },
+        requires: [],
         output_type: Some(
             List(
                 Named(
@@ -1992,6 +1995,7 @@ input_file: apollo-federation/src/connectors/expand/tests/schemas/expand/realist
             connect_extensions: None,
             connect_is_success: None,
         },
+        requires: [],
         output_type: Some(
             Named(
                 "User",

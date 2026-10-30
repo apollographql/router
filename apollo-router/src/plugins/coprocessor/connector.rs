@@ -478,7 +478,9 @@ where
                 .then(|| http_response.inner.status.as_u16());
             (headers, status)
         }
-        TransportOutcome::MappingOnly | TransportOutcome::Error(_) => (None, None),
+        TransportOutcome::MappingOnly | TransportOutcome::Skipped | TransportOutcome::Error(_) => {
+            (None, None)
+        }
     };
 
     // Extract body from mapped response
