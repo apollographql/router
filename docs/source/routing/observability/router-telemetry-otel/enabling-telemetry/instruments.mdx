@@ -560,6 +560,41 @@ telemetry:
             graphql.type.name: true
 ```
 
+##### Example: Subgraph error code attribute
+
+To group subgraph errors by the error code each subgraph returns, add a custom attribute to a `subgraph` instrument with the [`subgraph_response_errors`](/router/configuration/telemetry/instrumentation/selectors#subgraph) selector. This selector takes a JSONPath into the `errors` array of the subgraph response, such as `$[0].extensions.code` for the code of the first error.
+
+Pair it with a `condition` on the `subgraph_on_graphql_error` selector so the instrument only records subgraph responses that contain GraphQL errors:
+
+```yaml title="router.yaml"
+telemetry:
+  instrumentation:
+    instruments:
+      subgraph:
+        acme.subgraph.errors:
+          value: unit
+          type: counter
+          unit: "{error}"
+          description: "Subgraph responses that contain GraphQL errors"
+          attributes:
+            subgraph.name: true
+            # The extensions.code value of the first error in the subgraph response
+            subgraph.error.code:
+              subgraph_response_errors: "$[0].extensions.code"
+          condition:
+            eq:
+              - subgraph_on_graphql_error: true
+              - true
+```
+
+With this configuration, the `acme.subgraph.errors` counter increments once for each subgraph response with errors, and you can filter or group it by `subgraph.name` and `subgraph.error.code` in your APM.
+
+<Note>
+
+Selectors that read the response body, such as `subgraph_response_errors`, can affect router performance.
+
+</Note>
+
 ### Instrument configuration reference
 
 | Option                      | Values                                                                         | Default    | Description                                   |
