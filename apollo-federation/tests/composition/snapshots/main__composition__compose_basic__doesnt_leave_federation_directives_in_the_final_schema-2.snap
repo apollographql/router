@@ -1,5 +1,6 @@
 ---
 source: apollo-federation/tests/composition/compose_basic.rs
+assertion_line: 364
 expression: subgraph_a_extracted.schema.schema()
 ---
 schema @link(url: "https://specs.apollo.dev/link/v1.0") @link(url: "https://specs.apollo.dev/federation/v3.0", import: ["@key", "@requires", "@provides", "@external", "@tag", "@extends", "@shareable", "@inaccessible", "@override", "@composeDirective", "@interfaceObject"]) {
@@ -46,6 +47,14 @@ directive @federation__listSize(assumedSize: Int, slicingArguments: [String!], s
 
 directive @federation__cacheTag(format: String!) repeatable on OBJECT | FIELD_DEFINITION
 
+directive @federation__lookup on FIELD_DEFINITION
+
+directive @federation__internal on OBJECT | FIELD_DEFINITION
+
+directive @federation__is(field: federation__FieldSelectionMap!) on ARGUMENT_DEFINITION
+
+directive @federation__require(field: federation__FieldSelectionMap!) on ARGUMENT_DEFINITION
+
 enum link__Purpose {
   """
   `SECURITY` features provide metadata necessary to securely resolve fields.
@@ -66,6 +75,8 @@ scalar federation__Scope
 scalar federation__Policy
 
 scalar federation__ContextFieldValue
+
+scalar federation__FieldSelectionMap
 
 type Query {
   products: [Product!] @provides(fields: "name")
