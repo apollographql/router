@@ -1,14 +1,14 @@
 //! Implements API schema generation.
 use apollo_compiler::Name;
 use apollo_compiler::Node;
-<<<<<<< HEAD
-=======
 use apollo_compiler::Schema;
 use apollo_compiler::ast;
+use apollo_compiler::ast::Directive;
 use apollo_compiler::collections::IndexMap;
 use apollo_compiler::collections::IndexSet;
->>>>>>> bc80144 (perf(federation): speed up API schema generation for large contracts (#10715))
 use apollo_compiler::name;
+use apollo_compiler::schema::Component;
+use apollo_compiler::schema::ComponentName;
 use apollo_compiler::schema::DirectiveDefinition;
 use apollo_compiler::schema::DirectiveLocation;
 use apollo_compiler::schema::EnumType;
@@ -196,7 +196,7 @@ impl HiddenElements {
             }
         }
         let definition = schema.schema_definition.make_mut();
-        self.strip_directives(&mut definition.directives);
+        self.strip_directives(&mut definition.directives.0);
         for root in [
             &mut definition.query,
             &mut definition.mutation,
@@ -229,67 +229,66 @@ impl HiddenElements {
         self.hides(&field.directives, field.ty.inner_named_type())
     }
 
-    fn has_hidden_directive(&self, directives: &ast::DirectiveList) -> bool {
+    fn has_hidden_directive<D: DirectiveName>(&self, directives: &[D]) -> bool {
         directives
             .iter()
-            .any(|directive| self.directives.contains(&directive.name))
+            .any(|directive| self.directives.contains(directive.name()))
     }
 
-    fn strip_directives(&self, directives: &mut ast::DirectiveList) {
-        directives
-            .0
-            .retain(|directive| !self.directives.contains(&directive.name));
+    fn strip_directives<D: DirectiveName>(&self, directives: &mut Vec<D>) {
+        directives.retain(|directive| !self.directives.contains(directive.name()));
     }
 
     fn changes_input_values(&self, values: &[Node<InputValueDefinition>]) -> bool {
         values.iter().any(|value| {
-            self.hides_input_value(value) || self.has_hidden_directive(&value.directives)
+            self.hides_input_value(value) || self.has_hidden_directive(&value.directives.0)
         })
     }
 
     fn filter_input_values(&self, values: &mut Vec<Node<InputValueDefinition>>) {
         values.retain(|value| !self.hides_input_value(value));
         for value in values.iter_mut() {
-            if self.has_hidden_directive(&value.directives) {
-                self.strip_directives(&mut value.make_mut().directives);
+            if self.has_hidden_directive(&value.directives.0) {
+                self.strip_directives(&mut value.make_mut().directives.0);
             }
         }
     }
 
     fn changes_field(&self, field: &FieldDefinition) -> bool {
-        self.has_hidden_directive(&field.directives) || self.changes_input_values(&field.arguments)
+        self.has_hidden_directive(&field.directives.0)
+            || self.changes_input_values(&field.arguments)
     }
 
-    fn changes_fields(&self, fields: &IndexMap<Name, Node<FieldDefinition>>) -> bool {
+    fn changes_fields(&self, fields: &IndexMap<Name, Component<FieldDefinition>>) -> bool {
         fields
             .values()
             .any(|field| self.hides_field(field) || self.changes_field(field))
     }
 
-    fn filter_fields(&self, fields: &mut IndexMap<Name, Node<FieldDefinition>>) {
+    fn filter_fields(&self, fields: &mut IndexMap<Name, Component<FieldDefinition>>) {
         fields.retain(|_, field| !self.hides_field(field));
         for field in fields.values_mut() {
             if self.changes_field(field) {
                 let field = field.make_mut();
-                self.strip_directives(&mut field.directives);
+                self.strip_directives(&mut field.directives.0);
                 self.filter_input_values(&mut field.arguments);
             }
         }
     }
 
-    fn hides_any_type(&self, names: &IndexSet<Node<Name>>) -> bool {
+    fn hides_any_type(&self, names: &IndexSet<ComponentName>) -> bool {
         names.iter().any(|name| self.types.contains(&**name))
     }
 
-    fn filter_type_names(&self, names: &mut IndexSet<Node<Name>>) {
+    fn filter_type_names(&self, names: &mut IndexSet<ComponentName>) {
         names.retain(|name| !self.types.contains(&**name));
     }
 
     fn changes_fields_type(
         &self,
-        directives: &ast::DirectiveList,
-        fields: &IndexMap<Name, Node<FieldDefinition>>,
-        implements_interfaces: &IndexSet<Node<Name>>,
+        directives: &[Component<Directive>],
+        fields: &IndexMap<Name, Component<FieldDefinition>>,
+        implements_interfaces: &IndexSet<ComponentName>,
     ) -> bool {
         self.has_hidden_directive(directives)
             || self.changes_fields(fields)
@@ -298,9 +297,9 @@ impl HiddenElements {
 
     fn filter_fields_type(
         &self,
-        directives: &mut ast::DirectiveList,
-        fields: &mut IndexMap<Name, Node<FieldDefinition>>,
-        implements_interfaces: &mut IndexSet<Node<Name>>,
+        directives: &mut Vec<Component<Directive>>,
+        fields: &mut IndexMap<Name, Component<FieldDefinition>>,
+        implements_interfaces: &mut IndexSet<ComponentName>,
     ) {
         self.strip_directives(directives);
         self.filter_fields(fields);
@@ -310,19 +309,19 @@ impl HiddenElements {
     fn filter_type(&self, ty: &mut ExtendedType) {
         match ty {
             ExtendedType::Scalar(scalar) => {
-                if self.has_hidden_directive(&scalar.directives) {
-                    self.strip_directives(&mut scalar.make_mut().directives);
+                if self.has_hidden_directive(&scalar.directives.0) {
+                    self.strip_directives(&mut scalar.make_mut().directives.0);
                 }
             }
             ExtendedType::Object(object) => {
                 if self.changes_fields_type(
-                    &object.directives,
+                    &object.directives.0,
                     &object.fields,
                     &object.implements_interfaces,
                 ) {
                     let object = object.make_mut();
                     self.filter_fields_type(
-                        &mut object.directives,
+                        &mut object.directives.0,
                         &mut object.fields,
                         &mut object.implements_interfaces,
                     );
@@ -330,24 +329,24 @@ impl HiddenElements {
             }
             ExtendedType::Interface(interface) => {
                 if self.changes_fields_type(
-                    &interface.directives,
+                    &interface.directives.0,
                     &interface.fields,
                     &interface.implements_interfaces,
                 ) {
                     let interface = interface.make_mut();
                     self.filter_fields_type(
-                        &mut interface.directives,
+                        &mut interface.directives.0,
                         &mut interface.fields,
                         &mut interface.implements_interfaces,
                     );
                 }
             }
             ExtendedType::Union(union_) => {
-                if self.has_hidden_directive(&union_.directives)
+                if self.has_hidden_directive(&union_.directives.0)
                     || self.hides_any_type(&union_.members)
                 {
                     let union_ = union_.make_mut();
-                    self.strip_directives(&mut union_.directives);
+                    self.strip_directives(&mut union_.directives.0);
                     self.filter_type_names(&mut union_.members);
                 }
             }
@@ -360,7 +359,7 @@ impl HiddenElements {
         let changes_value = |directives: &ast::DirectiveList| {
             self.is_inaccessible(directives) || self.has_hidden_directive(directives)
         };
-        if !self.has_hidden_directive(&enum_.directives)
+        if !self.has_hidden_directive(&enum_.directives.0)
             && !enum_
                 .values
                 .values()
@@ -369,22 +368,22 @@ impl HiddenElements {
             return;
         }
         let enum_ = enum_.make_mut();
-        self.strip_directives(&mut enum_.directives);
+        self.strip_directives(&mut enum_.directives.0);
         enum_
             .values
             .retain(|_, value| !self.is_inaccessible(&value.directives));
         for value in enum_.values.values_mut() {
-            if self.has_hidden_directive(&value.directives) {
-                self.strip_directives(&mut value.make_mut().directives);
+            if self.has_hidden_directive(&value.directives.0) {
+                self.strip_directives(&mut value.make_mut().directives.0);
             }
         }
     }
 
     fn filter_input_object(&self, input_object: &mut Node<InputObjectType>) {
         let changes_field = |field: &InputValueDefinition| {
-            self.hides_input_value(field) || self.has_hidden_directive(&field.directives)
+            self.hides_input_value(field) || self.has_hidden_directive(&field.directives.0)
         };
-        if !self.has_hidden_directive(&input_object.directives)
+        if !self.has_hidden_directive(&input_object.directives.0)
             && !input_object
                 .fields
                 .values()
@@ -393,14 +392,32 @@ impl HiddenElements {
             return;
         }
         let input_object = input_object.make_mut();
-        self.strip_directives(&mut input_object.directives);
+        self.strip_directives(&mut input_object.directives.0);
         input_object
             .fields
             .retain(|_, field| !self.hides_input_value(field));
         for field in input_object.fields.values_mut() {
-            if self.has_hidden_directive(&field.directives) {
-                self.strip_directives(&mut field.make_mut().directives);
+            if self.has_hidden_directive(&field.directives.0) {
+                self.strip_directives(&mut field.make_mut().directives.0);
             }
         }
+    }
+}
+
+/// Lets the directive helpers take both `ast` and `schema` directive lists, whose elements wrap
+/// directives differently.
+trait DirectiveName {
+    fn name(&self) -> &Name;
+}
+
+impl DirectiveName for Node<Directive> {
+    fn name(&self) -> &Name {
+        &self.name
+    }
+}
+
+impl DirectiveName for Component<Directive> {
+    fn name(&self) -> &Name {
+        &self.name
     }
 }
