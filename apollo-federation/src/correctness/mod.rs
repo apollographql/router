@@ -162,9 +162,11 @@ impl Default for CheckerOptions {
 /// Check that a query plan is correct for a client operation.
 ///
 /// This is [`query_plan_check`], the port of the Lean `checkQueryPlan` model. It decides the same
-/// question as [`legacy::check_plan`] by a different route, and asks two things legacy does not:
-/// that every entity case of a fetch is covered by some `requires` entry, and that every
-/// contextual value a fetch reads is already fetched wherever the fetch runs.
+/// question as [`legacy::check_plan`] by a different route, and asks three things legacy does not:
+/// that every entity case of a fetch is covered by some `requires` entry, that every contextual
+/// value a fetch reads is already fetched wherever the fetch runs, and that every field a fetch
+/// selects is one its subgraph can resolve where it selects it, not `@external` outside a
+/// `@provides` window naming it there.
 pub fn check_plan(
     api_schema: &ValidFederationSchema,
     supergraph_schema: &ValidFederationSchema,
