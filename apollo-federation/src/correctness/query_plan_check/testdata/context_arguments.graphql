@@ -1,0 +1,211 @@
+# Contextual arguments, bound and read from their declaration.
+#
+# `stores` resolves an `Offer` by `id`. Its `label` takes `locale` from the context `locality`, and
+# its `price` takes `locale` and `currency` from it; `Store` and `Department` set `locality`, a
+# department sitting under a store. `note` takes `locale` from `outlet`, a context `stores` declares
+# on the interface `Outlet`, and `tag` takes `kind` from `venue`, declared on the union `Venue`,
+# which selects its `__typename`. `directory` serves the hierarchy the contexts are read along:
+# regions above stores above departments, a region setting no context and having a `locale` of its
+# own, every outlet, and every venue.
+#
+# Composed with `apollo_federation::composition::compose` from the two subgraphs below. Recompose
+# it when they change. The plans beside it in `plans/` are the planner's plans over it, with default
+# options, produced by the revision that added the files:
+#
+#   regions_stores_offers_label.json
+#     { regions { stores { offers { label } } } }
+#   regions_stores_offers_price.json
+#     { regions { stores { offers { price } } } }
+#   regions_stores_departments_offers_label.json
+#     { regions { stores { departments { offers { label } } } } }
+#   outlets_members_offers_label.json
+#     { outlets { ... on Store { offers { label } } ... on Department { offers { label } } } }
+#   outlets_store_offers_label.json
+#     { outlets { ... on Store { offers { label } } } }
+#   outlets_offers_note.json
+#     { outlets { offers { note } } }
+#   venues_offers_label.json
+#     { venues { ... on Store { offers { label } } ... on Department { offers { label } } } }
+#   venues_offers_tag.json
+#     { venues { ... on Store { offers { tag } } ... on Department { offers { tag } } } }
+#
+# The planner plans `label` below the interface only with its members selected by fragment: for
+# `{ outlets { offers { label } } }` it reports an internal error, finding no option for `label`.
+#
+# Subgraph `directory`:
+#
+#   extend schema @link(url: "https://specs.apollo.dev/federation/v2.8", import: ["@key"])
+#
+#   type Query {
+#     regions: [Region!]!
+#     outlets: [Outlet!]!
+#     venues: [Venue!]!
+#   }
+#
+#   type Region {
+#     locale: String
+#     stores: [Store!]!
+#   }
+#
+#   interface Outlet {
+#     locale: String
+#     currency: String
+#     offers: [Offer!]!
+#   }
+#
+#   union Venue = Store | Department
+#
+#   type Store implements Outlet @key(fields: "id") {
+#     id: ID!
+#     locale: String
+#     currency: String
+#     departments: [Department!]!
+#     offers: [Offer!]!
+#   }
+#
+#   type Department implements Outlet @key(fields: "id") {
+#     id: ID!
+#     locale: String
+#     currency: String
+#     offers: [Offer!]!
+#   }
+#
+#   type Offer @key(fields: "id") {
+#     id: ID!
+#   }
+#
+# Subgraph `stores`:
+#
+#   extend schema
+#     @link(
+#       url: "https://specs.apollo.dev/federation/v2.8"
+#       import: ["@key", "@external", "@context", "@fromContext"]
+#     )
+#
+#   interface Outlet @context(name: "outlet") {
+#     locale: String
+#   }
+#
+#   union Venue @context(name: "venue") = Store | Department
+#
+#   type Store implements Outlet @key(fields: "id") @context(name: "locality") {
+#     id: ID!
+#     locale: String @external
+#     currency: String @external
+#   }
+#
+#   type Department implements Outlet @key(fields: "id") @context(name: "locality") {
+#     id: ID!
+#     locale: String @external
+#     currency: String @external
+#   }
+#
+#   type Offer @key(fields: "id") {
+#     id: ID!
+#     label(locale: String @fromContext(field: "$locality { locale }")): String
+#     price(
+#       locale: String @fromContext(field: "$locality { locale }")
+#       currency: String @fromContext(field: "$locality { currency }")
+#     ): Int
+#     note(locale: String @fromContext(field: "$outlet { locale }")): String
+#     tag(kind: String @fromContext(field: "$venue { __typename }")): String
+#   }
+
+schema @link(url: "https://specs.apollo.dev/link/v1.0") @link(url: "https://specs.apollo.dev/join/v0.5", for: EXECUTION) @link(url: "https://specs.apollo.dev/context/v0.1", for: SECURITY) {
+  query: Query
+}
+
+directive @link(url: String, as: String, for: link__Purpose, import: [link__Import]) repeatable on SCHEMA
+
+directive @join__graph(name: String!, url: String!) on ENUM_VALUE
+
+directive @join__type(graph: join__Graph!, key: join__FieldSet, extension: Boolean! = false, resolvable: Boolean! = true, isInterfaceObject: Boolean! = false) repeatable on OBJECT | INTERFACE | UNION | ENUM | INPUT_OBJECT | SCALAR
+
+directive @join__field(graph: join__Graph, requires: join__FieldSet, provides: join__FieldSet, type: String, external: Boolean, override: String, usedOverridden: Boolean, overrideLabel: String, contextArguments: [join__ContextArgument!]) repeatable on FIELD_DEFINITION | INPUT_FIELD_DEFINITION
+
+directive @join__implements(graph: join__Graph!, interface: String!) repeatable on OBJECT | INTERFACE
+
+directive @join__unionMember(graph: join__Graph!, member: String!) repeatable on UNION
+
+directive @join__enumValue(graph: join__Graph!) repeatable on ENUM_VALUE
+
+directive @join__directive(graphs: [join__Graph!], name: String!, args: join__DirectiveArguments) repeatable on SCHEMA | OBJECT | INTERFACE | FIELD_DEFINITION
+
+directive @context(name: String!) repeatable on INTERFACE | OBJECT | UNION
+
+directive @context__fromContext(field: context__ContextFieldValue) on ARGUMENT_DEFINITION
+
+enum link__Purpose {
+  """
+  `SECURITY` features provide metadata necessary to securely resolve fields.
+  """
+  SECURITY
+  """
+  `EXECUTION` features provide metadata necessary for operation execution.
+  """
+  EXECUTION
+}
+
+scalar link__Import
+
+enum join__Graph {
+  DIRECTORY @join__graph(name: "directory", url: "http://directory")
+  STORES @join__graph(name: "stores", url: "http://stores")
+}
+
+scalar join__FieldSet
+
+scalar join__DirectiveArguments
+
+scalar join__FieldValue
+
+input join__ContextArgument {
+  name: String!
+  type: String!
+  context: String!
+  selection: join__FieldValue!
+}
+
+scalar context__ContextFieldValue
+
+type Query @join__type(graph: DIRECTORY) @join__type(graph: STORES) {
+  regions: [Region!]! @join__field(graph: DIRECTORY)
+  outlets: [Outlet!]! @join__field(graph: DIRECTORY)
+  venues: [Venue!]! @join__field(graph: DIRECTORY)
+}
+
+type Region @join__type(graph: DIRECTORY) {
+  locale: String
+  stores: [Store!]!
+}
+
+interface Outlet @join__type(graph: DIRECTORY) @join__type(graph: STORES) @context(name: "stores__outlet") {
+  locale: String
+  currency: String @join__field(graph: DIRECTORY)
+  offers: [Offer!]! @join__field(graph: DIRECTORY)
+}
+
+union Venue @join__type(graph: DIRECTORY) @join__type(graph: STORES) @join__unionMember(graph: DIRECTORY, member: "Store") @join__unionMember(graph: STORES, member: "Store") @join__unionMember(graph: DIRECTORY, member: "Department") @join__unionMember(graph: STORES, member: "Department") @context(name: "stores__venue") = Store | Department
+
+type Store implements Outlet @join__implements(graph: DIRECTORY, interface: "Outlet") @join__implements(graph: STORES, interface: "Outlet") @join__type(graph: DIRECTORY, key: "id") @join__type(graph: STORES, key: "id") @context(name: "stores__locality") {
+  id: ID!
+  locale: String @join__field(graph: DIRECTORY) @join__field(graph: STORES, external: true)
+  currency: String @join__field(graph: DIRECTORY) @join__field(graph: STORES, external: true)
+  departments: [Department!]! @join__field(graph: DIRECTORY)
+  offers: [Offer!]! @join__field(graph: DIRECTORY)
+}
+
+type Department implements Outlet @join__implements(graph: DIRECTORY, interface: "Outlet") @join__implements(graph: STORES, interface: "Outlet") @join__type(graph: DIRECTORY, key: "id") @join__type(graph: STORES, key: "id") @context(name: "stores__locality") {
+  id: ID!
+  locale: String @join__field(graph: DIRECTORY) @join__field(graph: STORES, external: true)
+  currency: String @join__field(graph: DIRECTORY) @join__field(graph: STORES, external: true)
+  offers: [Offer!]! @join__field(graph: DIRECTORY)
+}
+
+type Offer @join__type(graph: DIRECTORY, key: "id") @join__type(graph: STORES, key: "id") {
+  id: ID!
+  label: String @join__field(graph: STORES, contextArguments: [{context: "stores__locality", name: "locale", type: "String", selection: "{ locale }"}])
+  price: Int @join__field(graph: STORES, contextArguments: [{context: "stores__locality", name: "locale", type: "String", selection: "{ locale }"}, {context: "stores__locality", name: "currency", type: "String", selection: "{ currency }"}])
+  note: String @join__field(graph: STORES, contextArguments: [{context: "stores__outlet", name: "locale", type: "String", selection: "{ locale }"}])
+  tag: String @join__field(graph: STORES, contextArguments: [{context: "stores__venue", name: "kind", type: "String", selection: "{ __typename }"}])
+}

@@ -274,48 +274,21 @@ fn window_below(
 
 #[cfg(test)]
 mod tests {
-    use apollo_compiler::ExecutableDocument;
-
     use super::Subgraph;
     use super::check_fetch_resolves;
+    use crate::correctness::query_plan_check::test_support::recursive_chain;
+    use crate::correctness::query_plan_check::test_support::recursive_subgraph;
 
-    /// `root` is a `Recursive`, an interface with four implementations, each returning another
-    /// `Recursive`.
-    const RECURSIVE: &str = r#"
-        extend schema @link(url: "https://specs.apollo.dev/federation/v2.8", import: ["@key"])
-
-        type Query { root: Recursive }
-        interface Recursive { next: Recursive, leaf: String }
-        type First implements Recursive { next: Recursive, leaf: String }
-        type Second implements Recursive { next: Recursive, leaf: String }
-        type Third implements Recursive { next: Recursive, leaf: String }
-        type Fourth implements Recursive { next: Recursive, leaf: String }
-    "#;
-
-    /// A chain of 64 `next` through the interface. The walk pools the runtime types that share a
-    /// window, so each level is asked once for each of the four, where a descent per runtime path
-    /// would be 4^64 of them.
+    /// A chain of 64 `next` through an interface with four implementations completes, which a
+    /// descent per runtime path, 4^64 of them, would not: the walk pools the runtime types that
+    /// share a window. It shows completion on this input, not a growth law.
     ///
     /// The model's `deepInterfaceChainIsWalkedOnce`.
     #[test]
     fn a_deep_interface_chain_is_walked_once() {
-        let subgraph =
-            crate::subgraph::typestate::Subgraph::parse("recursive", "http://recursive", RECURSIVE)
-                .expect("valid subgraph")
-                .expand_links()
-                .expect("links expand")
-                .validate()
-                .expect("valid subgraph schema");
+        let subgraph = recursive_subgraph();
         let schema = subgraph.validated_schema();
-        let depth = 64;
-        let operation = format!(
-            "{{ root {}{{ leaf }}{} }}",
-            "{ next ".repeat(depth),
-            " }".repeat(depth)
-        );
-        let document =
-            ExecutableDocument::parse_and_validate(schema.schema(), operation, "op.graphql")
-                .expect("valid operation");
+        let document = recursive_chain(schema, 64);
         let operation = document.operations.get(None).expect("one operation");
         check_fetch_resolves(
             &Subgraph::new(schema).expect("subgraph metadata"),
