@@ -90,11 +90,17 @@ impl InaccessibleSpecDefinition {
         validate_inaccessible(schema, self)
     }
 
-    pub(crate) fn remove_inaccessible_elements(
+    pub(crate) fn directive_name(
         &self,
-        schema: &mut FederationSchema,
-    ) -> Result<(), FederationError> {
-        remove_inaccessible_elements(schema, self)
+        schema: &FederationSchema,
+    ) -> Result<Name, FederationError> {
+        self.directive_name_in_schema(schema, &INACCESSIBLE_DIRECTIVE_NAME_IN_SPEC)
+            .ok_or_else(|| {
+                SingleFederationError::Internal {
+                    message: "Unexpectedly could not find inaccessible spec in schema".to_owned(),
+                }
+                .into()
+            })
     }
 
     fn directive_specification(&self) -> Box<dyn TypeAndDirectiveSpecification> {
@@ -1128,137 +1134,6 @@ fn validate_inaccessible(
 
     if !errors.errors.is_empty() {
         return Err(errors.into());
-    }
-
-    Ok(())
-}
-
-fn remove_inaccessible_elements(
-    schema: &mut FederationSchema,
-    inaccessible_spec: &InaccessibleSpecDefinition,
-) -> Result<(), FederationError> {
-    let directive_name = inaccessible_spec
-        .directive_name_in_schema(schema, &INACCESSIBLE_DIRECTIVE_NAME_IN_SPEC)
-        .ok_or_else(|| SingleFederationError::Internal {
-            message: "Unexpectedly could not find inaccessible spec in schema".to_owned(),
-        })?;
-
-    // Find all elements that use @inaccessible. Clone so there's no live borrow.
-    let inaccessible_referencers = schema.referencers().get_directive(&directive_name).clone();
-
-    // Remove fields and arguments from inaccessible types first. If any inaccessible type has a field
-    // that references another inaccessible type, it would prevent the other type from being
-    // removed.
-    // We need an intermediate allocation as `.remove()` requires mutable access to the schema and
-    // looking up fields requires immutable access.
-    //
-    // This is a lot more verbose than in the JS implementation, but the JS implementation relies on
-    // being able to set references to `undefined`, and the types all working out in the end once
-    // the removal is complete, which our Rust data structures don't support.
-    let mut inaccessible_children: Vec<ObjectFieldDefinitionPosition> = vec![];
-    for position in &inaccessible_referencers.object_types {
-        let object = position.get(schema.schema())?;
-        inaccessible_children.extend(
-            object
-                .fields
-                .keys()
-                .map(|field_name| position.field(field_name.clone())),
-        );
-    }
-    let mut inaccessible_arguments: Vec<ObjectFieldArgumentDefinitionPosition> = vec![];
-    for position in inaccessible_children {
-        let field = position.get(schema.schema())?;
-        inaccessible_arguments.extend(
-            field
-                .arguments
-                .iter()
-                .map(|argument| position.argument(argument.name.clone())),
-        );
-
-        position.remove(schema)?;
-    }
-    for position in inaccessible_arguments {
-        position.remove(schema)?;
-    }
-
-    let mut inaccessible_children: Vec<InterfaceFieldDefinitionPosition> = vec![];
-    for position in &inaccessible_referencers.interface_types {
-        let object = position.get(schema.schema())?;
-        inaccessible_children.extend(
-            object
-                .fields
-                .keys()
-                .map(|field_name| position.field(field_name.clone())),
-        );
-    }
-    let mut inaccessible_arguments: Vec<InterfaceFieldArgumentDefinitionPosition> = vec![];
-    for position in inaccessible_children {
-        let field = position.get(schema.schema())?;
-        inaccessible_arguments.extend(
-            field
-                .arguments
-                .iter()
-                .map(|argument| position.argument(argument.name.clone())),
-        );
-
-        position.remove(schema)?;
-    }
-    for position in inaccessible_arguments {
-        position.remove(schema)?;
-    }
-
-    let mut inaccessible_children: Vec<InputObjectFieldDefinitionPosition> = vec![];
-    for position in &inaccessible_referencers.input_object_types {
-        let object = position.get(schema.schema())?;
-        inaccessible_children.extend(
-            object
-                .fields
-                .keys()
-                .map(|field_name| position.field(field_name.clone())),
-        );
-    }
-    for position in inaccessible_children {
-        position.remove(schema)?;
-    }
-
-    for argument in inaccessible_referencers.directive_arguments {
-        argument.remove(schema)?;
-    }
-    for argument in inaccessible_referencers.interface_field_arguments {
-        argument.remove(schema)?;
-    }
-    for argument in inaccessible_referencers.object_field_arguments {
-        argument.remove(schema)?;
-    }
-    for field in inaccessible_referencers.input_object_fields {
-        field.remove(schema)?;
-    }
-    for field in inaccessible_referencers.interface_fields {
-        field.remove(schema)?;
-    }
-    for field in inaccessible_referencers.object_fields {
-        field.remove(schema)?;
-    }
-    for ty in inaccessible_referencers.union_types {
-        ty.remove(schema)?;
-    }
-    for ty in inaccessible_referencers.object_types {
-        ty.remove(schema)?;
-    }
-    for ty in inaccessible_referencers.interface_types {
-        ty.remove(schema)?;
-    }
-    for ty in inaccessible_referencers.input_object_types {
-        ty.remove(schema)?;
-    }
-    for value in inaccessible_referencers.enum_values {
-        value.remove(schema)?;
-    }
-    for ty in inaccessible_referencers.enum_types {
-        ty.remove(schema)?;
-    }
-    for ty in inaccessible_referencers.scalar_types {
-        ty.remove(schema)?;
     }
 
     Ok(())
