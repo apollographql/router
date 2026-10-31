@@ -1,0 +1,57 @@
+---
+source: apollo-federation/tests/query_plan/build_query_plan_tests/incremental_planner.rs
+expression: plan
+---
+QueryPlan {
+  Sequence {
+    Fetch(service: "subgraphA") {
+      {
+        foo {
+          bar
+          ... @include(if: $branch) {
+            t {
+              ... @include(if: $enabled) {
+                __typename
+                id
+              }
+            }
+          }
+          ... @skip(if: $branch) {
+            t {
+              ... @include(if: $enabled) {
+                __typename
+                id
+              }
+            }
+          }
+        }
+      }
+    },
+    Include(if: $enabled) {
+      Flatten(path: "foo.t") {
+        Fetch(service: "subgraphB") {
+          {
+            ... on T @include(if: $branch) {
+              __typename
+              id
+            }
+            ... on T @skip(if: $branch) {
+              __typename
+              id
+            }
+          } =>
+          {
+            ... on T {
+              ... @include(if: $branch) {
+                f1
+              }
+              ... @skip(if: $branch) {
+                f1
+              }
+            }
+          }
+        },
+      },
+    },
+  },
+}
