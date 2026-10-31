@@ -88,16 +88,38 @@ You can attach custom attributes using [router selectors](/router/configuration/
 - `apollo.router.graphql_error` - counts GraphQL errors in responses. Also counts errors which occur during the response validation and connectors' response mapping phases, which are represented in client responses as `extensions.valueCompletion` and `extensions.connectorErrors` respectively instead of actual GraphQL errors. Attributes:
   - `code`: error code, including `RESPONSE_VALIDATION_FAILED` in the case of a value completion error.
 
-## Cache
+<a id="cache"></a>
+## In-memory Cache
 
-- `apollo.router.cache.size` — Number of entries in the cache
+The router has several in-memory caches that emit different metrics.
+
+### `apollo.platform.*`
+
+These metrics are emitted by the in-memory cache for GraphQL query parsing.
+
+`apollo.platform.cache.memory.size` - Number of entries in the cache.
+- `cache.kind` - always `memory`
+- `cache.name` - the name of the cache: `query_parsing`
+
+`apollo.platform.cache.lookup.duration` - Histogram recording the time of cache lookups.
+- `cache.kind` - always `memory`
+- `cache.name` - the name of the cache: `query_parsing`
+- `cache.status` - `hit` or `miss`
+
+### `apollo.router.*`
+
+These metrics are emitted by the in-memory caches for APQ, query planning, and introspection.
+
+In the future, all in-memory caches will migrate to the `apollo.platform.*` metrics.
+
+- `apollo.router.cache.size` - Number of entries in the cache
 - `apollo.router.cache.hit.time` - Time to hit the cache in seconds
 - `apollo.router.cache.hit.time.count` - Number of cache hits
 - `apollo.router.cache.miss.time` - Time to miss the cache in seconds
 - `apollo.router.cache.miss.time.count` - Number of cache misses
 - `apollo.router.cache.storage.estimated_size` - The estimated storage size of the cache in bytes (query planner in memory only).
 
-All cache metrics listed above have the following attributes:
+These cache metrics have the following attributes:
 
 - `kind`: the cache being queried (`apq`, `query planner`, `introspection`)
 - `storage`: The backend storage of the cache (`memory`, `redis`)
