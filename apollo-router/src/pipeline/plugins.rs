@@ -69,7 +69,6 @@ pub(crate) async fn create_plugins(
             .supergraph_schema(Arc::new(schema.supergraph_schema().clone()))
             .subgraph_schemas(subgraph_schemas)
             .launch_id(schema.launch_id.clone())
-            .notify(configuration.notify.clone())
             .license(license)
             .and_original_config_yaml(configuration.raw_yaml.clone())
             .build(),

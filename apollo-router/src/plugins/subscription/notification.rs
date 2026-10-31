@@ -140,7 +140,7 @@ impl<K, V> Debug for Notification<K, V> {
 
 /// In memory pub/sub implementation
 #[derive(Clone)]
-pub struct Notify<K, V> {
+pub(crate) struct Notify<K, V> {
     sender: mpsc::Sender<Notification<K, V>>,
     /// Size (number of events) of the channel to receive message
     pub(crate) queue_size: Option<usize>,
@@ -169,17 +169,6 @@ where
         Notify {
             sender,
             queue_size,
-            router_broadcasts: Arc::new(RouterBroadcasts::new()),
-        }
-    }
-
-    #[doc(hidden)]
-    /// NOOP notifier for tests
-    pub fn for_tests() -> Self {
-        let (sender, _receiver) = mpsc::channel(NOTIFY_CHANNEL_SIZE);
-        Notify {
-            sender,
-            queue_size: None,
             router_broadcasts: Arc::new(RouterBroadcasts::new()),
         }
     }
@@ -427,18 +416,6 @@ where
             .await?;
 
         Ok(response_rx.await.unwrap())
-    }
-}
-
-#[cfg(test)]
-impl<K, V> Default for Notify<K, V>
-where
-    K: Send + Hash + Eq + Clone + 'static,
-    V: Send + Sync + Clone + 'static,
-{
-    /// Useless notify mainly for test
-    fn default() -> Self {
-        Self::for_tests()
     }
 }
 

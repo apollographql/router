@@ -144,8 +144,6 @@ impl<'de> Visitor<'de> for ConfigurationVisitor {
             keys.insert(key);
         }
         config.insert_typed_plugin_sections();
-        config.notify = Configuration::notify(&config.apollo_plugins)
-            .map_err(|error| serde::de::Error::custom(error.to_string()))?;
         let config = config
             .validate()
             .map_err(|error| serde::de::Error::custom(error.to_string()))?;
