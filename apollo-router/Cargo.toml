@@ -235,7 +235,7 @@ static_assertions = "1.1.0"
 strum = { version = "0.28.0", features = ["derive"] }
 subtle = "2.6.1"
 sys-info = "0.9.1"
-sysinfo = { version = "0.39.1", features = [
+sysinfo = { version = "0.40.0", features = [
     "system",
 ], default-features = false }
 thiserror = "2.0.0"
