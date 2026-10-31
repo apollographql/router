@@ -1,0 +1,48 @@
+---
+source: apollo-router/src/plugins/telemetry/config_new/instruments.rs
+description: Custom counter conditions are evaluated when a coprocessor call fails at the router stage
+expression: "&metrics.all()"
+info:
+  telemetry:
+    instrumentation:
+      instruments:
+        default_requirement_level: none
+        router:
+          http.server.active_requests: false
+          http.server.request.duration: false
+          with_response_header:
+            description: count of responses with x-outcome
+            type: counter
+            unit: unit
+            value: unit
+            attributes:
+              outcome:
+                response_header: x-outcome
+            condition:
+              exists:
+                response_header: x-outcome
+          coprocessor_unreachable:
+            description: "count of requests whose coprocessor couldn't be reached"
+            type: counter
+            unit: unit
+            value: unit
+            condition:
+              eq:
+                - "HTTP fetch failed: tcp connect error"
+                - error: reason
+---
+- name: coprocessor_unreachable
+  description: "count of requests whose coprocessor couldn't be reached"
+  unit: unit
+  data:
+    datapoints:
+      - value: 1
+        attributes: {}
+- name: with_response_header
+  description: count of responses with x-outcome
+  unit: unit
+  data:
+    datapoints:
+      - value: 1
+        attributes:
+          outcome: match
