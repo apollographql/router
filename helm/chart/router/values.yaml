@@ -110,6 +110,14 @@ imagePullSecrets: []
 nameOverride: ""
 fullnameOverride: ""
 
+# -- Sets the [DNS config](https://kubernetes.io/docs/concepts/services-networking/dns-pod-service/#pod-dns-config) for Deployment pods
+# Example:
+# dnsConfig:
+#   options:
+#     - name: "ndots"
+#       value: "2"
+dnsConfig: {}
+
 serviceAccount:
   # Specifies whether a service account should be created
   create: true
