@@ -18,6 +18,7 @@ use http::Request;
 use http::header::ACCEPT_ENCODING;
 use http::header::CONTENT_ENCODING;
 use http_body::Body;
+use http_body_util::BodyExt;
 use itertools::Itertools;
 use multimap::MultiMap;
 use once_cell::sync::Lazy;
@@ -28,7 +29,9 @@ use tokio::net::UnixListener;
 use tokio::sync::mpsc;
 use tokio_rustls::TlsAcceptor;
 use tower::ServiceBuilder;
+use tower::BoxError;
 use tower::ServiceExt;
+use tower_http::decompression::DecompressionBody;
 use tower_http::trace::TraceLayer;
 use tracing::Instrument;
 use tracing::instrument::WithSubscriber;
@@ -304,11 +307,9 @@ fn main_endpoint(
     let cors = configuration.cors.clone().into_layer().map_err(|e| {
         ApolloRouterError::ServiceCreationError(format!("CORS configuration error: {e}").into())
     })?;
-    // XXX(@goto-bus-stop): in hyper 0.x, we required a HandleErrorLayer around this,
-    // to turn errors from decompression into an axum error response. Now,
-    // `RequestDecompressionLayer` appears to preserve(?) the error type from the inner service?
-    // So maybe we don't need this anymore? But I don't understand what happens to an error *caused
-    // by decompression* (such as an invalid compressed data stream).
+    // Errors caused by an invalid compressed data stream only surface when the body is read, deep
+    // in the pipeline. They are tagged as `RequestDecompressionError` right after this layer so that
+    // `handle_graphql` can answer them with a 400 instead of a 500.
     let decompression = tower_http::decompression::RequestDecompressionLayer::new()
         .br(true)
         .gzip(true)
@@ -328,7 +329,10 @@ fn main_endpoint(
             // browser clients will not be able to view the error response body.
             .layer(cors)
             .layer(LicenseLayer::new(license))
-            .layer(decompression),
+            .layer(decompression)
+            .map_request(|req: Request<DecompressionBody<axum::body::Body>>| {
+                req.map(|body| body.map_err(RequestDecompressionError::tag))
+            }),
     );
 
     if let Some(main_endpoint_layer) = ENDPOINT_CALLBACK.get() {
@@ -429,7 +433,10 @@ async fn handle_graphql(
     };
 
     match res {
-        Err(err) => internal_server_error(err),
+        Err(err) => match RequestDecompressionError::find_in(&err) {
+            Some(err) => invalid_compressed_body(err),
+            None => internal_server_error(err),
+        },
         Ok(response) => {
             let (mut parts, body) = response.response.into_parts();
 
@@ -471,6 +478,52 @@ async fn handle_graphql(
             http::Response::from_parts(parts, body).into_response()
         }
     }
+}
+
+/// The request body could not be decompressed according to its `Content-Encoding`.
+#[derive(Debug, thiserror::Error)]
+#[error("failed to decompress the request body: {0}")]
+pub(crate) struct RequestDecompressionError(#[source] std::io::Error);
+
+impl RequestDecompressionError {
+    /// Tags decoder failures from a `DecompressionBody`.
+    ///
+    /// `DecompressionBody` passes errors from the inner body through unchanged, and those are never
+    /// a bare `io::Error` (the inner body is an `axum::body::Body`, whose error is `axum::Error`).
+    /// So a top-level `io::Error` here can only come from the decoder.
+    fn tag(err: BoxError) -> BoxError {
+        match err.downcast::<std::io::Error>() {
+            Ok(err) => Box::new(RequestDecompressionError(*err)),
+            Err(err) => err,
+        }
+    }
+
+    /// Body errors get wrapped on their way up the pipeline (e.g. in `axum::Error`), so look
+    /// through the whole source chain.
+    fn find_in(err: &BoxError) -> Option<&Self> {
+        let mut current: Option<&(dyn std::error::Error + 'static)> = Some(err.as_ref());
+        while let Some(err) = current {
+            if let Some(err) = err.downcast_ref::<Self>() {
+                return Some(err);
+            }
+            current = err.source();
+        }
+        None
+    }
+}
+
+fn invalid_compressed_body(err: &RequestDecompressionError) -> Response {
+    tracing::debug!(%err, "rejecting request with an invalid compressed body");
+
+    let error = graphql::Error::builder()
+        .message("Invalid GraphQL request")
+        .extension_code("INVALID_GRAPHQL_REQUEST")
+        .extension("details", err.to_string())
+        .build();
+
+    let response = graphql::Response::builder().error(error).build();
+
+    (StatusCode::BAD_REQUEST, Json(json!(response))).into_response()
 }
 
 fn internal_server_error<T>(err: T) -> Response

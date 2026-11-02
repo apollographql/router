@@ -763,7 +763,7 @@ async fn mismatched_compression_header() -> Result<(), ApolloRouterError> {
         .await
         .unwrap();
 
-    assert_eq!(response.status(), StatusCode::INTERNAL_SERVER_ERROR);
+    assert_eq!(response.status(), StatusCode::BAD_REQUEST);
 
     server.shutdown().await?;
     crate::plugin::test::assert_no_mock_calls(supergraph_handle).await;
@@ -772,7 +772,6 @@ async fn mismatched_compression_header() -> Result<(), ApolloRouterError> {
 
 #[tokio::test]
 async fn truncated_brotli_request_body() -> Result<(), ApolloRouterError> {
-    let _guard = crate::test_harness::tracing_test::dispatcher_guard();
     let (supergraph_mock, supergraph_handle) = tower_test::mock::pair::<
         crate::services::supergraph::Request,
         crate::services::supergraph::Response,
@@ -801,13 +800,23 @@ async fn truncated_brotli_request_body() -> Result<(), ApolloRouterError> {
         .await
         .unwrap();
 
-    let status = response.status();
-    let body = response.text().await.unwrap();
-    assert_eq!(status, StatusCode::INTERNAL_SERVER_ERROR, "body: {body}");
-    // The client only sees a generic message; the decoder error is logged by `internal_server_error`
-    assert!(
-        crate::test_harness::tracing_test::logs_contain("reached unexpected EOF"),
-        "expected the brotli decoder error to be logged"
+    assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+    assert_eq!(
+        response.headers().get(CONTENT_TYPE).unwrap(),
+        &HeaderValue::from_static("application/json")
+    );
+    let response_json: serde_json::Value = response.json().await.unwrap();
+    assert_eq!(
+        response_json,
+        json!({
+            "errors": [{
+                "message": "Invalid GraphQL request",
+                "extensions": {
+                    "code": "INVALID_GRAPHQL_REQUEST",
+                    "details": "failed to decompress the request body: reached unexpected EOF",
+                },
+            }],
+        })
     );
 
     server.shutdown().await?;
