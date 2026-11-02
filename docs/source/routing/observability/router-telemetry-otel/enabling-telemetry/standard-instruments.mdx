@@ -98,11 +98,11 @@ The router has several in-memory caches that emit different metrics.
 These metrics are emitted by the in-memory cache for GraphQL query parsing.
 
 `apollo.platform.cache.memory.size` - Number of entries in the cache.
-- `cache.kind` - always `memory`
+- `cache.type` - always `memory`
 - `cache.name` - the name of the cache: `query_parsing`
 
 `apollo.platform.cache.lookup.duration` - Histogram recording the time of cache lookups.
-- `cache.kind` - always `memory`
+- `cache.type` - always `memory`
 - `cache.name` - the name of the cache: `query_parsing`
 - `cache.status` - `hit` or `miss`
 
