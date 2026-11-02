@@ -618,7 +618,7 @@ jobs:
             if [ "$CIRCLE_BRANCH" = "$DEFAULT_BRANCH" ]; then
               exit 0
             fi
-            git fetch origin "$DEFAULT_BRANCH" --depth=100
+            git fetch origin "$DEFAULT_BRANCH"
             BASE=$(git merge-base HEAD "origin/$DEFAULT_BRANCH" 2>/dev/null || git rev-parse HEAD~1)
             CHANGED=$(git diff --name-only "$BASE" HEAD)
             echo "Changed files:"
