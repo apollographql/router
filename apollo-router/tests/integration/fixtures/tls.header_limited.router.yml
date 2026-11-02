@@ -1,5 +1,4 @@
 supergraph:
-  listen: 127.0.0.1:0
   # Belt-and-suspenders override. The integration test harness
   # (apollo-router/tests/common.rs::merge_overrides) injects a 5 s
   # `connection_shutdown_timeout` default for every test, which is
@@ -13,9 +12,10 @@ supergraph:
   connection_shutdown_timeout: 1s
 
 limits:
-  http1_max_request_headers: 100
-  http1_max_request_buf_size: "16000"
-  http2_max_headers_list_bytes: "20Mib"
+  router:
+    http1_max_request_headers: 100
+    http1_max_request_buf_size: "16000"
+    http2_max_headers_list_bytes: "20Mib"
 
 tls:
   supergraph:

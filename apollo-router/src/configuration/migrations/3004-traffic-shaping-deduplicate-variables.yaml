@@ -1,0 +1,7 @@
+description: |
+  `traffic_shaping.deduplicate_variables` has been removed in Router 3.0. Variable
+  deduplication is unconditionally enabled, so the field was accepted and silently
+  ignored. Please remove the field from your config.
+actions:
+  - type: delete
+    path: traffic_shaping.deduplicate_variables

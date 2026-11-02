@@ -1,6 +1,3 @@
-use schemars::JsonSchema;
-use serde::Deserialize;
-
 use crate::plugins::telemetry::config_new::DefaultForLevel;
 use crate::plugins::telemetry::config_new::attributes::DefaultAttributeRequirementLevel;
 use crate::plugins::telemetry::config_new::conditional::Conditional;
@@ -9,8 +6,7 @@ use crate::plugins::telemetry::config_new::router::attributes::RouterAttributes;
 use crate::plugins::telemetry::config_new::router::selectors::RouterSelector;
 use crate::plugins::telemetry::otlp::TelemetryDataKind;
 
-#[derive(Deserialize, JsonSchema, Clone, Debug, Default)]
-#[serde(deny_unknown_fields, default)]
+#[apollo_configuration::configuration]
 pub(crate) struct RouterSpans {
     /// Custom attributes that are attached to the router span.
     pub(crate) attributes: Extendable<RouterAttributes, Conditional<RouterSelector>>,
@@ -52,7 +48,6 @@ mod test {
     use super::RouterSpans;
     use crate::Context;
     use crate::context::CONTAINS_GRAPHQL_ERROR;
-    use crate::plugins::telemetry::OTEL_NAME;
     use crate::plugins::telemetry::config::AttributeValue;
     use crate::plugins::telemetry::config_new::DefaultForLevel;
     use crate::plugins::telemetry::config_new::Selectors;
@@ -62,6 +57,7 @@ mod test {
     use crate::plugins::telemetry::config_new::conditions::Condition;
     use crate::plugins::telemetry::config_new::conditions::SelectorOrValue;
     use crate::plugins::telemetry::config_new::router::selectors::RouterSelector;
+    use crate::plugins::telemetry::consts::OTEL_NAME;
     use crate::plugins::telemetry::otlp::TelemetryDataKind;
     use crate::services::router;
 

@@ -11,12 +11,10 @@ use opentelemetry::KeyValue;
 use opentelemetry::metrics::MeterProvider;
 use opentelemetry::metrics::ObservableGauge;
 use parking_lot::Mutex;
-use schemars::JsonSchema;
-use serde::Deserialize;
 use sysinfo::System;
 use tower::BoxError;
-use tower::ServiceExt as _;
-use tower::util::BoxService;
+use tower::ServiceExt;
+use tower::util::BoxCloneService;
 use tracing::debug;
 
 use crate::metrics::meter_provider;
@@ -37,7 +35,7 @@ const OFFICIAL_HELM_CHART: &str = "official_helm_chart";
 const OPERATOR: &str = "operator";
 
 /// The fleet detector plugin has no configuration.
-#[derive(Debug, Default, Deserialize, JsonSchema)]
+#[apollo_configuration::configuration]
 struct Conf {}
 
 #[derive(Debug)]
@@ -259,7 +257,7 @@ impl PluginPrivate for FleetDetector {
         }
     }
 
-    fn router_service(&self, service: router::BoxService) -> router::BoxService {
+    fn router_service(&self, service: router::BoxCloneService) -> router::BoxCloneService {
         service
             // Count the number of request bytes from clients to the router
             .map_request(move |req: router::Request| router::Request {
@@ -271,9 +269,10 @@ impl PluginPrivate for FleetDetector {
                     // If the `SizeHint` gives us an exact value, we can use this for the
                     // metric and return without wrapping the request Body into a stream.
                     if let Some(size) = size_hint.exact() {
-                        u64_counter!(
+                        u64_counter_with_unit!(
                             "apollo.router.operations.request_size",
                             "Total number of request bytes from clients",
+                            "By",
                             size
                         );
                         return body;
@@ -282,9 +281,10 @@ impl PluginPrivate for FleetDetector {
                     // For streaming bodies, we need to wrap the stream and count bytes as we go
                     router::body::from_result_stream(body.into_data_stream().inspect(move |res| {
                         if let Ok(bytes) = res {
-                            u64_counter!(
+                            u64_counter_with_unit!(
                                 "apollo.router.operations.request_size",
                                 "Total number of request bytes from clients",
+                                "By",
                                 bytes.len() as u64
                             );
                         }
@@ -303,9 +303,10 @@ impl PluginPrivate for FleetDetector {
                         // If the `SizeHint` gives us an exact value, we can use this for the
                         // metric and return without wrapping the response Body into a stream.
                         if let Some(size) = size_hint.exact() {
-                            u64_counter!(
+                            u64_counter_with_unit!(
                                 "apollo.router.operations.response_size",
                                 "Total number of response bytes to clients",
+                                "By",
                                 size
                             );
                             return body;
@@ -315,9 +316,10 @@ impl PluginPrivate for FleetDetector {
                         router::body::from_result_stream(body.into_data_stream().inspect(
                             move |res| {
                                 if let Ok(bytes) = res {
-                                    u64_counter!(
+                                    u64_counter_with_unit!(
                                         "apollo.router.operations.response_size",
                                         "Total number of response bytes to clients",
+                                        "By",
                                         bytes.len() as u64
                                     );
                                 }
@@ -328,14 +330,14 @@ impl PluginPrivate for FleetDetector {
                     .build()
                     .unwrap()
             })
-            .boxed()
+            .boxed_clone()
     }
 
     fn http_client_service(
         &self,
         subgraph_name: &str,
-        service: BoxService<HttpRequest, HttpResponse, BoxError>,
-    ) -> BoxService<HttpRequest, HttpResponse, BoxError> {
+        service: BoxCloneService<HttpRequest, HttpResponse, BoxError>,
+    ) -> BoxCloneService<HttpRequest, HttpResponse, BoxError> {
         let sn_req = Arc::new(subgraph_name.to_string());
         let sn_res = sn_req.clone();
         service
@@ -353,9 +355,10 @@ impl PluginPrivate for FleetDetector {
                         // metric and return without wrapping the request Body into a stream.
                         if let Some(size) = size_hint.exact() {
                             let sn = sn.clone();
-                            u64_counter!(
+                            u64_counter_with_unit!(
                                 "apollo.router.operations.fetch.request_size",
                                 "Total number of request bytes for subgraph fetches",
+                                "By",
                                 size,
                                 subgraph.name = sn.to_string()
                             );
@@ -367,9 +370,10 @@ impl PluginPrivate for FleetDetector {
                             move |res| {
                                 if let Ok(bytes) = res {
                                     let sn = sn.clone();
-                                    u64_counter!(
+                                    u64_counter_with_unit!(
                                         "apollo.router.operations.fetch.request_size",
                                         "Total number of request bytes for subgraph fetches",
+                                        "By",
                                         bytes.len() as u64,
                                         subgraph.name = sn.to_string()
                                     );
@@ -401,9 +405,10 @@ impl PluginPrivate for FleetDetector {
                                     move |res| {
                                         if let Ok(bytes) = res {
                                             let sn = sn.clone();
-                                            u64_counter!(
+                                            u64_counter_with_unit!(
                                             "apollo.router.operations.fetch.response_size",
                                             "Total number of response bytes for subgraph fetches",
+                                            "By",
                                             bytes.len() as u64,
                                             subgraph.name = sn.to_string()
                                         );
@@ -426,7 +431,7 @@ impl PluginPrivate for FleetDetector {
                     }
                 }
             })
-            .boxed()
+            .boxed_clone()
     }
 }
 
@@ -597,7 +602,7 @@ mod tests {
             let plugin = FleetDetector::default();
 
             let (mock, mut handle) = tower_test::mock::pair::<router::Request, router::Response>();
-            let mut bad_request_router_service = plugin.router_service(mock.boxed());
+            let mut bad_request_router_service = plugin.router_service(mock.boxed_clone());
 
             let router_req = router::Request::fake_builder()
                 .body(router::body::from_bytes("request"))
@@ -641,7 +646,7 @@ mod tests {
             // GIVEN an http client service request with a complete body
             let (mock, mut handle) = tower_test::mock::pair::<HttpRequest, HttpResponse>();
             let mut bad_request_http_client_service =
-                plugin.http_client_service("subgraph", mock.boxed());
+                plugin.http_client_service("subgraph", mock.boxed_clone());
 
             let http_client_req = HttpRequest {
                 http_request: http::Request::builder()
@@ -707,7 +712,7 @@ mod tests {
             // GIVEN an http client service request with a streaming body
             let (mock, mut handle) = tower_test::mock::pair::<HttpRequest, HttpResponse>();
             let mut bad_request_http_client_service =
-                plugin.http_client_service("subgraph", mock.boxed());
+                plugin.http_client_service("subgraph", mock.boxed_clone());
 
             let http_client_req = HttpRequest {
                 http_request: http::Request::builder()
@@ -854,7 +859,7 @@ nodev   cgroup
 
             // GIVEN a router service with request and response bodies that have exact size hints
             let (mock, mut handle) = tower_test::mock::pair::<router::Request, router::Response>();
-            let mut router_service = plugin.router_service(mock.boxed());
+            let mut router_service = plugin.router_service(mock.boxed_clone());
 
             let router_req = router::Request::fake_builder()
                 .body(router::body::from_bytes("test request"))
@@ -912,7 +917,7 @@ nodev   cgroup
 
             // GIVEN a router service with a streaming body (no exact size hint)
             let (mock, mut handle) = tower_test::mock::pair::<router::Request, router::Response>();
-            let mut router_service = plugin.router_service(mock.boxed());
+            let mut router_service = plugin.router_service(mock.boxed_clone());
 
             let router_req = router::Request::fake_builder()
                 .body(router::body::from_result_stream(futures::stream::once(

@@ -1,0 +1,54 @@
+---
+source: apollo-router/src/configuration/compatibility.rs
+description: "cors policies, apq, persisted queries, batching, limits, health check, subscription, a hidden built-in plugin and a custom plugin"
+expression: changed_settings(&config)
+---
+{
+  "/apq/enabled": false,
+  "/batching/enabled": true,
+  "/cors/policies": [
+    {
+      "allow_credentials": true,
+      "allow_headers": [],
+      "expose_headers": [],
+      "match_origins": [],
+      "max_age": null,
+      "methods": null,
+      "origins": [
+        "https://studio.apollographql.com"
+      ],
+      "private_network_access": null
+    }
+  ],
+  "/health_check/path": "/healthz",
+  "/limits/router/max_depth": 100,
+  "/persisted_queries/enabled": true,
+  "/persisted_queries/safelist/enabled": true,
+  "/persisted_queries/safelist/require_id": true,
+  "/plugins": {
+    "apollo_testing.my_test_plugin": {}
+  },
+  "/response_cache": {
+    "enabled": false,
+    "subgraph": {}
+  },
+  "/subscription": {
+    "enabled": true,
+    "mode": {
+      "passthrough": {
+        "all": {
+          "path": "/subscriptions"
+        }
+      }
+    },
+    "deduplication": {
+      "all": {
+        "enabled": true,
+        "ignored_headers": [
+          "x-request-id"
+        ]
+      }
+    }
+  },
+  "/supergraph/introspection": true
+}

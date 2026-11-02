@@ -557,7 +557,7 @@ impl CopyDirective for SchemaDefinitionPosition {
                     subgraph_name_replacements,
                     connect_directive_names,
                 ) {
-                    self.insert_directive(to, updated_directive.into())
+                    self.insert_directive(to, updated_directive)
                 } else {
                     Ok(())
                 }
@@ -609,7 +609,7 @@ macro_rules! impl_copy_directive {
                                         subgraph_name_replacements,
                                         connect_directive_names
                                     ) && self.get(to.schema()).is_ok() {
-                                        self.insert_directive(to, updated_directive.into())
+                                        self.insert_directive(to, updated_directive)
                                     } else {
                                         Ok(())
                                     }

@@ -143,13 +143,13 @@ async fn execute_and_validate_metrics(
 /// regardless of the configured temporality for other metrics.
 async fn test_updown_counter_with_temporality(config: &str) -> Result<(), BoxError> {
     let mock_server = mock_otlp_server(1..).await;
-    let config = config.replace("<otel-collector-endpoint>", &mock_server.uri());
 
     let mut router = IntegrationTest::builder()
         .telemetry(Telemetry::Otlp {
             endpoint: Some(format!("{}/v1/traces", mock_server.uri())),
         })
-        .config(&config)
+        .config(config)
+        .env_entry("TEST_CONFIG_COLLECTOR_ENDPOINT", mock_server.uri())
         .build()
         .await;
 

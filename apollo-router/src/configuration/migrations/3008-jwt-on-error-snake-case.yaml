@@ -1,0 +1,17 @@
+description: |
+  `authentication.router.jwt.on_error`'s values have been renamed to snake_case for
+  consistency with the rest of the router configuration: `Error` -> `error`, `Continue` ->
+  `continue`, `RedactedError` -> `redacted_error`.
+actions:
+  - type: change
+    path: authentication.router.jwt.on_error
+    from: Error
+    to: error
+  - type: change
+    path: authentication.router.jwt.on_error
+    from: Continue
+    to: continue
+  - type: change
+    path: authentication.router.jwt.on_error
+    from: RedactedError
+    to: redacted_error

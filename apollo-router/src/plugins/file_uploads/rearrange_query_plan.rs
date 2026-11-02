@@ -24,7 +24,7 @@ pub(super) fn rearrange_query_plan(
     query_plan: &QueryPlan,
     map: &MapField,
 ) -> UploadResult<QueryPlan> {
-    let root = &query_plan.root;
+    let root = query_plan.root.as_ref();
     let mut variable_ranges = HashMap::with_capacity(map.per_variable.len());
     for (name, submap) in map.per_variable.iter() {
         variable_ranges.insert(
@@ -38,13 +38,14 @@ pub(super) fn rearrange_query_plan(
         );
     }
 
-    let root = rearrange_plan_node(root, &mut IndexMap::default(), &variable_ranges)?;
+    let root = root
+        .map(|root| rearrange_plan_node(root, &mut IndexMap::default(), &variable_ranges))
+        .transpose()?;
     Ok(QueryPlan {
-        root: Arc::new(root),
+        root: root.map(Arc::new),
         usage_reporting: query_plan.usage_reporting.clone(),
         formatted_query_plan: query_plan.formatted_query_plan.clone(),
         query: query_plan.query.clone(),
-        query_metrics: query_plan.query_metrics,
         estimated_size: Default::default(),
     })
 }

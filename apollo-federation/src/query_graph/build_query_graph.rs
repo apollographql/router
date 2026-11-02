@@ -4,7 +4,7 @@ use apollo_compiler::Name;
 use apollo_compiler::Schema;
 use apollo_compiler::collections::IndexMap;
 use apollo_compiler::collections::IndexSet;
-use apollo_compiler::schema::DirectiveList as ComponentDirectiveList;
+use apollo_compiler::schema::DirectiveList;
 use apollo_compiler::schema::ExtendedType;
 use apollo_compiler::validation::Valid;
 use itertools::Itertools;
@@ -289,18 +289,25 @@ impl BaseQueryGraphBuilder {
     }
 
     /// Precompute which followup edges for a given edge are non-trivial.
+    ///
+    /// The followups of an edge only depend on its tail node and on its transition (and, for key
+    /// edges, on its conditions). So we compute the out edges of each node once, and share the
+    /// resulting lists between all the edges pointing to that node that would produce the same
+    /// list. This matters for graphs with many subgraphs, where every root type node has an edge
+    /// to every other root type node (and similarly for entities sharing a key).
     fn precompute_non_trivial_followup_edges(&mut self) -> Result<(), FederationError> {
-        let mut out_edges_cache = IndexMap::default();
-        for edge in self.query_graph.graph.edge_indices() {
-            let edge_weight = self.query_graph.edge_weight(edge)?.clone();
-            let (_, tail) = self.query_graph.edge_endpoints(edge)?;
-            let out_edges = out_edges_cache
-                .entry(tail)
-                .or_insert_with(|| self.query_graph.out_edge_ids(tail));
-            let mut non_trivial_followups = Vec::with_capacity(out_edges.len());
-            for followup_edge in out_edges {
-                let followup_edge_weight = self.query_graph.edge_weight(*followup_edge)?;
-                match edge_weight.transition {
+        let graph = &self.query_graph.graph;
+        let empty: Arc<[EdgeIndex]> = Arc::from([]);
+        let mut non_trivial_followup_edges = vec![empty; graph.edge_count()];
+        for tail in graph.node_indices() {
+            let out_edges = self.query_graph.out_edges(tail);
+            let all_followups: Arc<[EdgeIndex]> = out_edges.iter().map(|e| e.id()).collect();
+            let mut non_root_type_followups: Option<Arc<[EdgeIndex]>> = None;
+            let mut followups_by_key_conditions: Vec<(&Arc<SelectionSet>, Arc<[EdgeIndex]>)> =
+                Vec::new();
+            for edge_ref in graph.edges_directed(tail, Direction::Incoming) {
+                let edge_weight = edge_ref.weight();
+                let followups = match edge_weight.transition {
                     QueryGraphEdgeTransition::KeyResolution => {
                         // After taking a key from subgraph A to B, there is no point of following
                         // that up with another key to subgraph C if that key has the same
@@ -309,62 +316,79 @@ impl BaseQueryGraphBuilder {
                         // to also have a key (with the same conditions X) from A to C, and so it's
                         // that later key we should be using in the first place. In other words,
                         // it's never better to do 2 hops rather than 1.
-                        if matches!(
-                            followup_edge_weight.transition,
-                            QueryGraphEdgeTransition::KeyResolution
-                        ) {
-                            let Some(conditions) = &edge_weight.conditions else {
-                                return Err(SingleFederationError::Internal {
-                                    message: "Key resolution edge unexpectedly missing conditions"
-                                        .to_owned(),
-                                }
-                                .into());
-                            };
-                            let Some(followup_conditions) = &followup_edge_weight.conditions else {
-                                return Err(SingleFederationError::Internal {
-                                    message: "Key resolution edge unexpectedly missing conditions"
-                                        .to_owned(),
-                                }
-                                .into());
-                            };
-
-                            if conditions == followup_conditions {
-                                continue;
+                        let Some(conditions) = &edge_weight.conditions else {
+                            return Err(SingleFederationError::Internal {
+                                message: "Key resolution edge unexpectedly missing conditions"
+                                    .to_owned(),
                             }
+                            .into());
+                        };
+                        if let Some((_, followups)) =
+                            followups_by_key_conditions.iter().find(|(other, _)| {
+                                Arc::ptr_eq(other, conditions) || other == &conditions
+                            })
+                        {
+                            followups.clone()
+                        } else {
+                            let mut followups = Vec::with_capacity(out_edges.len());
+                            for followup_edge_ref in &out_edges {
+                                let followup_edge_weight = followup_edge_ref.weight();
+                                if matches!(
+                                    followup_edge_weight.transition,
+                                    QueryGraphEdgeTransition::KeyResolution
+                                ) {
+                                    let Some(followup_conditions) =
+                                        &followup_edge_weight.conditions
+                                    else {
+                                        return Err(SingleFederationError::Internal {
+                                            message: "Key resolution edge unexpectedly missing conditions"
+                                                .to_owned(),
+                                        }
+                                        .into());
+                                    };
+                                    if conditions == followup_conditions {
+                                        continue;
+                                    }
+                                }
+                                followups.push(followup_edge_ref.id());
+                            }
+                            let followups: Arc<[EdgeIndex]> = followups.into();
+                            followups_by_key_conditions.push((conditions, followups.clone()));
+                            followups
                         }
                     }
-                    QueryGraphEdgeTransition::RootTypeResolution { .. } => {
-                        // A 'RootTypeResolution' means that a query reached the query type (or
-                        // another root type) in some subgraph A and we're looking at jumping to
-                        // another subgraph B. But like for keys, there is no point in trying to
-                        // jump directly to yet another subpraph C from B, since we can always jump
-                        // directly from A to C and it's better.
-                        if matches!(
-                            followup_edge_weight.transition,
-                            QueryGraphEdgeTransition::RootTypeResolution { .. }
-                        ) {
-                            continue;
-                        }
+                    // A 'RootTypeResolution' means that a query reached the query type (or
+                    // another root type) in some subgraph A and we're looking at jumping to
+                    // another subgraph B. But like for keys, there is no point in trying to
+                    // jump directly to yet another subgraph C from B, since we can always jump
+                    // directly from A to C and it's better.
+                    //
+                    // 'SubgraphEnteringTransition' is somewhat similar except that we're
+                    // starting the query. Still, we shouldn't do "start of query" -> B -> C,
+                    // since we can do "start of query" -> C and that's always better.
+                    QueryGraphEdgeTransition::RootTypeResolution { .. }
+                    | QueryGraphEdgeTransition::SubgraphEnteringTransition => {
+                        non_root_type_followups
+                            .get_or_insert_with(|| {
+                                out_edges
+                                    .iter()
+                                    .filter(|e| {
+                                        !matches!(
+                                            e.weight().transition,
+                                            QueryGraphEdgeTransition::RootTypeResolution { .. }
+                                        )
+                                    })
+                                    .map(|e| e.id())
+                                    .collect()
+                            })
+                            .clone()
                     }
-                    QueryGraphEdgeTransition::SubgraphEnteringTransition => {
-                        // This is somewhat similar to 'RootTypeResolution' except that we're
-                        // starting the query. Still, we shouldn't do "start of query" -> B -> C,
-                        // since we can do "start of query" -> C and that's always better.
-                        if matches!(
-                            followup_edge_weight.transition,
-                            QueryGraphEdgeTransition::RootTypeResolution { .. }
-                        ) {
-                            continue;
-                        }
-                    }
-                    _ => {}
-                }
-                non_trivial_followups.push(*followup_edge);
+                    _ => all_followups.clone(),
+                };
+                non_trivial_followup_edges[edge_ref.id().index()] = followups;
             }
-            self.query_graph
-                .non_trivial_followup_edges
-                .insert(edge, non_trivial_followups);
         }
+        self.query_graph.non_trivial_followup_edges = non_trivial_followup_edges;
         Ok(())
     }
 }
@@ -467,14 +491,13 @@ impl SchemaQueryGraphBuilder {
             .base
             .query_graph
             .schema()?
-            .get_type(&root_type_name.name)?
+            .get_type(root_type_name.as_ref())?
         {
             TypeDefinitionPosition::Object(pos) => pos,
             _ => {
                 return Err(SingleFederationError::Internal {
                     message: format!(
-                        "Root type \"{}\" was unexpectedly not an object type",
-                        root_type_name.name,
+                        "Root type \"{root_type_name}\" was unexpectedly not an object type",
                     ),
                 }
                 .into());
@@ -979,37 +1002,22 @@ impl SchemaQueryGraphBuilder {
                             other_type.subgraph_runtime_type_positions.contains(type_pos) &&
                                 !intersecting_local_runtime_type_positions.contains(type_pos)
                         };
-                        // TODO: we're currently _never_ adding the edge if the target/"to" type is
-                        // a union. We shouldn't be doing that, this will genuinely make some cases
-                        // less efficient than they could be (though those cases are admittedly a
-                        // bit convoluted), but this make sense *until*
-                        // https://github.com/apollographql/federation/issues/2256 gets fixed.
-                        // Because until then, we do not properly track unions through composition,
-                        // and that means there is never a difference (in the query planner) between
-                        // a local union definition and the supergraph one, even if that different
-                        // actually exists. And so, never type-exploding in that case is somewhat
-                        // safer, as not-type-exploding is ultimately an optimisation. Please note
-                        // that this is *not* a fix for #2256, and most of the issues created by
-                        // #2256 still needs fixing, but it avoids making it even worth for a few
-                        // corner cases. We should remove the `isUnionType` below once the
-                        // fix for #2256 is implemented.
-                        if !(matches!(
-                            t2.abstract_type_definition_position,
-                            AbstractTypeDefinitionPosition::Union(_)
-                        ) || t2
+                        // This relies on the local union members being accurate, which requires a
+                        // supergraph recording them with `@join__unionMember` (join v0.3+, see
+                        // https://github.com/apollographql/federation/issues/2256). Union members
+                        // extracted from older supergraphs are synthesized from the supergraph's
+                        // and may claim members the subgraph never declared.
+                        if !t2
                             .api_runtime_type_positions
                             .iter()
-                            .any(|rt| is_in_local_other_type_but_not_local_intersection(rt, t1)))
+                            .any(|rt| is_in_local_other_type_but_not_local_intersection(rt, t1))
                         {
                             add_t1_to_t2 = true;
                         }
-                        if !(matches!(
-                            t1.abstract_type_definition_position,
-                            AbstractTypeDefinitionPosition::Union(_)
-                        ) || t1
+                        if !t1
                             .api_runtime_type_positions
                             .iter()
-                            .any(|rt| is_in_local_other_type_but_not_local_intersection(rt, t2)))
+                            .any(|rt| is_in_local_other_type_but_not_local_intersection(rt, t2))
                         {
                             add_t2_to_t1 = true;
                         }
@@ -1240,6 +1248,8 @@ impl FederatedQueryGraphBuilder {
     /// subgraphs (and for @defer, like for @key, we also add self-node loops). This encodes the
     /// fact that if a field returns a root type, we can always query any subgraph from that point.
     fn add_root_edges(&mut self) -> Result<(), FederationError> {
+        // There is a root type resolution edge between every pair of subgraphs, so we only stage
+        // the endpoints here (instead of the full edge data) and reserve the edges upfront.
         let mut new_edges = Vec::new();
         for (source, root_kinds_to_nodes) in &self.base.query_graph.root_kinds_to_nodes_by_source {
             if *source == self.base.query_graph.current_source {
@@ -1254,12 +1264,7 @@ impl FederatedQueryGraphBuilder {
                     .ok_or_else(|| SingleFederationError::Internal {
                         message: "Federated root node unexpectedly missing".to_owned(),
                     })?;
-                new_edges.push(QueryGraphEdgeData {
-                    head: *federated_root_node,
-                    tail: *root_node,
-                    transition: QueryGraphEdgeTransition::SubgraphEnteringTransition,
-                    conditions: None,
-                });
+                new_edges.push((*federated_root_node, *root_node, None));
                 for (other_source, other_root_kinds_to_nodes) in
                     &self.base.query_graph.root_kinds_to_nodes_by_source
                 {
@@ -1267,20 +1272,18 @@ impl FederatedQueryGraphBuilder {
                         continue;
                     }
                     if let Some(other_root_node) = other_root_kinds_to_nodes.get(root_kind) {
-                        new_edges.push(QueryGraphEdgeData {
-                            head: *root_node,
-                            tail: *other_root_node,
-                            transition: QueryGraphEdgeTransition::RootTypeResolution {
-                                root_kind: *root_kind,
-                            },
-                            conditions: None,
-                        })
+                        new_edges.push((*root_node, *other_root_node, Some(*root_kind)));
                     }
                 }
             }
         }
-        for new_edge in new_edges {
-            new_edge.add_to(&mut self.base)?;
+        self.base.query_graph.graph.reserve_edges(new_edges.len());
+        for (head, tail, root_kind) in new_edges {
+            let transition = match root_kind {
+                Some(root_kind) => QueryGraphEdgeTransition::RootTypeResolution { root_kind },
+                None => QueryGraphEdgeTransition::SubgraphEnteringTransition,
+            };
+            self.base.add_edge(head, tail, transition, None, None)?;
         }
         Ok(())
     }
@@ -1670,7 +1673,7 @@ impl FederatedQueryGraphBuilder {
 
         for (edge, condition) in edge_to_conditions {
             let mutable_edge = self.base.query_graph.edge_weight_mut(edge)?;
-            mutable_edge.override_condition = Some(condition);
+            mutable_edge.override_condition = Some(Box::new(condition));
         }
         self.base.query_graph.override_condition_labels = override_condition_labels;
 
@@ -1819,11 +1822,10 @@ impl FederatedQueryGraphBuilder {
             let Some(required_contexts) = contexts.get(obj_field) else {
                 continue;
             };
-            self.base
-                .query_graph
-                .edge_weight_mut(edge)?
-                .required_contexts
-                .extend_from_slice(required_contexts);
+            let edge_weight = self.base.query_graph.edge_weight_mut(edge)?;
+            let mut contexts = std::mem::take(&mut edge_weight.required_contexts).into_vec();
+            contexts.extend_from_slice(required_contexts);
+            edge_weight.required_contexts = contexts.into();
         }
 
         // Add the context argument mapping
@@ -2447,7 +2449,7 @@ impl QueryGraphEdgeData {
 }
 
 fn resolvable_key_applications<'doc>(
-    directives: &'doc ComponentDirectiveList,
+    directives: &'doc DirectiveList,
     key_directive_definition_name: &Name,
     federation_spec_definition: &'static FederationSpecDefinition,
 ) -> Result<Vec<KeyDirectiveArguments<'doc>>, FederationError> {

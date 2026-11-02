@@ -1,0 +1,20 @@
+---
+source: apollo-router/src/configuration/compatibility.rs
+description: flat headers.all.request migrates under an operations key
+expression: changed_settings(&config)
+---
+{
+  "/headers": {
+    "all": {
+      "request": {
+        "operations": [
+          {
+            "propagate": {
+              "named": "x-request-id"
+            }
+          }
+        ]
+      }
+    }
+  }
+}

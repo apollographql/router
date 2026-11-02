@@ -136,7 +136,7 @@ impl SpecDefinition for ContextSpecDefinition {
                 DirectiveLocation::Union,
             ],
             Some(DirectiveCompositionOptions {
-                supergraph_specification: &|v| CONTEXT_VERSIONS.get_dyn_minimum_required_version(v),
+                supergraph_specification: &|v| CONTEXT_VERSIONS.get_dyn_maximum_allowed_version(v),
                 static_argument_transform: Some(Rc::new(Self::static_argument_transform)),
                 use_join_directive: false,
             }),

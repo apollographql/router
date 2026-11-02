@@ -195,10 +195,12 @@ impl ValueExt for Value {
             }
             (_, Value::Null) => {}
             (Value::Object(_), Value::Array(_)) => {
-                failfast_debug!("trying to replace an object with an array");
+                // XXX(@goto-bus-stop): this should be fallible..?
+                tracing::debug!("trying to replace an object with an array");
             }
             (Value::Array(_), Value::Object(_)) => {
-                failfast_debug!("trying to replace an array with an object");
+                // XXX(@goto-bus-stop): this should be fallible..?
+                tracing::debug!("trying to replace an array with an object");
             }
             (a, b) => {
                 if b != Value::Null {
@@ -242,10 +244,12 @@ impl ValueExt for Value {
             }
             (_, Value::Null) => {}
             (Value::Object(_), Value::Array(_)) => {
-                failfast_debug!("trying to replace an object with an array");
+                // XXX(@goto-bus-stop): this should be fallible..?
+                tracing::debug!("trying to replace an object with an array");
             }
             (Value::Array(_), Value::Object(_)) => {
-                failfast_debug!("trying to replace an array with an object");
+                // XXX(@goto-bus-stop): this should be fallible..?
+                tracing::debug!("trying to replace an array with an object");
             }
             (a, b) => {
                 if b != Value::Null {

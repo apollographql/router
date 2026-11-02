@@ -131,43 +131,6 @@ The attributes that the OpenTelemetry spec defines as `opt-in` must be configure
 
 </Note>
 
-### `mode` 
-
-The `mode` option enables the router spans to either use legacy attributes in the router, or those defined in the OpenTelemetry specification.
-
-Valid values:
-
-* `spec_compliant` (default)
-* `deprecated`
-
-#### `spec_compliant`
-
-This mode is the default and follows the OpenTelemetry spec.
-
-```yaml title="router.yaml"
-telemetry:
-  instrumentation:
-    spans:
-      mode: spec_compliant
-```
-
-#### `deprecated`
-
-This mode follows the previous behavior which is deprecated. The performance of this mode is significantly worse because many more attributes are added to spans, including attributes that do not follow OpenTelemetry conventions.
-
-```yaml title="router.yaml"
-telemetry:
-  instrumentation:
-    spans:
-      mode: deprecated
-```
-
-<Note>
-
-The `mode` option will eventually be removed in a future release. 
-
-</Note>
-
 ## Span status
 
 By default spans are marked in error only if the http status code is different than 200. If you want to mark a span in error for other reason you can override the `otel.status_code` attribute which is responsible to mark a span in error or not.
@@ -214,7 +177,6 @@ telemetry:
   instrumentation:
     spans:
       default_attribute_requirement_level: required
-      mode: spec_compliant
       router:
         attributes:
           # Standard attributes (http)
@@ -305,5 +267,4 @@ telemetry:
 | `attributes`                          | [standard attributes](/router/configuration/telemetry/instrumentation/standard-attributes)\|[selectors](/router/configuration/telemetry/instrumentation/selectors)    |                                | The attributes of the span.              |
 | `condition`                           | [conditions](/router/configuration/telemetry/instrumentation/conditions)                                                |                                | The condition for adding a custom attribute. |
 | `default_attribute_requirement_level` | `required`\|`recommended`                                                 | `required`                     | The default attribute requirement level. |
-| `mode`                                | `spec_compliant` \| `deprecated`                                          | `spec_compliant`                   | The attributes of the span.              |
 

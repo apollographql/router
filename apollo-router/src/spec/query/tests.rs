@@ -2,9 +2,15 @@ use apollo_compiler::parser::Parser;
 use insta::assert_json_snapshot;
 use serde_json_bytes::json;
 use test_log::test;
+use tower::ServiceExt;
 
 use super::*;
+use crate::compute_job::ComputeJobType;
 use crate::json_ext::ValueExt;
+use crate::plugins::authorization::CacheKeyMetadata;
+use crate::query_planner::query_planner_service::QueryPlannerService;
+use crate::services::QueryPlannerRequest;
+use crate::services::query_planner::PlanOptions;
 
 macro_rules! assert_eq_and_ordered {
     ($a:expr, $b:expr $(,)?) => {
@@ -140,8 +146,7 @@ impl FormatTest {
             self.variables
                 .unwrap_or_else(|| Value::Object(Object::default()))
                 .as_object()
-                .unwrap()
-                .clone(),
+                .unwrap(),
             api_schema,
             BooleanValues { bits: 0 },
             true,
@@ -3609,6 +3614,115 @@ fn variable_validation_enforce_mode() {
 }
 
 #[test]
+fn variable_validation_oneof_input() {
+    let schema =
+        "input Choice @oneOf { a: Int, b: String } type Query { x(choice: Choice!): String }";
+    let query = "query($c: Choice!) { x(choice: $c) }";
+
+    // Exactly one non-null field: valid
+    assert_validation(schema, query, json!({"c": {"a": 1}}));
+    assert_validation(schema, query, json!({"c": {"b": "hello"}}));
+
+    // Multiple fields: invalid, error should mention field count
+    let res = run_validation(
+        with_supergraph_boilerplate(schema, "Query"),
+        query,
+        json!({"c": {"a": 1, "b": "hello"}}),
+        Mode::Enforce,
+    );
+    let err = res.expect_err("multiple fields on @oneOf should fail validation");
+    let msg = err.errors[0].message.as_str();
+    assert!(
+        msg.contains("exactly one") && !msg.contains("non-null"),
+        "multiple fields should report a field count error, got: {msg}"
+    );
+
+    // Empty object: invalid, error should mention field count
+    let res = run_validation(
+        with_supergraph_boilerplate(schema, "Query"),
+        query,
+        json!({"c": {}}),
+        Mode::Enforce,
+    );
+    let err = res.expect_err("empty @oneOf input should fail validation");
+    let msg = err.errors[0].message.as_str();
+    assert!(
+        msg.contains("exactly one") && !msg.contains("non-null"),
+        "empty object should report a field count error, got: {msg}"
+    );
+
+    // Single field with explicit null: invalid, error should mention null
+    let res = run_validation(
+        with_supergraph_boilerplate(schema, "Query"),
+        query,
+        json!({"c": {"a": null}}),
+        Mode::Enforce,
+    );
+    let err = res.expect_err("null value on @oneOf field should fail validation");
+    let msg = err.errors[0].message.as_str();
+    assert!(
+        msg.contains("non-null"),
+        "null field should report a non-null error, got: {msg}"
+    );
+
+    // Two fields where one is explicitly null: still two keys provided,
+    // so rejected as a field count error per the spec, not a null error.
+    let res = run_validation(
+        with_supergraph_boilerplate(schema, "Query"),
+        query,
+        json!({"c": {"a": 1, "b": null}}),
+        Mode::Enforce,
+    );
+    let err = res.expect_err("two fields with one null on @oneOf should fail validation");
+    let msg = err.errors[0].message.as_str();
+    assert!(
+        msg.contains("exactly one") && !msg.contains("non-null"),
+        "two keys (one null) should report a field count error, got: {msg}"
+    );
+
+    // Mixed inline literal + variable: apollo-compiler's static validation
+    // rejects this at parse time since two fields are present in the literal
+    // regardless of whether the variable has a runtime value.
+    let supergraph = with_supergraph_boilerplate(schema, "Query");
+    let parsed_schema =
+        Schema::parse(&supergraph, &Default::default()).expect("could not parse schema");
+    let parse_result = Query::parse(
+        "query($b: String) { x(choice: { a: 1, b: $b }) }",
+        None,
+        &parsed_schema,
+        &Default::default(),
+    );
+    assert!(
+        parse_result.is_err(),
+        "inline @oneOf with two fields should fail static validation"
+    );
+}
+
+#[test]
+fn variable_validation_oneof_null_with_unknown_field_in_measure_mode() {
+    let schema =
+        "input Choice @oneOf { a: Int, b: String } type Query { x(choice: Choice!): String }";
+    let query = "query($c: Choice!) { x(choice: $c) }";
+
+    // In measure mode, unknown fields are warned but not rejected. The @oneOf
+    // null check must inspect the recognized field, not just the first key in
+    // iteration order.
+    let res = run_validation(
+        with_supergraph_boilerplate(schema, "Query"),
+        query,
+        json!({"c": {"unknownField": "x", "a": null}}),
+        Mode::Measure,
+    );
+    let err = res
+        .expect_err("null recognized field on @oneOf should fail even with unknown fields present");
+    let msg = err.errors[0].message.as_str();
+    assert!(
+        msg.contains("non-null"),
+        "should report a non-null error for the recognized field, got: {msg}"
+    );
+}
+
+#[test]
 #[rstest::rstest]
 #[case::top_level_unexpected_field(
     json!({"content": "Hello", "canvas": [], "unknownField": "unknown"}),
@@ -7026,7 +7140,7 @@ fn fragment_on_interface_on_query() {
 
     query.format_response(
         &mut response,
-        Default::default(),
+        &Object::new(),
         api_schema,
         BooleanValues { bits: 0 },
         true,
@@ -7621,6 +7735,156 @@ fn test_query_not_named_query() {
     );
 }
 
+const AUTHENTICATED_INTERFACE_SCHEMA: &str = r#"
+    schema
+        @link(url: "https://specs.apollo.dev/link/v1.0")
+        @link(url: "https://specs.apollo.dev/join/v0.3", for: EXECUTION)
+        @link(url: "https://specs.apollo.dev/authenticated/v0.1", for: SECURITY)
+    {
+        query: Query
+    }
+    directive @link(url: String, as: String, for: link__Purpose, import: [link__Import]) repeatable on SCHEMA
+    directive @join__graph(name: String!, url: String!) on ENUM_VALUE
+    directive @join__type(graph: join__Graph!, key: join__FieldSet, extension: Boolean! = false, resolvable: Boolean! = true, isInterfaceObject: Boolean! = false) repeatable on OBJECT | INTERFACE | UNION | ENUM | INPUT_OBJECT | SCALAR
+    directive @join__implements(graph: join__Graph!, interface: String!) repeatable on OBJECT | INTERFACE
+    directive @join__field(graph: join__Graph, requires: join__FieldSet, provides: join__FieldSet, type: String, external: Boolean, override: String, usedOverridden: Boolean) repeatable on FIELD_DEFINITION | INPUT_FIELD_DEFINITION
+    directive @join__unionMember(graph: join__Graph!, member: String!) repeatable on UNION
+    directive @join__enumValue(graph: join__Graph!) repeatable on ENUM_VALUE
+    directive @authenticated on OBJECT | FIELD_DEFINITION | INTERFACE | SCALAR | ENUM
+
+    scalar join__FieldSet
+    scalar link__Import
+
+    enum link__Purpose {
+      SECURITY
+      EXECUTION
+    }
+    enum join__Graph {
+        TEST @join__graph(name: "test", url: "http://localhost:4001/graphql")
+    }
+
+    type Query @join__type(graph: TEST) {
+        thing: Thing
+    }
+
+    interface Thing @join__type(graph: TEST) {
+        id: ID
+    }
+
+    type Foo implements Thing
+    @join__type(graph: TEST)
+    @join__implements(graph: TEST, interface: "Thing") {
+        id: ID
+        inline: String
+        spread: String
+        secret: String @authenticated
+    }
+"#;
+
+/// Plans `query_str` as an unauthenticated request and returns the original `Query` with
+/// `filtered_query` populated, alongside the schema.
+///
+/// The pair comes from `QueryPlannerService`, so the filtered `Query` is the one
+/// `filter_query` produces, marked `is_original = false` by the planner.
+async fn authorization_filtered_query(query_str: &str) -> (Arc<Query>, Arc<Schema>) {
+    let configuration: Configuration = serde_json::from_value(serde_json::json!({
+        "authorization": { "directives": { "enabled": true } }
+    }))
+    .unwrap();
+    let configuration = Arc::new(configuration);
+    let schema = Arc::new(Schema::parse(AUTHENTICATED_INTERFACE_SCHEMA, &configuration).unwrap());
+    let doc = Query::parse_document(query_str, None, &schema, &configuration).unwrap();
+
+    let planner = QueryPlannerService::for_test(schema.clone(), configuration.clone()).unwrap();
+    let response = planner
+        .oneshot(QueryPlannerRequest {
+            query: query_str.to_string(),
+            operation_name: None,
+            document: doc,
+            metadata: CacheKeyMetadata::default(),
+            plan_options: PlanOptions::default(),
+            compute_job_type: ComputeJobType::QueryPlanning,
+        })
+        .await
+        .unwrap();
+
+    let query = match response.content {
+        Some(plan) => plan.query.clone(),
+        _ => panic!("filtering removed only `secret`, so the planner must return a plan"),
+    };
+    assert!(
+        query.filtered_query.is_some(),
+        "filtering must have produced a second Query, otherwise the two-pass formatting \
+         under test never runs"
+    );
+
+    (query, schema)
+}
+
+/// Formats `data` through [`Query::format_response_filtered_then_original`] and returns
+/// the resulting `thing` object.
+fn format_filtered_then_original(query: &Query, schema: &Schema, data: Value) -> Value {
+    let mut response = crate::graphql::Response::builder().data(data).build();
+
+    query.format_response_filtered_then_original(
+        &mut response,
+        &Object::new(),
+        schema.api_schema(),
+        BooleanValues { bits: 0 },
+        true,
+    );
+
+    response
+        .data
+        .as_ref()
+        .unwrap()
+        .get("thing")
+        .unwrap()
+        .clone()
+}
+
+/// Double-applying response formatting on an abstract type should apply the
+/// correct fragment spread.
+/// `__typename` is not selected by the input query, but internally we have to
+/// pass it along to the final formatting pass, else it wouldn't know which concrete
+/// type it's working on.
+///
+/// One fragment form per test: each form passes `__typename` along independently, so a
+/// query carrying both keeps its fields alive when either does.
+#[tokio::test]
+async fn filtered_inline_fragment_on_abstract_type() {
+    // `secret` is `@authenticated`, so filtering drops it and leaves `inline`.
+    let (query, schema) =
+        authorization_filtered_query("{ thing { id ... on Foo { inline secret } } }").await;
+
+    // What the subgraph returns for the filtered plan: `secret` was never requested.
+    let thing = format_filtered_then_original(
+        &query,
+        &schema,
+        json! {{ "thing": { "__typename": "Foo", "id": "1", "inline": "inline" } }},
+    );
+
+    assert_eq!(thing.get("inline"), Some(&json!("inline")));
+}
+
+/// The fragment-spread counterpart of `filtered_inline_fragment_on_abstract_type`,
+/// covering the second `!is_original` branch in `apply_selection_set`.
+#[tokio::test]
+async fn filtered_fragment_spread_on_abstract_type() {
+    let (query, schema) = authorization_filtered_query(
+        "{ thing { id ...Spread } } fragment Spread on Foo { spread secret }",
+    )
+    .await;
+
+    let thing = format_filtered_then_original(
+        &query,
+        &schema,
+        json! {{ "thing": { "__typename": "Foo", "id": "1", "spread": "spread" } }},
+    );
+
+    assert_eq!(thing.get("spread"), Some(&json!("spread")));
+}
+
 #[test]
 fn filtered_defer_fragment() {
     let config = Configuration::default();
@@ -7739,7 +8003,7 @@ fn filtered_defer_fragment() {
 
     query.filtered_query.as_ref().unwrap().format_response(
         &mut response,
-        Object::new(),
+        &Object::new(),
         schema.api_schema(),
         BooleanValues { bits: 0 },
         true,
@@ -7749,7 +8013,7 @@ fn filtered_defer_fragment() {
 
     query.format_response(
         &mut response,
-        Object::new(),
+        &Object::new(),
         schema.api_schema(),
         BooleanValues { bits: 0 },
         true,

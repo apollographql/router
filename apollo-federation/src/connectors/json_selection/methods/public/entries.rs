@@ -157,7 +157,7 @@ fn entries_shape(
             entries.insert("key".to_string(), Shape::string([]));
             entries.insert("value".to_string(), Shape::unknown([]));
             Shape::list(
-                Shape::record(entries, method_name.shape_location(context.source_id())),
+                Shape::closed_record(entries, method_name.shape_location(context.source_id())),
                 method_name.shape_location(context.source_id()),
             )
         }

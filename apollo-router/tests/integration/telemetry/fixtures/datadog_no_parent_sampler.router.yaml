@@ -1,7 +1,7 @@
 telemetry:
   exporters:
     tracing:
-      experimental_response_trace_id:
+      response_trace_id:
         enabled: true
         header_name: apollo-custom-trace-id
         format: datadog
@@ -18,7 +18,6 @@ telemetry:
           scheduled_delay: 100ms
   instrumentation:
     spans:
-      mode: spec_compliant
       supergraph:
         attributes:
           graphql.operation.name: true

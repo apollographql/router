@@ -2,7 +2,7 @@
 source: apollo-federation/tests/composition/compose_cache_tag.rs
 expression: result.schema().schema()
 ---
-schema @link(url: "https://specs.apollo.dev/link/v1.0") @link(url: "https://specs.apollo.dev/join/v0.5", for: EXECUTION) @link(url: "https://specs.apollo.dev/cacheTag/v0.1", for: EXECUTION) {
+schema @link(url: "https://specs.apollo.dev/link/v1.0") @link(url: "https://specs.apollo.dev/join/v0.6", for: EXECUTION) @link(url: "https://specs.apollo.dev/cacheTag/v0.1", for: EXECUTION) {
   query: Query
 }
 

@@ -1,0 +1,4 @@
+telemetry:
+  apollo:
+    errors:
+      preview_extended_error_metrics: enabled

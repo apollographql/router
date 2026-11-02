@@ -322,8 +322,8 @@ fn test_defer_node_nested() {
     "###);
 }
 
-// QP missing ConditionNode bug (FED-505).
-// - Note: The correctness checker won't report this, since it's an over-fetching issue.
+// Formerly the QP missing ConditionNode bug (FED-505): the post-requires fetch for `s_p` used to
+// be executed unconditionally. It is now conditioned on `v0` like the field that triggers it.
 #[test]
 fn test_missing_boolean_condition_over_fetch() {
     let op_str = r#"
@@ -338,7 +338,7 @@ fn test_missing_boolean_condition_over_fetch() {
         }
       }
     "#;
-    // Note: `s_p -may-> s_p on P` is supposed to have `if v0` condition.
+    // Note: `s_p` is only requested under `@include(if: $v0)`, so it is conditioned on `v0`.
     let rs = plan_response_shape(op_str);
     insta::assert_snapshot!(rs, @r###"
     {
@@ -350,13 +350,13 @@ fn test_missing_boolean_condition_over_fetch() {
         id -may-> id on P if ¬v0
         a_p -may-> a_p on P if v0
         a_p -may-> a_p on P if ¬v0
-        s_p -may-> s_p on P
+        s_p -may-> s_p on P if v0
       }
     }
     "###);
 }
 
-// Related to FED-505, but QP is still correct in this case.
+// Related to FED-505; the QP was already correct in this case since both branches request `s_p`.
 #[test]
 fn test_missing_boolean_condition_still_correct() {
     let op_str = r#"
@@ -371,7 +371,7 @@ fn test_missing_boolean_condition_still_correct() {
         }
       }
     "#;
-    // Note: `s_p -may-> s_p on P` below is missing Boolean conditions, but still correct.
+    // Note: `s_p` is requested under both branches, so it carries both conditions.
     insta::assert_snapshot!(plan_response_shape(op_str), @r###"
     {
       test_i -----> test_i {
@@ -382,7 +382,8 @@ fn test_missing_boolean_condition_still_correct() {
         id -may-> id on P if ¬v0
         a_p -may-> a_p on P if v0
         a_p -may-> a_p on P if ¬v0
-        s_p -may-> s_p on P
+        s_p -may-> s_p on P if v0
+        s_p -may-> s_p on P if ¬v0
       }
     }
     "###);

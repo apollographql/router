@@ -32,6 +32,7 @@
 //! * [`otel`] - Global state management and initialization of the tracing subscriber
 //! * [`activation`] - State container for the activation phase, handles safe provider replacement
 //! * [`builder`] - Configuration change detection and construction of new providers
+//! * [`log_layers`] - Logging layers that keep locks off span callbacks
 //! * [`metrics`] - Building meter providers from configuration
 //! * [`tracing`] - Building trace providers from configuration
 use multimap::MultiMap;
@@ -46,9 +47,12 @@ use crate::plugins::telemetry::reload::builder::Builder;
 
 pub(crate) mod activation;
 pub(crate) mod builder;
+pub(crate) mod log_layers;
 pub(crate) mod metrics;
 pub(crate) mod otel;
 pub(crate) mod rate_limit;
+#[cfg(test)]
+mod testing;
 pub(crate) mod tracing;
 
 /// Prepares telemetry components for activation (Phase 1 of reload lifecycle).

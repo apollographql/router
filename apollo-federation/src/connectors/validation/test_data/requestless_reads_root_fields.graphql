@@ -1,0 +1,84 @@
+extend schema
+  @link(
+    url: "https://specs.apollo.dev/connect/v0.4"
+    import: ["@connect", "@source"]
+  )
+
+# Requestless `@connect` directives that consume `$root` (the response body,
+# which a requestless connector does not have), either by reading its fields
+# or by referring to it as a whole. Every field below should still trigger
+# `RequestlessSelectionUsesRequestData`, even when the reads are mixed in
+# with literal values:
+#
+# - `Query.groupAlias`: `price: { amount }` groups `$root.amount` under an
+#   alias, so it reads `amount` from `$root`.
+# - `Query.subselection`: `price { amount }` (no colon) descends into
+#   `$root.price`.
+# - `Query.literalAndField`: literal object with one real `$root` read.
+# - `Query.bareDollar`: bare `$`, the whole response body.
+# - `Query.bareAt`: bare `@`, the whole response body.
+# - `Query.aliasedDollar`: `everything: $`, the whole response body under
+#   an alias.
+scalar JSON
+
+type Price {
+  amount: Int
+}
+
+type Product {
+  id: ID!
+  name: String
+  price: Price
+}
+
+type Query {
+  groupAlias: Product
+    @connect(
+      selection: """
+      id: "sku-4417"
+      price: { amount }
+      """
+    )
+
+  subselection: Product
+    @connect(
+      selection: """
+      id: "sku-4417"
+      price { amount }
+      """
+    )
+
+  literalAndField: Product
+    @connect(
+      selection: """
+      id: "sku-4417"
+      name: $.name
+      price: { amount: 1395 }
+      """
+    )
+
+  bareDollar: JSON
+    @connect(
+      selection: """
+      $
+      """
+    )
+
+  bareAt: JSON
+    @connect(
+      selection: """
+      @
+      """
+    )
+
+  aliasedDollar: Wrapper
+    @connect(
+      selection: """
+      everything: $
+      """
+    )
+}
+
+type Wrapper {
+  everything: JSON
+}

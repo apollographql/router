@@ -1,0 +1,6 @@
+---
+source: apollo-router/src/configuration/compatibility.rs
+description: minimal supergraph listener
+expression: changed_settings(&config)
+---
+{}

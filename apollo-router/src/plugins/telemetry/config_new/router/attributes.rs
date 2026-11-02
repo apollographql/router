@@ -1,10 +1,6 @@
-use std::fmt::Debug;
-
 use opentelemetry::Key;
 use opentelemetry::KeyValue;
 use opentelemetry::baggage::BaggageExt;
-use schemars::JsonSchema;
-use serde::Deserialize;
 use tower::BoxError;
 use tracing::Span;
 
@@ -21,9 +17,8 @@ use crate::plugins::telemetry::otel::OpenTelemetrySpanExt;
 use crate::plugins::telemetry::otlp::TelemetryDataKind;
 use crate::services::router;
 
-#[derive(Deserialize, JsonSchema, Clone, Default, Debug)]
+#[apollo_configuration::configuration]
 #[cfg_attr(test, derive(PartialEq))]
-#[serde(deny_unknown_fields, default)]
 pub(crate) struct RouterAttributes {
     /// The datadog trace ID.
     /// This can be output in logs and used to correlate traces in Datadog.

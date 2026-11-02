@@ -418,7 +418,9 @@ fn matches_condition_for_kind(
     match directive.specified_argument_by_name("if") {
         Some(v) => match v.as_variable() {
             Some(directive_var) => conditions.condition_kind(directive_var) == Some(kind),
-            None => true,
+            // Hoisted conditions only track variables, so a literal condition is never covered
+            // by them. Removing `@include(if: false)` would make the subgraph resolve the field.
+            None => false,
         },
         // Directive without argument: unreachable in a valid document.
         None => false,

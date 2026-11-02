@@ -97,9 +97,9 @@ Standard attributes of the `supergraph` service:
 
 | Attribute                   | Values                              | Description                                 |
 |-----------------------------|-------------------------------------|---------------------------------------------|
-| `graphql.operation.name`    |                                     | The operation name from the graphql query (need `spec_compliant` [mode](/router/configuration/telemetry/instrumentation/spans/#mode) to disable it)   |
+| `graphql.operation.name`    |                                     | The operation name from the graphql query. Emitted when `default_attribute_requirement_level` is `recommended`, or when set to `true`. |
 | `graphql.operation.type`    | `query`\|`mutation`\|`subscription` | The operation kind from the subgraph query  |
-| `graphql.document`          |                                     | The GraphQL query to the subgraph (need `spec_compliant` [mode](/router/configuration/telemetry/instrumentation/spans/#mode) to disable it)          |
+| `graphql.document`          |                                     | The GraphQL query to the subgraph. Emitted when `default_attribute_requirement_level` is `recommended`, or when set to `true`. |
 
 <Caution>
 
@@ -122,10 +122,10 @@ Standard attributes of the `subgraph` service:
 
 | Attribute                          | Values                              | Description                                    |
 |------------------------------------|-------------------------------------|------------------------------------------------|
-| `subgraph.name`                    |                                     | The name of the subgraph (need `spec_compliant` [mode](/router/configuration/telemetry/instrumentation/spans/#mode) to disable it)                       |
-| `subgraph.graphql.operation.name`  |                                     | The operation name from the subgraph query  (need `spec_compliant` [mode](/router/configuration/telemetry/instrumentation/spans/#mode) to disable it)    |
+| `subgraph.name`                    |                                     | The name of the subgraph. Emitted by default; set to `false` to disable it. |
+| `subgraph.graphql.operation.name`  |                                     | The operation name from the subgraph query. Emitted when `default_attribute_requirement_level` is `recommended`, or when set to `true`. |
 | `subgraph.graphql.operation.type`  | `query`\|`mutation`\|`subscription` | The operation kind from the subgraph query     |
-| `subgraph.graphql.document`        |                                     | The GraphQL query to the subgraph  (need `spec_compliant` [mode](/router/configuration/telemetry/instrumentation/spans/#mode) to disable it)             |
+| `subgraph.graphql.document`        |                                     | The GraphQL query to the subgraph. Emitted when `default_attribute_requirement_level` is `recommended`, or when set to `true`. |
 | `http.request.resend_count`        | `true`\|`false`                     | Number of retries for an http request to a subgraph              |
 
 <Caution>

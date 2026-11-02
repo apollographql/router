@@ -1,5 +1,4 @@
 use bytes::Bytes;
-use derivative::Derivative;
 use serde::Deserialize;
 use serde::Serialize;
 use serde::de::DeserializeSeed;
@@ -12,11 +11,10 @@ use crate::json_ext::Object;
 use crate::json_ext::Value;
 
 /// A GraphQL `Request` used to represent both supergraph and subgraph requests.
-#[derive(Clone, Derivative, Serialize, Deserialize, Default)]
+#[derive(Clone, Debug, PartialEq, Eq, Hash, Serialize, Deserialize, Default)]
 // Note: if adding #[serde(deny_unknown_fields)],
 // also remove `Fields::Other` in `DeserializeSeed` impl.
 #[serde(rename_all = "camelCase")]
-#[derivative(Debug, PartialEq, Eq, Hash)]
 #[non_exhaustive]
 pub struct Request {
     /// The GraphQL operation (e.g., query, mutation) string.

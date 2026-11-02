@@ -1,0 +1,22 @@
+# Every field selected in some `->match` branch is resolved. `b` is only
+# selected in the second branch, next to `c`, which `T` doesn't have.
+extend schema
+  @link(
+    url: "https://specs.apollo.dev/connect/v0.4"
+    import: ["@connect", "@source"]
+  )
+  @source(name: "v2", http: { baseURL: "http://127.0.0.1" })
+
+type Query {
+  t: T
+    @connect(
+      source: "v2"
+      http: { GET: "/t" }
+      selection: """$->match([1, {"a": "x"}], [@, {"b": "y", "c": "z"}])"""
+    )
+}
+
+type T {
+  a: String
+  b: String
+}

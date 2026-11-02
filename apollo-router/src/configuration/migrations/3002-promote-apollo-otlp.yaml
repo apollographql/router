@@ -1,0 +1,15 @@
+description: |
+  The `experimental_otlp_endpoint`, `experimental_otlp_tracing_protocol`, and
+  `experimental_otlp_metrics_protocol` fields under `telemetry.apollo` have been
+  promoted out of experimental in Router 3.0. They are now `otlp_endpoint`,
+  `otlp_tracing_protocol`, and `otlp_metrics_protocol`.
+actions:
+  - type: move
+    from: telemetry.apollo.experimental_otlp_endpoint
+    to: telemetry.apollo.otlp_endpoint
+  - type: move
+    from: telemetry.apollo.experimental_otlp_tracing_protocol
+    to: telemetry.apollo.otlp_tracing_protocol
+  - type: move
+    from: telemetry.apollo.experimental_otlp_metrics_protocol
+    to: telemetry.apollo.otlp_metrics_protocol

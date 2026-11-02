@@ -68,7 +68,7 @@ impl PolicySpecDefinition {
                 DirectiveLocation::Enum,
             ],
             Some(DirectiveCompositionOptions {
-                supergraph_specification: &|v| POLICY_VERSIONS.get_dyn_minimum_required_version(v),
+                supergraph_specification: &|v| POLICY_VERSIONS.get_dyn_maximum_allowed_version(v),
                 static_argument_transform: None,
                 use_join_directive: false,
             }),

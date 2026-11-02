@@ -1,7 +1,7 @@
 telemetry:
   exporters:
     tracing:
-      experimental_response_trace_id:
+      response_trace_id:
         enabled: true
         header_name: apollo-custom-trace-id
       common:
@@ -11,14 +11,13 @@ telemetry:
       otlp:
         enabled: true
         protocol: http
-        endpoint: <otel-collector-endpoint>
+        endpoint: ${env.TEST_CONFIG_COLLECTOR_ENDPOINT}
         batch_processor:
           scheduled_delay: 10ms
           max_export_batch_size: 512
 
   instrumentation:
     spans:
-      mode: spec_compliant
       supergraph:
         attributes:
           graphql.operation.name: true

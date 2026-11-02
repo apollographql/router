@@ -19,6 +19,16 @@ pull_request_rules:
           - dev-v2.16.x
         assignees:
           - "{{ author }}"
+  - name: backport v2.x
+    description: Add a label to backport to 2.x
+    conditions:
+      - label = backport-2.x
+    actions:
+      backport:
+        branches:
+          - dev
+        assignees:
+          - "{{ author }}"
 defaults:
   actions:
     backport:

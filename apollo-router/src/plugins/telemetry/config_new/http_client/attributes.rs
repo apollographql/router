@@ -1,8 +1,4 @@
-use std::fmt::Debug;
-
 use opentelemetry::KeyValue;
-use schemars::JsonSchema;
-use serde::Deserialize;
 use tower::BoxError;
 
 use crate::Context;
@@ -12,9 +8,8 @@ use crate::plugins::telemetry::config_new::attributes::DefaultAttributeRequireme
 use crate::plugins::telemetry::otlp::TelemetryDataKind;
 use crate::services::http;
 
-#[derive(Deserialize, JsonSchema, Clone, Default, Debug)]
+#[apollo_configuration::configuration]
 #[cfg_attr(test, derive(PartialEq))]
-#[serde(deny_unknown_fields, default)]
 pub(crate) struct HttpClientAttributes {}
 
 impl DefaultForLevel for HttpClientAttributes {

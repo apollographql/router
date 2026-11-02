@@ -1,0 +1,6 @@
+# Mission Control configuration: maps each Jira project to the
+# directories in this repository that its tickets usually change.
+
+[jira.projects]
+ROUTER = ["apollo-router"]
+FED = ["apollo-federation"]

@@ -1,7 +1,7 @@
 # Must be declared before any FROM so it can be used in FROM stage selection.
 ARG DEBUG_IMAGE=false
 
-FROM debian:bookworm-slim AS downloader
+FROM debian:trixie-slim AS downloader
 ARG ROUTER_RELEASE=latest
 ARG ARTIFACT_URL=
 ARG CIRCLE_TOKEN=
@@ -24,17 +24,17 @@ COPY download_and_validate_router.sh /tmp/download_and_validate_router.sh
 RUN chmod +x /tmp/download_and_validate_router.sh && /tmp/download_and_validate_router.sh
 
 # Use a multi-stage build to install the debug tools if DEBUG_IMAGE is true
-FROM rust:slim-bookworm AS install-debug-tools-true
+FROM rust:slim-trixie AS install-debug-tools-true
 # We use the rust addr2line to avoid this error/perf issue https://github.com/iced-rs/iced/issues/2394
 RUN cargo install addr2line --locked --features="bin"
 RUN cargo install flamegraph --locked
 
-FROM rust:slim-bookworm AS install-debug-tools-false
+FROM rust:slim-trixie AS install-debug-tools-false
 # Do nothing
 
 FROM install-debug-tools-${DEBUG_IMAGE} AS install-debug-tools
 
-FROM debian:bookworm-slim AS distro
+FROM debian:trixie-slim AS distro
 ARG DEBUG_IMAGE=false
 ARG REPO_URL=https://github.com/apollographql/router
 ARG BASE_VERSION

@@ -123,8 +123,15 @@ struct ConfigForOneSubgraph {
 }
 ```
 
-As of this writing, this plugin is only intended for the Router’s own tests but is always available.
-It is excluded from the JSON Schema for Router configuration (see `HIDDEN_FROM_CONFIG_JSON_SCHEMA`)
-and prefixed `experimental_`, but nothing actually prevents its use externally.
+This plugin is only intended for the Router's own tests. It is gated behind the
+`mock_subgraphs_testing` Cargo feature (`cfg(any(test, feature = "mock_subgraphs_testing"))`), so
+it's always available for `cfg(test)` unit tests, and CI enables the feature explicitly for the
+`integration_tests` binary (see `.circleci/config.yml`), but it is **not** compiled into release
+builds. This closes off the previous gap where the plugin — despite being excluded from the JSON
+Schema for Router configuration (see `HIDDEN_FROM_CONFIG_JSON_SCHEMA`) and prefixed
+`experimental_` — was still reachable via `router.yaml` in production.
+
+If you depend on `apollo-router` as a library and want to use this plugin in your own tests, add
+`features = ["mock_subgraphs_testing"]` to your dev-dependency on `apollo-router`.
 
 The plugin implementation lives at `apollo-router/src/plugins/mock_subgraphs/mod.rs`.

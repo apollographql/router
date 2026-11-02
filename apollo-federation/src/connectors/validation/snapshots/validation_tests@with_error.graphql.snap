@@ -1,6 +1,6 @@
 ---
 source: apollo-federation/src/connectors/validation/mod.rs
-expression: result.errors
+expression: errors
 input_file: apollo-federation/src/connectors/validation/test_data/with_error.graphql
 ---
 [
@@ -30,6 +30,20 @@ input_file: apollo-federation/src/connectors/validation/test_data/with_error.gra
         message: "`@connect(selection:)` on `Query.misspelledMessageKey` contains an invalid mapping for field `status`: Method ->withError( { messge: \"typo\" } ) requires a string message or an object with a `message`, got an object with no `message`, only `messge`",
         locations: [
             111:33..111:51,
+        ],
+    },
+    Message {
+        code: InvalidSelection,
+        message: "`@connect(selection:)` on `Query.misspelledMessageKeyBehindCoalescing` contains an invalid mapping for field `status`: Method ->withError( { messge: \"typo\" } ) requires a string message or an object with a `message`, got an object with no `message`, only `messge`",
+        locations: [
+            126:51..126:69,
+        ],
+    },
+    Message {
+        code: InvalidSelection,
+        message: "`@connect(selection:)` on `Query.arityErrorBehindCoalescing` contains an invalid mapping for field `status`: Method ->withWarning() requires exactly one argument, the value to record as the message, got 0",
+        locations: [
+            139:41..139:52,
         ],
     },
 ]

@@ -1,0 +1,221 @@
+---
+title: Incremental Query Planner
+subtitle: Plan operations faster with bounded search
+description: Learn how to enable and tune the incremental query planner in GraphOS Router, which quickly finds a draft query plan and then optimizes it within a fuel budget.
+minVersion: Router v3.0.0
+---
+
+The incremental query planner is an alternative query planner for GraphOS Router. It quickly finds a draft of a query plan, then spends a bounded fuel budget optimizing it. On large or highly connected graphs, this keeps query planning fast and predictable.
+
+## How it differs from the default planner
+
+The default query planner considers many complete candidate plans for an operation and picks the cheapest. The number of candidates grows with the number of ways each field can be resolved. Heavy use of `@shareable`, `@key`, `@requires`, or `@interfaceObject` can make that number very large, which is why the default planner exposes limits like [`experimental_plans_limit`](/graphos/routing/query-planning/query-planning-best-practices#tuning-query-planner-limits).
+
+The incremental planner works differently:
+
+1. It drafts a plan by taking the cheapest option for each field. Fields that only one subgraph can resolve are planned immediately.
+2. If a choice leads to a dead end, the planner backtracks and tries other options until it reaches a complete plan. Finding this draft does not use the fuel budget.
+3. It then spends the fuel budget revisiting earlier choices, keeping any plan that is cheaper than the best one found so far.
+
+Because the search is bounded, planning time depends mostly on the size of the operation rather than the number of possible plans. The trade-off is that when the budget runs out, the planner might return a plan that is not the cheapest one possible.
+
+## How the search works
+
+The incremental planner uses BULB search (beam search using limited discrepancy backtracking), described by Furcy and Koenig in the 2005 paper "Limited Discrepancy Beam Search." BULB is an anytime algorithm: it produces a complete answer early, then keeps improving that answer for as long as its budget allows.
+
+### Decisions and options
+
+The planner keeps a stack of selections it has not routed yet, starting with the operation's top-level fields. For each selection, it asks the federated query graph where the selection can be resolved from the current position. Each answer is an option, such as resolving the field in the current subgraph, hopping to another subgraph through an entity `@key`, or using a `@provides` path.
+
+- A selection with exactly one option is committed immediately, without a decision.
+- A selection with more than one option is a decision, where the search compares options.
+
+Both kinds of selection count toward the fuel budget described in [Fuel and timeout](#fuel-and-timeout).
+
+Committing an option adds the field to a fetch in the plan under construction, then pushes the field's subselections onto the stack. Planning finishes when the stack is empty.
+
+### Scoring options
+
+At each decision, the planner applies every option in turn, measures the cost of the resulting partial plan, and undoes the option. It then sorts the options from cheapest to most expensive. When two options cost the same, ties are broken in this order:
+
+1. `@provides` paths
+2. Fields resolvable in the current subgraph
+3. Entity hops, preferring keys with fewer fields
+4. The subgraph that appears first in the supergraph schema
+
+The cost of a plan depends on how many fetches it makes and how deep its chain of dependent fetches is. A fetch that has to wait on other fetches costs more than one that can run right away, so the planner favors plans with fewer, more parallel fetches. Because adding to a plan never makes it cheaper, any option that already costs as much as the best complete plan found so far is skipped, along with everything beneath it.
+
+### Discrepancies and passes
+
+At each decision, the planner keeps a **beam**: the `beam_width` cheapest options, sorted after scoring. `beam_width` sets the size of that beam, so a wider beam carries more alternatives forward from each decision. Picking an option from the first beam keeps the search on its default course. Picking an option outside the first beam is a **discrepancy**: a deliberate departure from the cheapest-looking choice, taken on the chance that it leads to a cheaper plan overall.
+
+The search runs in passes, and each pass allows one more discrepancy than the last:
+
+1. The first pass always takes the cheapest option. This is the greedy draft. If the draft reaches a selection that no option can resolve, the planner backs up to an earlier decision and tries the next option, until it reaches a complete plan.
+2. Later passes explore the other options in the beam, and spend their discrepancies on options outside it. Discrepancies go to the earliest decisions first, because early decisions, such as which subgraph resolves a top-level field, shape the rest of the plan more than decisions near the leaves.
+3. Whenever a pass completes a plan that is cheaper than the best one so far, that plan becomes the new best.
+
+The search stops when a pass leaves no alternatives unexplored, when the fuel budget runs out, when the timeout fires, or when the request is canceled. The planner then returns the best complete plan it found.
+
+### Fuel and timeout
+
+Fuel measures work in small, fixed units: one unit each time the planner adds a selection to the stack, whether or not that selection is a decision, and one unit each time it applies an option at a decision, including options it scores and then undoes. Work done while building the draft does not count against the budget, so a `fuel` of `0` returns the draft and never fails for lack of fuel. Because fuel counts work rather than time, the same operation on the same schema with the same configuration always produces the same plan.
+
+The `timeout` applies to the whole search, including the draft. If it fires after the draft is complete, the planner returns the best plan found so far. If it fires before the draft is complete, planning fails with an error.
+
+### Example
+
+Consider this operation:
+
+```graphql
+query {
+  user {
+    profile {
+      detail
+    }
+  }
+}
+```
+
+It runs against three subgraphs:
+
+```graphql title="Subgraph A"
+type Query {
+  user: User
+}
+
+type User @key(fields: "id") {
+  id: ID!
+}
+```
+
+```graphql title="Subgraph B"
+type User @key(fields: "id") {
+  id: ID!
+  profile: Profile @shareable
+}
+
+type Profile @key(fields: "id") {
+  id: ID!
+}
+```
+
+```graphql title="Subgraph C"
+type User @key(fields: "id") {
+  id: ID!
+  profile: Profile @shareable
+}
+
+type Profile @key(fields: "id") {
+  id: ID!
+  detail: String
+}
+```
+
+Only subgraph A resolves `user`, so the planner commits it to a fetch from A without a decision. `profile` is a decision: subgraphs B and C both resolve it through a `User` key hop, and both options cost the same at this point. Subgraph order breaks the tie in favor of B.
+
+In the first pass, the planner takes B. B cannot resolve `detail`, so the planner hops again, to C. The draft makes three fetches in sequence: A, then B, then C.
+
+The second pass revisits `profile` with both options in the beam. Taking B again reproduces the draft, which is not an improvement. Taking C resolves both `profile` and `detail` in a single fetch after A, so the plan makes two fetches instead of three. This plan becomes the new best. No alternatives remain, so the search stops without using the rest of its fuel.
+
+With `fuel: 0`, the planner returns the three-fetch draft instead.
+
+## Enable the incremental planner
+
+Add the following to your [`router.yaml` configuration file](/graphos/routing/configuration/yaml):
+
+```yaml title="router.yaml"
+supergraph:
+  query_planning:
+    incremental_planner:
+      enabled: true
+```
+
+When enabled, the incremental planner plans every operation. The router does not fall back to the default planner.
+
+## Configuration options
+
+```yaml title="router.yaml"
+supergraph:
+  query_planning:
+    incremental_planner:
+      enabled: true
+      beam_width: 16
+      fuel: 5000
+      timeout: 5s
+```
+
+| Option | Default | Description |
+| --- | --- | --- |
+| `enabled` | `false` | Use the incremental planner for all operations. |
+| `beam_width` | `16` | How many of the cheapest options for each field are considered together when revisiting choices. Wider values explore more alternatives per pass. Narrower values use less memory but need more backtracking to reach the same alternatives. |
+| `fuel` | `5000` | How much additional effort the planner can spend improving on its first plan. `0` returns the first complete plan. |
+| `timeout` | none | Optional time limit for planning a single operation, for example `500ms` or `5s`. When the limit is reached, the planner returns the best plan found so far. |
+
+### Tuning recommendations
+
+- Start with the defaults. They are sized to keep planning fast on large graphs.
+- Adjust `fuel` first. Lowering it reduces planning time and returns plans closer to the draft. Raising it gives the planner more room to find cheaper plans.
+- Leave `beam_width` at its default unless you have measured a benefit from changing it. Lowering it reduces memory use during planning at the cost of more backtracking.
+- Only set `timeout` if you need a hard upper bound on planning time. With a timeout, the plan you get for an operation depends on how busy the router is, so the same operation might produce different plans at different times. Without a timeout, the same operation and supergraph always produce the same plan.
+
+## Behavior changes when enabled
+
+### Query plan cache
+
+The incremental planner's configuration is part of the [query plan cache](/graphos/routing/query-planning/caching) key. Enabling it, or changing `beam_width`, `fuel`, or `timeout` while it's enabled, invalidates previously cached plans, including plans in a distributed Redis cache. Plan for a warm-up period after deploying the change.
+
+Disabling the incremental planner restores the cache keys used by the default planner.
+
+### Query plans and subgraph operations
+
+For the same operation, the incremental planner might choose a different plan than the default planner. Both planners produce plans that return the same data, but the fetches, their order, and the generated subgraph operations might differ.
+
+### Unused limits
+
+`experimental_plans_limit` and `experimental_paths_limit` only apply to the default planner. The incremental planner ignores them and uses `fuel` and `timeout` instead.
+
+## Observability
+
+The standard [query planning instruments](/graphos/routing/observability/router-telemetry-otel/enabling-telemetry/standard-instruments#query-planning) apply to the incremental planner:
+
+- `apollo.router.query_planning.plan.duration`: time spent planning each operation
+- `apollo.router.query_planning.plan.evaluated_plans`: the number of candidate plans the search finished, including ones it discarded
+- `apollo.router.query_planning.plan.evaluated_paths`: the number of times the search expanded a field with more than one option, counting revisits
+
+Compare `plan.duration` before and after enabling the incremental planner. Its `planner` attribute is `rust` for both planners, so compare across deployments or time ranges rather than by attribute. The other two metrics measure search effort and are not directly comparable to the same metrics from the default planner.
+
+### Fuel metrics
+
+The router records two histograms for each operation planned by the incremental planner. Use them to tune `fuel`:
+
+- `apollo.router.query_planning.plan.fuel_consumed`: fuel the planner spends improving on its first complete plan
+- `apollo.router.query_planning.plan.fuel_remaining`: fuel left when the planner stops searching
+
+A `fuel_remaining` value of `0` means the planner ran out of fuel before it finished exploring alternatives.
+
+Mutations are planned one top-level field at a time. For a mutation, both values come from the field whose search consumed the most fuel.
+
+The router also records the same values on the `query_planning` span as `query_planning.fuel_consumed` and `query_planning.fuel_remaining`. Use the span attributes to find which operations ran out of fuel, because the histograms do not identify operations.
+
+Interpret the metrics as follows:
+
+- If most operations finish with fuel remaining, the planner is exploring every alternative it considers worthwhile within the budget. Raising `fuel` does not change their plans.
+- If many operations finish with `0` remaining, the budget is cutting the search short. Raising `fuel` lets the search go further and might find cheaper plans, at the cost of longer planning.
+- Operations served from the query plan cache do not record these metrics, because no search runs.
+
+Both histograms use the buckets `0`, `1`, `10`, `100`, `1000`, `10000`, `100000`, and `1000000`, regardless of the [global histogram buckets setting](/graphos/routing/observability/router-telemetry-otel/telemetry-pipelines/metrics-exporters/overview#buckets). The `0` bucket of `fuel_remaining` counts searches that ran out of fuel. The boundaries do not depend on your `fuel` setting, so series stay comparable when you change it. To use finer buckets around your `fuel` value, add a [metrics view with custom buckets](/graphos/routing/observability/router-telemetry-otel/telemetry-pipelines/metrics-exporters/overview#customizing-metric-attributes-and-buckets):
+
+```yaml title="router.yaml"
+telemetry:
+  exporters:
+    metrics:
+      common:
+        views:
+          - name: apollo.router.query_planning.plan.fuel_*
+            aggregation:
+              histogram:
+                buckets: [0, 10, 50, 100, 500, 1000, 2500, 5000]
+```
+
+To stop exporting either metric, [drop it with a view](/graphos/routing/observability/router-telemetry-otel/telemetry-pipelines/metrics-exporters/overview#dropping-metrics).

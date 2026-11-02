@@ -25,13 +25,14 @@ use super::helpers::spaces_or_comments;
 use super::helpers::vec_push;
 use super::known_var::KnownVariable;
 use super::lit_expr::LitExpr;
+use super::location::DepthCounter;
 use super::location::OffsetRange;
 use super::location::Ranged;
 use super::location::Span;
 use super::location::SpanExtra;
 use super::location::WithRange;
 use super::location::merge_ranges;
-use super::location::new_span_with_spec;
+use super::location::new_span_with_depth;
 use super::location::ranged_span;
 use crate::connectors::ConnectSpec;
 use crate::connectors::Namespace;
@@ -86,6 +87,71 @@ pub(super) fn nom_fail_message(
         }),
         nom::error::ErrorKind::IsNot,
     ))
+}
+
+// Counts each `{`, `[`, `(` and `$(` the parser is inside, plus each path step
+// (key, `.key`, `->method`, `$`, `@`, `?`) leading to it, so one `a { ... }`
+// level spends two and one `a: { ... }` or `[ ... ]` level spends one. Every
+// walker of the parsed selection (shape computation, apply_to, printing,
+// validation, Drop) recurses once per such level, so this bounds them too.
+// Chosen experimentally for release builds, which is how the router runs, with
+// Rust 1.99.0 on aarch64-apple-darwin on a 2MB thread stack, the default for
+// tokio workers. Parsing and then running every walker, nested `$( ... )` was
+// the most expensive per level and overflowed past 250, so 128 is about half
+// of that. Debug builds use several times more stack per level and can
+// overflow a 2MB stack below this limit.
+const DEFAULT_RECURSION_LIMIT: usize = 128;
+
+fn recursion_limit_message() -> String {
+    format!(
+        "Selection nested too deeply: more than {DEFAULT_RECURSION_LIMIT} levels, counting each \
+         {{, [, (, $( and path step"
+    )
+}
+
+/// Decrements the parse's depth when dropped.
+pub(super) struct DepthGuard<'a>(&'a DepthCounter);
+
+impl<'a> DepthGuard<'a> {
+    /// Marks that the parser is nesting one level deeper, failing once the
+    /// limit is reached.
+    pub(super) fn increment(
+        input: &Span<'a>,
+    ) -> Result<Self, nom::Err<nom::error::Error<Span<'a>>>> {
+        let depth = input.extra.depth;
+        if depth.0.get() >= DEFAULT_RECURSION_LIMIT {
+            return Err(
+                nom_fail_message(input.clone(), recursion_limit_message()).map(|error| {
+                    nom::error::Error {
+                        code: nom::error::ErrorKind::TooLarge,
+                        ..error
+                    }
+                }),
+            );
+        }
+        depth.0.set(depth.0.get() + 1);
+        Ok(Self(depth))
+    }
+}
+
+impl Drop for DepthGuard<'_> {
+    fn drop(&mut self) {
+        self.0.0.set(self.0.0.get() - 1);
+    }
+}
+
+// Hands a parse result back for the caller to inspect, unless it failed on the
+// recursion limit. That failure is propagated so callers that backtrack do not
+// try alternatives once the limit has been reached.
+pub(super) fn propagate_recursion_error<'a, T>(
+    result: ParseResult<'a, T>,
+) -> Result<ParseResult<'a, T>, nom::Err<nom::error::Error<Span<'a>>>> {
+    match result {
+        Err(nom::Err::Failure(error)) if error.code == nom::error::ErrorKind::TooLarge => {
+            Err(nom::Err::Failure(error))
+        }
+        result => Ok(result),
+    }
 }
 
 pub(crate) trait VarPaths {
@@ -257,7 +323,8 @@ impl JSONSelection {
         input: &str,
         spec: ConnectSpec,
     ) -> Result<Self, JSONSelectionParseError> {
-        let span = new_span_with_spec(input, spec);
+        let depth = DepthCounter::default();
+        let span = new_span_with_depth(input, spec, &depth);
 
         match JSONSelection::parse_span(span) {
             Ok((remainder, selection)) => {
@@ -277,8 +344,8 @@ impl JSONSelection {
                     // Use offset and fragment from first error if available
                     let (error_offset, error_fragment) =
                         if let Some((_, first_error_offset)) = remainder.extra.errors.first() {
-                            let error_span =
-                                new_span_with_spec(input, spec).take_from(*first_error_offset);
+                            let error_span = new_span_with_depth(input, spec, &depth)
+                                .take_from(*first_error_offset);
                             (
                                 error_span.location_offset(),
                                 error_span.fragment().to_string(),
@@ -811,7 +878,9 @@ impl NamedSelection {
         let (after_alias, alias) = opt(Alias::parse).parse(input.clone())?;
 
         if let Some(alias) = alias {
-            if let Ok((remainder, sub)) = SubSelection::parse(after_alias.clone()) {
+            if let Ok((remainder, sub)) =
+                propagate_recursion_error(SubSelection::parse(after_alias.clone()))?
+            {
                 let sub_range = sub.range();
                 return Ok((
                     remainder,
@@ -901,7 +970,9 @@ impl NamedSelection {
         let (after_alias, alias) = opt(Alias::parse).parse(input.clone())?;
 
         if let Some(alias) = alias {
-            if let Ok((remainder, sub)) = SubSelection::parse(after_alias.clone()) {
+            if let Ok((remainder, sub)) =
+                propagate_recursion_error(SubSelection::parse(after_alias.clone()))?
+            {
                 let sub_range = sub.range();
                 return Ok((
                     remainder,
@@ -1210,6 +1281,14 @@ impl PathList {
         WithRange::new(self, None)
     }
 
+    // Parses the rest of the path after one step. Every walker of the parsed
+    // PathList recurses once per step, so the step counts as a level toward
+    // the recursion limit while the rest is parsed.
+    fn parse_rest(input: Span, depth: usize) -> ParseResult<WithRange<Self>> {
+        let _guard = DepthGuard::increment(&input)?;
+        Self::parse_with_depth(input, depth + 1)
+    }
+
     pub(super) fn parse_with_depth(input: Span, depth: usize) -> ParseResult<WithRange<Self>> {
         let spec = get_connect_spec(&input);
 
@@ -1233,29 +1312,29 @@ impl PathList {
             // case needs to come before the $ (and $var) case, because $( looks
             // like the $ variable followed by a parse error in the variable
             // case, unless we add some complicated lookahead logic there.
-            match (
-                spaces_or_comments,
-                ranged_span("$("),
-                LitExpr::parse,
-                spaces_or_comments,
-                ranged_span(")"),
-            )
-                .parse(input.clone())
+            if let Ok((after_open, (_, dollar_open_paren))) =
+                (spaces_or_comments, ranged_span("$(")).parse(input.clone())
             {
-                Ok((suffix, (_, dollar_open_paren, expr, close_paren, _))) => {
-                    let (remainder, rest) = Self::parse_with_depth(suffix, depth + 1)?;
-                    let expr_range = merge_ranges(dollar_open_paren.range(), close_paren.range());
-                    let full_range = merge_ranges(expr_range, rest.range());
-                    return Ok((
-                        remainder,
-                        WithRange::new(Self::Expr(expr, rest), full_range),
-                    ));
-                }
-                Err(nom::Err::Failure(err)) => {
-                    return Err(nom::Err::Failure(err));
-                }
-                Err(_) => {
-                    // We can otherwise continue for non-fatal errors
+                // The expression and the rest of the path both nest inside
+                // the $(, so it counts as one level for both.
+                let _guard = DepthGuard::increment(&after_open)?;
+                match (LitExpr::parse, spaces_or_comments, ranged_span(")")).parse(after_open) {
+                    Ok((suffix, (expr, close_paren, _))) => {
+                        let (remainder, rest) = Self::parse_with_depth(suffix, depth + 1)?;
+                        let expr_range =
+                            merge_ranges(dollar_open_paren.range(), close_paren.range());
+                        let full_range = merge_ranges(expr_range, rest.range());
+                        return Ok((
+                            remainder,
+                            WithRange::new(Self::Expr(expr, rest), full_range),
+                        ));
+                    }
+                    Err(nom::Err::Failure(err)) => {
+                        return Err(nom::Err::Failure(err));
+                    }
+                    Err(_) => {
+                        // We can otherwise continue for non-fatal errors
+                    }
                 }
             }
 
@@ -1263,7 +1342,7 @@ impl PathList {
                 (ranged_span("$"), opt(parse_identifier_no_space)).parse(input.clone())
             {
                 let dollar_range = dollar.range();
-                let (remainder, rest) = Self::parse_with_depth(suffix, depth + 1)?;
+                let (remainder, rest) = Self::parse_rest(suffix, depth)?;
                 let full_range = merge_ranges(dollar_range.clone(), rest.range());
                 return if let Some(var) = opt_var {
                     let full_name = format!("{}{}", dollar.as_ref(), var.as_str());
@@ -1291,7 +1370,7 @@ impl PathList {
             }
 
             if let Ok((suffix, at)) = ranged_span("@").parse(input.clone()) {
-                let (remainder, rest) = Self::parse_with_depth(suffix, depth + 1)?;
+                let (remainder, rest) = Self::parse_rest(suffix, depth)?;
                 let full_range = merge_ranges(at.range(), rest.range());
                 return Ok((
                     remainder,
@@ -1303,7 +1382,7 @@ impl PathList {
             }
 
             if let Ok((suffix, key)) = Key::parse(input.clone()) {
-                let (remainder, rest) = Self::parse_with_depth(suffix, depth + 1)?;
+                let (remainder, rest) = Self::parse_rest(suffix, depth)?;
 
                 return match spec {
                     ConnectSpec::V0_1 | ConnectSpec::V0_2 => match rest.as_ref() {
@@ -1371,7 +1450,7 @@ impl PathList {
             }
             ConnectSpec::V0_3 | ConnectSpec::V0_4 | ConnectSpec::V0_5 => {
                 if let Ok((suffix, question)) = ranged_span("?").parse(input.clone()) {
-                    let (remainder, rest) = Self::parse_with_depth(suffix.clone(), depth + 1)?;
+                    let (remainder, rest) = Self::parse_rest(suffix.clone(), depth)?;
 
                     return match rest.as_ref() {
                         // The ? cannot be repeated sequentially, so if rest starts with
@@ -1409,7 +1488,7 @@ impl PathList {
         // equivalent to the old behavior, but parses unambiguously. In terms of
         // this code, that means we allow a .key only at depths > 0.
         if let Ok((remainder, (dot, key))) = (ranged_span("."), Key::parse).parse(input.clone()) {
-            let (remainder, rest) = Self::parse_with_depth(remainder, depth + 1)?;
+            let (remainder, rest) = Self::parse_rest(remainder, depth)?;
             let dot_key_range = merge_ranges(dot.range(), key.range());
             let full_range = merge_ranges(dot_key_range, rest.range());
             return Ok((remainder, WithRange::new(Self::Key(key, rest), full_range)));
@@ -1431,7 +1510,9 @@ impl PathList {
             // method name, so we can unconditionally return based on what
             // parse_identifier tells us. since MethodArgs::parse is optional,
             // the absence of args will never trigger the error case.
-            return match (parse_identifier, opt(MethodArgs::parse)).parse(suffix) {
+            return match propagate_recursion_error(
+                (parse_identifier, opt(MethodArgs::parse)).parse(suffix),
+            )? {
                 Ok((suffix, (method, args_opt))) => {
                     let mut local_var_name = None;
 
@@ -1487,8 +1568,7 @@ impl PathList {
                         suffix
                     };
 
-                    let (remainder, rest) =
-                        Self::parse_with_depth(suffix_with_local_var, depth + 1)?;
+                    let (remainder, rest) = Self::parse_rest(suffix_with_local_var, depth)?;
                     let full_range = merge_ranges(arrow.range(), rest.range());
 
                     Ok((
@@ -1508,7 +1588,9 @@ impl PathList {
         // responsible for enforcing a trailing SubSelection in the
         // PathWithSubSelection case, since that requirement is checked by
         // NamedSelection::parse_path.
-        if let Ok((suffix, selection)) = SubSelection::parse(input.clone()) {
+        if let Ok((suffix, selection)) =
+            propagate_recursion_error(SubSelection::parse(input.clone()))?
+        {
             let selection_range = selection.range();
             return Ok((
                 suffix,
@@ -1668,16 +1750,12 @@ impl Ranged for SubSelection {
 
 impl SubSelection {
     pub(crate) fn parse(input: Span) -> ParseResult<Self> {
-        match (
-            spaces_or_comments,
-            ranged_span("{"),
-            Self::parse_naked,
-            spaces_or_comments,
-            ranged_span("}"),
-        )
-            .parse(input)
-        {
-            Ok((remainder, (_, open_brace, sub, _, close_brace))) => {
+        // This is called speculatively, so it only counts toward the recursion
+        // limit once it finds a `{`.
+        let (input, (_, open_brace)) = (spaces_or_comments, ranged_span("{")).parse(input)?;
+        let _guard = DepthGuard::increment(&input)?;
+        match (Self::parse_naked, spaces_or_comments, ranged_span("}")).parse(input) {
+            Ok((remainder, (sub, _, close_brace))) => {
                 let range = merge_ranges(open_brace.range(), close_brace.range());
                 Ok((
                     remainder,
@@ -1816,7 +1894,7 @@ impl SubSelection {
                     // another NamedSelection follows without a preceding
                     // comma, that is an inconsistent-separator error; if no
                     // NamedSelection follows, the list is simply over.
-                    if NamedSelection::parse(after_ws.clone()).is_ok() {
+                    if propagate_recursion_error(NamedSelection::parse(after_ws.clone()))?.is_ok() {
                         // Likewise, the colon-led summary ("Missing comma
                         // before item") lands at the end so the offending
                         // item follows it directly when the error is shown.
@@ -2029,8 +2107,9 @@ impl Display for Key {
 
 pub(super) fn is_identifier(input: &str) -> bool {
     // TODO Don't use the whole parser for this?
+    let depth = DepthCounter::default();
     all_consuming(parse_identifier_no_space)
-        .parse(new_span_with_spec(input, ConnectSpec::latest()))
+        .parse(new_span_with_depth(input, ConnectSpec::latest(), &depth))
         .is_ok()
 }
 
@@ -2165,16 +2244,19 @@ impl MethodArgs {
     fn parse(input: Span) -> ParseResult<Self> {
         let input = spaces_or_comments(input)?.0;
         let (mut input, open_paren) = ranged_span("(").parse(input)?;
+        let _guard = DepthGuard::increment(&input)?;
         input = spaces_or_comments(input)?.0;
 
         let mut args = Vec::new();
-        if let Ok((remainder, first)) = LitExpr::parse(input.clone()) {
+        if let Ok((remainder, first)) = propagate_recursion_error(LitExpr::parse(input.clone()))? {
             args.push(first);
             input = remainder;
 
             while let Ok((remainder, _)) = (spaces_or_comments, char(',')).parse(input.clone()) {
                 input = spaces_or_comments(remainder)?.0;
-                if let Ok((remainder, arg)) = LitExpr::parse(input.clone()) {
+                if let Ok((remainder, arg)) =
+                    propagate_recursion_error(LitExpr::parse(input.clone()))?
+                {
                     args.push(arg);
                     input = remainder;
                 } else {
@@ -2206,6 +2288,7 @@ mod tests {
     use crate::connectors::json_selection::lit_expr::KEYWORD_PREFIXED_KEYS;
     use crate::connectors::json_selection::lit_expr::NUMBER_ROOTED_PATHS;
     use crate::connectors::json_selection::location::new_span;
+    use crate::connectors::json_selection::location::new_span_with_spec;
     use crate::selection;
 
     #[test]
@@ -3228,6 +3311,7 @@ mod tests {
                             spec,
                             errors: vec![(expected_message, expected_offset)],
                             local_vars: Vec::new(),
+                            depth: &DepthCounter::default(),
                         }
                     );
                 }
@@ -5213,5 +5297,148 @@ mod tests {
             parsed.pretty_print_with_indentation(true, 0),
             "$(falsePositives ?? \"fallback\")",
         );
+    }
+
+    type Nesting = (
+        &'static str,
+        &'static str,
+        &'static str,
+        &'static str,
+        &'static str,
+        usize,
+    );
+
+    // Each shape nests by repeating `open` around `leaf`, then closing. The
+    // last column is the deepest nesting the limit accepts: each `{`, `[`,
+    // `(`, `$(` and path step counts one level, including the steps in the
+    // prefix and the leaf.
+    const NESTINGS: [Nesting; 8] = [
+        // `a` and `{` per level, plus the leaf `b`.
+        ("subselection", "", "a { ", "b", " }", 63),
+        // `{` per level, plus the leaf `b`.
+        ("group", "", "a: { ", "b", " }", 127),
+        // One step per level, plus `b`.
+        ("path", "a: b", ".c", "", "", 127),
+        ("method", "a: b", "->first", "", "", 127),
+        // `b` and `(` per level.
+        ("method arg", "a: ", "b->echo(", "1", ")", 64),
+        ("expr", "a: ", "$(", "1", ")", 128),
+        ("array", "a: ", "[", "1", "]", 128),
+        // `{` and `[` per level.
+        ("mixed", "", "{ a: [", "1", "] }", 64),
+    ];
+
+    fn nested(shape: Nesting, levels: usize) -> String {
+        let (_, prefix, open, leaf, close, _) = shape;
+        format!(
+            "{prefix}{}{leaf}{}",
+            open.repeat(levels),
+            close.repeat(levels)
+        )
+    }
+
+    // The limit is chosen for release builds, and debug builds use several
+    // times more stack per level, so tests parse on a larger stack.
+    fn on_large_stack<T: Send + 'static>(f: impl FnOnce() -> T + Send + 'static) -> T {
+        std::thread::Builder::new()
+            .stack_size(16 * 1024 * 1024)
+            .spawn(f)
+            .expect("spawn parser thread")
+            .join()
+            .expect("parser thread should not panic")
+    }
+
+    #[rstest]
+    #[case::v0_2(ConnectSpec::V0_2)]
+    #[case::v0_3(ConnectSpec::V0_3)]
+    #[case::v0_4(ConnectSpec::V0_4)]
+    #[case::v0_5(ConnectSpec::V0_5)]
+    fn deep_nesting_is_a_parse_error(#[case] spec: ConnectSpec) {
+        for shape in NESTINGS {
+            // Some shapes, like arrays, are not valid syntax in older specs.
+            if JSONSelection::parse_with_spec(&nested(shape, 1), spec).is_err() {
+                continue;
+            }
+            let err = on_large_stack(move || {
+                JSONSelection::parse_with_spec(&nested(shape, 300), spec).map(|_| ())
+            })
+            .expect_err("deep nesting should be rejected");
+            assert_eq!(
+                err.message,
+                recursion_limit_message(),
+                "{} under {spec:?}",
+                shape.0
+            );
+        }
+    }
+
+    #[rstest]
+    #[case::v0_4(ConnectSpec::V0_4)]
+    #[case::v0_5(ConnectSpec::V0_5)]
+    fn limit_accepts_up_to_the_deepest_nesting(#[case] spec: ConnectSpec) {
+        for shape in NESTINGS {
+            let (name, .., deepest) = shape;
+            let (at_limit, past_limit) = on_large_stack(move || {
+                let parse = |levels| {
+                    JSONSelection::parse_with_spec(&nested(shape, levels), spec)
+                        .map(|_| ())
+                        .map_err(|e| e.message)
+                };
+                (parse(deepest), parse(deepest + 1))
+            });
+            assert_eq!(
+                at_limit,
+                Ok(()),
+                "{name} at {deepest} levels under {spec:?}"
+            );
+            assert_eq!(
+                past_limit,
+                Err(recursion_limit_message()),
+                "{name} at {} levels under {spec:?}",
+                deepest + 1,
+            );
+        }
+    }
+
+    #[rstest]
+    #[case::v0_4(ConnectSpec::V0_4)]
+    #[case::v0_5(ConnectSpec::V0_5)]
+    fn neighboring_items_do_not_change_the_limit(#[case] spec: ConnectSpec) {
+        for shape in NESTINGS {
+            let (name, .., deepest) = shape;
+            if !matches!(name, "subselection" | "group") {
+                continue;
+            }
+            for levels in [deepest, deepest + 1] {
+                let results = on_large_stack(move || {
+                    let selection = nested(shape, levels);
+                    [
+                        selection.clone(),
+                        format!("x {selection}"),
+                        format!("{selection} x"),
+                    ]
+                    .map(|input| JSONSelection::parse_with_spec(&input, spec).is_ok())
+                });
+                assert_eq!(
+                    results, [results[0]; 3],
+                    "{name} at {levels} levels under {spec:?}, alone, after x and before x",
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn empty_method_arguments_do_not_count_toward_the_limit() {
+        let deepest = |call: &'static str| {
+            on_large_stack(move || {
+                (1..)
+                    .take_while(|steps| {
+                        JSONSelection::parse(&format!("a: b{}", call.repeat(*steps))).is_ok()
+                    })
+                    .last()
+                    .expect("one method call should parse")
+            })
+        };
+        assert_eq!(deepest("->first()"), deepest("->first"));
     }
 }

@@ -42,6 +42,7 @@ mod field_merging_with_skip_and_include;
 mod fragment_autogeneration;
 mod handles_fragments_with_directive_conditions;
 mod handles_operations_with_directives;
+mod incremental_planner;
 mod interface_object;
 mod interface_type_explosion;
 mod introspection_typename_handling;
@@ -1211,87 +1212,47 @@ fn handles_multiple_conditions_on_abstract_types() {
         }
       }
       "#,
-      @r###"
-        QueryPlan {
-          Sequence {
-            Fetch(service: "products") {
-              {
-                products {
-                  __typename
-                  id
-                  ... on Book {
-                    __typename
-                    id
-                  }
-                  ... on Magazine {
-                    __typename
-                    id
-                  }
-                }
+      @r#"
+    QueryPlan {
+      Sequence {
+        Fetch(service: "products") {
+          {
+            products {
+              __typename
+              id
+              ... on Book {
+                __typename
+                id
               }
-            },
-            Flatten(path: "products.@") {
-              Fetch(service: "reviews") {
-                {
-                  ... on Book {
+              ... on Magazine {
+                __typename
+                id
+              }
+            }
+          }
+        },
+        Flatten(path: "products.@") {
+          Fetch(service: "reviews") {
+            {
+              ... on Book {
+                __typename
+                id
+              }
+              ... on Magazine {
+                __typename
+                id
+              }
+            } =>
+            {
+              ... on Book {
+                reviews {
+                  product {
                     __typename
                     id
-                  }
-                  ... on Magazine {
-                    __typename
-                    id
-                  }
-                } =>
-                {
-                  ... on Book {
-                    reviews {
-                      product {
-                        __typename
-                        id
-                        ... on Book @include(if: $title) {
-                          __typename
-                          id
-                          ... on Book @skip(if: $title) {
-                            __typename
-                            id
-                          }
-                        }
-                        ... on Magazine {
-                          __typename
-                          id
-                        }
-                      }
-                    }
-                  }
-                  ... on Magazine {
-                    reviews {
-                      product {
-                        __typename
-                        id
-                        ... on Book @include(if: $title) {
-                          __typename
-                          id
-                          ... on Book @skip(if: $title) {
-                            __typename
-                            id
-                          }
-                        }
-                        ... on Magazine {
-                          __typename
-                          id
-                        }
-                      }
-                    }
-                  }
-                }
-              },
-            },
-            Parallel {
-              Flatten(path: "products.@.reviews.@.product") {
-                Fetch(service: "products") {
-                  {
-                    ... on Book {
-                      ... on Book {
+                    ... on Book @include(if: $title) {
+                      __typename
+                      id
+                      ... on Book @skip(if: $title) {
                         __typename
                         id
                       }
@@ -1300,40 +1261,80 @@ fn handles_multiple_conditions_on_abstract_types() {
                       __typename
                       id
                     }
-                  } =>
-                  {
-                    ... on Book @include(if: $title) {
-                      ... on Book @skip(if: $title) {
-                        sku
-                      }
-                    }
-                    ... on Magazine {
-                      sku
-                    }
                   }
-                },
-              },
-              Include(if: $title) {
-                Flatten(path: "products.@.reviews.@.product") {
-                  Fetch(service: "books") {
-                    {
-                      ... on Book {
+                }
+              }
+              ... on Magazine {
+                reviews {
+                  product {
+                    __typename
+                    id
+                    ... on Book @include(if: $title) {
+                      __typename
+                      id
+                      ... on Book @skip(if: $title) {
                         __typename
                         id
                       }
-                    } =>
-                    {
-                      ... on Book {
-                        title
-                      }
                     }
-                  },
-                },
+                    ... on Magazine {
+                      __typename
+                      id
+                    }
+                  }
+                }
+              }
+            }
+          },
+        },
+        Parallel {
+          Flatten(path: "products.@.reviews.@.product") {
+            Fetch(service: "products") {
+              {
+                ... on Book @include(if: $title) {
+                  ... on Book @skip(if: $title) {
+                    __typename
+                    id
+                  }
+                }
+                ... on Magazine {
+                  __typename
+                  id
+                }
+              } =>
+              {
+                ... on Book @include(if: $title) {
+                  ... on Book @skip(if: $title) {
+                    sku
+                  }
+                }
+                ... on Magazine {
+                  sku
+                }
+              }
+            },
+          },
+          Include(if: $title) {
+            Flatten(path: "products.@.reviews.@.product") {
+              Fetch(service: "books") {
+                {
+                  ... on Book {
+                    __typename
+                    id
+                  }
+                } =>
+                {
+                  ... on Book {
+                    title
+                  }
+                }
               },
             },
           },
-        }
-      "###
+        },
+      },
+    }
+    "#
     );
 }
 

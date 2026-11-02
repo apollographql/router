@@ -61,6 +61,15 @@ pub(crate) const DECLARED_ERROR_MARKER: &str = "apollo_private.connectors.declar
 /// `extensions`.
 pub(crate) const CONNECTOR_ERRORS_EXTENSION_KEY: &str = "connectorErrors";
 
+/// Whether a connector response's mapping declared any error, set in the
+/// response's `http` extensions before `include_subgraph_errors` decides
+/// whether the client sees those errors.
+///
+/// The response cache reads it: such a response stores none of its entities and
+/// doesn't mark its query as private. It carries no error text.
+#[derive(Clone, Copy, Debug)]
+pub(crate) struct HasDeclaredErrors(pub(crate) bool);
+
 /// The declared errors collected so far for one request, in the order the
 /// fetches that produced them completed.
 ///

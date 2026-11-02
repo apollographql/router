@@ -10,7 +10,10 @@ use crate::connectors::json_selection::immutable::InputPath;
 use crate::connectors::json_selection::location::Ranged;
 use crate::connectors::json_selection::location::WithRange;
 use crate::connectors::json_selection::methods::common::is_comparable_shape_combination;
+use crate::connectors::json_selection::methods::common::may_be_missing;
 use crate::connectors::json_selection::methods::common::number_value_as_float;
+use crate::connectors::json_selection::methods::common::or_missing;
+use crate::connectors::json_selection::methods::common::present_arg;
 use crate::connectors::spec::ConnectSpec;
 use crate::impl_arrow_method;
 
@@ -120,8 +123,18 @@ fn lte_shape(
 
     let arg_shape = first_arg.compute_output_shape(context, input_shape.clone(), dollar_shape);
 
+    let maybe_missing = may_be_missing(&arg_shape);
+    let Some(arg_shape) = present_arg(context, &arg_shape) else {
+        // The method produces no value when its argument has none.
+        return Shape::none();
+    };
+
     if is_comparable_shape_combination(&arg_shape, &input_shape) {
-        Shape::bool(method_name.shape_location(context.source_id()))
+        or_missing(
+            context,
+            Shape::bool(method_name.shape_location(context.source_id())),
+            maybe_missing,
+        )
     } else {
         Shape::error_with_partial(
             format!(
@@ -430,24 +443,17 @@ mod shape_tests {
             get_shape(
                 vec![WithRange::new(LitExpr::String("a".to_string()), None)],
                 Shape::int([])
-            ),
-            Shape::error_with_partial(
-                "Method ->lte can only compare two numbers or two strings. Found Int <= \"a\""
-                    .to_string(),
-                Shape::bool_value(false, [get_location()]),
-                [get_location()]
             )
+            .pretty_print(),
+            r#"false (err "Method ->lte can only compare two numbers or two strings. Found Int <= \"a\"")"#,
         );
     }
 
     #[test]
     fn lte_shape_should_error_on_no_args() {
         assert_eq!(
-            get_shape(vec![], Shape::string([])),
-            Shape::error(
-                "Method ->lte requires one argument".to_string(),
-                [get_location()]
-            )
+            get_shape(vec![], Shape::string([])).pretty_print(),
+            r#"Unknown (err "Method ->lte requires one argument")"#,
         );
     }
 
@@ -460,11 +466,9 @@ mod shape_tests {
                     WithRange::new(LitExpr::Number(Number::from(42)), None)
                 ],
                 Shape::int([])
-            ),
-            Shape::error(
-                "Method ->lte requires only one argument, but 2 were provided".to_string(),
-                []
             )
+            .pretty_print(),
+            r#"Unknown (err "Method ->lte requires only one argument, but 2 were provided")"#,
         );
     }
 
@@ -478,11 +482,9 @@ mod shape_tests {
                 None,
                 Shape::string([]),
                 Shape::none(),
-            ),
-            Shape::error(
-                "Method ->lte requires one argument".to_string(),
-                [get_location()]
             )
+            .pretty_print(),
+            r#"Unknown (err "Method ->lte requires one argument")"#,
         );
     }
 }

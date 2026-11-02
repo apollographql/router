@@ -1,0 +1,18 @@
+coprocessor:
+  url: http://example.com
+  router:
+    request:
+      context: true
+    response:
+      context: false
+  supergraph:
+    request:
+      context: true
+  subgraph:
+    all:
+      request:
+        context: false
+  connector:
+    all:
+      request:
+        context: true

@@ -2,6 +2,7 @@ use std::sync::Arc;
 
 use crate::ListenAddr;
 use crate::metrics::UpDownCounterGuard;
+use crate::services::router::pipeline_handle::PipelineHandle;
 use crate::services::router::pipeline_handle::PipelineRef;
 
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
@@ -19,10 +20,16 @@ pub(crate) struct ConnectionHandle {
     pub(crate) address: ListenAddr,
     state: ConnectionState,
     guard: UpDownCounterGuard<i64>,
+    /// Keeps the pipeline's `apollo.router.pipelines` gauge from dropping to 0
+    /// while this connection is still open. The gauge is otherwise only tied
+    /// to the `RouterFactory` generation's own lifetime, which a config reload
+    /// can drop well before connections created under it finish draining.
+    _pipeline_handle: Arc<PipelineHandle>,
 }
 
 impl ConnectionHandle {
-    pub(crate) fn new(pipeline_ref: Arc<PipelineRef>, address: ListenAddr) -> Self {
+    pub(crate) fn new(pipeline_handle: Arc<PipelineHandle>, address: ListenAddr) -> Self {
+        let pipeline_ref = pipeline_handle.pipeline_ref.clone();
         let guard = Self::create_counter_guard(&pipeline_ref, &address, ConnectionState::Active);
 
         ConnectionHandle {
@@ -30,6 +37,7 @@ impl ConnectionHandle {
             address,
             state: ConnectionState::Active,
             guard,
+            _pipeline_handle: pipeline_handle,
         }
     }
 
@@ -97,14 +105,14 @@ mod tests {
     #[tokio::test]
     async fn test_connection_handle_increments_counter() {
         async {
-            let pipeline_ref = Arc::new(PipelineRef {
-                schema_id: "schema1".to_string(),
-                launch_id: Some("launch1".to_string()),
-                config_hash: "config1".to_string(),
-            });
+            let pipeline_handle = Arc::new(PipelineHandle::new(
+                "schema1".to_string(),
+                Some("launch1".to_string()),
+                "config1".to_string(),
+            ));
 
             let addr = ListenAddr::SocketAddr(SocketAddr::from(([127, 0, 0, 1], 4000)));
-            let _handle = ConnectionHandle::new(pipeline_ref, addr);
+            let _handle = ConnectionHandle::new(pipeline_handle, addr);
 
             assert_up_down_counter!(
                 "apollo.router.open_connections",
@@ -124,16 +132,16 @@ mod tests {
     #[tokio::test]
     async fn test_connection_handle_decrements_on_drop() {
         async {
-            let pipeline_ref = Arc::new(PipelineRef {
-                schema_id: "schema1".to_string(),
-                launch_id: Some("launch1".to_string()),
-                config_hash: "config1".to_string(),
-            });
+            let pipeline_handle = Arc::new(PipelineHandle::new(
+                "schema1".to_string(),
+                Some("launch1".to_string()),
+                "config1".to_string(),
+            ));
 
             let addr = ListenAddr::SocketAddr(SocketAddr::from(([127, 0, 0, 1], 4000)));
 
             {
-                let _handle = ConnectionHandle::new(pipeline_ref.clone(), addr.clone());
+                let _handle = ConnectionHandle::new(pipeline_handle.clone(), addr.clone());
 
                 assert_up_down_counter!(
                     "apollo.router.open_connections",
@@ -166,14 +174,14 @@ mod tests {
     #[tokio::test]
     async fn test_connection_handle_shutdown_changes_state() {
         async {
-            let pipeline_ref = Arc::new(PipelineRef {
-                schema_id: "schema1".to_string(),
-                launch_id: Some("launch1".to_string()),
-                config_hash: "config1".to_string(),
-            });
+            let pipeline_handle = Arc::new(PipelineHandle::new(
+                "schema1".to_string(),
+                Some("launch1".to_string()),
+                "config1".to_string(),
+            ));
 
             let addr = ListenAddr::SocketAddr(SocketAddr::from(([127, 0, 0, 1], 4000)));
-            let mut handle = ConnectionHandle::new(pipeline_ref, addr);
+            let mut handle = ConnectionHandle::new(pipeline_handle, addr);
 
             // Initially active
             assert_up_down_counter!(
@@ -219,17 +227,17 @@ mod tests {
     #[tokio::test]
     async fn test_connection_handle_multiple_connections() {
         async {
-            let pipeline_ref = Arc::new(PipelineRef {
-                schema_id: "schema1".to_string(),
-                launch_id: None,
-                config_hash: "config1".to_string(),
-            });
+            let pipeline_handle = Arc::new(PipelineHandle::new(
+                "schema1".to_string(),
+                None,
+                "config1".to_string(),
+            ));
 
             let addr1 = ListenAddr::SocketAddr(SocketAddr::from(([127, 0, 0, 1], 4000)));
             let addr2 = ListenAddr::SocketAddr(SocketAddr::from(([127, 0, 0, 1], 4001)));
 
-            let _handle1 = ConnectionHandle::new(pipeline_ref.clone(), addr1);
-            let _handle2 = ConnectionHandle::new(pipeline_ref, addr2);
+            let _handle1 = ConnectionHandle::new(pipeline_handle.clone(), addr1);
+            let _handle2 = ConnectionHandle::new(pipeline_handle, addr2);
 
             // Check first connection
             assert_up_down_counter!(
@@ -263,14 +271,14 @@ mod tests {
     #[tokio::test]
     async fn test_connection_handle_unix_socket() {
         async {
-            let pipeline_ref = Arc::new(PipelineRef {
-                schema_id: "schema1".to_string(),
-                launch_id: Some("launch1".to_string()),
-                config_hash: "config1".to_string(),
-            });
+            let pipeline_handle = Arc::new(PipelineHandle::new(
+                "schema1".to_string(),
+                Some("launch1".to_string()),
+                "config1".to_string(),
+            ));
 
             let addr = ListenAddr::UnixSocket("/tmp/router.sock".into());
-            let _handle = ConnectionHandle::new(pipeline_ref, addr);
+            let _handle = ConnectionHandle::new(pipeline_handle, addr);
 
             assert_up_down_counter!(
                 "apollo.router.open_connections",

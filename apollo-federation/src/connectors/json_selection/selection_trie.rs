@@ -143,8 +143,8 @@ impl SelectionTrie {
     /// |---------------------|-------------------------------------|
     /// | `Base(name)`        | `name` (e.g. `"$root"`)             |
     /// | `Field(_, key)`     | `key`                               |
-    /// | `Item(_, idx)`      | `idx.to_string()`                   |
     /// | `AnyField(_)`       | `"**"`                              |
+    /// | `Item(_, idx)`      | (skipped — list index, RH-1415)     |
     /// | `AnyItem(_)`        | (skipped — array iteration marker)  |
     /// | `Question(_)`       | (skipped — operator)                |
     /// | `NotNone(_)`        | (skipped — operator)                |
@@ -159,34 +159,35 @@ impl SelectionTrie {
     pub(crate) fn add_name(&mut self, name: &Name) -> &mut Self {
         let mut current: &mut SelectionTrie = self;
         // Ranges specific to each name segment (not inherited from parent
-        // segments). `Name::locations()` (public) returns the parent chain's
-        // locations followed by the segment's own, deduplicated in insertion
-        // order; `Name::locs()` (the per-segment accessor) is `pub(crate)` in
-        // shape@0.7.0, so we recover the per-segment slice by tracking the
-        // previous segment's accumulated location count.
-        let mut prev_count = 0;
+        // segments): the segment's own locations, minus any an ancestor
+        // segment already contributed. Calling `Name::locations()` per segment
+        // instead rebuilds the whole parent chain's set each time, which is
+        // quadratic in the name's depth.
+        let mut seen_locs = IndexSet::default();
         for part in name.iter() {
-            let all_locs: Vec<_> = part.locations().collect();
-            let ranges: Vec<Range<usize>> = all_locs
-                .iter()
-                .skip(prev_count)
+            let ranges: Vec<Range<usize>> = part
+                .locs()
+                .filter(|loc| seen_locs.insert(*loc))
                 .map(|loc| loc.span.clone())
                 .collect();
-            prev_count = all_locs.len();
             match part.case() {
                 NameCase::Base(base) => current = current.add_str_with_ranges(base, ranges),
                 NameCase::Field(_, field) => {
                     current = current.add_str_with_ranges(field, ranges);
                 }
-                NameCase::Item(_, idx) => {
-                    current = current.add_str_with_ranges(&idx.to_string(), ranges);
-                }
                 NameCase::AnyField(_) => current = current.add_str_with_ranges("**", ranges),
-                NameCase::AnyItem(_) | NameCase::Question(_) | NameCase::NotNone(_) => {
-                    // `*` is an iteration marker, not a path component; `?`
-                    // and `!` are presence operators that constrain the shape
-                    // of the value at the current trie position. None of them
-                    // introduce a new trie key.
+                NameCase::Item(_, _)
+                | NameCase::AnyItem(_)
+                | NameCase::Question(_)
+                | NameCase::NotNone(_) => {
+                    // `*` and `[i]` select list elements, not fields: a
+                    // consumer of `list->first` still needs all of `list`,
+                    // and a GraphQL field set cannot index into a list (an
+                    // index key here once produced `tagIds { "0" }` and broke
+                    // @key synthesis, RH-1415). `?` and `!` are presence
+                    // operators that constrain the shape of the value at the
+                    // current trie position. None of them introduce a new
+                    // trie key.
                 }
             }
         }
@@ -198,6 +199,28 @@ impl SelectionTrie {
         // continues to mean "explicitly consumed" rather than "navigated
         // through."
         current
+    }
+
+    /// Read-only counterpart of [`Self::add_name`]: whether the path that
+    /// `add_name(name)` would walk already exists in this trie.
+    pub(crate) fn contains_name(&self, name: &Name) -> bool {
+        let mut current = self;
+        for part in name.iter() {
+            let key = match part.case() {
+                NameCase::Base(base) => base.to_string(),
+                NameCase::Field(_, field) => field.to_string(),
+                NameCase::AnyField(_) => "**".to_string(),
+                NameCase::Item(_, _)
+                | NameCase::AnyItem(_)
+                | NameCase::Question(_)
+                | NameCase::NotNone(_) => continue,
+            };
+            match current.get(key) {
+                Some(sub) => current = sub,
+                None => return false,
+            }
+        }
+        true
     }
 
     pub(crate) fn extend(&mut self, other: &SelectionTrie) -> &mut Self {

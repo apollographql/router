@@ -1,0 +1,14 @@
+---
+source: apollo-federation/src/connectors/validation/mod.rs
+expression: errors
+input_file: apollo-federation/src/connectors/validation/test_data/keys_and_entities/invalid/this_first_object_list_without_subselection.graphql
+---
+[
+    Message {
+        code: ConnectorsCannotResolveKey,
+        message: "Variables used in connector (`$this { items }`) on type `Cart.result` cannot be used to create a valid `@key` directive.",
+        locations: [
+            30:6..30:13,
+        ],
+    },
+]

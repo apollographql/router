@@ -1,0 +1,38 @@
+extend schema
+  @link(url: "https://specs.apollo.dev/federation/v2.13", import: ["@key"])
+  @link(
+    url: "https://specs.apollo.dev/connect/v0.4"
+    import: ["@connect", "@source"]
+  )
+  @source(name: "api", http: { baseURL: "http://localhost" })
+
+# Counterpart to `invalid/this_first_object_list_without_subselection`:
+# reading fields from the first element of an object list records them
+# directly under the list (RH-1415), so the synthesized key is
+# `items { id name }` and composes.
+
+type Query {
+  cart(id: ID!): Cart
+    @connect(
+      source: "api"
+      http: { GET: "/carts/{$args.id}" }
+      selection: "id items { id name }"
+      entity: true
+    )
+}
+
+type Cart @key(fields: "id") {
+  id: ID!
+  items: [Item]!
+  result: String
+    @connect(
+      source: "api"
+      http: { POST: "/process", body: "{ item: $this.items->first { id name } }" }
+      selection: "$"
+    )
+}
+
+type Item {
+  id: ID!
+  name: String
+}

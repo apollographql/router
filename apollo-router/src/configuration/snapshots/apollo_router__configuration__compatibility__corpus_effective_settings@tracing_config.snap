@@ -1,0 +1,33 @@
+---
+source: apollo-router/src/configuration/compatibility.rs
+description: telemetry exporters and instrumentation
+expression: changed_settings(&config)
+---
+{
+  "/supergraph/listen": "1.2.3.4:5",
+  "/telemetry": {
+    "exporters": {
+      "tracing": {
+        "common": {
+          "resource": {
+            "foo": "bar"
+          },
+          "max_attributes_per_event": 2,
+          "max_attributes_per_link": 3,
+          "max_attributes_per_span": 3,
+          "max_events_per_span": 3,
+          "max_links_per_span": 3,
+          "parent_based_sampler": false,
+          "sampler": 0.3,
+          "service_name": "foo",
+          "service_namespace": "bar"
+        },
+        "propagation": {
+          "datadog": false,
+          "baggage": false,
+          "trace_context": false
+        }
+      }
+    }
+  }
+}

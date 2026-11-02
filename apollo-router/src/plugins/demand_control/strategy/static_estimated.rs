@@ -115,26 +115,16 @@ impl StrategyImpl for StaticEstimated {
     fn on_execution_response(
         &self,
         context: &crate::Context,
-        request: &ExecutableDocument,
+        _request: &ExecutableDocument,
         response: &graphql::Response,
     ) -> Result<(), DemandControlError> {
         if response.data.is_none() {
             return Ok(());
         }
 
-        let cost = match self.actual_cost_mode {
-            ActualCostMode::BySubgraph => context
-                .get_actual_cost_by_subgraph()?
-                .map_or(0.0, |cost| cost.total()),
-            ActualCostMode::ByResponseShape => self.cost_calculator.actual(
-                request,
-                response,
-                &context
-                    .extensions()
-                    .with_lock(|lock| lock.get().cloned())
-                    .unwrap_or_default(),
-            )?,
-        };
+        let cost = context
+            .get_actual_cost_by_subgraph()?
+            .map_or(0.0, |cost| cost.total());
 
         context.insert_actual_cost(cost)?;
         Ok(())

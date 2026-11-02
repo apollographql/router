@@ -1,0 +1,63 @@
+{
+  "Sequence": {
+    "nodes": [
+      {
+        "Fetch": {
+          "subgraph_name": "locations",
+          "id": null,
+          "variable_usages": [],
+          "operation_document": "{ locations { __typename id name } }",
+          "operation_name": null,
+          "operation_kind": "query",
+          "input_rewrites": [],
+          "output_rewrites": [],
+          "context_rewrites": []
+        }
+      },
+      {
+        "Flatten": {
+          "path": [
+            {
+              "Key": [
+                "locations",
+                null
+              ]
+            },
+            {
+              "AnyIndex": null
+            }
+          ],
+          "node": {
+            "Fetch": {
+              "subgraph_name": "reviews",
+              "id": null,
+              "variable_usages": [],
+              "requires": [
+                {
+                  "kind": "InlineFragment",
+                  "typeCondition": "Location",
+                  "selections": [
+                    {
+                      "kind": "Field",
+                      "name": "__typename"
+                    },
+                    {
+                      "kind": "Field",
+                      "name": "id"
+                    }
+                  ]
+                }
+              ],
+              "operation_document": "query($representations: [_Any!]!) { _entities(representations: $representations) { ... on Location { overallRating } } }",
+              "operation_name": null,
+              "operation_kind": "query",
+              "input_rewrites": [],
+              "output_rewrites": [],
+              "context_rewrites": []
+            }
+          }
+        }
+      }
+    ]
+  }
+}

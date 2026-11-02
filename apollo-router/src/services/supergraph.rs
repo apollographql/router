@@ -30,7 +30,6 @@ pub(crate) mod service;
 #[cfg(test)]
 mod tests;
 
-pub type BoxService = tower::util::BoxService<Request, Response, BoxError>;
 pub type BoxCloneService = tower::util::BoxCloneService<Request, Response, BoxError>;
 pub type ServiceResult = Result<Response, BoxError>;
 
@@ -422,7 +421,7 @@ impl Response {
     ///     #     Ok(Self)
     ///     # }
     ///     // …
-    ///     fn supergraph_service(&self, inner: supergraph::BoxService) -> supergraph::BoxService {
+    ///     fn supergraph_service(&self, inner: supergraph::BoxCloneService) -> supergraph::BoxCloneService {
     ///         inner
     ///             .map_response(|supergraph_response| {
     ///                 supergraph_response.map_stream(|graphql_response| {

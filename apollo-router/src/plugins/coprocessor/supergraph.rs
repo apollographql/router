@@ -3,8 +3,6 @@ use std::sync::Arc;
 
 use futures::future;
 use futures::stream;
-use schemars::JsonSchema;
-use serde::Deserialize;
 use tower::BoxError;
 use tower::ServiceBuilder;
 use tower_service::Service;
@@ -21,14 +19,18 @@ use crate::services::header_masking::MaskingRulesMap;
 use crate::services::supergraph;
 
 /// What information is passed to a router request/response stage
-#[derive(Clone, Debug, Default, Deserialize, PartialEq, JsonSchema)]
-#[serde(default, deny_unknown_fields)]
+#[apollo_configuration::configuration]
+#[derive(PartialEq)]
 pub(super) struct SupergraphRequestConf {
     /// Condition to trigger this stage
+    // Condition is generic, so it can't take the configuration attribute.
+    #[config(skip_validate)]
     pub(super) condition: Condition<SupergraphSelector>,
     /// Send the headers
     pub(super) headers: bool,
     /// Send the context
+    // ContextConf's Selective tuple variant holds a HashSet, which has no Validate impl.
+    #[config(skip_validate)]
     pub(super) context: ContextConf,
     /// Send the body
     pub(super) body: bool,
@@ -41,14 +43,18 @@ pub(super) struct SupergraphRequestConf {
 }
 
 /// What information is passed to a router request/response stage
-#[derive(Clone, Debug, Default, Deserialize, PartialEq, JsonSchema)]
-#[serde(default, deny_unknown_fields)]
+#[apollo_configuration::configuration]
+#[derive(PartialEq)]
 pub(super) struct SupergraphResponseConf {
     /// Condition to trigger this stage
+    // Condition is generic, so it can't take the configuration attribute.
+    #[config(skip_validate)]
     pub(super) condition: Condition<SupergraphSelector>,
     /// Send the headers
     pub(super) headers: bool,
     /// Send the context
+    // ContextConf's Selective tuple variant holds a HashSet, which has no Validate impl.
+    #[config(skip_validate)]
     pub(super) context: ContextConf,
     /// Send the body (can be true/false or selective with data/errors/extensions)
     pub(super) body: BodyConf,
@@ -60,8 +66,8 @@ pub(super) struct SupergraphResponseConf {
     pub(super) url: Option<String>,
 }
 
-#[derive(Clone, Debug, Default, Deserialize, PartialEq, JsonSchema)]
-#[serde(default)]
+#[apollo_configuration::configuration]
+#[derive(PartialEq)]
 pub(super) struct SupergraphStage {
     /// The request configuration
     pub(super) request: SupergraphRequestConf,
@@ -73,11 +79,11 @@ impl SupergraphStage {
     pub(crate) fn as_service<C>(
         &self,
         http_client: C,
-        service: supergraph::BoxService,
+        service: supergraph::BoxCloneService,
         default_url: String,
         sdl: Arc<String>,
         response_validation: bool,
-    ) -> supergraph::BoxService
+    ) -> supergraph::BoxCloneService
     where
         C: Service<HttpRequest, Response = HttpResponse, Error = BoxError>
             + Clone
@@ -186,9 +192,8 @@ impl SupergraphStage {
             .instrument(external_service_span())
             .option_layer(request_layer)
             .option_layer(response_layer)
-            .buffered() // XXX: Added during backpressure fixing
             .service(service)
-            .boxed()
+            .boxed_clone()
     }
 }
 
@@ -323,12 +328,7 @@ where
             };
 
             if let Some(context) = co_processor_output.context {
-                for (mut key, value) in context.try_into_iter()? {
-                    if let ContextConf::NewContextConf(NewContextConf::Deprecated) =
-                        &request_config.context
-                    {
-                        key = context_key_from_deprecated(key);
-                    }
+                for (key, value) in context.try_into_iter()? {
                     supergraph_response
                         .context
                         .upsert_json_value(key, move |_current| value);
@@ -351,11 +351,7 @@ where
     request.supergraph_request = http::Request::from_parts(parts, new_body);
 
     if let Some(context) = co_processor_output.context {
-        for (mut key, value) in context.try_into_iter()? {
-            if let ContextConf::NewContextConf(NewContextConf::Deprecated) = &request_config.context
-            {
-                key = context_key_from_deprecated(key);
-            }
+        for (key, value) in context.try_into_iter()? {
             request
                 .context
                 .upsert_json_value(key, move |_current| value);
@@ -510,12 +506,7 @@ where
         }
 
         if let Some(context) = co_processor_output.context {
-            update_context_from_coprocessor(
-                &response.context,
-                context,
-                &response_config.context,
-                &keys_sent,
-            )?;
+            update_context_from_coprocessor(&response.context, context, &keys_sent)?;
         }
 
         if let Some(headers) = co_processor_output.headers {
@@ -624,7 +615,6 @@ where
                         update_context_from_coprocessor(
                             &generator_map_context,
                             context,
-                            &response_config_context,
                             &keys_sent,
                         )?;
                     }
@@ -710,7 +700,7 @@ mod tests {
             request: SupergraphRequestConf {
                 condition: Default::default(),
                 headers: false,
-                context: ContextConf::Deprecated(false),
+                context: ContextConf::None,
                 body: true,
                 sdl: false,
                 method: false,
@@ -817,7 +807,7 @@ mod tests {
 
         let service = supergraph_stage.as_service(
             mock_http_client,
-            mock_supergraph_service.boxed(),
+            mock_supergraph_service.boxed_clone(),
             "http://test".to_string(),
             Arc::new("".to_string()),
             true,
@@ -855,7 +845,7 @@ mod tests {
                     SelectorOrValue::Value("value".to_string().into()),
                 ]),
                 headers: false,
-                context: ContextConf::Deprecated(false),
+                context: ContextConf::None,
                 body: true,
                 sdl: false,
                 method: false,
@@ -898,7 +888,7 @@ mod tests {
 
         let service = supergraph_stage.clone().as_service(
             mock_http_client,
-            mock_supergraph_service_1.boxed(),
+            mock_supergraph_service_1.boxed_clone(),
             "http://test".to_string(),
             Arc::new("".to_string()),
             true,
@@ -977,7 +967,7 @@ mod tests {
 
         let service = supergraph_stage.as_service(
             mock_http_client,
-            mock_supergraph_service_2.boxed(),
+            mock_supergraph_service_2.boxed_clone(),
             "http://test".to_string(),
             Arc::new("".to_string()),
             true,
@@ -997,7 +987,7 @@ mod tests {
             response: SupergraphResponseConf {
                 condition: Default::default(),
                 headers: true,
-                context: ContextConf::NewContextConf(NewContextConf::All),
+                context: ContextConf::All,
                 body: BodyConf::All(true),
                 sdl: true,
                 status_code: false,
@@ -1096,7 +1086,7 @@ mod tests {
 
         let service = supergraph_stage.as_service(
             mock_http_client,
-            mock_supergraph_service.boxed(),
+            mock_supergraph_service.boxed_clone(),
             "http://test".to_string(),
             Arc::new("".to_string()),
             true,
@@ -1136,7 +1126,7 @@ mod tests {
             response: SupergraphResponseConf {
                 condition: Default::default(),
                 headers: true,
-                context: ContextConf::NewContextConf(NewContextConf::All),
+                context: ContextConf::All,
                 body: BodyConf::All(true),
                 sdl: true,
                 status_code: false,
@@ -1214,7 +1204,7 @@ mod tests {
 
         let service = supergraph_stage.as_service(
             mock_http_client,
-            mock_supergraph_service.boxed(),
+            mock_supergraph_service.boxed_clone(),
             "http://test".to_string(),
             Arc::new("".to_string()),
             true,
@@ -1256,7 +1246,7 @@ mod tests {
                     SelectorOrValue::Value(true.into()),
                 ]),
                 headers: true,
-                context: ContextConf::NewContextConf(NewContextConf::All),
+                context: ContextConf::All,
                 body: BodyConf::All(true),
                 sdl: true,
                 status_code: false,
@@ -1334,7 +1324,7 @@ mod tests {
 
         let service = supergraph_stage.as_service(
             mock_http_client,
-            mock_supergraph_service.boxed(),
+            mock_supergraph_service.boxed_clone(),
             "http://test".to_string(),
             Arc::new("".to_string()),
             true,
@@ -1437,7 +1427,7 @@ mod tests {
 
             let service = supergraph_stage.as_service(
                 mock_http_client,
-                mock_supergraph_service.boxed(),
+                mock_supergraph_service.boxed_clone(),
                 "http://test".to_string(),
                 Arc::new("".to_string()),
                 false,
@@ -1472,7 +1462,7 @@ mod tests {
             response: SupergraphResponseConf {
                 condition: Condition::True,
                 headers: true,
-                context: ContextConf::NewContextConf(NewContextConf::All),
+                context: ContextConf::All,
                 body: BodyConf::All(true),
                 sdl: true,
                 status_code: false,
@@ -1510,7 +1500,7 @@ mod tests {
             request: SupergraphRequestConf {
                 condition: Condition::True,
                 headers: true,
-                context: ContextConf::NewContextConf(NewContextConf::All),
+                context: ContextConf::All,
                 body: true,
                 sdl: true,
                 method: true,
@@ -1662,7 +1652,7 @@ mod tests {
         let (supergraph_mock, supergraph_driver) = create_mock_supergraph_service();
         let service = create_supergraph_stage_for_response_validation_test().as_service(
             create_mock_http_client_invalid_response(),
-            supergraph_mock.boxed(),
+            supergraph_mock.boxed_clone(),
             "http://test".to_string(),
             Arc::default(),
             false, // Validation disabled
@@ -1683,7 +1673,7 @@ mod tests {
         let (supergraph_mock, supergraph_driver) = create_mock_supergraph_service();
         let service = create_supergraph_stage_for_response_validation_test().as_service(
             create_mock_http_client_empty_response(),
-            supergraph_mock.boxed(),
+            supergraph_mock.boxed_clone(),
             "http://test".to_string(),
             Arc::default(),
             false, // Validation disabled
@@ -1711,7 +1701,7 @@ mod tests {
         let (supergraph_mock, supergraph_driver) = create_mock_supergraph_service();
         let service = create_supergraph_stage_for_request_validation_test().as_service(
             create_mock_http_client_supergraph_request_valid_response(),
-            supergraph_mock.boxed(),
+            supergraph_mock.boxed_clone(),
             "http://test".to_string(),
             Arc::default(),
             true, // Validation enabled
@@ -1732,7 +1722,7 @@ mod tests {
         let (supergraph_mock, supergraph_driver) = create_mock_supergraph_service();
         let service = create_supergraph_stage_for_request_validation_test().as_service(
             create_mock_http_client_supergraph_request_empty_response(),
-            supergraph_mock.boxed(),
+            supergraph_mock.boxed_clone(),
             "http://test".to_string(),
             Arc::default(),
             true, // Validation enabled
@@ -1758,7 +1748,7 @@ mod tests {
         let (supergraph_mock, supergraph_driver) = create_mock_supergraph_service();
         let service = create_supergraph_stage_for_request_validation_test().as_service(
             create_mock_http_client_supergraph_request_invalid_response(),
-            supergraph_mock.boxed(),
+            supergraph_mock.boxed_clone(),
             "http://test".to_string(),
             Arc::default(),
             true, // Validation enabled
@@ -1784,7 +1774,7 @@ mod tests {
         let (supergraph_mock, supergraph_driver) = create_mock_supergraph_service();
         let service = create_supergraph_stage_for_request_validation_test().as_service(
             create_mock_http_client_supergraph_request_valid_response(),
-            supergraph_mock.boxed(),
+            supergraph_mock.boxed_clone(),
             "http://test".to_string(),
             Arc::default(),
             false, // Validation disabled
@@ -1805,7 +1795,7 @@ mod tests {
         let (supergraph_mock, supergraph_driver) = create_mock_supergraph_service();
         let service = create_supergraph_stage_for_request_validation_test().as_service(
             create_mock_http_client_supergraph_request_empty_response(),
-            supergraph_mock.boxed(),
+            supergraph_mock.boxed_clone(),
             "http://test".to_string(),
             Arc::default(),
             false, // Validation disabled
@@ -1828,7 +1818,7 @@ mod tests {
         let (supergraph_mock, supergraph_driver) = create_mock_supergraph_service();
         let service = create_supergraph_stage_for_request_validation_test().as_service(
             create_mock_http_client_supergraph_request_invalid_response(),
-            supergraph_mock.boxed(),
+            supergraph_mock.boxed_clone(),
             "http://test".to_string(),
             Arc::default(),
             false, // Validation disabled
@@ -1852,7 +1842,7 @@ mod tests {
         let (supergraph_mock, supergraph_driver) = create_mock_supergraph_service();
         let service = create_supergraph_stage_for_response_validation_test().as_service(
             create_mock_http_client_supergraph_response_valid_response(),
-            supergraph_mock.boxed(),
+            supergraph_mock.boxed_clone(),
             "http://test".to_string(),
             Arc::default(),
             true, // Validation enabled
@@ -1872,7 +1862,7 @@ mod tests {
         let (supergraph_mock, supergraph_driver) = create_mock_supergraph_service();
         let service = create_supergraph_stage_for_response_validation_test().as_service(
             create_mock_http_client_empty_response(),
-            supergraph_mock.boxed(),
+            supergraph_mock.boxed_clone(),
             "http://test".to_string(),
             Arc::default(),
             true, // Validation enabled
@@ -1891,7 +1881,7 @@ mod tests {
         let (supergraph_mock, supergraph_driver) = create_mock_supergraph_service();
         let service = create_supergraph_stage_for_response_validation_test().as_service(
             create_mock_http_client_invalid_response(),
-            supergraph_mock.boxed(),
+            supergraph_mock.boxed_clone(),
             "http://test".to_string(),
             Arc::default(),
             true, // Validation enabled
@@ -1910,7 +1900,7 @@ mod tests {
         let (supergraph_mock, supergraph_driver) = create_mock_supergraph_service();
         let service = create_supergraph_stage_for_response_validation_test().as_service(
             create_mock_http_client_supergraph_response_valid_response(),
-            supergraph_mock.boxed(),
+            supergraph_mock.boxed_clone(),
             "http://test".to_string(),
             Arc::default(),
             false, // Validation disabled

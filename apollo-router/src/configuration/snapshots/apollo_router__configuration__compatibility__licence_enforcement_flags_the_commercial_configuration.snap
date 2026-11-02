@@ -1,0 +1,21 @@
+---
+source: apollo-router/src/configuration/compatibility.rs
+expression: features
+---
+[
+  "APQ caching",
+  "Authentication plugin",
+  "Authorization directives",
+  "Batching support",
+  "Coprocessor plugin",
+  "Demand control plugin",
+  "Federated subscriptions",
+  "Operation aliases limiting",
+  "Operation depth limiting",
+  "Operation height limiting",
+  "Operation root fields limiting",
+  "Persisted queries",
+  "Query plan caching",
+  "Restricted",
+  "Subgraph response caching"
+]

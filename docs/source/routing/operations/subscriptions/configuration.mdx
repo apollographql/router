@@ -423,11 +423,12 @@ subscription:
   enabled: true
 # highlight-start
   deduplication:
-    enabled: false # default: true
+    all:
+      enabled: false # default: true
 # highlight-end
 ```
 
-Note that this is a global setting (not per-subgraph or per-operation).
+This disables deduplication for every subgraph. To disable it for only some subgraphs, see [per-subgraph deduplication](#per-subgraph-deduplication).
 
 #### Why disable deduplication?
 

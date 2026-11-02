@@ -34,8 +34,8 @@ telemetry:
   exporters:
     tracing:
       propagation:
-          # Important! You must enable Jaeger propagation to use allow use of Jaeger headers for traceIDs.
-          jaeger: true
+          # Enable W3C trace context propagation so trace IDs are shared with Jaeger via OTLP.
+          trace_context: true
       otlp:
         enabled: true
         # Optional endpoint, either 'default' or a URL (Defaults to http://127.0.0.1:4317)

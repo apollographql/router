@@ -16,7 +16,6 @@ use opentelemetry_sdk::metrics::InstrumentKind;
 use opentelemetry_sdk::metrics::Stream;
 use opentelemetry_sdk::metrics::Temporality;
 use opentelemetry_sdk::metrics::periodic_reader_with_async_runtime::PeriodicReader;
-use opentelemetry_sdk::runtime;
 use sys_info::hostname;
 use tonic::metadata::MetadataMap;
 use tonic::transport::ClientTlsConfig;
@@ -32,14 +31,18 @@ use crate::plugins::telemetry::apollo_exporter::ApolloExporter;
 use crate::plugins::telemetry::apollo_exporter::get_uname;
 use crate::plugins::telemetry::config::ApolloMetricsReferenceMode;
 use crate::plugins::telemetry::config::Conf;
+use crate::plugins::telemetry::metrics::BlockingSafeTokioRuntime;
 use crate::plugins::telemetry::metrics::NamedMetricExporter;
+use crate::plugins::telemetry::metrics::OverflowCounting;
 use crate::plugins::telemetry::metrics::OverflowMetricExporter;
 use crate::plugins::telemetry::metrics::RetryMetricExporter;
 use crate::plugins::telemetry::otlp::Protocol;
 use crate::plugins::telemetry::otlp::TelemetryDataKind;
+use crate::plugins::telemetry::otlp::no_retries;
 use crate::plugins::telemetry::otlp::process_endpoint;
 use crate::plugins::telemetry::reload::metrics::MetricsBuilder;
 use crate::plugins::telemetry::reload::metrics::MetricsConfigurator;
+use crate::plugins::telemetry::reload::metrics::instrument_default_buckets;
 
 pub(crate) mod histogram;
 pub(crate) mod studio;
@@ -75,8 +78,8 @@ impl MetricsConfigurator for Config {
         static ENABLED: AtomicBool = AtomicBool::new(false);
         if let Config {
             endpoint,
-            experimental_otlp_endpoint: otlp_endpoint,
-            experimental_otlp_metrics_protocol: otlp_metrics_protocol,
+            otlp_endpoint,
+            otlp_metrics_protocol,
             apollo_key: Some(key),
             apollo_graph_ref: Some(reference),
             schema_id,
@@ -139,9 +142,10 @@ impl Config {
 
                 let exporter = MetricExporter::builder()
                     .with_tonic()
+                    .with_retry_policy(no_retries())
                     .with_tls_config(ClientTlsConfig::new().with_native_roots())
                     .with_endpoint(endpoint.as_str())
-                    .with_timeout(batch_config.max_export_timeout)
+                    .with_timeout(*batch_config.max_export_timeout)
                     .with_metadata(metadata.clone())
                     .with_compression(opentelemetry_otlp::Compression::Gzip)
                     .with_temporality(Temporality::Delta)
@@ -150,9 +154,10 @@ impl Config {
                 // MetricExporter builder does not implement Clone, so we need to create a new builder for the realtime exporter
                 let realtime_exporter = MetricExporter::builder()
                     .with_tonic()
+                    .with_retry_policy(no_retries())
                     .with_tls_config(ClientTlsConfig::new().with_native_roots())
                     .with_endpoint(endpoint.as_str())
-                    .with_timeout(batch_config.max_export_timeout)
+                    .with_timeout(*batch_config.max_export_timeout)
                     .with_metadata(metadata.clone())
                     .with_compression(opentelemetry_otlp::Compression::Gzip)
                     .with_temporality(Temporality::Delta)
@@ -170,7 +175,8 @@ impl Config {
 
                 let exporter = MetricExporter::builder()
                     .with_http()
-                    .with_timeout(batch_config.max_export_timeout)
+                    .with_retry_policy(no_retries())
+                    .with_timeout(*batch_config.max_export_timeout)
                     .with_temporality(Temporality::Delta)
                     .with_compression(opentelemetry_otlp::Compression::Gzip)
                     .with_headers(headers.clone())
@@ -180,7 +186,8 @@ impl Config {
                 // MetricExporter builder does not implement Clone, so we need to create a new builder for the realtime exporter
                 let realtime_exporter = MetricExporter::builder()
                     .with_http()
-                    .with_timeout(batch_config.max_export_timeout)
+                    .with_retry_policy(no_retries())
+                    .with_timeout(*batch_config.max_export_timeout)
                     .with_temporality(Temporality::Delta)
                     .with_compression(opentelemetry_otlp::Compression::Gzip)
                     .with_headers(headers)
@@ -192,21 +199,31 @@ impl Config {
 
         // Wrap with retry, then overflow detection, then error prefixing
         let named_exporter = NamedMetricExporter::new(
-            OverflowMetricExporter::new_push(RetryMetricExporter::new(exporter)),
+            OverflowMetricExporter::new(
+                RetryMetricExporter::new(exporter),
+                OverflowCounting::EveryExport,
+            ),
             "apollo",
         );
         let named_realtime_exporter = NamedMetricExporter::new(
-            OverflowMetricExporter::new_push(RetryMetricExporter::new(realtime_exporter)),
+            OverflowMetricExporter::new(
+                RetryMetricExporter::new(realtime_exporter),
+                OverflowCounting::EveryExport,
+            ),
             "apollo",
         );
 
-        let default_reader = PeriodicReader::builder(named_exporter, runtime::Tokio)
-            .with_interval(Duration::from_secs(60))
-            .build();
+        let default_reader =
+            PeriodicReader::builder(named_exporter, BlockingSafeTokioRuntime::new_for_metrics())
+                .with_interval(Duration::from_secs(60))
+                .build();
 
-        let realtime_reader = PeriodicReader::builder(named_realtime_exporter, runtime::Tokio)
-            .with_interval(batch_config.scheduled_delay)
-            .build();
+        let realtime_reader = PeriodicReader::builder(
+            named_realtime_exporter,
+            BlockingSafeTokioRuntime::new_for_metrics(),
+        )
+        .with_interval(*batch_config.scheduled_delay)
+        .build();
 
         let resource = Resource::builder_empty()
             .with_attributes([
@@ -230,14 +247,18 @@ impl Config {
             .with_reader(MeterProviderType::Apollo, default_reader)
             .with_resource(MeterProviderType::Apollo, resource.clone());
 
-        // Configure histogram buckets for Apollo metrics
+        // Configure histogram buckets for Apollo metrics, preferring per-instrument
+        // defaults for histograms that don't measure durations
         let apollo_buckets = default_buckets();
         builder.with_view(MeterProviderType::Apollo, move |instrument: &Instrument| {
             if instrument.kind() == InstrumentKind::Histogram {
+                let boundaries = instrument_default_buckets(instrument.name())
+                    .map(<[f64]>::to_vec)
+                    .unwrap_or_else(|| apollo_buckets.clone());
                 Some(
                     Stream::builder()
                         .with_aggregation(Aggregation::ExplicitBucketHistogram {
-                            boundaries: apollo_buckets.clone(),
+                            boundaries,
                             record_min_max: true,
                         })
                         .build()
@@ -303,6 +324,8 @@ impl Config {
 
 #[cfg(test)]
 mod test {
+    use std::collections::HashMap;
+    use std::collections::HashSet;
     use std::future::Future;
     use std::sync::Arc;
     use std::time::Duration;
@@ -318,6 +341,8 @@ mod test {
     use super::*;
     use crate::Context;
     use crate::TestHarness;
+    use crate::configuration::ExternalValues;
+    use crate::configuration::expansion::Expansion;
     use crate::context::OPERATION_KIND;
     use crate::plugin::Plugin;
     use crate::plugin::PluginInit;
@@ -325,7 +350,6 @@ mod test {
     use crate::plugins::subscription;
     use crate::plugins::telemetry::STUDIO_EXCLUDE;
     use crate::plugins::telemetry::Telemetry;
-    use crate::plugins::telemetry::apollo;
     use crate::plugins::telemetry::apollo::ENDPOINT_DEFAULT;
     use crate::plugins::telemetry::apollo_exporter::Sender;
     use crate::query_planner::OperationKind;
@@ -463,7 +487,9 @@ mod test {
         let mut settings = insta::Settings::clone_current();
         settings.set_sort_maps(true);
         settings.add_redaction("[].request_id", "[REDACTED]");
-        settings.bind(|| insta::assert_json_snapshot!(results));
+        settings.bind(|| {
+            insta::assert_json_snapshot!(results);
+        });
         Ok(())
     }
 
@@ -479,6 +505,76 @@ mod test {
             insta::assert_json_snapshot!(results);
         });
 
+        Ok(())
+    }
+
+    /// Enum values in responses are only reported in extended reference mode.
+    #[rstest::rstest]
+    #[case::standard("standard", HashMap::new())]
+    #[case::extended(
+        "extended",
+        HashMap::from([("Status".to_string(), HashSet::from(["ACTIVE".to_string()]))])
+    )]
+    #[tokio::test(flavor = "multi_thread")]
+    async fn apollo_metrics_enum_response_references_follow_reference_mode(
+        #[case] metrics_reference_mode: &str,
+        #[case] expected: HashMap<String, HashSet<String>>,
+    ) -> Result<(), BoxError> {
+        let _guard = TEST.lock().await;
+        let telemetry_config = ExternalValues::from(
+            Expansion::builder()
+                .supported_mode("env")
+                .mocked_env_var("METRICS_REFERENCE_MODE", metrics_reference_mode)
+                .build(),
+        )
+        .expand_without_schema(
+            r#"
+            telemetry:
+              apollo:
+                apollo_key: "key"
+                apollo_graph_ref: "ref"
+                schema_id: "schema_sha"
+                metrics_reference_mode: ${env.METRICS_REFERENCE_MODE}
+            "#,
+        )?;
+        let mut plugin = create_telemetry_plugin_from_value(telemetry_config).await?;
+        let (tx, rx) = tokio::sync::mpsc::channel(100);
+        plugin.apollo_metrics_sender = Sender::Apollo(tx);
+
+        TestHarness::builder()
+            .configuration_json(serde_json::json!({
+                "experimental_mock_subgraphs": {
+                    "subgraph-a": { "query": { "status": "ACTIVE" } },
+                },
+            }))?
+            .schema(include_str!(
+                "../../testdata/enum_response_supergraph.graphql"
+            ))
+            .extra_private_plugin(plugin)
+            .build_router()
+            .await?
+            .oneshot(
+                SupergraphRequest::fake_builder()
+                    .query("{ status }")
+                    .build()?
+                    .try_into()
+                    .unwrap(),
+            )
+            .await?
+            .next_response()
+            .await
+            .unwrap()?;
+
+        let reports = ReceiverStream::new(rx).collect::<Vec<_>>().await;
+        let [report] = reports.as_slice() else {
+            panic!("expected one stats report, got {}", reports.len());
+        };
+        let stats = report
+            .stats
+            .values()
+            .next()
+            .expect("stats for the operation");
+        assert_eq!(stats.stats_with_context.enum_response_references, expected);
         Ok(())
     }
 
@@ -654,14 +750,11 @@ mod test {
             .collect::<Vec<_>>()
             .await
             .into_iter()
-            .filter_map(|m| match m {
-                apollo::SingleReport::Stats(mut m) => {
-                    m.stats.iter_mut().for_each(|(_k, v)| {
-                        v.stats_with_context.query_latency_stats.latency = default_latency
-                    });
-                    Some(m)
-                }
-                apollo::SingleReport::Traces(_) => None,
+            .map(|mut m| {
+                m.stats.iter_mut().for_each(|(_k, v)| {
+                    v.stats_with_context.query_latency_stats.latency = default_latency
+                });
+                m
             })
             .collect();
         Ok(results)
@@ -686,7 +779,13 @@ mod test {
     }
 
     async fn create_telemetry_plugin(full_config: &str) -> Result<Telemetry, BoxError> {
-        let full_config = serde_yaml::from_str::<Value>(full_config).expect("yaml must be valid");
+        create_telemetry_plugin_from_value(
+            serde_yaml::from_str(full_config).expect("yaml must be valid"),
+        )
+        .await
+    }
+
+    async fn create_telemetry_plugin_from_value(full_config: Value) -> Result<Telemetry, BoxError> {
         let telemetry_config = full_config
             .as_object()
             .expect("must be an object")

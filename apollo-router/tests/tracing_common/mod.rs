@@ -23,7 +23,7 @@ pub(crate) fn encode_ftv1(trace: Trace) -> String {
     BASE64_STANDARD.encode(trace.encode_to_vec())
 }
 
-pub(crate) fn subgraph_mocks(subgraph: &str) -> subgraph::BoxService {
+pub(crate) fn subgraph_mocks(subgraph: &str) -> subgraph::BoxCloneService {
     let builder = MockSubgraph::builder();
     // base64 FTV1 blobs were manually captured from un-mocked responses
     if subgraph == "products" {
@@ -553,5 +553,5 @@ pub(crate) fn subgraph_mocks(subgraph: &str) -> subgraph::BoxService {
       builder
   }
   .build()
-  .boxed()
+  .boxed_clone()
 }

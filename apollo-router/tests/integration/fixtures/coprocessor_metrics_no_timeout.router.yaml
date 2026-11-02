@@ -1,6 +1,6 @@
 # This coprocessor url will be updated to a test-scoped mock server
 coprocessor:
-  url: "<replace>"
+  url: "${env.TEST_CONFIG_COPROCESSOR_URL}"
   router:
     request:
       body: true
@@ -10,5 +10,4 @@ telemetry:
     metrics:
       prometheus:
         enabled: true
-        listen: "127.0.0.1:0"
         path: "/metrics"

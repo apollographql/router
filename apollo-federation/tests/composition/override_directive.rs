@@ -909,7 +909,7 @@ mod progressive_override {
         "#);
 
         insta::assert_snapshot!(supergraph.schema().schema(), @r#"
-        schema @link(url: "https://specs.apollo.dev/link/v1.0") @link(url: "https://specs.apollo.dev/join/v0.5", for: EXECUTION) {
+        schema @link(url: "https://specs.apollo.dev/link/v1.0") @link(url: "https://specs.apollo.dev/join/v0.6", for: EXECUTION) {
           query: Query
         }
 

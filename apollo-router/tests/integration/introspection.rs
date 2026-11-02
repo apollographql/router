@@ -281,7 +281,7 @@ async fn just_over_max_depth_with_check_disabled() {
     let response = make_request_with_extra_config(request, |conf| {
         conf.as_object_mut().unwrap().insert(
             "limits".to_owned(),
-            json!({"introspection_max_depth": false}),
+            json!({"router": {"introspection_max_depth": false}}),
         );
     })
     .await;
@@ -355,7 +355,7 @@ async fn make_request_with_extra_config(
                     json!({"data": {"me": {"id": 1}}}),
                 )
                 .build()
-                .boxed(),
+                .boxed_clone(),
             _ => default,
         })
         .build_supergraph()

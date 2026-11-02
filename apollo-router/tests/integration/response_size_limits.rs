@@ -21,7 +21,6 @@ async fn test_subgraph_response_size_limit_exceeded() -> Result<(), BoxError> {
                 exporters:
                     metrics:
                         prometheus:
-                            listen: 127.0.0.1:4000
                             enabled: true
                             path: /metrics
             include_subgraph_errors:
@@ -72,7 +71,6 @@ async fn test_subgraph_response_size_limit_not_exceeded() -> Result<(), BoxError
                 exporters:
                     metrics:
                         prometheus:
-                            listen: 127.0.0.1:4000
                             enabled: true
                             path: /metrics
             limits:
@@ -114,7 +112,6 @@ async fn test_per_subgraph_response_size_limit_exceeded() -> Result<(), BoxError
                 exporters:
                     metrics:
                         prometheus:
-                            listen: 127.0.0.1:4000
                             enabled: true
                             path: /metrics
             include_subgraph_errors:
@@ -162,7 +159,6 @@ async fn test_connector_response_size_limit_exceeded() -> Result<(), BoxError> {
                 exporters:
                     metrics:
                         prometheus:
-                            listen: 127.0.0.1:4000
                             enabled: true
                             path: /metrics
             include_subgraph_errors:
@@ -234,7 +230,6 @@ async fn test_connector_response_size_limit_not_exceeded() -> Result<(), BoxErro
                 exporters:
                     metrics:
                         prometheus:
-                            listen: 127.0.0.1:4000
                             enabled: true
                             path: /metrics
             connectors:

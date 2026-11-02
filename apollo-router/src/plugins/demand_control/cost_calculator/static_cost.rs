@@ -385,7 +385,7 @@ impl StaticCostCalculator {
         ctx: &ScoringContext,
         subgraph: &str,
     ) -> Result<f64, DemandControlError> {
-        let mut cost = if operation.is_mutation() { 10.0 } else { 0.0 };
+        let mut cost = operation_base_cost(operation);
 
         let Some(root_type_name) = ctx.schema.root_operation(operation.operation_type) else {
             return Err(DemandControlError::QueryParseFailure(format!(
@@ -632,7 +632,11 @@ impl StaticCostCalculator {
         query_plan: &QueryPlan,
         variables: &Object,
     ) -> Result<CostBySubgraph, DemandControlError> {
-        self.score_plan_node(&query_plan.root, variables)
+        if let Some(plan) = query_plan.root.as_ref() {
+            self.score_plan_node(plan, variables)
+        } else {
+            Ok(CostBySubgraph::default())
+        }
     }
 
     pub(crate) fn actual(
@@ -643,8 +647,19 @@ impl StaticCostCalculator {
     ) -> Result<f64, DemandControlError> {
         let mut visitor = ResponseCostCalculator::new(&self.supergraph_schema);
         visitor.visit(request, response, variables);
-        Ok(visitor.cost)
+        let base_cost: f64 = request
+            .operations
+            .iter()
+            .map(|op| operation_base_cost(op))
+            .sum();
+        Ok(base_cost + visitor.cost)
     }
+}
+
+/// Flat cost added to an operation on top of its field costs. Estimated and actual
+/// cost must both include it, or every mutation reports a constant delta.
+fn operation_base_cost(operation: &Operation) -> f64 {
+    if operation.is_mutation() { 10.0 } else { 0.0 }
 }
 
 pub(crate) struct ResponseCostCalculator<'a> {
@@ -784,9 +799,8 @@ mod tests {
     use crate::compute_job::ComputeJobType;
     use crate::plugins::authorization::CacheKeyMetadata;
     use crate::query_planner::QueryPlannerService;
-    use crate::services::QueryPlannerContent;
     use crate::services::QueryPlannerRequest;
-    use crate::services::layers::query_analysis::ParsedDocument;
+    use crate::services::query_parsing::ParsedDocument;
     use crate::services::query_planner::PlanOptions;
     use crate::spec;
     use crate::spec::Query;
@@ -885,9 +899,10 @@ mod tests {
             .unwrap_or_default();
         let supergraph_schema = schema.supergraph_schema().clone();
 
-        let mut planner = QueryPlannerService::new(schema.into(), config.clone())
-            .await
-            .unwrap();
+        let schema_arc: Arc<crate::spec::Schema> = schema.into();
+        let qp_arc = QueryPlannerService::create_planner(&schema_arc, &config).unwrap();
+        let subgraph_schemas = crate::query_planner::build_subgraph_schemas(&qp_arc);
+        let mut planner = QueryPlannerService::new(schema_arc, config.clone(), qp_arc);
 
         let ctx = Context::new();
         ctx.extensions()
@@ -901,22 +916,18 @@ mod tests {
                 CacheKeyMetadata::default(),
                 PlanOptions::default(),
                 ComputeJobType::QueryPlanning,
-                variables.clone(),
             ))
             .await
             .unwrap();
-        let query_plan = match planner_res.content.unwrap() {
-            QueryPlannerContent::Plan { plan } => plan,
-            _ => panic!("Query planner returned unexpected non-plan content"),
-        };
+        let query_plan = planner_res.content.unwrap();
 
         let schema = DemandControlledSchema::new(Arc::new(supergraph_schema)).unwrap();
         let mut demand_controlled_subgraph_schemas = HashMap::new();
-        for (subgraph_name, subgraph_schema) in planner.subgraph_schemas().iter() {
+        for (subgraph_name, subgraph_schema) in subgraph_schemas.iter() {
             let demand_controlled_subgraph_schema =
-                DemandControlledSchema::new(subgraph_schema.schema.clone()).unwrap();
+                DemandControlledSchema::new(subgraph_schema.clone()).unwrap();
             demand_controlled_subgraph_schemas
-                .insert(subgraph_name.to_string(), demand_controlled_subgraph_schema);
+                .insert(subgraph_name.clone(), demand_controlled_subgraph_schema);
         }
 
         let calculator = StaticCostCalculator::new(
@@ -1040,6 +1051,15 @@ mod tests {
         let variables = "{}";
 
         assert_eq!(basic_estimated_cost(schema, query, variables), 10.0)
+    }
+
+    #[test]
+    fn mutation_actual_cost_includes_base_cost() {
+        let schema = include_str!("./fixtures/basic_schema.graphql");
+        let query = include_str!("./fixtures/basic_mutation.graphql");
+        let response = br#"{"data":{"doSomething":6}}"#;
+
+        assert_eq!(basic_actual_cost(schema, query, "{}", response), 10.0)
     }
 
     #[test]

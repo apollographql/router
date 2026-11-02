@@ -48,10 +48,10 @@ telemetry:
             # Only these attributes will be preserved on the renamed metric
 
           # Example 5: Rename with custom description and unit
-          - name: apollo.router.session.count.active
-            rename: custom.active.sessions
-            description: "Number of active GraphQL sessions"
-            unit: "{session}"
+          - name: apollo.router.opened.subscriptions
+            rename: custom.active.subscriptions
+            description: "Number of currently open subscriptions"
+            unit: "{subscription}"
 
       # OTLP exporter - receives renamed metrics
       otlp:

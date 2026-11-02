@@ -1,7 +1,5 @@
 use apollo_compiler::executable::Field;
 use apollo_compiler::executable::NamedType;
-use schemars::JsonSchema;
-use serde::Deserialize;
 use serde_json_bytes::Value;
 use sha2::Digest;
 use tower::BoxError;
@@ -16,22 +14,19 @@ use crate::plugins::telemetry::config_new::instruments::InstrumentValue;
 use crate::plugins::telemetry::config_new::instruments::StandardUnit;
 use crate::plugins::telemetry::config_new::selectors::OperationName;
 
-#[derive(Deserialize, JsonSchema, Clone, Debug)]
-#[serde(deny_unknown_fields, rename_all = "snake_case")]
+#[apollo_configuration::configuration]
 pub(crate) enum ListLength {
     /// The length of the list
     Value,
 }
 
-#[derive(Deserialize, JsonSchema, Clone, Debug)]
-#[serde(deny_unknown_fields, rename_all = "snake_case")]
+#[apollo_configuration::configuration]
 pub(crate) enum FieldName {
     /// The GraphQL field name
     String,
 }
 
-#[derive(Deserialize, JsonSchema, Clone, Debug)]
-#[serde(deny_unknown_fields, rename_all = "snake_case")]
+#[apollo_configuration::configuration]
 pub(crate) enum FieldType {
     /// The GraphQL field name
     Name,
@@ -44,15 +39,14 @@ pub(crate) enum FieldType {
     Type,
 }
 
-#[derive(Deserialize, JsonSchema, Clone, Debug)]
-#[serde(deny_unknown_fields, rename_all = "snake_case")]
+#[apollo_configuration::configuration]
 pub(crate) enum TypeName {
     /// The GraphQL type name
     String,
 }
 
-#[derive(Deserialize, JsonSchema, Clone, Debug)]
-#[serde(deny_unknown_fields, rename_all = "snake_case", untagged)]
+#[apollo_configuration::configuration]
+#[serde(untagged)]
 pub(crate) enum GraphQLValue {
     Unit(StandardUnit),
     Custom(GraphQLSelector),
@@ -69,37 +63,43 @@ impl From<&GraphQLValue> for InstrumentValue<GraphQLSelector> {
     }
 }
 
-#[derive(Deserialize, JsonSchema, Clone, Debug)]
-#[serde(deny_unknown_fields, untagged)]
+#[apollo_configuration::configuration]
+#[serde(untagged)]
 pub(crate) enum GraphQLSelector {
     /// If the field is a list, the length of the list
     ListLength {
         #[allow(dead_code)]
+        #[config(required)]
         list_length: ListLength,
     },
     /// The GraphQL field name
     FieldName {
         #[allow(dead_code)]
+        #[config(required)]
         field_name: FieldName,
     },
     /// The GraphQL field type
     FieldType {
         #[allow(dead_code)]
+        #[config(required)]
         field_type: FieldType,
     },
     /// The GraphQL type name
     TypeName {
         #[allow(dead_code)]
+        #[config(required)]
         type_name: TypeName,
     },
     OperationName {
         /// The operation name from the query.
+        #[config(required)]
         operation_name: OperationName,
         /// Optional default value.
         default: Option<String>,
     },
     StaticField {
         /// A static value
+        #[config(required)]
         r#static: AttributeValue,
     },
 }

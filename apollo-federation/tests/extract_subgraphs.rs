@@ -109,7 +109,7 @@ fn preserve_default_values_of_input_fields() {
     let supergraph = Supergraph::new(r#"
     schema
       @link(url: "https://specs.apollo.dev/link/v1.0")
-      @link(url: "https://specs.apollo.dev/join/v0.2", for: EXECUTION)
+      @link(url: "https://specs.apollo.dev/join/v0.3", for: EXECUTION)
     {
       query: Query
     }
@@ -120,7 +120,9 @@ fn preserve_default_values_of_input_fields() {
 
     directive @join__implements(graph: join__Graph!, interface: String!) repeatable on OBJECT | INTERFACE
 
-    directive @join__type(graph: join__Graph!, key: join__FieldSet, extension: Boolean! = false, resolvable: Boolean! = true) repeatable on OBJECT | INTERFACE | UNION | ENUM | INPUT_OBJECT | SCALAR
+    directive @join__type(graph: join__Graph!, key: join__FieldSet, extension: Boolean! = false, resolvable: Boolean! = true, isInterfaceObject: Boolean! = false) repeatable on OBJECT | INTERFACE | UNION | ENUM | INPUT_OBJECT | SCALAR
+    directive @join__unionMember(graph: join__Graph!, member: String!) repeatable on UNION
+    directive @join__enumValue(graph: join__Graph!) repeatable on ENUM_VALUE
 
     directive @link(url: String, as: String, for: link__Purpose, import: [link__Import]) repeatable on SCHEMA
 

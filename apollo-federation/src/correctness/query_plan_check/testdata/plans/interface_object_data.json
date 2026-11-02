@@ -1,0 +1,155 @@
+{
+  "Sequence": {
+    "nodes": [
+      {
+        "Fetch": {
+          "subgraph_name": "A",
+          "id": null,
+          "variable_usages": [],
+          "operation_document": "{ start { __typename id } }",
+          "operation_name": null,
+          "operation_kind": "query",
+          "input_rewrites": [],
+          "output_rewrites": [],
+          "context_rewrites": []
+        }
+      },
+      {
+        "Flatten": {
+          "path": [
+            {
+              "Key": [
+                "start",
+                null
+              ]
+            }
+          ],
+          "node": {
+            "Fetch": {
+              "subgraph_name": "B",
+              "id": null,
+              "variable_usages": [],
+              "requires": [
+                {
+                  "kind": "InlineFragment",
+                  "typeCondition": "I",
+                  "selections": [
+                    {
+                      "kind": "Field",
+                      "name": "__typename"
+                    },
+                    {
+                      "kind": "Field",
+                      "name": "id"
+                    }
+                  ]
+                }
+              ],
+              "operation_document": "query($representations: [_Any!]!) { _entities(representations: $representations) { ... on I { __typename required } } }",
+              "operation_name": null,
+              "operation_kind": "query",
+              "input_rewrites": [
+                {
+                  "ValueSetter": {
+                    "path": [
+                      {
+                        "TypenameEquals": "I"
+                      },
+                      {
+                        "Key": [
+                          "__typename",
+                          null
+                        ]
+                      }
+                    ],
+                    "set_value_to": "I"
+                  }
+                },
+                {
+                  "ValueSetter": {
+                    "path": [
+                      {
+                        "TypenameEquals": "I"
+                      },
+                      {
+                        "Key": [
+                          "__typename",
+                          null
+                        ]
+                      }
+                    ],
+                    "set_value_to": "I"
+                  }
+                }
+              ],
+              "output_rewrites": [],
+              "context_rewrites": []
+            }
+          }
+        }
+      },
+      {
+        "Flatten": {
+          "path": [
+            {
+              "Key": [
+                "start",
+                null
+              ]
+            }
+          ],
+          "node": {
+            "Fetch": {
+              "subgraph_name": "C",
+              "id": null,
+              "variable_usages": [],
+              "requires": [
+                {
+                  "kind": "InlineFragment",
+                  "typeCondition": "I",
+                  "selections": [
+                    {
+                      "kind": "Field",
+                      "name": "__typename"
+                    },
+                    {
+                      "kind": "Field",
+                      "name": "required"
+                    },
+                    {
+                      "kind": "Field",
+                      "name": "id"
+                    }
+                  ]
+                }
+              ],
+              "operation_document": "query($representations: [_Any!]!) { _entities(representations: $representations) { ... on I { data } } }",
+              "operation_name": null,
+              "operation_kind": "query",
+              "input_rewrites": [
+                {
+                  "ValueSetter": {
+                    "path": [
+                      {
+                        "TypenameEquals": "I"
+                      },
+                      {
+                        "Key": [
+                          "__typename",
+                          null
+                        ]
+                      }
+                    ],
+                    "set_value_to": "I"
+                  }
+                }
+              ],
+              "output_rewrites": [],
+              "context_rewrites": []
+            }
+          }
+        }
+      }
+    ]
+  }
+}

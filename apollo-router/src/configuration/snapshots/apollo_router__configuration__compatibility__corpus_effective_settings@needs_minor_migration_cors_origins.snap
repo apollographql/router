@@ -1,0 +1,21 @@
+---
+source: apollo-router/src/configuration/compatibility.rs
+description: cors.origins migrates into cors.policies
+expression: changed_settings(&config)
+---
+{
+  "/cors/policies": [
+    {
+      "allow_credentials": null,
+      "allow_headers": [],
+      "expose_headers": [],
+      "match_origins": [],
+      "max_age": null,
+      "methods": null,
+      "origins": [
+        "https://example.com"
+      ],
+      "private_network_access": null
+    }
+  ]
+}

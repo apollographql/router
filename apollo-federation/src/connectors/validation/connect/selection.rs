@@ -14,7 +14,6 @@ use itertools::Itertools;
 use shape::Shape;
 use shape::ShapeCase;
 use shape::location::Location;
-use shape::location::SourceId;
 
 use self::variables::VariableResolver;
 use super::Code;
@@ -27,6 +26,7 @@ use crate::connectors::PathSelection;
 use crate::connectors::SubSelection;
 use crate::connectors::expand::visitors::FieldVisitor;
 use crate::connectors::expand::visitors::GroupVisitor;
+use crate::connectors::graphql_shapes::source_file;
 use crate::connectors::id::ConnectedElement;
 use crate::connectors::json_selection::NamedSelection;
 use crate::connectors::json_selection::Ranged;
@@ -194,19 +194,12 @@ impl<'schema> Selection<'schema> {
                 // Clear seen_fields for this connector
                 validator.seen_fields.clear();
 
-                // Collect fields resolved from all concrete types
-                let mut all_resolved_fields = Vec::new();
-
                 for concrete_type_ref in concrete_type_refs {
                     // Use the new shape-based walk method for each concrete type
-                    {
-                        let mut fields =
-                            validator.walk_selection_with_shape(concrete_type_ref, &shape)?;
-                        all_resolved_fields.append(&mut fields)
-                    }
+                    validator.walk_selection_with_shape(concrete_type_ref, &shape)?;
                 }
 
-                Ok(all_resolved_fields)
+                Ok(validator.seen_fields)
             }
 
             ConnectedElement::Type { type_ref } => {
@@ -237,7 +230,8 @@ impl<'schema> Selection<'schema> {
                 validator.seen_fields.clear();
 
                 // Use the new shape-based walk method
-                validator.walk_selection_with_shape(type_ref, &shape)
+                validator.walk_selection_with_shape(type_ref, &shape)?;
+                Ok(validator.seen_fields)
             }
         }
     }
@@ -559,13 +553,13 @@ impl<'schema> SelectionValidator<'schema> {
     ) -> Vec<Range<LineColumn>> {
         shape_locations
             .into_iter()
-            .filter_map(|location| match &location.source_id {
-                SourceId::GraphQL(file_id) => self
-                    .schema
-                    .sources
-                    .get(file_id)
-                    .and_then(|source| source.get_line_column_range(location.span.clone())),
-                SourceId::Other(_) => {
+            .filter_map(|location| {
+                // GraphQL locations are `graphql:<path>` `SourceId::Other` values
+                // since shape 0.9.0; `source_file` returns `None` for the
+                // JSONSelection ids, which is how the two are told apart here.
+                if let Some(source) = source_file(self.schema, &location.source_id) {
+                    source.get_line_column_range(location.span.clone())
+                } else {
                     // JSONSelection location - convert to range in the selection string
                     subslice_location(self.node, location.span.clone(), self.schema)
                 }
@@ -603,7 +597,24 @@ impl<'schema> SelectionValidator<'schema> {
         &mut self,
         type_ref: SchemaTypeRef<'schema>,
         shape: &Shape,
-    ) -> Result<Vec<(Name, Name)>, Message> {
+    ) -> Result<bool, Message> {
+        // Shape errors are carried as metadata rather than a dedicated
+        // `ShapeCase::Error` variant, so they ride on a shape that still has a
+        // partial structure. Report the first one and stop: descending into a
+        // structure we already know is partial would emit spurious
+        // `SelectedFieldNotFound`-style errors on top of the real failure.
+        //
+        // Returning `Ok(false)` here instead would credit no fields as
+        // seen, which does not suppress the diagnostic so much as replace it:
+        // the selected fields then look unresolved by any connector, and the
+        // reader is told the wrong thing about a different field.
+        if let Some(error) = shape.own_errors().next() {
+            return Err(Message {
+                code: Code::InvalidSelection,
+                message: error.message.clone(),
+                locations: self.get_shape_locations(shape.locations()),
+            });
+        }
         match shape.case() {
             ShapeCase::Object { fields, .. } => {
                 for (field_name, field_shape) in fields.iter() {
@@ -614,17 +625,18 @@ impl<'schema> SelectionValidator<'schema> {
                     // A field whose shape is an error means the mapping that
                     // produces it is malformed: a method called wrongly, most
                     // often. The shape functions already diagnosed it precisely
-                    // (`Error<"Method ->withWarning requires exactly one
-                    // argument, the value to record as the message, got 0">`);
+                    // (`Unknown (err "Method ->withWarning requires exactly
+                    // one argument, the value to record as the message, got
+                    // 0")`);
                     // without this arm that diagnosis is computed and
                     // discarded, the selection type-checks, and the author
                     // finds out only when a request runs and the mapping
-                    // silently produces nothing. Reported here rather than in
-                    // the terminal `ShapeCase::Error` arm below because an
+                    // silently produces nothing. Reported here rather than by
+                    // the terminal error check below because an
                     // error nested in an object never reaches that arm: the
                     // walk treats a non-object field shape as a scalar leaf and
                     // stops.
-                    if let ShapeCase::Error(shape::Error { message, .. }) = field_shape.case() {
+                    if let Some(shape::Error { message }) = field_shape.own_errors().next() {
                         return Err(Message {
                             code: Code::InvalidSelection,
                             message: format!(
@@ -649,7 +661,7 @@ impl<'schema> SelectionValidator<'schema> {
                     }
 
                     for (type_name, field_component) in fields_by_type_name.iter() {
-                        let field_def = &field_component.node;
+                        let field_def = &**field_component;
 
                         // Shadowing the type_ref parameter with a concrete type reference.
                         let Some(type_ref) = SchemaTypeRef::new(self.schema, type_name) else {
@@ -773,26 +785,26 @@ impl<'schema> SelectionValidator<'schema> {
                         self.path.pop();
                     }
                 }
-                Ok(self.seen_fields.clone())
+                Ok(!self.seen_fields.is_empty())
             }
             ShapeCase::One(shapes) => {
                 // For union shapes, we need to collect seen fields from ALL branches
                 // that succeed, not just the first one. This is because different
                 // branches may resolve different fields (e.g., in a ->match expression
                 // that returns different object types for interface implementations).
-                let mut all_seen_fields = Vec::new();
+                let mut any_seen = false;
                 let mut all_errors = Vec::new();
 
                 for (index, member_shape) in shapes.iter().enumerate() {
                     match self.walk_selection_with_shape(type_ref, member_shape) {
-                        Ok(mut fields) => all_seen_fields.append(&mut fields),
+                        Ok(seen) => any_seen |= seen,
                         Err(e) => all_errors.push((index, e)),
                     }
                 }
 
                 // If at least one branch succeeded, return all collected fields
-                if !all_seen_fields.is_empty() || all_errors.is_empty() {
-                    Ok(all_seen_fields)
+                if any_seen || all_errors.is_empty() {
+                    Ok(any_seen)
                 } else {
                     // If no shape worked, provide a comprehensive error
                     Err(Message {
@@ -817,14 +829,14 @@ impl<'schema> SelectionValidator<'schema> {
                 // selected beneath such methods were never marked as seen, producing
                 // spurious CONNECTORS_UNRESOLVED_FIELD errors (e.g. `->entries { key value }`
                 // against `[FooEntry]` left `FooEntry.key`/`FooEntry.value` unresolved).
-                let mut all_seen_fields = Vec::new();
+                let mut any_seen = false;
                 for item_shape in prefix {
-                    all_seen_fields.extend(self.walk_selection_with_shape(type_ref, item_shape)?);
+                    any_seen |= self.walk_selection_with_shape(type_ref, item_shape)?;
                 }
                 if !tail.is_none() {
-                    all_seen_fields.extend(self.walk_selection_with_shape(type_ref, tail)?);
+                    any_seen |= self.walk_selection_with_shape(type_ref, tail)?;
                 }
-                Ok(all_seen_fields)
+                Ok(any_seen)
             }
             ShapeCase::All(shapes) => {
                 // An intersection shape (e.g. `IntfA & IntfB`, or merged records):
@@ -833,11 +845,11 @@ impl<'schema> SelectionValidator<'schema> {
                 // `type_ref`. Walk every member and accumulate, propagating errors —
                 // unlike `One` (a union of alternatives), an intersection member that
                 // fails to validate is a genuine error, not a discarded branch.
-                let mut all_seen_fields = Vec::new();
+                let mut any_seen = false;
                 for member_shape in shapes.iter() {
-                    all_seen_fields.extend(self.walk_selection_with_shape(type_ref, member_shape)?);
+                    any_seen |= self.walk_selection_with_shape(type_ref, member_shape)?;
                 }
-                Ok(all_seen_fields)
+                Ok(any_seen)
             }
             // Structureless shapes expose no selectable GraphQL fields, so they
             // contribute nothing to `seen_fields`. These are listed explicitly,
@@ -850,16 +862,13 @@ impl<'schema> SelectionValidator<'schema> {
             | ShapeCase::Int(_)
             | ShapeCase::Float
             | ShapeCase::Null
-            | ShapeCase::None => Ok(Vec::new()),
+            | ShapeCase::None => Ok(false),
             // Opaque / deferred shapes whose structure is not statically known
             // here. We preserve the existing behavior of contributing nothing;
             // crucially we do NOT treat them as resolving every field, which could
             // mask genuine `CONNECTORS_UNRESOLVED_FIELD` errors. A structure-aware
             // policy for these is left to a follow-up.
-            ShapeCase::Name(_, _) | ShapeCase::Unknown => Ok(Vec::new()),
-            // A shape-processing failure is surfaced through other diagnostics;
-            // there is nothing to credit as seen here.
-            ShapeCase::Error(_) => Ok(Vec::new()),
+            ShapeCase::Name(_, _) | ShapeCase::Unknown => Ok(false),
         }
     }
 }

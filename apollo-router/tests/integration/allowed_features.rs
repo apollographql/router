@@ -30,18 +30,6 @@ static JWT_WITH_COPROCESSORS_IN_ALLOWED_FEATURES: LazyLock<String> = LazyLock::n
     )
 });
 
-// In the CI environment we only install Redis on x86_64 Linux; this jwt is part of testing that
-// flow
-#[cfg(any(not(feature = "ci"), all(target_arch = "x86_64", target_os = "linux")))]
-static JWT_WITH_ENTITY_CACHING_COPROCESSORS_IN_ALLOWED_FEATURES: LazyLock<String> =
-    LazyLock::new(|| {
-        mint_license_jwt(
-            Some(&["entity_caching", "coprocessors"]),
-            LICENSE_SIX_MONTHS_SECS,
-            LICENSE_SIX_MONTHS_SECS,
-        )
-    });
-
 static JWT_WITH_COPROCESSORS_SUBSCRIPTION_IN_ALLOWED_FEATURES: LazyLock<String> =
     LazyLock::new(|| {
         mint_license_jwt(
@@ -144,7 +132,6 @@ async fn traffic_shaping_when_allowed_features_contains_feature() {
                 exporters:
                     metrics:
                         prometheus:
-                            listen: 127.0.0.1:4000
                             enabled: true
                             path: /metrics
             include_subgraph_errors:
@@ -156,49 +143,6 @@ async fn traffic_shaping_when_allowed_features_contains_feature() {
         )
         .env(env)
         .jwt(JWT_WITH_ENTITY_CACHING_COPROCESSORS_TRAFFIC_SHAPING_IN_ALLOWED_FEATURES.to_string())
-        .build()
-        .await;
-
-    router.start().await;
-    router.assert_started().await;
-    router.assert_no_error_logs();
-}
-
-// In the CI environment we only install Redis on x86_64 Linux
-#[cfg(any(not(feature = "ci"), all(target_arch = "x86_64", target_os = "linux")))]
-#[tokio::test(flavor = "multi_thread")]
-async fn connectors_with_entity_caching_enabled_when_allowed_features_contains_features() {
-    use crate::integration::common::TEST_JWKS_ENDPOINT;
-
-    let mut env = HashMap::new();
-    env.insert(
-        "APOLLO_TEST_INTERNAL_UPLINK_JWKS".to_string(),
-        TEST_JWKS_ENDPOINT.as_os_str().into(),
-    );
-    let mut router = IntegrationTest::builder()
-        .config(
-            r#"
-            preview_entity_cache:
-              enabled: true
-              subgraph:
-                all:
-                  redis:
-                    urls: ["redis://127.0.0.1:6379"]
-                    ttl: "10m"
-                    required_to_start: true
-                subgraphs:
-                    connectors:
-                      enabled: true
-    "#,
-        )
-        .supergraph(PathBuf::from_iter([
-            "tests",
-            "fixtures",
-            "connectors",
-            "quickstart.graphql",
-        ]))
-        .env(env)
-        .jwt(JWT_WITH_ENTITY_CACHING_COPROCESSORS_IN_ALLOWED_FEATURES.to_string())
         .build()
         .await;
 
@@ -302,10 +246,8 @@ async fn router_starts_when_allowed_features_contains_feature_undefined_in_route
     let coprocessor_address = mock_server.uri();
 
     let mut router = IntegrationTest::builder()
-        .config(
-            include_str!("fixtures/coprocessor.router.yaml")
-                .replace("<replace>", &coprocessor_address),
-        )
+        .config(include_str!("fixtures/coprocessor.router.yaml"))
+        .env_entry("TEST_CONFIG_COPROCESSOR_URL", &coprocessor_address)
         .env(env)
         .jwt(JWT_WITH_ALLOWED_FEATURES_COPROCESSOR_WITH_FEATURE_UNDEFINED_IN_ROUTER.to_string())
         .build()
@@ -366,10 +308,10 @@ async fn demand_control_enabledwhen_allowed_features_none() {
     let coprocessor_address = mock_server.uri();
 
     let mut router = IntegrationTest::builder()
-        .config(
-            include_str!("fixtures/coprocessor_demand_control.router.yaml")
-                .replace("<replace>", &coprocessor_address),
-        )
+        .config(include_str!(
+            "fixtures/coprocessor_demand_control.router.yaml"
+        ))
+        .env_entry("TEST_CONFIG_COPROCESSOR_URL", &coprocessor_address)
         .env(env)
         .jwt(JWT_WITH_ALLOWED_FEATURES_NONE.to_string())
         .build()
@@ -402,10 +344,8 @@ async fn feature_violation_when_allowed_features_empty_with_coprocessor_in_confi
     );
 
     let mut router = IntegrationTest::builder()
-        .config(
-            include_str!("fixtures/coprocessor.router.yaml")
-                .replace("<replace>", &coprocessor_address),
-        )
+        .config(include_str!("fixtures/coprocessor.router.yaml"))
+        .env_entry("TEST_CONFIG_COPROCESSOR_URL", &coprocessor_address)
         .env(env)
         .jwt(JWT_WITH_EMPTY_ALLOWED_FEATURES.to_string())
         .build()
@@ -461,10 +401,10 @@ async fn feature_violation_when_allowed_features_does_not_contain_feature_demand
     );
 
     let mut router = IntegrationTest::builder()
-        .config(
-            include_str!("fixtures/coprocessor_demand_control.router.yaml")
-                .replace("<replace>", &coprocessor_address),
-        )
+        .config(include_str!(
+            "fixtures/coprocessor_demand_control.router.yaml"
+        ))
+        .env_entry("TEST_CONFIG_COPROCESSOR_URL", &coprocessor_address)
         .env(env)
         .jwt(JWT_WITH_COPROCESSORS_IN_ALLOWED_FEATURES.to_string())
         .build()
@@ -527,7 +467,7 @@ async fn canned_response_when_license_halted_with_valid_config_and_schema() {
     /*
      * THEN
      *  - since the license is expired and using restricted features the router should start but
-     *    the axum middleware, license_handler, should return a 500
+     *    the LicenseLayer should return a 500
      * */
     router.start().await;
     router
@@ -573,7 +513,7 @@ async fn canned_response_when_license_halted_with_restricted_config_and_valid_sc
     /*
      * THEN
      *  - since the license is expired and using restricted features the router should start but
-     *    the axum middleware, license_handler, should return a 500
+     *    the LicenseLayer should return a 500
      * */
     router.start().await;
     router
@@ -616,7 +556,7 @@ async fn canned_response_when_license_halted_with_valid_config_and_invalid_schem
     /*
      * THEN
      *  - since the license is expired and using restricted features the router should start but
-     *    the axum middleware, license_handler, should return a 500
+     *    the LicenseLayer tower layer should return a 500
      * */
     router.start().await;
     router
@@ -660,47 +600,6 @@ async fn router_starts_when_license_past_warn_at_but_not_expired_allowed_feature
     router.replace_config_string("http://localhost:{{PRODUCTS_PORT}}", "localhost:4001");
     router.replace_config_string("http://localhost:{{ACCOUNTS_PORT}}", "localhost:4002");
     router.replace_config_string("http://localhost:{{COPROCESSOR_PORT}}", "5002");
-
-    router.start().await;
-    router.assert_started().await;
-}
-
-// In the CI environment we only install Redis on x86_64 Linux
-#[cfg(any(not(feature = "ci"), all(target_arch = "x86_64", target_os = "linux")))]
-#[tokio::test(flavor = "multi_thread")]
-async fn router_starts_when_license_past_warn_at_but_not_expired_allowed_features_contains_feature_entity_caching()
- {
-    let mut env = HashMap::new();
-    env.insert(
-        "APOLLO_TEST_INTERNAL_UPLINK_JWKS".to_string(),
-        TEST_JWKS_ENDPOINT.as_os_str().into(),
-    );
-    let mut router = IntegrationTest::builder()
-        .config(
-            r#"
-            preview_entity_cache:
-              enabled: true
-              subgraph:
-                all:
-                  redis:
-                    urls: ["redis://127.0.0.1:6379"]
-                    ttl: "10m"
-                    required_to_start: true
-                subgraphs:
-                    connectors:
-                      enabled: true
-    "#,
-        )
-        .supergraph(PathBuf::from_iter([
-            "tests",
-            "fixtures",
-            "connectors",
-            "quickstart.graphql",
-        ]))
-        .env(env)
-        .jwt(JWT_PAST_WARN_AT_BUT_NOT_EXPIRED_WITH_COPROCESSORS_ENTITY_CACHING_TRAFFIC_SHAPING_IN_ALLOWED_FEATURES.to_string())
-        .build()
-        .await;
 
     router.start().await;
     router.assert_started().await;

@@ -30,7 +30,7 @@ where
     F: Fn(&Request) -> tracing::Span,
 {
     span_fn: F,
-    phantom: PhantomData<Request>,
+    phantom: PhantomData<fn(Request)>,
 }
 
 impl<F, Request> InstrumentLayer<F, Request>
@@ -70,7 +70,21 @@ where
 {
     inner: S,
     span_fn: F,
-    phantom: PhantomData<Request>,
+    phantom: PhantomData<fn(Request)>,
+}
+
+impl<F, S, Request> Clone for InstrumentService<F, S, Request>
+where
+    S: Service<Request> + Clone,
+    F: Fn(&Request) -> tracing::Span + Clone,
+{
+    fn clone(&self) -> Self {
+        Self {
+            inner: self.inner.clone(),
+            span_fn: self.span_fn.clone(),
+            phantom: PhantomData,
+        }
+    }
 }
 
 impl<F, S, Request> Service<Request> for InstrumentService<F, S, Request>

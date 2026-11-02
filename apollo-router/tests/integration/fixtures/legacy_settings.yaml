@@ -1,0 +1,8 @@
+# Settings that the router upgrades automatically at startup: one migration with a notice and
+# one without. Its name doesn't end in `router.yaml`, so the tests that check every project
+# configuration as written skip it.
+telemetry:
+  apollo:
+    otlp_tracing_sampler: 0.5
+plugins:
+  experimental.expose_query_plan: true

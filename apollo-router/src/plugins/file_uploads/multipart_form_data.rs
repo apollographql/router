@@ -1,4 +1,6 @@
 use std::sync::Arc;
+use std::sync::atomic::AtomicBool;
+use std::sync::atomic::Ordering;
 
 use bytes::Bytes;
 use bytes::BytesMut;
@@ -25,6 +27,7 @@ pub(super) struct MultipartFormData {
     boundary: String,
     map: Arc<MapFieldRaw>,
     multipart: MultipartRequest,
+    upload_failed: Arc<AtomicBool>,
 }
 
 impl MultipartFormData {
@@ -34,7 +37,14 @@ impl MultipartFormData {
             boundary,
             map: Arc::new(map),
             multipart,
+            upload_failed: Arc::default(),
         }
+    }
+
+    /// A flag that [`into_stream`](Self::into_stream)'s stream sets if it fails, shared by every
+    /// clone of this form.
+    pub(super) fn upload_failed(&self) -> Arc<AtomicBool> {
+        self.upload_failed.clone()
     }
 
     pub(super) fn content_type(&self) -> HeaderValue {
@@ -91,6 +101,10 @@ impl MultipartFormData {
             .multipart
             .subgraph_stream(file_names, file_prefix)
             .await;
-        static_part.chain(files_stream).chain(last)
+        let upload_failed = self.upload_failed;
+        static_part
+            .chain(files_stream)
+            .chain(last)
+            .inspect_err(move |_| upload_failed.store(true, Ordering::Relaxed))
     }
 }

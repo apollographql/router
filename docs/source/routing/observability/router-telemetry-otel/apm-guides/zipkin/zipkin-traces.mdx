@@ -7,16 +7,14 @@ context:
 redirectFrom:
     - /graphos/routing/observability/telemetry/trace-exporters/zipkin
 ---
-import BatchProcessorPreamble from '../../../../../../shared/batch-processor-preamble.mdx';
-import BatchProcessorRef from '../../../../../../shared/batch-processor-ref.mdx';
 
 Enable and configure tracing for [Zipkin](https://zipkin.io/) in GraphOS Router or Apollo Router Core.
 
 For general tracing configuration, refer to [Router Tracing Configuration](/router/configuration/telemetry/exporters/tracing/overview).
 
-## OTLP configuration (recommended)
+## OTLP configuration
 
-Zipkin supports OTLP ingestion via [zipkin-otel](https://github.com/openzipkin-contrib/zipkin-otel), and OpenTelemetry is [deprecating the native Zipkin exporters](https://opentelemetry.io/blog/2025/deprecating-zipkin-exporters/) in favor of OTLP. Using the OTLP exporter is recommended:
+Zipkin supports OTLP ingestion via [zipkin-otel](https://github.com/openzipkin-contrib/zipkin-otel). Configure the router's OTLP exporter to send traces to Zipkin:
 
 ```yaml title="router.yaml"
 telemetry:
@@ -31,62 +29,3 @@ telemetry:
 This sends traces to Zipkin using the OTLP protocol.
 
 See [OTLP configuration](/router/configuration/telemetry/exporters/tracing/otlp#configuration) for more details on settings.
-
-## Zipkin native configuration
-
-<Caution>
-    The native Zipkin exporter is deprecated and will be removed in the next major version of Router. Zipkin supports OTLP ingestion, and OpenTelemetry is [deprecating native Zipkin exporters](https://opentelemetry.io/blog/2025/deprecating-zipkin-exporters/) in favor of OTLP. Use [OTLP configuration](#otlp-configuration-recommended) instead.
-</Caution>
-<Caution>
-    Zipkin native exporter does not currently support setting the service name on the Zipkin native exports.
-</Caution>
-
-You can configure the router to export tracing data to Zipkin using the native Zipkin exporter:
-
-```yaml title="router.yaml"
-telemetry:
-  exporters:
-     tracing:
-       zipkin:
-         enabled: true
-         # Optional endpoint (defaults to http://127.0.0.1:9411/api/v2/spans)
-         endpoint: "http://${env.ZIPKIN_HOST}:9411/api/v2/spans"
-```
-
-### `enabled`
-
-Set to true to enable the Zipkin exporter. Defaults to false.
-
-### `endpoint`
-
-The Zipkin collector endpoint address. Defaults to `http://127.0.0.1:9411/api/v2/spans`.
-
-### `batch_processor`
-
-<BatchProcessorPreamble />
-
-```yaml title="router.yaml"
-telemetry:
-  exporters:
-    tracing:
-      zipkin:
-        enabled: true
-        batch_processor:
-          max_export_batch_size: 512
-          max_concurrent_exports: 1
-          max_export_timeout: 30s
-          max_queue_size: 2048
-          scheduled_delay: 5s
-```
-
-#### `batch_processor` configuration reference
-
-<BatchProcessorRef />
-
-## Zipkin native configuration reference
-
-| Attribute         | Default                              | Description                    |
-|-------------------|--------------------------------------|--------------------------------|
-| `enabled`         | `false`                              | Enable the Zipkin exporter.    |
-| `endpoint`        | `http://127.0.0.1:9411/api/v2/spans` | The endpoint to send spans to. |
-| `batch_processor` |                                      | The batch processor settings.  |

@@ -1,0 +1,8 @@
+---
+source: apollo-router/src/configuration/compatibility.rs
+description: "experimental_batching renamed to batching (breaking; needs `router config upgrade`)"
+expression: changed_settings(&config)
+---
+{
+  "/batching/enabled": true
+}

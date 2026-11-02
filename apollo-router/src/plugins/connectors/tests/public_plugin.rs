@@ -11,11 +11,9 @@ use std::sync::Arc;
 use std::sync::Mutex;
 
 use apollo_federation::connectors::runtime::http_json_transport::TransportRequest;
-use schemars::JsonSchema;
-use serde::Deserialize;
 use tower::BoxError;
 use tower::ServiceExt;
-use tower::util::BoxService;
+use tower::util::BoxCloneService;
 
 use super::*;
 use crate::plugin::PluginInit;
@@ -42,7 +40,7 @@ struct ObservingPlugin {
     observed: Arc<Mutex<Observed>>,
 }
 
-#[derive(Deserialize, JsonSchema)]
+#[apollo_configuration::configuration]
 struct Conf {}
 
 #[async_trait::async_trait]
@@ -55,9 +53,9 @@ impl PluginUnstable for ObservingPlugin {
 
     fn connector_request_service(
         &self,
-        service: request_service::BoxService,
+        service: request_service::BoxCloneService,
         source_name: String,
-    ) -> request_service::BoxService {
+    ) -> request_service::BoxCloneService {
         self.observed
             .lock()
             .unwrap()
@@ -65,7 +63,7 @@ impl PluginUnstable for ObservingPlugin {
             .push(source_name.clone());
 
         let observed = self.observed.clone();
-        BoxService::new(
+        BoxCloneService::new(
             service.map_request(move |mut request: request_service::Request| {
                 // Read the originating operation through the public accessor.
                 let query = request.supergraph_request().body().query.clone();
@@ -172,10 +170,10 @@ async fn public_unstable_plugin_can_break_a_connector_request() {
 
         fn connector_request_service(
             &self,
-            service: request_service::BoxService,
+            service: request_service::BoxCloneService,
             _source_name: String,
-        ) -> request_service::BoxService {
-            BoxService::new(tower::service_fn(
+        ) -> request_service::BoxCloneService {
+            BoxCloneService::new(tower::service_fn(
                 move |request: request_service::Request| {
                     // `service` is intentionally dropped: the upstream call is never made.
                     let _ = &service;
@@ -276,11 +274,11 @@ async fn public_unstable_plugin_can_wrap_a_connector_response_with_data() {
 
         fn connector_request_service(
             &self,
-            service: request_service::BoxService,
+            service: request_service::BoxCloneService,
             _source_name: String,
-        ) -> request_service::BoxService {
+        ) -> request_service::BoxCloneService {
             let observed = self.observed.clone();
-            BoxService::new(
+            BoxCloneService::new(
                 service
                     .map_request(|request: request_service::Request| {
                         request
@@ -475,12 +473,12 @@ async fn public_unstable_plugin_can_wrap_a_connector_response_with_error() {
 
         fn connector_request_service(
             &self,
-            service: request_service::BoxService,
+            service: request_service::BoxCloneService,
             _source_name: String,
-        ) -> request_service::BoxService {
+        ) -> request_service::BoxCloneService {
             let observed = self.observed.clone();
-            BoxService::new(
-                service.map_response(move |mut response: request_service::Response| {
+            BoxCloneService::new(service.map_response(
+                move |mut response: request_service::Response| {
                     let mut observed = observed.lock().unwrap();
 
                     observed.transport_status_before = match &response.transport_outcome {
@@ -525,8 +523,8 @@ async fn public_unstable_plugin_can_wrap_a_connector_response_with_error() {
 
                     drop(observed);
                     response
-                }),
-            )
+                },
+            ))
         }
 
         fn unstable_method(&self) {}

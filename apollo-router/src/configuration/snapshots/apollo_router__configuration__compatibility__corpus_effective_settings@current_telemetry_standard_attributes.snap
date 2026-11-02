@@ -1,0 +1,50 @@
+---
+source: apollo-router/src/configuration/compatibility.rs
+description: "telemetry standard attributes, enabled by a boolean or renamed with an alias"
+expression: changed_settings(&config)
+---
+{
+  "/telemetry": {
+    "instrumentation": {
+      "spans": {
+        "router": {
+          "attributes": {
+            "http.request.method": true,
+            "http.response.status_code": false,
+            "url.path": {
+              "alias": "request_path"
+            }
+          }
+        },
+        "supergraph": {
+          "attributes": {
+            "graphql.operation.name": true,
+            "graphql.operation.type": {
+              "alias": "operation_kind"
+            }
+          }
+        },
+        "subgraph": {
+          "attributes": {
+            "subgraph.name": {
+              "alias": "service"
+            },
+            "subgraph.graphql.operation.name": true
+          }
+        }
+      },
+      "instruments": {
+        "router": {
+          "http.server.request.duration": {
+            "attributes": {
+              "http.response.status_code": true,
+              "http.request.method": {
+                "alias": "method"
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+}

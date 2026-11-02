@@ -4,18 +4,16 @@ use futures::StreamExt;
 use futures::future::ready;
 use futures::stream::once;
 use http::HeaderValue;
-use schemars::JsonSchema;
-use serde::Deserialize;
-use serde::Serialize;
 use serde_json_bytes::json;
 use tower::BoxError;
 use tower::ServiceBuilder;
-use tower::ServiceExt as TowerServiceExt;
+use tower::ServiceExt;
 
 use super::connectors::query_plans::replace_connector_service_names;
 use super::connectors::query_plans::replace_connector_service_names_text;
 use crate::layers::ServiceBuilderExt;
-use crate::layers::ServiceExt;
+use crate::layers::ServiceExt as _;
+use crate::plugin::Enabled;
 use crate::plugin::Plugin;
 use crate::plugin::PluginInit;
 use crate::services::execution;
@@ -33,14 +31,6 @@ struct ExposeQueryPlan {
     enabled: bool,
 }
 
-/// Expose query plan
-#[derive(Debug, Clone, Deserialize, Serialize, JsonSchema)]
-#[serde(deny_unknown_fields)]
-struct ExposeQueryPlanConfig(
-    /// Enabled
-    bool,
-);
-
 #[derive(Clone, serde::Deserialize, serde::Serialize)]
 enum Setting {
     Enabled,
@@ -50,7 +40,7 @@ enum Setting {
 
 #[async_trait::async_trait]
 impl Plugin for ExposeQueryPlan {
-    type Config = ExposeQueryPlanConfig;
+    type Config = Enabled;
 
     async fn new(init: PluginInit<Self::Config>) -> Result<Self, BoxError> {
         Ok(ExposeQueryPlan {
@@ -59,9 +49,9 @@ impl Plugin for ExposeQueryPlan {
         })
     }
 
-    fn execution_service(&self, service: execution::BoxService) -> execution::BoxService {
+    fn execution_service(&self, service: execution::BoxCloneService) -> execution::BoxCloneService {
         ServiceBuilder::new()
-            .checkpoint(|req: execution::Request| {
+            .checkpoint_async(|req: execution::Request| async move {
                 let setting = req
                     .context
                     .get::<_, Setting>(ENABLED_CONTEXT_KEY)
@@ -71,7 +61,9 @@ impl Plugin for ExposeQueryPlan {
 
                 if !matches!(setting, Setting::Disabled) {
                     let plan =
-                        replace_connector_service_names(req.query_plan.root.clone(), &req.context);
+                        req.query_plan.root.clone().map(|root_node| {
+                            replace_connector_service_names(root_node, &req.context)
+                        });
                     let text = replace_connector_service_names_text(
                         req.query_plan.formatted_query_plan.clone(),
                         &req.context,
@@ -94,10 +86,13 @@ impl Plugin for ExposeQueryPlan {
                 }
             })
             .service(service)
-            .boxed()
+            .boxed_clone()
     }
 
-    fn supergraph_service(&self, service: supergraph::BoxService) -> supergraph::BoxService {
+    fn supergraph_service(
+        &self,
+        service: supergraph::BoxCloneService,
+    ) -> supergraph::BoxCloneService {
         let conf_enabled = self.enabled;
         service
             .map_future_with_request_data(move |req: &supergraph::Request| {
@@ -134,7 +129,10 @@ impl Plugin for ExposeQueryPlan {
                                 {
                                     first
                                         .extensions
-                                        .insert("apolloQueryPlan", json!({ "object": { "kind": "QueryPlan", "node": plan }, "text": res.context.get_json_value(FORMATTED_QUERY_PLAN_CONTEXT_KEY) }));
+                                        .insert("apolloQueryPlan", json!({
+                                            "object": { "kind": "QueryPlan", "node": plan },
+                                            "text": res.context.get_json_value(FORMATTED_QUERY_PLAN_CONTEXT_KEY),
+                                        }));
                                 }
                             res.response = http::Response::from_parts(
                                 parts,
@@ -149,11 +147,11 @@ impl Plugin for ExposeQueryPlan {
 
                 res
             })
-            .boxed()
+            .boxed_clone()
     }
 }
 
-register_plugin!("experimental", "expose_query_plan", ExposeQueryPlan);
+register_plugin!("apollo", "expose_query_plan", ExposeQueryPlan);
 
 #[cfg(test)]
 mod tests {
@@ -168,6 +166,8 @@ mod tests {
     use crate::plugin::test::MockSubgraph;
 
     static VALID_QUERY: &str = r#"query TopProducts($first: Int) { topProducts(first: $first) { upc name reviews { id product { name } author { id name } } } }"#;
+    static EMPTY_QUERY: &str =
+        r#"query NoPlanning { topProducts(first: 5) @skip(if: true) { upc } }"#;
 
     async fn build_mock_supergraph(config: serde_json::Value) -> supergraph::BoxCloneService {
         let mut extensions = Object::new();
@@ -273,9 +273,7 @@ mod tests {
     #[tokio::test]
     async fn it_doesnt_expose_query_plan() {
         let supergraph = build_mock_supergraph(serde_json::json! {{
-            "plugins": {
-                "experimental.expose_query_plan": false
-            }
+            "expose_query_plan": false
         }})
         .await;
 
@@ -299,9 +297,7 @@ mod tests {
         let response = execute_supergraph_test(
             VALID_QUERY,
             build_mock_supergraph(serde_json::json! {{
-                "plugins": {
-                    "experimental.expose_query_plan": true
-                }
+                "expose_query_plan": true
             }})
             .await,
         )
@@ -314,6 +310,28 @@ mod tests {
 
         // Since this is a full-run (ie, not a dry-run), we should have data
         assert!(response.data.is_some());
+        assert!(response.errors.is_empty());
+    }
+
+    #[tokio::test]
+    async fn it_expose_empty_query_plan() {
+        let response = execute_supergraph_test(
+            EMPTY_QUERY,
+            build_mock_supergraph(serde_json::json! {{
+                "expose_query_plan": true
+            }})
+            .await,
+        )
+        .await;
+
+        // Since we're exposing the query plan, the extensions better not be empty! See the test
+        // for not exposing query plans to know why the assumption that a non-empty extension means
+        // we have a query plan
+        assert!(!response.extensions.is_empty());
+
+        // Since this is a full-run (ie, not a dry-run), we should have data
+        assert!(response.data.is_some());
+        assert!(response.errors.is_empty());
     }
 
     #[tokio::test]
@@ -321,9 +339,7 @@ mod tests {
         let response = execute_supergraph_test_dry_run(
             VALID_QUERY,
             build_mock_supergraph(serde_json::json! {{
-                "plugins": {
-                    "experimental.expose_query_plan": true
-                }
+                "expose_query_plan": true
             }})
             .await,
         )
@@ -336,5 +352,6 @@ mod tests {
 
         // Since this is a dry-run, we shouldn't have any data
         assert!(response.data.is_none());
+        assert!(response.errors.is_empty());
     }
 }

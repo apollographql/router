@@ -1,0 +1,9 @@
+---
+source: apollo-router/src/configuration/compatibility.rs
+description: experimental.expose_query_plan plugin moves to the top-level expose_query_plan
+expression: changed_settings(&config)
+---
+{
+  "/expose_query_plan": true,
+  "/plugins": {}
+}

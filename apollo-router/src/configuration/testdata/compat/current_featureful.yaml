@@ -1,0 +1,40 @@
+supergraph:
+  listen: 127.0.0.1:4000
+  introspection: true
+cors:
+  policies:
+    - origins:
+        - https://studio.apollographql.com
+      allow_credentials: true
+apq:
+  enabled: false
+persisted_queries:
+  enabled: true
+  safelist:
+    enabled: true
+    require_id: true
+batching:
+  enabled: true
+  mode: batch_http_link
+limits:
+  router:
+    max_depth: 100
+health_check:
+  enabled: true
+  path: /healthz
+subscription:
+  enabled: true
+  mode:
+    passthrough:
+      all:
+        path: /subscriptions
+  deduplication:
+    all:
+      enabled: true
+      ignored_headers:
+        - x-request-id
+response_cache:
+  enabled: false
+  subgraph: {}
+plugins:
+  apollo_testing.my_test_plugin: {}

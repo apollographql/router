@@ -7,8 +7,6 @@ use std::sync::Arc;
 use apollo_federation::connectors::runtime::http_json_transport::HttpRequest as ConnectorsHttpRequest;
 use apollo_federation::connectors::runtime::http_json_transport::TransportRequest;
 use apollo_federation::connectors::runtime::responses::MappedResponse;
-use schemars::JsonSchema;
-use serde::Deserialize;
 use serde_json_bytes::ByteString;
 use tower::BoxError;
 use tower::Service;
@@ -18,14 +16,12 @@ use tower::ServiceExt;
 use super::COPROCESSOR_ERROR_EXTENSION;
 use super::ContextConf;
 use super::EXTERNAL_SPAN_NAME;
-use super::NewContextConf;
 use super::get_coprocessor_timer;
 use super::internalize_header_map;
 use super::record_coprocessor_operation;
 use super::update_context_from_coprocessor;
 use super::validate_coprocessor_output;
 use crate::Context;
-use crate::context::context_key_from_deprecated;
 use crate::json_ext::Value;
 use crate::layers::ServiceBuilderExt;
 use crate::layers::async_checkpoint::AsyncCheckpointLayer;
@@ -43,14 +39,18 @@ use crate::services::http::HttpRequest;
 use crate::services::http::HttpResponse;
 
 /// What information is passed to a connector request stage
-#[derive(Clone, Debug, Default, Deserialize, PartialEq, JsonSchema)]
-#[serde(default, deny_unknown_fields)]
+#[apollo_configuration::configuration]
+#[derive(PartialEq)]
 pub(super) struct ConnectorRequestConf {
     /// Condition to trigger this stage
+    // Condition is generic, so it can't take the configuration attribute.
+    #[config(skip_validate)]
     pub(super) condition: Condition<ConnectorSelector>,
     /// Send the headers
     pub(super) headers: bool,
     /// Send the context
+    // ContextConf's Selective tuple variant holds a HashSet, which has no Validate impl.
+    #[config(skip_validate)]
     pub(super) context: ContextConf,
     /// Send the body
     pub(super) body: bool,
@@ -65,14 +65,18 @@ pub(super) struct ConnectorRequestConf {
 }
 
 /// What information is passed to a connector response stage
-#[derive(Clone, Debug, Default, Deserialize, PartialEq, JsonSchema)]
-#[serde(default, deny_unknown_fields)]
+#[apollo_configuration::configuration]
+#[derive(PartialEq)]
 pub(super) struct ConnectorResponseConf {
     /// Condition to trigger this stage
+    // Condition is generic, so it can't take the configuration attribute.
+    #[config(skip_validate)]
     pub(super) condition: Condition<ConnectorSelector>,
     /// Send the headers
     pub(super) headers: bool,
     /// Send the context
+    // ContextConf's Selective tuple variant holds a HashSet, which has no Validate impl.
+    #[config(skip_validate)]
     pub(super) context: ContextConf,
     /// Send the body
     pub(super) body: bool,
@@ -85,22 +89,19 @@ pub(super) struct ConnectorResponseConf {
 }
 
 /// Configures the connector coprocessor stages
-#[derive(Clone, Debug, Default, Deserialize, PartialEq, JsonSchema)]
-#[serde(default)]
+#[apollo_configuration::configuration]
+#[derive(PartialEq)]
 pub(super) struct ConnectorStages {
-    #[serde(default)]
     pub(super) all: ConnectorStage,
 }
 
 /// The connector stage request/response configuration
-#[derive(Clone, Debug, Default, Deserialize, PartialEq, JsonSchema)]
-#[serde(default, deny_unknown_fields)]
+#[apollo_configuration::configuration]
+#[derive(PartialEq)]
 pub(super) struct ConnectorStage {
     /// The request configuration
-    #[serde(default)]
     pub(super) request: ConnectorRequestConf,
     /// The response configuration
-    #[serde(default)]
     pub(super) response: ConnectorResponseConf,
 }
 
@@ -108,10 +109,10 @@ impl ConnectorStage {
     pub(crate) fn as_service<C>(
         &self,
         http_client: C,
-        service: request_service::BoxService,
+        service: request_service::BoxCloneService,
         default_url: String,
         service_name: String,
-    ) -> request_service::BoxService
+    ) -> request_service::BoxCloneService
     where
         C: Service<HttpRequest, Response = HttpResponse, Error = BoxError>
             + Clone
@@ -224,9 +225,8 @@ impl ConnectorStage {
             .instrument(external_service_span())
             .option_layer(request_layer)
             .option_layer(response_layer)
-            .buffered()
             .service(service)
-            .boxed()
+            .boxed_clone()
     }
 }
 
@@ -371,12 +371,7 @@ where
         );
 
         if let Some(context) = co_processor_output.context {
-            for (mut key, value) in context.try_into_iter()? {
-                if let ContextConf::NewContextConf(NewContextConf::Deprecated) =
-                    &request_config.context
-                {
-                    key = context_key_from_deprecated(key);
-                }
+            for (key, value) in context.try_into_iter()? {
                 request
                     .context
                     .upsert_json_value(key, move |_current| value);
@@ -404,11 +399,7 @@ where
     }
 
     if let Some(context) = co_processor_output.context {
-        for (mut key, value) in context.try_into_iter()? {
-            if let ContextConf::NewContextConf(NewContextConf::Deprecated) = &request_config.context
-            {
-                key = context_key_from_deprecated(key);
-            }
+        for (key, value) in context.try_into_iter()? {
             request
                 .context
                 .upsert_json_value(key, move |_current| value);
@@ -557,12 +548,7 @@ where
     }
 
     if let Some(returned_context) = co_processor_output.context {
-        update_context_from_coprocessor(
-            &context,
-            returned_context,
-            &response_config.context,
-            &keys_sent,
-        )?;
+        update_context_from_coprocessor(&context, returned_context, &keys_sent)?;
     }
 
     if let Some(body) = co_processor_output.body {

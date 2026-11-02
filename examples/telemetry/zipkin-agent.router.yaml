@@ -1,8 +1,0 @@
-telemetry:
-  exporters:
-    tracing:
-      common:
-        service_name: router
-      zipkin:
-        enabled: true
-        endpoint: default

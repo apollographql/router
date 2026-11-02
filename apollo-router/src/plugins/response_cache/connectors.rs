@@ -13,9 +13,6 @@ use lru::LruCache;
 use opentelemetry::Array;
 use opentelemetry::Key;
 use opentelemetry::StringValue;
-use schemars::JsonSchema;
-use serde::Deserialize;
-use serde::Serialize;
 use serde_json_bytes::ByteString;
 use serde_json_bytes::Value;
 use tokio::sync::RwLock;
@@ -48,8 +45,11 @@ use super::plugin::build_entity_debug_entry;
 use super::plugin::build_entity_store_document;
 use super::plugin::get_invalidation_entity_keys_from_schema;
 use super::plugin::hash_private_id;
+use super::plugin::marks_query_private;
 use super::plugin::non_entity_errors;
 use super::plugin::reindex_entity_errors;
+use super::plugin::remember_private_query;
+use super::plugin::succeeded_without_errors;
 use super::plugin::update_cache_control;
 use super::storage;
 use super::storage::CacheEntry;
@@ -62,6 +62,7 @@ use crate::error::FetchError;
 use crate::graphql;
 use crate::json_ext::Object;
 use crate::plugins::authorization::CacheKeyMetadata;
+use crate::plugins::connectors::declared_errors::HasDeclaredErrors;
 use crate::plugins::connectors::query_plans::get_connectors;
 use crate::plugins::response_cache::cache_key::ConnectorCacheKeyEntity;
 use crate::plugins::response_cache::cache_key::ConnectorCacheKeyRoot;
@@ -84,14 +85,21 @@ use crate::services::connector::request_service::TransportOutcome;
 use crate::spec::TYPENAME;
 
 /// Configuration for connector response caching: global defaults plus per-source overrides
-#[derive(Clone, Debug, Default, JsonSchema, Deserialize)]
-#[serde(rename_all = "snake_case", deny_unknown_fields, default)]
+#[apollo_configuration::configuration]
 pub(crate) struct ConnectorCacheConfiguration {
     /// Options applying to all connector sources
+    #[schemars(extend("default" = {
+        "cache_key_headers": null,
+        "enabled": null,
+        "invalidation": null,
+        "private_id": null,
+        "redis": null,
+        "ttl": null
+    }))]
     pub(crate) all: ConnectorCacheSource,
 
     /// Map of subgraph_name.connector_source_name to configuration
-    #[serde(default)]
+    #[schemars(extend("default" = {}))]
     pub(crate) sources: HashMap<String, ConnectorCacheSource>,
 }
 
@@ -149,19 +157,21 @@ impl ConnectorCacheConfiguration {
 }
 
 /// Per connector source configuration for response caching
-#[derive(Clone, Debug, Default, JsonSchema, Deserialize, Serialize)]
-#[serde(rename_all = "snake_case", deny_unknown_fields)]
+// Holds Redis credentials, so it cannot serialize its defaults: the schema declares them by hand.
+#[apollo_configuration::configuration]
 pub(crate) struct ConnectorCacheSource {
     /// Redis configuration
-    #[serde(default)]
+    #[schemars(extend("default" = null))]
+    // The Redis config doesn't use the configuration attribute, so it has no Validate impl.
+    #[config(skip_validate)]
     pub(crate) redis: Option<storage::redis::Config>,
 
     /// Expiration for all keys for this connector source, unless overridden by the `Cache-Control` header in connector responses
-    #[serde(default)]
+    // Ttl is a tuple struct, which the configuration attribute can't take yet (PLAT-320).
+    #[config(skip_validate)]
     pub(crate) ttl: Option<Ttl>,
 
     /// Activates caching for this connector source, overrides the global configuration
-    #[serde(default)]
     pub(crate) enabled: Option<bool>,
 
     /// The client request header names whose values are folded into this source's cache key.
@@ -191,15 +201,18 @@ pub(crate) struct ConnectorCacheSource {
     // better fit and cheaper here. (See `configuration::cors` for the same pattern.) This is a
     // deliberate, localized departure from the surrounding `Vec`/`String` convention — keep it
     // scoped to these cache-key-header fields unless you are converting a field for the same reason.
-    #[serde(default)]
+    //
+    // A slice (`[Arc<str>]`) has no Validate impl.
+    #[config(skip_validate)]
     pub(crate) cache_key_headers: Option<Arc<[Arc<str>]>>,
 
     /// Context key used to separate cache sections per user
-    #[serde(default)]
     pub(crate) private_id: Option<String>,
 
     /// Invalidation configuration
-    #[serde(default)]
+    #[schemars(extend("default" = null))]
+    // SubgraphInvalidationConfig doesn't use the configuration attribute, so it has no Validate impl.
+    #[config(skip_validate)]
     pub(crate) invalidation: Option<SubgraphInvalidationConfig>,
 }
 
@@ -235,7 +248,7 @@ pub(super) struct ConnectorCacheService {
 impl Service<connect::Request> for ConnectorCacheService {
     type Response = connect::Response;
     type Error = BoxError;
-    type Future = <connect::BoxService as Service<connect::Request>>::Future;
+    type Future = <connect::BoxCloneService as Service<connect::Request>>::Future;
 
     fn poll_ready(
         &mut self,
@@ -442,6 +455,7 @@ impl ConnectorCacheService {
                     data: serde_json_bytes::to_value(resp.response.body().clone())
                         .unwrap_or_default(),
                     warnings: Vec::new(),
+                    has_errors: false,
                     should_store: false,
                 }
                 .update_metadata();
@@ -817,7 +831,8 @@ impl ConnectorCacheService {
                             "data": cache_entry.data.clone()
                         }),
                         warnings: Vec::new(),
-                        should_store: false,
+                        has_errors: false,
+                        should_store: true,
                     }
                     .update_metadata()
                 })
@@ -974,14 +989,22 @@ impl ConnectorCacheService {
             response_cache_control.merge_no_store(req_cc);
         }
 
+        // Checked separately because `include_subgraph_errors` may have kept declared errors out
+        // of `errors`. Their paths follow the upstream order, not the entity order, so a declared
+        // error rules out storing every entity in this response.
+        let has_declared_errors = response
+            .response
+            .extensions()
+            .get::<HasDeclaredErrors>()
+            .is_some_and(|marker| marker.0);
+
         // Track private queries in the LRU so future requests can short-circuit
-        if response_cache_control.private() && !is_known_private {
-            let size = {
-                let mut pq = private_queries.write().await;
-                pq.put(private_query_key, ());
-                pq.len()
-            };
-            lru_size_instrument.update(size as u64);
+        if !is_known_private
+            && succeeded_without_errors(&response.response)
+            && !has_declared_errors
+            && marks_query_private(&response_cache_control)
+        {
+            remember_private_query(private_queries, private_query_key, lru_size_instrument).await;
         }
 
         // The response has a private scope but we don't have a way to differentiate
@@ -1080,7 +1103,7 @@ impl ConnectorCacheService {
                         // to avoid persisting error data until TTL expires.
                         let reindexed_errors =
                             reindex_entity_errors(&errors, entity_idx, new_entity_idx);
-                        let has_errors = !reindexed_errors.is_empty();
+                        let has_errors = has_declared_errors || !reindexed_errors.is_empty();
                         new_errors.extend(reindexed_errors);
 
                         // Append private_id to cache key if response was discovered
@@ -1123,9 +1146,10 @@ impl ConnectorCacheService {
                             entity_key,
                             invalidation_keys: user_tags,
                             has_tags,
+                            has_errors,
                         };
 
-                        if !has_errors
+                        if !miss.has_errors
                             && !is_null_entity
                             && !unstorable_private_response
                             && response_cache_control.should_store()
@@ -1141,6 +1165,7 @@ impl ConnectorCacheService {
                         if debug && let Some(ref debug_req) = debug_request {
                             debug_ctx_entries.push(build_entity_debug_entry(
                                 &miss,
+                                !miss.has_errors && !is_null_entity,
                                 private_id.clone(),
                                 source_name,
                                 CacheKeySource::Connector,
@@ -1168,9 +1193,8 @@ impl ConnectorCacheService {
         response.response.body_mut().data = response_data;
 
         // Update errors with reindexed paths (entity indices changed due to cache merge), keeping
-        // any error that has no entity slot to be reindexed into. Identical to the subgraph path
-        // (`insert_entities_in_result`'s caller), so a partial hit returns the same error set on
-        // both, which is what `EntityCacheMiss`'s shared shape is there to keep true.
+        // any error that has no entity slot to be reindexed into, so a partial hit never swallows
+        // an error that a full miss would have returned.
         let mut errors = non_entity_errors(&response.response.body().errors);
         errors.extend(new_errors);
         response.response.body_mut().errors = errors;
@@ -1240,7 +1264,7 @@ pub(super) struct ConnectorRequestCacheService {
 impl Service<connector::request_service::Request> for ConnectorRequestCacheService {
     type Response = connector::request_service::Response;
     type Error = BoxError;
-    type Future = <connector::request_service::BoxService as Service<
+    type Future = <connector::request_service::BoxCloneService as Service<
         connector::request_service::Request,
     >>::Future;
 
@@ -1342,6 +1366,7 @@ impl ConnectorRequestCacheService {
                             transport_outcome: TransportOutcome::Error(
                                 apollo_federation::connectors::runtime::errors::Error::InvalidCacheControl(message),
                             ),
+                            answered_by_router: true,
                             mapped_response:
                                 apollo_federation::connectors::runtime::responses::MappedResponse::Error {
                                     error: runtime_error,
@@ -1458,6 +1483,7 @@ impl ConnectorRequestCacheService {
                     cache_control: CacheControl::default_no_store(),
                     data: serde_json_bytes::Value::Null,
                     warnings: Vec::new(),
+                    has_errors: false,
                     should_store: false,
                 }
                 .update_metadata();
@@ -1621,7 +1647,8 @@ impl ConnectorRequestCacheService {
                         cache_control: entry.control.clone(),
                         data: serde_json_bytes::json!({"data": entry.data.clone()}),
                         warnings: Vec::new(),
-                        should_store: false,
+                        has_errors: false,
+                        should_store: true,
                     }
                     .update_metadata();
                     add_cache_key_to_context(&request.context, cache_key_context)?;
@@ -1634,7 +1661,9 @@ impl ConnectorRequestCacheService {
                 // downstream — telemetry selectors, the coprocessor `ConnectorResponse` stage,
                 // public connector plugins — reads a hit exactly as it reads a fetch, so none
                 // of them need a cache concept. This mirrors the subgraph path, which builds a
-                // `subgraph::Response` on a hit and lets its status default to 200.
+                // `subgraph::Response` on a hit and lets its status default to 200. Only the
+                // circuit breaker is told, through `answered_by_router`: a hit says nothing about
+                // the source's health.
                 //
                 // The status is the one the origin actually sent (replayed from the entry)
                 // rather than a blanket 200, because `@connect(errors: { is_success: ... })`
@@ -1646,6 +1675,7 @@ impl ConnectorRequestCacheService {
                     context: request.context,
                     subgraph_name,
                     transport_outcome: TransportOutcome::Response(http_response),
+                    answered_by_router: true,
                     mapped_response:
                         apollo_federation::connectors::runtime::responses::MappedResponse::Data {
                             data: entry.data,
@@ -1725,14 +1755,15 @@ impl ConnectorRequestCacheService {
                     }
 
                     // Track private queries in the LRU so future requests can short-circuit
+                    if !is_known_private && marks_query_private(&cache_control) {
+                        remember_private_query(
+                            &private_queries,
+                            private_query_key,
+                            &lru_size_instrument,
+                        )
+                        .await;
+                    }
                     if cache_control.private() && !is_known_private {
-                        let size = {
-                            let mut pq = private_queries.write().await;
-                            pq.put(private_query_key, ());
-                            pq.len()
-                        };
-                        lru_size_instrument.update(size as u64);
-
                         // Update cache key with private_id suffix now that we know the
                         // response is private (matching subgraph pattern at line 1278)
                         if let Some(ref s) = private_id {
@@ -1793,7 +1824,9 @@ impl ConnectorRequestCacheService {
                                 cache_control: cache_control.clone(),
                                 data: serde_json_bytes::json!({"data": data.clone()}),
                                 warnings: Vec::new(),
-                                should_store: false,
+                                has_errors: false,
+                                // Only built for a response that is about to be stored.
+                                should_store: true,
                             }
                             .update_metadata();
                             add_cache_key_to_context(&context, cache_key_context)?;
@@ -2145,6 +2178,47 @@ fn connector_key_inputs(
     root.insert(ByteString::from("context"), Value::Object(context_obj));
     root.insert(ByteString::from("headers"), Value::Object(headers_obj));
     Value::Object(root)
+}
+
+/// The connector request cache for `source_name` in front of `service`, as the response cache
+/// places it for a source it caches, with `store` as a mock Redis behind it.
+#[cfg(all(
+    test,
+    any(not(feature = "ci"), all(target_arch = "x86_64", target_os = "linux"))
+))]
+pub(crate) async fn request_cache_for_test(
+    service: ConnectorRequestBoxCloneService,
+    source_name: &str,
+    store: Arc<dyn fred::mocks::Mocks>,
+) -> ConnectorRequestBoxCloneService {
+    use tower::ServiceExt as _;
+
+    let config = storage::redis::Config::test(false, "connector-request-cache");
+    let (_drop_tx, drop_rx) = tokio::sync::broadcast::channel(1);
+    let storage = Storage::mocked(&config, false, store, drop_rx)
+        .await
+        .expect("mock storage builds");
+    let supergraph_schema = Arc::new(
+        Schema::parse_and_validate("type Query { hello: String }", "schema.graphql").unwrap(),
+    );
+
+    ConnectorRequestCacheService {
+        service,
+        storage: Arc::new(StorageInterface::for_connectors(storage)),
+        source_name: source_name.to_string(),
+        connector_ttl: Duration::from_secs(60),
+        private_id_key: None,
+        debug: false,
+        supergraph_schema,
+        subgraph_enums: Default::default(),
+        private_queries: Arc::new(RwLock::new(LruCache::new(
+            std::num::NonZeroUsize::new(1).unwrap(),
+        ))),
+        lru_size_instrument: LruSizeInstrument::new("test.private_queries.lru.size"),
+        indexes: Default::default(),
+        cache_key_headers: Arc::new([]),
+    }
+    .boxed_clone()
 }
 
 #[cfg(test)]

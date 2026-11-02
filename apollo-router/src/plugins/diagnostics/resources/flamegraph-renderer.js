@@ -162,6 +162,17 @@ function renderFlameGraph(containerId, flameData) {
         series: [{
             type: 'custom',
             renderItem: renderFlameItem,
+            // Dimensions 3 (label) and 4 (percentage) aren't covered by `encode`,
+            // so without an explicit type ECharts defaults them to numeric and
+            // `api.value(3)` in renderFlameItem casts the function name to NaN.
+            // `name` must stay 'ordinal' so it's kept as a string, not parsed as a number.
+            dimensions: [
+                { name: 'level', type: 'number' },
+                { name: 'start', type: 'number' },
+                { name: 'end', type: 'number' },
+                { name: 'name', type: 'ordinal' },
+                { name: 'percentage', type: 'number' }
+            ],
             encode: {
                 x: [1, 2],
                 y: 0

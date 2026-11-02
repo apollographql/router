@@ -132,7 +132,7 @@ jobs:
           esac
 
       - name: Install dev environment (mise)
-        uses: jdx/mise-action@v4
+        uses: jdx/mise-action@v5
 
       - name: Show toolchain
         run: |

@@ -1,0 +1,15 @@
+---
+source: apollo-router/src/configuration/upgrade.rs
+expression: config
+---
+{
+  "connectors": {
+    "sources": {
+      "sub_a.src_1": {
+        "$config": {
+          "key": "from-subgraph"
+        }
+      }
+    }
+  }
+}

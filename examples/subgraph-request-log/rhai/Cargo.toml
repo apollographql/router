@@ -7,7 +7,7 @@ license-file = "../../../LICENSE"
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 [dependencies]
 anyhow = "1"
-apollo-router = { path = "../../../apollo-router" }
+apollo-router = { path = "../../../apollo-router", features = ["mock_subgraphs_testing"] }
 http = "1.2"
 serde_json = "1"
 tokio = { version = "1", features = ["full"] }

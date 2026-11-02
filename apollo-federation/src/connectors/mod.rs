@@ -27,8 +27,10 @@ use apollo_compiler::Name;
 
 pub(crate) mod blueprint;
 pub mod expand;
+mod graphql_shapes;
 pub mod header;
 mod id;
+pub mod index;
 mod json_selection;
 pub mod migration;
 mod models;
@@ -41,7 +43,7 @@ pub mod validation;
 pub(crate) mod variable;
 
 use apollo_compiler::name;
-use id::ConnectorPosition;
+pub(crate) use id::ConnectorPosition;
 use id::ObjectTypeDefinitionDirectivePosition;
 pub use json_selection::ApplyToError;
 pub use json_selection::ApplyToErrorKind;

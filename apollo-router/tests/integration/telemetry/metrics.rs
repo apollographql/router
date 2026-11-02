@@ -3,6 +3,11 @@ use std::collections::HashMap;
 use std::path::PathBuf;
 use std::time::Duration;
 
+use opentelemetry_proto::tonic::collector::metrics::v1::ExportMetricsServiceRequest;
+use opentelemetry_proto::tonic::common::v1::any_value;
+use opentelemetry_proto::tonic::metrics::v1::metric;
+use opentelemetry_proto::tonic::metrics::v1::number_data_point;
+use prost::Message;
 use regex::Regex;
 use serde_json::json;
 use wiremock::Mock;
@@ -13,6 +18,7 @@ use wiremock::matchers::method;
 use crate::integration::IntegrationTest;
 use crate::integration::common::Query;
 use crate::integration::common::graph_os_enabled;
+use crate::integration::telemetry::otlp::mock_otlp_server;
 
 const PROMETHEUS_CONFIG: &str = include_str!("fixtures/prometheus.router.yaml");
 const PROMETHEUS_RESPONSE_BODY_SIZE_CONFIG: &str =
@@ -71,7 +77,18 @@ async fn test_metrics_reloading() {
     let mut config_value: serde_yaml::Value =
         serde_yaml::from_str(PROMETHEUS_CONFIG).expect("fixture is valid YAML");
     let apollo_block: serde_yaml::Value = serde_yaml::from_str(
-        "field_level_instrumentation_sampler: always_on\nexperimental_otlp_tracing_protocol: http\nexperimental_otlp_metrics_protocol: http\nbatch_processor:\n  scheduled_delay: 100ms\n",
+        r#"
+        field_level_instrumentation_sampler: always_on
+        otlp_tracing_protocol: http
+        otlp_metrics_protocol: http
+        tracing:
+          batch_processor:
+            scheduled_delay: 100ms
+        metrics:
+          usage_reports:
+            batch_processor:
+              scheduled_delay: 100ms
+        "#,
     )
     .unwrap();
     config_value
@@ -102,7 +119,7 @@ async fn test_metrics_reloading() {
     //     also fine for this test, which just asserts the License
     //     poller's success counter increments.
     //   * Both `telemetry.apollo.endpoint` and
-    //     `telemetry.apollo.experimental_otlp_endpoint` pinned to the
+    //     `telemetry.apollo.otlp_endpoint` pinned to the
     //     per-test `apollo_otlp_server` mock with a catch-all
     //     `POST → 200` route, so all four reporting paths
     //     (`studio_reports_total{report_type=metrics|traces}` ×
@@ -149,14 +166,14 @@ async fn test_metrics_reloading() {
 
     check_metrics_contains(
         &metrics,
-        r#"apollo_router_cache_hit_time_count{kind="query planner",storage="memory",otel_scope_name="apollo/router"} 4"#,
+        r#"apollo_router_cache_hit_time_seconds_count{kind="query planner",storage="memory",otel_scope_name="apollo/router"} 4"#,
     );
     check_metrics_contains(
         &metrics,
-        r#"apollo_router_cache_miss_time_count{kind="query planner",storage="memory",otel_scope_name="apollo/router"} 2"#,
+        r#"apollo_router_cache_miss_time_seconds_count{kind="query planner",storage="memory",otel_scope_name="apollo/router"} 2"#,
     );
-    check_metrics_contains(&metrics, r#"apollo_router_cache_hit_time"#);
-    check_metrics_contains(&metrics, r#"apollo_router_cache_miss_time"#);
+    check_metrics_contains(&metrics, r#"apollo_router_cache_hit_time_seconds"#);
+    check_metrics_contains(&metrics, r#"apollo_router_cache_miss_time_seconds"#);
 
     router
         .assert_metrics_does_not_contain(r#"_total_total{"#)
@@ -164,7 +181,7 @@ async fn test_metrics_reloading() {
 
     // Studio + Uplink metrics. With both Apollo Studio and Apollo Uplink
     // pointed at local wiremocks (Studio via the harness's per-test mock at
-    // `experimental_otlp_endpoint`, Uplink via `APOLLO_UPLINK_ENDPOINTS`), all
+    // `otlp_endpoint`, Uplink via `APOLLO_UPLINK_ENDPOINTS`), all
     // four reporting paths complete successfully and deterministically — no
     // public-Internet dependency, no batch-timer race.
     //
@@ -323,7 +340,6 @@ async fn test_sigv4_does_not_leak_to_unconfigured_subgraph() {
               exporters:
                 metrics:
                   prometheus:
-                    listen: 127.0.0.1:4000
                     enabled: true
                     path: /metrics
             include_subgraph_errors:
@@ -565,18 +581,22 @@ async fn test_gauges_on_reload() {
     router
         .assert_metrics_contains(r#"apollo_router_cache_storage_estimated_size{kind="query planner",type="memory",otel_scope_name="apollo/router"} "#, None)
         .await;
+
+    // APQ cache should contain the persisted query
     router
         .assert_metrics_contains(
             r#"apollo_router_cache_size{kind="APQ",type="memory",otel_scope_name="apollo/router"} 1"#,
             None,
         )
         .await;
+    // Query plan cache should contain the regular query + the persisted query
     router
         .assert_metrics_contains(
-            r#"apollo_router_cache_size{kind="query planner",type="memory",otel_scope_name="apollo/router"} 1"#,
+            r#"apollo_router_cache_size{kind="query planner",type="memory",otel_scope_name="apollo/router"} 2"#,
             None,
         )
         .await;
+    // Introspection cache should contain the introspection query
     router
         .assert_metrics_contains(
             r#"apollo_router_cache_size{kind="introspection",type="memory",otel_scope_name="apollo/router"} 1"#,
@@ -1130,6 +1150,207 @@ async fn test_connector_mapping_warning_is_not_reported_or_counted() {
     router
         .assert_metrics_does_not_contain(r#"apollo_router_graphql_error_total"#)
         .await;
+
+    router.graceful_shutdown().await;
+}
+
+fn cardinality_overflow_lines(metrics: &str) -> Vec<&str> {
+    metrics
+        .lines()
+        .filter(|l| l.starts_with("apollo_router_telemetry_metrics_cardinality_overflow"))
+        .collect()
+}
+
+/// Sends a successful and a failed request, which is enough to push
+/// `http.server.request.duration` past the fixtures' `cardinality_limit: 1`.
+async fn overflow_request_duration(router: &mut IntegrationTest) {
+    router.execute_default_query().await;
+    router
+        .execute_query(Query::default().with_bad_query())
+        .await;
+}
+
+/// The value of the single `cardinality_overflow` series in a scrape, which must be labelled
+/// `metric_name`.
+async fn scraped_overflow_count(router: &IntegrationTest, metric_name: &str) -> u64 {
+    let metrics = router
+        .get_metrics_response()
+        .await
+        .expect("failed to fetch metrics")
+        .text()
+        .await
+        .unwrap();
+    let counter = cardinality_overflow_lines(&metrics);
+    assert_eq!(
+        counter.len(),
+        1,
+        "expected one counter series in:\n{metrics}"
+    );
+    let (series, value) = counter[0].rsplit_once(' ').unwrap();
+    assert!(
+        series.contains(&format!(r#"metric_name="{metric_name}""#)),
+        "{series}"
+    );
+    value.parse().unwrap()
+}
+
+/// With only the Prometheus exporter, an overflowed instrument is reported by
+/// `apollo.router.telemetry.metrics.cardinality_overflow`, labelled with its OpenTelemetry name,
+/// as with the other exporters. The start of the overflow counts once, however many times the
+/// endpoint is scraped.
+#[tokio::test(flavor = "multi_thread")]
+async fn test_prometheus_cardinality_overflow_counter() {
+    let mut router = IntegrationTest::builder()
+        .config(include_str!(
+            "fixtures/prometheus_cardinality_overflow.router.yaml"
+        ))
+        .build()
+        .await;
+
+    router.start().await;
+    router.assert_started().await;
+    overflow_request_duration(&mut router).await;
+
+    router
+        .assert_metrics_contains_multiple(
+            vec![
+                r#"http_server_request_duration_seconds_count{otel_metric_overflow="true""#,
+                r#"apollo_router_telemetry_metrics_cardinality_overflow_total{metric_name="http.server.request.duration",otel_scope_name="apollo/router"} 1"#,
+            ],
+            None,
+        )
+        .await;
+    // More scrapes, including from a second client, don't count the same overflow again.
+    let second_scraper = reqwest::Client::new();
+    for _ in 0..3 {
+        second_scraper
+            .get(format!("http://{}/metrics", router.bind_address()))
+            .send()
+            .await
+            .expect("second scraper failed");
+        assert_eq!(
+            scraped_overflow_count(&router, "http.server.request.duration").await,
+            1
+        );
+    }
+
+    router.graceful_shutdown().await;
+}
+
+async fn otlp_metric_exports(collector: &MockServer) -> Vec<ExportMetricsServiceRequest> {
+    collector
+        .received_requests()
+        .await
+        .unwrap_or_default()
+        .iter()
+        .filter(|request| request.url.path() == "/metrics")
+        .map(|request| {
+            ExportMetricsServiceRequest::decode(request.body.as_slice())
+                .expect("OTLP metrics export")
+        })
+        .collect()
+}
+
+async fn wait_for_otlp_metric_exports(collector: &MockServer, exports: usize) {
+    let target = otlp_metric_exports(collector).await.len() + exports;
+    tokio::time::timeout(Duration::from_secs(15), async {
+        while otlp_metric_exports(collector).await.len() < target {
+            tokio::time::sleep(Duration::from_millis(50)).await;
+        }
+    })
+    .await
+    .expect("OTLP exporter did not export");
+}
+
+/// The value of the `cardinality_overflow` series for `http.server.request.duration` in the most
+/// recent OTLP export that carries it. With cumulative temporality that is its running total.
+async fn exported_overflow_count(collector: &MockServer) -> Option<i64> {
+    otlp_metric_exports(collector)
+        .await
+        .iter()
+        .flat_map(|export| &export.resource_metrics)
+        .flat_map(|resource| &resource.scope_metrics)
+        .flat_map(|scope| &scope.metrics)
+        .filter(|metric| metric.name == "apollo.router.telemetry.metrics.cardinality_overflow")
+        .filter_map(|metric| match &metric.data {
+            Some(metric::Data::Sum(sum)) => Some(&sum.data_points),
+            _ => None,
+        })
+        .flatten()
+        .filter(|point| {
+            point.attributes.iter().any(|attribute| {
+                attribute.key == "metric.name"
+                    && attribute
+                        .value
+                        .as_ref()
+                        .and_then(|value| value.value.as_ref())
+                        == Some(&any_value::Value::StringValue(
+                            "http.server.request.duration".to_string(),
+                        ))
+            })
+        })
+        .filter_map(|point| match point.value {
+            Some(number_data_point::Value::AsInt(value)) => Some(value),
+            _ => None,
+        })
+        .next_back()
+}
+
+/// With OTLP, alone or with Prometheus, the OTLP exporter counts the start of an overflow once,
+/// with the dotted metric name, however many exports follow.
+async fn assert_counted_once_by_otlp(collector: &MockServer) {
+    tokio::time::timeout(Duration::from_secs(15), async {
+        while exported_overflow_count(collector).await.is_none() {
+            tokio::time::sleep(Duration::from_millis(50)).await;
+        }
+    })
+    .await
+    .expect("OTLP never exported the overflow counter");
+    wait_for_otlp_metric_exports(collector, 3).await;
+    assert_eq!(exported_overflow_count(collector).await, Some(1));
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn test_otlp_cardinality_overflow_counted_once() {
+    let collector = mock_otlp_server(0..).await;
+    let mut router = IntegrationTest::builder()
+        .config(include_str!(
+            "fixtures/otlp_cardinality_overflow.router.yaml"
+        ))
+        .env_entry("TEST_CONFIG_COLLECTOR_ENDPOINT", collector.uri())
+        .build()
+        .await;
+
+    router.start().await;
+    router.assert_started().await;
+    overflow_request_duration(&mut router).await;
+    assert_counted_once_by_otlp(&collector).await;
+
+    router.graceful_shutdown().await;
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn test_prometheus_and_otlp_cardinality_overflow_counted_once() {
+    let collector = mock_otlp_server(0..).await;
+    let mut router = IntegrationTest::builder()
+        .config(include_str!(
+            "fixtures/prometheus_otlp_cardinality_overflow.router.yaml"
+        ))
+        .env_entry("TEST_CONFIG_COLLECTOR_ENDPOINT", collector.uri())
+        .build()
+        .await;
+
+    router.start().await;
+    router.assert_started().await;
+    overflow_request_duration(&mut router).await;
+    assert_counted_once_by_otlp(&collector).await;
+    // Scrapes don't count as well: the endpoint shows OTLP's single dotted series.
+    for _ in 0..3 {
+        assert_eq!(
+            scraped_overflow_count(&router, "http.server.request.duration").await,
+            1
+        );
+    }
 
     router.graceful_shutdown().await;
 }

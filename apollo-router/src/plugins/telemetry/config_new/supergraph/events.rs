@@ -1,11 +1,8 @@
-use std::fmt::Debug;
 use std::sync::Arc;
 
 use opentelemetry::Key;
 use opentelemetry::KeyValue;
 use opentelemetry_semantic_conventions::trace::HTTP_REQUEST_METHOD;
-use schemars::JsonSchema;
-use serde::Deserialize;
 use tower::BoxError;
 
 use super::selectors::SupergraphSelector;
@@ -137,8 +134,7 @@ pub(crate) struct SupergraphEventResponse {
     pub(crate) condition: Arc<Condition<SupergraphSelector>>,
 }
 
-#[derive(Clone, Deserialize, JsonSchema, Debug, Default)]
-#[serde(deny_unknown_fields, default)]
+#[apollo_configuration::configuration]
 pub(crate) struct SupergraphEventsConfig {
     /// Log the supergraph request
     pub(crate) request: StandardEventConfig<SupergraphSelector>,
@@ -151,6 +147,9 @@ pub(crate) struct SupergraphEventsConfig {
 #[cfg(test)]
 mod tests {
     use http::HeaderValue;
+    use tower::Service as _;
+    use tower::ServiceBuilder;
+    use tower::ServiceExt as _;
     use tracing::instrument::WithSubscriber;
 
     use super::*;
@@ -169,14 +168,28 @@ mod tests {
             .expect("test harness");
 
         async {
-            test_harness
-                .supergraph_service(|_r| async {
+            let (mock_service, mut handle) =
+                tower_test::mock::pair::<supergraph::Request, supergraph::Response>();
+            let driver = tokio::spawn(async move {
+                let (_req, responder) = handle.next_request().await.unwrap();
+                responder.send_response(
                     supergraph::Response::fake_builder()
                         .header("custom-header", "val1")
                         .header("x-log-request", HeaderValue::from_static("log"))
                         .data(serde_json::json!({"data": "res"}).to_string())
                         .build()
-                })
+                        .expect("expecting valid response"),
+                );
+            });
+
+            let mut service = ServiceBuilder::new()
+                .layer(test_harness.instrument_supergraph_layer())
+                .service(mock_service);
+
+            service
+                .ready()
+                .await
+                .unwrap()
                 .call(
                     supergraph::Request::fake_builder()
                         .query("query { foo }")
@@ -186,6 +199,8 @@ mod tests {
                 )
                 .await
                 .expect("expecting successful response");
+
+            crate::plugin::test::await_mock_driver(driver).await;
         }
         .with_subscriber(assert_snapshot_subscriber!())
         .await
@@ -204,12 +219,27 @@ mod tests {
         async {
             let ctx = Context::new();
             ctx.insert(OPERATION_NAME, String::from("Test")).unwrap();
-            test_harness
-                .supergraph_service(|_r| async {
+
+            let (mock_service, mut handle) =
+                tower_test::mock::pair::<supergraph::Request, supergraph::Response>();
+            let driver = tokio::spawn(async move {
+                let (_req, responder) = handle.next_request().await.unwrap();
+                responder.send_response(
                     supergraph::Response::fake_builder()
                         .data(serde_json::json!({"data": "res"}).to_string())
                         .build()
-                })
+                        .expect("expecting valid response"),
+                );
+            });
+
+            let mut service = ServiceBuilder::new()
+                .layer(test_harness.instrument_supergraph_layer())
+                .service(mock_service);
+
+            service
+                .ready()
+                .await
+                .unwrap()
                 .call(
                     supergraph::Request::fake_builder()
                         .query("query Test { foo }")
@@ -219,13 +249,29 @@ mod tests {
                 )
                 .await
                 .expect("expecting successful response");
-            test_harness
-                .supergraph_service(|_r| async {
-                    Ok(supergraph::Response::fake_builder()
+
+            crate::plugin::test::await_mock_driver(driver).await;
+
+            let (mock_service, mut handle) =
+                tower_test::mock::pair::<supergraph::Request, supergraph::Response>();
+            let driver = tokio::spawn(async move {
+                let (_req, responder) = handle.next_request().await.unwrap();
+                responder.send_response(
+                    supergraph::Response::fake_builder()
                         .data(serde_json::json!({"data": "res"}).to_string())
                         .build()
-                        .expect("expecting valid response"))
-                })
+                        .expect("expecting valid response"),
+                );
+            });
+
+            let mut service = ServiceBuilder::new()
+                .layer(test_harness.instrument_supergraph_layer())
+                .service(mock_service);
+
+            service
+                .ready()
+                .await
+                .unwrap()
                 .call(
                     supergraph::Request::fake_builder()
                         .query("query { foo }")
@@ -234,6 +280,8 @@ mod tests {
                 )
                 .await
                 .expect("expecting successful response");
+
+            crate::plugin::test::await_mock_driver(driver).await;
         }
         .with_subscriber(assert_snapshot_subscriber!())
         .await
@@ -248,19 +296,33 @@ mod tests {
             .expect("test harness");
 
         async {
-            test_harness
-                .supergraph_service(|_r| async {
-                    let context_with_error = Context::new();
-                    let _ = context_with_error
-                        .insert(CONTAINS_GRAPHQL_ERROR, true)
-                        .unwrap();
+            let (mock_service, mut handle) =
+                tower_test::mock::pair::<supergraph::Request, supergraph::Response>();
+            let driver = tokio::spawn(async move {
+                let (_req, responder) = handle.next_request().await.unwrap();
+                let context_with_error = Context::new();
+                let _ = context_with_error
+                    .insert(CONTAINS_GRAPHQL_ERROR, true)
+                    .unwrap();
+                responder.send_response(
                     supergraph::Response::fake_builder()
                         .header("custom-header", "val1")
                         .header("x-log-request", HeaderValue::from_static("log"))
                         .context(context_with_error)
                         .data(serde_json_bytes::json!({"errors": [{"message": "res"}]}))
                         .build()
-                })
+                        .expect("expecting valid response"),
+                );
+            });
+
+            let mut service = ServiceBuilder::new()
+                .layer(test_harness.instrument_supergraph_layer())
+                .service(mock_service);
+
+            service
+                .ready()
+                .await
+                .unwrap()
                 .call(
                     supergraph::Request::fake_builder()
                         .query("query { foo }")
@@ -269,6 +331,8 @@ mod tests {
                 )
                 .await
                 .expect("expecting successful response");
+
+            crate::plugin::test::await_mock_driver(driver).await;
         }
         .with_subscriber(assert_snapshot_subscriber!())
         .await
@@ -286,12 +350,26 @@ mod tests {
 
         async {
             // With the request header present, the response event should fire
-            test_harness
-                .supergraph_service(|_r| async {
+            let (mock_service, mut handle) =
+                tower_test::mock::pair::<supergraph::Request, supergraph::Response>();
+            let driver = tokio::spawn(async move {
+                let (_req, responder) = handle.next_request().await.unwrap();
+                responder.send_response(
                     supergraph::Response::fake_builder()
                         .data(serde_json::json!({"data": "res"}).to_string())
                         .build()
-                })
+                        .expect("expecting valid response"),
+                );
+            });
+
+            let mut service = ServiceBuilder::new()
+                .layer(test_harness.instrument_supergraph_layer())
+                .service(mock_service);
+
+            service
+                .ready()
+                .await
+                .unwrap()
                 .call(
                     supergraph::Request::fake_builder()
                         .query("query { foo }")
@@ -301,14 +379,30 @@ mod tests {
                 )
                 .await
                 .expect("expecting successful response");
+
+            crate::plugin::test::await_mock_driver(driver).await;
+
             // Without the request header, the response event should not fire
-            test_harness
-                .supergraph_service(|_r| async {
-                    Ok(supergraph::Response::fake_builder()
+            let (mock_service, mut handle) =
+                tower_test::mock::pair::<supergraph::Request, supergraph::Response>();
+            let driver = tokio::spawn(async move {
+                let (_req, responder) = handle.next_request().await.unwrap();
+                responder.send_response(
+                    supergraph::Response::fake_builder()
                         .data(serde_json::json!({"data": "res"}).to_string())
                         .build()
-                        .expect("expecting valid response"))
-                })
+                        .expect("expecting valid response"),
+                );
+            });
+
+            let mut service = ServiceBuilder::new()
+                .layer(test_harness.instrument_supergraph_layer())
+                .service(mock_service);
+
+            service
+                .ready()
+                .await
+                .unwrap()
                 .call(
                     supergraph::Request::fake_builder()
                         .query("query { foo }")
@@ -317,6 +411,8 @@ mod tests {
                 )
                 .await
                 .expect("expecting successful response");
+
+            crate::plugin::test::await_mock_driver(driver).await;
         }
         .with_subscriber(assert_snapshot_subscriber!())
         .await
@@ -331,14 +427,28 @@ mod tests {
             .expect("test harness");
 
         async {
-            test_harness
-                .supergraph_service(|_r| async {
+            let (mock_service, mut handle) =
+                tower_test::mock::pair::<supergraph::Request, supergraph::Response>();
+            let driver = tokio::spawn(async move {
+                let (_req, responder) = handle.next_request().await.unwrap();
+                responder.send_response(
                     supergraph::Response::fake_builder()
                         .header("custom-header", "val1")
                         .header("x-log-response", HeaderValue::from_static("log"))
                         .data(serde_json_bytes::json!({"errors": [{"message": "res"}]}))
                         .build()
-                })
+                        .expect("expecting valid response"),
+                );
+            });
+
+            let mut service = ServiceBuilder::new()
+                .layer(test_harness.instrument_supergraph_layer())
+                .service(mock_service);
+
+            service
+                .ready()
+                .await
+                .unwrap()
                 .call(
                     supergraph::Request::fake_builder()
                         .query("query { foo }")
@@ -347,6 +457,8 @@ mod tests {
                 )
                 .await
                 .expect("expecting successful response");
+
+            crate::plugin::test::await_mock_driver(driver).await;
         }
         .with_subscriber(assert_snapshot_subscriber!())
         .await

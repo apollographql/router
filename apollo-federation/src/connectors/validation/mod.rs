@@ -314,4 +314,57 @@ mod test_validate_source {
             });
         });
     }
+
+    #[test]
+    fn deeply_nested_selection_is_a_validation_error() {
+        let selection = format!("{}b{}", "a { ".repeat(200), " }".repeat(200));
+        let sdl = format!(
+            r#"
+            extend schema
+            @link(url: "https://specs.apollo.dev/connect/v0.4", import: ["@connect"])
+
+            type Query {{
+                something: String
+                @connect(http: {{ GET: "http://127.0.0.1/something" }}, selection: "{selection}")
+            }}
+            "#
+        );
+        // The parser's recursion limit is chosen for release builds, and debug
+        // builds use several times more stack per level than a test thread has.
+        let messages = std::thread::Builder::new()
+            .stack_size(16 * 1024 * 1024)
+            .spawn(move || {
+                let builder = SchemaBuilder::new()
+                    .adopt_orphan_extensions()
+                    .parse(&sdl, "deeply_nested_selection.graphql");
+                let orphan_extension_types =
+                    builder.iter_orphan_extension_types().cloned().collect();
+                let parsed = builder
+                    .build()
+                    .unwrap_or_else(|schema_with_errors| schema_with_errors.partial);
+                let subgraph = Subgraph::new("test", "http://test", parsed, orphan_extension_types)
+                    .expect("valid subgraph name")
+                    .expand_links()
+                    .expect("links should expand");
+                validate(&subgraph)
+                    .into_iter()
+                    .map(|error| (error.code, error.message))
+                    .collect::<Vec<_>>()
+            })
+            .expect("spawn validation thread")
+            .join()
+            .expect("validation should not panic");
+
+        assert_eq!(
+            messages.len(),
+            1,
+            "expected one validation error: {messages:?}"
+        );
+        let (code, message) = &messages[0];
+        assert_eq!(*code, Code::InvalidSelection);
+        assert!(
+            message.contains("Selection nested too deeply"),
+            "unexpected message: {message}",
+        );
+    }
 }

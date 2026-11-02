@@ -3,6 +3,7 @@
 //! Parsing, formatting and manipulation of queries.
 #![allow(clippy::mutable_key_type)]
 
+use std::borrow::Cow;
 use std::collections::HashMap;
 use std::collections::HashSet;
 use std::sync::Arc;
@@ -11,7 +12,6 @@ use apollo_compiler::ExecutableDocument;
 use apollo_compiler::Name;
 use apollo_compiler::executable;
 use apollo_compiler::schema::ExtendedType;
-use derivative::Derivative;
 use indexmap::IndexSet;
 use serde::Deserialize;
 use serde::Serialize;
@@ -36,9 +36,9 @@ use crate::json_ext::ResponsePathElement;
 use crate::json_ext::Value;
 use crate::plugins::authorization::UnauthorizedPaths;
 use crate::query_planner::fetch::OperationKind;
-use crate::services::layers::query_analysis::ParsedDocument;
-use crate::services::layers::query_analysis::ParsedDocumentInner;
-use crate::services::layers::query_analysis::get_operation;
+use crate::services::query_parsing::ParsedDocument;
+use crate::services::query_parsing::ParsedDocumentInner;
+use crate::services::query_parsing::get_operation;
 use crate::spec::FieldType;
 use crate::spec::Fragments;
 use crate::spec::InvalidValue;
@@ -59,29 +59,20 @@ pub(crate) const ERROR_CODE_RESPONSE_VALIDATION: &str = "RESPONSE_VALIDATION_FAI
 pub(crate) const EXTENSIONS_VALUE_COMPLETION_KEY: &str = "valueCompletion";
 
 /// A GraphQL query.
-#[derive(Derivative, Serialize, Deserialize)]
-#[derivative(PartialEq, Hash, Eq, Debug)]
+#[derive(Debug, Serialize, Deserialize)]
 pub(crate) struct Query {
     pub(crate) string: String,
-    #[derivative(PartialEq = "ignore", Hash = "ignore")]
     pub(crate) fragments: Fragments,
-    #[derivative(PartialEq = "ignore", Hash = "ignore")]
     pub(crate) operation: Operation,
-    #[derivative(PartialEq = "ignore", Hash = "ignore")]
     pub(crate) subselections: HashMap<SubSelectionKey, SubSelectionValue>,
-    #[derivative(PartialEq = "ignore", Hash = "ignore")]
     pub(crate) unauthorized: UnauthorizedPaths,
-    #[derivative(PartialEq = "ignore", Hash = "ignore")]
     pub(crate) filtered_query: Option<Arc<Query>>,
-    #[derivative(PartialEq = "ignore", Hash = "ignore")]
     pub(crate) defer_stats: DeferStats,
-    #[derivative(PartialEq = "ignore", Hash = "ignore")]
     pub(crate) is_original: bool,
 
     /// This is a hash that depends on:
     /// - the query itself
     /// - the schema
-    #[derivative(PartialEq = "ignore", Hash = "ignore")]
     pub(crate) schema_aware_hash: QueryHash,
 }
 
@@ -127,10 +118,47 @@ impl Query {
     /// This will discard unrequested fields and re-order the output to match the order of the
     /// query.
     #[tracing::instrument(skip_all, level = "trace")]
+    /// Formats a response for an operation that authorization may have filtered,
+    /// returning the nullified paths from every pass.
+    ///
+    /// The filtered query formats first, projecting the data onto the authorized shape
+    /// and discarding fields the subgraphs returned beyond it (via `@requires`, or a
+    /// misbehaving subgraph). The original query formats second, expanding the result to
+    /// the shape the client requested and nulling what filtering removed. One pass cannot
+    /// do both: the original alone returns unauthorized values, the filtered alone drops
+    /// requested fields from the response.
+    pub(crate) fn format_response_filtered_then_original(
+        &self,
+        response: &mut Response,
+        variables: &Object,
+        schema: &ApiSchema,
+        defer_conditions: BooleanValues,
+        include_coercion_errors: bool,
+    ) -> Vec<Path> {
+        let mut paths = Vec::new();
+        if let Some(filtered_query) = self.filtered_query.as_ref() {
+            paths = filtered_query.format_response(
+                response,
+                variables,
+                schema,
+                defer_conditions,
+                include_coercion_errors,
+            );
+        }
+        paths.extend(self.format_response(
+            response,
+            variables,
+            schema,
+            defer_conditions,
+            include_coercion_errors,
+        ));
+        paths
+    }
+
     pub(crate) fn format_response(
         &self,
         response: &mut Response,
-        variables: Object,
+        variables: &Object,
         schema: &ApiSchema,
         defer_conditions: BooleanValues,
         include_coercion_errors: bool,
@@ -154,7 +182,7 @@ impl Query {
                             let mut output =
                                 Object::with_capacity(subselection.selection_set.len());
                             let mut parameters = FormatParameters {
-                                variables: &variables,
+                                variables,
                                 schema,
                                 errors: Vec::new(),
                                 coercion_errors: include_coercion_errors.then(Vec::new),
@@ -199,18 +227,27 @@ impl Query {
                 } else {
                     let mut output = Object::with_capacity(self.operation.selection_set.len());
 
-                    let all_variables = if self.operation.variables.is_empty() {
-                        variables
+                    // Without declared defaults the merge below reproduces `variables`
+                    // entry for entry, so borrow it instead.
+                    let has_defaults = self
+                        .operation
+                        .variables
+                        .values()
+                        .any(|variable| variable.default_value.is_some());
+                    let all_variables = if has_defaults {
+                        Cow::Owned(
+                            self.operation
+                                .variables
+                                .iter()
+                                .filter_map(|(k, Variable { default_value, .. })| {
+                                    default_value.as_ref().map(|v| (k, v))
+                                })
+                                .chain(variables.iter())
+                                .map(|(k, v)| (k.clone(), v.clone()))
+                                .collect(),
+                        )
                     } else {
-                        self.operation
-                            .variables
-                            .iter()
-                            .filter_map(|(k, Variable { default_value, .. })| {
-                                default_value.as_ref().map(|v| (k, v))
-                            })
-                            .chain(variables.iter())
-                            .map(|(k, v)| (k.clone(), v.clone()))
-                            .collect()
+                        Cow::Borrowed(variables)
                     };
 
                     let operation_type_name = schema
@@ -260,7 +297,8 @@ impl Query {
                 return vec![];
             }
             _ => {
-                failfast_debug!("invalid type for data in response. data: {:#?}", data);
+                // XXX(@goto-bus-stop): this should raise an execution error?
+                tracing::debug!("invalid type for data in response. data: {data:#?}");
             }
         }
 
@@ -1017,7 +1055,13 @@ impl Query {
                         }
                     } else {
                         // the fragment should have been already checked with the schema
-                        failfast_debug!("missing fragment named: {}", name);
+                        // XXX(@goto-bus-stop): can we store a reference to the fragment instead of
+                        // just a name?
+                        tracing::error!(
+                            name = name,
+                            "missing fragment in response formatting, this is a bug"
+                        );
+                        return Err(InvalidValue);
                     }
                 }
             }
@@ -1209,7 +1253,13 @@ impl Query {
                         }
                     } else {
                         // the fragment should have been already checked with the schema
-                        failfast_debug!("missing fragment named: {}", name);
+                        // XXX(@goto-bus-stop): can we store a reference to the fragment instead of
+                        // just a name?
+                        tracing::error!(
+                            name = name,
+                            "missing fragment in response formatting, this is a bug"
+                        );
+                        return Err(InvalidValue);
                     }
                 }
             }
@@ -1244,9 +1294,9 @@ impl Query {
                 .difference(&known_variables)
                 .collect::<Vec<_>>();
             if !unknown_variables.is_empty() {
-                failfast_debug!(
-                    "Received variable unknown to the query: {:?}",
-                    unknown_variables,
+                tracing::debug!(
+                    unknown_variables = ?unknown_variables,
+                    "Received variable unknown to the query",
                 );
             }
         }

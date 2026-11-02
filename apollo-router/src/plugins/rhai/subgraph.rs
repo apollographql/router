@@ -37,7 +37,7 @@ pub(super) fn request_failure(
             .build()
     };
 
-    Ok(ControlFlow::Break(res))
+    Ok(ControlFlow::Break(res.answered_by_router()))
 }
 
 pub(super) fn response_failure(context: Context, error_details: ErrorDetails) -> Response {

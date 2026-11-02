@@ -29,7 +29,7 @@ traffic_shaping:
         capacity: 10
         interval: 5s # Must not be greater than 18_446_744_073_709_551_615 milliseconds and not less than 0 milliseconds
       timeout: 50s # If a request to the subgraph 'products' takes more than 50secs then cancel the request (30 sec by default)
-      experimental_http2: enable # Configures HTTP/2 usage. Can be 'enable' (default), 'disable' or 'http2only'
+      http2: enable # Configures HTTP/2 usage. Can be 'enable' (default), 'disable' or 'http2only'
 ```
 
 ### Preset values
@@ -37,7 +37,7 @@ traffic_shaping:
 The preset values of `traffic_shaping` that's enabled by default:
 
 - `timeout: 30s` for all timeouts
-- `experimental_http2: enable`
+- `http2: enable`
 
 ## Client side traffic shaping
 
@@ -233,6 +233,10 @@ traffic_shaping:
     deduplicate_query: true # Enable query deduplication for all subgraphs.
 ```
 
+The operation name isn't part of the comparison. The query planner gives every subgraph fetch its own operation name, so this lets fetches within a single client request share a request too, when they send the same query and variables to the same subgraph. Subgraph request hooks in coprocessors, Rhai scripts, and plugins run once for each shared request and see the operation name of the first request that started it.
+
+For subgraphs with query deduplication enabled, the router reports the [`apollo.router.subgraph_deduplication.requests`](/graphos/routing/observability/router-telemetry-otel/enabling-telemetry/standard-instruments#query-deduplication) counter to your metrics exporters and to GraphOS. Use it to see how many subgraph requests reuse the response of an identical in-flight request.
+
 ### HTTP/2
 
 <HttpConnection type="subgraph" />
@@ -254,7 +258,7 @@ traffic_shaping:
 
 <Note>
 
-Keep-alive pings require HTTP/2 to be active. Setting `experimental_http2: disable` will prevent pings from being sent regardless of these settings.
+Keep-alive pings require HTTP/2 to be active. Setting `http2: disable` will prevent pings from being sent regardless of these settings.
 
 </Note>
 
@@ -270,7 +274,7 @@ traffic_shaping:
     pool_idle_timeout: 30s  # default: 15s; set to null to disable
 ```
 
-This option applies under `all`, per-subgraph under `subgraphs`, and per-source under `connector.sources`.
+Set this option in the `all` block, per subgraph under `subgraphs`, or per source under `connector.sources`. A per-subgraph or per-source block that omits it uses the value from the `all` block (or `connector.all`). Setting it to `null` there disables idle eviction for that subgraph or source, even if the `all` block sets a value.
 
 ### Ordering
 

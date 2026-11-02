@@ -1,4 +1,5 @@
 use apollo_federation::supergraph::CompositionHint;
+use apollo_federation::supergraph::HintLevel;
 use apollo_federation::supergraph::Satisfiable;
 use apollo_federation::supergraph::Supergraph;
 
@@ -641,6 +642,90 @@ mod union_member_inconsistencies {
             "INCONSISTENT_UNION_MEMBER",
             r#"Union type "T" includes member type "B" in some but not all defining subgraphs: "B" is defined in subgraph "Subgraph1" but not in subgraph "Subgraph2"."#,
         );
+    }
+}
+
+mod input_object_hints {
+    use test_log::test;
+
+    use super::*;
+
+    #[test]
+    fn hint_on_inconsistent_one_of() {
+        let subgraph1 = ServiceDefinition {
+            name: "Subgraph1",
+            type_defs: r#"
+                type Query {
+                    find(input: FindInput!): String @shareable
+                }
+
+                input FindInput @oneOf {
+                    id: ID
+                    name: String
+                }
+            "#,
+        };
+
+        let subgraph2 = ServiceDefinition {
+            name: "Subgraph2",
+            type_defs: r#"
+                type Query {
+                    find(input: FindInput!): String @shareable
+                }
+
+                input FindInput {
+                    id: ID
+                    name: String
+                }
+            "#,
+        };
+
+        let result = compose_as_fed2_subgraphs(&[subgraph1, subgraph2]).unwrap();
+        assert_has_hint(
+            &result,
+            "INCONSISTENT_ONE_OF_INPUT_OBJECT",
+            r#"Input object type "FindInput" is marked @oneOf in some but not all defining subgraphs: it is marked @oneOf in subgraph "Subgraph1" but not in subgraph "Subgraph2", so clients must provide exactly one field of this type, even for fields resolved by subgraph "Subgraph2"."#,
+        );
+        let hint = result
+            .hints()
+            .iter()
+            .find(|hint| hint.code() == "INCONSISTENT_ONE_OF_INPUT_OBJECT")
+            .expect("expected @oneOf hint");
+        assert!(matches!(hint.level(), HintLevel::Warn));
+    }
+
+    #[test]
+    fn no_hint_on_consistent_one_of() {
+        let subgraph1 = ServiceDefinition {
+            name: "Subgraph1",
+            type_defs: r#"
+                type Query {
+                    find(input: FindInput!): String @shareable
+                }
+
+                input FindInput @oneOf {
+                    id: ID
+                    name: String
+                }
+            "#,
+        };
+
+        let subgraph2 = ServiceDefinition {
+            name: "Subgraph2",
+            type_defs: r#"
+                type Query {
+                    find(input: FindInput!): String @shareable
+                }
+
+                input FindInput @oneOf {
+                    id: ID
+                    name: String
+                }
+            "#,
+        };
+
+        let result = compose_as_fed2_subgraphs(&[subgraph1, subgraph2]).unwrap();
+        assert_no_hints(&result);
     }
 }
 

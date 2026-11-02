@@ -518,12 +518,6 @@ impl CacheControl {
         self.private
     }
 
-    /// Returns `true` if the `public` directive is set.
-    /// Note: `private` takes precedence — both will not be true simultaneously.
-    pub(crate) fn public(&self) -> bool {
-        self.public
-    }
-
     /// Returns `true` if this response should be stored in the cache.
     ///
     /// A response should be stored if `no-store` is not set and the TTL (if present) has not
@@ -682,6 +676,12 @@ impl CacheControl {
         self.remaining_duration(self.max_age(), Some(now))
     }
 
+    /// Moves `created` back by `seconds`, as if this value had been stored that long ago.
+    #[allow(dead_code)]
+    pub(crate) fn backdate(&mut self, seconds: u64) {
+        self.created -= seconds;
+    }
+
     /// Sets `created` to 0, making time-dependent fields deterministic in snapshot tests.
     #[allow(dead_code)]
     pub(crate) fn zero_out_created(&mut self) {
@@ -801,7 +801,7 @@ mod tests {
         };
 
         let merged = first.merge_inner(&second, now, true);
-        assert!(!merged.public());
+        assert!(!merged.public);
         assert!(merged.private());
         assert!(merged.can_use());
     }
@@ -932,7 +932,7 @@ mod tests {
         let cc =
             CacheControl::try_from(&header_map(&[("cache-control", "public,private")])).unwrap();
         assert!(cc.private());
-        assert!(!cc.public());
+        assert!(!cc.public);
     }
 
     #[test]

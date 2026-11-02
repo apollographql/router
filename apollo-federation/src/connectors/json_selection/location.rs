@@ -1,3 +1,5 @@
+use std::cell::Cell;
+
 use nom::Parser;
 use nom::bytes::complete::tag;
 use nom::combinator::map;
@@ -20,10 +22,10 @@ use crate::connectors::ConnectSpec;
 // parsing and then only set Some(message) when we need to report an error, so
 // we would not be cloning long String messages very often (and the rest of the
 // Span fields are cheap to clone).
-pub(crate) type Span<'a> = LocatedSpan<&'a str, SpanExtra>;
+pub(crate) type Span<'a> = LocatedSpan<&'a str, SpanExtra<'a>>;
 
-#[derive(Debug, PartialEq, Eq, Clone, Hash)]
-pub(crate) struct SpanExtra {
+#[derive(Debug, PartialEq, Eq, Clone)]
+pub(crate) struct SpanExtra<'a> {
     pub(super) spec: ConnectSpec,
     /// A list of (message, offset) tuples representing errors encountered
     /// during parsing. The offset is relative to the start of the original
@@ -31,27 +33,38 @@ pub(crate) struct SpanExtra {
     pub(super) errors: Vec<(String, usize)>,
     /// Names of local variables currently bound by the `->as($var)` method.
     pub(super) local_vars: Vec<String>,
+    /// Recursion depth of the parse this span belongs to.
+    pub(super) depth: &'a DepthCounter,
 }
+
+/// Counts how deeply the parser has nested, to prevent stack overflow.
+#[derive(Debug, Default, PartialEq, Eq)]
+pub(crate) struct DepthCounter(pub(super) Cell<usize>);
 
 #[cfg(test)]
 pub(crate) fn new_span(input: &str) -> Span<'_> {
-    Span::new_extra(
-        input,
-        SpanExtra {
-            spec: ConnectSpec::latest(),
-            local_vars: Vec::new(),
-            errors: Vec::new(),
-        },
-    )
+    new_span_with_spec(input, ConnectSpec::latest())
 }
 
+// Tests parse spans on their own, without an enclosing parse to own the
+// counter, so each one gets a counter that lives until the test exits.
+#[cfg(test)]
 pub(crate) fn new_span_with_spec(input: &str, spec: ConnectSpec) -> Span<'_> {
+    new_span_with_depth(input, spec, Box::leak(Box::default()))
+}
+
+pub(crate) fn new_span_with_depth<'a>(
+    input: &'a str,
+    spec: ConnectSpec,
+    depth: &'a DepthCounter,
+) -> Span<'a> {
     Span::new_extra(
         input,
         SpanExtra {
             spec,
             local_vars: Vec::new(),
             errors: Vec::new(),
+            depth,
         },
     )
 }
@@ -60,7 +73,7 @@ pub(super) fn get_connect_spec(input: &Span) -> ConnectSpec {
     input.extra.spec
 }
 
-impl SpanExtra {
+impl SpanExtra<'_> {
     pub(super) fn is_local_var(&self, name: &String) -> bool {
         self.local_vars.contains(name)
     }

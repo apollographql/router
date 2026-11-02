@@ -1,7 +1,0 @@
-query {
-  __schema {
-    queryType {
-      name
-    }
-  }
-}

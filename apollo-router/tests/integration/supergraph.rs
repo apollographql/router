@@ -1,4 +1,5 @@
 use std::collections::HashMap;
+use std::path::PathBuf;
 
 use serde_json::json;
 use tower::BoxError;
@@ -12,7 +13,8 @@ async fn test_supergraph_errors_on_http1_max_headers() -> Result<(), BoxError> {
         .config(
             r#"
             limits:
-              http1_max_request_headers: 100
+              router:
+                http1_max_request_headers: 100
             "#,
         )
         .build()
@@ -44,7 +46,8 @@ async fn test_supergraph_allow_to_change_http1_max_headers() -> Result<(), BoxEr
         .config(
             r#"
             limits:
-              http1_max_request_headers: 200
+              router:
+                http1_max_request_headers: 200
             "#,
         )
         .build()
@@ -81,7 +84,8 @@ async fn test_supergraph_errors_on_http1_header_that_does_not_fit_inside_buffer(
         .config(
             r#"
             limits:
-              http1_max_request_buf_size: 100kib
+              router:
+                http1_max_request_buf_size: 100kib
             "#,
         )
         .build()
@@ -129,7 +133,8 @@ async fn test_supergraph_allow_to_change_http1_max_buf_size() -> Result<(), BoxE
         .config(
             r#"
             limits:
-              http1_max_request_buf_size: 2mib
+              router:
+                http1_max_request_buf_size: 2mib
             "#,
         )
         .build()
@@ -151,5 +156,53 @@ async fn test_supergraph_allow_to_change_http1_max_buf_size() -> Result<(), BoxE
         response.json::<serde_json::Value>().await?,
         json!({ "data": { "__typename": "Query" } })
     );
+    Ok(())
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn test_validate_default_values_false_allows_startup() -> Result<(), BoxError> {
+    let mut router = IntegrationTest::builder()
+        .config(
+            r#"
+            supergraph:
+              validate_default_values: false
+            "#,
+        )
+        .supergraph(PathBuf::from_iter([
+            "tests",
+            "fixtures",
+            "supergraph_with_invalid_default.graphql",
+        ]))
+        .build()
+        .await;
+
+    router.start().await;
+    router.assert_started().await;
+    router.graceful_shutdown().await;
+    Ok(())
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn test_validate_default_values_false_allows_startup_with_connectors() -> Result<(), BoxError>
+{
+    let mut router = IntegrationTest::builder()
+        .config(
+            r#"
+            supergraph:
+              validate_default_values: false
+            "#,
+        )
+        .supergraph(PathBuf::from_iter([
+            "tests",
+            "fixtures",
+            "connectors",
+            "supergraph_with_invalid_default.graphql",
+        ]))
+        .build()
+        .await;
+
+    router.start().await;
+    router.assert_started().await;
+    router.graceful_shutdown().await;
     Ok(())
 }

@@ -1,7 +1,9 @@
 use std::cell::Cell;
 use std::num::NonZeroU32;
+use std::num::NonZeroU64;
 use std::ops::ControlFlow;
 use std::sync::Arc;
+use std::time::Duration;
 
 use apollo_compiler::ExecutableDocument;
 use apollo_compiler::Name;
@@ -58,7 +60,7 @@ use crate::schema::position::SchemaRootDefinitionKind;
 use crate::schema::position::TypeDefinitionPosition;
 use crate::utils::logging::snapshot;
 
-#[derive(Debug, Clone, Hash, Serialize)]
+#[derive(Debug, Clone, Serialize)]
 pub struct QueryPlannerConfig {
     /// If enabled, the query planner will attempt to extract common subselections into named
     /// fragments. This can significantly reduce the size of the query sent to subgraphs.
@@ -94,6 +96,9 @@ pub struct QueryPlannerConfig {
     ///
     /// If you aren't aware of this flag, you probably don't need it.
     pub type_conditioned_fetching: bool,
+
+    /// Configuration for the incremental (BULB) planner.
+    pub incremental_planner: IncrementalPlannerConfig,
 }
 
 #[allow(clippy::derivable_impls)] // it's derivable right now, but we might change the defaults
@@ -105,6 +110,80 @@ impl Default for QueryPlannerConfig {
             incremental_delivery: Default::default(),
             debug: Default::default(),
             type_conditioned_fetching: false,
+            incremental_planner: Default::default(),
+        }
+    }
+}
+
+impl QueryPlannerConfig {
+    /// Whether operations are planned by the incremental planner. There is no
+    /// legacy fallback: with native connectors the schema is unexpanded and
+    /// only the incremental planner can route it.
+    pub(crate) fn uses_incremental_planner(&self) -> bool {
+        self.incremental_planner.enabled
+    }
+}
+
+impl std::hash::Hash for QueryPlannerConfig {
+    fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
+        // Destructured so adding a field is a compile error until it is
+        // added to the hash; a silently omitted field would let config
+        // changes serve stale cached plans.
+        let Self {
+            generate_query_fragments,
+            subgraph_graphql_validation,
+            incremental_delivery,
+            debug,
+            type_conditioned_fetching,
+            incremental_planner,
+        } = self;
+        generate_query_fragments.hash(state);
+        subgraph_graphql_validation.hash(state);
+        incremental_delivery.hash(state);
+        debug.hash(state);
+        type_conditioned_fetching.hash(state);
+        // Only include incremental_planner in the hash when enabled,
+        // so the cache key for the existing planner stays unchanged.
+        if incremental_planner.enabled {
+            incremental_planner.hash(state);
+        }
+    }
+}
+
+/// Configuration for the incremental (BULB) planner. The planner drives
+/// planning field-by-field, exploring options greedily with bounded
+/// backtracking.
+#[derive(Debug, Clone, Hash, Serialize)]
+pub struct IncrementalPlannerConfig {
+    /// Use the incremental planner.
+    pub enabled: bool,
+
+    /// Beam width: how many states advance together per depth in the beam.
+    /// Wider beams capture more diversity in the search, reducing the
+    /// need for expensive backtracking iterations.
+    pub beam_width: usize,
+
+    /// Absolute cap on the additional search effort spent beyond the
+    /// planner's initial greedy pass, measured in pending-selection visits.
+    /// The greedy pass always runs to completion; fuel is the optimization
+    /// budget granted on top of it, so `fuel: 0` is pure greedy planning.
+    pub fuel: u64,
+
+    /// Optional wall-clock time limit for the search. When set, the search
+    /// returns the best complete plan found so far once the limit is
+    /// reached, which makes the chosen plan dependent on machine load.
+    /// Leave unset (the default) for fully deterministic, fuel-bounded
+    /// planning.
+    pub timeout: Option<Duration>,
+}
+
+impl Default for IncrementalPlannerConfig {
+    fn default() -> Self {
+        Self {
+            enabled: false,
+            beam_width: 16,
+            fuel: 5_000,
+            timeout: None,
         }
     }
 }
@@ -158,6 +237,31 @@ pub struct QueryPlannerDebugConfig {
     ///
     /// The default value is None, which specifies no limit.
     pub paths_limit: Option<u32>,
+
+    /// The default for max number of non-local selections is 100000, but that
+    /// default can be altered with `APOLLO_ROUTER_MAX_NON_LOCAL_SELECTIONS`
+    /// environment variable. The query planning process is aborted if this
+    /// number is reached.
+    ///
+    /// Since query planning configuration is part of the cache key, setting or
+    /// changing the value of this env var will clear the query planner cache and
+    /// cause replanning of the previously cached query plans.
+    ///
+    /// If the env var value is unable to be parsed into a `NonZeroU64`, the default
+    /// value is used and a warn message is emitted which can be found in the logs.
+    /// An info log is emitted when that env var value parsed and is set.
+    ///
+    /// This env var is intentionally undocumented. It is meant for troubleshooting
+    /// purposes when investigating query plan and operation complexity in regards
+    /// to non-local selection sets, an internal to query planner measurement for
+    /// the number of selection sets that cannot be optimized due to not being local
+    /// to the selection set currently being explored.
+    ///
+    /// The number of non-local selections explored for a given plan is tracked in
+    /// `apollo.router.query_planning.plan.non_local_selections` histogram and is
+    /// available to everyone. This histogram uses fixed bucket boundaries of 100,
+    /// 1000, 25000, 50000, 100000, and 150000.
+    pub max_non_local_selections: NonZeroU64,
 }
 
 impl Default for QueryPlannerDebugConfig {
@@ -165,6 +269,7 @@ impl Default for QueryPlannerDebugConfig {
         Self {
             max_evaluated_plans: NonZeroU32::new(10_000).unwrap(),
             paths_limit: None,
+            max_non_local_selections: NonZeroU64::new(100_000).unwrap(),
         }
     }
 }
@@ -177,6 +282,22 @@ pub struct QueryPlanningStatistics {
     /// `best_plan_cost` can be NaN, if the cost is not computed or irrelevant.
     #[serde(deserialize_with = "deserialize_f64_nullable")]
     pub best_plan_cost: f64,
+    /// Incremental planner fuel spent improving on the first complete plan.
+    /// Mutations run one search per top-level field and report the search that
+    /// spent the most. `None` when the incremental planner is disabled.
+    #[serde(default, skip_serializing_if = "cell_is_none")]
+    pub fuel_consumed: Cell<Option<u64>>,
+    /// Fuel left in the search reported by `fuel_consumed`. `Some(0)` means
+    /// the budget ran out.
+    #[serde(default, skip_serializing_if = "cell_is_none")]
+    pub fuel_remaining: Cell<Option<u64>>,
+    /// `non_local_selections_count` can be `None`, if
+    /// `QueryPlanOptions::non_local_selections_limit_enabled` is `false`
+    pub non_local_selections_count: Option<u64>,
+}
+
+fn cell_is_none(cell: &Cell<Option<u64>>) -> bool {
+    cell.get().is_none()
 }
 
 /// Deserialize helper for f64 that treats null as NaN.
@@ -258,6 +379,10 @@ pub struct QueryPlanner {
     /// A set of the names of interface types for which at least one subgraph use an
     /// @interfaceObject to abstract that interface.
     interface_types_with_interface_objects: IndexSet<InterfaceTypeDefinitionPosition>,
+    /// Lookup table from (type, field) to connectors, built once at planner
+    /// construction so the incremental planner can route fields to connectors
+    /// without expanding them into virtual subgraphs.
+    connector_index: Arc<crate::connectors::index::ConnectorIndex>,
     /// A set of the names of interface or union types that have inconsistent "runtime types" across
     /// subgraphs.
     // PORT_NOTE: Named `inconsistentAbstractTypesRuntimes` in the JS codebase, which was slightly
@@ -274,7 +399,13 @@ impl QueryPlanner {
         supergraph: &Supergraph,
         config: QueryPlannerConfig,
     ) -> Result<Self, FederationError> {
-        let supergraph_schema = supergraph.schema.clone();
+        // The incremental planner plans connectors without expanding them, so
+        // it needs the entity keys expansion would have synthesized.
+        let supergraph_schema = if config.incremental_planner.enabled {
+            crate::connectors::index::add_connector_entity_keys(&supergraph.schema)?
+        } else {
+            supergraph.schema.clone()
+        };
         let api_schema = supergraph.to_api_schema(ApiSchemaOptions {
             include_defer: config.incremental_delivery.enable_defer,
             ..Default::default()
@@ -337,7 +468,7 @@ impl QueryPlanner {
                             .try_get(subgraph.schema())?
                             .members
                             .iter()
-                            .map(|member| ObjectTypeDefinitionPosition::new(member.name.clone()))
+                            .map(|member| ObjectTypeDefinitionPosition::new(Name::clone(member)))
                             .collect(),
                     ),
                     _ => None,
@@ -358,6 +489,20 @@ impl QueryPlanner {
             .map(|position| position.type_name().clone())
             .collect::<IndexSet<_>>();
 
+        // Build the connector index from the subgraph schemas. Subgraphs
+        // without connector directives contribute nothing.
+        let mut connectors_by_subgraph = Vec::new();
+        for (subgraph_name, subgraph_schema) in query_graph.subgraph_schemas() {
+            let connectors =
+                crate::connectors::Connector::from_schema(subgraph_schema.schema(), subgraph_name)?;
+            if !connectors.is_empty() {
+                connectors_by_subgraph.push((subgraph_schema, connectors));
+            }
+        }
+        let connector_index = Arc::new(crate::connectors::index::ConnectorIndex::from_subgraphs(
+            connectors_by_subgraph,
+        )?);
+
         Ok(Self {
             config,
             federated_query_graph: Arc::new(query_graph),
@@ -365,11 +510,16 @@ impl QueryPlanner {
             api_schema,
             interface_types_with_interface_objects,
             abstract_types_with_inconsistent_runtime_types,
+            connector_index,
         })
     }
 
     pub fn subgraph_schemas(&self) -> &IndexMap<Arc<str>, ValidFederationSchema> {
         self.federated_query_graph.subgraph_schemas()
+    }
+
+    pub fn connector_index(&self) -> &crate::connectors::index::ConnectorIndex {
+        &self.connector_index
     }
 
     // PORT_NOTE: this receives an `Operation` object in JS which is a concept that doesn't exist in apollo-rs.
@@ -412,6 +562,7 @@ impl QueryPlanner {
                     &options.check_for_cooperative_cancellation,
                 )
             },
+            !self.config.uses_incremental_planner(),
         )?;
 
         let NormalizedDefer {
@@ -454,12 +605,13 @@ impl QueryPlanner {
         } else {
             SubgraphOperationCompression::Disabled
         };
+        let client_labels = Arc::new(client_labels);
         let mut processor = FetchDependencyGraphToQueryPlanProcessor::new(
             normalized_operation.variables.clone(),
             normalized_operation.directives.clone(),
             operation_compression,
             operation.name.clone(),
-            client_labels,
+            client_labels.as_ref().clone(),
         );
         let mut parameters = QueryPlanningParameters {
             supergraph_schema: self.supergraph_schema.clone(),
@@ -479,6 +631,7 @@ impl QueryPlanner {
                 &self.federated_query_graph,
                 &IndexSet::from_iter(options.override_conditions),
             ),
+            connector_index: self.connector_index.clone(),
             check_for_cooperative_cancellation: options.check_for_cooperative_cancellation,
             fetch_id_generator: Arc::new(FetchIdGenerator::new()),
             disabled_subgraphs: self
@@ -492,6 +645,7 @@ impl QueryPlanner {
                     }
                 })
                 .collect(),
+            client_labels: client_labels.clone(),
         };
 
         let mut non_local_selection_state = options
@@ -563,6 +717,7 @@ impl QueryPlanner {
             node: root_node,
             statistics: QueryPlanningStatistics {
                 best_plan_cost: cost,
+                non_local_selections_count: non_local_selection_state.as_ref().map(|s| s.count),
                 ..statistics
             },
         };
@@ -860,9 +1015,41 @@ fn compute_plan_internal(
 ) -> Result<(Option<PlanNode>, QueryPlanCost), FederationError> {
     let root_kind = parameters.operation.root_kind;
 
+    let use_incremental = parameters.config.uses_incremental_planner();
     let (main, deferred, primary_selection, cost) = if root_kind
         == SchemaRootDefinitionKind::Mutation
+        && use_incremental
     {
+        // BULB planner: plan each top-level mutation field independently,
+        // then sequence the results. One naming state spans all fields so
+        // generated subgraph operation names stay unique across the plan.
+        let mut naming = crate::query_plan::incremental_planner::OperationNaming::new(
+            parameters.config.generate_query_fragments,
+        );
+        let mut plans: Vec<Option<PlanNode>> = Vec::new();
+        for field_selection in parameters
+            .operation
+            .selection_set
+            .clone()
+            .split_top_level_fields()
+        {
+            let bulb = crate::query_plan::incremental_planner::build_bulb_plan(
+                parameters,
+                &field_selection,
+                root_kind,
+                &mut naming,
+                has_defers,
+            )?;
+            plans.push(bulb.plan);
+        }
+        let mut nodes: Vec<PlanNode> = plans.into_iter().flatten().collect();
+        let plan = match nodes.len() {
+            0 => None,
+            1 => Some(nodes.remove(0)),
+            _ => Some(PlanNode::Sequence(SequenceNode { nodes })),
+        };
+        (plan, vec![], None, f64::NAN)
+    } else if root_kind == SchemaRootDefinitionKind::Mutation {
         let dependency_graphs = compute_root_serial_dependency_graph_for_mutation(
             parameters,
             has_defers,
@@ -892,6 +1079,21 @@ fn compute_plan_internal(
         }
         // No cost computation necessary. Return NaN for cost.
         (main, deferred, primary_selection, f64::NAN)
+    } else if use_incremental {
+        // BULB planner: bypass the traversal loop and FDG processing
+        // entirely; the plan is materialized directly from the FetchGraph.
+        let selection_set = parameters.operation.selection_set.clone();
+        let mut naming = crate::query_plan::incremental_planner::OperationNaming::new(
+            parameters.config.generate_query_fragments,
+        );
+        let bulb = crate::query_plan::incremental_planner::build_bulb_plan(
+            parameters,
+            &selection_set,
+            root_kind,
+            &mut naming,
+            has_defers,
+        )?;
+        (bulb.plan, vec![], None, bulb.cost)
     } else {
         let (mut dependency_graph, cost) = compute_root_parallel_dependency_graph(
             parameters,
@@ -988,7 +1190,11 @@ impl SubgraphOperationCompression {
     pub(crate) fn compress(
         &mut self,
         operation: Operation,
+        skip_validation: bool,
     ) -> Result<Valid<ExecutableDocument>, FederationError> {
+        if skip_validation {
+            return self.compress_unchecked(operation);
+        }
         match self {
             Self::GenerateFragments => Ok(operation.generate_fragments()?),
             Self::Disabled => {
@@ -1005,6 +1211,16 @@ impl SubgraphOperationCompression {
             }
         }
     }
+
+    fn compress_unchecked(
+        &mut self,
+        operation: Operation,
+    ) -> Result<Valid<ExecutableDocument>, FederationError> {
+        match self {
+            Self::GenerateFragments => Ok(operation.generate_fragments_unchecked()?),
+            Self::Disabled => operation.into_document_unchecked(),
+        }
+    }
 }
 
 #[cfg(test)]
@@ -1014,7 +1230,7 @@ mod tests {
     const TEST_SUPERGRAPH: &str = r#"
 schema
   @link(url: "https://specs.apollo.dev/link/v1.0")
-  @link(url: "https://specs.apollo.dev/join/v0.2", for: EXECUTION)
+  @link(url: "https://specs.apollo.dev/join/v0.3", for: EXECUTION)
 {
   query: Query
 }
@@ -1025,7 +1241,9 @@ directive @join__graph(name: String!, url: String!) on ENUM_VALUE
 
 directive @join__implements(graph: join__Graph!, interface: String!) repeatable on OBJECT | INTERFACE
 
-directive @join__type(graph: join__Graph!, key: join__FieldSet, extension: Boolean! = false, resolvable: Boolean! = true) repeatable on OBJECT | INTERFACE | UNION | ENUM | INPUT_OBJECT | SCALAR
+directive @join__type(graph: join__Graph!, key: join__FieldSet, extension: Boolean! = false, resolvable: Boolean! = true, isInterfaceObject: Boolean! = false) repeatable on OBJECT | INTERFACE | UNION | ENUM | INPUT_OBJECT | SCALAR
+directive @join__unionMember(graph: join__Graph!, member: String!) repeatable on UNION
+directive @join__enumValue(graph: join__Graph!) repeatable on ENUM_VALUE
 
 directive @link(url: String, as: String, for: link__Purpose, import: [link__Import]) repeatable on SCHEMA
 
@@ -1458,13 +1676,16 @@ type User
             evaluated_plan_count: Cell::new(10),
             evaluated_plan_paths: Cell::new(20),
             best_plan_cost: f64::NAN,
+            non_local_selections_count: Some(30),
+            ..Default::default()
         };
         let serialized = serde_json::to_string_pretty(&stats).expect("Serializing");
         insta::assert_snapshot!(serialized, @r###"
         {
           "evaluated_plan_count": 10,
           "evaluated_plan_paths": 20,
-          "best_plan_cost": null
+          "best_plan_cost": null,
+          "non_local_selections_count": 30
         }
         "###);
 

@@ -1,6 +1,3 @@
-use schemars::JsonSchema;
-use serde::Deserialize;
-
 use super::connector::spans::ConnectorSpans;
 use super::http_client::spans::HttpClientSpans;
 use super::router::spans::RouterSpans;
@@ -9,14 +6,9 @@ use super::supergraph::spans::SupergraphSpans;
 use crate::plugins::telemetry::config_new::DefaultForLevel;
 use crate::plugins::telemetry::config_new::attributes::DefaultAttributeRequirementLevel;
 use crate::plugins::telemetry::otlp::TelemetryDataKind;
-use crate::plugins::telemetry::span_factory::SpanMode;
 
-#[derive(Deserialize, JsonSchema, Clone, Default, Debug)]
-#[serde(deny_unknown_fields, default)]
+#[apollo_configuration::configuration]
 pub(crate) struct Spans {
-    /// Use new OpenTelemetry spec compliant span attributes or preserve existing. This will be defaulted in future to `spec_compliant`, eventually removed in future.
-    pub(crate) mode: SpanMode,
-
     /// The attributes to include by default in spans based on their level as specified in the otel semantic conventions and Apollo documentation.
     pub(crate) default_attribute_requirement_level: DefaultAttributeRequirementLevel,
 
@@ -63,25 +55,25 @@ impl Spans {
         );
     }
 
-    pub(crate) fn validate(&self) -> Result<(), String> {
+    pub(crate) fn validate_selectors(&self) -> Result<(), String> {
         for (name, custom) in &self.router.attributes.custom {
             custom
-                .validate()
+                .validate_selectors()
                 .map_err(|err| format!("error for router span attribute {name:?}: {err}"))?;
         }
         for (name, custom) in &self.supergraph.attributes.custom {
             custom
-                .validate()
+                .validate_selectors()
                 .map_err(|err| format!("error for supergraph span attribute {name:?}: {err}"))?;
         }
         for (name, custom) in &self.subgraph.attributes.custom {
             custom
-                .validate()
+                .validate_selectors()
                 .map_err(|err| format!("error for subgraph span attribute {name:?}: {err}"))?;
         }
         for (name, custom) in &self.http_client.attributes.custom {
             custom
-                .validate()
+                .validate_selectors()
                 .map_err(|err| format!("error for http_client span attribute {name:?}: {err}"))?;
         }
 

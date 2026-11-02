@@ -330,6 +330,24 @@ impl OpPathElement {
             }
         }
     }
+
+    /// Rebase variant that allows concrete-to-interface rebasing for
+    /// @interfaceObject schemas. Used by the incremental planner's
+    /// `add_at_path` when building subgraph operations.
+    pub(crate) fn rebase_on_for_incremental_planner(
+        &self,
+        parent_type: &CompositeTypeDefinitionPosition,
+        schema: &ValidFederationSchema,
+    ) -> Result<OpPathElement, FederationError> {
+        match self {
+            OpPathElement::Field(field) => Ok(field
+                .rebase_on_for_incremental_planner(parent_type, schema)?
+                .into()),
+            OpPathElement::InlineFragment(inline) => {
+                Ok(inline.rebase_on(parent_type, schema)?.into())
+            }
+        }
+    }
 }
 
 impl Display for OpPathElement {
@@ -373,6 +391,39 @@ impl OpGraphPathContext {
         }
 
         let mut new_conditionals = operation_element.extract_operation_conditionals()?;
+        if new_conditionals.is_empty() {
+            return Ok(self.clone());
+        }
+        new_conditionals.extend(self.iter().cloned());
+        Ok(OpGraphPathContext {
+            conditionals: Arc::new(new_conditionals),
+        })
+    }
+
+    /// Returns this context extended with the conditionals of every element of the given path
+    /// (outermost element first), skipping conditionals that are already in this context.
+    pub(crate) fn with_context_of_path(
+        &self,
+        path: &OpPath,
+    ) -> Result<OpGraphPathContext, FederationError> {
+        let mut new_conditionals: Vec<OperationConditional> = vec![];
+        for element in path.0.iter() {
+            if element.directives().is_empty() {
+                continue;
+            }
+            let mut element_conditionals: Vec<_> = element
+                .extract_operation_conditionals()?
+                .into_iter()
+                .filter(|conditional| {
+                    !self.conditionals.contains(conditional)
+                        && !new_conditionals.contains(conditional)
+                })
+                .collect();
+            // Conditionals are stored innermost-first, and this element is nested within the
+            // previous ones.
+            element_conditionals.extend(new_conditionals);
+            new_conditionals = element_conditionals;
+        }
         if new_conditionals.is_empty() {
             return Ok(self.clone());
         }

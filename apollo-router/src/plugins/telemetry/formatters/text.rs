@@ -226,9 +226,7 @@ impl Text {
             }
         }
 
-        if let Some(otel_attributes) = ext
-            .get::<OtelData>()
-            .and_then(|otel_data| otel_data.builder.attributes.as_ref())
+        if let Some(otel_attributes) = ext.get::<OtelData>().map(|otel_data| &otel_data.attributes)
         {
             let mut attrs = otel_attributes
                 .iter()

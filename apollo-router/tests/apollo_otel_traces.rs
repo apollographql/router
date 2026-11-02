@@ -55,7 +55,6 @@ static ROUTER_SERVICE_RUNTIME: Lazy<Arc<tokio::runtime::Runtime>> = Lazy::new(||
 });
 
 async fn config(
-    use_legacy_request_span: bool,
     batch: bool,
     reports: Arc<Mutex<Vec<ExportTraceServiceRequest>>>,
 ) -> (JoinHandle<()>, serde_json::Value) {
@@ -95,29 +94,22 @@ async fn config(
         Some(serde_json::Value::String(format!("http://{addr}")))
     })
     .expect("Could not sub in endpoint");
-    config = jsonpath_lib::replace_with(
-        config,
-        "$.telemetry.apollo.experimental_otlp_endpoint",
-        &mut |_| Some(serde_json::Value::String(format!("http://{addr}"))),
-    )
+    config = jsonpath_lib::replace_with(config, "$.telemetry.apollo.otlp_endpoint", &mut |_| {
+        Some(serde_json::Value::String(format!("http://{addr}")))
+    })
     .expect("Could not sub in endpoint");
     config = jsonpath_lib::replace_with(
         config,
-        "$.telemetry.apollo.otlp_tracing_sampler",
-        &mut |_| Some(serde_json::Value::String("always_on".to_string())),
-    )
-    .expect("Could not sub in otlp sampler");
-    config = jsonpath_lib::replace_with(
-        config,
-        "$.telemetry.apollo.experimental_otlp_tracing_protocol",
+        "$.telemetry.apollo.otlp_tracing_protocol",
         &mut |_| Some(serde_json::Value::String("http".to_string())),
     )
     .expect("Could not sub in otlp protocol");
-    config =
-        jsonpath_lib::replace_with(config, "$.telemetry.spans.legacy_request_span", &mut |_| {
-            Some(serde_json::Value::Bool(use_legacy_request_span))
-        })
-        .expect("Could not sub in endpoint");
+    // The shared reports fixtures set `sampler: always_off` so the reports tests don't export
+    // traces to an unmocked endpoint. These trace tests mock the OTLP collector, so re-enable it.
+    config = jsonpath_lib::replace_with(config, "$.telemetry.apollo.sampler", &mut |_| {
+        Some(serde_json::Value::String("always_on".to_string()))
+    })
+    .expect("Could not sub in apollo sampler");
     (task, config)
 }
 
@@ -300,11 +292,16 @@ async fn start_demo_subgraphs_mock_server() -> MockServer {
 /// cause.
 async fn get_router_service_with_subgraph_mock(
     reports: Arc<Mutex<Vec<ExportTraceServiceRequest>>>,
-    use_legacy_request_span: bool,
     _mocked: bool,
 ) -> (JoinHandle<()>, BoxCloneService) {
-    let (task, mut config) = config(use_legacy_request_span, false, reports).await;
+    let (task, config) = config(false, reports).await;
+    build_router_with_subgraph_mock(task, config).await
+}
 
+async fn build_router_with_subgraph_mock(
+    task: JoinHandle<()>,
+    mut config: serde_json::Value,
+) -> (JoinHandle<()>, BoxCloneService) {
     let subgraph_mock = start_demo_subgraphs_mock_server().await;
     let mock_url = subgraph_mock.uri();
     // Leak so the wiremock outlives this helper's return — the harness
@@ -345,10 +342,9 @@ async fn get_router_service_with_subgraph_mock(
 
 async fn get_connector_router_service(
     reports: Arc<Mutex<Vec<ExportTraceServiceRequest>>>,
-    use_legacy_request_span: bool,
     mocked: bool,
 ) -> (JoinHandle<()>, BoxCloneService) {
-    let (task, mut config) = config(use_legacy_request_span, false, reports).await;
+    let (task, mut config) = config(false, reports).await;
 
     // Stand up a localhost wiremock to replace the real
     // `https://jsonplaceholder.typicode.com/` egress the connector schema
@@ -413,10 +409,9 @@ async fn get_connector_router_service(
 
 async fn get_batch_router_service(
     reports: Arc<Mutex<Vec<ExportTraceServiceRequest>>>,
-    use_legacy_request_span: bool,
     mocked: bool,
 ) -> (JoinHandle<()>, BoxCloneService) {
-    let (task, config) = config(use_legacy_request_span, true, reports).await;
+    let (task, config) = config(true, reports).await;
     let builder = TestHarness::builder()
         .try_log_level("INFO")
         .configuration_json(config)
@@ -755,12 +750,41 @@ async fn traces_handler(
 async fn get_trace_report_with_subgraph_mock(
     reports: Arc<Mutex<Vec<ExportTraceServiceRequest>>>,
     request: router::Request,
-    use_legacy_request_span: bool,
 ) -> ExportTraceServiceRequest {
     get_traces(
         get_router_service_with_subgraph_mock,
         reports,
-        use_legacy_request_span,
+        false,
+        request,
+        |r| {
+            !r.resource_spans
+                .first()
+                .expect("resource spans required")
+                .scope_spans
+                .first()
+                .expect("scope spans required")
+                .spans
+                .is_empty()
+        },
+    )
+    .await
+}
+
+async fn get_trace_report_with_subgraph_mock_demand_control(
+    reports: Arc<Mutex<Vec<ExportTraceServiceRequest>>>,
+    request: router::Request,
+) -> ExportTraceServiceRequest {
+    get_traces(
+        |reports, _mocked| async move {
+            let (task, config) = config(false, reports).await;
+            let config =
+                jsonpath_lib::replace_with(config, "$.demand_control.enabled", &mut |_| {
+                    Some(serde_json::Value::Bool(true))
+                })
+                .expect("could not enable demand_control");
+            build_router_with_subgraph_mock(task, config).await
+        },
+        reports,
         false,
         request,
         |r| {
@@ -780,50 +804,34 @@ async fn get_trace_report_with_subgraph_mock(
 async fn get_connector_trace_report(
     reports: Arc<Mutex<Vec<ExportTraceServiceRequest>>>,
     request: router::Request,
-    use_legacy_request_span: bool,
 ) -> ExportTraceServiceRequest {
-    get_traces(
-        get_connector_router_service,
-        reports,
-        use_legacy_request_span,
-        false,
-        request,
-        |r| {
-            !r.resource_spans
-                .first()
-                .expect("resource spans required")
-                .scope_spans
-                .first()
-                .expect("scope spans required")
-                .spans
-                .is_empty()
-        },
-    )
+    get_traces(get_connector_router_service, reports, false, request, |r| {
+        !r.resource_spans
+            .first()
+            .expect("resource spans required")
+            .scope_spans
+            .first()
+            .expect("scope spans required")
+            .spans
+            .is_empty()
+    })
     .await
 }
 
 async fn get_batch_trace_report(
     reports: Arc<Mutex<Vec<ExportTraceServiceRequest>>>,
     request: router::Request,
-    use_legacy_request_span: bool,
 ) -> ExportTraceServiceRequest {
-    get_traces(
-        get_batch_router_service,
-        reports,
-        use_legacy_request_span,
-        false,
-        request,
-        |r| {
-            !r.resource_spans
-                .first()
-                .expect("resource spans required")
-                .scope_spans
-                .first()
-                .expect("scope spans required")
-                .spans
-                .is_empty()
-        },
-    )
+    get_traces(get_batch_router_service, reports, false, request, |r| {
+        !r.resource_spans
+            .first()
+            .expect("resource spans required")
+            .scope_spans
+            .first()
+            .expect("scope spans required")
+            .spans
+            .is_empty()
+    })
     .await
 }
 
@@ -831,9 +839,8 @@ async fn get_traces<
     Fut,
     T: Fn(&&ExportTraceServiceRequest) -> bool + Send + Sync + Copy + 'static,
 >(
-    service_fn: impl FnOnce(Arc<Mutex<Vec<ExportTraceServiceRequest>>>, bool, bool) -> Fut,
+    service_fn: impl FnOnce(Arc<Mutex<Vec<ExportTraceServiceRequest>>>, bool) -> Fut,
     reports: Arc<Mutex<Vec<ExportTraceServiceRequest>>>,
-    use_legacy_request_span: bool,
     mocked: bool,
     request: router::Request,
     filter: T,
@@ -842,7 +849,7 @@ where
     Fut: Future<Output = (JoinHandle<()>, BoxCloneService)>,
 {
     reports.lock().await.clear();
-    let (task, mut service) = service_fn(reports.clone(), use_legacy_request_span, mocked).await;
+    let (task, mut service) = service_fn(reports.clone(), mocked).await;
     let started_at = Instant::now();
     let response = service
         .ready()
@@ -955,196 +962,199 @@ where
 
 #[tokio::test(flavor = "multi_thread")]
 async fn connector() {
-    for use_legacy_request_span in [true, false] {
-        let request = supergraph::Request::fake_builder()
-            .query("query{posts{id body title}}")
-            .build()
-            .unwrap();
-        let req: router::Request = request.try_into().expect("could not convert request");
-        let reports = Arc::new(Mutex::new(vec![]));
-        let report = get_connector_trace_report(reports, req, use_legacy_request_span).await;
-        assert_report!(report);
-    }
+    let request = supergraph::Request::fake_builder()
+        .query("query{posts{id body title}}")
+        .build()
+        .unwrap();
+    let req: router::Request = request.try_into().expect("could not convert request");
+    let reports = Arc::new(Mutex::new(vec![]));
+    let report = get_connector_trace_report(reports, req).await;
+    assert_report!(report);
 }
 
 #[tokio::test(flavor = "multi_thread")]
 async fn connector_error() {
-    for use_legacy_request_span in [true, false] {
-        let request = supergraph::Request::fake_builder()
-            .query("query{posts{id body title forceError}}")
-            .build()
-            .unwrap();
-        let req: router::Request = request.try_into().expect("could not convert request");
-        let reports = Arc::new(Mutex::new(vec![]));
-        let report = get_connector_trace_report(reports, req, use_legacy_request_span).await;
-        assert_report!(report);
-    }
+    let request = supergraph::Request::fake_builder()
+        .query("query{posts{id body title forceError}}")
+        .build()
+        .unwrap();
+    let req: router::Request = request.try_into().expect("could not convert request");
+    let reports = Arc::new(Mutex::new(vec![]));
+    let report = get_connector_trace_report(reports, req).await;
+    assert_report!(report);
 }
 
 #[tokio::test(flavor = "multi_thread")]
 async fn non_defer() {
-    for use_legacy_request_span in [true, false] {
-        let request = supergraph::Request::fake_builder()
-            .query("query{topProducts{name reviews {author{name}} reviews{author{name}}}}")
-            .build()
-            .unwrap();
-        let req: router::Request = request.try_into().expect("could not convert request");
-        let reports = Arc::new(Mutex::new(vec![]));
-        let report =
-            get_trace_report_with_subgraph_mock(reports, req, use_legacy_request_span).await;
-        assert_report!(report);
-    }
+    let request = supergraph::Request::fake_builder()
+        .query("query{topProducts{name reviews {author{name}} reviews{author{name}}}}")
+        .build()
+        .unwrap();
+    let req: router::Request = request.try_into().expect("could not convert request");
+    let reports = Arc::new(Mutex::new(vec![]));
+    let report = get_trace_report_with_subgraph_mock(reports, req).await;
+    assert_report!(report);
 }
 
 #[tokio::test(flavor = "multi_thread")]
 async fn test_condition_if() {
-    for use_legacy_request_span in [true, false] {
-        let request = supergraph::Request::fake_builder()
+    let request = supergraph::Request::fake_builder()
             .query("query($if: Boolean!) {topProducts {  name    ... @defer(if: $if) {  reviews {    author {      name    }  }  reviews {    author {      name    }  }    }}}")
             .variable("if", true)
             .header(ACCEPT, "multipart/mixed;deferSpec=20220824")
             .build()
             .unwrap();
-        let req: router::Request = request.try_into().expect("could not convert request");
-        let reports = Arc::new(Mutex::new(vec![]));
-        let report =
-            get_trace_report_with_subgraph_mock(reports, req, use_legacy_request_span).await;
-        assert_report!(report);
-    }
+    let req: router::Request = request.try_into().expect("could not convert request");
+    let reports = Arc::new(Mutex::new(vec![]));
+    let report = get_trace_report_with_subgraph_mock(reports, req).await;
+    assert_report!(report);
 }
 
 #[tokio::test(flavor = "multi_thread")]
 async fn test_condition_else() {
-    for use_legacy_request_span in [true, false] {
-        let request = supergraph::Request::fake_builder()
+    let request = supergraph::Request::fake_builder()
         .query("query($if: Boolean!) {topProducts {  name    ... @defer(if: $if) {  reviews {    author {      name    }  }  reviews {    author {      name    }  }    }}}")
         .variable("if", false)
         .header(ACCEPT, "multipart/mixed;deferSpec=20220824")
         .build()
         .unwrap();
-        let req: router::Request = request.try_into().expect("could not convert request");
-        let reports = Arc::new(Mutex::new(vec![]));
-        let report =
-            get_trace_report_with_subgraph_mock(reports, req, use_legacy_request_span).await;
-        assert_report!(report);
-    }
+    let req: router::Request = request.try_into().expect("could not convert request");
+    let reports = Arc::new(Mutex::new(vec![]));
+    let report = get_trace_report_with_subgraph_mock(reports, req).await;
+    assert_report!(report);
 }
 
 #[tokio::test(flavor = "multi_thread")]
 async fn test_trace_id() {
-    for use_legacy_request_span in [true, false] {
-        let request = supergraph::Request::fake_builder()
-            .query("query{topProducts{name reviews {author{name}} reviews{author{name}}}}")
-            .build()
-            .unwrap();
-        let req: router::Request = request.try_into().expect("could not convert request");
-        let reports = Arc::new(Mutex::new(vec![]));
-        let report =
-            get_trace_report_with_subgraph_mock(reports, req, use_legacy_request_span).await;
-        assert_report!(report);
-    }
+    let request = supergraph::Request::fake_builder()
+        .query("query{topProducts{name reviews {author{name}} reviews{author{name}}}}")
+        .build()
+        .unwrap();
+    let req: router::Request = request.try_into().expect("could not convert request");
+    let reports = Arc::new(Mutex::new(vec![]));
+    let report = get_trace_report_with_subgraph_mock(reports, req).await;
+    assert_report!(report);
 }
 
 #[tokio::test(flavor = "multi_thread")]
 async fn test_batch_trace_id() {
-    for use_legacy_request_span in [true, false] {
-        let request = make_fake_batch(
-            supergraph::Request::fake_builder()
-                .query("query one {topProducts{name reviews {author{name}} reviews{author{name}}}}")
-                .operation_name("one")
-                .build()
-                .unwrap()
-                .supergraph_request,
-            Some(("one", "two")),
-        );
-        let reports = Arc::new(Mutex::new(vec![]));
-        let report = get_batch_trace_report(reports, request.into(), use_legacy_request_span).await;
-        assert_report!(report, true);
-    }
+    let request = make_fake_batch(
+        supergraph::Request::fake_builder()
+            .query("query one {topProducts{name reviews {author{name}} reviews{author{name}}}}")
+            .operation_name("one")
+            .build()
+            .unwrap()
+            .supergraph_request,
+        Some(("one", "two")),
+    );
+    let reports = Arc::new(Mutex::new(vec![]));
+    let report = get_batch_trace_report(reports, request.into()).await;
+    assert_report!(report, true);
 }
 
 #[tokio::test(flavor = "multi_thread")]
 async fn test_client_name() {
-    for use_legacy_request_span in [true, false] {
-        let request = supergraph::Request::fake_builder()
-            .query("query{topProducts{name reviews {author{name}} reviews{author{name}}}}")
-            .header("apollographql-client-name", "my client")
-            .build()
-            .unwrap();
-        let req: router::Request = request.try_into().expect("could not convert request");
-        let reports = Arc::new(Mutex::new(vec![]));
-        let report =
-            get_trace_report_with_subgraph_mock(reports, req, use_legacy_request_span).await;
-        assert_report!(report);
-    }
+    let request = supergraph::Request::fake_builder()
+        .query("query{topProducts{name reviews {author{name}} reviews{author{name}}}}")
+        .header("apollographql-client-name", "my client")
+        .build()
+        .unwrap();
+    let req: router::Request = request.try_into().expect("could not convert request");
+    let reports = Arc::new(Mutex::new(vec![]));
+    let report = get_trace_report_with_subgraph_mock(reports, req).await;
+    assert_report!(report);
 }
 
 #[tokio::test(flavor = "multi_thread")]
 async fn test_client_version() {
-    for use_legacy_request_span in [true, false] {
-        let request = supergraph::Request::fake_builder()
-            .query("query{topProducts{name reviews {author{name}} reviews{author{name}}}}")
-            .header("apollographql-client-version", "my client version")
-            .build()
-            .unwrap();
-        let req: router::Request = request.try_into().expect("could not convert request");
-        let reports = Arc::new(Mutex::new(vec![]));
-        let report =
-            get_trace_report_with_subgraph_mock(reports, req, use_legacy_request_span).await;
-        assert_report!(report);
-    }
+    let request = supergraph::Request::fake_builder()
+        .query("query{topProducts{name reviews {author{name}} reviews{author{name}}}}")
+        .header("apollographql-client-version", "my client version")
+        .build()
+        .unwrap();
+    let req: router::Request = request.try_into().expect("could not convert request");
+    let reports = Arc::new(Mutex::new(vec![]));
+    let report = get_trace_report_with_subgraph_mock(reports, req).await;
+    assert_report!(report);
 }
 
 #[tokio::test(flavor = "multi_thread")]
 async fn test_send_header() {
-    for use_legacy_request_span in [true, false] {
-        let request = supergraph::Request::fake_builder()
-            .query("query{topProducts{name reviews {author{name}} reviews{author{name}}}}")
-            .header("send-header", "Header value")
-            .header("dont-send-header", "Header value")
-            .build()
-            .unwrap();
-        let req: router::Request = request.try_into().expect("could not convert request");
-        let reports = Arc::new(Mutex::new(vec![]));
-        let report =
-            get_trace_report_with_subgraph_mock(reports, req, use_legacy_request_span).await;
-        assert_report!(report);
-    }
+    let request = supergraph::Request::fake_builder()
+        .query("query{topProducts{name reviews {author{name}} reviews{author{name}}}}")
+        .header("send-header", "Header value")
+        .header("dont-send-header", "Header value")
+        .build()
+        .unwrap();
+    let req: router::Request = request.try_into().expect("could not convert request");
+    let reports = Arc::new(Mutex::new(vec![]));
+    let report = get_trace_report_with_subgraph_mock(reports, req).await;
+    assert_report!(report);
 }
 
 #[tokio::test(flavor = "multi_thread")]
 async fn test_batch_send_header() {
-    for use_legacy_request_span in [true, false] {
-        let request = make_fake_batch(
-            supergraph::Request::fake_builder()
-                .query("query one {topProducts{name reviews {author{name}} reviews{author{name}}}}")
-                .operation_name("one")
-                .header("send-header", "Header value")
-                .header("dont-send-header", "Header value")
-                .build()
-                .unwrap()
-                .supergraph_request,
-            Some(("one", "two")),
-        );
-        let reports = Arc::new(Mutex::new(vec![]));
-        let report = get_batch_trace_report(reports, request.into(), use_legacy_request_span).await;
-        assert_report!(report, true);
-    }
+    let request = make_fake_batch(
+        supergraph::Request::fake_builder()
+            .query("query one {topProducts{name reviews {author{name}} reviews{author{name}}}}")
+            .operation_name("one")
+            .header("send-header", "Header value")
+            .header("dont-send-header", "Header value")
+            .build()
+            .unwrap()
+            .supergraph_request,
+        Some(("one", "two")),
+    );
+    let reports = Arc::new(Mutex::new(vec![]));
+    let report = get_batch_trace_report(reports, request.into()).await;
+    assert_report!(report, true);
 }
 
 #[tokio::test(flavor = "multi_thread")]
 async fn test_send_variable_value() {
-    for use_legacy_request_span in [true, false] {
-        let request = supergraph::Request::fake_builder()
+    let request = supergraph::Request::fake_builder()
         .query("query($sendValue:Boolean!, $dontSendValue: Boolean!){topProducts{name reviews @include(if: $sendValue) {author{name}} reviews @include(if: $dontSendValue){author{name}}}}")
         .variable("sendValue", true)
         .variable("dontSendValue", true)
         .build()
         .unwrap();
-        let req: router::Request = request.try_into().expect("could not convert request");
-        let reports = Arc::new(Mutex::new(vec![]));
-        let report =
-            get_trace_report_with_subgraph_mock(reports, req, use_legacy_request_span).await;
-        assert_report!(report);
-    }
+    let req: router::Request = request.try_into().expect("could not convert request");
+    let reports = Arc::new(Mutex::new(vec![]));
+    let report = get_trace_report_with_subgraph_mock(reports, req).await;
+    assert_report!(report);
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn test_demand_control_trace() {
+    let request = supergraph::Request::fake_builder()
+        .query("query{topProducts{name reviews {author{name}} reviews{author{name}}}}")
+        .build()
+        .unwrap();
+    let req: router::Request = request.try_into().expect("could not convert request");
+    let reports = Arc::new(Mutex::new(vec![]));
+    let report = get_trace_report_with_subgraph_mock_demand_control(reports, req).await;
+
+    // The demand-control cost data reaches Studio as `apollo_private.cost.*` span
+    // attributes.
+    // Assert their presence explicitly so this test fails loudly if the attributes
+    // ever stop flowing through the OTLP path, independent of the snapshot below.
+    let cost_keys: Vec<&str> = report
+        .resource_spans
+        .iter()
+        .flat_map(|rs| &rs.scope_spans)
+        .flat_map(|ss| &ss.spans)
+        .flat_map(|s| &s.attributes)
+        .map(|kv| kv.key.as_str())
+        .filter(|k| k.starts_with("apollo_private.cost."))
+        .collect();
+    assert!(
+        cost_keys.contains(&"apollo_private.cost.estimated"),
+        "estimated cost attribute missing from exported spans; saw {cost_keys:?}"
+    );
+    assert!(
+        cost_keys.contains(&"apollo_private.cost.actual"),
+        "actual cost attribute missing from exported spans; saw {cost_keys:?}"
+    );
+
+    assert_report!(report);
 }

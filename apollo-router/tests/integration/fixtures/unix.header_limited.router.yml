@@ -1,7 +1,8 @@
 supergraph:
-  listen: /tmp/apollo_router_test_{{RANDOM}}.sock
+  listen: ${env.TEST_CONFIG_UNIX_SOCKET_PATH}
 
 limits:
-  http1_max_request_headers: 100
-  http1_max_request_buf_size: "16000"
-  http2_max_headers_list_bytes: "20Mib"
+  router:
+    http1_max_request_headers: 100
+    http1_max_request_buf_size: "16000"
+    http2_max_headers_list_bytes: "20Mib"

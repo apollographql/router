@@ -9,9 +9,7 @@ pub(super) struct CoprocessorIncompatPlugin;
 impl CoprocessorIncompatPlugin {
     pub(super) fn from_config(config: &Configuration) -> Option<Self> {
         config
-            .apollo_plugins
-            .plugins
-            .get("coprocessor")
+            .document_section("coprocessor")
             .and_then(|val| val.get("subgraph"))
             .and_then(|val| val.get("all"))
             .and_then(|raw| serde_json::from_value(raw.clone()).ok())

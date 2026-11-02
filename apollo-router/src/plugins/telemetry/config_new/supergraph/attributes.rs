@@ -1,11 +1,7 @@
-use std::fmt::Debug;
-
 use opentelemetry::KeyValue;
 use opentelemetry_semantic_conventions::trace::GRAPHQL_DOCUMENT;
 use opentelemetry_semantic_conventions::trace::GRAPHQL_OPERATION_NAME;
 use opentelemetry_semantic_conventions::trace::GRAPHQL_OPERATION_TYPE;
-use schemars::JsonSchema;
-use serde::Deserialize;
 use tower::BoxError;
 
 use crate::Context;
@@ -19,9 +15,8 @@ use crate::plugins::telemetry::config_new::cost::SupergraphCostAttributes;
 use crate::plugins::telemetry::otlp::TelemetryDataKind;
 use crate::services::supergraph;
 
-#[derive(Deserialize, JsonSchema, Clone, Default, Debug)]
+#[apollo_configuration::configuration]
 #[cfg_attr(test, derive(PartialEq))]
-#[serde(deny_unknown_fields, default)]
 pub(crate) struct SupergraphAttributes {
     /// The GraphQL document being executed.
     /// Examples:

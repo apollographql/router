@@ -211,7 +211,7 @@ impl Service<SubgraphRequest> for MockSubgraph {
             SubgraphResponse::new_from_response(
                 http_response,
                 req.context,
-                "test".to_string(),
+                req.subgraph_name.clone(),
                 req.id,
             )
         } else {

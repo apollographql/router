@@ -6,7 +6,7 @@
 supergraph:
   defer_support: true
   early_cancel: false
-  experimental_log_on_broken_pipe: false
+  log_on_broken_pipe: false
   generate_query_fragments: true
   introspection: false
   listen: example_listen
@@ -36,7 +36,11 @@ supergraph:
         username: example_username
     experimental_paths_limit: null
     experimental_plans_limit: null
-    experimental_reuse_query_plans: false
+    incremental_planner:
+      enabled: false
+      beam_width: 16
+      fuel: 5000
+      timeout: null
     warmed_up_queries: null
   strict_variable_validation: enforce
 ```

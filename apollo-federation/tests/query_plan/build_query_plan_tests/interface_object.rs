@@ -959,6 +959,132 @@ fn test_interface_object_advance_with_non_collecting_and_type_preserving_transit
 }
 
 #[test]
+fn legacy_requires_through_interface_object_does_not_fetch_external_field() {
+    // Regression test: can_rebase_on case 3 (concrete-to-interface rebase)
+    // must not affect legacy planner sourcing decisions. With case 3 active
+    // in the legacy path, the planner would fetch @external sku from S1
+    // (which cannot resolve it) instead of from S2.
+    let planner = planner!(
+        S1: r#"
+          type Query { is1: [I] }
+          type I @interfaceObject @key(fields: "id") {
+            id: ID!
+            x: Int @shareable
+            sku: String @external
+            z: Int @requires(fields: "sku")
+          }
+        "#,
+        S2: r#"
+          type Query { i: I }
+          interface I @key(fields: "id") {
+            id: ID!
+            x: Int
+            sku: String
+          }
+          type A implements I @key(fields: "sku") @key(fields: "id") {
+            id: ID!
+            sku: String
+            x: Int @external
+            y: String @requires(fields: "x")
+          }
+          type B implements I @key(fields: "id") {
+            id: ID!
+            sku: String
+            x: Int @shareable
+          }
+        "#,
+    );
+    // The plan must fetch sku from S2 (where it is resolvable), not from
+    // S1 (where it is @external).
+    let plan = assert_plan!(
+        &planner,
+        r#"
+          {
+            is1 {
+              ... on A {
+                y
+              }
+            }
+          }
+        "#,
+        @r###"
+        QueryPlan {
+          Sequence {
+            Fetch(service: "S1") {
+              {
+                is1 {
+                  __typename
+                  id
+                }
+              }
+            },
+            Flatten(path: "is1.@") {
+              Fetch(service: "S2") {
+                {
+                  ... on I {
+                    __typename
+                    id
+                  }
+                } =>
+                {
+                  ... on I {
+                    __typename
+                    ... on A {
+                      __typename
+                      id
+                      sku
+                    }
+                  }
+                }
+              },
+            },
+            Flatten(path: "is1.@") {
+              Fetch(service: "S1") {
+                {
+                  ... on A {
+                    __typename
+                    id
+                  }
+                } =>
+                {
+                  ... on I {
+                    x
+                  }
+                }
+              },
+            },
+            Flatten(path: "is1.@") {
+              Fetch(service: "S2") {
+                {
+                  ... on A {
+                    __typename
+                    x
+                    sku
+                  }
+                } =>
+                {
+                  ... on A {
+                    y
+                  }
+                }
+              },
+            },
+          },
+        }
+      "###
+    );
+    // Verify S1 never fetches sku (it is @external there).
+    let s1_fetches = find_fetch_nodes_for_subgraph("S1", &plan);
+    for fetch in &s1_fetches {
+        let text = fetch.to_string();
+        assert!(
+            !text.contains("sku"),
+            "S1 must not fetch @external field sku, but got: {text}"
+        );
+    }
+}
+
+#[test]
 fn test_type_conditioned_fetching_with_interface_object_does_not_crash() {
     let planner = planner!(
         config = QueryPlannerConfig {

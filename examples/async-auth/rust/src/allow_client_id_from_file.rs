@@ -8,17 +8,17 @@ use apollo_router::plugin::PluginInit;
 use apollo_router::register_plugin;
 use apollo_router::services::supergraph;
 use http::StatusCode;
-use schemars::JsonSchema;
-use serde::Deserialize;
 use serde_json_bytes::Value;
 use tower::BoxError;
 use tower::ServiceBuilder;
 use tower::ServiceExt;
 
 // This structure is the one we'll deserialize the yml configuration into
-#[derive(Deserialize, JsonSchema)]
+#[apollo_configuration::configuration]
 struct AllowClientIdConfig {
+    #[config(required)]
     header: String,
+    #[config(required)]
     path: String,
 }
 
@@ -46,7 +46,10 @@ impl Plugin for AllowClientIdFromFile {
     // While this is not the most performant and efficient usecase,
     // We could easily change the place where the file list is stored,
     // switching the async file read with an async http request
-    fn supergraph_service(&self, service: supergraph::BoxService) -> supergraph::BoxService {
+    fn supergraph_service(
+        &self,
+        service: supergraph::BoxCloneService,
+    ) -> supergraph::BoxCloneService {
         let header_key = self.header.clone();
         // async_checkpoint is an async function.
         // this means it will run whenever the service `await`s it
@@ -152,7 +155,7 @@ impl Plugin for AllowClientIdFromFile {
             .checkpoint_async(handler)
             .buffered()
             .service(service)
-            .boxed()
+            .boxed_clone()
     }
 }
 
@@ -226,7 +229,7 @@ mod tests {
         let service_stack = AllowClientIdFromFile::new(init)
             .await
             .expect("couldn't create AllowClientIdFromFile")
-            .supergraph_service(mock_service.boxed());
+            .supergraph_service(mock_service.boxed_clone());
 
         // Let's create a request without a client id...
         let request_without_client_id = supergraph::Request::fake_builder()
@@ -276,7 +279,7 @@ mod tests {
         let service_stack = AllowClientIdFromFile::new(init)
             .await
             .expect("couldn't create AllowClientIdFromFile")
-            .supergraph_service(mock_service.boxed());
+            .supergraph_service(mock_service.boxed_clone());
 
         // Let's create a request with a not allowed client id...
         let request_with_unauthorized_client_id = supergraph::Request::fake_builder()
@@ -346,7 +349,7 @@ mod tests {
         let service_stack = AllowClientIdFromFile::new(init)
             .await
             .expect("couldn't create AllowClientIdFromFile")
-            .supergraph_service(mock_service.boxed());
+            .supergraph_service(mock_service.boxed_clone());
 
         // Let's create a request with an valid client id...
         let request_with_valid_client_id = supergraph::Request::fake_builder()

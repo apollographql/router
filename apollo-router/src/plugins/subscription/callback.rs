@@ -4,6 +4,7 @@ use std::task::Poll;
 use bytes::Buf;
 use futures::future::BoxFuture;
 use hmac::Hmac;
+use hmac::KeyInit;
 use hmac::Mac;
 use http::HeaderName;
 use http::HeaderValue;

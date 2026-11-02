@@ -5,8 +5,6 @@ use std::sync::Arc;
 use http::HeaderMap;
 use http::StatusCode;
 use http::header;
-use schemars::JsonSchema;
-use serde::Deserialize;
 use tower::BoxError;
 use tower::ServiceBuilder;
 use tower::ServiceExt;
@@ -19,9 +17,7 @@ use crate::services::router;
 /// CSRF protection configuration.
 ///
 /// See <https://owasp.org/www-community/attacks/csrf> for an explanation on CSRF attacks.
-#[derive(Deserialize, Debug, Clone, JsonSchema)]
-#[serde(deny_unknown_fields)]
-#[serde(default)]
+#[apollo_configuration::configuration]
 pub(crate) struct CSRFConfig {
     /// The CSRF plugin is enabled by default.
     ///
@@ -36,6 +32,7 @@ pub(crate) struct CSRFConfig {
     /// - did not set any `allow_headers` list (so it defaults to `mirror_request`)
     /// - added your required headers to the allow_headers list, as shown in the
     ///   `examples/cors-and-csrf/custom-headers.router.yaml` files.
+    #[config(default = apollo_custom_preflight_headers())]
     required_headers: Arc<Vec<String>>,
 }
 
@@ -44,15 +41,6 @@ fn apollo_custom_preflight_headers() -> Arc<Vec<String>> {
         "x-apollo-operation-name".to_string(),
         "apollo-require-preflight".to_string(),
     ])
-}
-
-impl Default for CSRFConfig {
-    fn default() -> Self {
-        Self {
-            unsafe_disabled: false,
-            required_headers: apollo_custom_preflight_headers(),
-        }
-    }
 }
 
 static NON_PREFLIGHTED_CONTENT_TYPES: &[&str] = &[
@@ -100,36 +88,39 @@ impl Plugin for Csrf {
         })
     }
 
-    fn router_service(&self, service: router::BoxService) -> router::BoxService {
+    fn router_service(&self, service: router::BoxCloneService) -> router::BoxCloneService {
         if !self.config.unsafe_disabled {
             let required_headers = self.config.required_headers.clone();
             ServiceBuilder::new()
-                .checkpoint(move |req: router::Request| {
-                    if is_preflighted(&req, required_headers.as_slice()) {
-                        tracing::trace!("request is preflighted");
-                        Ok(ControlFlow::Continue(req))
-                    } else {
-                        tracing::trace!("request is not preflighted");
-                        let error = crate::error::Error::builder().message(
-                            format!(
-                                "This operation has been blocked as a potential Cross-Site Request Forgery (CSRF). \
-                                Please either specify a 'content-type' header (with a mime-type that is not one of {}) \
-                                or provide one of the following headers: {}", 
-                                NON_PREFLIGHTED_CONTENT_TYPES.join(", "),
-                                required_headers.join(", ")
-                            ))
-                            .extension_code("CSRF_ERROR")
-                            .build();
-                        let res = router::Response::infallible_builder()
-                            .error(error)
-                            .status_code(StatusCode::BAD_REQUEST)
-                            .context(req.context)
-                            .build();
-                        Ok(ControlFlow::Break(res))
+                .checkpoint_async(move |req: router::Request| {
+                    let required_headers = required_headers.clone();
+                    async move {
+                        if is_preflighted(&req, required_headers.as_slice()) {
+                            tracing::trace!("request is preflighted");
+                            Ok(ControlFlow::Continue(req))
+                        } else {
+                            tracing::trace!("request is not preflighted");
+                            let error = crate::error::Error::builder().message(
+                                format!(
+                                    "This operation has been blocked as a potential Cross-Site Request Forgery (CSRF). \
+                                    Please either specify a 'content-type' header (with a mime-type that is not one of {}) \
+                                    or provide one of the following headers: {}",
+                                    NON_PREFLIGHTED_CONTENT_TYPES.join(", "),
+                                    required_headers.join(", ")
+                                ))
+                                .extension_code("CSRF_ERROR")
+                                .build();
+                            let res = router::Response::infallible_builder()
+                                .error(error)
+                                .status_code(StatusCode::BAD_REQUEST)
+                                .context(req.context)
+                                .build();
+                            Ok(ControlFlow::Break(res))
+                        }
                     }
                 })
                 .service(service)
-                .boxed()
+                .boxed_clone()
         } else {
             service
         }

@@ -2,21 +2,19 @@
 source: apollo-router/src/configuration/tests.rs
 expression: error.to_string()
 ---
-configuration had errors: 
-1. at line 6
+apollo::configuration::schema
 
-  supergraph:
-    # The socket address and port to listen on
-    # Defaults to 127.0.0.1:4000
-    listen: 127.0.0.1:4000
-┌   ${TEST_CONFIG_NUMERIC_ENV_UNIQUE:-true}: 5
-└-----> Additional properties are not allowed ('${TEST_CONFIG_NUMERIC_ENV_UNIQUE:-true}' was unexpected)
+  × schema validation error
+  ╰─▶ schema validation error
 
-1. at line 7
+Error: apollo::configuration::validation
 
-    # The socket address and port to listen on
-    # Defaults to 127.0.0.1:4000
-    listen: 127.0.0.1:4000
-    ${TEST_CONFIG_NUMERIC_ENV_UNIQUE:-true}: 5
-┌   another_one: foo
-└-----> Additional properties are not allowed ('another_one' was unexpected)
+  × Additional properties are not allowed
+  │ ('${TEST_CONFIG_NUMERIC_ENV_UNIQUE:-true}', 'another_one' were unexpected)
+   ╭─[6:3]
+ 5 │   listen: 127.0.0.1:4000
+ 6 │   ${TEST_CONFIG_NUMERIC_ENV_UNIQUE:-true}: 5
+   ·   ───────────────────┬───────────────────
+   ·                      ╰── Additional properties are not allowed ('${TEST_CONFIG_NUMERIC_ENV_UNIQUE:-true}', 'another_one' were unexpected)
+ 7 │   another_one: foo
+   ╰────

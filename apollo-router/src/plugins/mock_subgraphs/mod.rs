@@ -7,7 +7,7 @@ use apollo_compiler::ExecutableDocument;
 use apollo_compiler::Schema;
 use apollo_compiler::ast::OperationType;
 use apollo_compiler::resolvers::Execution;
-use apollo_compiler::resolvers::FieldError;
+use apollo_compiler::resolvers::ExecutionError;
 use apollo_compiler::resolvers::ObjectValue;
 use apollo_compiler::resolvers::ResolveInfo;
 use apollo_compiler::resolvers::ResolvedValue;
@@ -51,7 +51,17 @@ const SUBGRAPH_CALL_COUNT_KEY: &str = "apollo::experimental_mock_subgraphs::subg
 /// ```
 //
 // If changing this, also update `dev-docs/mock_subgraphs_plugin.md`
-type Config = HashMap<String, Arc<SubgraphConfig>>;
+#[derive(Clone, Default, serde::Deserialize, schemars::JsonSchema)]
+#[serde(transparent)]
+#[schemars(inline)]
+struct Config(SubgraphConfigs);
+
+type SubgraphConfigs = HashMap<String, Arc<SubgraphConfig>>;
+
+// `#[configuration]` does not support tuple structs yet, and a named struct would change the YAML:
+// subgraph names are the section's own keys. So this implements the traits by hand.
+impl apollo_configuration::Validate for Config {}
+impl apollo_configuration::Configuration for Config {}
 
 /// Configuration for one subgraph for the `mock_subgraphs` plugin
 #[derive(serde::Deserialize, schemars::JsonSchema)]
@@ -99,7 +109,7 @@ pub(crate) static PLUGIN_NAME: LazyLock<&'static str> =
 
 struct MockSubgraphsPlugin {
     per_subgraph_config: Config,
-    subgraph_schemas: Arc<HashMap<String, Arc<Valid<Schema>>>>,
+    subgraph_schemas: Arc<crate::query_planner::SubgraphSchemas>,
 }
 
 #[async_trait::async_trait]
@@ -115,8 +125,12 @@ impl PluginPrivate for MockSubgraphsPlugin {
         })
     }
 
-    fn subgraph_service(&self, name: &str, _: subgraph::BoxService) -> subgraph::BoxService {
-        let config = self.per_subgraph_config.get(name).cloned();
+    fn subgraph_service(
+        &self,
+        name: &str,
+        _: subgraph::BoxCloneService,
+    ) -> subgraph::BoxCloneService {
+        let config = self.per_subgraph_config.0.get(name).cloned();
         let subgraph_schema = self.subgraph_schemas[name].clone();
         tower::service_fn(move |request: subgraph::Request| {
             let config = config.clone();
@@ -159,7 +173,7 @@ impl PluginPrivate for MockSubgraphsPlugin {
                 ))
             }
         })
-        .boxed()
+        .boxed_clone()
     }
 }
 
@@ -293,7 +307,7 @@ impl ObjectValue for RootResolver<'_> {
     fn resolve_field<'a>(
         &'a self,
         info: &'a ResolveInfo<'a>,
-    ) -> Result<ResolvedValue<'a>, FieldError> {
+    ) -> Result<ResolvedValue<'a>, ExecutionError> {
         if info.field_name() != "_entities" {
             let in_entity = false;
             return resolve_normal_field(
@@ -305,17 +319,17 @@ impl ObjectValue for RootResolver<'_> {
         }
         let entities = info.arguments()["representations"]
             .as_array()
-            .ok_or(FieldError {
+            .ok_or(ExecutionError {
                 message: "expected array `representations`".into(),
             })?
             .iter()
             .map(move |representation| {
-                let representation = representation.as_object().ok_or(FieldError {
+                let representation = representation.as_object().ok_or(ExecutionError {
                     message: "expected object `representations[n]`".into(),
                 })?;
                 let entity = self
                     .find_entities(representation)
-                    .ok_or_else(|| FieldError {
+                    .ok_or_else(|| ExecutionError {
                         message: format!(
                             "no mocked entity found for representation {representation:?}"
                         ),
@@ -349,7 +363,7 @@ impl ObjectValue for MockResolver<'_> {
     fn resolve_field<'a>(
         &'a self,
         info: &'a ResolveInfo<'a>,
-    ) -> Result<ResolvedValue<'a>, FieldError> {
+    ) -> Result<ResolvedValue<'a>, ExecutionError> {
         resolve_normal_field(self.response_extensions, self.in_entity, self.mocks, info)
     }
 }
@@ -367,10 +381,10 @@ fn resolve_normal_field<'a>(
     in_entity: bool,
     mocks: &'a JsonMap,
     info: &'a ResolveInfo<'a>,
-) -> Result<ResolvedValue<'a>, FieldError> {
+) -> Result<ResolvedValue<'a>, ExecutionError> {
     // TODO: find some way to vary response based on arguments?
     let field_name = info.field_name();
-    let mock = mocks.get(field_name).ok_or_else(|| FieldError {
+    let mock = mocks.get(field_name).ok_or_else(|| ExecutionError {
         message: format!("field '{field_name}' not found in mocked data"),
     })?;
     resolve_value(response_extensions, in_entity, mock, info)
@@ -381,7 +395,7 @@ fn resolve_value<'a>(
     in_entity: bool,
     mock: &'a JsonValue,
     info: &'a ResolveInfo<'a>,
-) -> Result<ResolvedValue<'a>, FieldError> {
+) -> Result<ResolvedValue<'a>, ExecutionError> {
     match mock {
         JsonValue::Object(map) => {
             if !in_entity && let Some(keys) = map.get("__cacheTags") {

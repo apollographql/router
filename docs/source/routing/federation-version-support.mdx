@@ -26,3 +26,7 @@ Only Apollo Router Core and GraphOS Router v1.59 and earlier support Federation 
 - Router v2.0 and later
 
 [Learn how to upgrade from Federation version 1 to 2.](/graphos/schema-design/federated-schemas/reference/moving-to-federation-2)
+
+## Federation 2.0–2.2 support
+
+Router v3.0 and later don't support supergraphs composed with Federation 2.0, 2.1, or 2.2. These supergraphs use version 0.2 of the join spec (`https://specs.apollo.dev/join/v0.2`), and the router requires join spec v0.3 or later. Recompose your supergraph with Federation 2.3 or later.

@@ -5,13 +5,13 @@ coprocessor:
     request:
       headers: true
       body: true
-      context: true
+      context: all
       method: true
       path: true
       sdl: true
     response:
       sdl: true
-      context: true
+      context: all
       body: true
       headers: true
       status_code: true
@@ -19,12 +19,12 @@ coprocessor:
     request:
       headers: true
       body: true
-      context: true
+      context: all
       method: true
       sdl: true
     response:
       sdl: true
-      context: true
+      context: all
       body: true
       headers: true
       status_code: true
@@ -33,20 +33,20 @@ coprocessor:
       request:
         headers: true
         body: true
-        context: true
+        context: all
         method: true
       response:
         status_code: true
         headers: true
         body: true
-        context: true
+        context: all
         service_name: true
   connector:
     all:
       request:
         headers: true
         body: true
-        context: true
+        context: all
         method: true
         uri: true
         service_name: true

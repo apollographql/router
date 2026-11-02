@@ -1300,5 +1300,7 @@ fn format_fragment_spread(
     )
 }
 
+pub(crate) mod extended_references_layer;
+
 #[cfg(test)]
 mod tests;

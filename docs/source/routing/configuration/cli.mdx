@@ -188,8 +188,10 @@ For default behavior and possible values, see [Apollo Uplink](/federation/manage
 
 An OCI reference to a graph artifact that contains the supergraph schema for the router to run.<br/><br/>
 
+The reference can use a SHA256 digest or a [tag](/graphos/platform/schema-management/delivery/graph-artifacts/tags). Tag references require `--hot-reload`. Digest references can't be used with `--hot-reload`.<br/><br/>
+
 When you set this option, the router uses the schema from the specified graph artifact instead of Apollo Uplink.
-The router still fetches entitlements and persisted queries from Uplink.<br/><br/>
+The router also fetches its entitlement from the same registry when the graph artifact manifest carries an entitlement identifier; persisted queries still come from Uplink.<br/><br/>
 
 </td>
 </tr>
@@ -272,9 +274,8 @@ supergraph:
   introspection: true
 include_subgraph_errors:
   all: true
-plugins:
-  # Enable with the header, Apollo-Expose-Query-Plan: true
-  experimental.expose_query_plan: true
+# Enable with the header, Apollo-Expose-Query-Plan: true
+expose_query_plan: true
 ```
 
 <Caution>
@@ -327,10 +328,21 @@ The router can be used to validate an existing configuration file. This can be u
 ./router config validate <path-to-config-file.yaml>
 ```
 
-This command takes a config file and validates it against the router's full supported configuration format.
+This command checks the file the way the router does when it loads its configuration at startup, including the automatic upgrades the router applies to settings that have changed within its major version. It exits with a non-zero status and prints the errors if the configuration is invalid.
+
+If a valid file relies on automatic upgrades, the command lists them and still exits successfully:
+
+```
+Configuration at path router.yaml is valid.
+It relies on automatic upgrades that the router applies at startup:
+  - telemetry.apollo.otlp_tracing_sampler has been removed. Router 3 uses OTLP exclusively for traces. Remove this key from your config.
+Run `router config upgrade router.yaml` to update the file.
+```
+
+To stop the router applying these upgrades at every startup, run `router config upgrade` to write them to the file.
 
 <Note>
 
-This is a static validation that checks if it is syntactically correct using the JSON schema. The router does additional logical checks on startup against the config that this command does not capture.
+The router does additional checks at startup that need the supergraph schema or external services. This command does not capture them.
 
 </Note>

@@ -1,6 +1,5 @@
 use std::pin::Pin;
 
-use derivative::Derivative;
 use derive_more::Display;
 use futures::prelude::*;
 
@@ -10,8 +9,7 @@ use crate::router::Event::Shutdown;
 type ShutdownFuture = Pin<Box<dyn Future<Output = ()> + Send>>;
 
 /// Specifies when the Router’s HTTP server should gracefully shutdown
-#[derive(Display, Derivative)]
-#[derivative(Debug)]
+#[derive(Display, derive_more::Debug)]
 #[non_exhaustive]
 pub enum ShutdownSource {
     /// No graceful shutdown
@@ -20,7 +18,7 @@ pub enum ShutdownSource {
 
     /// A custom shutdown future.
     #[display("Custom")]
-    Custom(#[derivative(Debug = "ignore")] ShutdownFuture),
+    Custom(#[debug(skip)] ShutdownFuture),
 
     /// Watch for Ctl-C signal.
     #[display("CtrlC")]

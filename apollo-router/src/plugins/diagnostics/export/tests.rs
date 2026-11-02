@@ -2,7 +2,6 @@
 
 use std::fs;
 use std::net::SocketAddr;
-use std::path::Path;
 use std::path::PathBuf;
 use std::str::FromStr;
 
@@ -233,17 +232,14 @@ async fn test_create_main_manifest() {
 #[tokio::test]
 async fn test_archive_with_empty_output_directory() {
     // Use a non-existent directory
+    let temp_dir = tempdir().expect("Failed to create temp dir");
     let config = Config {
         enabled: true,
         listen: SocketAddr::from_str("127.0.0.1:8089").unwrap().into(),
 
-        output_directory: PathBuf::from("/tmp/nonexistent-diagnostics-dir"),
+        output_directory: temp_dir.path().join("nonexistent-diagnostics-dir"),
     };
-
-    // Ensure the directory doesn't exist
-    if Path::new(&config.output_directory).exists() {
-        fs::remove_dir_all(&config.output_directory).ok();
-    }
+    assert!(!config.output_directory.exists());
 
     let test_full_config = serde_json::json!({"test": "config"});
     let archive_data = collect_streaming_archive(&config, "supergraph_schema", &test_full_config)
@@ -476,14 +472,18 @@ async fn test_manual_archive_inspection() {
         .await
         .expect("Archive creation should succeed");
 
-    // Write to /tmp for manual inspection
-    let debug_archive = "/tmp/debug_router_diagnostics.tar.gz";
-    fs::write(debug_archive, &archive_data).expect("Failed to write debug archive");
-    tracing::debug!("Debug archive written to: {}", debug_archive);
+    // Write to disk for inspection with system tools
+    let inspection_dir = tempdir().expect("Failed to create temp dir");
+    let debug_archive = inspection_dir
+        .path()
+        .join("debug_router_diagnostics.tar.gz");
+    fs::write(&debug_archive, &archive_data).expect("Failed to write debug archive");
+    tracing::debug!("Debug archive written to: {}", debug_archive.display());
 
     // Verify with multiple tools
     let tar_list = std::process::Command::new("tar")
-        .args(["-tzf", debug_archive])
+        .arg("-tzf")
+        .arg(&debug_archive)
         .output()
         .expect("Failed to run tar");
 
@@ -498,12 +498,14 @@ async fn test_manual_archive_inspection() {
     assert!(tar_list.status.success(), "tar -t should work");
 
     // Try to extract to verify completeness
-    let extract_dir = "/tmp/debug_extract";
-    let _ = fs::remove_dir_all(extract_dir); // Clean up any previous run
-    fs::create_dir_all(extract_dir).expect("Failed to create extract dir");
+    let extract_dir = inspection_dir.path().join("debug_extract");
+    fs::create_dir_all(&extract_dir).expect("Failed to create extract dir");
 
     let tar_extract = std::process::Command::new("tar")
-        .args(["-xzf", debug_archive, "-C", extract_dir])
+        .arg("-xzf")
+        .arg(&debug_archive)
+        .arg("-C")
+        .arg(&extract_dir)
         .output()
         .expect("Failed to run tar extract");
 
@@ -514,13 +516,13 @@ async fn test_manual_archive_inspection() {
     assert!(tar_extract.status.success(), "tar -x should work");
 
     // Verify extracted files exist
-    assert!(Path::new(&format!("{}/manifest.txt", extract_dir)).exists());
-    assert!(Path::new(&format!("{}/router.yaml", extract_dir)).exists());
-    assert!(Path::new(&format!("{}/memory", extract_dir)).exists());
+    assert!(extract_dir.join("manifest.txt").exists());
+    assert!(extract_dir.join("router.yaml").exists());
+    assert!(extract_dir.join("memory").exists());
 
     // Log router.yaml content for verification (debug only)
-    let router_yaml_content = fs::read_to_string(format!("{extract_dir}/router.yaml"))
-        .expect("Failed to read router.yaml");
+    let router_yaml_content =
+        fs::read_to_string(extract_dir.join("router.yaml")).expect("Failed to read router.yaml");
     tracing::debug!("Router.yaml content:\n{}", router_yaml_content);
 }
 

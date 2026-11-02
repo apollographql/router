@@ -98,7 +98,7 @@ fn runtime_types_implies(
             let union = union.get(schema.schema())?;
             let interface_implementers = get_interface_implementers(interface, schema)?;
             Ok(union.members.iter().all(|m| {
-                let m_ty = ObjectTypeDefinitionPosition::new(m.name.clone());
+                let m_ty = ObjectTypeDefinitionPosition::new(Name::clone(m));
                 interface_implementers.contains(&m_ty)
             }))
         }
@@ -1055,7 +1055,7 @@ impl ResponseShapeContext {
         // Record this selection's definition.
         let value = response_shape
             .definitions_per_response_key
-            .entry(field.response_key().clone())
+            .entry(field.response_name().clone())
             .or_default();
         value.insert_possible_definition(
             self.type_condition.clone(),

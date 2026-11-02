@@ -58,6 +58,85 @@ rhai:
     router.graceful_shutdown().await;
 }
 
+// Asserts that a failing script's client response hides the Rhai wrapper, callback names and
+// script positions. `script_disclosures` are extra strings from this script's error that must not
+// reach the client; pass only strings the error actually contains, or the check asserts nothing.
+async fn assert_client_error_omits_rhai_internals(script: &str, script_disclosures: &[&str]) {
+    let config = format!(
+        r#"
+rhai:
+  scripts: tests/fixtures
+  main: {script}
+"#
+    );
+
+    let mut router = IntegrationTest::builder()
+        .config(config.as_str())
+        .supergraph(PathBuf::from("tests/fixtures/supergraph.graphql"))
+        .build()
+        .await;
+
+    router.start().await;
+    router.assert_started().await;
+
+    let (_trace_id, response) = router
+        .execute_query(
+            Query::builder()
+                .body(json!({"query": "{ topProducts { name } }", "variables": {}}))
+                .build(),
+        )
+        .await;
+
+    assert_eq!(
+        response.status(),
+        reqwest::StatusCode::INTERNAL_SERVER_ERROR
+    );
+    let body = response.text().await.expect("a response body");
+    assert_eq!(
+        serde_json::from_str::<serde_json::Value>(&body).expect("a GraphQL response")["errors"][0]
+            ["message"],
+        json!("Internal Server Error")
+    );
+    for disclosure in ["rhai", "Rhai", "Runtime error", "line ", "position "]
+        .iter()
+        .chain(script_disclosures)
+    {
+        assert!(
+            !body.contains(*disclosure),
+            "client response leaks {disclosure:?}: {body}"
+        );
+    }
+
+    // The reason the client no longer sees has to be in the router's logs instead, otherwise this
+    // is just a silent failure.
+    router.wait_for_log_message("rhai execution error").await;
+
+    router.graceful_shutdown().await;
+}
+
+// A router Rhai function that fails, naming the header the script expected.
+#[tokio::test(flavor = "multi_thread")]
+async fn client_errors_omit_rhai_internals() {
+    assert_client_error_omits_rhai_internals(
+        "rhai_redacted_error.rhai",
+        &["x-header-that-is-not-there"],
+    )
+    .await;
+}
+
+// The Rhai engine's own failure, which never reaches a router function. This needs a script of its
+// own: the router_service in rhai_redacted_error.rhai breaks the pipeline before an execution
+// callback could run.
+#[tokio::test(flavor = "multi_thread")]
+async fn client_errors_omit_rhai_engine_internals() {
+    // The engine's error names the missing function.
+    assert_client_error_omits_rhai_internals(
+        "rhai_engine_error.rhai",
+        &["this_function_does_not_exist"],
+    )
+    .await;
+}
+
 #[tokio::test(flavor = "multi_thread")]
 async fn test_rhai_hot_reload_works() {
     let (sender, receiver) = tokio::sync::oneshot::channel();

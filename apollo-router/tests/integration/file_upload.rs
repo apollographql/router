@@ -723,12 +723,12 @@ async fn it_fails_upload_without_file() -> Result<(), BoxError> {
             {
               "errors": [
                 {
-                  "message": "HTTP fetch failed from 'uploads': HTTP fetch failed from 'uploads': error from user's Body stream: Missing files in the request: '0'.",
+                  "message": "HTTP fetch failed: HTTP fetch failed: error from user's Body stream: Missing files in the request: '0'.",
                   "path": [],
                   "extensions": {
                     "code": "SUBREQUEST_HTTP_ERROR",
                     "service": "uploads",
-                    "reason": "HTTP fetch failed from 'uploads': error from user's Body stream: Missing files in the request: '0'."
+                    "reason": "HTTP fetch failed: error from user's Body stream: Missing files in the request: '0'."
                   }
                 }
               ]
@@ -757,6 +757,7 @@ async fn it_fails_with_file_count_limits() -> Result<(), BoxError> {
         .handler(make_handler!(helper::always_fail))
         .request(request)
         .subgraph_mapping("uploads", "/")
+        .buffered(true)
         .build()
         .run_test(|response| {
             insta::assert_json_snapshot!(response, @r###"
@@ -801,12 +802,12 @@ async fn it_fails_with_file_size_limit() -> Result<(), BoxError> {
             {
               "errors": [
                 {
-                  "message": "HTTP fetch failed from 'uploads': HTTP fetch failed from 'uploads': error from user's Body stream: Exceeded the limit of 512.0 KB on 'fat.payload.bin' file.",
+                  "message": "HTTP fetch failed: HTTP fetch failed: error from user's Body stream: Exceeded the limit of 512.0 KB on 'fat.payload.bin' file.",
                   "path": [],
                   "extensions": {
                     "code": "SUBREQUEST_HTTP_ERROR",
                     "service": "uploads",
-                    "reason": "HTTP fetch failed from 'uploads': error from user's Body stream: Exceeded the limit of 512.0 KB on 'fat.payload.bin' file."
+                    "reason": "HTTP fetch failed: error from user's Body stream: Exceeded the limit of 512.0 KB on 'fat.payload.bin' file."
                   }
                 }
               ]
@@ -845,6 +846,7 @@ async fn it_fails_invalid_multipart_order() -> Result<(), BoxError> {
         .handler(make_handler!(helper::always_fail))
         .request(request)
         .subgraph_mapping("uploads", "/")
+        .buffered(true)
         .build()
         .run_test(|response| {
             insta::assert_json_snapshot!(response, @r###"
@@ -922,12 +924,12 @@ async fn it_fails_invalid_file_order() -> Result<(), BoxError> {
               },
               "errors": [
                 {
-                  "message": "HTTP fetch failed from 'uploads_clone': HTTP fetch failed from 'uploads_clone': error from user's Body stream: Missing files in the request: '1'.",
+                  "message": "HTTP fetch failed: HTTP fetch failed: error from user's Body stream: Missing files in the request: '1'.",
                   "path": [],
                   "extensions": {
                     "code": "SUBREQUEST_HTTP_ERROR",
                     "service": "uploads_clone",
-                    "reason": "HTTP fetch failed from 'uploads_clone': error from user's Body stream: Missing files in the request: '1'."
+                    "reason": "HTTP fetch failed: error from user's Body stream: Missing files in the request: '1'."
                   }
                 }
               ]
@@ -961,6 +963,7 @@ async fn it_fails_with_no_boundary_in_multipart() -> Result<(), BoxError> {
         .handler(make_handler!(helper::always_fail))
         .request(request)
         .subgraph_mapping("uploads", "/")
+        .buffered(true)
         .transformer(strip_boundary)
         .build()
         .run_test(|response| {
@@ -1028,6 +1031,7 @@ async fn it_fails_incompatible_query_order() -> Result<(), BoxError> {
         .request(request)
         .subgraph_mapping("uploads", "/s1")
         .subgraph_mapping("uploads_clone", "/s2")
+        .buffered(true)
         .build()
         .run_test(|response| {
             insta::assert_json_snapshot!(response, @r###"
@@ -1763,6 +1767,7 @@ mod helper {
         request: Form,
         subgraph_mappings: HashMap<String, String>,
         transformer: Option<fn(reqwest::Request) -> reqwest::Request>,
+        buffered: bool,
     }
 
     #[buildstructor]
@@ -1772,6 +1777,9 @@ mod helper {
         /// Prefer the builder so that tests are more descriptive.
         ///
         /// See [make_handler] and [create_request].
+        ///
+        /// Set `buffered` for requests the router rejects before reading the files. See
+        /// [IntegrationTest::execute_multipart_request].
         #[builder]
         pub fn new(
             config: &'static str,
@@ -1779,6 +1787,7 @@ mod helper {
             subgraph_mappings: HashMap<String, String>,
             request: Form,
             transformer: Option<fn(reqwest::Request) -> reqwest::Request>,
+            buffered: Option<bool>,
         ) -> Self {
             Self {
                 config,
@@ -1786,6 +1795,7 @@ mod helper {
                 request,
                 subgraph_mappings,
                 transformer,
+                buffered: buffered.unwrap_or_default(),
             }
         }
 
@@ -1843,7 +1853,7 @@ mod helper {
 
             // Make the request and pass it into the validator callback
             let (_span, response) = router
-                .execute_multipart_request(self.request, self.transformer)
+                .execute_multipart_request(self.request, self.transformer, self.buffered)
                 .await;
             let response = serde_json::from_slice(&response.bytes().await?)?;
             validation_fn(response);

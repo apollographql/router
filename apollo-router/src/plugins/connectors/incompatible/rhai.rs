@@ -7,11 +7,7 @@ pub(super) struct RhaiIncompatPlugin;
 
 impl RhaiIncompatPlugin {
     pub(super) fn from_config(config: &Configuration) -> Option<Self> {
-        config
-            .apollo_plugins
-            .plugins
-            .get("rhai")
-            .map(|_| RhaiIncompatPlugin)
+        config.document_section("rhai").map(|_| RhaiIncompatPlugin)
     }
 }
 

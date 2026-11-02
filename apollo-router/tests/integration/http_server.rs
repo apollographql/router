@@ -398,15 +398,7 @@ enum HttpProtocol {
 async fn test_http1_connection_persistence(
     #[case] http_protocol: HttpProtocol,
 ) -> Result<(), BoxError> {
-    let mut router = IntegrationTest::builder()
-        .config(
-            r#"
-            supergraph:
-              listen: localhost:80
-            "#,
-        )
-        .build()
-        .await;
+    let mut router = IntegrationTest::builder().config("{}").build().await;
 
     router.start().await;
     router.assert_started().await;
@@ -510,9 +502,12 @@ mod unix_tests {
         // generate a unique socket path to avoid conflicts
         let uuid = Uuid::new_v4().simple().to_string();
         let socket_path = format!("/tmp/apollo_router_test_{}.sock", uuid);
-        let config = config.replace("{{RANDOM}}", &uuid);
 
-        let mut router = IntegrationTest::builder().config(&config).build().await;
+        let mut router = IntegrationTest::builder()
+            .config(config)
+            .env_entry("TEST_CONFIG_UNIX_SOCKET_PATH", &socket_path)
+            .build()
+            .await;
 
         router.start().await;
         router.assert_started().await;

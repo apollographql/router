@@ -13,7 +13,6 @@ use futures::future;
 use futures::stream::SplitStream;
 use http::HeaderValue;
 use pin_project_lite::pin_project;
-use schemars::JsonSchema;
 use serde::Deserialize;
 use serde::Serialize;
 use serde_json_bytes::Value;
@@ -90,13 +89,13 @@ pub(crate) enum SubscriptionEvent {
 /// differently-typed concrete streams).
 pub(crate) type BoxSubscriptionStream = Pin<Box<dyn Stream<Item = SubscriptionEvent> + Send>>;
 
-#[derive(Debug, Default, Clone, PartialEq, Eq, Hash, Deserialize, Serialize, JsonSchema, Copy)]
-#[serde(rename_all = "snake_case")]
+#[apollo_configuration::configuration]
+#[derive(PartialEq, Eq, Hash, Serialize, Copy)]
 pub(crate) enum WebSocketProtocol {
     /// The modern graphql-ws protocol. The subprotocol name is "graphql-transport-ws".
     ///
     /// Spec URL: https://github.com/enisdenjo/graphql-ws/blob/0c0eb499c3a0278c6d9cc799064f22c5d24d2f60/PROTOCOL.md
-    #[default]
+    #[config(default)]
     GraphqlWs,
     #[serde(rename = "graphql_transport_ws")]
     /// The legacy subscriptions-transport-ws protocol. Confusingly, the subprotocol name is

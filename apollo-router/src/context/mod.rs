@@ -11,16 +11,14 @@ use apollo_compiler::validation::Valid;
 use dashmap::DashMap;
 use dashmap::mapref::multiple::RefMulti;
 use dashmap::mapref::multiple::RefMutMulti;
-use derivative::Derivative;
 use extensions::sync::ExtensionsMutex;
 use serde::Deserialize;
 use serde::Serialize;
 use tower::BoxError;
 
 use crate::json_ext::Value;
-use crate::services::layers::query_analysis::ParsedDocument;
+use crate::services::query_parsing::ParsedDocument;
 
-pub(crate) mod deprecated;
 pub(crate) mod extensions;
 
 /// Context key for the operation name.
@@ -50,9 +48,6 @@ pub(crate) const COUNTED_ERRORS: &str = "apollo::telemetry::counted_errors";
 /// supported for user access.
 pub(crate) const ROUTER_RESPONSE_ERRORS: &str = "apollo::router::response_errors";
 
-pub(crate) use deprecated::context_key_from_deprecated;
-pub(crate) use deprecated::context_key_to_deprecated;
-
 /// Holds [`Context`] entries.
 pub(crate) type Entries = Arc<DashMap<String, Value>>;
 
@@ -67,9 +62,8 @@ pub(crate) type Entries = Arc<DashMap<String, Value>>;
 /// [`crate::services::SubgraphResponse`] processing. At such times,
 /// plugins should restrict themselves to the [`Context::get`] and [`Context::upsert`]
 /// functions to minimise the possibility of mis-sequenced updates.
-#[derive(Clone, Deserialize, Serialize, Derivative)]
+#[derive(Clone, Deserialize, Serialize, derive_more::Debug)]
 #[serde(default)]
-#[derivative(Debug)]
 pub struct Context {
     // Allows adding custom entries to the context.
     entries: Entries,

@@ -16,7 +16,6 @@ use crate::plugins::telemetry::CLIENT_NAME;
 use crate::plugins::telemetry::CLIENT_VERSION;
 use crate::plugins::telemetry::GRAPHQL_OPERATION_NAME_ATTRIBUTE;
 use crate::plugins::telemetry::GRAPHQL_OPERATION_TYPE_ATTRIBUTE;
-use crate::plugins::telemetry::apollo::Config;
 use crate::plugins::telemetry::config_new::attributes::StandardAttribute;
 use crate::plugins::telemetry::config_new::connector::ConnectorRequest;
 use crate::plugins::telemetry::config_new::connector::ConnectorResponse;
@@ -64,7 +63,7 @@ pub(crate) struct ApolloConnectorInstruments {
 impl ApolloSubgraphInstruments {
     pub(crate) fn new(
         static_instruments: Arc<HashMap<String, StaticInstrument>>,
-        apollo_config: Config,
+        subgraph_metrics: bool,
     ) -> Self {
         let selectors = Extendable {
             attributes: SubgraphAttributes::builder()
@@ -116,7 +115,7 @@ impl ApolloSubgraphInstruments {
         let attribute_count = selectors.custom.len() + 1; // 1 for subgraph_name on attributes
 
         let apollo_router_operations_fetch_duration =
-            apollo_config.subgraph_metrics.then(|| {
+            subgraph_metrics.then(|| {
                 CustomHistogram::builder()
                     .increment(Increment::Duration(Instant::now(), "s".to_string()))
                     .attributes(Vec::with_capacity(attribute_count))
@@ -178,7 +177,7 @@ impl Instrumented for ApolloSubgraphInstruments {
 impl ApolloConnectorInstruments {
     pub(crate) fn new(
         static_instruments: Arc<HashMap<String, StaticInstrument>>,
-        apollo_config: Config,
+        subgraph_metrics: bool,
     ) -> Self {
         let selectors = Extendable {
             attributes: ConnectorAttributes::builder()
@@ -236,7 +235,7 @@ impl ApolloConnectorInstruments {
         let attribute_count = selectors.custom.len() + 1; // 1 for subgraph_name on attributes
 
         let apollo_router_operations_fetch_duration =
-            apollo_config.subgraph_metrics.then(|| {
+            subgraph_metrics.then(|| {
                 CustomHistogram::builder()
                     .increment(Increment::Duration(Instant::now(), "s".to_string()))
                     .attributes(Vec::with_capacity(attribute_count))

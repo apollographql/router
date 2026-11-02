@@ -1,6 +1,5 @@
 use serde_json_bytes::Value as JSON;
 use shape::Shape;
-use shape::ShapeCase;
 
 use crate::connectors::json_selection::ApplyToError;
 use crate::connectors::json_selection::ApplyToInternal;
@@ -10,6 +9,7 @@ use crate::connectors::json_selection::VarsWithPathsMap;
 use crate::connectors::json_selection::immutable::InputPath;
 use crate::connectors::json_selection::location::Ranged;
 use crate::connectors::json_selection::location::WithRange;
+use crate::connectors::json_selection::methods::common::could_satisfy;
 use crate::connectors::spec::ConnectSpec;
 use crate::impl_arrow_method;
 
@@ -148,23 +148,19 @@ fn filter_shape(
     // so the condition must be shaped against the array's ELEMENT shape, not the
     // whole array. Passing `input_shape` directly only happened to work when the
     // input was `Unknown` (the lenient check below accepts it); for a concrete
-    // list — e.g. the output of a prior `->filter`, which is `List<…>` — a
+    // list — e.g. the output of a prior `->filter`, which is `[...]` — a
     // condition like `@.field->eq(…)` mapped `.field` across the list and then
     // applied the comparison to a list, yielding a non-boolean shape and a
-    // spurious `Error<"->filter condition must return a boolean value">`. That
+    // spurious `(err "->filter condition must return a boolean value")`. That
     // error then propagated into expansion as an empty output object type.
     // `any_item` matches the per-element runtime semantics and is robust to
     // chaining.
     let condition_shape =
         first_arg.compute_output_shape(context, input_shape.any_item([]), dollar_shape);
 
-    // Validate that the condition evaluates to a boolean or
-    // something that could become a boolean
-    if !(matches!(condition_shape.case(), ShapeCase::Bool(_)) ||
-        // This allows Unknown and Name shapes, which can produce boolean
-        // values at runtime, without any runtime errors.
-        condition_shape.accepts(&Shape::unknown([])))
-    {
+    // Validate that the condition could evaluate to a boolean at runtime,
+    // which includes Unknown and Name shapes.
+    if !could_satisfy(&Shape::bool([]), &condition_shape) {
         return Shape::error(
             format!(
                 "->{} condition must return a boolean value",
@@ -428,22 +424,17 @@ mod shape_tests {
                     None
                 )],
                 Shape::string([])
-            ),
-            Shape::error(
-                "->filter condition must return a boolean value".to_string(),
-                [get_location()]
             )
+            .pretty_print(),
+            r#"Unknown (err "->filter condition must return a boolean value")"#,
         );
     }
 
     #[test]
     fn filter_shape_should_error_on_no_args() {
         assert_eq!(
-            get_shape(vec![], Shape::string([])),
-            Shape::error(
-                "Method ->filter requires one argument".to_string(),
-                [get_location()]
-            )
+            get_shape(vec![], Shape::string([])).pretty_print(),
+            r#"Unknown (err "Method ->filter requires one argument")"#,
         );
     }
 
@@ -456,11 +447,9 @@ mod shape_tests {
                     WithRange::new(LitExpr::Bool(false), None)
                 ],
                 Shape::string([])
-            ),
-            Shape::error(
-                "Method ->filter requires only one argument, but 2 were provided".to_string(),
-                []
             )
+            .pretty_print(),
+            r#"Unknown (err "Method ->filter requires only one argument, but 2 were provided")"#,
         );
     }
 
@@ -474,11 +463,9 @@ mod shape_tests {
                 None,
                 Shape::string([]),
                 Shape::none(),
-            ),
-            Shape::error(
-                "Method ->filter requires one argument".to_string(),
-                [get_location()]
             )
+            .pretty_print(),
+            r#"Unknown (err "Method ->filter requires one argument")"#,
         );
     }
 
@@ -507,10 +494,10 @@ mod shape_tests {
 
     // Regression: chained `->filter(...)` must shape each condition against the
     // array's element, not the whole array. The first filter turns an `Unknown`
-    // input into a concrete `List<Unknown>`; the second filter then receives that
+    // input into a concrete `[...Unknown]`; the second filter then receives that
     // list. Before the fix, the second filter's condition (`@.field->gt(0)`)
     // mapped `.field` across the list and applied `->gt` to a list, producing
-    // `Error<"->filter condition must return a boolean value">`. The expander
+    // `(err "->filter condition must return a boolean value")`. The expander
     // turned that error shape into an empty output object type, which slipped
     // past release builds (validation skipped) and surfaced downstream as a
     // composition `SATISFIABILITY_ERROR` (e.g. Relay-pagination connectors with
@@ -524,7 +511,7 @@ mod shape_tests {
             Shape::unknown([]),
         );
         assert!(
-            !matches!(after_first.case(), ShapeCase::Error(_)),
+            !after_first.has_own_errors(),
             "first ->filter unexpectedly errored: {}",
             after_first.pretty_print()
         );
@@ -534,7 +521,7 @@ mod shape_tests {
         // error.
         let after_second = get_shape(vec![parse_condition("@.locNumber->gt(0)")], after_first);
         assert!(
-            !matches!(after_second.case(), ShapeCase::Error(_)),
+            !after_second.has_own_errors(),
             "chained ->filter produced an error shape (regression): {}",
             after_second.pretty_print()
         );

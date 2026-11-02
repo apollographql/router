@@ -1,0 +1,33 @@
+### Fetch `@requires` fields only when the requiring field is selected
+
+When a field with `@requires` was under `@skip`/`@include` and shared its entity fetch with an unconditional sibling field, the planner correctly fetched the required fields only under that condition, but listed them unconditionally in the `requires` inputs of the entity fetch. When the condition did not hold at runtime, the required fields were absent, the entity representation was invalid, and the entity fetch was skipped for that entity, so the unconditional sibling field silently came back as `null`. When the required fields were nullable, the representation was instead sent with them set to `null`, which some subgraphs reject.
+
+For example, given a subgraph like this, where `weight` is resolved by another subgraph:
+
+```graphql
+type Product @key(fields: "id") {
+  id: ID!
+  inStock: Boolean
+  weight: Int! @external
+  shippingEstimate: Int @requires(fields: "weight")
+}
+```
+
+this query returned `"inStock": null` whenever `$withShipping` was `false`, even though `inStock` isn't conditional:
+
+```graphql
+query Product($withShipping: Boolean!) {
+  product {
+    inStock
+    shippingEstimate @include(if: $withShipping)
+  }
+}
+```
+
+The inline fragments of a fetch node's `requires` can now carry `@skip`/`@include` conditions (serialized as a `conditions` list on the fragment), and the router evaluates them when building entity representations: a fragment excluded by its conditions contributes nothing to the representation. Fetches shared between conditional and unconditional fields stay merged, so this does not add subgraph requests.
+
+The same mechanism also preserves conditions on the entity fetch following a `@requires` when two sibling selections carry opposite conditions on the same variable (for example `... @include(if: $v)` and `... @skip(if: $v)`): those conditions were previously dropped from that fetch, so the subgraph was asked for fields the client had excluded, with the union of both `@requires` field sets as inputs. And when every selection leading to a `@requires` field is conditional, the entity fetch following it is now wrapped in the corresponding `Skip`/`Include` node instead of being executed unconditionally.
+
+The incremental query planner was not affected by this bug: it already fetched required fields unconditionally, independently of the conditions on the fields requiring them.
+
+By [@sachindshinde](https://github.com/sachindshinde) in https://github.com/apollographql/router/pull/10566
