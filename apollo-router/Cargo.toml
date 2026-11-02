@@ -59,6 +59,7 @@ mock_subgraphs_testing = []
 [dependencies]
 addr2line = "0.27.0"
 anyhow = "1.0.86"
+apollo-cache-memory.workspace = true
 apollo-compiler.workspace = true
 apollo-configuration.workspace = true
 apollo-federation = { path = "../apollo-federation", version = "=3.0.0-preview.0" }
