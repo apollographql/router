@@ -623,6 +623,29 @@ jobs:
     executor: << parameters.platform >>
     steps:
       - checkout
+<<<<<<< HEAD
+=======
+      - run:
+          name: Skip if no source files changed
+          command: |
+            # Always run on the default branch (post-merge); nightly triggers also target it
+            git remote set-head origin -a
+            DEFAULT_BRANCH=$(git rev-parse --abbrev-ref origin/HEAD | sed 's|^origin/||')
+            if [ "$CIRCLE_BRANCH" = "$DEFAULT_BRANCH" ]; then
+              exit 0
+            fi
+            git fetch origin "$DEFAULT_BRANCH"
+            BASE=$(git merge-base HEAD "origin/$DEFAULT_BRANCH" 2>/dev/null || git rev-parse HEAD~1)
+            CHANGED=$(git diff --name-only "$BASE" HEAD)
+            echo "Changed files:"
+            echo "$CHANGED"
+            if echo "$CHANGED" | grep -qE '^(apollo-router/(src|tests|benches|build)/|apollo-federation/|Cargo\.(toml|lock)|[^/]+/Cargo\.toml|rust-toolchain\.toml|xtask/)'; then
+              echo "Source files changed -- running tests"
+              exit 0
+            fi
+            echo "No source files changed -- skipping tests"
+            circleci-agent step halt
+>>>>>>> 245f3c7 (ci: don't shallow-fetch the default branch in the test skip check (#10735))
       - setup_environment:
           platform: << parameters.platform >>
       - xtask_test
