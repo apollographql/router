@@ -19,6 +19,10 @@
 //! `@interfaceObject` standing for every object of the supergraph interface of its name
 //! ([`Subgraph::field_runtime_types`]).
 
+use std::cell::RefCell;
+use std::collections::HashMap;
+use std::rc::Rc;
+
 use apollo_compiler::Name;
 use apollo_compiler::Node;
 use apollo_compiler::ast;
@@ -70,6 +74,11 @@ pub(super) struct Subgraph<'a> {
     federation: &'a FederationSpecDefinition,
     /// The reading of `@external` the query graph is built from.
     metadata: &'a SubgraphMetadata,
+    /// Each type's objects in the subgraph, sorted, read once per type asked: an object is
+    /// checked against a fragment's type once per case of each fragment a fetch selects and once
+    /// per entity type of each `_entities` fragment, so a fragment on an abstract type of many
+    /// objects would otherwise collect and sort them at every check.
+    possible_types: RefCell<HashMap<Name, Rc<[Name]>>>,
 }
 
 impl<'a> Subgraph<'a> {
@@ -84,6 +93,7 @@ impl<'a> Subgraph<'a> {
             schema,
             federation,
             metadata,
+            possible_types: Default::default(),
         })
     }
 
@@ -109,7 +119,24 @@ impl<'a> Subgraph<'a> {
     /// implementation of it? The model's `typeIncludesObjectBool` in the subgraph's schema, which
     /// is where a fetch's own fragments are read.
     pub(super) fn type_includes_object(&self, type_name: &Name, object_type: &Name) -> bool {
-        type_name == object_type || possible_types(self.schema, type_name).contains(object_type)
+        type_name == object_type
+            || self
+                .possible_types(type_name)
+                .binary_search(object_type)
+                .is_ok()
+    }
+
+    /// The object types a type name grounds to in this subgraph, sorted: the subgraph schema's
+    /// [`possible_types`], computed once per type.
+    fn possible_types(&self, type_name: &Name) -> Rc<[Name]> {
+        if let Some(types) = self.possible_types.borrow().get(type_name) {
+            return types.clone();
+        }
+        let types: Rc<[Name]> = possible_types(self.schema, type_name).into();
+        self.possible_types
+            .borrow_mut()
+            .insert(type_name.clone(), types.clone());
+        types
     }
 
     /// The supergraph objects a subgraph object stands for, through the declaration
