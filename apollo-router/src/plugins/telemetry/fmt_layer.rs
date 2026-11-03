@@ -33,10 +33,15 @@ use crate::plugins::telemetry::reload::otel::IsSampled;
 use crate::plugins::telemetry::reload::otel::LayeredTracer;
 use crate::plugins::telemetry::resource::ConfigResource;
 
+/// A layer that writes logs, and whether the fields of spans are needed to write them.
+pub(crate) struct LogFormatLayer<S> {
+    pub(crate) layer: Box<dyn Layer<S> + Send + Sync>,
+    /// Whether the layer's format shows span fields; see [`Format::shows_span_fields`].
+    pub(crate) shows_span_fields: bool,
+}
+
 /// Returns the layer that writes logs to stdout, or `None` when stdout logging is disabled.
-pub(crate) fn create_fmt_layer(
-    config: &config::Conf,
-) -> Option<Box<dyn Layer<LayeredTracer> + Send + Sync>> {
+pub(crate) fn create_fmt_layer(config: &config::Conf) -> Option<LogFormatLayer<LayeredTracer>> {
     match &config.exporters.logging.stdout {
         StdOut {
             enabled,
@@ -48,29 +53,23 @@ pub(crate) fn create_fmt_layer(
                 Some(tty) if std::io::stdout().is_terminal() => tty,
                 _ => format,
             };
-            match format {
+            let resource = config.exporters.logging.common.to_resource();
+            let layer = match format {
                 Format::Json(format_config) => {
-                    let format = Json::new(
-                        config.exporters.logging.common.to_resource(),
-                        format_config.clone(),
-                    );
-                    Some(
-                        FmtLayer::new(RateLimitFormatter::new(format, rate_limit), std::io::stdout)
-                            .boxed(),
-                    )
+                    let format = Json::new(resource, format_config.clone());
+                    FmtLayer::new(RateLimitFormatter::new(format, rate_limit), std::io::stdout)
+                        .boxed()
                 }
-
                 Format::Text(format_config) => {
-                    let format = Text::new(
-                        config.exporters.logging.common.to_resource(),
-                        format_config.clone(),
-                    );
-                    Some(
-                        FmtLayer::new(RateLimitFormatter::new(format, rate_limit), std::io::stdout)
-                            .boxed(),
-                    )
+                    let format = Text::new(resource, format_config.clone());
+                    FmtLayer::new(RateLimitFormatter::new(format, rate_limit), std::io::stdout)
+                        .boxed()
                 }
-            }
+            };
+            Some(LogFormatLayer {
+                layer,
+                shows_span_fields: format.shows_span_fields(),
+            })
         }
         _ => None,
     }
@@ -146,8 +145,8 @@ where
 /// callbacks don't take the reload lock. See
 /// [`EventsOnly`](crate::plugins::telemetry::reload::log_layers::EventsOnly).
 ///
-/// Recording can be switched off through [`SpanFieldsLayer::enabled`] while nothing writes logs.
-/// It starts on.
+/// Recording can be switched off through [`SpanFieldsLayer::enabled`] while no log format shows
+/// span fields. It starts on.
 pub(crate) struct SpanFieldsLayer {
     excluded_attributes: HashSet<&'static str>,
     enabled: Arc<AtomicBool>,
@@ -363,6 +362,7 @@ mod tests {
     use opentelemetry::InstrumentationScope;
     use opentelemetry::trace::TracerProvider as _;
     use opentelemetry_sdk::Resource;
+    use opentelemetry_sdk::trace::Sampler;
     use opentelemetry_sdk::trace::SdkTracerProvider;
     use parking_lot::Mutex;
     use parking_lot::MutexGuard;
@@ -645,6 +645,42 @@ connector:
                 assert!(logs.contains(field), "with_tracer: {with_tracer}, {logs}");
             }
         }
+    }
+
+    /// The router sets `dd.trace_id` as a dynamic attribute, so JSON logs keep it when the format
+    /// hides span fields and span fields aren't recorded.
+    #[test]
+    fn json_logs_keep_dd_trace_id_while_span_fields_are_not_recorded() {
+        let buff = LogBuffer::default();
+        let format_config = JsonFormat {
+            display_timestamp: false,
+            display_span_list: false,
+            ..Default::default()
+        };
+        assert!(!Format::Json(format_config.clone()).shows_span_fields());
+        let format = Json::new(Resource::builder_empty().build(), format_config);
+        let span_fields = SpanFieldsLayer::default();
+        span_fields.enabled().store(false, Ordering::Relaxed);
+        // Unsampled, so dynamic attributes go to `LogAttributes` rather than the OTel span.
+        let tracer = SdkTracerProvider::builder()
+            .with_sampler(Sampler::AlwaysOff)
+            .build()
+            .tracer_with_scope(InstrumentationScope::builder("test").build());
+        let subscriber = tracing_subscriber::Registry::default()
+            .with(DynAttributeLayer::new())
+            .with(otel::layer().with_tracer(tracer))
+            .with(EventsOnly::new(FmtLayer::new(format, buff.clone())))
+            .with(span_fields);
+
+        ::tracing::subscriber::with_default(subscriber, || {
+            let root = info_span!("router", field = "value");
+            root.set_span_dyn_attribute("dd.trace_id".into(), "1234".into());
+            let _root = root.enter();
+            info!("Hello");
+        });
+
+        let logs = buff.to_string();
+        assert!(logs.contains(r#""dd.trace_id":"1234""#), "{logs}");
     }
 
     #[test]
