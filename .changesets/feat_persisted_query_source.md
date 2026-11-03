@@ -1,6 +1,6 @@
 ### Expose persisted-query resolution source on the request context
 
-The router writes `apollo::supergraph::persisted_query_source` to the request context alongside `apollo::supergraph::persisted_query_id`. The value is `"id"` when the client sends `extensions.persistedQuery.sha256Hash` and the plugin looks up the operation in the manifest, and `"freeform"` when the client sends the full query body and the plugin matches it against the manifest after normalization. The key is absent when no match occurs.
+The router writes `apollo::supergraph::persisted_query_source` to the request context alongside `apollo::supergraph::persisted_query_id`. The value is `id` when the client sends `extensions.persistedQuery.sha256Hash` and the plugin looks up the operation in the manifest, and `freeform` when the client sends the full query body and the plugin matches it against the manifest after normalization. The key is absent when no match occurs.
 
 Both paths previously write the same `persisted_query_id`, making them indistinguishable from outside the router. The only marker that separates them (`UsedQueryIdFromManifest`) is a Rust-only extension type, unreachable from YAML selectors, Rhai, or coprocessor responses. Downstream telemetry can now tag the router span with the source via one YAML line:
 
