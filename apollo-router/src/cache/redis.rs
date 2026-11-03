@@ -1101,6 +1101,41 @@ fn setup_event_listeners(caller: &'static str, client: &Client) {
     });
 }
 
+#[cfg(test)]
+impl RedisCacheStorage {
+    /// Inserts multiple records. Returns Ok(()) on success, emitting traces for successful
+    /// inserts, and otherwise an error and error traces and error-level log
+    pub(crate) async fn insert_multiple<K: KeyType, V: ValueType>(
+        &self,
+        data: &[(RedisKey<K>, RedisValue<V>)],
+        ttl: Option<Duration>,
+    ) -> Result<(), RedisError> {
+        tracing::trace!("inserting into redis: {:#?}", data);
+        let expiration = self.expiration(ttl);
+
+        // NB: if we were using MSET here, we'd need to split the keys by hash slot. however, fred
+        // seems to split the pipeline by hash slot in the background.
+        let pipeline = self.pipeline().await?;
+        for (key, value) in data {
+            let key = self.make_key(key.clone());
+            let _: Result<(), _> = pipeline
+                .set(key, value.clone(), expiration.clone(), None, false)
+                .await;
+        }
+
+        let result: Result<Vec<()>, _> = pipeline.all().await;
+        match result {
+            Ok(values) => tracing::trace!("successfully inserted {} values", values.len()),
+            Err(err) => {
+                tracing::trace!("caught error during insert: {err:?}");
+                self.record_query_error(&err);
+            }
+        }
+
+        Ok(())
+    }
+}
+
 #[cfg(all(
     test,
     any(not(feature = "ci"), all(target_arch = "x86_64", target_os = "linux"))
@@ -1152,38 +1187,6 @@ impl RedisCacheStorage {
     ) -> Result<Vec<Result<RedisValue<V>, RedisError>>, RedisError> {
         self.get_multiple_with_options(keys, Options::default())
             .await
-    }
-
-    /// Inserts multiple records. Returns Ok(()) on success, emitting traces for successful
-    /// inserts, and otherwise an error and error traces and error-level log
-    pub(crate) async fn insert_multiple<K: KeyType, V: ValueType>(
-        &self,
-        data: &[(RedisKey<K>, RedisValue<V>)],
-        ttl: Option<Duration>,
-    ) -> Result<(), RedisError> {
-        tracing::trace!("inserting into redis: {:#?}", data);
-        let expiration = self.expiration(ttl);
-
-        // NB: if we were using MSET here, we'd need to split the keys by hash slot. however, fred
-        // seems to split the pipeline by hash slot in the background.
-        let pipeline = self.pipeline().await?;
-        for (key, value) in data {
-            let key = self.make_key(key.clone());
-            let _: Result<(), _> = pipeline
-                .set(key, value.clone(), expiration.clone(), None, false)
-                .await;
-        }
-
-        let result: Result<Vec<()>, _> = pipeline.all().await;
-        match result {
-            Ok(values) => tracing::trace!("successfully inserted {} values", values.len()),
-            Err(err) => {
-                tracing::trace!("caught error during insert: {err:?}");
-                self.record_query_error(&err);
-            }
-        }
-
-        Ok(())
     }
 
     /// Delete keys *without* adding the `namespace` prefix because `keys` is from
@@ -1473,7 +1476,10 @@ mod test {
                 let value: RedisValue<String> = storage.get(single.clone()).await?;
                 assert_eq!(value.0, "one");
                 let values = storage
-                    .get_multiple::<_, String>(vec![single, multiple])
+                    .get_multiple_with_options::<_, String>(
+                        vec![single, multiple],
+                        Default::default(),
+                    )
                     .await?
                     .into_iter()
                     .map(|value| value.map(|value| value.0))
