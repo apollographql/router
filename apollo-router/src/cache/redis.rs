@@ -1095,14 +1095,13 @@ fn setup_event_listeners(caller: &'static str, client: &Client) {
 
 #[cfg(test)]
 impl RedisCacheStorage {
-    /// Inserts multiple records. Returns Ok(()) on success, emitting traces for successful
-    /// inserts, and otherwise an error and error traces and error-level log
-    pub(crate) async fn insert_multiple<K: KeyType, V: ValueType>(
+    /// Inserts multiple records.
+    // XXX(@goto-bus-stop): we should probably remove this, but it's marginally useful in tests
+    pub(crate) async fn test_insert_multiple<K: KeyType, V: ValueType>(
         &self,
         data: &[(RedisKey<K>, RedisValue<V>)],
         ttl: Option<Duration>,
     ) -> Result<(), RedisError> {
-        tracing::trace!("inserting into redis: {:#?}", data);
         let expiration = self.expiration(ttl);
 
         // NB: if we were using MSET here, we'd need to split the keys by hash slot. however, fred
@@ -1115,14 +1114,7 @@ impl RedisCacheStorage {
                 .await;
         }
 
-        let result: Result<Vec<()>, _> = pipeline.all().await;
-        match result {
-            Ok(values) => tracing::trace!("successfully inserted {} values", values.len()),
-            Err(err) => {
-                tracing::trace!("caught error during insert: {err:?}");
-                self.record_query_error(&err);
-            }
-        }
+        pipeline.all::<Vec<()>>().await?;
 
         Ok(())
     }
@@ -1136,7 +1128,7 @@ impl RedisCacheStorage {
     /// Test helper that deletes all keys in this storage's namespace.
     ///
     /// If the storage doesn't have a namespace, this silently does nothing.
-    pub(crate) async fn truncate_namespace(&self) -> Result<(), RedisError> {
+    pub(crate) async fn test_truncate_namespace(&self) -> Result<(), RedisError> {
         use std::pin::Pin;
 
         use fred::prelude::Key;
@@ -1179,7 +1171,7 @@ impl RedisCacheStorage {
 
     /// Test helper that returns a list of all keys in this namespace,
     /// with the namespace string stripped from each key.
-    pub(crate) async fn all_keys_in_namespace(&self) -> Result<Vec<String>, BoxError> {
+    pub(crate) async fn test_all_keys_in_namespace(&self) -> Result<Vec<String>, BoxError> {
         use fred::types::scan::Scanner;
         use futures::stream::BoxStream;
         use tokio_stream::StreamExt as _;
@@ -1455,7 +1447,10 @@ mod test {
                     .insert(single.clone(), RedisValue("one".to_string()), None)
                     .await;
                 storage
-                    .insert_multiple(&[(multiple.clone(), RedisValue("two".to_string()))], None)
+                    .test_insert_multiple(
+                        &[(multiple.clone(), RedisValue("two".to_string()))],
+                        None,
+                    )
                     .await?;
 
                 let value: RedisValue<String> =
@@ -2050,7 +2045,7 @@ mod test {
         }
 
         /// Pipeline operations (batched commands) should work after client recreation.
-        /// insert_multiple uses pipeline() under the hood.
+        /// test_insert_multiple uses pipeline() under the hood.
         #[tokio::test]
         #[rstest::rstest]
         async fn pipeline_operations_work_after_recreation(
@@ -2074,7 +2069,7 @@ mod test {
                     RedisValue("val_2".to_string()),
                 ),
             ];
-            storage.insert_multiple(&data, None).await?;
+            storage.test_insert_multiple(&data, None).await?;
 
             let fetched1: RedisValue<String> = storage
                 .get(RedisKey("pipe_key_1".to_string()), Default::default())
@@ -2167,7 +2162,7 @@ mod test {
             Ok(())
         }
 
-        /// Tests that `insert_multiple` and `get_multiple` are successful when run against clustered Redis.
+        /// Tests that `test_insert_multiple` and `get_multiple` are successful when run against clustered Redis.
         ///
         /// Clustered Redis works by hashing each key to one of 16384 hash slots, and assigning each hash
         /// slot to a node. Operations which interact with multiple keys (`MGET`, `MSET`) *cannot* be
@@ -2206,10 +2201,10 @@ mod test {
             // insert values
             let keys: Vec<_> = data.keys().cloned().collect();
             let data: Vec<_> = data.into_iter().collect();
-            let _ = storage.insert_multiple(&data, None).await;
+            let _ = storage.test_insert_multiple(&data, None).await;
 
             // make a `get` call for each key and ensure that it has the expected value. this tests both
-            // the `get` and `insert_multiple` functions
+            // the `get` and `test_insert_multiple` functions
             for key in &keys {
                 let value: RedisValue<usize> = storage.get(key.clone(), Default::default()).await?;
                 assert_eq!(value.0, expected_value);
@@ -2339,7 +2334,7 @@ mod test {
 
             let data = [("a", "1"), ("b", "2"), ("c", "3")]
                 .map(|(k, v)| (RedisKey(k.to_string()), RedisValue(v.to_string())));
-            let _ = storage.insert_multiple(&data, None).await;
+            let _ = storage.test_insert_multiple(&data, None).await;
 
             // check different orders of fetches to make everything is ordered correctly, including
             // when some values are none
