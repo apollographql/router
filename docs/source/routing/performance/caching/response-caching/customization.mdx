@@ -42,6 +42,12 @@ For basic response caching setup, see the [Quickstart](/router/performance/cachi
 
 A subgraph can return a response with the header `Cache-Control: private`, indicating that it contains user-personalized data. Although this usually forbids intermediate servers from storing data, the router can recognize different users and store their data in different parts of the cache.
 
+<Caution>
+
+The router only treats a response as private when the subgraph sends `Cache-Control: private`. With `@cacheControl`, a field is `PUBLIC` by default. For details, see [Scope: PUBLIC vs PRIVATE](./invalidation#scope-public-vs-private).
+
+</Caution>
+
 Use private data caching when:
 
 - Your subgraph returns user-specific data that can be cached (shopping cart, user preferences, personalized recommendations)
