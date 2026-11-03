@@ -1538,6 +1538,7 @@ mod test {
             executable_document: None,
             id: SubgraphRequestId(String::new()),
             is_deferred_fetch: false,
+            is_aliased_entities_fetch: false,
         };
 
         let call = tokio::spawn(service.ready().await?.call(req));
@@ -1942,6 +1943,7 @@ mod test {
             executable_document: None,
             id: SubgraphRequestId(String::new()),
             is_deferred_fetch: false,
+            is_aliased_entities_fetch: false,
         };
         HeadersService::<tower_test::mock::Mock<SubgraphRequest, SubgraphResponse>>::modify_subgraph_request(&service.operations, &mut request);
         let headers = request
@@ -2014,6 +2016,7 @@ mod test {
             executable_document: None,
             id: SubgraphRequestId(String::new()),
             is_deferred_fetch: false,
+            is_aliased_entities_fetch: false,
         };
         HeadersService::<tower_test::mock::Mock<SubgraphRequest, SubgraphResponse>>::modify_subgraph_request(&service.operations, &mut request);
         let headers = request
@@ -2096,6 +2099,7 @@ mod test {
             executable_document: None,
             id: SubgraphRequestId(String::new()),
             is_deferred_fetch: false,
+            is_aliased_entities_fetch: false,
         }
     }
 

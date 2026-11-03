@@ -8751,3 +8751,162 @@ async fn entity_error_without_index_in_path_on_partial_cache_hit() {
     }
     "#);
 }
+
+/// A mock Redis that answers every read like [`super::AlwaysHit`] and records the commands it
+/// receives, so a test can check both that the cache did not answer a request from storage and
+/// that it did not store the response.
+#[derive(Debug)]
+struct RecordingHit {
+    hit: super::AlwaysHit,
+    commands: std::sync::Mutex<Vec<String>>,
+}
+
+impl RecordingHit {
+    fn new(data: serde_json_bytes::Value) -> Self {
+        Self {
+            hit: super::AlwaysHit::new(data),
+            commands: Default::default(),
+        }
+    }
+
+    fn commands(&self) -> Vec<String> {
+        self.commands.lock().unwrap().clone()
+    }
+}
+
+impl fred::mocks::Mocks for RecordingHit {
+    fn process_command(
+        &self,
+        command: fred::mocks::MockCommand,
+    ) -> Result<fred::types::Value, fred::error::Error> {
+        self.commands.lock().unwrap().push(command.cmd.to_string());
+        self.hit.process_command(command)
+    }
+}
+
+/// An entity fetch whose entities have different `@fromContext` values is sent as one aliased
+/// `_entities_<i>` copy per context, each with its own `representations_<i>` variable instead of
+/// `representations`. The cache does not understand that shape: it would key the fetch as a root
+/// query, which entity invalidation can never match. Such a fetch must go straight to the
+/// subgraph, and its response must not be stored.
+#[tokio::test]
+async fn aliased_context_entity_fetch_bypasses_cache() {
+    use std::sync::atomic::AtomicUsize;
+    use std::sync::atomic::Ordering;
+
+    const ALIASED_QUERY: &str = "query QueryLL__Subgraph1__1($representations_0: [_Any!]!, $representations_1: [_Any!]!, $contextualArgument_1_0_0: String, $contextualArgument_1_0_1: String) { _entities_0: _entities(representations: $representations_0) { ... on U { field(a: $contextualArgument_1_0_0) } } _entities_1: _entities(representations: $representations_1) { ... on U { field(a: $contextualArgument_1_0_1) } } }";
+    let subgraph_schema = Schema::parse_and_validate(
+        r#"
+        scalar _Any
+        union _Entity = U
+        type Query { _entities(representations: [_Any!]!): [_Entity]! }
+        type U { id: ID! field(a: String): Int }
+        "#,
+        "subgraph.graphql",
+    )
+    .unwrap();
+    // The fetch service attaches the operation as planned, before it was aliased.
+    let document = Arc::new(
+        apollo_compiler::ExecutableDocument::parse_and_validate(
+            &subgraph_schema,
+            "query QueryLL__Subgraph1__1($representations: [_Any!]!, $contextualArgument_1_0: String) { _entities(representations: $representations) { ... on U { field(a: $contextualArgument_1_0) } } }",
+            "operation.graphql",
+        )
+        .unwrap(),
+    );
+    let aliased_data = serde_json_bytes::json!({
+        "_entities_0": [{ "id": "3", "field": 3456 }],
+        "_entities_1": [{ "id": "4", "field": 222 }]
+    });
+    let store = Arc::new(RecordingHit::new(
+        serde_json_bytes::json!({ "_entities": [{ "id": "0", "field": 0 }] }),
+    ));
+
+    let subgraph_calls = Arc::new(AtomicUsize::new(0));
+    let subgraph = {
+        let calls = subgraph_calls.clone();
+        let data = aliased_data.clone();
+        tower::service_fn(move |request: subgraph::Request| {
+            calls.fetch_add(1, Ordering::SeqCst);
+            let data = data.clone();
+            async move {
+                let mut headers = http::HeaderMap::new();
+                headers.insert(CACHE_CONTROL, HeaderValue::from_static("public"));
+                Ok::<_, tower::BoxError>(
+                    subgraph::Response::fake_builder()
+                        .subgraph_name(request.subgraph_name)
+                        .context(request.context)
+                        .data(data)
+                        .headers(headers)
+                        .build(),
+                )
+            }
+        })
+        .boxed_clone()
+    };
+    let mut cache =
+        super::plugin::subgraph_cache_for_test(subgraph, "Subgraph1", store.clone()).await;
+
+    let request = |is_aliased_entities_fetch: bool| {
+        let mut request = subgraph::Request::fake_builder()
+            .subgraph_name("Subgraph1")
+            .subgraph_request(
+                http::Request::builder()
+                    .body(
+                        graphql::Request::fake_builder()
+                            .query(ALIASED_QUERY)
+                            .operation_name("QueryLL__Subgraph1__1")
+                            .variable("contextualArgument_1_0_0", "prop value 1")
+                            .variable("contextualArgument_1_0_1", "prop value 2")
+                            .variable(
+                                "representations_0",
+                                serde_json_bytes::json!([{ "__typename": "U", "id": "3" }]),
+                            )
+                            .variable(
+                                "representations_1",
+                                serde_json_bytes::json!([{ "__typename": "U", "id": "4" }]),
+                            )
+                            .build(),
+                    )
+                    .unwrap(),
+            )
+            .build();
+        request.executable_document = Some(document.clone());
+        request.is_aliased_entities_fetch = is_aliased_entities_fetch;
+        request
+    };
+
+    let response = cache
+        .ready()
+        .await
+        .unwrap()
+        .call(request(true))
+        .await
+        .unwrap();
+    assert_eq!(
+        subgraph_calls.load(Ordering::SeqCst),
+        1,
+        "the aliased fetch must reach the subgraph"
+    );
+    assert_eq!(response.response.body().data, Some(aliased_data));
+    assert!(
+        store.commands().is_empty(),
+        "the cache must neither look up nor store the aliased fetch, but sent {:?}",
+        store.commands()
+    );
+
+    // The same request not marked as aliased shows the mark is what keeps it out of the cache:
+    // the cache takes it for a root query and fails it while computing the root fields'
+    // invalidation keys, since the planned operation's `$representations` has no value, so the
+    // subgraph never sees it.
+    let result = cache.ready().await.unwrap().call(request(false)).await;
+    assert!(
+        result.is_err(),
+        "the cache must not pass the unmarked fetch through intact"
+    );
+    assert_eq!(
+        subgraph_calls.load(Ordering::SeqCst),
+        1,
+        "the cache must not send the unmarked fetch to the subgraph"
+    );
+}
