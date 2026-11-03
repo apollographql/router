@@ -1,5 +1,6 @@
 use std::collections::HashMap;
 use std::sync::Arc;
+use std::time::Duration;
 
 use apollo_federation::connectors::CustomConfiguration;
 use apollo_federation::connectors::expand::Connectors;
@@ -79,6 +80,45 @@ pub(crate) struct SourceConfiguration {
     // serde_json's Value has no Validate impl.
     #[config(skip_validate)]
     pub(crate) custom: CustomConfiguration,
+
+    /// How the router talks to a source that is a Model Context Protocol server
+    pub(crate) mcp: Option<McpSourceConfiguration>,
+}
+
+/// Configuration for a source whose connectors call a Model Context Protocol server
+#[apollo_configuration::configuration]
+#[derive(Serialize)]
+pub(crate) struct McpSourceConfiguration {
+    /// Whether the router opens MCP sessions for this source (default: off)
+    pub(crate) sessions: McpSessionsMode,
+
+    /// Request headers that tell sessions apart, such as a tenant or conversation id. A caller
+    /// gets one session per login (the `iss`, `sub` and `sid` of a validated JWT) or, without
+    /// one, per `Authorization`, `Cookie` and `Proxy-Authorization`; these headers split that
+    /// further.
+    pub(crate) identity_headers: Vec<String>,
+
+    /// The maximum number of open sessions for this source; the least recently used is closed
+    /// to make room (default: 50, minimum: 1)
+    #[config(default = 50)]
+    pub(crate) max_sessions: usize,
+
+    /// How long an unused session is kept before it is closed (default: 30m)
+    #[config(default = Duration::from_secs(30 * 60).into())]
+    #[schemars(with = "Option<String>")]
+    pub(crate) idle_timeout: apollo_configuration::types::Duration,
+}
+
+/// Whether the router opens MCP sessions for a source
+#[apollo_configuration::configuration]
+#[derive(Copy, PartialEq, Eq, Serialize)]
+pub(crate) enum McpSessionsMode {
+    /// Send requests as written, with no session
+    #[config(default)]
+    Off,
+    /// Initialize a session per caller before its first request, and stop if the server does
+    /// not issue one
+    Auto,
 }
 
 fn uri_schema(_generator: &mut schemars::SchemaGenerator) -> schemars::Schema {

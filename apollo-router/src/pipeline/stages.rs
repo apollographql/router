@@ -32,6 +32,8 @@ use crate::layers::unconstrained_buffer::UnconstrainedBuffer;
 use crate::plugins::authorization::AuthorizationPlugin;
 use crate::plugins::authorization::extract_authorization_checks_layer::ExtractAuthorizationChecksLayer;
 use crate::plugins::circuit_breaker::CircuitBreaker;
+use crate::plugins::connectors::mcp_session;
+use crate::plugins::connectors::mcp_session::McpSessionLayer;
 use crate::plugins::connectors::request_limit::RequestLimitLayer;
 use crate::plugins::connectors::tracing::connect_spec_version_instrument;
 use crate::plugins::connectors::tracing::connect_stream_mode_instrument;
@@ -152,10 +154,14 @@ pub(crate) fn build_query_planner_service(
 ///
 /// `name` is the subgraph name — for a connector source's client, the name of the
 /// subgraph that owns the source — and is what the plugin hook receives.
+///
+/// `mcp_sessions` is set for a connector source configured to hold MCP sessions. It goes
+/// innermost, so it sees requests exactly as they are sent.
 pub(crate) fn build_http_client_service(
     name: &str,
     inputs: HttpClientInputs,
     plugins: Arc<Plugins>,
+    mcp_sessions: Option<McpSessionLayer>,
 ) -> http::BoxCloneService {
     ServiceBuilder::new()
         .layer(JoinBatchRequestsLayer::new(name))
@@ -166,6 +172,7 @@ pub(crate) fn build_http_client_service(
         .rust_plugins(plugins, |plugin, service| {
             plugin.http_client_service(name, service)
         })
+        .option_layer(mcp_sessions)
         .service(HttpClientService::new(inputs))
         .boxed_clone()
 }
@@ -175,6 +182,7 @@ pub(crate) fn build_http_client_service(
 pub(crate) fn build_http_services(
     client_inputs: HttpClientInputsMaps,
     plugins: &Arc<Plugins>,
+    configuration: &Configuration,
 ) -> (
     IndexMap<String, http::BoxCloneService>,
     IndexMap<String, http::BoxCloneService>,
@@ -186,17 +194,23 @@ pub(crate) fn build_http_services(
     let subgraph_services = subgraph_inputs
         .into_iter()
         .map(|(name, inputs)| {
-            let service = build_http_client_service(&name, inputs, plugins.clone());
+            let service = build_http_client_service(&name, inputs, plugins.clone(), None);
             (name, service)
         })
         .collect();
+    let mut mcp_sessions = mcp_session::layers(configuration);
     let connector_services = connector_inputs
         .into_iter()
         .map(|(source, inputs)| {
             // source_config_key() format is "{subgraph_name}.{source_or_synthetic}"; the
             // http_client_service plugin hook receives the subgraph name, not the source key.
             let subgraph_name = source.split('.').next().unwrap_or(&source);
-            let service = build_http_client_service(subgraph_name, inputs, plugins.clone());
+            let service = build_http_client_service(
+                subgraph_name,
+                inputs,
+                plugins.clone(),
+                mcp_sessions.remove(&source),
+            );
             (source, service)
         })
         .collect();

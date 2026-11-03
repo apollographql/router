@@ -12,4 +12,5 @@ expression: "& metrics.non_zero()"
           opt.max_requests_per_operation_per_source: true
           opt.source.config: true
           opt.source.max_requests_per_operation: true
+          opt.source.mcp_sessions: true
           opt.source.override_url: true

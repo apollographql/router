@@ -103,7 +103,7 @@ async fn build_http_services_builds_a_client_per_subgraph() {
     let client_inputs = parse_http_client_inputs(&plugins, &schema, &configuration).unwrap();
 
     let (subgraph_services, connector_services) =
-        build_http_services(client_inputs, &Arc::new(plugins));
+        build_http_services(client_inputs, &Arc::new(plugins), &configuration);
 
     assert_eq!(sorted_keys(&subgraph_services), FIXTURE_SUBGRAPHS);
     assert!(connector_services.is_empty());

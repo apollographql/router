@@ -518,7 +518,9 @@ impl InstrumentData {
             opt.source.override_url,
             "$[?(@.sources..override_url)]",
             opt.source.max_requests_per_operation,
-            "$[?(@.sources..max_requests_per_operation)]"
+            "$[?(@.sources..max_requests_per_operation)]",
+            opt.source.mcp_sessions,
+            "$[?(@.sources..mcp.sessions == 'auto')]"
         );
 
         populate_config_instrument!(

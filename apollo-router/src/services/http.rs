@@ -75,6 +75,7 @@ pub(crate) fn test_http_client_service(name: &str) -> BoxCloneService {
         name,
         inputs,
         Arc::new(indexmap::IndexMap::default()),
+        None,
     )
 }
 

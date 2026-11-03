@@ -6688,6 +6688,56 @@ expression: "&schema"
         }
       ]
     },
+    "McpSessionsMode": {
+      "description": "Whether the router opens MCP sessions for a source",
+      "oneOf": [
+        {
+          "const": "off",
+          "description": "Send requests as written, with no session",
+          "type": "string"
+        },
+        {
+          "const": "auto",
+          "description": "Initialize a session per caller before its first request, and stop if the server does\nnot issue one",
+          "type": "string"
+        }
+      ]
+    },
+    "McpSourceConfiguration": {
+      "additionalProperties": false,
+      "description": "Configuration for a source whose connectors call a Model Context Protocol server",
+      "properties": {
+        "identity_headers": {
+          "default": [],
+          "description": "Request headers that tell sessions apart, such as a tenant or conversation id. A caller\ngets one session per login (the `iss`, `sub` and `sid` of a validated JWT) or, without\none, per `Authorization`, `Cookie` and `Proxy-Authorization`; these headers split that\nfurther.",
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "idle_timeout": {
+          "default": "30m",
+          "description": "How long an unused session is kept before it is closed (default: 30m)",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "max_sessions": {
+          "default": 50,
+          "description": "The maximum number of open sessions for this source; the least recently used is closed\nto make room (default: 50, minimum: 1)",
+          "format": "uint",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "sessions": {
+          "$ref": "#/$defs/McpSessionsMode",
+          "default": "off",
+          "description": "Whether the router opens MCP sessions for this source (default: off)"
+        }
+      },
+      "type": "object"
+    },
     "MetricAggregation": {
       "oneOf": [
         {
@@ -8954,6 +9004,18 @@ expression: "&schema"
             "integer",
             "null"
           ]
+        },
+        "mcp": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/McpSourceConfiguration"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "How the router talks to a source that is a Model Context Protocol server"
         },
         "override_url": {
           "default": null,

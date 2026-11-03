@@ -3,6 +3,7 @@ pub(crate) mod declared_errors;
 pub(crate) mod handle_responses;
 pub(crate) mod incompatible;
 pub(crate) mod make_requests;
+pub(crate) mod mcp_session;
 pub(crate) mod plugin;
 pub(crate) mod query_plans;
 pub(crate) mod request_limit;
