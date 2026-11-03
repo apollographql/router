@@ -566,33 +566,6 @@ impl Storage {
         Ok(s)
     }
 
-    /// Return a list of all keys in this namespace, with the namespace string stripped from
-    /// each key.
-    async fn all_keys_in_namespace(&self) -> Result<Vec<String>, BoxError> {
-        use fred::types::scan::Scanner;
-        use tokio_stream::StreamExt;
-
-        let mut scan_stream = self
-            .storage
-            .scan_with_namespaced_results(String::from("*"), None)
-            .await
-            .map_err(BoxError::from)?;
-
-        let mut keys = Vec::default();
-        while let Some(result) = scan_stream.next().await {
-            if let Some(page_keys) = result?.take_results() {
-                let mut str_keys: Vec<String> = page_keys
-                    .into_iter()
-                    .map(|k| k.into_string().unwrap())
-                    .map(|k| self.storage.strip_namespace(k))
-                    .collect();
-                keys.append(&mut str_keys);
-            }
-        }
-
-        Ok(keys)
-    }
-
     async fn ttl(&self, key: &str) -> StorageResult<i64> {
         let key = self.make_key(key);
         Ok(self.storage.client().await?.ttl(key).await?)
@@ -835,7 +808,7 @@ mod tests {
             let expected_cache_tag_keys = render_doc_keys(&document, SUBGRAPH_NAME);
 
             // iterate over all the keys in the namespace and make sure we have everything we'd expect
-            let keys = storage.all_keys_in_namespace().await?;
+            let keys = storage.storage.all_keys_in_namespace().await?;
             assert!(keys.contains(&document_key));
             for key in &expected_cache_tag_keys {
                 assert!(keys.contains(key), "missing {key}");
@@ -894,7 +867,7 @@ mod tests {
 
             // Only `cache_tags`-derived keys (plus the document itself) should exist — proves
             // `cdn_invalidation_tags` never reaches Redis's `ZADD` indexing.
-            let keys = storage.all_keys_in_namespace().await?;
+            let keys = storage.storage.all_keys_in_namespace().await?;
             assert_eq!(
                 keys.len(),
                 2,
@@ -979,7 +952,7 @@ mod tests {
             );
 
             // iterate over all the keys in the namespace and make sure we have everything we'd expect
-            let keys = storage.all_keys_in_namespace().await?;
+            let keys = storage.storage.all_keys_in_namespace().await?;
             for expected_document_key in &expected_document_keys {
                 assert!(keys.contains(expected_document_key));
             }
@@ -1046,7 +1019,7 @@ mod tests {
             };
             storage.insert(document.clone(), SUBGRAPH_NAME).await?;
 
-            let keys = storage.all_keys_in_namespace().await?;
+            let keys = storage.storage.all_keys_in_namespace().await?;
 
             // save current expiry times
             let mut expire_times: HashMap<String, i64> = HashMap::default();

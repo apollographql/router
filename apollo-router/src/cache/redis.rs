@@ -1133,6 +1133,9 @@ impl RedisCacheStorage {
     any(not(feature = "ci"), all(target_arch = "x86_64", target_os = "linux"))
 ))]
 impl RedisCacheStorage {
+    /// Test helper that deletes all keys in this storage's namespace.
+    ///
+    /// If the storage doesn't have a namespace, this silently does nothing.
     pub(crate) async fn truncate_namespace(&self) -> Result<(), RedisError> {
         use std::pin::Pin;
 
@@ -1164,7 +1167,7 @@ impl RedisCacheStorage {
         Ok(())
     }
 
-    pub(crate) fn strip_namespace(&self, key: String) -> String {
+    fn strip_namespace(&self, key: String) -> String {
         match &self.namespace {
             Some(namespace) => key
                 .strip_prefix(&format!("{namespace}:"))
@@ -1174,30 +1177,37 @@ impl RedisCacheStorage {
         }
     }
 
-    /// The keys returned in `ScanResult` do include the prefix from `namespace` configuration.
-    pub(crate) async fn scan_with_namespaced_results(
-        &self,
-        pattern: String,
-        count: Option<u32>,
-    ) -> Result<
-        std::pin::Pin<
-            Box<
-                dyn futures::Stream<Item = Result<fred::types::scan::ScanResult, RedisError>>
-                    + Send,
-            >,
-        >,
-        RedisError,
-    > {
-        let pattern = self.make_key(RedisKey(pattern));
-        if self.is_cluster {
+    /// Test helper that returns a list of all keys in this namespace,
+    /// with the namespace string stripped from each key.
+    pub(crate) async fn all_keys_in_namespace(&self) -> Result<Vec<String>, BoxError> {
+        use fred::types::scan::Scanner;
+        use futures::stream::BoxStream;
+        use tokio_stream::StreamExt as _;
+
+        let pattern = self.make_key(RedisKey("*"));
+
+        let client = self.client().await?;
+        let mut scan_stream: BoxStream<_> = if self.is_cluster {
             // NOTE: scans might be better send to only the read replicas, but the read-only client
             // doesn't have a scan_cluster(), just a paginated version called scan_page()
-            Ok(Box::pin(
-                self.client().await?.scan_cluster(pattern, count, None),
-            ))
+            Box::pin(client.scan_cluster(pattern, None, None))
         } else {
-            Ok(Box::pin(self.client().await?.scan(pattern, count, None)))
+            Box::pin(client.scan(pattern, None, None))
+        };
+
+        let mut keys = Vec::default();
+        while let Some(result) = scan_stream.next().await {
+            if let Some(page_keys) = result?.take_results() {
+                let mut str_keys: Vec<String> = page_keys
+                    .into_iter()
+                    .map(|k| k.into_string().unwrap())
+                    .map(|k| self.strip_namespace(k))
+                    .collect();
+                keys.append(&mut str_keys);
+            }
         }
+
+        Ok(keys)
     }
 }
 
@@ -2154,40 +2164,6 @@ mod test {
                     .is_ok(),
                 "lock should be released after recreation completes"
             );
-            Ok(())
-        }
-
-        /// scan_with_namespaced_results should work after client recreation
-        #[tokio::test]
-        #[rstest::rstest]
-        async fn scan_works_after_recreation(
-            #[values(Standalone, PrimaryWithReplica, Sentinel, Cluster)] deployment: Deployment,
-        ) -> Result<(), BoxError> {
-            let _guard = lock_for_static().lock().await;
-            use fred::types::scan::Scanner;
-            use futures::StreamExt;
-
-            let storage = RedisCacheStorage::new(redis_config(deployment), "test").await?;
-            storage.create_client_pool().await?;
-            let key = RedisKey("scan_test_key".to_string());
-            storage
-                .insert(key, RedisValue("value".to_string()), None)
-                .await;
-
-            storage.inner.write().take();
-            let _ = storage.client().await;
-            wait_for_recreation(&storage).await;
-
-            let mut stream = storage
-                .scan_with_namespaced_results("*".to_string(), Some(100))
-                .await?;
-            let mut found_keys = Vec::new();
-            while let Some(result) = stream.next().await {
-                if let Some(keys) = result?.take_results() {
-                    found_keys.extend(keys);
-                }
-            }
-            assert!(!found_keys.is_empty(), "scan should find at least one key");
             Ok(())
         }
 
