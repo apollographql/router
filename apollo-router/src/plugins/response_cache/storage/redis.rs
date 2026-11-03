@@ -168,10 +168,7 @@ impl Storage {
             .into_iter()
             .map(|key| self.make_key(key))
             .map(fred::types::Key::from);
-        let deleted = self
-            .storage
-            .delete_from_scan_result_with_options(keys, options)
-            .await?;
+        let deleted = self.storage.delete_raw_keys(keys, options).await?;
 
         // NOTE: we don't delete elements from the cache tag sorted sets. if we did, we would likely
         // encounter a race condition - if another router inserted a value associated with this cache
@@ -449,10 +446,7 @@ impl CacheStorage for Storage {
             timeout: Some(self.fetch_timeout()),
             ..Options::default()
         };
-        let value: RedisValue<CacheValue> = self
-            .storage
-            .get_with_options(RedisKey(cache_key), options)
-            .await?;
+        let value: RedisValue<CacheValue> = self.storage.get(RedisKey(cache_key), options).await?;
         Ok(CacheEntry::from((cache_key, value.0)))
     }
 
@@ -460,17 +454,17 @@ impl CacheStorage for Storage {
         &self,
         cache_keys: &[&str],
     ) -> StorageResult<Vec<StorageResult<CacheEntry>>> {
-        let keys: Vec<RedisKey<String>> = cache_keys
+        let keys = cache_keys
             .iter()
             .map(|key| RedisKey(key.to_string()))
-            .collect();
+            .collect::<Vec<_>>();
         let options = Options {
             timeout: Some(self.fetch_timeout()),
             ..Options::default()
         };
-        let values: Vec<Result<RedisValue<CacheValue>, _>> = self
+        let values = self
             .storage
-            .get_multiple_with_options(keys, options)
+            .get_multiple::<_, CacheValue>(keys, options)
             .await?;
 
         let entries = values

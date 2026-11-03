@@ -779,13 +779,6 @@ impl RedisCacheStorage {
     pub(crate) async fn get<K: KeyType, V: ValueType>(
         &self,
         key: RedisKey<K>,
-    ) -> Result<RedisValue<V>, RedisError> {
-        self.get_with_options(key, Options::default()).await
-    }
-
-    pub(crate) async fn get_with_options<K: KeyType, V: ValueType>(
-        &self,
-        key: RedisKey<K>,
         options: Options,
     ) -> Result<RedisValue<V>, RedisError> {
         let key = self.make_key(key);
@@ -827,7 +820,7 @@ impl RedisCacheStorage {
     ///
     /// The outer `Result` covers total failures (ie the standalone node is down), while the inner
     /// `Result`s cover partial cluster failures and values not being found.
-    pub(crate) async fn get_multiple_with_options<K: KeyType, V: ValueType>(
+    pub(crate) async fn get_multiple<K: KeyType, V: ValueType>(
         &self,
         keys: Vec<RedisKey<K>>,
         options: Options,
@@ -903,9 +896,8 @@ impl RedisCacheStorage {
         }
     }
 
-    /// Delete keys *without* adding the `namespace` prefix because `keys` is from
-    /// `scan_with_namespaced_results` and already includes it.
-    pub(crate) async fn delete_from_scan_result_with_options<I>(
+    /// Delete keys *without* adding the `namespace` prefix. The caller must add the namespace.
+    pub(crate) async fn delete_raw_keys<I>(
         &self,
         keys: I,
         options: Options,
@@ -1167,7 +1159,8 @@ impl RedisCacheStorage {
         }
 
         // remove all members of this namespace
-        self.delete_from_scan_result(keys.into_iter()).await?;
+        self.delete_raw_keys(keys.into_iter(), Default::default())
+            .await?;
         Ok(())
     }
 
@@ -1179,24 +1172,6 @@ impl RedisCacheStorage {
                 .unwrap_or(key),
             None => key,
         }
-    }
-
-    pub(crate) async fn get_multiple<K: KeyType, V: ValueType>(
-        &self,
-        keys: Vec<RedisKey<K>>,
-    ) -> Result<Vec<Result<RedisValue<V>, RedisError>>, RedisError> {
-        self.get_multiple_with_options(keys, Options::default())
-            .await
-    }
-
-    /// Delete keys *without* adding the `namespace` prefix because `keys` is from
-    /// `scan_with_namespaced_results` and already includes it.
-    pub(crate) async fn delete_from_scan_result<I>(&self, keys: I) -> Result<u32, RedisError>
-    where
-        I: Iterator<Item = fred::types::Key>,
-    {
-        self.delete_from_scan_result_with_options(keys, Options::default())
-            .await
     }
 
     /// The keys returned in `ScanResult` do include the prefix from `namespace` configuration.
@@ -1473,13 +1448,11 @@ mod test {
                     .insert_multiple(&[(multiple.clone(), RedisValue("two".to_string()))], None)
                     .await?;
 
-                let value: RedisValue<String> = storage.get(single.clone()).await?;
+                let value: RedisValue<String> =
+                    storage.get(single.clone(), Default::default()).await?;
                 assert_eq!(value.0, "one");
                 let values = storage
-                    .get_multiple_with_options::<_, String>(
-                        vec![single, multiple],
-                        Default::default(),
-                    )
+                    .get_multiple::<_, String>(vec![single, multiple], Default::default())
                     .await?
                     .into_iter()
                     .map(|value| value.map(|value| value.0))
@@ -1923,7 +1896,7 @@ mod test {
             storage
                 .insert(key.clone(), RedisValue("after".to_string()), None)
                 .await;
-            let fetched: RedisValue<String> = storage.get(key).await?;
+            let fetched: RedisValue<String> = storage.get(key, Default::default()).await?;
             assert_eq!(fetched.0, "after");
             Ok(())
         }
@@ -2093,10 +2066,12 @@ mod test {
             ];
             storage.insert_multiple(&data, None).await?;
 
-            let fetched1: RedisValue<String> =
-                storage.get(RedisKey("pipe_key_1".to_string())).await?;
-            let fetched2: RedisValue<String> =
-                storage.get(RedisKey("pipe_key_2".to_string())).await?;
+            let fetched1: RedisValue<String> = storage
+                .get(RedisKey("pipe_key_1".to_string()), Default::default())
+                .await?;
+            let fetched2: RedisValue<String> = storage
+                .get(RedisKey("pipe_key_2".to_string()), Default::default())
+                .await?;
             assert_eq!(fetched1.0, "val_1");
             assert_eq!(fetched2.0, "val_2");
             Ok(())
@@ -2260,12 +2235,12 @@ mod test {
             // make a `get` call for each key and ensure that it has the expected value. this tests both
             // the `get` and `insert_multiple` functions
             for key in &keys {
-                let value: RedisValue<usize> = storage.get(key.clone()).await?;
+                let value: RedisValue<usize> = storage.get(key.clone(), Default::default()).await?;
                 assert_eq!(value.0, expected_value);
             }
 
             // test the `mget` functionality
-            let values = storage.get_multiple(keys).await?;
+            let values = storage.get_multiple(keys, Default::default()).await?;
             for value in values {
                 let value: RedisValue<usize> = value?;
                 assert_eq!(value.0, expected_value);
@@ -2412,7 +2387,7 @@ mod test {
                     .map(|value| value.map(ToString::to_string))
                     .collect();
 
-                let values = storage.get_multiple(keys).await?;
+                let values = storage.get_multiple(keys, Default::default()).await?;
                 let parsed_values: Vec<Option<String>> =
                     values.into_iter().map(|v| v.ok().map(|v| v.0)).collect();
                 assert_eq!(parsed_values, expected_values);

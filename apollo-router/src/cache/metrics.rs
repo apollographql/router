@@ -308,7 +308,8 @@ mod tests {
             storage
                 .insert(test_key.clone(), test_value.clone(), None)
                 .await;
-            let retrieved: Result<RedisValue<TestValue>, _> = storage.get(test_key.clone()).await;
+            let retrieved: Result<RedisValue<TestValue>, _> =
+                storage.get(test_key.clone(), Default::default()).await;
 
             // Verify the mock actually worked
             assert!(retrieved.is_ok(), "Should have retrieved value from mock");
