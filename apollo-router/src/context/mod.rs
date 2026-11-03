@@ -27,6 +27,10 @@ pub(crate) const OPERATION_NAME: &str = "apollo::supergraph::operation_name";
 pub(crate) const OPERATION_KIND: &str = "apollo::supergraph::operation_kind";
 /// Context key for the persisted query ID.
 pub(crate) const PERSISTED_QUERY_ID: &str = "apollo::supergraph::persisted_query_id";
+/// How the persisted query ID was resolved. `"id"` if the client sent it in
+/// `extensions.persistedQuery.sha256Hash`; `"freeform"` if the full query body
+/// matched the manifest after normalization. Absent otherwise.
+pub(crate) const PERSISTED_QUERY_SOURCE: &str = "apollo::supergraph::persisted_query_source";
 /// The key to know if the response body contains at least 1 GraphQL error. This value is sticky:
 /// once set to true for any chunk in a deferred response stream, it remains true for the lifetime
 /// of the request.
