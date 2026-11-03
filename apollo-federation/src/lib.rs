@@ -85,6 +85,7 @@ use crate::subgraph::ValidSubgraph;
 pub use crate::supergraph::ValidFederationSubgraph;
 pub use crate::supergraph::ValidFederationSubgraphs;
 
+/// PR TEST
 pub mod internal_lsp_api {
     pub use crate::subgraph::schema_diff_expanded_from_initial;
 }
