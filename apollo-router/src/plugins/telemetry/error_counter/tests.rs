@@ -535,6 +535,65 @@ async fn test_count_subgraph_errors_with_include_subgraphs_enabled() {
 }
 
 #[tokio::test]
+async fn test_count_subgraph_errors_keeps_errors_counted_by_other_subgraphs() {
+    async {
+        let config = ErrorsConfiguration {
+            extended_error_metrics: ExtendedErrorMetricsMode::Enabled,
+            ..Default::default()
+        };
+
+        let context = Context::default();
+        let error_a = graphql::Error::builder()
+            .message("subgraph-a failed")
+            .extension_code("A_FAILED")
+            .extension("service", "subgraph-a")
+            .apollo_id(Uuid::new_v4())
+            .build();
+        let error_b = graphql::Error::builder()
+            .message("subgraph-b failed")
+            .extension_code("B_FAILED")
+            .extension("service", "subgraph-b")
+            .apollo_id(Uuid::new_v4())
+            .build();
+
+        // Two fetches of the same operation each return an error.
+        for (subgraph_name, error) in [("subgraph-a", &error_a), ("subgraph-b", &error_b)] {
+            count_subgraph_errors(
+                SubgraphResponse::fake_builder()
+                    .context(context.clone())
+                    .subgraph_name(subgraph_name.to_string())
+                    .errors(vec![error.clone()])
+                    .build(),
+                &config,
+            )
+            .await;
+        }
+
+        assert_eq!(
+            unwrap_from_context::<HashSet<Uuid>>(&context, COUNTED_ERRORS),
+            HashSet::from([error_a.apollo_id(), error_b.apollo_id()])
+        );
+
+        // The execution response carries both errors, with the same apollo ids, and neither
+        // is counted again.
+        count_execution_errors(
+            ExecutionResponse::fake_builder()
+                .context(context.clone())
+                .errors(vec![error_a.clone(), error_b.clone()])
+                .build()
+                .unwrap(),
+            &config,
+        )
+        .await;
+
+        assert_counter!("apollo.router.graphql_error", 1, code = "A_FAILED");
+        assert_counter!("apollo.router.graphql_error", 1, code = "B_FAILED");
+    }
+    .with_metrics()
+    .await;
+}
+
+#[tokio::test]
 async fn test_count_subgraph_errors_with_include_subgraphs_disabled() {
     async {
         let config = ErrorsConfiguration {
