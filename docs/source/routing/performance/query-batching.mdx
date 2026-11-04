@@ -29,7 +29,7 @@ To prevent this inconsistency from happening, clients can bundle multiple reques
 
 Batch requests are counted as one request in concurrency limits and rate limits. Batch requests inherently do the work of several non-batch requests. This means that large batches can increase the load on the router. Size concurrency limits and `maximum_size` appropriately for the resources you have assigned to the router.
 
-We recommend using a conservative `maximum_size`. The vast majority of batches contain fewer than 10 requests.
+We recommend using a conservative `maximum_size`. The vast majority of batches contain fewer than 10 requests, but check what your clients actually send first: the [`apollo.router.operations.batching.size`](#metrics-for-query-batching) metric reports batch sizes. Set `maximum_size` a little above the largest batch you see, because a batch over the limit fails entirely with a `BATCH_LIMIT_EXCEEDED` error.
 
 ### Router batching support
 
@@ -148,7 +148,7 @@ From the input query, the router generates a set of subgraph queries:
 "query MeQuery6__accounts__0{me{name}}",
 "query MeQuery7__accounts__0{me{id}}",
 ```
-All of the queries can be combined into a single batch. So instead of 15 (non-batch) subgraph fetches, the router only has to make one fetch.
+All of the queries can be combined into a single batch. So instead of 7 (non-batch) subgraph fetches, the router only has to make one fetch.
 
 | Subgraph | Fetch Count (without)| Fetch Count (with) |
 |----------|----------------------|--------------------|
