@@ -48,6 +48,8 @@ response_cache:
     all:
       enabled: true
       ttl: 5m # Required: fallback TTL when responses don't include Cache-Control headers
+      # Request context key that identifies the user, required to cache `PRIVATE` data. The `private_id` can also be set on a per-subgraph basis.
+      private_id: "user_id"
       # Configure Redis for all subgraphs
       redis:
         urls: ["redis://localhost:6379"]
@@ -214,7 +216,7 @@ type Query {
   post(id: ID!): Post
 }
 
-type User @key(fields: "id") @cacheControl(maxAge: 60) {
+type User @key(fields: "id") @cacheControl(maxAge: 60, scope: PRIVATE) {
   id: ID!
   posts: [Post!]!
 }
@@ -229,6 +231,38 @@ type Post @key(fields: "id") @cacheControl(maxAge: 60) {
 ```
 
 The cache control is set with a TTL of 60 seconds, so both the `Post` and `User` types are cached for 60 seconds.
+
+Because `User` is `PRIVATE`, the router needs to recognize which user sent each request. The `private_id` in the router configuration points at the `user_id` key in the request context. This example retrieves the `user_id` from a JWT authentication:
+
+```yaml title="router.yaml"
+authentication:
+  router:
+    jwt:
+      jwks:
+        - url: https://auth-server/jwks.json
+```
+
+Then use a Rhai script to set `user_id` from the JWT's `sub` claim:
+
+```rhai title="main.rhai"
+fn supergraph_service(service) {
+  let request_callback = |request| {
+    let claims = request.context[Router.APOLLO_AUTHENTICATION_JWT_CLAIMS];
+
+    if claims != () {
+      request.context["user_id"] = claims["sub"];
+    }
+  };
+
+  service.map_request(request_callback);
+}
+```
+
+<Note>
+
+The subgraph must send a `Cache-Control` header for the router to cache its responses. For `PRIVATE` data, the header must include `private`, which `scope: PRIVATE` sets in Apollo Server. For details, see [Private data caching](./customization#private-data-caching).
+
+</Note>
 
 <Note>
 
