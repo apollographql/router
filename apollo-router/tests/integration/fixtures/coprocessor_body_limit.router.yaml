@@ -1,6 +1,6 @@
 # This coprocessor doesn't point to anything
 coprocessor:
-  url: "<replace>"
+  url: "${env.TEST_CONFIG_COPROCESSOR_URL}"
   router:
     request:
       body: true

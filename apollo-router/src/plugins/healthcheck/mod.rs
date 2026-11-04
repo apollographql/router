@@ -48,9 +48,12 @@ struct Health {
 #[serde(deny_unknown_fields)]
 #[serde(default)]
 pub(crate) struct ReadinessIntervalConfig {
-    #[serde(deserialize_with = "humantime_serde::deserialize", default)]
+    #[serde(
+        deserialize_with = "humantime_serde::deserialize",
+        default = "default_sampling"
+    )]
     #[serde(serialize_with = "humantime_serde::serialize")]
-    #[schemars(with = "Option<String>", default)]
+    #[schemars(with = "Option<String>")]
     /// The sampling interval (default: 5s)
     pub(crate) sampling: Duration,
 
@@ -74,10 +77,14 @@ pub(crate) struct ReadinessConfig {
     pub(crate) allowed: usize,
 }
 
+fn default_sampling() -> Duration {
+    Duration::from_secs(5)
+}
+
 impl Default for ReadinessIntervalConfig {
     fn default() -> Self {
         Self {
-            sampling: Duration::from_secs(5),
+            sampling: default_sampling(),
             unready: None,
         }
     }
@@ -334,6 +341,33 @@ mod test {
     use super::*;
     use crate::plugins::test::PluginTestHarness;
     use crate::plugins::test::ServiceHandle;
+
+    /// An interval that omits `sampling` still samples every 5s, rather than every 0s, which
+    /// panicked the readiness ticker.
+    #[test]
+    fn omitted_sampling_interval_defaults_to_five_seconds() {
+        for interval in [json!({}), json!({ "unready": "10s" })] {
+            let config: ReadinessConfig =
+                serde_json::from_value(json!({ "interval": interval })).unwrap();
+            assert_eq!(config.interval.sampling, Duration::from_secs(5));
+        }
+    }
+
+    #[tokio::test]
+    async fn readiness_ticker_runs_when_interval_omits_sampling() {
+        let config: Config = serde_json::from_value(json!({
+            "readiness": { "interval": { "unready": "10s" } }
+        }))
+        .unwrap();
+        let mut plugin = HealthCheck::new(PluginInit::fake_new(config, Default::default()))
+            .await
+            .unwrap();
+
+        // The ticker never finishes on its own, so finishing here means it panicked.
+        tokio::time::timeout(Duration::from_millis(100), &mut plugin.ticker)
+            .await
+            .expect_err("readiness ticker stopped");
+    }
 
     // Create a base for testing. Even though we don't use the test_harness once this function
     // completes, we return it because we need to keep it alive to prevent the ticker from being

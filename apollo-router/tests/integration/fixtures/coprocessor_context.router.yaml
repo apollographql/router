@@ -1,7 +1,7 @@
 # This coprocessor url will be updated to a test-scoped mock server
 # This config enables context for stages that need to test context propagation
 coprocessor:
-  url: "<replace>"
+  url: "${env.TEST_CONFIG_COPROCESSOR_URL}"
   router:
     request:
       body: true

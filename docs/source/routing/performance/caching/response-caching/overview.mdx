@@ -24,6 +24,12 @@ Response caching enables the router to cache origin responses and reuse them acr
 - **Root query fields**: Cached as complete units (the entire response for that root field)
 - **Entity representations**: Cached independently—each origin's contribution to an entity is cached separately and can be reused across different queries. (See [_entities query](/federation/subgraph-spec/#understanding-query_entities).)
 
+<Note>
+
+Response caching covers both origin kinds, and this section is written for both. Where behavior differs for [Apollo Connectors](/graphos/connectors), the difference is explicitly stated and linked to in [Response Caching for Apollo Connectors](./connectors), which lists every difference in one table.
+
+</Note>
+
 The router uses Redis to cache data from origin query responses. The cache organizes data by origin and entity representation, so different clients requesting the same data hit shared cache entries. You can use the [cache debugger](/graphos/routing/performance/caching/response-caching/observability#cache-debugger) to see exactly what's being cached during development.
 
 ### Goals

@@ -1551,3 +1551,277 @@ async fn no_store_from_request() {
     // Errors expected because the cache is empty (no-store prevented storage in Phase 1)
     insta::assert_json_snapshot!(response);
 }
+
+/// One `_entities` request the `orga` subgraph answers: the ids of the organizations it is asked
+/// for, and the entities and errors it returns.
+struct OrgaResponse {
+    ids: &'static [&'static str],
+    entities: serde_json::Value,
+    errors: serde_json::Value,
+}
+
+/// Builds a two-subgraph harness where `user` returns organizations 1 and 2 and `orga` resolves
+/// `Organization.name` with `orga_responses`. Shared by the entity error tests below, which differ
+/// in the shape of the error path the subgraph reports and in which entities are already cached.
+/// Passing no responses leaves `orga` unmocked, so any fetch that is not served from the cache
+/// fails — that is how the tests below prove an entity was *not* cached.
+async fn entity_error_harness(
+    redis_cache: RedisCacheStorage,
+    orga_responses: Vec<OrgaResponse>,
+) -> supergraph::BoxCloneService {
+    let valid_schema = Arc::new(Schema::parse_and_validate(SCHEMA, "test.graphql").unwrap());
+    let user_subgraph = (
+        "user",
+        MockSubgraph::builder()
+            .with_json(
+                serde_json::json! {{"query":"{currentUser{allOrganizations{__typename id}}}"}},
+                serde_json::json! {{"data": {"currentUser": { "allOrganizations": [
+                    {
+                        "__typename": "Organization",
+                        "id": "1"
+                    },
+                    {
+                        "__typename": "Organization",
+                        "id": "2"
+                    }
+                ] }}}},
+            )
+            .with_header(CACHE_CONTROL, HeaderValue::from_static("no-store"))
+            .build(),
+    );
+    let orga_subgraph = (!orga_responses.is_empty()).then(|| {
+        let orga = orga_responses
+            .into_iter()
+            .fold(MockSubgraph::builder(), |builder, response| {
+                let representations: Vec<_> = response
+                    .ids
+                    .iter()
+                    .map(|id| serde_json::json!({"id": id, "__typename": "Organization"}))
+                    .collect();
+                builder.with_json(
+                    serde_json::json! {{
+                        "query": "query($representations:[_Any!]!){_entities(representations:$representations){...on Organization{name}}}",
+                        "variables": { "representations": representations }
+                    }},
+                    serde_json::json! {{
+                        "data": { "_entities": response.entities },
+                        "errors": response.errors
+                    }},
+                )
+            })
+            .with_header(CACHE_CONTROL, HeaderValue::from_static("public, max-age=3600"))
+            .build();
+        ("orga", orga)
+    });
+    let subgraphs = MockedSubgraphs(
+        std::iter::once(user_subgraph)
+            .chain(orga_subgraph)
+            .collect(),
+    );
+
+    let entity_cache = EntityCache::with_mocks(redis_cache, HashMap::new(), valid_schema)
+        .await
+        .unwrap();
+
+    TestHarness::builder()
+        .configuration_json(serde_json::json!({"include_subgraph_errors": { "all": true } }))
+        .unwrap()
+        .schema(SCHEMA)
+        .extra_private_plugin(entity_cache)
+        .extra_plugin(subgraphs)
+        .build_supergraph()
+        .await
+        .unwrap()
+}
+
+fn entity_error_request() -> supergraph::Request {
+    supergraph::Request::fake_builder()
+        .query("query { currentUser { allOrganizations { id name } } }")
+        .context(Context::new())
+        .build()
+        .unwrap()
+}
+
+/// Waits for the entity cache's spawned write task to store at least `expected` entries, so a
+/// follow-up request is not racing that task. Note that entries become visible one at a time —
+/// `RedisCacheStorage::insert_multiple` pipelines one `SET` per key and `MockStore` takes its lock
+/// per command — so returning from here means *at least* `expected` landed, never exactly that
+/// many. Assert on which keys are present rather than on `len()`.
+async fn wait_for_stored_entries(mock_store: &MockStore, expected: usize) {
+    for _ in 0..50 {
+        if mock_store.len() >= expected {
+            return;
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+    }
+    panic!(
+        "expected {expected} cache entries, store still holds {}",
+        mock_store.len()
+    );
+}
+
+/// Some subgraph frameworks report entity errors without the index in their path, for example
+/// `["_entities", "name"]` instead of `["_entities", 0, "name"]`. The entity cache must pass such an
+/// error on to the client and must not cache any entity it may belong to.
+#[tokio::test]
+async fn entity_error_without_index_in_path() {
+    let mock_store = Arc::new(MockStore::new());
+    let redis_cache = RedisCacheStorage::from_mocks(mock_store.clone())
+        .await
+        .unwrap();
+
+    let service = entity_error_harness(
+        redis_cache.clone(),
+        vec![OrgaResponse {
+            ids: &["1", "2"],
+            entities: serde_json::json!([{"name": null}, {"name": "Organization 2"}]),
+            // The failure is reported without the entity index, so it cannot be attributed.
+            errors: serde_json::json!([{
+                "message": "cannot resolve name",
+                "path": ["_entities", "name"],
+                "extensions": {"code": "NAME_FAILURE"}
+            }]),
+        }],
+    )
+    .await;
+
+    // The subgraph error must reach the client. Since it carries no entity index, the router
+    // cannot tell which entity failed and reports it for every entity of the fetch — the same
+    // behaviour as when the entity cache is disabled.
+    let mut response = service.oneshot(entity_error_request()).await.unwrap();
+    let response = response.next_response().await.unwrap();
+    insta::assert_json_snapshot!(response);
+
+    // Neither organization may be cached: the error could belong to either of them. Proven by a
+    // second request with `orga` left unmocked — had the first request cached either entity, that
+    // one would now be answered from the cache instead of failing the fetch.
+    let service = entity_error_harness(redis_cache, vec![]).await;
+    let mut response = service.oneshot(entity_error_request()).await.unwrap();
+    let response = response.next_response().await.unwrap();
+    insta::assert_json_snapshot!(response);
+    assert_eq!(
+        mock_store.len(),
+        0,
+        "no entity should have been cached alongside an unattributable error"
+    );
+}
+
+/// Counterpart to `entity_error_without_index_in_path`: when the subgraph *does* report the entity
+/// index, the error is attributed to that one entity. Only that entity is kept out of the cache,
+/// its sibling is stored as usual, and the error's index is rewritten to the entity's position in
+/// the reassembled response.
+#[tokio::test]
+async fn entity_error_with_index_in_path() {
+    let mock_store = Arc::new(MockStore::new());
+    let redis_cache = RedisCacheStorage::from_mocks(mock_store.clone())
+        .await
+        .unwrap();
+
+    let service = entity_error_harness(
+        redis_cache.clone(),
+        vec![OrgaResponse {
+            ids: &["1", "2"],
+            entities: serde_json::json!([{"name": null}, {"name": "Organization 2"}]),
+            errors: serde_json::json!([{
+                "message": "cannot resolve name",
+                "path": ["_entities", 0, "name"],
+                "extensions": {"code": "NAME_FAILURE"}
+            }]),
+        }],
+    )
+    .await;
+
+    // A single error, pointing at the one organization the subgraph attributed it to.
+    let mut response = service.oneshot(entity_error_request()).await.unwrap();
+    let response = response.next_response().await.unwrap();
+    insta::assert_json_snapshot!(response);
+
+    // Wait for the sibling's write, then send a second request with `orga` left unmocked:
+    // organization 2 can only have a name if it came from the cache, and the fetch error appears
+    // only if organization 1 was not cached.
+    wait_for_stored_entries(&mock_store, 1).await;
+    let service = entity_error_harness(redis_cache, vec![]).await;
+    let mut response = service.oneshot(entity_error_request()).await.unwrap();
+    let response = response.next_response().await.unwrap();
+    insta::assert_json_snapshot!(response);
+}
+
+/// On a partial cache hit, only the cache misses go to the subgraph. With a single miss, an
+/// `_entities` error without an index can only be about that entity: it lands on that entity's
+/// position in the response, and the cached entity keeps its data. Organization 1 is cached first,
+/// so organization 2 is the one fetched, and the error's position has to be rewritten from the
+/// subgraph's index 0 to the response's index 1.
+#[tokio::test]
+async fn entity_error_without_index_in_path_on_partial_cache_hit() {
+    let mock_store = Arc::new(MockStore::new());
+    let redis_cache = RedisCacheStorage::from_mocks(mock_store.clone())
+        .await
+        .unwrap();
+
+    // Only the single-entity request for organization 2 is mocked, so organization 1 can only
+    // have a name in the second response if it came from the cache.
+    let single_miss = OrgaResponse {
+        ids: &["2"],
+        entities: serde_json::json!([{"name": null}]),
+        errors: serde_json::json!([{
+            "message": "cannot resolve name",
+            "path": ["_entities", "name"],
+            "extensions": {"code": "NAME_FAILURE"}
+        }]),
+    };
+
+    // Caches organization 1 only.
+    let service = entity_error_harness(
+        redis_cache.clone(),
+        vec![OrgaResponse {
+            ids: &["1", "2"],
+            entities: serde_json::json!([{"name": "Organization 1"}, {"name": null}]),
+            errors: serde_json::json!([{
+                "message": "cannot resolve name",
+                "path": ["_entities", 1, "name"],
+                "extensions": {"code": "NAME_FAILURE"}
+            }]),
+        }],
+    )
+    .await;
+    let mut response = service.oneshot(entity_error_request()).await.unwrap();
+    response.next_response().await.unwrap();
+    wait_for_stored_entries(&mock_store, 1).await;
+
+    let service = entity_error_harness(redis_cache, vec![single_miss]).await;
+    let mut response = service.oneshot(entity_error_request()).await.unwrap();
+    let response = response.next_response().await.unwrap();
+    insta::assert_json_snapshot!(response, @r#"
+    {
+      "data": {
+        "currentUser": {
+          "allOrganizations": [
+            {
+              "id": "1",
+              "name": "Organization 1"
+            },
+            {
+              "id": "2",
+              "name": null
+            }
+          ]
+        }
+      },
+      "errors": [
+        {
+          "message": "cannot resolve name",
+          "path": [
+            "currentUser",
+            "allOrganizations",
+            1,
+            "name"
+          ],
+          "extensions": {
+            "code": "NAME_FAILURE",
+            "service": "orga"
+          }
+        }
+      ]
+    }
+    "#);
+}
