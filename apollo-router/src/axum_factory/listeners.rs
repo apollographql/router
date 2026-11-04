@@ -42,10 +42,13 @@ use crate::axum_factory::utils::ConnectionRouterService;
 use crate::configuration::Configuration;
 use crate::http_server_factory::Listener;
 use crate::http_server_factory::NetworkStream;
+use crate::layers::InternalServiceBuilderExt as _;
 use crate::metrics::FutureMetricsExt;
+use crate::plugins::limits::LimitsPlugin;
 use crate::plugins::limits::http2_header_list;
 use crate::plugins::telemetry::pipeline_bypass::record_rejected_request;
 use crate::router::ApolloRouterError;
+use crate::services::Plugins;
 use crate::services::router::pipeline_handle::PipelineHandle;
 
 static MAX_FILE_HANDLES_WARN: AtomicBool = AtomicBool::new(false);
@@ -101,14 +104,14 @@ pub(super) fn ensure_endpoints_consistency(
 
 pub(super) fn extra_endpoints(
     endpoints: MultiMap<ListenAddr, Endpoint>,
-    configuration: &Configuration,
+    plugins: &Plugins,
 ) -> MultiMap<ListenAddr, Router> {
     let mut mm: MultiMap<ListenAddr, axum::Router> = Default::default();
     mm.extend(endpoints.into_iter().map(|(listen_addr, e)| {
         (
             listen_addr,
             e.into_iter()
-                .map(|e| endpoint_router(e, configuration))
+                .map(|e| endpoint_router(e, plugins))
                 .collect::<Vec<_>>(),
         )
     }));
@@ -117,16 +120,13 @@ pub(super) fn extra_endpoints(
 
 /// Builds a plugin endpoint's router, on any listener.
 ///
-/// Plugin endpoints don't go through the limits plugin, so they get their own HTTP/2
-/// header-list check. HTTP/1.1 header limits need none: hyper enforces them on the
-/// connection, before any route is chosen.
-pub(super) fn endpoint_router(endpoint: Endpoint, configuration: &Configuration) -> Router {
-    let mut router = endpoint
-        .into_router()
-        .layer(axum::middleware::from_fn_with_state(
-            configuration.limits.router.http2_header_list_limit(),
-            http2_header_list::reject_oversized,
-        ));
+/// Plugin endpoints don't go through the limits plugin's router service, so they get its HTTP/2
+/// header-list check as a layer of their own. HTTP/1.1 header limits need none: hyper enforces
+/// them on the connection, before any route is chosen.
+pub(super) fn endpoint_router(endpoint: Endpoint, plugins: &Plugins) -> Router {
+    let mut router = endpoint.into_router().layer(
+        ServiceBuilder::new().apply_plugin_layer(plugins, LimitsPlugin::endpoint_header_list_layer),
+    );
     if let Some(main_endpoint_layer) = ENDPOINT_CALLBACK.get() {
         router = main_endpoint_layer(router);
     }
@@ -675,6 +675,7 @@ mod tests {
 
     use super::*;
     use crate::axum_factory::tests::init_with_config;
+    use crate::axum_factory::tests::init_with_plugins;
     use crate::configuration::Sandbox;
     use crate::configuration::Supergraph;
     use crate::graphql;
@@ -1069,10 +1070,19 @@ mod tests {
             crate::services::supergraph::Request,
             crate::services::supergraph::Response,
         >();
-        let (server, _) = init_with_config(
+        // The endpoint gets its check from the limits plugin in the registry.
+        let limits = crate::plugin::plugins()
+            .find(|factory| factory.name == "apollo.limits")
+            .unwrap()
+            .create_instance_without_schema(&serde_json::json!({}))
+            .await
+            .unwrap();
+        let plugins = Arc::new(Plugins::from_iter([("apollo.limits".to_string(), limits)]));
+        let (server, _) = init_with_plugins(
             crate::pipeline::from_supergraph_mock(supergraph_mock).await,
             conf,
             web_endpoints,
+            plugins,
         )
         .await
         .unwrap();

@@ -60,6 +60,7 @@ use crate::plugins::telemetry::config_new::router::instruments::ResponseBodySize
 use crate::plugins::telemetry::config_new::router::instruments::ResponseBodySizeRecordingStream;
 use crate::router::ApolloRouterError;
 use crate::router_factory::RouterFactory;
+use crate::services::Plugins;
 use crate::services::router;
 use crate::uplink::license_enforcement::LicenseState;
 
@@ -81,6 +82,7 @@ impl AxumHttpServerFactory {
 pub(crate) fn make_axum_router(
     configuration: &Configuration,
     mut endpoints: MultiMap<ListenAddr, Endpoint>,
+    plugins: &Plugins,
     license: Arc<LicenseState>,
 ) -> Result<ListenersAndRouters, ApolloRouterError> {
     ensure_listenaddrs_consistency(configuration, &endpoints)?;
@@ -92,9 +94,10 @@ pub(crate) fn make_axum_router(
         endpoints
             .remove(&configuration.supergraph.listen)
             .unwrap_or_default(),
+        plugins,
         license,
     )?;
-    let mut extra_endpoints = extra_endpoints(endpoints, configuration);
+    let mut extra_endpoints = extra_endpoints(endpoints, plugins);
 
     // put any extra endpoint that uses the main ListenAddr into the main router
     if let Some(routers) = extra_endpoints.remove(&main_endpoint.0) {
@@ -129,7 +132,12 @@ impl HttpServerFactory for AxumHttpServerFactory {
             let pipeline_handle = service_factory.pipeline_handle();
             // Built once per reload; connections clone it cheaply.
             let router_service = connection_router_service(service_factory.create());
-            let all_routers = make_axum_router(&configuration, extra_endpoints, license)?;
+            let all_routers = make_axum_router(
+                &configuration,
+                extra_endpoints,
+                &service_factory.plugins(),
+                license,
+            )?;
 
             // serve main router
 
@@ -300,6 +308,7 @@ impl HttpServerFactory for AxumHttpServerFactory {
 fn main_endpoint(
     configuration: &Configuration,
     endpoints_on_main_listener: Vec<Endpoint>,
+    plugins: &Plugins,
     license: Arc<LicenseState>,
 ) -> Result<ListenAddrAndRouter, ApolloRouterError> {
     let cors = configuration.cors.clone().into_layer().map_err(|e| {
@@ -338,9 +347,7 @@ fn main_endpoint(
 
     let route = endpoints_on_main_listener
         .into_iter()
-        .fold(main_route, |acc, r| {
-            acc.merge(endpoint_router(r, configuration))
-        });
+        .fold(main_route, |acc, r| acc.merge(endpoint_router(r, plugins)));
 
     let listener = configuration.supergraph.listen.clone();
     Ok(ListenAddrAndRouter(listener, route))
