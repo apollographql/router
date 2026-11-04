@@ -2026,8 +2026,6 @@ mod test {
         async fn pipeline_operations_work_after_recreation(
             #[values(Standalone, PrimaryWithReplica, Sentinel, Cluster)] deployment: Deployment,
         ) -> Result<(), BoxError> {
-            use std::time::Duration;
-
             let _guard = lock_for_static().lock().await;
 
             let mut config = redis_config(deployment);
