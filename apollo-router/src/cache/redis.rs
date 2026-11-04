@@ -872,6 +872,11 @@ impl RedisCacheStorage {
         }
     }
 
+    /// Insert a value into the cache.
+    ///
+    /// # Errors
+    /// Even if the insert fails, this function does not return an error. Instead, the error is
+    /// recorded in metrics only.
     pub(crate) async fn insert<K: KeyType, V: ValueType>(
         &self,
         key: RedisKey<K>,
@@ -1091,33 +1096,6 @@ fn setup_event_listeners(caller: &'static str, client: &Client) {
             }
         }
     });
-}
-
-#[cfg(test)]
-impl RedisCacheStorage {
-    /// Inserts multiple records.
-    // XXX(@goto-bus-stop): we should probably remove this, but it's marginally useful in tests
-    pub(crate) async fn insert_multiple_for_test<K: KeyType, V: ValueType>(
-        &self,
-        data: &[(RedisKey<K>, RedisValue<V>)],
-        ttl: Option<Duration>,
-    ) -> Result<(), RedisError> {
-        let expiration = self.expiration(ttl);
-
-        // NB: if we were using MSET here, we'd need to split the keys by hash slot. however, fred
-        // seems to split the pipeline by hash slot in the background.
-        let pipeline = self.pipeline().await?;
-        for (key, value) in data {
-            let key = self.make_key(key.clone());
-            let _: Result<(), _> = pipeline
-                .set(key, value.clone(), expiration.clone(), None, false)
-                .await;
-        }
-
-        pipeline.all::<Vec<()>>().await?;
-
-        Ok(())
-    }
 }
 
 #[cfg(all(
@@ -1447,11 +1425,8 @@ mod test {
                     .insert(single.clone(), RedisValue("one".to_string()), None)
                     .await;
                 storage
-                    .insert_multiple_for_test(
-                        &[(multiple.clone(), RedisValue("two".to_string()))],
-                        None,
-                    )
-                    .await?;
+                    .insert(multiple.clone(), RedisValue("two".to_string()), None)
+                    .await;
 
                 let value: RedisValue<String> =
                     storage.get(single.clone(), Default::default()).await?;
@@ -2045,40 +2020,38 @@ mod test {
         }
 
         /// Pipeline operations (batched commands) should work after client recreation.
-        /// insert_multiple_for_test uses pipeline() under the hood.
+        /// `get` uses pipeline() under the hood when it needs to reset the TTL.
         #[tokio::test]
         #[rstest::rstest]
         async fn pipeline_operations_work_after_recreation(
             #[values(Standalone, PrimaryWithReplica, Sentinel, Cluster)] deployment: Deployment,
         ) -> Result<(), BoxError> {
+            use std::time::Duration;
+
             let _guard = lock_for_static().lock().await;
-            let storage = RedisCacheStorage::new(redis_config(deployment), "test").await?;
+
+            let mut config = redis_config(deployment);
+            config.reset_ttl = true;
+
+            let storage = RedisCacheStorage::new(config, "test").await?;
             storage.create_client_pool().await?;
 
             storage.inner.write().take();
             let _ = storage.client().await;
             wait_for_recreation(&storage).await;
 
-            let data = vec![
-                (
-                    RedisKey("pipe_key_1".to_string()),
-                    RedisValue("val_1".to_string()),
-                ),
-                (
-                    RedisKey("pipe_key_2".to_string()),
-                    RedisValue("val_2".to_string()),
-                ),
-            ];
-            storage.insert_multiple_for_test(&data, None).await?;
+            storage
+                .insert(
+                    RedisKey("ttl_key".to_string()),
+                    RedisValue("val".to_string()),
+                    None, // the standard redis test config sets a TTL
+                )
+                .await;
 
-            let fetched1: RedisValue<String> = storage
-                .get(RedisKey("pipe_key_1".to_string()), Default::default())
+            let fetched: RedisValue<String> = storage
+                .get(RedisKey("ttl_key".to_string()), Default::default())
                 .await?;
-            let fetched2: RedisValue<String> = storage
-                .get(RedisKey("pipe_key_2".to_string()), Default::default())
-                .await?;
-            assert_eq!(fetched1.0, "val_1");
-            assert_eq!(fetched2.0, "val_2");
+            assert_eq!(fetched.0, "val");
             Ok(())
         }
 
@@ -2162,7 +2135,7 @@ mod test {
             Ok(())
         }
 
-        /// Tests that `insert_multiple_for_test` and `get_multiple` are successful when run against clustered Redis.
+        /// Tests that `get_multiple` is successful when run against clustered Redis.
         ///
         /// Clustered Redis works by hashing each key to one of 16384 hash slots, and assigning each hash
         /// slot to a node. Operations which interact with multiple keys (`MGET`, `MSET`) *cannot* be
@@ -2200,11 +2173,11 @@ mod test {
 
             // insert values
             let keys: Vec<_> = data.keys().cloned().collect();
-            let data: Vec<_> = data.into_iter().collect();
-            let _ = storage.insert_multiple_for_test(&data, None).await;
+            for (key, value) in data {
+                storage.insert(key, value, None).await;
+            }
 
-            // make a `get` call for each key and ensure that it has the expected value. this tests both
-            // the `get` and `insert_multiple_for_test` functions
+            // make a `get` call for each key and ensure that it has the expected value.
             for key in &keys {
                 let value: RedisValue<usize> = storage.get(key.clone(), Default::default()).await?;
                 assert_eq!(value.0, expected_value);
@@ -2334,7 +2307,9 @@ mod test {
 
             let data = [("a", "1"), ("b", "2"), ("c", "3")]
                 .map(|(k, v)| (RedisKey(k.to_string()), RedisValue(v.to_string())));
-            let _ = storage.insert_multiple_for_test(&data, None).await;
+            for (key, value) in &data {
+                storage.insert(key.clone(), value.clone(), None).await;
+            }
 
             // check different orders of fetches to make everything is ordered correctly, including
             // when some values are none
