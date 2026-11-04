@@ -4894,7 +4894,7 @@ async fn failure_mode_reconnect() {
         let storage = Storage::new(&Config::test(false,"failure_mode_reconnect"), drop_rx)
             .await
             .unwrap();
-        storage.test_truncate_namespace().await.unwrap();
+        storage.truncate_namespace_for_test().await.unwrap();
 
         let response_cache =
             ResponseCache::without_storage_for_failure_mode(map, valid_schema.clone())

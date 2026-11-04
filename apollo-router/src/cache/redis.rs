@@ -1097,7 +1097,7 @@ fn setup_event_listeners(caller: &'static str, client: &Client) {
 impl RedisCacheStorage {
     /// Inserts multiple records.
     // XXX(@goto-bus-stop): we should probably remove this, but it's marginally useful in tests
-    pub(crate) async fn test_insert_multiple<K: KeyType, V: ValueType>(
+    pub(crate) async fn insert_multiple_for_test<K: KeyType, V: ValueType>(
         &self,
         data: &[(RedisKey<K>, RedisValue<V>)],
         ttl: Option<Duration>,
@@ -1128,7 +1128,7 @@ impl RedisCacheStorage {
     /// Test helper that deletes all keys in this storage's namespace.
     ///
     /// If the storage doesn't have a namespace, this silently does nothing.
-    pub(crate) async fn test_truncate_namespace(&self) -> Result<(), RedisError> {
+    pub(crate) async fn truncate_namespace_for_test(&self) -> Result<(), RedisError> {
         use std::pin::Pin;
 
         use fred::prelude::Key;
@@ -1171,7 +1171,7 @@ impl RedisCacheStorage {
 
     /// Test helper that returns a list of all keys in this namespace,
     /// with the namespace string stripped from each key.
-    pub(crate) async fn test_all_keys_in_namespace(&self) -> Result<Vec<String>, BoxError> {
+    pub(crate) async fn all_keys_in_namespace_for_test(&self) -> Result<Vec<String>, BoxError> {
         use fred::types::scan::Scanner;
         use futures::stream::BoxStream;
         use tokio_stream::StreamExt as _;
@@ -1447,7 +1447,7 @@ mod test {
                     .insert(single.clone(), RedisValue("one".to_string()), None)
                     .await;
                 storage
-                    .test_insert_multiple(
+                    .insert_multiple_for_test(
                         &[(multiple.clone(), RedisValue("two".to_string()))],
                         None,
                     )
@@ -2045,7 +2045,7 @@ mod test {
         }
 
         /// Pipeline operations (batched commands) should work after client recreation.
-        /// test_insert_multiple uses pipeline() under the hood.
+        /// insert_multiple_for_test uses pipeline() under the hood.
         #[tokio::test]
         #[rstest::rstest]
         async fn pipeline_operations_work_after_recreation(
@@ -2069,7 +2069,7 @@ mod test {
                     RedisValue("val_2".to_string()),
                 ),
             ];
-            storage.test_insert_multiple(&data, None).await?;
+            storage.insert_multiple_for_test(&data, None).await?;
 
             let fetched1: RedisValue<String> = storage
                 .get(RedisKey("pipe_key_1".to_string()), Default::default())
@@ -2162,7 +2162,7 @@ mod test {
             Ok(())
         }
 
-        /// Tests that `test_insert_multiple` and `get_multiple` are successful when run against clustered Redis.
+        /// Tests that `insert_multiple_for_test` and `get_multiple` are successful when run against clustered Redis.
         ///
         /// Clustered Redis works by hashing each key to one of 16384 hash slots, and assigning each hash
         /// slot to a node. Operations which interact with multiple keys (`MGET`, `MSET`) *cannot* be
@@ -2201,10 +2201,10 @@ mod test {
             // insert values
             let keys: Vec<_> = data.keys().cloned().collect();
             let data: Vec<_> = data.into_iter().collect();
-            let _ = storage.test_insert_multiple(&data, None).await;
+            let _ = storage.insert_multiple_for_test(&data, None).await;
 
             // make a `get` call for each key and ensure that it has the expected value. this tests both
-            // the `get` and `test_insert_multiple` functions
+            // the `get` and `insert_multiple_for_test` functions
             for key in &keys {
                 let value: RedisValue<usize> = storage.get(key.clone(), Default::default()).await?;
                 assert_eq!(value.0, expected_value);
@@ -2334,7 +2334,7 @@ mod test {
 
             let data = [("a", "1"), ("b", "2"), ("c", "3")]
                 .map(|(k, v)| (RedisKey(k.to_string()), RedisValue(v.to_string())));
-            let _ = storage.test_insert_multiple(&data, None).await;
+            let _ = storage.insert_multiple_for_test(&data, None).await;
 
             // check different orders of fetches to make everything is ordered correctly, including
             // when some values are none

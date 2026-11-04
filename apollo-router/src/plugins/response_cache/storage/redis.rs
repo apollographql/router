@@ -522,8 +522,8 @@ impl CacheStorage for Storage {
         test,
         any(not(feature = "ci"), all(target_arch = "x86_64", target_os = "linux"))
     ))]
-    async fn test_truncate_namespace(&self) -> StorageResult<()> {
-        self.storage.test_truncate_namespace().await?;
+    async fn truncate_namespace_for_test(&self) -> StorageResult<()> {
+        self.storage.truncate_namespace_for_test().await?;
         Ok(())
     }
 }
@@ -797,7 +797,7 @@ mod tests {
         async fn single_document(#[values(true, false)] clustered: bool) -> Result<(), BoxError> {
             let (_drop_tx, drop_rx) = broadcast::channel(2);
             let storage = Storage::new(&redis_config(clustered), drop_rx).await?;
-            storage.test_truncate_namespace().await?;
+            storage.truncate_namespace_for_test().await?;
 
             // every element of this namespace must have a TTL associated with it, and the TTL of the
             // cache keys must be greater than the TTL of the document
@@ -808,7 +808,7 @@ mod tests {
             let expected_cache_tag_keys = render_doc_keys(&document, SUBGRAPH_NAME);
 
             // iterate over all the keys in the namespace and make sure we have everything we'd expect
-            let keys = storage.storage.test_all_keys_in_namespace().await?;
+            let keys = storage.storage.all_keys_in_namespace_for_test().await?;
             assert!(keys.contains(&document_key));
             for key in &expected_cache_tag_keys {
                 assert!(keys.contains(key), "missing {key}");
@@ -853,7 +853,7 @@ mod tests {
         ) -> Result<(), BoxError> {
             let (_drop_tx, drop_rx) = broadcast::channel(2);
             let storage = Storage::new(&redis_config(clustered), drop_rx).await?;
-            storage.test_truncate_namespace().await?;
+            storage.truncate_namespace_for_test().await?;
 
             let document = Document {
                 // No `CacheTag::Tag` entries here — simulates `IndexMode::CacheTag` being off.
@@ -867,7 +867,7 @@ mod tests {
 
             // Only `cache_tags`-derived keys (plus the document itself) should exist — proves
             // `cdn_invalidation_tags` never reaches Redis's `ZADD` indexing.
-            let keys = storage.storage.test_all_keys_in_namespace().await?;
+            let keys = storage.storage.all_keys_in_namespace_for_test().await?;
             assert_eq!(
                 keys.len(),
                 2,
@@ -895,7 +895,7 @@ mod tests {
         ) -> Result<(), BoxError> {
             let (_drop_tx, drop_rx) = broadcast::channel(2);
             let storage = Storage::new(&redis_config(clustered), drop_rx).await?;
-            storage.test_truncate_namespace().await?;
+            storage.truncate_namespace_for_test().await?;
 
             // set up two documents with a shared key and different TTLs
             let documents = vec![
@@ -952,7 +952,7 @@ mod tests {
             );
 
             // iterate over all the keys in the namespace and make sure we have everything we'd expect
-            let keys = storage.storage.test_all_keys_in_namespace().await?;
+            let keys = storage.storage.all_keys_in_namespace_for_test().await?;
             for expected_document_key in &expected_document_keys {
                 assert!(keys.contains(expected_document_key));
             }
@@ -1010,7 +1010,7 @@ mod tests {
         ) -> Result<(), BoxError> {
             let (_drop_tx, drop_rx) = broadcast::channel(2);
             let storage = Storage::new(&redis_config(clustered), drop_rx).await?;
-            storage.test_truncate_namespace().await?;
+            storage.truncate_namespace_for_test().await?;
 
             let document = Document {
                 key: "key1".to_string(),
@@ -1019,7 +1019,7 @@ mod tests {
             };
             storage.insert(document.clone(), SUBGRAPH_NAME).await?;
 
-            let keys = storage.storage.test_all_keys_in_namespace().await?;
+            let keys = storage.storage.all_keys_in_namespace_for_test().await?;
 
             // save current expiry times
             let mut expire_times: HashMap<String, i64> = HashMap::default();
@@ -1059,7 +1059,7 @@ mod tests {
         ) -> Result<(), BoxError> {
             let (_drop_tx, drop_rx) = broadcast::channel(2);
             let storage = Storage::new(&redis_config(clustered), drop_rx).await?;
-            storage.test_truncate_namespace().await?;
+            storage.truncate_namespace_for_test().await?;
 
             let document = Document {
                 expire: Duration::from_secs(60),
@@ -1127,7 +1127,7 @@ mod tests {
         ) -> Result<(), BoxError> {
             let (_drop_tx, drop_rx) = broadcast::channel(2);
             let storage = Storage::new(&redis_config(clustered), drop_rx).await?;
-            storage.test_truncate_namespace().await?;
+            storage.truncate_namespace_for_test().await?;
 
             let document = Document {
                 expire: Duration::from_secs(60),
@@ -1207,7 +1207,7 @@ mod tests {
             let (_drop_tx, drop_rx) = broadcast::channel(2);
             let config = redis_config(clustered);
             let storage = Storage::new(&config, drop_rx).await?;
-            storage.test_truncate_namespace().await?;
+            storage.truncate_namespace_for_test().await?;
 
             let document = common_document();
             let document_key = document.key.clone();
@@ -1229,7 +1229,7 @@ mod tests {
             // NB: we do this for each key because fred might report a failure at the beginning of a pipeline
             // differently than a failure at the end.
             for key in cache_tag_keys {
-                storage.test_truncate_namespace().await?;
+                storage.truncate_namespace_for_test().await?;
                 insert_invalid_cache_tag(key.clone()).await?;
 
                 let result = storage.insert(document.clone(), SUBGRAPH_NAME).await;
@@ -1257,7 +1257,7 @@ mod tests {
 
             let cache_tag_keys = render_doc_keys(&documents[1], SUBGRAPH_NAME);
             for key in cache_tag_keys {
-                storage.test_truncate_namespace().await?;
+                storage.truncate_namespace_for_test().await?;
                 insert_invalid_cache_tag(key.clone()).await?;
 
                 storage
@@ -1327,7 +1327,7 @@ mod tests {
     ) -> Result<(), BoxError> {
         let (_drop_tx, drop_rx) = broadcast::channel(2);
         let storage = Storage::new(&redis_config(clustered), drop_rx).await?;
-        storage.test_truncate_namespace().await?;
+        storage.truncate_namespace_for_test().await?;
 
         // set up two documents with a shared key and different TTLs
         let documents = vec![
@@ -1412,7 +1412,7 @@ mod tests {
         ) -> Result<(), BoxError> {
             let (_drop_tx, drop_rx) = broadcast::channel(2);
             let storage = Storage::new(&redis_config(clustered), drop_rx).await?;
-            storage.test_truncate_namespace().await?;
+            storage.truncate_namespace_for_test().await?;
 
             let document1 = Document {
                 key: "key1".to_string(),
@@ -1463,7 +1463,7 @@ mod tests {
         ) -> Result<(), BoxError> {
             let (_drop_tx, drop_rx) = broadcast::channel(2);
             let storage = Storage::new(&redis_config(clustered), drop_rx).await?;
-            storage.test_truncate_namespace().await?;
+            storage.truncate_namespace_for_test().await?;
 
             let name = "graph.api";
             let subgraph_doc = Document {
@@ -1516,7 +1516,7 @@ mod tests {
         ) -> Result<(), BoxError> {
             let (_drop_tx, drop_rx) = broadcast::channel(2);
             let storage = Storage::new(&redis_config(clustered), drop_rx).await?;
-            storage.test_truncate_namespace().await?;
+            storage.truncate_namespace_for_test().await?;
 
             let name = "graph.api";
             let subgraph_doc = Document {
@@ -1569,7 +1569,7 @@ mod tests {
             // to form a list of cache tags to remove from
             let (_drop_tx, drop_rx) = broadcast::channel(2);
             let storage = Storage::new(&redis_config(clustered), drop_rx).await?;
-            storage.test_truncate_namespace().await?;
+            storage.truncate_namespace_for_test().await?;
 
             let document1 = Document {
                 key: "key1".to_string(),
@@ -1618,7 +1618,7 @@ mod tests {
         ) -> Result<(), BoxError> {
             let (_drop_tx, drop_rx) = broadcast::channel(2);
             let storage = Storage::new(&redis_config(clustered), drop_rx).await?;
-            storage.test_truncate_namespace().await?;
+            storage.truncate_namespace_for_test().await?;
 
             storage.insert(common_document(), "S1").await?;
 
@@ -1648,7 +1648,7 @@ mod tests {
         ) -> Result<(), BoxError> {
             let (_drop_tx, drop_rx) = broadcast::channel(2);
             let storage = Storage::new(&redis_config(clustered), drop_rx).await?;
-            storage.test_truncate_namespace().await?;
+            storage.truncate_namespace_for_test().await?;
 
             storage.insert(common_document(), "S1").await?;
 
@@ -1673,7 +1673,7 @@ mod tests {
         ) -> Result<(), BoxError> {
             let (_drop_tx, drop_rx) = broadcast::channel(2);
             let storage = Storage::new(&redis_config(clustered), drop_rx).await?;
-            storage.test_truncate_namespace().await?;
+            storage.truncate_namespace_for_test().await?;
 
             let document = common_document();
             let document_key = document.key.clone();
@@ -2162,7 +2162,7 @@ mod tests {
             };
             let (_drop_tx, drop_rx) = broadcast::channel(2);
             let storage = Storage::new(&config, drop_rx).await?;
-            storage.test_truncate_namespace().await?;
+            storage.truncate_namespace_for_test().await?;
 
             let document = common_document();
 
