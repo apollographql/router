@@ -79,6 +79,7 @@ use crate::router_factory::Endpoint;
 use crate::router_factory::RouterFactory;
 use crate::services::MULTIPART_DEFER_ACCEPT;
 use crate::services::MULTIPART_DEFER_CONTENT_TYPE;
+use crate::services::Plugins;
 use crate::services::RouterRequest;
 use crate::services::RouterResponse;
 use crate::services::SupergraphResponse;
@@ -169,6 +170,10 @@ impl RouterFactory for TestRouterFactory {
             launch_id: None,
             config_hash: "dummy".to_string(),
         })
+    }
+
+    fn plugins(&self) -> Arc<Plugins> {
+        Arc::new(Plugins::default())
     }
 }
 
