@@ -300,7 +300,7 @@ dependencies = [
  "dhat",
  "diff",
  "either",
- "encoding_rs 0.8.43",
+ "encoding_rs 0.8.44",
  "form_urlencoded",
  "hashbrown 0.17.1",
  "heck",
@@ -502,7 +502,7 @@ dependencies = [
  "displaydoc",
  "docker_credential",
  "ecdsa 0.17.0",
- "encoding_rs 0.8.43",
+ "encoding_rs 0.8.44",
  "erased-serde 0.4.11",
  "flate2",
  "fred",
@@ -2711,9 +2711,9 @@ dependencies = [
 
 [[package]]
 name = "encoding_rs"
-version = "0.8.43"
+version = "0.8.44"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "844dfa6d76a4e6b9d98e03ae5ead89fbedd02cbd1206b7817d6d3dca62326967"
+checksum = "89253175e704ab869b04f9db224d38630e0211a53841a79181deae0889e169f5"
 dependencies = [
  "cfg-if 1.0.4",
  "core_detect",
@@ -4823,7 +4823,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "83e87776546dc87511aa5ee218730c92b666d7264ab6ed41f9d215af9cd5224b"
 dependencies = [
  "bytes",
- "encoding_rs 0.8.43",
+ "encoding_rs 0.8.44",
  "futures-util",
  "http",
  "httparse",
