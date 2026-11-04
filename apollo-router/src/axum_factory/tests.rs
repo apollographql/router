@@ -79,6 +79,7 @@ use crate::plugins::healthcheck::Config as HealthCheck;
 use crate::router_factory::RouterFactory;
 use crate::services::MULTIPART_DEFER_ACCEPT;
 use crate::services::MULTIPART_DEFER_CONTENT_TYPE;
+use crate::services::Plugins;
 use crate::services::RouterRequest;
 use crate::services::RouterResponse;
 use crate::services::SupergraphResponse;
@@ -159,6 +160,10 @@ impl RouterFactory for TestRouterFactory {
             "dummy".to_string(),
         ))
     }
+
+    fn plugins(&self) -> Arc<Plugins> {
+        Arc::new(Plugins::default())
+    }
 }
 
 /// Like [`TestRouterFactory`], but counts calls to `create()` so tests can observe how many
@@ -185,6 +190,10 @@ impl RouterFactory for CountingRouterFactory {
             None,
             "dummy".to_string(),
         ))
+    }
+
+    fn plugins(&self) -> Arc<Plugins> {
+        Arc::new(Plugins::default())
     }
 }
 
