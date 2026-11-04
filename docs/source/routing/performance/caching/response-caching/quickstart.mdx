@@ -48,7 +48,7 @@ response_cache:
     all:
       enabled: true
       ttl: 5m # Required: fallback TTL when responses don't include Cache-Control headers
-      # Request context key that identifies the user, required to cache PRIVATE data. The private_id can also be set on a per-subgraph basis.
+      # Request context key that identifies the user, required to cache `PRIVATE` data. The `private_id` can also be set on a per-subgraph basis.
       private_id: "user_id"
       # Configure Redis for all subgraphs
       redis:
