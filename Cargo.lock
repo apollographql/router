@@ -179,11 +179,11 @@ checksum = "330a5ed07fa54e4702c9d6c4174f74427fc0ef6e214bbd677ae50a5099946470"
 
 [[package]]
 name = "apollo-cache-memory"
-version = "0.3.1"
+version = "0.3.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "4aab8caa273b333217b710a5deab8437dfaa2db0c28d14a7c30c1dbd83a76ab8"
+checksum = "f8cb8e02b4c725bed14f40ee2b0e3c1e63592d10573f41a72217f097979cebcb"
 dependencies = [
- "apollo-configuration 0.10.0",
+ "apollo-configuration",
  "apollo-opentelemetry",
  "moka",
  "opentelemetry",
@@ -207,34 +207,6 @@ dependencies = [
  "thiserror 2.0.21",
  "triomphe",
  "typed-arena",
-]
-
-[[package]]
-name = "apollo-configuration"
-version = "0.10.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "1dcbf8f01b72646bfb64ccaaf089157e2e794d2902b5ba6511a0f0f5602135a4"
-dependencies = [
- "apollo-configuration-macros",
- "apollo-errors",
- "apollo-redaction",
- "derive_more",
- "http",
- "humantime-serde",
- "jsonschema 0.58.6",
- "miette",
- "referencing 0.58.6",
- "regex",
- "saphyr",
- "saphyr-parser",
- "schemars",
- "serde",
- "serde_json",
- "serde_path_to_error",
- "serde_yaml 0.9.34+deprecated",
- "shellexpand",
- "tonic",
- "url",
 ]
 
 [[package]]
@@ -383,11 +355,11 @@ dependencies = [
 
 [[package]]
 name = "apollo-opentelemetry"
-version = "0.12.4"
+version = "0.12.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "8d12654664f3c6a8d172090f400e143f123c91ce53cc9b4731d78e13876900c2"
+checksum = "4cdcb6a585af518c6fa1c68a8a24df1309e997c80bcceab59e831cd510f0f08a"
 dependencies = [
- "apollo-configuration 0.10.0",
+ "apollo-configuration",
  "apollo-errors",
  "apollo-opentelemetry-macros",
  "apollo-opentelemetry-stdout",
@@ -454,11 +426,11 @@ dependencies = [
 
 [[package]]
 name = "apollo-qos"
-version = "0.10.4"
+version = "0.10.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "2f6a845caf5ee7964af929d95533a3edf58650cf1d1490d61764d957fae0263f"
+checksum = "cda5341e8914bf2c6fe1c18de853569a4a9e6197103d0c755c28e395d08e0ef1"
 dependencies = [
- "apollo-configuration 0.10.0",
+ "apollo-configuration",
  "apollo-errors",
  "apollo-opentelemetry",
  "bytes",
@@ -494,7 +466,7 @@ dependencies = [
  "anyhow",
  "apollo-cache-memory",
  "apollo-compiler",
- "apollo-configuration 0.11.0",
+ "apollo-configuration",
  "apollo-environment-detector",
  "apollo-federation",
  "apollo-qos",
@@ -779,7 +751,7 @@ name = "async-allow-client-id"
 version = "0.1.0"
 dependencies = [
  "anyhow",
- "apollo-configuration 0.11.0",
+ "apollo-configuration",
  "apollo-router",
  "async-trait",
  "http",
@@ -2843,7 +2815,7 @@ name = "external-subgraph"
 version = "0.1.0"
 dependencies = [
  "anyhow",
- "apollo-configuration 0.11.0",
+ "apollo-configuration",
  "apollo-router",
  "async-trait",
  "bytes",
@@ -3601,7 +3573,7 @@ name = "hello-world"
 version = "0.1.0"
 dependencies = [
  "anyhow",
- "apollo-configuration 0.11.0",
+ "apollo-configuration",
  "apollo-router",
  "async-trait",
  "serde",
@@ -5927,7 +5899,7 @@ name = "propagate-status-code"
 version = "0.1.0"
 dependencies = [
  "anyhow",
- "apollo-configuration 0.11.0",
+ "apollo-configuration",
  "apollo-router",
  "async-trait",
  "http",
