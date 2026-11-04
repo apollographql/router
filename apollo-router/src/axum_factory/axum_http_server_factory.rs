@@ -62,6 +62,7 @@ use crate::plugins::telemetry::config_new::router::instruments::ResponseBodySize
 use crate::router::ApolloRouterError;
 use crate::router_factory::Endpoint;
 use crate::router_factory::RouterFactory;
+use crate::services::Plugins;
 use crate::services::router;
 use crate::uplink::license_enforcement::APOLLO_ROUTER_LICENSE_EXPIRED;
 use crate::uplink::license_enforcement::LICENSE_EXPIRED_SHORT_MESSAGE;
@@ -106,6 +107,7 @@ pub(crate) fn make_axum_router<RF>(
     service_factory: RF,
     configuration: &Configuration,
     mut endpoints: MultiMap<ListenAddr, Endpoint>,
+    plugins: &Plugins,
     license: Arc<LicenseState>,
 ) -> Result<ListenersAndRouters, ApolloRouterError>
 where
@@ -121,9 +123,10 @@ where
         endpoints
             .remove(&configuration.supergraph.listen)
             .unwrap_or_default(),
+        plugins,
         license,
     )?;
-    let mut extra_endpoints = extra_endpoints(endpoints, configuration);
+    let mut extra_endpoints = extra_endpoints(endpoints, plugins);
 
     // put any extra endpoint that uses the main ListenAddr into the main router
     if let Some(routers) = extra_endpoints.remove(&main_endpoint.0) {
@@ -156,8 +159,14 @@ impl HttpServerFactory for AxumHttpServerFactory {
     {
         Box::pin(async move {
             let pipeline_ref = service_factory.pipeline_ref().clone();
-            let all_routers =
-                make_axum_router(service_factory, &configuration, extra_endpoints, license)?;
+            let plugins = service_factory.plugins();
+            let all_routers = make_axum_router(
+                service_factory,
+                &configuration,
+                extra_endpoints,
+                &plugins,
+                license,
+            )?;
 
             // serve main router
 
@@ -351,6 +360,7 @@ fn main_endpoint<RF>(
     service_factory: RF,
     configuration: &Configuration,
     endpoints_on_main_listener: Vec<Endpoint>,
+    plugins: &Plugins,
     license: Arc<LicenseState>,
 ) -> Result<ListenAddrAndRouter, ApolloRouterError>
 where
@@ -399,9 +409,7 @@ where
 
     let route = endpoints_on_main_listener
         .into_iter()
-        .fold(main_route, |acc, r| {
-            acc.merge(endpoint_router(r, configuration))
-        });
+        .fold(main_route, |acc, r| acc.merge(endpoint_router(r, plugins)));
 
     let listener = configuration.supergraph.listen.clone();
     Ok(ListenAddrAndRouter(listener, route))

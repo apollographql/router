@@ -4,16 +4,20 @@
 //! the connection, and the request never reaches the Router's telemetry. So the Router advertises
 //! a larger header-list size to h2 (see [`advertised_size`]) and rejects requests over the
 //! configured limit itself (see [`exceeds_limit`]), which records the 431 like any other response.
+//! Plugin endpoints, which don't go through the limits plugin, get the same check from
+//! [`Http2HeaderListLimitLayer`].
 //! The check applies only to HTTP/2: HTTP/1.1 keeps hyper's count and buffer limits.
 
-use axum::extract::Request;
-use axum::extract::State;
-use axum::middleware::Next;
-use axum::response::IntoResponse;
-use axum::response::Response;
+use std::future::Ready;
+use std::task::Context;
+use std::task::Poll;
+
 use bytesize::ByteSize;
+use futures::future::Either;
 use http::StatusCode;
 use http::Version;
+use tower::Layer;
+use tower::Service;
 
 /// How far above the configured limit h2 may accept a header list, at most.
 ///
@@ -36,17 +40,59 @@ pub(crate) fn exceeds_limit<B>(request: &http::Request<B>, limit: ByteSize) -> b
     request.version() == Version::HTTP_2 && header_list_size(request) > limit.as_u64()
 }
 
-/// Axum middleware for plugin endpoints, which don't go through the limits plugin. Without it,
-/// they would accept header lists up to the advertised size instead of the configured limit.
-pub(crate) async fn reject_oversized(
-    State(limit): State<ByteSize>,
-    request: Request,
-    next: Next,
-) -> Response {
-    if exceeds_limit(&request, limit) {
-        StatusCode::REQUEST_HEADER_FIELDS_TOO_LARGE.into_response()
-    } else {
-        next.run(request).await
+/// Answers an HTTP/2 request whose header list is over the limit with a bare 431, for plugin
+/// endpoints. Without it, they would accept header lists up to the advertised size instead of the
+/// configured limit.
+#[derive(Clone)]
+pub(crate) struct Http2HeaderListLimitLayer {
+    limit: ByteSize,
+}
+
+impl Http2HeaderListLimitLayer {
+    pub(crate) fn new(limit: ByteSize) -> Self {
+        Self { limit }
+    }
+}
+
+impl<S> Layer<S> for Http2HeaderListLimitLayer {
+    type Service = Http2HeaderListLimit<S>;
+
+    fn layer(&self, inner: S) -> Self::Service {
+        Http2HeaderListLimit {
+            inner,
+            limit: self.limit,
+        }
+    }
+}
+
+/// The service [`Http2HeaderListLimitLayer`] wraps around an endpoint.
+#[derive(Clone)]
+pub(crate) struct Http2HeaderListLimit<S> {
+    inner: S,
+    limit: ByteSize,
+}
+
+impl<S, ReqBody, ResBody> Service<http::Request<ReqBody>> for Http2HeaderListLimit<S>
+where
+    S: Service<http::Request<ReqBody>, Response = http::Response<ResBody>>,
+    ResBody: Default,
+{
+    type Response = S::Response;
+    type Error = S::Error;
+    type Future = Either<Ready<Result<S::Response, S::Error>>, S::Future>;
+
+    fn poll_ready(&mut self, cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
+        self.inner.poll_ready(cx)
+    }
+
+    fn call(&mut self, request: http::Request<ReqBody>) -> Self::Future {
+        if exceeds_limit(&request, self.limit) {
+            let mut response = http::Response::new(ResBody::default());
+            *response.status_mut() = StatusCode::REQUEST_HEADER_FIELDS_TOO_LARGE;
+            Either::Left(std::future::ready(Ok(response)))
+        } else {
+            Either::Right(self.inner.call(request))
+        }
     }
 }
 
@@ -134,5 +180,75 @@ mod tests {
             .body(())
             .unwrap();
         assert!(!exceeds_limit(&request, ByteSize::b(1)));
+    }
+
+    mod layer {
+        use std::sync::Arc;
+        use std::sync::atomic::AtomicBool;
+        use std::sync::atomic::Ordering;
+
+        use tower::ServiceExt;
+        use tower::service_fn;
+
+        use super::*;
+
+        const LIMIT: ByteSize = ByteSize::b(PSEUDO_HEADERS_SIZE + 3 + 100 + 32);
+
+        /// Sends `request` through the layer. Returns the response and whether the endpoint ran.
+        async fn through_layer(request: http::Request<()>) -> (http::Response<String>, bool) {
+            let called = Arc::new(AtomicBool::new(false));
+            let endpoint = service_fn({
+                let called = called.clone();
+                move |_: http::Request<()>| {
+                    called.store(true, Ordering::SeqCst);
+                    async { Ok::<_, std::convert::Infallible>(http::Response::new("ok".into())) }
+                }
+            });
+            let response = Http2HeaderListLimitLayer::new(LIMIT)
+                .layer(endpoint)
+                .oneshot(request)
+                .await
+                .unwrap();
+            (response, called.load(Ordering::SeqCst))
+        }
+
+        #[tokio::test]
+        async fn rejects_http2_requests_over_the_limit_without_calling_the_endpoint() {
+            let request = http2_request()
+                .header("x-a", "v".repeat(101))
+                .body(())
+                .unwrap();
+            let (response, called) = through_layer(request).await;
+            assert_eq!(
+                response.status(),
+                StatusCode::REQUEST_HEADER_FIELDS_TOO_LARGE
+            );
+            assert!(response.body().is_empty());
+            assert!(!called);
+        }
+
+        #[tokio::test]
+        async fn passes_http2_requests_at_the_limit() {
+            let request = http2_request()
+                .header("x-a", "v".repeat(100))
+                .body(())
+                .unwrap();
+            let (response, called) = through_layer(request).await;
+            assert_eq!(response.status(), StatusCode::OK);
+            assert!(called);
+        }
+
+        #[tokio::test]
+        async fn passes_http1_requests_over_the_limit() {
+            let request = http::Request::builder()
+                .version(Version::HTTP_11)
+                .uri("http://localhost:4000/graphql")
+                .header("x-a", "v".repeat(1000))
+                .body(())
+                .unwrap();
+            let (response, called) = through_layer(request).await;
+            assert_eq!(response.status(), StatusCode::OK);
+            assert!(called);
+        }
     }
 }
