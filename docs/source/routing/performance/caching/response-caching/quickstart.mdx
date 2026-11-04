@@ -230,7 +230,7 @@ type Post @key(fields: "id") @cacheControl(maxAge: 60) {
 
 The cache control is set with a TTL of 60 seconds, so both the `Post` and `User` types are cached for 60 seconds.
 
-Because `User` is `PRIVATE`, the router needs to recognize which user sent each request. The `private_id` in the router configuration points at the `user_id` key in the request context. This example retrieves the user_id from a JWT authentication:
+Because `User` is `PRIVATE`, the router needs to recognize which user sent each request. The `private_id` in the router configuration points at the `user_id` key in the request context. This example retrieves the `user_id` from a JWT authentication:
 
 ```yaml title="router.yaml"
 authentication:
