@@ -25,6 +25,12 @@ When the underlying data is changing rapidly, the separate requests of an applic
 
 To prevent this inconsistency from happening, clients can bundle multiple requests together into a batch so routers or servers can produce responses with consistent data. MFE-based UIs usually batch multiple client operations, issued close together, into a single HTTP request. Both Apollo Client and Apollo Server support this.
 
+### Resource impact
+
+Batch requests are counted as one request in concurrency limits and rate limits. Batch requests inherently do the work of several non-batch requests. This means that large batches can increase the load on the router. Size concurrency limits and `maximum_size` appropriately for the resources you have assigned to the router.
+
+We recommend using a conservative `maximum_size`. The vast majority of batches contain fewer than 10 requests, but check what your clients actually send first: the [`apollo.router.operations.batching.size`](#metrics-for-query-batching) metric reports batch sizes. Set `maximum_size` a little above the largest batch you see, because a batch over the limit fails entirely with a `BATCH_LIMIT_EXCEEDED` error.
+
 ### Router batching support
 
 The router's batching support is provided by two sets of functionality:
@@ -61,6 +67,7 @@ To enable query batching, set the following fields in your `router.yaml` configu
 batching:
   enabled: true
   mode: batch_http_link
+  maximum_size: 10
 ```
 
 | Attribute | Description | Valid Values | Default Value |
@@ -77,6 +84,7 @@ If client query batching is enabled, and the router's subgraphs [support query b
 batching:
   enabled: true
   mode: batch_http_link
+  maximum_size: 10
   subgraph:
     # Enable batching on all subgraphs
     all:
@@ -87,6 +95,7 @@ batching:
 batching:
   enabled: true
   mode: batch_http_link
+  maximum_size: 10
   subgraph:
     # Disable batching on all subgraphs
     all:
@@ -119,21 +128,13 @@ The input client query to the federated graph:
 
 ```json title="simple-batch.json"
 [
-    {"query":"query MeQuery1 {\n  me {\n    id\n }\n}"}
+    {"query":"query MeQuery1 {\n  me {\n    id\n }\n}"},
     {"query":"query MeQuery2 {\n  me {\n    name\n }\n}"},
-    {"query":"query MeQuery3 {\n  me {\n    id\n }\n}"}
+    {"query":"query MeQuery3 {\n  me {\n    id\n }\n}"},
     {"query":"query MeQuery4 {\n  me {\n    name\n }\n}"},
-    {"query":"query MeQuery5 {\n  me {\n    id\n }\n}"}
+    {"query":"query MeQuery5 {\n  me {\n    id\n }\n}"},
     {"query":"query MeQuery6 {\n  me {\n    name\n }\n}"},
     {"query":"query MeQuery7 {\n  me {\n    id\n }\n}"}
-    {"query":"query MeQuery8 {\n  me {\n    name\n }\n}"},
-    {"query":"query MeQuery9 {\n  me {\n    id\n }\n}"}
-    {"query":"query MeQuery10 {\n  me {\n    name\n }\n}"},
-    {"query":"query MeQuery11 {\n  me {\n    id\n }\n}"}
-    {"query":"query MeQuery12 {\n  me {\n    name\n }\n}"},
-    {"query":"query MeQuery13 {\n  me {\n    id\n }\n}"}
-    {"query":"query MeQuery14 {\n  me {\n    name\n }\n}"},
-    {"query":"query MeQuery15 {\n  me {\n    id\n }\n}"}
 ]
 ```
 
@@ -146,20 +147,12 @@ From the input query, the router generates a set of subgraph queries:
 "query MeQuery5__accounts__0{me{id}}",
 "query MeQuery6__accounts__0{me{name}}",
 "query MeQuery7__accounts__0{me{id}}",
-"query MeQuery8__accounts__0{me{name}}",
-"query MeQuery9__accounts__0{me{id}}",
-"query MeQuery10__accounts__0{me{name}}",
-"query MeQuery11__accounts__0{me{id}}",
-"query MeQuery12__accounts__0{me{name}}",
-"query MeQuery13__accounts__0{me{id}}",
-"query MeQuery14__accounts__0{me{name}}",
-"query MeQuery15__accounts__0{me{id}}",
 ```
-All of the queries can be combined into a single batch. So instead of 15 (non-batch) subgraph fetches, the router only has to make one fetch.
+All of the queries can be combined into a single batch. So instead of 7 (non-batch) subgraph fetches, the router only has to make one fetch.
 
 | Subgraph | Fetch Count (without)| Fetch Count (with) |
 |----------|----------------------|--------------------|
-| accounts | 15                   | 1                  |
+| accounts | 7                    | 1                  |
 
 ##### Example: complex subgraph batching
 
@@ -276,18 +269,10 @@ The `subgraph` attribute is optional. If the attribute isn't present, the metric
 
 A query batch is an array of operations.
 
-```graphql
+```json
 [
-query MyFirstQuery {
-  me {
-    id
-  }
-},
-query MySecondQuery {
-  me {
-    name
-  }
-}
+  { "query": "query MyFirstQuery { me { id } }" },
+  { "query": "query MySecondQuery { me { name } }" }
 ]
 ```
 
