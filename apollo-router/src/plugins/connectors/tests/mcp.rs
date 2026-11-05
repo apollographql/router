@@ -338,3 +338,70 @@ async fn an_mcp_source_holds_a_session_without_any_router_config() {
     }
     "#);
 }
+
+#[tokio::test]
+async fn a_401_says_where_to_get_a_token() {
+    let mock_server = MockServer::start().await;
+    mount_tool_call(
+        &mock_server,
+        "latest_event",
+        serde_json::json!({}),
+        ResponseTemplate::new(401)
+            .insert_header(
+                "www-authenticate",
+                r#"Bearer resource_metadata="https://quakes.example.com/.well-known/oauth-protected-resource", scope="quakes:read", error="invalid_token", error_description="The access token expired""#,
+            )
+            .set_body_string("unauthorized"),
+    )
+    .await;
+
+    let response = execute_stateless(&mock_server, "query { latestQuake { id } }").await;
+
+    assert_eq!(response["data"]["latestQuake"], serde_json::Value::Null);
+    insta::assert_json_snapshot!(response["errors"][0]["extensions"], @r#"
+    {
+      "code": "UNAUTHENTICATED",
+      "service": "quakes",
+      "connector": {
+        "coordinate": "quakes:Query.latestQuake[0]"
+      },
+      "http": {
+        "status": 401
+      },
+      "mcp": {
+        "auth": {
+          "resourceMetadata": "https://quakes.example.com/.well-known/oauth-protected-resource",
+          "scope": "quakes:read",
+          "error": "invalid_token",
+          "errorDescription": "The access token expired"
+        }
+      }
+    }
+    "#);
+    assert_eq!(
+        response["errors"][0]["message"],
+        "The MCP server needs a credential it accepts: The access token expired"
+    );
+}
+
+#[tokio::test]
+async fn a_403_without_a_challenge_is_forbidden() {
+    let mock_server = MockServer::start().await;
+    mount_tool_call(
+        &mock_server,
+        "latest_event",
+        serde_json::json!({}),
+        ResponseTemplate::new(403).set_body_string("forbidden"),
+    )
+    .await;
+
+    let response = execute_stateless(&mock_server, "query { latestQuake { id } }").await;
+
+    let error = &response["errors"][0];
+    assert_eq!(error["extensions"]["code"], "FORBIDDEN");
+    assert_eq!(error["extensions"]["mcp"], serde_json::Value::Null);
+    assert_eq!(
+        error["message"],
+        "The MCP server refused this credential access"
+    );
+}

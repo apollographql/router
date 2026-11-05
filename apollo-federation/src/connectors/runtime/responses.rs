@@ -215,8 +215,19 @@ fn handle_mcp_response(
     let author_maps_errors = settings.message.is_some()
         || settings.source_extensions.is_some()
         || settings.connect_extensions.is_some();
-    // A non-2xx status is an HTTP failure first, whatever the body says
-    if author_maps_errors || !parts.status.is_success() {
+    if author_maps_errors {
+        return map_error(connector, &reply_or_null, parts, key, inputs, warnings);
+    }
+    // An authentication failure says how to recover, so a client can get a token and retry
+    if let Some(error) = mcp_auth_error(parts, &key, connector) {
+        return MappedResponse::Error {
+            error,
+            key,
+            problems: warnings,
+        };
+    }
+    // Any other non-2xx status is an HTTP failure first, whatever the body says
+    if !parts.status.is_success() {
         return map_error(connector, &reply_or_null, parts, key, inputs, warnings);
     }
 
@@ -260,6 +271,52 @@ fn handle_mcp_response(
         key,
         problems: warnings,
     }
+}
+
+/// The error for a 401 or 403 from an MCP server: `UNAUTHENTICATED` or `FORBIDDEN`, with the
+/// server's `Bearer` challenge in `extensions.mcp.auth`, or `None` for any other status.
+fn mcp_auth_error(parts: &Parts, key: &ResponseKey, connector: &Connector) -> Option<RuntimeError> {
+    let (code, message) = match parts.status.as_u16() {
+        401 => (
+            mcp::UNAUTHENTICATED_CODE,
+            "The MCP server needs a credential it accepts",
+        ),
+        403 => (
+            mcp::FORBIDDEN_CODE,
+            "The MCP server refused this credential access",
+        ),
+        _ => return None,
+    };
+    let challenge = parts
+        .headers
+        .get_all(http::header::WWW_AUTHENTICATE)
+        .iter()
+        .filter_map(|value| value.to_str().ok())
+        .find_map(mcp::bearer_challenge);
+    let message = challenge
+        .as_ref()
+        .and_then(|challenge| challenge.get("errorDescription"))
+        .and_then(Value::as_str)
+        .map(|description| format!("{message}: {description}"))
+        .unwrap_or_else(|| message.to_string());
+
+    let mut error = RuntimeError::new(message, key);
+    error.subgraph_name = Some(connector.id.subgraph_name.clone());
+    error.coordinate = Some(connector.id.coordinate());
+    error = error.extension(
+        "http",
+        Value::Object(Map::from_iter([(
+            "status".into(),
+            Value::Number(parts.status.as_u16().into()),
+        )])),
+    );
+    if let Some(challenge) = challenge {
+        error = error.extension(
+            "mcp",
+            Value::Object(Map::from_iter([("auth".into(), challenge)])),
+        );
+    }
+    Some(error.with_code(code))
 }
 
 /// The error code used for [`check_response_shape`] errors, distinguishing a

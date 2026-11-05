@@ -20,6 +20,82 @@ pub(crate) const MCP_TOOL_ERROR_CODE: &str = "MCP_TOOL_ERROR";
 /// The error code for a successful HTTP response that holds no JSON-RPC reply.
 pub(crate) const MCP_INVALID_RESPONSE_CODE: &str = "MCP_INVALID_RESPONSE";
 
+/// The error code for a 401 from an MCP server: the caller needs a credential the server accepts.
+pub(crate) const UNAUTHENTICATED_CODE: &str = "UNAUTHENTICATED";
+
+/// The error code for a 403 from an MCP server: the credential lacks a permission or scope.
+pub(crate) const FORBIDDEN_CODE: &str = "FORBIDDEN";
+
+/// The parameters of a `Bearer` challenge in `WWW-Authenticate`, which MCP servers use to tell a
+/// client where to get a token (`resource_metadata`, from RFC 9728) and what it must allow
+/// (`scope`, `error`, `error_description`, from RFC 6750).
+///
+/// They become `extensions.mcp.auth`, so a client that can run the OAuth flow itself knows where
+/// to start and can retry with a token. Parameters other than these are left out.
+pub(crate) fn bearer_challenge(www_authenticate: &str) -> Option<Value> {
+    const PARAMS: [(&str, &str); 4] = [
+        ("resource_metadata", "resourceMetadata"),
+        ("scope", "scope"),
+        ("error", "error"),
+        ("error_description", "errorDescription"),
+    ];
+    let rest = www_authenticate.trim_start();
+    let scheme_end = rest.find(char::is_whitespace).unwrap_or(rest.len());
+    if !rest[..scheme_end].eq_ignore_ascii_case("bearer") {
+        return None;
+    }
+    let mut auth = Map::new();
+    for (name, value) in auth_params(&rest[scheme_end..]) {
+        if let Some((_, key)) = PARAMS
+            .iter()
+            .find(|(param, _)| param.eq_ignore_ascii_case(&name))
+        {
+            auth.insert(*key, Value::String(value.into()));
+        }
+    }
+    Some(Value::Object(auth))
+}
+
+/// The `name=value` pairs of an auth challenge, where a value is a token or a quoted string.
+fn auth_params(mut rest: &str) -> Vec<(String, String)> {
+    let mut params = Vec::new();
+    loop {
+        rest = rest.trim_start_matches(|c: char| c.is_whitespace() || c == ',');
+        let Some(eq) = rest.find('=') else {
+            return params;
+        };
+        let name = rest[..eq].trim().to_string();
+        rest = rest[eq + 1..].trim_start();
+        let value = if let Some(quoted) = rest.strip_prefix('"') {
+            let mut value = String::new();
+            let mut chars = quoted.char_indices();
+            let mut end = quoted.len();
+            while let Some((i, c)) = chars.next() {
+                match c {
+                    '\\' => {
+                        if let Some((_, escaped)) = chars.next() {
+                            value.push(escaped);
+                        }
+                    }
+                    '"' => {
+                        end = i + 1;
+                        break;
+                    }
+                    c => value.push(c),
+                }
+            }
+            rest = &quoted[end..];
+            value
+        } else {
+            let end = rest.find(',').unwrap_or(rest.len());
+            let value = rest[..end].trim().to_string();
+            rest = &rest[end..];
+            value
+        };
+        params.push((name, value));
+    }
+}
+
 /// The JSON-RPC reply among the folded events: an object with an `id` and a `result` or an
 /// `error`, and no `method`, which would make it a request or notification from the server.
 ///
@@ -119,6 +195,30 @@ mod tests {
     use serde_json_bytes::json;
 
     use super::*;
+
+    #[test]
+    fn a_bearer_challenge_keeps_what_a_client_needs_to_get_a_token() {
+        let challenge = r#"Bearer realm="mcp", resource_metadata="https://mcp.example.com/.well-known/oauth-protected-resource", scope="mcp:connect files:read", error="invalid_token", error_description="The token \"t\" expired""#;
+        assert_eq!(
+            bearer_challenge(challenge),
+            Some(json!({
+                "resourceMetadata": "https://mcp.example.com/.well-known/oauth-protected-resource",
+                "scope": "mcp:connect files:read",
+                "error": "invalid_token",
+                "errorDescription": "The token \"t\" expired",
+            }))
+        );
+    }
+
+    #[test]
+    fn a_bearer_challenge_with_token_values_and_no_params() {
+        assert_eq!(
+            bearer_challenge("bearer error=insufficient_scope, scope=admin"),
+            Some(json!({ "error": "insufficient_scope", "scope": "admin" }))
+        );
+        assert_eq!(bearer_challenge("Bearer"), Some(json!({})));
+        assert_eq!(bearer_challenge(r#"Basic realm="x""#), None);
+    }
 
     #[test]
     fn the_reply_is_found_after_progress_notifications() {

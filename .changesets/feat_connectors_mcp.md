@@ -24,6 +24,7 @@ MCP reports a failure in one of two ways, both with HTTP 200: a JSON-RPC `error`
 - `MCP_PROTOCOL_ERROR` for a JSON-RPC `error`, such as an unknown tool or invalid arguments, with the JSON-RPC error code in `extensions.mcp.code`. The error's `data` is not passed on.
 - `MCP_TOOL_ERROR` for a tool result with `isError: true`, with the tool's text as the message.
 - `MCP_INVALID_RESPONSE` when a successful HTTP response holds no JSON-RPC reply.
+- `UNAUTHENTICATED` for a 401 and `FORBIDDEN` for a 403. When the server sends a `Bearer` challenge in `WWW-Authenticate`, its `resource_metadata`, `scope`, `error` and `error_description` are passed on in `extensions.mcp.auth` (as `resourceMetadata`, `scope`, `error` and `errorDescription`), so a client that can get a token from the server's authorization server knows where to start, and can retry with it.
 
 A connector's own `isSuccess` and `errors` mappings, including ones it inherits from its `@source`, see the JSON-RPC reply instead of the tool's output.
 
