@@ -730,6 +730,12 @@ mod tests {
                     stations: [Station]
                     @connect(source: "quakes", mcp: { tool: "list_stations" }, selection: "$.stations { id }")
 
+                    latestQuakeFromText: Quake
+                    @connect(source: "quakes", mcp: { tool: "latest_event_text" }, selection: "$->jsonParse { id magnitude }")
+
+                    latestQuakeMap: String
+                    @connect(source: "quakes", mcp: { tool: "latest_event_map" }, selection: "$")
+
                     checkedQuake: Quake
                     @connect(
                         source: "quakes"

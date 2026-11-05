@@ -10,6 +10,8 @@ use wiremock::matchers::header;
 use wiremock::matchers::method;
 use wiremock::matchers::path;
 
+use crate::metrics::FutureMetricsExt as _;
+
 const MCP_SCHEMA: &str = include_str!("../testdata/mcp.graphql");
 
 /// Runs `query` against the `quakes` MCP server mocked by `mock_server`. `sessions` is the
@@ -115,14 +117,14 @@ async fn a_tool_call_sends_its_arguments_and_maps_the_structured_result_from_sse
 }
 
 #[tokio::test]
-async fn a_tool_without_arguments_gets_an_empty_arguments_object_and_json_text_is_parsed() {
+async fn a_tool_without_arguments_gets_an_empty_arguments_object() {
     let mock_server = MockServer::start().await;
     mount_tool_call(
         &mock_server,
         "latest_event",
         serde_json::json!({}),
         json_reply(
-            r#"{"jsonrpc":"2.0","id":1,"result":{"content":[{"type":"text","text":"{\"id\":\"c\",\"magnitude\":6.2}"}]}}"#,
+            r#"{"jsonrpc":"2.0","id":1,"result":{"structuredContent":{"id":"c","magnitude":6.2},"content":[]}}"#,
         ),
     )
     .await;
@@ -139,6 +141,83 @@ async fn a_tool_without_arguments_gets_an_empty_arguments_object_and_json_text_i
       }
     }
     "#);
+}
+
+#[tokio::test]
+async fn json_text_is_text_until_the_selection_parses_it() {
+    let mock_server = MockServer::start().await;
+    mount_tool_call(
+        &mock_server,
+        "latest_event_text",
+        serde_json::json!({}),
+        json_reply(
+            r#"{"jsonrpc":"2.0","id":1,"result":{"content":[{"type":"text","text":"{\"id\":\"t\",\"magnitude\":4.4}"}]}}"#,
+        ),
+    )
+    .await;
+
+    let response = execute_stateless(
+        &mock_server,
+        "query { latestQuakeFromText { id magnitude } }",
+    )
+    .await;
+
+    insta::assert_json_snapshot!(response, @r#"
+    {
+      "data": {
+        "latestQuakeFromText": {
+          "id": "t",
+          "magnitude": 4.4
+        }
+      }
+    }
+    "#);
+}
+
+#[tokio::test]
+async fn image_only_content_is_an_unsupported_content_error() {
+    let mock_server = MockServer::start().await;
+    mount_tool_call(
+        &mock_server,
+        "latest_event_map",
+        serde_json::json!({}),
+        json_reply(
+            r#"{"jsonrpc":"2.0","id":1,"result":{"content":[{"type":"image","data":"iVBORw0KGgo=","mimeType":"image/png"}]}}"#,
+        ),
+    )
+    .await;
+
+    let response = execute_stateless(&mock_server, "query { latestQuakeMap }").await;
+
+    assert_eq!(response["data"]["latestQuakeMap"], serde_json::Value::Null);
+    assert_eq!(
+        response["errors"][0]["extensions"]["code"],
+        "MCP_UNSUPPORTED_CONTENT"
+    );
+}
+
+#[tokio::test]
+async fn a_null_result_is_an_invalid_response_not_a_silent_null() {
+    let mock_server = MockServer::start().await;
+    mount_tool_call(
+        &mock_server,
+        "latest_event",
+        serde_json::json!({}),
+        json_reply(r#"{"jsonrpc":"2.0","id":1,"result":null}"#),
+    )
+    .await;
+
+    let response = execute_stateless(&mock_server, "query { latestQuake { id } }").await;
+
+    assert_eq!(response["data"]["latestQuake"], serde_json::Value::Null);
+    assert_eq!(
+        response["errors"][0]["extensions"]["code"],
+        "MCP_INVALID_RESPONSE"
+    );
+    assert_eq!(
+        response["errors"][0]["message"],
+        "The MCP server's reply held no tool result"
+    );
 }
 
 #[tokio::test]
@@ -404,4 +483,52 @@ async fn a_403_without_a_challenge_is_forbidden() {
         error["message"],
         "The MCP server refused this credential access"
     );
+}
+
+#[tokio::test]
+async fn tool_calls_are_counted_by_outcome() {
+    async {
+        let mock_server = MockServer::start().await;
+        mount_tool_call(
+            &mock_server,
+            "latest_event",
+            serde_json::json!({}),
+            json_reply(
+                r#"{"jsonrpc":"2.0","id":1,"result":{"isError":true,"content":[{"type":"text","text":"Catalog offline"}]}}"#,
+            ),
+        )
+        .await;
+        mount_tool_call(
+            &mock_server,
+            "search_events",
+            serde_json::json!({ "limit": 1 }),
+            json_reply(
+                r#"{"jsonrpc":"2.0","id":1,"result":{"structuredContent":{"events":[{"id":"a","magnitude":5.1}]},"content":[]}}"#,
+            ),
+        )
+        .await;
+
+        execute_stateless(
+            &mock_server,
+            "query { latestQuake { id } recentQuakes(limit: 1) { id } }",
+        )
+        .await;
+
+        assert_counter!(
+            "apollo.router.connectors.mcp.calls",
+            1,
+            "connector.source" = "quakes.quakes",
+            "mcp.tool.name" = "latest_event",
+            "mcp.outcome" = "tool_error"
+        );
+        assert_counter!(
+            "apollo.router.connectors.mcp.calls",
+            1,
+            "connector.source" = "quakes.quakes",
+            "mcp.tool.name" = "search_events",
+            "mcp.outcome" = "ok"
+        );
+    }
+    .with_metrics()
+    .await;
 }

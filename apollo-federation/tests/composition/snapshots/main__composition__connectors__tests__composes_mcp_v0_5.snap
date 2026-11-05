@@ -57,6 +57,8 @@ type Query @join__type(graph: QUAKES) {
   latestQuake: Quake @join__directive(name: "connect", graphs: [QUAKES], args: {source: "quakes", mcp: {tool: "latest_event"}, selection: "id magnitude"})
   quake(id: ID!): Quake @join__directive(name: "connect", graphs: [QUAKES], args: {source: "quakes", mcp: {tool: "get_event", arguments: "$args { event_id: id }"}, selection: "id magnitude", entity: true})
   stations: [Station] @join__directive(name: "connect", graphs: [QUAKES], args: {source: "quakes", mcp: {tool: "list_stations"}, selection: "$.stations { id }"})
+  latestQuakeFromText: Quake @join__directive(name: "connect", graphs: [QUAKES], args: {source: "quakes", mcp: {tool: "latest_event_text"}, selection: "$->jsonParse { id magnitude }"})
+  latestQuakeMap: String @join__directive(name: "connect", graphs: [QUAKES], args: {source: "quakes", mcp: {tool: "latest_event_map"}, selection: "$"})
   checkedQuake: Quake @join__directive(name: "connect", graphs: [QUAKES], args: {source: "quakes", mcp: {tool: "latest_event"}, selection: "id magnitude", errors: {message: "$(result.content->first.text ?? error.message)", extensions: "code: $('QUAKE_TOOL_FAILED')"}})
 }
 

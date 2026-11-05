@@ -330,11 +330,11 @@ mod tests {
     async fn test_connect_mcp_instrument() {
         async {
             let config = Arc::default();
-            // Six connectors call an MCP tool: five on fields and one on a type
+            // Eight connectors call an MCP tool: seven on fields and one on a type
             let schema = Schema::parse(include_str!("./testdata/mcp.graphql"), &config).unwrap();
             let _services = ConnectorServices::empty(Arc::from(schema));
 
-            assert_gauge!("apollo.router.schema.connectors.mcp", 6);
+            assert_gauge!("apollo.router.schema.connectors.mcp", 8);
         }
         .with_metrics()
         .await;

@@ -20,6 +20,10 @@ pub(crate) const MCP_TOOL_ERROR_CODE: &str = "MCP_TOOL_ERROR";
 /// The error code for a successful HTTP response that holds no JSON-RPC reply.
 pub(crate) const MCP_INVALID_RESPONSE_CODE: &str = "MCP_INVALID_RESPONSE";
 
+/// The error code for a tool result with neither `structuredContent` nor text: only images, audio
+/// or resources, which `@connect(mcp:)` doesn't map.
+pub(crate) const MCP_UNSUPPORTED_CONTENT_CODE: &str = "MCP_UNSUPPORTED_CONTENT";
+
 /// The error code for a 401 from an MCP server: the caller needs a credential the server accepts.
 pub(crate) const UNAUTHENTICATED_CODE: &str = "UNAUTHENTICATED";
 
@@ -128,6 +132,11 @@ pub(crate) enum Failure<'a> {
     },
     /// A tool result with `isError: true`
     Tool { message: Option<String> },
+    /// A reply whose `result` isn't a tool result: not an object, or one with neither `content`
+    /// nor `structuredContent`
+    InvalidResult,
+    /// A tool result with neither `structuredContent` nor text blocks
+    UnsupportedContent,
 }
 
 /// Whether the reply reports a failure, and which kind.
@@ -142,17 +151,31 @@ pub(crate) fn failure(reply: Option<&Value>) -> Option<Failure<'_>> {
         });
     }
     let result = reply.get("result")?;
+    let is_tool_result = result.as_object().is_some_and(|result| {
+        result.get("content").is_some_and(Value::is_array)
+            || result.contains_key("structuredContent")
+    });
+    if !is_tool_result {
+        return Some(Failure::InvalidResult);
+    }
     if result.get("isError").and_then(Value::as_bool) == Some(true) {
         return Some(Failure::Tool {
             message: text_content(result),
         });
     }
+    if result.get("structuredContent").is_none() && text_content(result).is_none() {
+        return Some(Failure::UnsupportedContent);
+    }
     None
 }
 
-/// What the selection of an `@connect(mcp:)` connector receives: the tool's `structuredContent`
-/// when it has one. Otherwise the text of its content, parsed as JSON if it is JSON and as a
-/// string if not, since many tools put JSON in a text block instead of declaring an output schema.
+/// What the selection of an `@connect(mcp:)` connector receives, from a reply that [`failure`]
+/// accepted: the tool's `structuredContent` when it has one, which a tool with an output schema
+/// always sends, and otherwise the text of its text blocks, joined by newlines, as a string.
+///
+/// Text is never parsed implicitly, so a tool's output doesn't change type with what it happens
+/// to say; a tool that writes JSON as text is mapped with `$->jsonParse`. A result with neither is
+/// refused by [`failure`] as unsupported content rather than handed over in yet another shape.
 pub(crate) fn tool_output(reply: &Value) -> Value {
     let Some(result) = reply.get("result") else {
         return Value::Null;
@@ -160,12 +183,9 @@ pub(crate) fn tool_output(reply: &Value) -> Value {
     if let Some(structured) = result.get("structuredContent") {
         return structured.clone();
     }
-    match text_content(result) {
-        Some(text) => {
-            serde_json::from_str::<Value>(&text).unwrap_or_else(|_| Value::String(text.into()))
-        }
-        None => Value::Null,
-    }
+    text_content(result)
+        .map(|text| Value::String(text.into()))
+        .unwrap_or(Value::Null)
 }
 
 /// The text blocks of a tool result's `content`, joined by newlines, or `None` if it has none.
@@ -278,16 +298,39 @@ mod tests {
     }
 
     #[test]
-    fn text_content_is_parsed_as_json_when_it_is_json() {
-        let reply = json!({ "id": 1, "result": { "content": [{ "type": "text", "text": "{\"a\": [1, 2]}" }] } });
-        assert_eq!(tool_output(&reply), json!({ "a": [1, 2] }));
+    fn text_content_stays_a_string_even_when_it_is_json() {
+        for text in ["{\"a\": [1, 2]}", "null", "hello"] {
+            let reply =
+                json!({ "id": 1, "result": { "content": [{ "type": "text", "text": text }] } });
+            assert_eq!(failure(Some(&reply)), None);
+            assert_eq!(tool_output(&reply), json!(text));
+        }
     }
 
     #[test]
-    fn text_content_stays_a_string_when_it_is_not_json() {
-        let reply =
-            json!({ "id": 1, "result": { "content": [{ "type": "text", "text": "hello" }] } });
-        assert_eq!(tool_output(&reply), json!("hello"));
+    fn media_only_content_is_unsupported() {
+        let content = json!([{ "type": "image", "data": "iVBORw0KGgo=", "mimeType": "image/png" }]);
+        let reply = json!({ "id": 1, "result": { "content": content } });
+        assert_eq!(failure(Some(&reply)), Some(Failure::UnsupportedContent));
+        let empty = json!({ "id": 1, "result": { "content": [] } });
+        assert_eq!(failure(Some(&empty)), Some(Failure::UnsupportedContent));
+    }
+
+    #[test]
+    fn a_result_that_is_not_a_tool_result_is_invalid() {
+        for result in [
+            json!(null),
+            json!("ok"),
+            json!({}),
+            json!({ "content": "text" }),
+        ] {
+            let reply = json!({ "jsonrpc": "2.0", "id": 1, "result": result });
+            assert_eq!(
+                failure(Some(&reply)),
+                Some(Failure::InvalidResult),
+                "{result}"
+            );
+        }
     }
 
     #[test]

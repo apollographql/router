@@ -251,6 +251,17 @@ fn handle_mcp_response(
             mcp::MCP_INVALID_RESPONSE_CODE,
             None,
         ),
+        Some(mcp::Failure::InvalidResult) => (
+            "The MCP server's reply held no tool result".to_string(),
+            mcp::MCP_INVALID_RESPONSE_CODE,
+            None,
+        ),
+        Some(mcp::Failure::UnsupportedContent) => (
+            "The tool returned no structured content or text, which @connect(mcp:) can map"
+                .to_string(),
+            mcp::MCP_UNSUPPORTED_CONTENT_CODE,
+            None,
+        ),
     };
 
     let mut error = RuntimeError::new(message, &key);

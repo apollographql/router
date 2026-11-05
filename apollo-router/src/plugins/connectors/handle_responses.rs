@@ -15,11 +15,19 @@ use apollo_federation::connectors::runtime::responses::HandleResponseError;
 use apollo_federation::connectors::runtime::responses::MappedResponse;
 use apollo_federation::connectors::runtime::responses::deserialize_response;
 use apollo_federation::connectors::runtime::responses::handle_raw_response;
+use apollo_federation::connectors::runtime::stream_framing::StreamFraming;
 use axum::body::HttpBody;
+use bytes::Buf;
+use bytes::Bytes;
+use futures::Stream;
+use futures::StreamExt;
 use http::response::Parts;
+use http_body::Frame;
+use http_body_util::BodyDataStream;
 use http_body_util::BodyExt;
 use http_body_util::LengthLimitError;
 use http_body_util::Limited;
+use http_body_util::StreamBody;
 use opentelemetry::KeyValue;
 use parking_lot::Mutex;
 use serde_json_bytes::Map;
@@ -150,33 +158,32 @@ where
             // Whether the body failed to arrive in full for a reason of the source's own, as
             // opposed to the router cutting it off at the response size limit.
             let mut body_incomplete = false;
-            let body_result: Result<_, Box<RuntimeError>> = match response_size_limit {
-                Some(ConnectorResponseSizeLimit(limit)) => {
-                    Limited::new(body, limit)
-                        .collect()
-                        .await
-                        .map_err(|e| {
-                            if e.downcast_ref::<LengthLimitError>().is_some() {
-                                u64_counter!(
-                                    "apollo.router.limits.connector_response_size.exceeded",
-                                    "Number of connector responses aborted because they exceeded the configured response size limit",
-                                    1,
-                                    "connector.source" = connector.source_config_key()
-                                );
-                                tracing::Span::current()
-                                    .record("apollo.connector.response.aborted", "response_size_limit");
-                                make_limit_err(limit)
-                            } else {
-                                body_incomplete = true;
-                                make_invalid_response_err()
-                            }
-                        })
-                }
-                None => body.collect().await.map_err(|_| {
-                    body_incomplete = true;
-                    make_invalid_response_err()
-                }),
+            let limit = response_size_limit.map(|ConnectorResponseSizeLimit(limit)| limit);
+            // An MCP server may keep an event stream open after it has replied (the transport
+            // only says it SHOULD close it), so a tool call's stream is read up to the reply.
+            let collected = if calls_mcp(&connector) && is_event_stream(&parts) {
+                collect_body(until_json_rpc_reply(body), limit).await
+            } else {
+                collect_body(body, limit).await
             };
+            let body_result: Result<_, Box<RuntimeError>> =
+                collected.map_err(|error| match error {
+                    CollectError::Limit(limit) => {
+                        u64_counter!(
+                            "apollo.router.limits.connector_response_size.exceeded",
+                            "Number of connector responses aborted because they exceeded the configured response size limit",
+                            1,
+                            "connector.source" = connector.source_config_key()
+                        );
+                        tracing::Span::current()
+                            .record("apollo.connector.response.aborted", "response_size_limit");
+                        make_limit_err(limit)
+                    }
+                    CollectError::Incomplete => {
+                        body_incomplete = true;
+                        make_invalid_response_err()
+                    }
+                });
             if body_incomplete && let TransportOutcome::Response(http_response) = &mut outcome {
                 http_response
                     .inner
@@ -185,7 +192,6 @@ where
             }
 
             let deserialized_body = body_result.and_then(|body| {
-                let body = body.to_bytes();
                 let stream = connector
                     .transport
                     .as_ref()
@@ -264,6 +270,8 @@ where
         }
     };
 
+    record_mcp_outcome(&connector, &mapped_response);
+
     if let MappedResponse::Error { ref mut error, .. } = mapped_response {
         // Emit here so the event picks up the connector request-service span's attributes
         // (coordinate, source, etc.). Mark the error as emitted so `From<RuntimeError>` carries
@@ -280,6 +288,125 @@ where
         mapped_response,
         answered_by_router: false,
     }
+}
+
+/// Why a connector response body couldn't be read in full.
+enum CollectError {
+    /// It went past the configured response size limit, in bytes.
+    Limit(usize),
+    /// The source failed to send all of it.
+    Incomplete,
+}
+
+/// Reads `body` to the end, or up to `limit` bytes.
+async fn collect_body<B>(body: B, limit: Option<usize>) -> Result<Bytes, CollectError>
+where
+    B: HttpBody,
+    B::Error: Into<tower::BoxError>,
+{
+    match limit {
+        Some(limit) => Limited::new(body, limit)
+            .collect()
+            .await
+            .map(|collected| collected.to_bytes())
+            .map_err(|error| {
+                if error.downcast_ref::<LengthLimitError>().is_some() {
+                    CollectError::Limit(limit)
+                } else {
+                    CollectError::Incomplete
+                }
+            }),
+        None => body
+            .collect()
+            .await
+            .map(|collected| collected.to_bytes())
+            .map_err(|_| CollectError::Incomplete),
+    }
+}
+
+fn calls_mcp(connector: &Connector) -> bool {
+    connector
+        .transport
+        .as_ref()
+        .is_some_and(|transport| transport.mcp.is_some())
+}
+
+fn is_event_stream(parts: &Parts) -> bool {
+    parts
+        .headers
+        .get(http::header::CONTENT_TYPE)
+        .and_then(|value| value.to_str().ok())
+        .and_then(|value| value.parse::<mime::Mime>().ok())
+        .and_then(|mime| StreamFraming::from_content_type(&mime))
+        == Some(StreamFraming::ServerSentEvents)
+}
+
+/// `body`, ending right after the first complete Server-Sent Event that holds a JSON-RPC reply
+/// (an `id` with a `result` or `error`, and no `method`). The events before it, progress
+/// notifications for example, are kept, so the response folds the same way it would have had the
+/// server closed the stream there.
+fn until_json_rpc_reply<B>(
+    body: B,
+) -> StreamBody<impl Stream<Item = Result<Frame<Bytes>, tower::BoxError>>>
+where
+    B: HttpBody,
+    B::Error: Into<tower::BoxError>,
+{
+    let chunks = Box::pin(BodyDataStream::new(body).map(|chunk| {
+        chunk
+            .map(|mut data| data.copy_to_bytes(data.remaining()))
+            .map_err(Into::into)
+    }));
+    let decoder = StreamFraming::ServerSentEvents.decoder();
+    // Ends as soon as the reply has been passed on, without waiting for another chunk: a stream
+    // that stays open would never send one.
+    let frames = futures::stream::unfold(Some((chunks, decoder)), |state| async move {
+        let (mut chunks, mut decoder) = state?;
+        let chunk = chunks.next().await?;
+        let replied = chunk.as_ref().is_ok_and(|data| {
+            decoder.push(data).iter().any(|event| {
+                serde_json::from_str::<serde_json::Value>(&event.data).is_ok_and(|message| {
+                    message.get("method").is_none()
+                        && message.get("id").is_some()
+                        && (message.get("result").is_some() || message.get("error").is_some())
+                })
+            })
+        });
+        let next = (!replied).then_some((chunks, decoder));
+        Some((chunk.map(Frame::data), next))
+    });
+    StreamBody::new(frames)
+}
+
+/// Counts an MCP tool call by its outcome. JSON-RPC and tool errors arrive with HTTP 200, so the
+/// HTTP client's instruments count them as successes; this is where they show up as failures.
+fn record_mcp_outcome(connector: &Connector, mapped: &MappedResponse) {
+    let Some(mcp) = connector
+        .transport
+        .as_ref()
+        .and_then(|transport| transport.mcp.as_ref())
+    else {
+        return;
+    };
+    let outcome = match mapped {
+        MappedResponse::Data { .. } => "ok",
+        MappedResponse::Error { error, .. } => match error.code() {
+            "MCP_TOOL_ERROR" => "tool_error",
+            "MCP_PROTOCOL_ERROR" => "protocol_error",
+            "MCP_INVALID_RESPONSE" => "invalid_response",
+            "MCP_UNSUPPORTED_CONTENT" => "unsupported_content",
+            "UNAUTHENTICATED" | "FORBIDDEN" => "auth_error",
+            _ => "error",
+        },
+    };
+    u64_counter!(
+        "apollo.router.connectors.mcp.calls",
+        "Number of MCP tool calls made by connectors, by outcome",
+        1,
+        "connector.source" = connector.source_config_key(),
+        "mcp.tool.name" = mcp.tool.clone(),
+        "mcp.outcome" = outcome
+    );
 }
 
 /// Build the client-facing form of one error a mapping declared with
@@ -2938,5 +3065,45 @@ mod tests {
             Some("b"),
             "connect_extensions sibling under extensions.http should appear alongside the source sibling"
         );
+    }
+}
+
+#[cfg(test)]
+mod mcp_stream_tests {
+    use std::time::Duration;
+
+    use super::*;
+
+    #[tokio::test]
+    async fn an_event_stream_left_open_after_the_reply_is_read_up_to_the_reply() {
+        let chunks: Vec<Result<Frame<Bytes>, tower::BoxError>> = vec![
+            Ok(Frame::data(Bytes::from_static(
+                b"data: {\"jsonrpc\":\"2.0\",\"method\":\"notifications/progress\",\"params\":{}}\n\n",
+            ))),
+            // The reply arrives split across two chunks
+            Ok(Frame::data(Bytes::from_static(
+                b"data: {\"jsonrpc\":\"2.0\",\"id\":1,",
+            ))),
+            Ok(Frame::data(Bytes::from_static(
+                b"\"result\":{\"content\":[]}}\n\n",
+            ))),
+        ];
+        // ...and then the server keeps the stream open
+        let body = StreamBody::new(futures::stream::iter(chunks).chain(futures::stream::pending()));
+
+        let bytes = tokio::time::timeout(
+            Duration::from_secs(5),
+            collect_body(until_json_rpc_reply(body), None),
+        )
+        .await
+        .expect("reading stops at the reply")
+        .unwrap_or_else(|_| panic!("the body is read"));
+
+        let events = apollo_federation::connectors::runtime::stream_framing::json_events(
+            StreamFraming::ServerSentEvents,
+            &bytes,
+        );
+        assert_eq!(events.len(), 2, "the progress event and the reply");
+        assert_eq!(events[1]["id"], serde_json_bytes::json!(1));
     }
 }
