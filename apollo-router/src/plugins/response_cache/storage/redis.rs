@@ -566,6 +566,12 @@ impl Storage {
         Ok(s)
     }
 
+    /// Test helper that returns a list of all keys in this namespace, with the namespace string
+    /// stripped from each key.
+    pub(crate) async fn all_keys_in_namespace_for_test(&self) -> Result<Vec<String>, BoxError> {
+        self.storage.all_keys_in_namespace_for_test().await
+    }
+
     async fn ttl(&self, key: &str) -> StorageResult<i64> {
         let key = self.make_key(key);
         Ok(self.storage.client().await?.ttl(key).await?)
