@@ -18,4 +18,4 @@ The section follows configuration reloads: editing a reference while the router 
 
 `APOLLO_GRAPH_ARTIFACT_REFERENCE` keeps working and overrides `artifacts.graph`; when both are set they must name the same registry. The persisted-queries artifact has no environment variable and is declared here only.
 
-By [@samaanghani](https://github.com/samaanghani) in https://github.com/apollographql/router/pull/TBD
+By [@samaanghani](https://github.com/samaanghani) in https://github.com/apollographql/router/pull/10772
