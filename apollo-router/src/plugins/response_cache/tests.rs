@@ -8789,6 +8789,10 @@ impl fred::mocks::Mocks for RecordingHit {
 /// `representations`. The cache does not understand that shape: it would key the fetch as a root
 /// query, which entity invalidation can never match. Such a fetch must go straight to the
 /// subgraph, and its response must not be stored.
+///
+/// This exercises the cache service on a hand-built request, so it can also show what the cache
+/// does to such a request without the mark. The planner, the fetch service and the cache are
+/// run together in [`aliased_context_entity_fetch_bypasses_cache_end_to_end`].
 #[tokio::test]
 async fn aliased_context_entity_fetch_bypasses_cache() {
     use std::sync::atomic::AtomicUsize;
@@ -8908,5 +8912,139 @@ async fn aliased_context_entity_fetch_bypasses_cache() {
         subgraph_calls.load(Ordering::SeqCst),
         1,
         "the cache must not send the unmarked fetch to the subgraph"
+    );
+}
+
+/// The end-to-end counterpart of [`aliased_context_entity_fetch_bypasses_cache`]: the planner
+/// and the fetch service produce the aliased fetch and mark it, and the response cache leaves it
+/// alone while caching the root fetch in Redis as usual. Nothing here spells out the planned
+/// operations, so the test follows the planner's output.
+#[tokio::test]
+async fn aliased_context_entity_fetch_bypasses_cache_end_to_end() {
+    const SCHEMA_SET_CONTEXT: &str =
+        include_str!("../../../tests/fixtures/set_context/supergraph.graphql");
+    let valid_schema =
+        Arc::new(Schema::parse_and_validate(SCHEMA_SET_CONTEXT, "test.graphql").unwrap());
+    // `U.field` takes its argument from the enclosing `T.prop` through `@fromContext`. The two
+    // `T`s have different `prop`s, so the fetch for `field` carries one aliased `_entities` copy
+    // per `U`.
+    let query = "query QueryLL { tList { id uList { field } } }";
+    let subgraphs = serde_json::json!({
+        "Subgraph1": {
+            "query": {
+                "tList": [
+                    {
+                        "__typename": "T",
+                        "id": "1",
+                        "prop": "prop value 1",
+                        "uList": [{ "__typename": "U", "id": "3" }]
+                    },
+                    {
+                        "__typename": "T",
+                        "id": "2",
+                        "prop": "prop value 2",
+                        "uList": [{ "__typename": "U", "id": "4" }]
+                    }
+                ]
+            },
+            "entities": [
+                { "__typename": "U", "id": "3", "field": 3456 },
+                { "__typename": "U", "id": "4", "field": 222 }
+            ],
+            "headers": { "cache-control": "public" },
+        },
+    });
+
+    let (drop_tx, drop_rx) = tokio::sync::broadcast::channel(2);
+    let storage = Storage::new(&Config::test(false, &Uuid::new_v4().to_string()), drop_rx)
+        .await
+        .unwrap();
+    let subgraphs_conf = create_subgraph_conf(
+        [(
+            "Subgraph1".to_string(),
+            Subgraph {
+                redis: None,
+                private_id: None,
+                enabled: true.into(),
+                ttl: None,
+                ..Default::default()
+            },
+        )]
+        .into_iter()
+        .collect(),
+    );
+    let response_cache = ResponseCache::for_test(
+        storage.clone(),
+        subgraphs_conf,
+        valid_schema,
+        false,
+        drop_tx,
+        true,
+    )
+    .await
+    .unwrap();
+
+    let service = TestHarness::builder()
+        .configuration_json(serde_json::json!({
+            "include_subgraph_errors": { "all": true },
+            "experimental_mock_subgraphs": subgraphs,
+        }))
+        .unwrap()
+        .schema(SCHEMA_SET_CONTEXT)
+        .extra_private_plugin(response_cache)
+        .build_supergraph()
+        .await
+        .unwrap();
+
+    let request = supergraph::Request::fake_builder()
+        .query(query)
+        .context(Context::new())
+        .header(
+            HeaderName::from_static(CACHE_DEBUG_HEADER_NAME),
+            HeaderValue::from_static("true"),
+        )
+        .build()
+        .unwrap();
+    let mut response = service.oneshot(request).await.unwrap();
+
+    // The cache handled the root `tList` fetch and nothing else: the aliased entity fetch left
+    // no entry behind.
+    let cache_keys = get_cache_keys_context(&response).expect("missing cache keys");
+    let handled: Vec<_> = cache_keys
+        .iter()
+        .map(|entry| (&entry.kind, &entry.source))
+        .collect();
+    assert_eq!(
+        handled,
+        [(
+            &CacheEntryKind::RootFields {
+                root_fields: vec!["tList".to_string()]
+            },
+            &CacheKeySource::Subgraph
+        )]
+    );
+
+    let response = response.next_response().await.unwrap();
+    assert!(response.errors.is_empty(), "{:?}", response.errors);
+    assert_eq!(
+        response.data,
+        Some(serde_json_bytes::json!({
+            "tList": [
+                { "id": "1", "uList": [{ "field": 3456 }] },
+                { "id": "2", "uList": [{ "field": 222 }] }
+            ]
+        }))
+    );
+
+    // Once the root fetch is stored, Redis holds its document and the cache tag indexes that
+    // point at it, and nothing for the entities: no `U` document, keyed by representation, and no
+    // `U` cache tag index.
+    wait_for_cache(&storage, expected_cached_keys(&cache_keys)).await;
+    let keys = storage.all_keys_in_namespace().await.unwrap();
+    assert!(keys.contains(&cache_keys[0].key), "{keys:?}");
+    assert!(
+        keys.iter()
+            .all(|key| !key.contains(":representation:") && !key.ends_with(":type:U")),
+        "the cache must not store the entity fetch, but Redis holds {keys:?}"
     );
 }

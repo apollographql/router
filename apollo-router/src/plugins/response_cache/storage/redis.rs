@@ -574,7 +574,7 @@ impl Storage {
 
     /// Return a list of all keys in this namespace, with the namespace string stripped from
     /// each key.
-    async fn all_keys_in_namespace(&self) -> Result<Vec<String>, BoxError> {
+    pub(crate) async fn all_keys_in_namespace(&self) -> Result<Vec<String>, BoxError> {
         use fred::types::scan::Scanner;
         use tokio_stream::StreamExt;
 
