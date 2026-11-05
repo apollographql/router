@@ -122,7 +122,8 @@ pub(super) fn extra_endpoints(
 /// them on the connection, before any route is chosen.
 pub(super) fn endpoint_router(endpoint: Endpoint, plugins: &Plugins) -> Router {
     let mut router = endpoint.into_router().layer(
-        ServiceBuilder::new().apply_plugin_layer(plugins, LimitsPlugin::endpoint_header_list_layer),
+        ServiceBuilder::new()
+            .apply_plugin_layer(plugins, LimitsPlugin::endpoint_header_list_limit_layer),
     );
     if let Some(main_endpoint_layer) = ENDPOINT_CALLBACK.get() {
         router = main_endpoint_layer(router);
