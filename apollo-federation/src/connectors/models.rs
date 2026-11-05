@@ -27,6 +27,7 @@ pub use self::headers::OriginatingDirective;
 pub use self::http_json_transport::HTTPMethod;
 pub use self::http_json_transport::HttpJsonTransport;
 pub use self::http_json_transport::MakeUriError;
+pub use self::http_json_transport::McpCall;
 pub use self::http_json_transport::StreamMode;
 pub use self::problem_location::ProblemLocation;
 pub use self::source::SourceName;
@@ -232,10 +233,19 @@ impl Connector {
 
         // Create our transport (absent for mapping-only connectors)
         let source_http = source.map(|s| &s.http);
-        let transport = connect
-            .http
-            .map(|connect_http| HttpJsonTransport::from_directive(connect_http, source_http, spec))
-            .transpose()?;
+        let transport = match (connect.http, connect.mcp) {
+            (Some(connect_http), _) => Some(HttpJsonTransport::from_directive(
+                connect_http,
+                source_http,
+                spec,
+            )?),
+            (None, Some(connect_mcp)) => Some(HttpJsonTransport::from_mcp_directive(
+                connect_mcp,
+                source.and_then(|s| Some((&s.http, s.mcp.as_ref()?))),
+                spec,
+            )?),
+            (None, None) => None,
+        };
 
         // Get our batch and error settings
         let batch_settings = connect.batch;
@@ -675,6 +685,7 @@ mod tests {
                         connect_path: None,
                         connect_query_params: None,
                         stream: None,
+                        mcp: None,
                     },
                 ),
                 selection: JSONSelection {
@@ -857,6 +868,7 @@ mod tests {
                         connect_path: None,
                         connect_query_params: None,
                         stream: None,
+                        mcp: None,
                     },
                 ),
                 selection: JSONSelection {

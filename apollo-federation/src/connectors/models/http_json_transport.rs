@@ -25,7 +25,9 @@ use crate::connectors::StringTemplate;
 use crate::connectors::json_selection::VarPaths;
 use crate::connectors::models::Header;
 use crate::connectors::spec::ConnectHTTPArguments;
+use crate::connectors::spec::ConnectMCPArguments;
 use crate::connectors::spec::SourceHTTPArguments;
+use crate::connectors::spec::SourceMCPArguments;
 use crate::connectors::string_template;
 use crate::connectors::string_template::UriString;
 use crate::connectors::string_template::write_value;
@@ -44,9 +46,58 @@ pub struct HttpJsonTransport {
     pub connect_path: Option<JSONSelection>,
     pub connect_query_params: Option<JSONSelection>,
     pub stream: Option<StreamMode>,
+    /// The MCP tool this connector calls, for `@connect(mcp:)`. The rest of the transport is the
+    /// HTTP request that carries the call: a POST to the source's MCP endpoint whose `body` is the
+    /// tool's arguments, with its answer folded as a stream.
+    pub mcp: Option<McpCall>,
+}
+
+/// An MCP tool call, from `@connect(mcp:)`.
+///
+/// The runtime wraps the evaluated `body` in a JSON-RPC `tools/call` request naming [`Self::tool`],
+/// and unwraps the tool's result before the selection sees it.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct McpCall {
+    /// The tool's name, as the server's `tools/list` gives it
+    pub tool: String,
 }
 
 impl HttpJsonTransport {
+    /// The transport for `@connect(mcp:)`: a POST of the tool's arguments to the source's MCP
+    /// endpoint, folding the answer whether it arrives as JSON or as a stream of events.
+    pub fn from_mcp_directive(
+        mcp: ConnectMCPArguments,
+        source: Option<(&SourceHTTPArguments, &SourceMCPArguments)>,
+        spec: ConnectSpec,
+    ) -> Result<Self, FederationError> {
+        let Some((source_http, source_mcp)) = source else {
+            return Err(FederationError::internal(
+                "`@connect(mcp:)` needs a source with `@source(mcp:)`",
+            ));
+        };
+        let path = source_mcp.path.as_deref().unwrap_or_default();
+        Ok(Self {
+            source_template: Some(source_http.base_url.template.clone()),
+            connect_template: StringTemplate::parse_with_spec(path, spec).map_err(
+                |e: string_template::Error| {
+                    FederationError::internal(format!(
+                        "could not parse MCP path: {message}",
+                        message = e.message
+                    ))
+                },
+            )?,
+            method: HTTPMethod::Post,
+            headers: source_http.headers.clone(),
+            body: mcp.arguments,
+            source_path: source_http.path.clone(),
+            source_query_params: source_http.query_params.clone(),
+            connect_path: None,
+            connect_query_params: None,
+            stream: Some(StreamMode::Array),
+            mcp: Some(McpCall { tool: mcp.tool }),
+        })
+    }
+
     pub fn from_directive(
         http: ConnectHTTPArguments,
         source: Option<&SourceHTTPArguments>,
@@ -94,11 +145,15 @@ impl HttpJsonTransport {
             connect_path: http.path,
             connect_query_params: http.query_params,
             stream: http.stream,
+            mcp: None,
         })
     }
 
     pub(super) fn label(&self) -> String {
-        format!("http: {} {}", self.method, self.connect_template)
+        match &self.mcp {
+            Some(mcp) => format!("mcp: {}", mcp.tool),
+            None => format!("http: {} {}", self.method, self.connect_template),
+        }
     }
 
     pub(crate) fn variable_references(&self) -> impl Iterator<Item = VariableReference<Namespace>> {

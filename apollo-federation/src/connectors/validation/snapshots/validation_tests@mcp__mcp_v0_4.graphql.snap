@@ -1,0 +1,21 @@
+---
+source: apollo-federation/src/connectors/validation/mod.rs
+expression: errors
+input_file: apollo-federation/src/connectors/validation/test_data/mcp/mcp_v0_4.graphql
+---
+[
+    Message {
+        code: InvalidMcp,
+        message: "`@source(mcp:)` requires connect spec v0.5 or later. Use `@link(url: \"https://specs.apollo.dev/connect/v0.5\")`.",
+        locations: [
+            4:78..4:94,
+        ],
+    },
+    Message {
+        code: InvalidMcp,
+        message: "`@connect(mcp:)` on `Query.latestQuake` requires connect spec v0.5 or later. Use `@link(url: \"https://specs.apollo.dev/connect/v0.5\")`.",
+        locations: [
+            9:37..9:66,
+        ],
+    },
+]

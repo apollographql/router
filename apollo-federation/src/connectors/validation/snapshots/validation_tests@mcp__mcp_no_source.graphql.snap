@@ -1,0 +1,14 @@
+---
+source: apollo-federation/src/connectors/validation/mod.rs
+expression: errors
+input_file: apollo-federation/src/connectors/validation/test_data/mcp/mcp_no_source.graphql
+---
+[
+    Message {
+        code: InvalidMcp,
+        message: "`@connect(mcp:)` on `Query.latestQuake` needs a `source` whose `@source` declares `mcp:`, to say which MCP server to call.",
+        locations: [
+            8:19..8:48,
+        ],
+    },
+]

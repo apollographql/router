@@ -1,0 +1,22 @@
+extend schema
+  @link(url: "https://specs.apollo.dev/federation/v2.10", import: ["@key"])
+  @link(url: "https://specs.apollo.dev/connect/v0.5", import: ["@connect", "@source"])
+  @source(name: "quakes", http: { baseURL: "https://mcp.example.com/mcp" }, mcp: {})
+
+type Query {
+  quakes: [Quake]
+    @connect(source: "quakes", mcp: { tool: "earthquake_latest" }, selection: "$.events { id }")
+}
+
+# Valid: a tool that takes a list of ids and answers with one item per id resolves a batch of
+# entities in one call, the same way an HTTP batch endpoint does.
+type Quake
+  @key(fields: "id")
+  @connect(
+    source: "quakes"
+    mcp: { tool: "earthquake_get_events", arguments: "ids: $batch.id" }
+    selection: "$.events { id magnitude }"
+  ) {
+  id: ID!
+  magnitude: Float
+}

@@ -1,0 +1,15 @@
+extend schema
+  @link(url: "https://specs.apollo.dev/federation/v2.10", import: ["@key"])
+  @link(url: "https://specs.apollo.dev/connect/v0.4", import: ["@connect", "@source"])
+  @source(name: "quakes", http: { baseURL: "https://mcp.example.com" }, mcp: { path: "/mcp" })
+
+type Query {
+  # Invalid: `mcp:` only exists from connect/v0.5.
+  latestQuake: Quake
+    @connect(source: "quakes", mcp: { tool: "earthquake_latest" }, selection: "id magnitude")
+}
+
+type Quake {
+  id: ID!
+  magnitude: Float
+}

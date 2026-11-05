@@ -2,6 +2,7 @@
 pub(crate) mod connect;
 pub(crate) mod errors;
 pub(crate) mod http;
+pub(crate) mod mcp;
 pub(crate) mod source;
 mod type_and_directive_specifications;
 
@@ -17,6 +18,8 @@ use apollo_compiler::name;
 pub use connect::ConnectHTTPArguments;
 pub(crate) use connect::extract_connect_directive_arguments;
 use itertools::Itertools;
+pub use mcp::ConnectMCPArguments;
+pub use mcp::SourceMCPArguments;
 pub use source::SourceHTTPArguments;
 pub(crate) use source::extract_source_directive_arguments;
 use strum::IntoEnumIterator;

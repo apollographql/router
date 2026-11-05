@@ -21,6 +21,8 @@ use crate::connectors::spec::connect_spec_from_schema;
 use crate::connectors::spec::http::HTTP_ARGUMENT_NAME;
 use crate::connectors::spec::http::PATH_ARGUMENT_NAME;
 use crate::connectors::spec::http::QUERY_PARAMS_ARGUMENT_NAME;
+use crate::connectors::spec::mcp::MCP_ARGUMENT_NAME;
+use crate::connectors::spec::mcp::SourceMCPArguments;
 use crate::connectors::string_template;
 use crate::connectors::validation::Code;
 use crate::connectors::validation::Message;
@@ -55,6 +57,9 @@ pub(crate) struct SourceDirectiveArguments {
     /// Common HTTP options
     pub(crate) http: SourceHTTPArguments,
 
+    /// Marks the source as an MCP server, from v0.5
+    pub(crate) mcp: Option<SourceMCPArguments>,
+
     /// Configure the error mapping functionality for this source
     pub(crate) errors: Option<ErrorsArguments>,
 
@@ -78,6 +83,7 @@ impl SourceDirectiveArguments {
             }
         })?;
         let mut http = None;
+        let mut mcp = None;
         let mut errors = None;
         let mut is_success = None;
         for arg in args {
@@ -93,6 +99,13 @@ impl SourceDirectiveArguments {
                     SourceHTTPArguments::from_directive(http_value, directive_name, sources, spec)?;
 
                 http = Some(http_value);
+            } else if arg_name == MCP_ARGUMENT_NAME.as_str() {
+                let mcp_value = arg.value.as_object().ok_or_else(|| {
+                    FederationError::internal(format!(
+                        "`mcp` field in `@{directive_name}` directive is not an object"
+                    ))
+                })?;
+                mcp = Some(SourceMCPArguments::try_from((mcp_value, directive_name))?);
             } else if arg_name == ERRORS_ARGUMENT_NAME.as_str() {
                 let http_value = arg.value.as_object().ok_or_else(|| {
                     FederationError::internal(format!(
@@ -122,6 +135,7 @@ impl SourceDirectiveArguments {
                     "missing `http` field in `@{directive_name}` directive"
                 ))
             })?,
+            mcp,
             errors,
             is_success,
         })

@@ -1,0 +1,14 @@
+extend schema
+  @link(url: "https://specs.apollo.dev/federation/v2.10", import: ["@key"])
+  @link(url: "https://specs.apollo.dev/connect/v0.5", import: ["@connect", "@source"])
+
+type Query {
+  # Invalid: a tool call needs a source that says which MCP server to call.
+  latestQuake: Quake
+    @connect(mcp: { tool: "earthquake_latest" }, selection: "id magnitude")
+}
+
+type Quake {
+  id: ID!
+  magnitude: Float
+}

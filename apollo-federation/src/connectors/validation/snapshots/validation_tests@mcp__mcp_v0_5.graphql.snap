@@ -1,0 +1,36 @@
+---
+source: apollo-federation/src/connectors/validation/mod.rs
+expression: errors
+input_file: apollo-federation/src/connectors/validation/test_data/mcp/mcp_v0_5.graphql
+---
+[
+    Message {
+        code: InvalidMcp,
+        message: "`@connect(mcp:)` on `Query.both` can't be combined with `http:`. A connector calls an MCP tool or makes an HTTP request, not both.",
+        locations: [
+            34:12..34:41,
+        ],
+    },
+    Message {
+        code: InvalidMcp,
+        message: "`@connect(mcp:)` on `Query.notMcp` uses source \"rest\", which isn't an MCP server. Add `mcp: {}` to its `@source`.",
+        locations: [
+            42:12..42:41,
+        ],
+    },
+    Message {
+        code: InvalidMcp,
+        message: "`@connect(mcp:)` on `Query.noTool` must name a tool with a non-empty `tool`.",
+        locations: [
+            49:12..49:24,
+        ],
+    },
+    Message {
+        code: InvalidMcp,
+        message: "In `@connect(mcp: {arguments:})` on `Query.badArguments`: `$args` doesn't have a field named `nope`",
+        locations: [
+            56:60..56:65,
+            56:66..56:70,
+        ],
+    },
+]

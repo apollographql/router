@@ -8,8 +8,10 @@ use super::coordinates::SourceDirectiveCoordinate;
 use super::errors::ErrorsCoordinate;
 use super::errors::IsSuccessArgument;
 use super::http::UrlProperties;
+use crate::connectors::ConnectSpec;
 use crate::connectors::SourceName;
 use crate::connectors::spec::http::HTTP_ARGUMENT_NAME;
+use crate::connectors::spec::mcp::MCP_ARGUMENT_NAME;
 use crate::connectors::spec::source::BaseUrl;
 use crate::connectors::spec::source::SOURCE_NAME_ARGUMENT_NAME;
 use crate::connectors::string_template::Part;
@@ -35,10 +37,17 @@ pub(super) struct SourceDirective<'schema> {
     headers: Option<Headers<'schema>>,
     is_success: Option<IsSuccessArgument<'schema>>,
     errors: Option<Errors<'schema>>,
+    /// Whether the source declares `mcp:`, making it an MCP server that `@connect(mcp:)` can call
+    is_mcp: bool,
     schema: &'schema SchemaInfo<'schema>,
 }
 
 impl<'schema> SourceDirective<'schema> {
+    /// Whether this source is an MCP server, declared with `mcp:`
+    pub(super) fn is_mcp(&self) -> bool {
+        self.is_mcp
+    }
+
     pub(super) fn find(schema: &'schema SchemaInfo) -> (Vec<Self>, Vec<Message>) {
         let source_directive_name = schema.source_directive_name();
         let mut directives = Vec::new();
@@ -99,6 +108,25 @@ impl<'schema> SourceDirective<'schema> {
             }
         };
 
+        let mcp_arg = directive.specified_argument_by_name(&MCP_ARGUMENT_NAME);
+        let is_mcp = mcp_arg.is_some();
+        if let Some(mcp_arg) = mcp_arg
+            && schema.connect_link.spec < ConnectSpec::V0_5
+        {
+            messages.push(Message {
+                code: Code::InvalidMcp,
+                message: format!(
+                    "`@{directive_name}({MCP_ARGUMENT_NAME}:)` requires connect spec v0.5 or later. Use `@link(url: \"{url}\")`.",
+                    directive_name = directive.name,
+                    url = ConnectSpec::V0_5.url(),
+                ),
+                locations: mcp_arg
+                    .line_column_range(&schema.sources)
+                    .into_iter()
+                    .collect(),
+            });
+        }
+
         let is_success = match IsSuccessArgument::parse_for_source(coordinate.clone(), schema) {
             Ok(is_success) => is_success,
             Err(err) => {
@@ -132,6 +160,7 @@ impl<'schema> SourceDirective<'schema> {
                     url_properties: None,
                     headers: None,
                     errors: None,
+                    is_mcp,
                 }),
                 messages,
             );
@@ -205,6 +234,7 @@ impl<'schema> SourceDirective<'schema> {
                 is_success,
                 headers,
                 errors,
+                is_mcp,
                 schema,
             }),
             messages,

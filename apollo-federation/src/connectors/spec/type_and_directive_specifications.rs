@@ -32,6 +32,12 @@ use super::http::PATH_ARGUMENT_NAME;
 use super::http::QUERY_PARAMS_ARGUMENT_NAME;
 use super::http::STREAM_ARGUMENT_NAME;
 use super::http::URL_PATH_TEMPLATE_SCALAR_NAME;
+use super::mcp::CONNECT_MCP_NAME_IN_SPEC;
+use super::mcp::MCP_ARGUMENT_NAME;
+use super::mcp::MCP_ARGUMENTS_ARGUMENT_NAME;
+use super::mcp::MCP_PATH_ARGUMENT_NAME;
+use super::mcp::MCP_TOOL_ARGUMENT_NAME;
+use super::mcp::SOURCE_MCP_NAME_IN_SPEC;
 use super::source::BaseUrl;
 use super::source::SOURCE_DIRECTIVE_NAME_IN_SPEC;
 use super::source::SOURCE_HTTP_NAME_IN_SPEC;
@@ -61,7 +67,115 @@ pub(crate) fn type_specifications() -> Vec<Box<dyn TypeAndDirectiveSpecification
         Box::new(connect_batch_spec()),
         Box::new(source_http_spec()),
         Box::new(connect_http_spec()),
+        Box::new(SinceConnectSpec {
+            since: ConnectSpec::V0_5,
+            inner: source_mcp_spec(),
+        }),
+        Box::new(SinceConnectSpec {
+            since: ConnectSpec::V0_5,
+            inner: connect_mcp_spec(),
+        }),
     ]
+}
+
+/// Whether the schema links a connect spec at least as new as `since`.
+fn links_connect_spec_since(schema: &FederationSchema, since: ConnectSpec) -> bool {
+    connect_spec_from_schema(schema.schema()).is_some_and(|spec| spec >= since)
+}
+
+/// A type that only exists from one version of the connect spec on. Schemas linking an older
+/// version don't get it, so they expand exactly as they did before it was added.
+struct SinceConnectSpec<T> {
+    since: ConnectSpec,
+    inner: T,
+}
+
+impl<T: TypeAndDirectiveSpecification + 'static> TypeAndDirectiveSpecification
+    for SinceConnectSpec<T>
+{
+    fn name(&self) -> &Name {
+        self.inner.name()
+    }
+
+    fn check_or_add(
+        &self,
+        schema: &mut FederationSchema,
+        link: Option<&Arc<Link>>,
+    ) -> Result<(), FederationError> {
+        if links_connect_spec_since(schema, self.since) {
+            self.inner.check_or_add(schema, link)
+        } else {
+            Ok(())
+        }
+    }
+
+    fn as_any(&self) -> &dyn std::any::Any {
+        self
+    }
+}
+
+// added in v0.5:
+// input SourceMCP {
+//   path: String
+// }
+fn source_mcp_spec() -> InputObjectTypeSpecification {
+    InputObjectTypeSpecification {
+        name: SOURCE_MCP_NAME_IN_SPEC,
+        fields: |_| {
+            vec![ArgumentSpecification {
+                name: MCP_PATH_ARGUMENT_NAME,
+                get_type: |_, _| Ok(ty!(String)),
+                default_value: Default::default(),
+            }]
+        },
+    }
+}
+
+// added in v0.5:
+// input ConnectMCP {
+//   tool: String!
+//   arguments: JSONSelection
+// }
+fn connect_mcp_spec() -> InputObjectTypeSpecification {
+    InputObjectTypeSpecification {
+        name: CONNECT_MCP_NAME_IN_SPEC,
+        fields: |_| {
+            vec![
+                ArgumentSpecification {
+                    name: MCP_TOOL_ARGUMENT_NAME,
+                    get_type: |_, _| Ok(ty!(String!)),
+                    default_value: Default::default(),
+                },
+                ArgumentSpecification {
+                    name: MCP_ARGUMENTS_ARGUMENT_NAME,
+                    get_type: |schema, link| {
+                        let json_selection_scalar =
+                            lookup_scalar_in_schema(&JSON_SELECTION_SCALAR_NAME, schema, link)?;
+                        Ok(Type::Named(json_selection_scalar))
+                    },
+                    default_value: Default::default(),
+                },
+            ]
+        },
+    }
+}
+
+/// `@connect(mcp: ConnectMCP)` or `@source(mcp: SourceMCP)`, from v0.5.
+fn mcp_argument_since_v0_5(
+    schema: &FederationSchema,
+    get_type: fn(&FederationSchema, Option<&Arc<Link>>) -> Result<Type, FederationError>,
+) -> Vec<DirectiveArgumentSpecification> {
+    if !links_connect_spec_since(schema, ConnectSpec::V0_5) {
+        return Vec::new();
+    }
+    vec![DirectiveArgumentSpecification {
+        base_spec: ArgumentSpecification {
+            name: MCP_ARGUMENT_NAME,
+            get_type,
+            default_value: None,
+        },
+        composition_strategy: None,
+    }]
 }
 
 // scalar JSONSelection
@@ -372,6 +486,9 @@ pub(crate) fn directive_specifications() -> Vec<Box<dyn TypeAndDirectiveSpecific
 //   entity: Boolean = false
 //   isSuccess: JSONSelection
 // ) repeatable on FIELD_DEFINITION | OBJECT
+//
+// connect/v0.5 (preview) adds:
+//   mcp: ConnectMCP
 fn connect_directive_spec() -> DirectiveSpecification {
     DirectiveSpecification::new(
         CONNECT_DIRECTIVE_NAME_IN_SPEC,
@@ -483,6 +600,13 @@ fn connect_directive_spec() -> DirectiveSpecification {
         //     use_join_directive: true,
         // }),
     )
+    .with_conditional_args(|schema| {
+        mcp_argument_since_v0_5(schema, |schema, link| {
+            let connect_mcp_input =
+                lookup_input_object_in_schema(&CONNECT_MCP_NAME_IN_SPEC, schema, link)?;
+            Ok(Type::Named(connect_mcp_input))
+        })
+    })
 }
 
 // directive @source(
@@ -490,6 +614,9 @@ fn connect_directive_spec() -> DirectiveSpecification {
 //   http: SourceHTTP!
 //   errors: ConnectorErrors
 //   isSuccess: JSONSelection
+//
+//   # added in v0.5
+//   mcp: SourceMCP
 // ) repeatable on SCHEMA
 fn source_directive_spec() -> DirectiveSpecification {
     DirectiveSpecification::new(
@@ -544,6 +671,13 @@ fn source_directive_spec() -> DirectiveSpecification {
         &[DirectiveLocation::Schema],
         None,
     )
+    .with_conditional_args(|schema| {
+        mcp_argument_since_v0_5(schema, |schema, link| {
+            let source_mcp_input =
+                lookup_input_object_in_schema(&SOURCE_MCP_NAME_IN_SPEC, schema, link)?;
+            Ok(Type::Named(source_mcp_input))
+        })
+    })
 }
 
 fn lookup_feature_type_in_schema(
@@ -1293,5 +1427,55 @@ mod stream_tests {
             .get_input_object("connect__ConnectHTTP")
             .expect("ConnectHTTP is defined");
         assert_eq!(connect_http.fields.contains_key(&name!(stream)), expected);
+    }
+}
+
+#[cfg(test)]
+mod mcp_tests {
+    use apollo_compiler::name;
+    use rstest::rstest;
+
+    use crate::subgraph::typestate::Subgraph;
+
+    /// `@connect(mcp:)`, `@source(mcp:)` and their input types only exist from v0.5, so older
+    /// schemas expand exactly as they did.
+    #[rstest]
+    #[case::v0_4("0.4", false)]
+    #[case::v0_5("0.5", true)]
+    fn mcp_exists_from_v0_5(#[case] version: &str, #[case] expected: bool) {
+        let sdl = format!(
+            r#"
+            type Query {{ hello: String }}
+            extend schema
+              @link(url: "https://specs.apollo.dev/federation/v2.11")
+              @link(url: "https://specs.apollo.dev/connect/v{version}", import: ["@source"])
+            "#
+        );
+
+        let subgraph = Subgraph::parse("s1", "http://s1", &sdl)
+            .expect("parsed successfully")
+            .expand_links()
+            .expect("expanded successfully");
+        let schema = subgraph.schema().schema();
+
+        let connect = schema
+            .directive_definitions
+            .get("connect")
+            .expect("@connect is defined");
+        assert_eq!(connect.argument_by_name(&name!(mcp)).is_some(), expected);
+        let source = schema
+            .directive_definitions
+            .get("source")
+            .expect("@source is defined");
+        assert_eq!(source.argument_by_name(&name!(mcp)).is_some(), expected);
+
+        assert_eq!(
+            schema.get_input_object("connect__ConnectMCP").is_some(),
+            expected
+        );
+        assert_eq!(
+            schema.get_input_object("connect__SourceMCP").is_some(),
+            expected
+        );
     }
 }

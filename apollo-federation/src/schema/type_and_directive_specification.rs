@@ -626,6 +626,9 @@ pub(crate) struct DirectiveSpecification {
     pub(crate) name: Name,
     pub(crate) composition: Option<DirectiveCompositionSpecification>,
     args: Vec<DirectiveArgumentSpecification>,
+    /// Arguments that only some versions of the spec define, decided per schema when the
+    /// directive is checked or added. They don't take part in composition strategies.
+    conditional_args: Option<fn(&FederationSchema) -> Vec<DirectiveArgumentSpecification>>,
     repeatable: bool,
     locations: IndexSet<DirectiveLocation>,
 }
@@ -672,9 +675,20 @@ impl DirectiveSpecification {
             name,
             composition: composition_spec,
             args: args.to_vec(),
+            conditional_args: None,
             repeatable,
             locations: locations.iter().copied().collect(),
         }
+    }
+
+    /// Adds arguments that depend on the schema, such as ones a spec only defines from some
+    /// version on. A schema that gets none of them sees exactly the directive it saw before.
+    pub(crate) fn with_conditional_args(
+        mut self,
+        conditional_args: fn(&FederationSchema) -> Vec<DirectiveArgumentSpecification>,
+    ) -> Self {
+        self.conditional_args = Some(conditional_args);
+        self
     }
 }
 
@@ -732,7 +746,11 @@ impl TypeAndDirectiveSpecification for DirectiveSpecification {
         let actual_name = actual_directive_name(&self.name, link);
         let mut resolved_args = Vec::new();
         let mut errors = MultipleFederationErrors { errors: vec![] };
-        for arg in self.args.iter() {
+        let conditional_args = self
+            .conditional_args
+            .map(|conditional_args| conditional_args(schema))
+            .unwrap_or_default();
+        for arg in self.args.iter().chain(conditional_args.iter()) {
             match (arg.base_spec.get_type)(schema, link) {
                 Ok(arg_type) => {
                     resolved_args.push(ResolvedArgumentSpecification {

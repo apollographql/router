@@ -14,6 +14,8 @@ use super::http::HTTP_ARGUMENT_NAME;
 use super::http::PATH_ARGUMENT_NAME;
 use super::http::QUERY_PARAMS_ARGUMENT_NAME;
 use super::http::STREAM_ARGUMENT_NAME;
+use super::mcp::ConnectMCPArguments;
+use super::mcp::MCP_ARGUMENT_NAME;
 use crate::connectors::ConnectSpec;
 use crate::connectors::ConnectorPosition;
 use crate::connectors::ObjectFieldDefinitionPosition;
@@ -151,6 +153,9 @@ pub(crate) struct ConnectDirectiveArguments {
     /// but is currently required.
     pub(crate) http: Option<ConnectHTTPArguments>,
 
+    /// The MCP tool this connector calls, from v0.5. A connector has `http` or `mcp`, not both.
+    pub(crate) mcp: Option<ConnectMCPArguments>,
+
     /// Fields to extract from the upstream JSON response.
     ///
     /// Uses the JSONSelection syntax to define a mapping of connector response to
@@ -192,6 +197,7 @@ impl ConnectDirectiveArguments {
         // We'll have to iterate over the arg list and keep the properties by their name
         let source = SourceName::from_connect(value);
         let mut http = None;
+        let mut mcp = None;
         let mut selection = None;
         let mut entity = None;
         let mut connector_id = None;
@@ -210,6 +216,18 @@ impl ConnectDirectiveArguments {
 
                 http = Some(ConnectHTTPArguments::try_from((
                     http_value,
+                    directive_name,
+                    connect_spec,
+                ))?);
+            } else if arg_name == MCP_ARGUMENT_NAME.as_str() {
+                let mcp_value = arg.value.as_object().ok_or_else(|| {
+                    FederationError::internal(format!(
+                        "`mcp` field in `@{directive_name}` directive is not an object"
+                    ))
+                })?;
+
+                mcp = Some(ConnectMCPArguments::try_from((
+                    mcp_value,
                     directive_name,
                     connect_spec,
                 ))?);
@@ -278,6 +296,7 @@ impl ConnectDirectiveArguments {
             position,
             source,
             http,
+            mcp,
             connector_id,
             selection: selection.ok_or_else(|| {
                 FederationError::internal(format!(
@@ -557,6 +576,7 @@ mod tests {
                         stream: None,
                     },
                 ),
+                mcp: None,
                 selection: JSONSelection {
                     inner: Named(
                         SubSelection {
@@ -668,6 +688,7 @@ mod tests {
                         stream: None,
                     },
                 ),
+                mcp: None,
                 selection: JSONSelection {
                     inner: Named(
                         SubSelection {

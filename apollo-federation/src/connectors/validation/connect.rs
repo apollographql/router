@@ -32,18 +32,22 @@ use crate::connectors::schema_type_ref::SchemaTypeRef;
 use crate::connectors::spec::connect::CONNECT_ID_ARGUMENT_NAME;
 use crate::connectors::spec::connect::CONNECT_SOURCE_ARGUMENT_NAME;
 use crate::connectors::spec::http::HTTP_ARGUMENT_NAME;
+use crate::connectors::spec::mcp::MCP_ARGUMENT_NAME;
 use crate::connectors::spec::source::SOURCE_NAME_ARGUMENT_NAME;
 use crate::connectors::validation::connect::http::Http;
+use crate::connectors::validation::connect::mcp::Mcp;
 use crate::connectors::validation::errors::Errors;
 use crate::connectors::validation::graphql::SchemaInfo;
 
 mod entity;
 mod http;
+mod mcp;
 mod selection;
 
 pub(super) fn fields_seen_by_all_connects(
     schema: &SchemaInfo,
     all_source_names: &[SourceName],
+    mcp_source_names: &[SourceName],
 ) -> Result<Vec<(Name, Name)>, Vec<Message>> {
     let (connects, messages): (Vec<_>, Vec<_>) = schema
         .types
@@ -56,7 +60,7 @@ pub(super) fn fields_seen_by_all_connects(
             )
         })
         .filter_map(|(type_name, _)| SchemaTypeRef::new(schema, type_name))
-        .map(|type_ref| Connect::find_on_type(type_ref, schema, all_source_names))
+        .map(|type_ref| Connect::find_on_type(type_ref, schema, all_source_names, mcp_source_names))
         .unzip();
     let connects: Vec<_> = connects.into_iter().flatten().collect();
     let mut messages: Vec<_> = messages.into_iter().flatten().collect();
@@ -135,6 +139,8 @@ struct Connect<'schema> {
     selection: Selection<'schema>,
     /// `None` when `http` is omitted (mapping-only, no HTTP transport involved)
     http: Option<Http<'schema>>,
+    /// `Some` for a connector that calls an MCP tool with `mcp:` instead of `http:`
+    mcp: Option<Mcp<'schema>>,
     errors: Errors<'schema>,
     is_success: Option<IsSuccessArgument<'schema>>,
     coordinate: ConnectDirectiveCoordinate<'schema>,
@@ -148,6 +154,7 @@ impl<'schema> Connect<'schema> {
         type_ref: SchemaTypeRef<'schema>,
         schema: &'schema SchemaInfo,
         source_names: &'schema [SourceName],
+        mcp_source_names: &'schema [SourceName],
     ) -> (Vec<Self>, Vec<Message>) {
         let object_category = if schema
             .schema_definition
@@ -226,7 +233,7 @@ impl<'schema> Connect<'schema> {
 
         let (connects, messages): (Vec<Connect>, Vec<Vec<Message>>) = directives_on_type
             .chain(directives_on_fields)
-            .map(|coordinate| Self::parse(coordinate, schema, source_names))
+            .map(|coordinate| Self::parse(coordinate, schema, source_names, mcp_source_names))
             .partition_result();
 
         let messages: Vec<Message> = messages.into_iter().flatten().collect();
@@ -249,6 +256,7 @@ impl<'schema> Connect<'schema> {
         coordinate: ConnectDirectiveCoordinate<'schema>,
         schema: &'schema SchemaInfo,
         source_names: &[SourceName],
+        mcp_source_names: &[SourceName],
     ) -> Result<Self, Vec<Message>> {
         if coordinate.element.is_root_type(schema) {
             return Err(vec![Message {
@@ -266,11 +274,17 @@ impl<'schema> Connect<'schema> {
             }]);
         }
 
-        // Determine if this is a mapping-only connector (http is absent)
-        let mapping_only = coordinate
+        // A connector calls an MCP tool with `mcp:`, makes an HTTP request with `http:`, or neither
+        let calls_mcp = coordinate
             .directive
-            .specified_argument_by_name(&HTTP_ARGUMENT_NAME)
-            .is_none();
+            .specified_argument_by_name(&MCP_ARGUMENT_NAME)
+            .is_some();
+        // Determine if this is a mapping-only connector (no transport at all)
+        let mapping_only = !calls_mcp
+            && coordinate
+                .directive
+                .specified_argument_by_name(&HTTP_ARGUMENT_NAME)
+                .is_none();
 
         // Omitting http requires spec v0.4+
         if mapping_only && schema.connect_link.spec < ConnectSpec::V0_4 {
@@ -288,16 +302,22 @@ impl<'schema> Connect<'schema> {
             }]);
         }
 
-        let (selection, http, errors, is_success) = Selection::parse(coordinate, schema)
+        let (selection, (http, mcp), errors, is_success) = Selection::parse(coordinate, schema)
             .map_err(|err| vec![err])
             .and_try(if mapping_only {
                 // For mapping-only connectors, skip Http::parse entirely
-                Ok(None)
+                Ok((None, None))
             } else {
                 validate_source_name(coordinate, source_names, schema)
                     .map_err(|err| vec![err])
                     .and_then(|source_name| {
-                        Http::parse(coordinate, source_name.as_ref(), schema).map(Some)
+                        if calls_mcp {
+                            Mcp::parse(coordinate, source_name.as_ref(), mcp_source_names, schema)
+                                .map(|mcp| (None, mcp))
+                        } else {
+                            Http::parse(coordinate, source_name.as_ref(), schema)
+                                .map(|http| (Some(http), None))
+                        }
                     })
             })
             .and_try(Errors::parse(
@@ -321,6 +341,7 @@ impl<'schema> Connect<'schema> {
         Ok(Self {
             selection,
             http,
+            mcp,
             errors,
             is_success,
             coordinate,
@@ -337,10 +358,12 @@ impl<'schema> Connect<'schema> {
             .as_ref()
             .map(|h| -> Box<dyn Iterator<Item = Namespace>> { Box::new(h.variables()) })
             .unwrap_or_else(|| Box::new(std::iter::empty()));
+        let mcp_variables = self.mcp.iter().flat_map(Mcp::variables);
         let all_variables = self
             .selection
             .variables()
             .chain(http_variables)
+            .chain(mcp_variables)
             .chain(self.errors.variables())
             .collect::<HashSet<_>>();
         if all_variables.contains(&Namespace::Batch) && all_variables.contains(&Namespace::This) {
@@ -385,6 +408,8 @@ impl<'schema> Connect<'schema> {
 
         if let Some(http) = self.http {
             messages.extend(http.type_check(self.schema).err().into_iter().flatten());
+        } else if let Some(mcp) = self.mcp {
+            messages.extend(mcp.type_check(self.schema).err());
         } else {
             // Requestless connector: no transport (`http:` is absent, and no
             // other transport argument has been added yet). Flag any

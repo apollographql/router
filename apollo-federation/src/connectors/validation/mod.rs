@@ -57,12 +57,17 @@ pub fn validate<S: HasMetadata>(subgraph: &Subgraph<S>) -> Vec<Message> {
         .iter()
         .map(|directive| directive.name.clone())
         .collect_vec();
+    let mcp_source_names = source_directives
+        .iter()
+        .filter(|directive| directive.is_mcp())
+        .map(|directive| directive.name.clone())
+        .collect_vec();
 
     for source in source_directives {
         messages.extend(source.type_check());
     }
 
-    match fields_seen_by_all_connects(&schema_info, &all_source_names) {
+    match fields_seen_by_all_connects(&schema_info, &all_source_names, &mcp_source_names) {
         Ok(fields_seen_by_connectors) => {
             // Don't run schema-wide checks if any connectors failed to validate
             messages.extend(schema::validate(
@@ -177,6 +182,9 @@ pub enum Code {
     /// The `http.stream` provided in `@connect` was not a known mode, or was combined with an
     /// entity or batch connector.
     InvalidStream,
+    /// The `mcp` argument of `@connect` or `@source` was not valid: used before connect/v0.5,
+    /// combined with `http`, or on a source that isn't an MCP server.
+    InvalidMcp,
     /// The `errors.message` provided in `@connect` or `@source` was not valid.
     InvalidErrorsMessage,
     /// The `isSuccess` mapping provided in `@connect` or `@source` was not valid.

@@ -1,0 +1,70 @@
+extend schema
+  @link(url: "https://specs.apollo.dev/federation/v2.10", import: ["@key"])
+  @link(url: "https://specs.apollo.dev/connect/v0.5", import: ["@connect", "@source"])
+  @source(name: "quakes", http: { baseURL: "https://mcp.example.com" }, mcp: { path: "/mcp" })
+  @source(name: "rest", http: { baseURL: "https://api.example.com" })
+
+type Query {
+  # Valid: a tool call with arguments built from $args.
+  recentQuakes(limit: Int): [Quake]
+    @connect(
+      source: "quakes"
+      mcp: { tool: "earthquake_search_events", arguments: "limit: $args.limit" }
+      selection: "$.events { id magnitude }"
+    )
+  # Valid: a tool that takes no arguments.
+  latestQuake: Quake
+    @connect(
+      source: "quakes"
+      mcp: { tool: "earthquake_latest" }
+      selection: "id magnitude"
+    )
+  # Valid: an entity resolver calls one tool per entity.
+  quake(id: ID!): Quake
+    @connect(
+      source: "quakes"
+      entity: true
+      mcp: { tool: "earthquake_get_event", arguments: "event_id: $args.id" }
+      selection: "id magnitude"
+    )
+  # Invalid: `mcp:` and `http:` together.
+  both: Quake
+    @connect(
+      source: "quakes"
+      mcp: { tool: "earthquake_latest" }
+      http: { GET: "/latest" }
+      selection: "id magnitude"
+    )
+  # Invalid: the source isn't an MCP server.
+  notMcp: Quake
+    @connect(
+      source: "rest"
+      mcp: { tool: "earthquake_latest" }
+      selection: "id magnitude"
+    )
+  # Invalid: an empty tool name.
+  noTool: Quake
+    @connect(
+      source: "quakes"
+      mcp: { tool: "" }
+      selection: "id magnitude"
+    )
+  # Invalid: `arguments` uses an argument the field doesn't have.
+  badArguments(limit: Int): Quake
+    @connect(
+      source: "quakes"
+      mcp: { tool: "earthquake_latest", arguments: "limit: $args.nope" }
+      selection: "id magnitude"
+    )
+}
+
+type Quake @key(fields: "id") {
+  id: ID!
+  magnitude: Float
+  forecast: String
+    @connect(
+      source: "quakes"
+      mcp: { tool: "forecast", arguments: "id: $this.id" }
+      selection: "$"
+    )
+}
