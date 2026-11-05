@@ -255,7 +255,7 @@ impl ManifestSource {
             }
         } else if let Some(paths) = &config.persisted_queries.local_manifests {
             ManifestSource::LocalStatic(paths.clone())
-        } else if let Some(pq_oci_config) = config.pq_oci.as_ref() {
+        } else if let Some(pq_oci_config) = config.resolved_registry.persisted_queries.as_ref() {
             // A configured persisted-queries artifact reference means that standalone artifact
             // is the source of truth, not Uplink. It is independent of the schema source: a
             // router can fetch its schema over OCI and still take persisted queries from Uplink
@@ -468,6 +468,7 @@ mod tests {
     use super::*;
     use crate::configuration::Apq;
     use crate::configuration::PersistedQueries;
+    use crate::configuration::registry::ResolvedRegistry;
     use crate::registry::test_helpers::mock_oci_config_with_reference;
     use crate::registry::test_helpers::pq_chunk_layer;
     use crate::registry::test_helpers::setup_mocks;
@@ -545,7 +546,10 @@ mod tests {
             Configuration::fake_builder()
                 .apq(Apq::fake_new(Some(false)))
                 .persisted_query(PersistedQueries::builder().enabled(true).build())
-                .pq_oci(oci_config_for(image_reference.to_string()))
+                .resolved_registry(ResolvedRegistry {
+                    persisted_queries: Some(oci_config_for(image_reference.to_string())),
+                    ..Default::default()
+                })
                 .build()
                 .unwrap(),
         )
@@ -572,7 +576,10 @@ mod tests {
             Configuration::fake_builder()
                 .apq(Apq::fake_new(Some(false)))
                 .persisted_query(PersistedQueries::builder().enabled(true).build())
-                .pq_oci(oci_config_for(image_reference.to_string()))
+                .resolved_registry(ResolvedRegistry {
+                    persisted_queries: Some(oci_config_for(image_reference.to_string())),
+                    ..Default::default()
+                })
                 .uplink(unreachable_uplink)
                 .build()
                 .unwrap(),
@@ -602,7 +609,12 @@ mod tests {
                         ])
                         .build(),
                 )
-                .pq_oci(oci_config_for("localhost:1/unreachable:latest".to_string()))
+                .resolved_registry(ResolvedRegistry {
+                    persisted_queries: Some(oci_config_for(
+                        "localhost:1/unreachable:latest".to_string(),
+                    )),
+                    ..Default::default()
+                })
                 .build()
                 .unwrap(),
         )

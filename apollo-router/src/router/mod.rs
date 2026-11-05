@@ -28,8 +28,9 @@ use tracing_futures::WithSubscriber;
 
 use crate::axum_factory::AxumHttpServerFactory;
 use crate::configuration::ListenAddr;
+use crate::configuration::RegistryOverrides;
 use crate::orbiter::OrbiterPipelineFactory;
-use crate::registry::OciConfig;
+use crate::router::event::registry::drive_from_configuration;
 use crate::router::event::reload::ReloadableEventStream;
 use crate::router_factory::PipelineFactory;
 use crate::state_machine::ListenAddresses;
@@ -102,11 +103,10 @@ impl RouterHttpServer {
     ///   Optional.
     ///   Specifies the Uplink configuration options.
     ///
-    /// * `.pq_oci(impl Into<OciConfig>)`
+    /// * `.registry_overrides(impl Into<RegistryOverrides>)`
     ///   Optional.
-    ///   Specifies the OCI persisted-queries artifact configuration, used to fetch the
-    ///   persisted query manifest from its standalone artifact when a persisted-queries
-    ///   artifact reference is configured. Independent of the schema source.
+    ///   The CLI and environment inputs the configuration's `registry` section is resolved
+    ///   against (the graph artifact reference, the Apollo key, hot reload).
     ///
     /// * `.shutdown(impl Into<`[`ShutdownSource`]`>)`
     ///   Optional.
@@ -134,7 +134,7 @@ impl RouterHttpServer {
         license: Option<LicenseSource>,
         shutdown: Option<ShutdownSource>,
         uplink: Option<UplinkConfig>,
-        pq_oci: Option<OciConfig>,
+        registry_overrides: Option<RegistryOverrides>,
         is_telemetry_disabled: Option<bool>,
     ) -> RouterHttpServer {
         let (shutdown_sender, shutdown_receiver) = oneshot::channel::<()>();
@@ -143,7 +143,7 @@ impl RouterHttpServer {
             configuration,
             schema,
             uplink,
-            pq_oci,
+            registry_overrides.unwrap_or_default(),
             license.unwrap_or_default(),
             shutdown_receiver,
         );
@@ -237,13 +237,26 @@ fn generate_event_stream(
     configuration: Option<ConfigurationSource>,
     schema: SchemaSource,
     uplink_config: Option<UplinkConfig>,
-    pq_oci_config: Option<OciConfig>,
+    registry_overrides: RegistryOverrides,
     license: LicenseSource,
     shutdown_receiver: oneshot::Receiver<()>,
 ) -> impl Stream<Item = Event> {
     let configuration = match configuration {
-        Some(source) => source.into_stream(uplink_config, pq_oci_config).boxed(),
-        None => ConfigurationSource::empty_document_stream(uplink_config, pq_oci_config).boxed(),
+        Some(source) => source
+            .into_stream(uplink_config, registry_overrides)
+            .boxed(),
+        None => {
+            ConfigurationSource::empty_document_stream(uplink_config, registry_overrides).boxed()
+        }
+    };
+    // Sources declared in the configuration's `registry` section are driven off the
+    // configuration events themselves, so editing the section restarts their pollers.
+    let drive_schema = matches!(schema, SchemaSource::FromRegistryConfiguration);
+    let drive_license = matches!(license, LicenseSource::FromRegistryConfiguration);
+    let configuration = if drive_schema || drive_license {
+        drive_from_configuration(configuration, drive_schema, drive_license).boxed()
+    } else {
+        configuration
     };
     stream::select_all(vec![
         shutdown.into_stream().boxed(),

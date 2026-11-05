@@ -3,6 +3,7 @@ use std::ffi::OsString;
 use std::fs;
 use std::net::SocketAddr;
 use std::net::TcpListener;
+use std::path::Path;
 use std::path::PathBuf;
 use std::process::Stdio;
 use std::sync::Arc;
@@ -1106,6 +1107,14 @@ impl IntegrationTest {
                 needs_supergraph_cli_arg = false;
             }
             router.env(key, val);
+        }
+
+        // A graph artifact declared in the configuration's `registry` section is a schema
+        // source too (the router probes for it the same way, see
+        // `config_declares_registry_graph` in executable.rs), so the CLI arg must not
+        // override it.
+        if config_declares_registry_graph(&self.test_config_location) {
+            needs_supergraph_cli_arg = false;
         }
 
         // Opt-in real Studio credentials. Reads `TEST_APOLLO_KEY` and
@@ -2399,6 +2408,21 @@ impl Drop for IntegrationTest {
 ///
 /// The test harness needs some options to be present for it to work, so this
 /// function allows patching any config to include the needed values.
+/// Whether the configuration file at `path` declares `registry.artifacts.graph`.
+fn config_declares_registry_graph(path: &Path) -> bool {
+    std::fs::read_to_string(path)
+        .ok()
+        .and_then(|text| serde_yaml::from_str::<serde_yaml::Value>(&text).ok())
+        .and_then(|document| {
+            document
+                .get("registry")?
+                .get("artifacts")?
+                .get("graph")
+                .cloned()
+        })
+        .is_some_and(|graph| !graph.is_null())
+}
+
 fn merge_overrides(
     yaml: &str,
     subgraph_overrides: &HashMap<String, String>,

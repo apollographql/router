@@ -1,0 +1,33 @@
+### `registry`
+
+Where the router fetches its artifacts from: the graph artifact that carries the supergraph schema, the persisted-queries artifact, and the entitlement that licenses the router. All three are repositories under one registry host and path prefix, so a pull-through cache or mirror of Apollo's registry is declared once and applies to every artifact.
+
+```yaml title="registry"
+registry:
+  host: artifact.api.apollographql.com
+  prefix: null
+  auth: auto
+  poll_interval: 30s
+  insecure: false
+  artifacts:
+    graph:
+      reference: my-graph:production
+    persisted_queries:
+      reference: persistedqueries/my-graph:production
+    entitlement: null
+```
+
+| Property | Description |
+| --- | --- |
+| `host` | The registry host, with an optional port. Apollo's `artifact.api.apollographql.com` when unset, or a pull-through cache or mirror of it such as `mirror.internal:5000`. |
+| `prefix` | The path under which the registry mounts Apollo's repositories, for caches that place an upstream under a prefix. With `prefix: apollo-remote`, the graph artifact is fetched from `<host>/apollo-remote/my-graph:production`. Unset for a registry that mounts them at its root, like Apollo's own. |
+| `auth` | How the router authenticates: `auto` (default) sends the graph API key in `APOLLO_KEY` to an Apollo-hosted registry and uses the Docker credential store for any other host; `apollo_key` always sends the key, for a proxy in front of Apollo's registry under another hostname; `docker_credentials` always uses the Docker credential store; `anonymous` sends nothing. |
+| `poll_interval` | How often tag references are checked for a new version. Defaults to `30s`. |
+| `insecure` | Use plain HTTP for this registry, for a local or in-cluster cache without TLS. |
+| `artifacts.graph.reference` | The graph artifact: `<graph>:<variant>` to follow the variant (requires `--hot-reload`), or `<graph>@sha256:<digest>` to pin a launch. `APOLLO_GRAPH_ARTIFACT_REFERENCE` overrides this slot and must name the same registry. |
+| `artifacts.persisted_queries.reference` | The persisted-queries artifact: `persistedqueries/<graph>:<variant>` to follow the variant's persisted query list, or a digest to pin a revision. Tag references are always followed, independently of `--hot-reload`. Unset, persisted queries come from Apollo Uplink; `persisted_queries.local_manifests` takes precedence over both. |
+| `artifacts.entitlement.reference` | Normally unset: the router reads the entitlement identifier off the graph artifact's manifest and fetches `entitlements/<id>:latest` next to the graph repository, under the same prefix. Set it only to take the license from a different repository. |
+
+A reference is relative to `host` and `prefix` unless its first path segment is itself a host (it contains a `.` or a `:`, or is `localhost`), in which case it is used as written.
+
+Editing this section while the router runs restarts the pollers it changes: a new graph reference fetches the new schema, a new persisted-queries reference loads the new list, and an untouched slot keeps its poller and cached state. A section that cannot be resolved at startup stops the router with an error; one that cannot be resolved on a later edit is logged and the running configuration is kept.
