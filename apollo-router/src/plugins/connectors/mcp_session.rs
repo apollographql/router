@@ -14,6 +14,7 @@ use std::collections::HashMap;
 use std::collections::HashSet;
 use std::num::NonZeroUsize;
 use std::sync::Arc;
+use std::sync::OnceLock;
 use std::sync::atomic::AtomicU64;
 use std::sync::atomic::Ordering;
 use std::task::Context as TaskContext;
@@ -140,15 +141,27 @@ impl McpSessionLayer {
                 idle_timeout: *config.idle_timeout,
                 hmac_key: rand::random(),
                 slots: Mutex::new(LruCache::new(capacity)),
+                closer: OnceLock::new(),
             }),
         }
     }
 }
 
-impl<S> Layer<S> for McpSessionLayer {
+impl<S> Layer<S> for McpSessionLayer
+where
+    S: Service<HttpRequest, Response = HttpResponse, Error = BoxError> + Clone + Send + 'static,
+    S::Future: Send,
+{
     type Service = McpSessionService<S>;
 
     fn layer(&self, inner: S) -> Self::Service {
+        // Keep a client for closing the sessions that are still open when the layer goes away,
+        // on a reload or at shutdown.
+        let closer = Mutex::new(inner.clone());
+        let _ = self.sessions.closer.set(Box::new(move |slot| {
+            let inner = closer.lock().clone();
+            close(slot, inner);
+        }));
         McpSessionService {
             inner,
             sessions: self.sessions.clone(),
@@ -192,6 +205,45 @@ struct Sessions {
     /// Random per process, so the keys say nothing about the credentials they were derived from.
     hmac_key: [u8; 32],
     slots: Mutex<LruCache<Key, Arc<Slot>>>,
+    /// Closes one session, through the client the layer wraps. Set when the layer is applied.
+    closer: OnceLock<Closer>,
+}
+
+type Closer = Box<dyn Fn(Arc<Slot>) + Send + Sync>;
+
+impl Drop for Sessions {
+    /// The pipeline holding these sessions is gone, after a reload or at shutdown. Close every
+    /// session still open rather than leaving it to the server's own expiry.
+    fn drop(&mut self) {
+        let Some(closer) = self.closer.get() else {
+            return;
+        };
+        for (_, slot) in self.slots.get_mut().iter() {
+            closer(slot.clone());
+        }
+    }
+}
+
+/// Why a handshake happens, for the handshake counter.
+#[derive(Clone, Copy)]
+enum HandshakeReason {
+    /// The caller had no session yet.
+    New,
+    /// The server answered 404: it no longer knows the session.
+    Expired,
+    /// The server answered 401 or 403 to a session opened with other credentials, as when a
+    /// token is refreshed and the server ties sessions to tokens.
+    CredentialsChanged,
+}
+
+impl HandshakeReason {
+    fn as_str(self) -> &'static str {
+        match self {
+            HandshakeReason::New => "new",
+            HandshakeReason::Expired => "expired",
+            HandshakeReason::CredentialsChanged => "credentials_changed",
+        }
+    }
 }
 
 type Key = [u8; 32];
@@ -263,6 +315,7 @@ impl Sessions {
         };
 
         let key = self.key(&parts.headers, &context);
+        let mut reason = HandshakeReason::New;
         for attempt in 0..2 {
             let slot = self.slot(key, inner.clone());
             // Move a clone of the service into the handshake rather than borrowing it, so the
@@ -271,7 +324,9 @@ impl Sessions {
                 (inner.clone(), &*self, &parts, &context);
             let state = match slot
                 .state
-                .get_or_try_init(move || this.initialize(handshake, parts_ref, context_ref))
+                .get_or_try_init(move || {
+                    this.counted_initialize(handshake, parts_ref, context_ref, reason)
+                })
                 .await
             {
                 Ok(state) => state,
@@ -284,11 +339,30 @@ impl Sessions {
 
             let request = session.request(&parts, &mut message, &context)?;
             let response = inner.clone().oneshot(request).await?;
-            if response.http_response.status() == StatusCode::NOT_FOUND && attempt == 0 {
+            let status = response.http_response.status();
+            if status == StatusCode::NOT_FOUND && attempt == 0 {
                 // The server no longer knows the session. It did not process the request, so
                 // starting a new session and sending it again is safe.
                 tracing::debug!(source = %self.source, "MCP session expired; initializing again");
                 self.forget(&key, &slot);
+                reason = HandshakeReason::Expired;
+                continue;
+            }
+            if (status == StatusCode::UNAUTHORIZED || status == StatusCode::FORBIDDEN)
+                && attempt == 0
+                && credentials_changed(&session.opened_by.headers, &parts.headers)
+            {
+                // The session was opened with other credentials, and this server ties sessions
+                // to them: open one with the credentials the request carries now. The request
+                // was refused, so sending it again is safe. A request refused with the same
+                // credentials that opened the session is not retried.
+                tracing::debug!(
+                    source = %self.source,
+                    "MCP session belongs to earlier credentials; initializing again"
+                );
+                self.forget(&key, &slot);
+                close(slot, inner.clone());
+                reason = HandshakeReason::CredentialsChanged;
                 continue;
             }
             *session.last_used.lock() = Instant::now();
@@ -369,6 +443,37 @@ impl Sessions {
         {
             slots.pop(key);
         }
+    }
+
+    /// [`Self::initialize`], counted by why it happened and how it ended. The handshake goes
+    /// below the HTTP client's own instruments, so this counter is where it shows up.
+    async fn counted_initialize<S>(
+        &self,
+        inner: S,
+        parts: &Parts,
+        context: &Context,
+        reason: HandshakeReason,
+    ) -> Result<State, HandshakeError>
+    where
+        S: Service<HttpRequest, Response = HttpResponse, Error = BoxError> + Clone + Send + 'static,
+        S::Future: Send,
+    {
+        let result = self.initialize(inner, parts, context).await;
+        let outcome = match &result {
+            Ok(State::Session(_)) => "session",
+            Ok(State::Stateless) => "stateless",
+            Err(HandshakeError::Refused(_)) => "refused",
+            Err(HandshakeError::Failed(_)) => "failed",
+        };
+        u64_counter!(
+            "apollo.router.connectors.mcp.handshakes",
+            "Number of MCP session handshakes the router made for connector sources",
+            1,
+            "connector.source" = self.source.clone(),
+            "mcp.handshake.reason" = reason.as_str(),
+            "mcp.handshake.outcome" = outcome
+        );
+        result
     }
 
     async fn initialize<S>(
@@ -485,6 +590,16 @@ fn session_message(bytes: &Bytes) -> Option<Value> {
     (method != "initialize").then_some(message)
 }
 
+/// Whether `request` carries credentials other than `opened_by`'s.
+fn credentials_changed(opened_by: &HeaderMap, request: &HeaderMap) -> bool {
+    DEFAULT_IDENTITY_HEADERS.iter().any(|name| {
+        !opened_by
+            .get_all(name)
+            .iter()
+            .eq(request.get_all(name).iter())
+    })
+}
+
 fn hash_headers(mac: &mut HmacSha256, headers: &HeaderMap, names: &[HeaderName]) {
     for name in names {
         for value in headers.get_all(name) {
@@ -590,9 +705,12 @@ where
         http_request: http::Request::from_parts(parts, body::empty()),
         context: Context::new(),
     };
-    tokio::spawn(async move {
-        let _ = inner.oneshot(request).await;
-    });
+    // A layer dropped outside the runtime, at the very end of shutdown, can't close anything.
+    if let Ok(runtime) = tokio::runtime::Handle::try_current() {
+        runtime.spawn(async move {
+            let _ = inner.oneshot(request).await;
+        });
+    }
 }
 
 #[cfg(test)]

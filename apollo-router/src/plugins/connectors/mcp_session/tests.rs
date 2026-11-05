@@ -19,6 +19,7 @@ use super::McpSessionLayer;
 use super::PROTOCOL_VERSION;
 use super::SESSION_ID;
 use crate::Context;
+use crate::metrics::FutureMetricsExt as _;
 use crate::plugins::authentication::APOLLO_AUTHENTICATION_JWT_CLAIMS;
 use crate::plugins::connectors::configuration::McpSourceConfiguration;
 use crate::services::http::HttpRequest;
@@ -34,7 +35,14 @@ struct Seen {
     session: Option<String>,
     version: Option<String>,
     authorization: Option<String>,
+    /// Whether the request still carried the [`Marker`] extension its connector request had,
+    /// as SigV4 signing parameters must be for the request to be signed below this layer
+    marked: bool,
 }
+
+/// A request extension standing in for SigV4 signing parameters, which travel the same way.
+#[derive(Clone)]
+struct Marker;
 
 /// A fake MCP server that requires sessions, as servers built on the stateful SDK defaults do.
 #[derive(Default)]
@@ -42,7 +50,13 @@ struct Server {
     stateless: bool,
     event_stream: bool,
     refuse_initialize: bool,
+    /// Refuse a tool call with 401 when it carries other credentials than its session was
+    /// opened with, as servers that tie sessions to tokens do
+    bind_credentials: bool,
+    /// Refuse every tool call with 401
+    refuse_tool_calls: bool,
     sessions: HashSet<String>,
+    opened_with: std::collections::HashMap<String, Option<String>>,
     issued: usize,
     seen: Vec<Seen>,
     deleted: Vec<String>,
@@ -114,6 +128,7 @@ impl Fake {
             session: session.clone(),
             version: header(&PROTOCOL_VERSION),
             authorization: header(&AUTHORIZATION),
+            marked: parts.extensions.get::<Marker>().is_some(),
         };
         let mut server = self.server.lock();
         server.seen.push(seen.clone());
@@ -143,6 +158,9 @@ impl Fake {
                 server.issued += 1;
                 let id = format!("session-{}", server.issued);
                 server.sessions.insert(id.clone());
+                server
+                    .opened_with
+                    .insert(id.clone(), seen.authorization.clone());
                 if !server.event_stream {
                     return Ok(response(StatusCode::OK, Some(&id), &result));
                 }
@@ -171,6 +189,19 @@ impl Fake {
                     Ok(response(StatusCode::NOT_FOUND, None, "Session not found"))
                 }
                 Some(_) if seen.rpc_id.is_none() => Ok(response(StatusCode::ACCEPTED, None, "")),
+                Some(_) if server.refuse_tool_calls => {
+                    Ok(response(StatusCode::UNAUTHORIZED, None, "invalid_token"))
+                }
+                Some(session)
+                    if server.bind_credentials
+                        && server.opened_with.get(&session) != Some(&seen.authorization) =>
+                {
+                    Ok(response(
+                        StatusCode::UNAUTHORIZED,
+                        None,
+                        "token does not match session",
+                    ))
+                }
                 Some(_) => Ok(response(
                     StatusCode::OK,
                     None,
@@ -470,4 +501,155 @@ async fn requests_that_are_not_json_rpc_pass_through() {
     service.oneshot(request).await.unwrap();
 
     assert_eq!(fake.initializes(), 0);
+}
+
+#[tokio::test]
+async fn a_session_tied_to_a_refreshed_token_is_replaced_and_the_request_sent_again() {
+    async {
+        let fake = Fake::default();
+        fake.server.lock().bind_credentials = true;
+        let service = layer(json!({ "sessions": "auto" })).layer(fake.service());
+        let claims = json!({ "iss": "https://idp", "sub": "ada", "sid": "login-1" });
+
+        let deleted = fake.deleted.notified();
+        for token in ["Bearer t1", "Bearer t2"] {
+            let response = service
+                .clone()
+                .oneshot(tool_call(Some(token), with_claims(claims.clone())))
+                .await
+                .unwrap();
+            assert_eq!(response.http_response.status(), StatusCode::OK, "{token}");
+        }
+        tokio::time::timeout(Duration::from_secs(5), deleted)
+            .await
+            .expect("the session opened with the old token is closed");
+
+        let calls: Vec<_> = fake
+            .seen_rpc("tools/call")
+            .into_iter()
+            .map(|call| (call.authorization.unwrap(), call.session.unwrap()))
+            .collect();
+        assert_eq!(
+            calls,
+            [
+                ("Bearer t1".to_string(), "session-1".to_string()),
+                // Refused: the server ties session-1 to t1
+                ("Bearer t2".to_string(), "session-1".to_string()),
+                ("Bearer t2".to_string(), "session-2".to_string()),
+            ]
+        );
+        let server = fake.server.lock();
+        assert_eq!(server.deleted, ["session-1"]);
+        let delete = server
+            .seen
+            .iter()
+            .find(|seen| seen.method == Method::DELETE)
+            .unwrap();
+        assert_eq!(delete.authorization.as_deref(), Some("Bearer t1"));
+        drop(server);
+
+        assert_counter!(
+            "apollo.router.connectors.mcp.handshakes",
+            1,
+            "connector.source" = "mcp.server",
+            "mcp.handshake.reason" = "new",
+            "mcp.handshake.outcome" = "session"
+        );
+        assert_counter!(
+            "apollo.router.connectors.mcp.handshakes",
+            1,
+            "connector.source" = "mcp.server",
+            "mcp.handshake.reason" = "credentials_changed",
+            "mcp.handshake.outcome" = "session"
+        );
+    }
+    .with_metrics()
+    .await;
+}
+
+#[tokio::test]
+async fn a_request_refused_with_the_credentials_that_opened_its_session_is_not_retried() {
+    let fake = Fake::default();
+    fake.server.lock().refuse_tool_calls = true;
+    let service = layer(json!({ "sessions": "auto" })).layer(fake.service());
+
+    let response = service
+        .oneshot(tool_call(Some("Bearer revoked"), Context::new()))
+        .await
+        .unwrap();
+
+    assert_eq!(response.http_response.status(), StatusCode::UNAUTHORIZED);
+    assert_eq!(fake.initializes(), 1);
+    assert_eq!(fake.seen_rpc("tools/call").len(), 1);
+}
+
+#[tokio::test]
+async fn open_sessions_are_closed_when_the_layer_is_dropped() {
+    let fake = Fake::default();
+    let layer = layer(json!({ "sessions": "auto" }));
+    let service = layer.layer(fake.service());
+
+    for authorization in ["Bearer a", "Bearer b"] {
+        service
+            .clone()
+            .oneshot(tool_call(Some(authorization), Context::new()))
+            .await
+            .unwrap();
+    }
+    assert!(fake.server.lock().deleted.is_empty());
+
+    // A reload drops the old pipeline's layer and every service built from it
+    drop(service);
+    drop(layer);
+    tokio::time::timeout(Duration::from_secs(5), async {
+        while fake.server.lock().deleted.len() < 2 {
+            fake.deleted.notified().await;
+        }
+    })
+    .await
+    .expect("both sessions are closed");
+
+    let mut deleted = fake.server.lock().deleted.clone();
+    deleted.sort();
+    assert_eq!(deleted, ["session-1", "session-2"]);
+}
+
+#[tokio::test]
+async fn every_request_the_layer_sends_keeps_the_connector_requests_extensions() {
+    let fake = Fake::default();
+    let layer = layer(json!({ "sessions": "auto" }));
+    let service = layer.layer(fake.service());
+
+    let mut request = tool_call(Some("Bearer a"), Context::new());
+    request.http_request.extensions_mut().insert(Marker);
+    service.oneshot(request).await.unwrap();
+
+    let deleted = fake.deleted.notified();
+    drop(layer);
+    tokio::time::timeout(Duration::from_secs(5), deleted)
+        .await
+        .expect("the session is closed");
+
+    let seen = fake.server.lock().seen.clone();
+    let kinds: Vec<_> = seen
+        .iter()
+        .map(|seen| {
+            (
+                seen.rpc_method
+                    .clone()
+                    .unwrap_or_else(|| seen.method.to_string()),
+                seen.marked,
+            )
+        })
+        .collect();
+    assert_eq!(
+        kinds,
+        [
+            ("initialize".to_string(), true),
+            ("notifications/initialized".to_string(), true),
+            ("tools/call".to_string(), true),
+            ("DELETE".to_string(), true),
+        ],
+        "SigV4 signing parameters ride in extensions, so every request must keep them"
+    );
 }
