@@ -213,14 +213,7 @@ impl StaticCostCalculator {
         let own_list_size_directives: Vec<ListSizeDirective> = definition
             .list_size_directive_entries()
             .iter()
-            .map(|entry| {
-                ListSizeDirective::new(
-                    &entry.directive,
-                    field,
-                    ctx.variables,
-                    entry.parsed_sized_fields.clone(),
-                )
-            })
+            .map(|entry| ListSizeDirective::new(entry, field, ctx.variables))
             .collect::<Result<Vec<_>, _>>()?;
 
         let effective_expected_size = own_list_size_directives
@@ -805,17 +798,6 @@ mod tests {
     use crate::spec;
     use crate::spec::Query;
 
-    impl StaticCostCalculator {
-        fn rust_planned(
-            &self,
-            query_plan: &apollo_federation::query_plan::QueryPlan,
-            variables: &Object,
-        ) -> Result<f64, DemandControlError> {
-            let js_planner_node: PlanNode = query_plan.node.as_ref().unwrap().into();
-            Ok(self.score_plan_node(&js_planner_node, variables)?.total())
-        }
-    }
-
     fn parse_schema_and_operation(
         schema_str: &str,
         query_str: &str,
@@ -941,6 +923,17 @@ mod tests {
     }
 
     fn planned_cost_rust(schema_str: &str, query_str: &str, variables_str: &str) -> f64 {
+        planned_cost_by_subgraph_rust(schema_str, query_str, variables_str, 100).total()
+    }
+
+    /// Estimate the cost of an operation against its (Rust) query plan, broken down by
+    /// subgraph, using `list_size` as the configured default list size.
+    fn planned_cost_by_subgraph_rust(
+        schema_str: &str,
+        query_str: &str,
+        variables_str: &str,
+        list_size: u32,
+    ) -> CostBySubgraph {
         let config: Arc<Configuration> = Arc::new(Default::default());
         let (schema, query) = parse_schema_and_operation(schema_str, query_str, &config);
         let variables = serde_json::from_str::<Value>(variables_str)
@@ -970,10 +963,11 @@ mod tests {
             Arc::new(schema),
             Arc::new(demand_controlled_subgraph_schemas),
             Default::default(),
-            100,
+            list_size,
         );
 
-        calculator.rust_planned(&query_plan, &variables).unwrap()
+        let plan_node: PlanNode = query_plan.node.as_ref().unwrap().into();
+        calculator.score_plan_node(&plan_node, &variables).unwrap()
     }
 
     fn actual_cost(
@@ -1483,6 +1477,7 @@ mod tests {
     /// Tests for array-based slicing arguments in @listSize directive
     mod array_slicing_argument_tests {
         use super::estimated_cost;
+        use crate::test_harness::tracing_test;
 
         const SCHEMA: &str = include_str!("./fixtures/custom_cost_schema.graphql");
 
@@ -1518,6 +1513,46 @@ mod tests {
             let query = r#"query Q($ids: [ID!]) { itemsByIdsWithAssumedSize(ids: $ids) { id } }"#;
             // assumedSize is 50 in the schema
             assert_eq!(estimated_cost(SCHEMA, query, variables), 50.0);
+        }
+
+        /// Per GraphQL input coercion, a single value supplied for a list-typed argument is a
+        /// list of one item, so the list size is 1 rather than the value itself.
+        #[rstest::rstest]
+        #[case::string_variable(
+            r#"query Q($ids: [ID!]!) { itemsByIds(ids: $ids) { id } }"#,
+            r#"{"ids": "a"}"#
+        )]
+        #[case::int_variable(
+            r#"query Q($ids: [ID!]!) { itemsByIds(ids: $ids) { id } }"#,
+            r#"{"ids": 1000000}"#
+        )]
+        #[case::inline_string(r#"query { itemsByIds(ids: "a") { id } }"#, "{}")]
+        #[case::inline_int(r#"query { itemsByIds(ids: 1000000) { id } }"#, "{}")]
+        fn single_value_for_list_argument_is_one_item(
+            #[case] query: &str,
+            #[case] variables: &str,
+        ) {
+            assert_eq!(estimated_cost(SCHEMA, query, variables), 1.0);
+        }
+
+        /// A `slicingArguments` entry that does not resolve against the schema is dropped (with a
+        /// warning) at schema load, so it never contributes a size; the remaining entries and
+        /// `assumedSize` apply as usual.
+        #[rstest::rstest]
+        #[case::resolvable_argument_present(
+            r#"query { itemsWithUnresolvableSlicingArgument(first: 3) { id } }"#,
+            3.0
+        )]
+        #[case::resolvable_argument_absent(
+            r#"query { itemsWithUnresolvableSlicingArgument { id } }"#,
+            50.0 // assumedSize
+        )]
+        fn unresolvable_slicing_argument_is_ignored(#[case] query: &str, #[case] expected: f64) {
+            let _guard = tracing_test::dispatcher_guard();
+            assert_eq!(estimated_cost(SCHEMA, query, "{}"), expected);
+            assert!(tracing_test::logs_contain(
+                "Slicing argument `input.pagination.first` of @listSize on `Query.itemsWithUnresolvableSlicingArgument` does not resolve"
+            ));
         }
     }
 
@@ -1853,6 +1888,149 @@ mod tests {
                 actual_cost(SCHEMA, query, variables, response_bytes),
                 expected_cost
             );
+        }
+    }
+
+    /// Sizing of lists across subgraph boundaries, with a configured default `list_size: 10`.
+    ///
+    /// The supergraph has a `products` and a `reviews` subgraph: `Query.productsByIds` is sized
+    /// by its `ids` slicing argument, `Product.categories` lives in the same subgraph, and
+    /// `Product.reviews` is an entity extension resolved through an `_entities` fetch.
+    ///
+    /// Per-`Product` cost of either nested list is `1 (Product) + 10 (@cost) + 10 × 1 = 21`.
+    mod entity_fetch_list_size_tests {
+        use super::planned_cost_by_subgraph_rust;
+
+        const SCHEMA: &str = include_str!("./fixtures/entity_fetch_list_size_schema.graphql");
+        const LIST_SIZE: u32 = 10;
+
+        // Nested list served by the same subgraph as the parent list.
+        const SAME_SUBGRAPH_QUERY: &str = r#"
+            query Products($ids: [Int!]!) {
+                productsByIds(ids: $ids) {
+                    id
+                    categories { id }
+                }
+            }"#;
+        // Nested list served by another subgraph via `_entities`.
+        const FEDERATED_QUERY: &str = r#"
+            query Products($ids: [Int!]!) {
+                productsByIds(ids: $ids) {
+                    id
+                    reviews { rating }
+                }
+            }"#;
+        // Both nested lists in one operation.
+        const BOTH_QUERY: &str = r#"
+            query Products($ids: [Int!]!) {
+                productsByIds(ids: $ids) {
+                    id
+                    categories { id }
+                    reviews { rating }
+                }
+            }"#;
+
+        fn ids(n: usize) -> String {
+            let ids: Vec<String> = (1..=n).map(|i| i.to_string()).collect();
+            format!(r#"{{"ids": [{}]}}"#, ids.join(","))
+        }
+
+        /// Control case: when the nested list is served by the same subgraph, the `ids`
+        /// slicing argument sizes the parent list and the cost scales with the number of
+        /// ids: `10 + 21n`.
+        #[rstest::rstest]
+        #[case(1, 31.0)]
+        #[case(2, 52.0)]
+        #[case(10, 220.0)]
+        #[case(25, 535.0)]
+        fn same_subgraph_list_scales_with_slicing_argument(
+            #[case] n: usize,
+            #[case] expected_total: f64,
+        ) {
+            let cost =
+                planned_cost_by_subgraph_rust(SCHEMA, SAME_SUBGRAPH_QUERY, &ids(n), LIST_SIZE);
+            assert_eq!(cost.get("products"), Some(expected_total));
+            assert_eq!(cost.get("reviews"), None);
+            assert_eq!(cost.total(), expected_total);
+        }
+
+        /// Current behavior: the `_entities` fetch to `reviews` is a list field (`[_Entity]!`)
+        /// with no `@listSize`, so it is sized with the configured `list_size` (10) regardless
+        /// of how many representations the parent fetch will produce. The subgraph is charged
+        /// a constant `10 × 21 = 210`, and only the `products` fetch (`10 + n`) scales with the
+        /// number of ids, giving a total of `220 + n`.
+        #[rstest::rstest]
+        #[case(1, 11.0, 221.0)]
+        #[case(2, 12.0, 222.0)]
+        #[case(10, 20.0, 230.0)]
+        #[case(25, 35.0, 245.0)]
+        fn entity_fetch_ignores_parent_list_size(
+            #[case] n: usize,
+            #[case] expected_products: f64,
+            #[case] expected_total: f64,
+        ) {
+            let cost = planned_cost_by_subgraph_rust(SCHEMA, FEDERATED_QUERY, &ids(n), LIST_SIZE);
+            assert_eq!(cost.get("products"), Some(expected_products));
+            assert_eq!(cost.get("reviews"), Some(210.0));
+            assert_eq!(cost.total(), expected_total);
+        }
+
+        /// Both selections in one operation: `products` scales as `10 + 21n` while `reviews`
+        /// stays at 210.
+        #[rstest::rstest]
+        #[case(1, 31.0, 241.0)]
+        #[case(2, 52.0, 262.0)]
+        #[case(10, 220.0, 430.0)]
+        #[case(25, 535.0, 745.0)]
+        fn entity_fetch_ignores_parent_list_size_with_both_selections(
+            #[case] n: usize,
+            #[case] expected_products: f64,
+            #[case] expected_total: f64,
+        ) {
+            let cost = planned_cost_by_subgraph_rust(SCHEMA, BOTH_QUERY, &ids(n), LIST_SIZE);
+            assert_eq!(cost.get("products"), Some(expected_products));
+            assert_eq!(cost.get("reviews"), Some(210.0));
+            assert_eq!(cost.total(), expected_total);
+        }
+
+        /// The entity fetch is sized by the configured `list_size`, not by the number of ids:
+        /// with `list_size: 1` the single-id federated query drops from 221 to 23.
+        #[test]
+        fn entity_fetch_is_sized_by_configured_list_size() {
+            let cost = planned_cost_by_subgraph_rust(SCHEMA, FEDERATED_QUERY, &ids(1), 1);
+            assert_eq!(cost.get("products"), Some(11.0));
+            assert_eq!(cost.get("reviews"), Some(12.0));
+            assert_eq!(cost.total(), 23.0);
+        }
+
+        /// A single value sent for the list-typed `ids` slicing argument is coerced to a list
+        /// of one item per GraphQL input coercion, so the list size is 1 (not the value).
+        #[rstest::rstest]
+        #[case::array_of_one(r#"{"ids": [1000000]}"#, 31.0)]
+        #[case::array_of_three(r#"{"ids": [1, 2, 3]}"#, 73.0)]
+        #[case::scalar_small(r#"{"ids": 5}"#, 31.0)]
+        #[case::scalar_large(r#"{"ids": 1000000}"#, 31.0)]
+        fn single_value_for_list_slicing_argument_is_one_item(
+            #[case] variables: &str,
+            #[case] expected_total: f64,
+        ) {
+            let cost =
+                planned_cost_by_subgraph_rust(SCHEMA, SAME_SUBGRAPH_QUERY, variables, LIST_SIZE);
+            assert_eq!(cost.total(), expected_total);
+        }
+
+        /// Same coercion for an inline literal.
+        #[test]
+        fn inline_single_value_for_list_slicing_argument_is_one_item() {
+            let query = r#"
+                query {
+                    productsByIds(ids: 5) {
+                        id
+                        categories { id }
+                    }
+                }"#;
+            let cost = planned_cost_by_subgraph_rust(SCHEMA, query, "{}", LIST_SIZE);
+            assert_eq!(cost.total(), 31.0);
         }
     }
 }

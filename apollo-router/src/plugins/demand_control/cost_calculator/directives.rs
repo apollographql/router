@@ -5,13 +5,13 @@ use ahash::HashMapExt;
 use apollo_compiler::Schema;
 use apollo_compiler::ast::FieldDefinition;
 use apollo_compiler::ast::NamedType;
+use apollo_compiler::ast::Type;
 use apollo_compiler::ast::Value as AstValue;
 use apollo_compiler::executable::Field;
 use apollo_compiler::executable::Selection;
 use apollo_compiler::executable::SelectionSet;
 use apollo_compiler::parser::Parser;
 use apollo_compiler::validation::Valid;
-use apollo_federation::link::cost_spec_definition::ListSizeDirective as ParsedListSizeDirective;
 use indexmap::IndexSet;
 use serde_json_bytes::Value as JsonValue;
 use tower::BoxError;
@@ -19,91 +19,175 @@ use tower::BoxError;
 use crate::json_ext::Object;
 use crate::json_ext::ValueExt;
 use crate::plugins::demand_control::DemandControlError;
+use crate::plugins::demand_control::cost_calculator::schema::ListSizeDirectiveEntry;
 
 // Traverses a nested AST value by path segments.
 // Given path `["pagination", "count"]`, returns the value at `{pagination: {count: <value>}}`.
-fn traverse_ast_value<'a>(value: &'a AstValue, path: &[&str]) -> Option<&'a AstValue> {
+fn traverse_ast_value<'a>(value: &'a AstValue, path: &[impl AsRef<str>]) -> Option<&'a AstValue> {
     path.iter()
         .try_fold(value, |current, segment| match current {
             AstValue::Object(fields) => fields
                 .iter()
-                .find(|(name, _)| name.as_str() == *segment)
+                .find(|(name, _)| name.as_str() == segment.as_ref())
                 .map(|(_, node)| node.as_ref()),
             _ => None,
         })
 }
 
 // Traverses a nested JSON value by path segments.
-fn traverse_json_value<'a>(value: &'a JsonValue, path: &[&str]) -> Option<&'a JsonValue> {
+fn traverse_json_value<'a>(
+    value: &'a JsonValue,
+    path: &[impl AsRef<str>],
+) -> Option<&'a JsonValue> {
     path.iter()
-        .try_fold(value, |current, segment| current.get(segment))
+        .try_fold(value, |current, segment| current.get(segment.as_ref()))
 }
 
 // Infers a size value from an AST argument value.
 //
+// `declared_type` is the schema type of the argument (or nested input field) the value is
+// supplied for. Per GraphQL input coercion, a single non-list value supplied for a list type is
+// coerced to a list of size one, so for a list-typed slicing argument a single value means a
+// list size of 1 rather than the value's numeric magnitude.
+//
 // Returns:
-// - `Some(n)` for integer values (e.g., `first: 10` → 10)
+// - `Some(n)` for integer values of non-list arguments (e.g., `first: 10` → 10)
 // - `Some(len)` for array values (e.g., `ids: ["a", "b"]` → 2)
+// - `Some(1)` for a single non-null value supplied for a list-typed argument
 // - Resolves variable references through the provided variables map
 // - `None` for null, missing, or unsupported value types
-fn infer_size_from_argument(value: Option<&AstValue>, variables: &Object) -> Option<i32> {
+fn infer_size_from_argument(
+    value: Option<&AstValue>,
+    declared_type: &Type,
+    variables: &Object,
+) -> Option<i32> {
     match value? {
+        AstValue::List(items) => Some(items.len() as i32),
+        AstValue::Variable(var_name) => {
+            infer_size_from_variable(variables.get(var_name.as_str()), declared_type)
+        }
+        AstValue::Null => None,
+        // A single value supplied for a list-typed argument coerces to a list of one item.
+        _ if declared_type.is_list() => Some(1),
         // A slicing argument is a count of elements, so it can never be negative. Clamp to a
         // non-negative lower bound: a negative value would otherwise contribute negative cost
         // and deflate the estimate below what the operation actually costs.
         AstValue::Int(n) => n.try_to_i32().ok().map(|n| n.max(0)),
-        AstValue::List(items) => Some(items.len() as i32),
-        AstValue::Variable(var_name) => infer_size_from_variable(variables.get(var_name.as_str())),
         _ => None,
     }
 }
 
-// Infers a size value from a JSON variable value.
-fn infer_size_from_variable(value: Option<&JsonValue>) -> Option<i32> {
+// Infers a size value from a JSON variable value. See `infer_size_from_argument`.
+fn infer_size_from_variable(value: Option<&JsonValue>, declared_type: &Type) -> Option<i32> {
     match value? {
         JsonValue::Array(items) => Some(items.len() as i32),
+        JsonValue::Null => None,
+        // A single value supplied for a list-typed argument coerces to a list of one item.
+        _ if declared_type.is_list() => Some(1),
         // Clamp to a non-negative lower bound for the same reason as literal integer arguments.
         other => other.as_i32().map(|n| n.max(0)),
     }
 }
 
-fn resolve_nested_size(value: &AstValue, path: &[&str], variables: &Object) -> Option<i32> {
+fn resolve_nested_size(
+    value: &AstValue,
+    path: &[String],
+    declared_type: &Type,
+    variables: &Object,
+) -> Option<i32> {
     match value {
-        AstValue::Object(_) => infer_size_from_argument(traverse_ast_value(value, path), variables),
+        AstValue::Object(_) => {
+            infer_size_from_argument(traverse_ast_value(value, path), declared_type, variables)
+        }
         AstValue::Variable(var_name) => infer_size_from_variable(
             variables
                 .get(var_name.as_str())
                 .and_then(|v| traverse_json_value(v, path)),
+            declared_type,
         ),
         _ => None,
     }
 }
 
-// Resolves a slicing argument path to its size value.
-// Supports nested paths like "input.count" which traverse into input objects.
-fn resolve_slicing_value(
-    args: &HashMap<&str, &AstValue>,
-    slicing_path: &str,
-    variables: &Object,
-) -> Option<i32> {
-    let segments: Vec<&str> = slicing_path.split('.').collect();
-    let (arg_name, nested_path) = segments.split_first()?;
-    let value = args.get(*arg_name)?;
+/// One `slicingArguments` entry of a `@listSize` directive, resolved against the schema at load
+/// time: the argument (or dotted path through input objects) the size is read from, and its
+/// declared type, which decides how a single value is interpreted (see
+/// `infer_size_from_argument`).
+#[derive(Clone, Debug)]
+pub(in crate::plugins::demand_control) struct SlicingArgument {
+    argument_name: String,
+    nested_path: Vec<String>,
+    declared_type: Type,
+}
 
-    if nested_path.is_empty() {
-        infer_size_from_argument(Some(*value), variables)
-    } else {
-        resolve_nested_size(value, nested_path, variables)
+impl SlicingArgument {
+    /// Resolves one slicing argument path such as `first` or `input.pagination.first` against
+    /// the field's arguments and the input object types the path leads through. Returns `None`
+    /// if any step of the path is not defined in the schema.
+    fn resolve(schema: &Schema, field_definition: &FieldDefinition, path: &str) -> Option<Self> {
+        let mut segments = path.split('.');
+        let argument_name = segments.next()?;
+        let argument = field_definition
+            .arguments
+            .iter()
+            .find(|arg| arg.name.as_str() == argument_name)?;
+        let mut declared_type: &Type = &argument.ty;
+        let mut nested_path = Vec::new();
+        for segment in segments {
+            let input_object = schema.get_input_object(declared_type.inner_named_type())?;
+            declared_type = &input_object.fields.get(segment)?.ty;
+            nested_path.push(segment.to_string());
+        }
+        Some(Self {
+            argument_name: argument_name.to_string(),
+            nested_path,
+            declared_type: declared_type.clone(),
+        })
+    }
+
+    /// Resolves every path in a directive's `slicingArguments`. A path that does not resolve
+    /// against the schema is logged and dropped, so it never contributes a size (the same
+    /// outcome as a slicing argument that is absent from the operation).
+    pub(in crate::plugins::demand_control) fn from_strings(
+        schema: &Schema,
+        parent_type_name: &NamedType,
+        field_definition: &FieldDefinition,
+        paths: &IndexSet<String>,
+    ) -> Vec<Self> {
+        paths
+            .iter()
+            .filter_map(|path| {
+                let resolved = Self::resolve(schema, field_definition, path);
+                if resolved.is_none() {
+                    tracing::warn!(
+                        "Slicing argument `{path}` of @listSize on `{parent_type_name}.{field_name}` does not resolve to an argument or input field in the schema; it will be ignored",
+                        field_name = field_definition.name,
+                    );
+                }
+                resolved
+            })
+            .collect()
+    }
+
+    // Resolves this slicing argument's size from the operation's (merged) arguments and
+    // variables.
+    fn size(&self, args: &HashMap<&str, &AstValue>, variables: &Object) -> Option<i32> {
+        let value = args.get(self.argument_name.as_str())?;
+        if self.nested_path.is_empty() {
+            infer_size_from_argument(Some(*value), &self.declared_type, variables)
+        } else {
+            resolve_nested_size(value, &self.nested_path, &self.declared_type, variables)
+        }
     }
 }
 
 // Collects slicing argument sizes from both default values and actual query arguments.
 // Actual values override defaults when both are present.
-fn collect_slicing_sizes<'a>(
+fn collect_slicing_sizes(
     field: &Field,
-    slicing_argument_names: &'a IndexSet<String>,
+    slicing_arguments: &[SlicingArgument],
     variables: &Object,
-) -> HashMap<&'a str, i32> {
+) -> Vec<i32> {
     // Merge default and actual argument values (actuals take precedence)
     let defaults = field
         .definition
@@ -116,11 +200,9 @@ fn collect_slicing_sizes<'a>(
         .map(|arg| (arg.name.as_str(), arg.value.as_ref()));
     let args: HashMap<&str, &AstValue> = defaults.chain(actuals).collect();
 
-    slicing_argument_names
+    slicing_arguments
         .iter()
-        .filter_map(|path| {
-            resolve_slicing_value(&args, path, variables).map(|size| (path.as_str(), size))
-        })
+        .filter_map(|slicing_argument| slicing_argument.size(&args, variables))
         .collect()
 }
 
@@ -307,16 +389,17 @@ pub(in crate::plugins::demand_control) struct ListSizeDirective {
 }
 
 impl ListSizeDirective {
-    /// Build a ListSizeDirective at request time using pre-parsed sizedFields from schema load.
+    /// Build a ListSizeDirective at request time from the slicing arguments and sizedFields
+    /// pre-resolved at schema load.
     pub(in crate::plugins::demand_control) fn new(
-        parsed: &ParsedListSizeDirective,
+        entry: &ListSizeDirectiveEntry,
         field: &Field,
         variables: &Object,
-        pre_parsed_sized_fields: Option<Arc<SizedFields>>,
     ) -> Result<Self, DemandControlError> {
-        let expected_size = match parsed.slicing_argument_names.as_ref() {
-            Some(slicing_argument_names) => {
-                let slicing_sizes = collect_slicing_sizes(field, slicing_argument_names, variables);
+        let parsed = &entry.directive;
+        let expected_size = match entry.slicing_arguments.as_deref() {
+            Some(slicing_arguments) => {
+                let slicing_sizes = collect_slicing_sizes(field, slicing_arguments, variables);
 
                 if parsed.require_one_slicing_argument && slicing_sizes.len() != 1 {
                     return Err(DemandControlError::QueryParseFailure(format!(
@@ -325,14 +408,14 @@ impl ListSizeDirective {
                     )));
                 }
 
-                slicing_sizes.into_values().max().or(parsed.assumed_size)
+                slicing_sizes.into_iter().max().or(parsed.assumed_size)
             }
             None => parsed.assumed_size,
         };
 
         Ok(Self {
             expected_size,
-            sized_fields: pre_parsed_sized_fields,
+            sized_fields: entry.parsed_sized_fields.clone(),
         })
     }
 
@@ -408,6 +491,8 @@ impl SkipDirective {
 
 #[cfg(test)]
 mod tests {
+    use apollo_compiler::ty;
+
     use super::*;
 
     mod infer_size_from_variable_tests {
@@ -428,12 +513,12 @@ mod tests {
         #[case::object_value(json!({"key": "value"}), None)]
         #[case::float_value(json!(1.5), None)]
         fn test_infer_size(#[case] input: JsonValue, #[case] expected: Option<i32>) {
-            assert_eq!(infer_size_from_variable(Some(&input)), expected);
+            assert_eq!(infer_size_from_variable(Some(&input), &ty!(Int)), expected);
         }
 
         #[test]
         fn none_input_returns_none() {
-            assert_eq!(infer_size_from_variable(None), None);
+            assert_eq!(infer_size_from_variable(None, &ty!(Int)), None);
         }
     }
 
@@ -460,7 +545,7 @@ mod tests {
         fn integer_values(#[case] input: &str, #[case] expected: Option<i32>) {
             let value = AstValue::Int(IntValue::new_parsed(input));
             assert_eq!(
-                infer_size_from_argument(Some(&value), &Object::new()),
+                infer_size_from_argument(Some(&value), &ty!(Int), &Object::new()),
                 expected
             );
         }
@@ -472,7 +557,7 @@ mod tests {
         fn list_values(#[case] size: usize, #[case] expected: Option<i32>) {
             let value = list_of_size(size);
             assert_eq!(
-                infer_size_from_argument(Some(&value), &Object::new()),
+                infer_size_from_argument(Some(&value), &ty!(Int), &Object::new()),
                 expected
             );
         }
@@ -491,7 +576,10 @@ mod tests {
             let value = AstValue::Variable(apollo_compiler::Name::new_unchecked(var_name));
             let mut variables = Object::new();
             variables.insert(var_name, var_value);
-            assert_eq!(infer_size_from_argument(Some(&value), &variables), expected);
+            assert_eq!(
+                infer_size_from_argument(Some(&value), &ty!(Int), &variables),
+                expected
+            );
         }
 
         #[rstest::rstest]
@@ -503,9 +591,149 @@ mod tests {
         ))))]
         fn unsupported_values_return_none(#[case] value: Option<AstValue>) {
             assert_eq!(
-                infer_size_from_argument(value.as_ref(), &Object::new()),
+                infer_size_from_argument(value.as_ref(), &ty!(Int), &Object::new()),
                 None
             );
+        }
+    }
+
+    /// Per GraphQL input coercion, a single value supplied for a list-typed argument is a list
+    /// of one item. The declared type decides whether an integer is a count or a list element.
+    mod list_typed_argument_coercion_tests {
+        use apollo_compiler::ast::IntValue;
+        use serde_json_bytes::json;
+
+        use super::*;
+
+        #[rstest::rstest]
+        #[case::int_for_list(json!(1000000), ty!([Int!]!), Some(1))]
+        #[case::int_for_nullable_list(json!(5), ty!([Int]), Some(1))]
+        #[case::string_for_list(json!("abc"), ty!([ID!]!), Some(1))]
+        #[case::object_for_list(json!({"a": 1}), ty!([SomeInput!]), Some(1))]
+        #[case::array_for_list(json!([1, 2, 3]), ty!([Int!]!), Some(3))]
+        #[case::null_for_list(json!(null), ty!([Int!]), None)]
+        #[case::int_for_int(json!(5), ty!(Int!), Some(5))]
+        #[case::negative_int_for_int(json!(-5), ty!(Int), Some(0))]
+        fn variable_size_respects_declared_type(
+            #[case] value: JsonValue,
+            #[case] declared_type: Type,
+            #[case] expected: Option<i32>,
+        ) {
+            assert_eq!(
+                infer_size_from_variable(Some(&value), &declared_type),
+                expected
+            );
+        }
+
+        #[rstest::rstest]
+        #[case::int_for_list(AstValue::Int(IntValue::new_parsed("5")), ty!([Int!]!), Some(1))]
+        #[case::string_for_list(AstValue::String("abc".into()), ty!([ID!]!), Some(1))]
+        #[case::null_for_list(AstValue::Null, ty!([Int!]), None)]
+        #[case::int_for_int(AstValue::Int(IntValue::new_parsed("5")), ty!(Int!), Some(5))]
+        fn argument_size_respects_declared_type(
+            #[case] value: AstValue,
+            #[case] declared_type: Type,
+            #[case] expected: Option<i32>,
+        ) {
+            assert_eq!(
+                infer_size_from_argument(Some(&value), &declared_type, &Object::new()),
+                expected
+            );
+        }
+
+        #[test]
+        fn variable_reference_uses_declared_type() {
+            let value = AstValue::Variable(apollo_compiler::Name::new_unchecked("ids"));
+            let mut variables = Object::new();
+            variables.insert("ids", json!(1000000));
+            assert_eq!(
+                infer_size_from_argument(Some(&value), &ty!([Int!]!), &variables),
+                Some(1)
+            );
+            assert_eq!(
+                infer_size_from_argument(Some(&value), &ty!(Int!), &variables),
+                Some(1000000)
+            );
+        }
+    }
+
+    mod slicing_argument_tests {
+        use apollo_compiler::Schema;
+
+        use super::*;
+        use crate::test_harness::tracing_test;
+
+        const SCHEMA: &str = r#"
+            type Query {
+                search(first: Int, ids: [ID!], input: SearchInput): [String]
+            }
+            input SearchInput {
+                query: String
+                pagination: PaginationInput
+            }
+            input PaginationInput {
+                first: Int!
+                ids: [ID!]
+            }
+        "#;
+
+        fn resolve(path: &str) -> Option<SlicingArgument> {
+            let schema = Schema::parse_and_validate(SCHEMA, "schema.graphql").unwrap();
+            let field = schema.type_field("Query", "search").unwrap();
+            SlicingArgument::resolve(&schema, field, path)
+        }
+
+        #[rstest::rstest]
+        #[case::argument("first", &[], ty!(Int))]
+        #[case::list_argument("ids", &[], ty!([ID!]))]
+        #[case::nested("input.pagination.first", &["pagination", "first"], ty!(Int!))]
+        #[case::nested_list("input.pagination.ids", &["pagination", "ids"], ty!([ID!]))]
+        fn resolves_declared_type_along_path(
+            #[case] path: &str,
+            #[case] nested_path: &[&str],
+            #[case] declared_type: Type,
+        ) {
+            let resolved = resolve(path).unwrap();
+            assert_eq!(resolved.nested_path, nested_path);
+            assert_eq!(resolved.declared_type, declared_type);
+        }
+
+        #[rstest::rstest]
+        #[case::empty("")]
+        #[case::unknown_argument("nope")]
+        #[case::unknown_input_field("input.nope")]
+        #[case::unknown_nested_input_field("input.pagination.nope")]
+        #[case::path_through_scalar("first.nope")]
+        #[case::path_through_scalar_input_field("input.query.nope")]
+        fn unresolvable_path_is_none(#[case] path: &str) {
+            assert!(resolve(path).is_none());
+        }
+
+        #[test]
+        fn unresolvable_paths_are_warned_and_dropped() {
+            let _guard = tracing_test::dispatcher_guard();
+            let schema = Schema::parse_and_validate(SCHEMA, "schema.graphql").unwrap();
+            let field = schema.type_field("Query", "search").unwrap();
+            let paths: IndexSet<String> = ["first", "input.nope", "ids"]
+                .into_iter()
+                .map(String::from)
+                .collect();
+
+            let resolved = SlicingArgument::from_strings(
+                &schema,
+                &apollo_compiler::name!("Query"),
+                field,
+                &paths,
+            );
+
+            let names: Vec<&str> = resolved
+                .iter()
+                .map(|arg| arg.argument_name.as_str())
+                .collect();
+            assert_eq!(names, ["first", "ids"]);
+            assert!(tracing_test::logs_contain(
+                "Slicing argument `input.nope` of @listSize on `Query.search` does not resolve"
+            ));
         }
     }
 
@@ -530,7 +758,7 @@ mod tests {
         fn empty_path_returns_value() {
             let value = AstValue::Int(apollo_compiler::ast::IntValue::new_parsed("42"));
             assert!(matches!(
-                traverse_ast_value(&value, &[]),
+                traverse_ast_value(&value, &[] as &[&str]),
                 Some(AstValue::Int(_))
             ));
         }
@@ -602,7 +830,7 @@ mod tests {
         #[test]
         fn empty_path_returns_value() {
             let value = json!(42);
-            assert_eq!(traverse_json_value(&value, &[]), Some(&value));
+            assert_eq!(traverse_json_value(&value, &[] as &[&str]), Some(&value));
         }
 
         #[test]
