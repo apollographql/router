@@ -694,6 +694,77 @@ mod tests {
         assert_snapshot!(supergraph.schema().schema().to_string());
     }
 
+    /// `@source(mcp:)` and `@connect(mcp:)` are carried into the supergraph like the rest of the
+    /// directives. The composed schema is the router's `testdata/mcp.graphql` fixture.
+    #[test]
+    fn composes_mcp_v0_5() {
+        let quakes = ServiceDefinition {
+            name: "quakes",
+            type_defs: r#"
+                extend schema
+                @link(
+                    url: "https://specs.apollo.dev/connect/v0.5"
+                    import: ["@connect", "@source"]
+                )
+                @source(name: "quakes", http: { baseURL: "http://localhost:4001" }, mcp: { path: "/mcp" })
+
+                type Query {
+                    recentQuakes(limit: Int): [Quake]
+                    @connect(
+                        source: "quakes"
+                        mcp: { tool: "search_events", arguments: "limit: $args.limit" }
+                        selection: "$.events { id magnitude }"
+                    )
+
+                    latestQuake: Quake
+                    @connect(source: "quakes", mcp: { tool: "latest_event" }, selection: "id magnitude")
+
+                    quake(id: ID!): Quake
+                    @connect(
+                        source: "quakes"
+                        mcp: { tool: "get_event", arguments: "event_id: $args.id" }
+                        selection: "id magnitude"
+                        entity: true
+                    )
+
+                    stations: [Station]
+                    @connect(source: "quakes", mcp: { tool: "list_stations" }, selection: "$.stations { id }")
+
+                    checkedQuake: Quake
+                    @connect(
+                        source: "quakes"
+                        mcp: { tool: "latest_event" }
+                        selection: "id magnitude"
+                        errors: {
+                            message: "$(result.content->first.text ?? error.message)"
+                            extensions: "code: $('QUAKE_TOOL_FAILED')"
+                        }
+                    )
+                }
+
+                type Quake @key(fields: "id") {
+                    id: ID!
+                    magnitude: Float
+                }
+
+                type Station
+                @key(fields: "id")
+                @connect(
+                    source: "quakes"
+                    mcp: { tool: "get_stations", arguments: "ids: $batch.id" }
+                    selection: "$.stations { id name }"
+                ) {
+                    id: ID!
+                    name: String
+                }
+            "#,
+        };
+
+        let result = compose_as_fed2_connectors_subgraphs(&[quakes]);
+        let supergraph = result.expect("Expected composition to succeed");
+        assert_snapshot!(supergraph.schema().schema().to_string());
+    }
+
     #[test]
     fn connectors_validation_errors_fail_composition() {
         let with_connectors = ServiceDefinition {
