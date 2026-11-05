@@ -117,9 +117,9 @@ pub(super) fn extra_endpoints(
 
 /// Builds a plugin endpoint's router, on any listener.
 ///
-/// Plugin endpoints don't go through the limits plugin's router service, so they get its HTTP/2
-/// header-list check as a layer of their own. HTTP/1.1 header limits need none: hyper enforces
-/// them on the connection, before any route is chosen.
+/// Plugin endpoints don't go through the router service stack, where graph requests get the HTTP/2
+/// header-list check, so they get the limits plugin's endpoint layer instead. HTTP/1.1 header
+/// limits need none: hyper enforces them on the connection, before any route is chosen.
 pub(super) fn endpoint_router(endpoint: Endpoint, plugins: &Plugins) -> Router {
     let mut router = endpoint.into_router().layer(
         ServiceBuilder::new()
@@ -524,7 +524,7 @@ fn configure_connection(
     // it to figure out whether we have an http1 or http2 connection
     //
     // h2 is given a larger limit than the configured one so that requests just over it reach the
-    // limits plugin, which rejects them with a 431 that telemetry records.
+    // Router's own header-list check, which rejects them with a 431 that telemetry records.
     conn_builder
         .http2()
         .max_header_list_size(http2_header_list::advertised_size(
@@ -1073,9 +1073,9 @@ mod tests {
                 .unwrap();
         let addr = server.graphql_listen_address().clone().unwrap();
 
-        // Both sizes are under the advertised 64 KiB, so h2 passes them to the limits plugin. They
-        // cover the bands where h2 would send its own bare 431 (20 KiB) or close the connection
-        // (60 KiB) if it enforced the limit itself.
+        // Both sizes are under the advertised 64 KiB, so h2 passes them to the Router's header-list
+        // check. They cover the bands where h2 would send its own bare 431 (20 KiB) or close the
+        // connection (60 KiB) if it enforced the limit itself.
         for size in [20 * 1024, 60 * 1024] {
             let response = send_h2c(&addr, "/", &cookie_crumbs(size)).await;
             assert_eq!(
