@@ -116,6 +116,6 @@ extraLabels:
 */}}
 {{- define "apollographql.templatizeExtraLabels" -}}
 {{- range $key, $value := .Values.extraLabels }}
-{{ printf "%s: %s" $key (include  "apollographql.tplvalues.render" ( dict "value" $value "context" $))}}
+{{ printf "%s: %s" $key (include  "apollographql.tplvalues.render" ( dict "value" $value "context" $) | quote) }}
 {{- end -}}
 {{- end -}}
