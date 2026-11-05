@@ -31,6 +31,7 @@ use crate::connectors::runtime::inputs::ContextReader;
 use crate::connectors::runtime::key::ResponseKey;
 use crate::connectors::runtime::mapping::Problem;
 use crate::connectors::runtime::mapping::aggregate_apply_to_errors;
+use crate::connectors::runtime::mcp;
 use crate::connectors::runtime::responses::DeserializeError::ContentDecoding;
 use crate::connectors::runtime::stream_framing::StreamFraming;
 use crate::connectors::runtime::stream_framing::json_events;
@@ -158,6 +159,13 @@ pub fn handle_raw_response(
         .request(&connector.response_headers, client_headers)
         .response(&connector.response_headers, Some(parts))
         .merge();
+    if connector
+        .transport
+        .as_ref()
+        .is_some_and(|transport| transport.mcp.is_some())
+    {
+        return handle_mcp_response(data, parts, key, connector, inputs);
+    }
     let warnings = Vec::new();
     let (success, warnings) = is_success(
         connector.error_settings.connect_is_success.as_ref(),
@@ -171,6 +179,86 @@ pub fn handle_raw_response(
         check_response_shape(connector, response)
     } else {
         map_error(connector, data, parts, key, inputs, warnings)
+    }
+}
+
+/// Maps the answer to an MCP `tools/call` (`@connect(mcp:)`).
+///
+/// `data` is the folded list of events. The selection receives the tool's output, not the events
+/// or the JSON-RPC envelope around them. `isSuccess` and `errors`, when the author sets them, see
+/// the JSON-RPC reply, or `null` if none came back. Without them, the call succeeds only if the
+/// HTTP status is 2xx and the reply is neither a JSON-RPC `error` nor a tool result with
+/// `isError: true`, and each failure becomes an error with its own code.
+fn handle_mcp_response(
+    data: &Value,
+    parts: &Parts,
+    key: ResponseKey,
+    connector: &Connector,
+    inputs: IndexMap<String, Value>,
+) -> MappedResponse {
+    let reply = mcp::reply(data);
+    let reply_or_null = reply.cloned().unwrap_or(Value::Null);
+    let failure = mcp::failure(reply);
+
+    let (success, warnings) = match connector.error_settings.connect_is_success.as_ref() {
+        Some(selection) => is_success(Some(selection), &reply_or_null, parts, &inputs, Vec::new()),
+        None => (parts.status.is_success() && failure.is_none(), Vec::new()),
+    };
+
+    if success {
+        let output = reply.map(mcp::tool_output).unwrap_or(Value::Null);
+        let response = map_response(connector, &output, key, inputs, warnings);
+        return check_response_shape(connector, response);
+    }
+
+    let settings = &connector.error_settings;
+    let author_maps_errors = settings.message.is_some()
+        || settings.source_extensions.is_some()
+        || settings.connect_extensions.is_some();
+    // A non-2xx status is an HTTP failure first, whatever the body says
+    if author_maps_errors || !parts.status.is_success() {
+        return map_error(connector, &reply_or_null, parts, key, inputs, warnings);
+    }
+
+    let (message, code, mcp_extension) = match failure {
+        Some(mcp::Failure::Protocol { message, code }) => (
+            message.unwrap_or("MCP request failed").to_string(),
+            mcp::MCP_PROTOCOL_ERROR_CODE,
+            Some(mcp::protocol_error_extension(code)),
+        ),
+        Some(mcp::Failure::Tool { message }) => (
+            message.unwrap_or_else(|| "MCP tool failed".to_string()),
+            mcp::MCP_TOOL_ERROR_CODE,
+            None,
+        ),
+        // An `isSuccess` the author set failed on a reply that is otherwise fine
+        None => {
+            return map_error(connector, &reply_or_null, parts, key, inputs, warnings);
+        }
+        Some(mcp::Failure::NoReply) => (
+            "The MCP server's response held no JSON-RPC reply".to_string(),
+            mcp::MCP_INVALID_RESPONSE_CODE,
+            None,
+        ),
+    };
+
+    let mut error = RuntimeError::new(message, &key);
+    error.subgraph_name = Some(connector.id.subgraph_name.clone());
+    error.coordinate = Some(connector.id.coordinate());
+    error = error.extension(
+        "http",
+        Value::Object(Map::from_iter([(
+            "status".into(),
+            Value::Number(parts.status.as_u16().into()),
+        )])),
+    );
+    if let Some(mcp_extension) = mcp_extension {
+        error = error.extension("mcp", mcp_extension);
+    }
+    MappedResponse::Error {
+        error: error.with_code(code),
+        key,
+        problems: warnings,
     }
 }
 

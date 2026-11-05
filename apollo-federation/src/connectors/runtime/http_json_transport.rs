@@ -18,6 +18,7 @@ use crate::connectors::Header;
 use crate::connectors::HeaderSource;
 use crate::connectors::HttpJsonTransport;
 use crate::connectors::MakeUriError;
+use crate::connectors::McpCall;
 use crate::connectors::OriginatingDirective;
 use crate::connectors::ProblemLocation;
 use crate::connectors::runtime::debug::ConnectorContext;
@@ -98,7 +99,7 @@ pub fn make_request(
         client_headers,
         &transport.headers,
         &inputs,
-        transport.body.is_some(),
+        transport.body.is_some() || transport.mcp.is_some(),
     );
     let header_mapping_problems =
         aggregate_apply_to_errors_with_warning_locations(header_apply_to_errors);
@@ -114,8 +115,16 @@ pub fn make_request(
     }
 
     let (json_body, form_body, body, content_length, body_apply_to_errors) =
-        if let Some(ref selection) = transport.body {
-            let (json_body, apply_to_errors) = selection.apply_with_vars(&json!({}), &inputs);
+        if transport.body.is_some() || transport.mcp.is_some() {
+            let (json_body, apply_to_errors) = match transport.body {
+                Some(ref selection) => selection.apply_with_vars(&json!({}), &inputs),
+                None => (None, Vec::new()),
+            };
+            // An MCP tool call carries its arguments inside a JSON-RPC request
+            let json_body = match &transport.mcp {
+                Some(mcp) => Some(mcp_tools_call(mcp, json_body)),
+                None => json_body,
+            };
             let mut form_body = None;
             let (body, content_length) = if let Some(json_body) = json_body.as_ref() {
                 if is_form_urlencoded {
@@ -192,6 +201,22 @@ pub fn make_request(
         })),
         all_problems,
     ))
+}
+
+/// The JSON-RPC request for an MCP `tools/call`, with the evaluated `arguments` mapping.
+///
+/// Each HTTP request carries exactly one JSON-RPC request, so its `id` only has to be unique within
+/// that request. A session layer that shares a session across requests renumbers it.
+fn mcp_tools_call(mcp: &McpCall, arguments: Option<Value>) -> Value {
+    json!({
+        "jsonrpc": "2.0",
+        "id": 1,
+        "method": "tools/call",
+        "params": {
+            "name": mcp.tool.as_str(),
+            "arguments": arguments.unwrap_or_else(|| json!({})),
+        },
+    })
 }
 
 fn add_headers(
