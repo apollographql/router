@@ -187,19 +187,19 @@ pub enum Perturbation {
     /// The same alias, with no renamer to name it back: the subgraph is sent `__require_0_f`.
     AliasWithoutRenamer,
     /// A renamer naming an alias back that no entry reads under. The plan fetches and reads the
-    /// plain field, so the rename has nothing to carry; rejected by design, since the checker
-    /// cannot tell it apart from one the entry should have used.
+    /// plain field, so the rename has nothing to carry and leaves the entry alone; correct.
     RenamerWithoutAlias,
     /// A renamer naming the demanded field away, so the subgraph is sent a key it never asked for.
     RenameRequiredFieldAway,
     /// Only one entity type aliases its input, under a renamer scoped to nothing. The other type's
-    /// entry sends the field under its own name, which the renamer inverted looks for elsewhere.
+    /// entry reads the field under its own name, so the renamer is not one of its rewrites; correct.
     UnscopedRenamerAcrossTypes,
-    /// The same, with the renamer scoped to the type that aliases: it reaches the other type's
-    /// entry neither forwards nor inverted, and both are correct.
+    /// The same, with the renamer scoped to the type that aliases. A renamer testing the type of
+    /// what it renames is rejected outright.
     RenamerScopedToItsType,
     /// Each entity type aliases its input differently, under its own renamer scoped to it. Two
-    /// renamers onto one key, which is what a planner writes for two types needing the same field.
+    /// renamers onto one key, which is what a planner writes for two types needing the same field;
+    /// rejected, the renamers testing types.
     RenamersForDisjointTypes,
     /// The entry reads the demanded field twice, under its alias and under its own name, so two
     /// keys are sent as one and the subgraph gets whichever the rewrites leave.

@@ -294,18 +294,21 @@ one key and sends another.
 | --- | --- | --- |
 | `AliasRequiredInput` | alias and renamer, consistent | yes |
 | `AliasWithoutRenamer` | an alias nothing names back | no |
-| `RenamerWithoutAlias` | a renamer no entry reads under | no |
+| `RenamerWithoutAlias` | a renamer no entry reads under | yes |
 | `RenameRequiredFieldAway` | a demanded field renamed to a key nothing sends | no |
-| `RenamerScopedToItsType` | one type aliases, its renamer scoped to it | yes |
-| `RenamersForDisjointTypes` | each type aliases differently, each renamer scoped | yes |
-| `UnscopedRenamerAcrossTypes` | one type aliases, the renamer reaches both | no, when both types are in the case |
+| `RenamerScopedToItsType` | one type aliases, its renamer scoped to it | no |
+| `RenamersForDisjointTypes` | each type aliases differently, each renamer scoped | no |
+| `UnscopedRenamerAcrossTypes` | one type aliases, the renamer reaches both | yes |
 | `OneFieldSentUnderTwoKeys` | the entry reads one field under two keys, both sent as one | no |
 | `AliasCompositeInput` | the composite half read under an alias on the list | yes |
 | `AliasInsideTheList` | the alias inside the list, the renamer's path through `@` | yes |
 
 
-`UnscopedRenamerAcrossTypes` is the one whose verdict depends on the operation rather than the
-perturbation alone, which is the point of leaving that judgement to the model.
+A renamer applies to an entry only if the entry reads the key path it renames from, so a renamer no
+entry reads, or one reaching a type whose entry reads another key, leaves that entry alone. A
+renamer that tests the type of what it renames is rejected outright: the model admits only
+renamers that rename a key path one way whatever the types, which is what lets it check object
+types together.
 
 ### Deferred blocks
 

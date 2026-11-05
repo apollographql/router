@@ -407,7 +407,7 @@ def requiresEntries (case : Case) : List RequiresSelection :=
   let keyField := if case.perturbation == .wrongKeyField then requiresFields else keyFields
   let entries :=
     (Case.entityCasesOf case).map fun entityType =>
-      RequiresSelection.inlineFragment (Option.some entityType)
+      RequiresSelection.inlineFragment (Option.some entityType) []
         -- The entry reads a field under its alias, which is where the plan fetched it; the
         -- renamer names it back to what the subgraph demands.
         ([.field none "__typename" [] [], .field none keyField [] [],
@@ -616,7 +616,8 @@ partial def loop : IO Unit := do
                   PlanNode.fetch
                     (fetchOf "Subgraph1" []
                       [.field "is" "is" [] [] (entityInputBody testCase entityType)]))
-        let available := (inputs.check schema subgraphs operation [] [] [] []).1
+        let returned := ((buildPlan testCase).returnedTypes schema subgraphs).eraseDups
+        let available := (inputs.check schema subgraphs returned operation [] [] [] []).1
         let cases := entityCaseTypes testCase
         let entityFetch :=
           fetchOf "Subgraph2" (requiresEntries testCase)
@@ -628,9 +629,11 @@ partial def loop : IO Unit := do
           | Option.none => []
           | Option.some variableName => [.positive variableName]
         let withCondition :=
-          checkFetch schema subgraphs operation path guarded available available entityFetch
+          checkFetch schema subgraphs returned operation path guarded available available
+            entityFetch
         let withoutCondition :=
-          checkFetch schema subgraphs operation path [] available available entityFetch
+          checkFetch schema subgraphs returned operation path [] available available
+            entityFetch
         IO.println s!"ok={flag withCondition},{flag withoutCondition}"
     (<- IO.getStdout).flush
     loop
@@ -643,8 +646,14 @@ partial def loop : IO Unit := do
         let unguardedCase := { testCase with guard := Option.none }
         let complete (operation : Operation) (plan : QueryPlan) : Bool :=
           includesBool schema
-            { operation with selectionSet := (plan.check schema subgraphs operation).1 }
-            operation
+            {
+              operation with
+                selectionSet :=
+                  (plan.check schema subgraphs
+                    (plan.returnedTypes schema subgraphs).eraseDups operation).1
+            }
+            (narrowedOperation schema (plan.returnedTypes schema subgraphs).eraseDups
+              operation)
         let guardedPlan := buildPlan testCase
         let unguardedPlan := buildPlan unguardedCase
         IO.println
@@ -670,13 +679,14 @@ partial def loop : IO Unit := do
                   PlanNode.fetch
                     (fetchOf "Subgraph1" []
                       [.field "is" "is" [] [] (entityInputBody testCase entityType)]))
-        let available := (inputs.check schema subgraphs operation [] [] [] []).1
+        let returned := ((buildPlan testCase).returnedTypes schema subgraphs).eraseDups
+        let available := (inputs.check schema subgraphs returned operation [] [] [] []).1
         let guarded : BooleanCondition :=
           match testCase.guard with
           | Option.none => []
           | Option.some variableName => [.positive variableName]
         match (entityCaseTypes testCase).head?, requiresEntries testCase with
-        | Option.some entityType, .inlineFragment (Option.some requireType) _ :: _ =>
+        | Option.some entityType, (firstEntry@(.inlineFragment (Option.some requireType) _ _)) :: _ =>
             match (subgraph2.keys entityType).head? with
             | Option.none => IO.println "ok=nokey"
             | Option.some key =>
@@ -692,7 +702,7 @@ partial def loop : IO Unit := do
                     (inputRewritesOf testCase.perturbation)
                 let required :=
                   requiredAt schema (flattenPath testCase) guarded available
-                    (entityFetch.requiredSelections schema requireType computed)
+                    (entityFetch.requiredSelections schema firstEntry computed)
                 IO.println s!"ok={renderSelections available} ||| {renderSelections required}"
         | _, _ => IO.println "ok=nocase"
     (<- IO.getStdout).flush
@@ -704,7 +714,9 @@ partial def loop : IO Unit := do
     | Option.none => IO.println "ok=skip"
     | Option.some testCase =>
         let operation := testCase.operation
-        let walked := (buildPlan testCase).check schema subgraphs operation
+        let plan := buildPlan testCase
+        let walked :=
+          plan.check schema subgraphs (plan.returnedTypes schema subgraphs).eraseDups operation
         IO.println s!"ok={renderSelections walked.1} ||| {renderSelections operation.selectionSet}"
     (<- IO.getStdout).flush
     loop
@@ -714,7 +726,9 @@ partial def loop : IO Unit := do
     | Option.none => IO.println "ok=skip"
     | Option.some testCase =>
         let operation := testCase.operation
-        let walked := (buildPlan testCase).check schema subgraphs operation
+        let plan := buildPlan testCase
+        let walked :=
+          plan.check schema subgraphs (plan.returnedTypes schema subgraphs).eraseDups operation
         IO.println s!"ok={renderSelections walked.1}"
     (<- IO.getStdout).flush
     loop
@@ -726,8 +740,11 @@ partial def loop : IO Unit := do
     | Option.some testCase =>
         let operation := testCase.operation
         let plan := buildPlan testCase
-        let walked := plan.check schema subgraphs operation
-        let complete := includesBool schema { operation with selectionSet := walked.1 } operation
+        let returned := (plan.returnedTypes schema subgraphs).eraseDups
+        let walked := plan.check schema subgraphs returned operation
+        let complete :=
+          includesBool schema { operation with selectionSet := walked.1 }
+            (narrowedOperation schema returned operation)
         IO.println s!"ok={flag complete},{flag walked.2}"
     (<- IO.getStdout).flush
     loop
