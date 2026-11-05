@@ -55,6 +55,10 @@ struct Server {
     bind_credentials: bool,
     /// Refuse every tool call with 401
     refuse_tool_calls: bool,
+    /// Answer `initialize` over SSE with its JSON split across `data:` lines and CRLF endings
+    multiline_initialize: bool,
+    /// Answer tool calls with an event stream that stays open after the reply
+    open_tool_streams: bool,
     sessions: HashSet<String>,
     opened_with: std::collections::HashMap<String, Option<String>>,
     issued: usize,
@@ -161,6 +165,27 @@ impl Fake {
                 server
                     .opened_with
                     .insert(id.clone(), seen.authorization.clone());
+                if server.multiline_initialize {
+                    let reply = json!({
+                        "jsonrpc": "2.0",
+                        "id": seen.rpc_id,
+                        "result": { "protocolVersion": "2025-06-18", "capabilities": {} },
+                    });
+                    let pretty = serde_json::to_string_pretty(&reply).unwrap();
+                    let data: String = pretty
+                        .lines()
+                        .map(|line| format!("data: {line}\r\n"))
+                        .collect();
+                    return Ok(HttpResponse {
+                        http_response: http::Response::builder()
+                            .status(StatusCode::OK)
+                            .header(SESSION_ID, id)
+                            .header(http::header::CONTENT_TYPE, "text/event-stream")
+                            .body(body::from_bytes(format!(": ping\r\n\r\n{data}\r\n")))
+                            .unwrap(),
+                        context: Context::new(),
+                    });
+                }
                 if !server.event_stream {
                     return Ok(response(StatusCode::OK, Some(&id), &result));
                 }
@@ -178,7 +203,25 @@ impl Fake {
                     context: Context::new(),
                 })
             }
-            _ if server.stateless => Ok(response(StatusCode::OK, None, "{}")),
+            // A stateless server built to the 2025 lifecycle still expects `initialized`, and the
+            // negotiated version on every request after it
+            Some("notifications/initialized") if server.stateless => {
+                Ok(response(StatusCode::ACCEPTED, None, ""))
+            }
+            _ if server.stateless => {
+                let initialized = server
+                    .seen
+                    .iter()
+                    .any(|seen| seen.rpc_method.as_deref() == Some("notifications/initialized"));
+                if !initialized || seen.version.as_deref() != Some("2025-06-18") {
+                    return Ok(response(
+                        StatusCode::BAD_REQUEST,
+                        None,
+                        "Bad Request: not initialized, or missing MCP-Protocol-Version",
+                    ));
+                }
+                Ok(response(StatusCode::OK, None, "{}"))
+            }
             _ => match session {
                 None => Ok(response(
                     StatusCode::BAD_REQUEST,
@@ -201,6 +244,20 @@ impl Fake {
                         None,
                         "token does not match session",
                     ))
+                }
+                Some(_) if server.open_tool_streams => {
+                    let reply = json!({ "jsonrpc": "2.0", "id": seen.rpc_id, "result": {} });
+                    let event = Bytes::from(format!("data: {reply}\n\n"));
+                    let stream = futures::stream::once(async move { Ok::<_, BoxError>(event) })
+                        .chain(futures::stream::pending());
+                    Ok(HttpResponse {
+                        http_response: http::Response::builder()
+                            .status(StatusCode::OK)
+                            .header(http::header::CONTENT_TYPE, "text/event-stream")
+                            .body(body::from_result_stream(stream))
+                            .unwrap(),
+                        context: Context::new(),
+                    })
                 }
                 Some(_) => Ok(response(
                     StatusCode::OK,
@@ -323,23 +380,30 @@ async fn reads_the_initialize_reply_from_an_open_event_stream() {
 }
 
 #[tokio::test]
-async fn a_server_that_issues_no_session_is_left_alone() {
+async fn a_server_that_issues_no_session_still_gets_the_lifecycle() {
     let fake = Fake::stateless();
     let service = layer(json!({ "sessions": "auto" })).layer(fake.service());
 
     for _ in 0..3 {
-        service
+        let response = service
             .clone()
             .oneshot(tool_call(Some("Bearer a"), Context::new()))
             .await
             .unwrap();
+        assert_eq!(response.http_response.status(), StatusCode::OK);
     }
 
     assert_eq!(fake.initializes(), 1);
-    assert!(fake.seen_rpc("notifications/initialized").is_empty());
+    let initialized = fake.seen_rpc("notifications/initialized");
+    assert_eq!(
+        initialized.len(),
+        1,
+        "sent even though no session was issued"
+    );
+    assert_eq!(initialized[0].version.as_deref(), Some("2025-06-18"));
     for call in fake.seen_rpc("tools/call") {
         assert_eq!(call.session, None);
-        assert_eq!(call.version, None);
+        assert_eq!(call.version.as_deref(), Some("2025-06-18"));
         assert_eq!(call.rpc_id, Some(json!(1)), "the body is sent as written");
     }
 }
@@ -652,4 +716,122 @@ async fn every_request_the_layer_sends_keeps_the_connector_requests_extensions()
         ],
         "SigV4 signing parameters ride in extensions, so every request must keep them"
     );
+}
+
+#[tokio::test]
+async fn an_initialize_reply_split_across_data_lines_is_read() {
+    let fake = Fake::default();
+    fake.server.lock().multiline_initialize = true;
+    let service = layer(json!({ "sessions": "auto" })).layer(fake.service());
+
+    let response = service
+        .oneshot(tool_call(Some("Bearer a"), Context::new()))
+        .await
+        .unwrap();
+
+    assert_eq!(response.http_response.status(), StatusCode::OK);
+    let calls = fake.seen_rpc("tools/call");
+    assert_eq!(calls[0].session.as_deref(), Some("session-1"));
+}
+
+#[tokio::test]
+async fn an_evicted_session_stays_open_until_its_response_body_is_done() {
+    let fake = Fake::default();
+    fake.server.lock().open_tool_streams = true;
+    let service = layer(json!({ "sessions": "auto", "max_sessions": 1 })).layer(fake.service());
+
+    // A's tool call answers with an event stream that is still open
+    let a_response = service
+        .clone()
+        .oneshot(tool_call(Some("Bearer a"), Context::new()))
+        .await
+        .unwrap();
+
+    // B's session takes the only place in the cache, evicting A's slot
+    fake.server.lock().open_tool_streams = false;
+    service
+        .clone()
+        .oneshot(tool_call(Some("Bearer b"), Context::new()))
+        .await
+        .unwrap();
+    // Let any DELETE spawned so far run before checking that there was none
+    for _ in 0..10 {
+        tokio::task::yield_now().await;
+    }
+    assert!(
+        fake.server.lock().deleted.is_empty(),
+        "A's session is still in use while its body is unread"
+    );
+
+    let deleted = fake.deleted.notified();
+    drop(a_response);
+    tokio::time::timeout(Duration::from_secs(5), deleted)
+        .await
+        .expect("A's session closes once its body is dropped");
+    assert_eq!(fake.server.lock().deleted, ["session-1"]);
+}
+
+#[tokio::test]
+async fn an_expired_session_is_not_deleted() {
+    let fake = Fake::default();
+    let layer = layer(json!({ "sessions": "auto" }));
+    let service = layer.layer(fake.service());
+
+    service
+        .clone()
+        .oneshot(tool_call(Some("Bearer a"), Context::new()))
+        .await
+        .unwrap();
+    fake.expire_all();
+    service
+        .clone()
+        .oneshot(tool_call(Some("Bearer a"), Context::new()))
+        .await
+        .unwrap();
+
+    // Closing the layer closes only the session the server still knows
+    let deleted = fake.deleted.notified();
+    drop(service);
+    drop(layer);
+    tokio::time::timeout(Duration::from_secs(5), deleted)
+        .await
+        .expect("the live session is closed");
+    for _ in 0..10 {
+        tokio::task::yield_now().await;
+    }
+    assert_eq!(fake.server.lock().deleted, ["session-2"]);
+}
+
+#[tokio::test]
+async fn session_adoption_is_counted_by_what_switched_it_on() {
+    async {
+        let configuration: crate::Configuration = serde_json::from_value(json!({
+            "connectors": {
+                "sources": {
+                    "a.by_config": { "mcp": { "sessions": "auto" } },
+                    "b.off": { "mcp": { "sessions": "off" } }
+                }
+            }
+        }))
+        .unwrap();
+        let mcp_sources: HashSet<String> = ["c.by_schema".to_string(), "b.off".to_string()].into();
+
+        let layers = super::layers(&configuration, &mcp_sources);
+
+        let mut sources: Vec<_> = layers.keys().cloned().collect();
+        sources.sort();
+        assert_eq!(sources, ["a.by_config", "c.by_schema"]);
+        assert_gauge!(
+            "apollo.router.connectors.mcp.sessions",
+            1,
+            "mcp.sessions.enabled_by" = "schema"
+        );
+        assert_gauge!(
+            "apollo.router.connectors.mcp.sessions",
+            1,
+            "mcp.sessions.enabled_by" = "config"
+        );
+    }
+    .with_metrics()
+    .await;
 }

@@ -44,6 +44,7 @@ impl Plugin for Connectors {
     type Config = ConnectorsConfig;
 
     async fn new(init: PluginInit<Self::Config>) -> Result<Self, BoxError> {
+        validate_mcp_identity_headers(&init.config)?;
         let debug_extensions = init.config.debug_extensions
             || std::env::var(CONNECTORS_DEBUG_ENV).as_deref() == Ok("true");
 
@@ -307,6 +308,56 @@ mod tests {
             !chunks[0]
                 .extensions
                 .contains_key(CONNECTOR_ERRORS_EXTENSION_KEY)
+        );
+    }
+}
+
+/// Refuses a configuration whose `mcp.identity_headers` names something that isn't a header.
+///
+/// Those headers keep callers' MCP sessions apart, for example per tenant. Ignoring a misspelled
+/// one would quietly merge sessions the operator meant to separate, so the configuration fails to
+/// load instead.
+fn validate_mcp_identity_headers(config: &ConnectorsConfig) -> Result<(), BoxError> {
+    for (source, source_config) in &config.sources {
+        let Some(mcp) = source_config.mcp.as_ref() else {
+            continue;
+        };
+        for name in &mcp.identity_headers {
+            if http::HeaderName::try_from(name.as_str()).is_err() {
+                return Err(format!(
+                    "connectors.sources.{source}.mcp.identity_headers: {name:?} is not a valid header name"
+                )
+                .into());
+            }
+        }
+    }
+    Ok(())
+}
+
+#[cfg(test)]
+mod mcp_identity_headers_tests {
+    use super::*;
+
+    fn config(identity_headers: serde_json::Value) -> ConnectorsConfig {
+        serde_json::from_value(serde_json::json!({
+            "sources": { "mcp.server": { "mcp": { "identity_headers": identity_headers } } }
+        }))
+        .unwrap()
+    }
+
+    #[test]
+    fn valid_identity_headers_are_accepted() {
+        validate_mcp_identity_headers(&config(serde_json::json!(["x-tenant-id"]))).unwrap();
+    }
+
+    #[test]
+    fn an_invalid_identity_header_fails_the_configuration() {
+        let error =
+            validate_mcp_identity_headers(&config(serde_json::json!(["x-tenant-id", "x tenant"])))
+                .unwrap_err();
+        assert_eq!(
+            error.to_string(),
+            r#"connectors.sources.mcp.server.mcp.identity_headers: "x tenant" is not a valid header name"#
         );
     }
 }
