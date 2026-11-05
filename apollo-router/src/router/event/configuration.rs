@@ -9,6 +9,7 @@ use futures::prelude::*;
 
 use crate::Configuration;
 use crate::configuration::ConfigurationParser;
+use crate::registry::OciConfig;
 use crate::router::Event;
 use crate::router::Event::NoMoreConfiguration;
 use crate::router::Event::RhaiReload;
@@ -58,17 +59,20 @@ impl ConfigurationSource {
     /// parsed as a file would be, so command-line and environment overrides and `--dev` apply.
     pub(crate) fn empty_document_stream(
         uplink_config: Option<UplinkConfig>,
+        pq_oci_config: Option<OciConfig>,
     ) -> impl Stream<Item = Event> {
-        Self::parse_empty_document(ConfigurationParser::new(), uplink_config)
+        Self::parse_empty_document(ConfigurationParser::new(), uplink_config, pq_oci_config)
     }
 
     fn parse_empty_document(
         parser: Result<ConfigurationParser, crate::configuration::ConfigurationError>,
         uplink_config: Option<UplinkConfig>,
+        pq_oci_config: Option<OciConfig>,
     ) -> impl Stream<Item = Event> {
         match parser.and_then(|mut parser| parser.parse("")) {
             Ok(mut configuration) => {
                 configuration.uplink = uplink_config;
+                configuration.pq_oci = pq_oci_config;
                 stream::iter(vec![UpdateConfiguration(Arc::new(configuration))])
             }
             Err(err) => {
@@ -82,15 +86,18 @@ impl ConfigurationSource {
     pub(crate) fn into_stream(
         self,
         uplink_config: Option<UplinkConfig>,
+        pq_oci_config: Option<OciConfig>,
     ) -> impl Stream<Item = Event> {
         match self {
             ConfigurationSource::Static(mut instance) => {
                 instance.uplink = uplink_config;
+                instance.pq_oci = pq_oci_config;
                 stream::iter(vec![UpdateConfiguration(instance.into())]).boxed()
             }
             ConfigurationSource::Stream(stream) => stream
                 .map(move |mut c| {
                     c.uplink = uplink_config.clone();
+                    c.pq_oci = pq_oci_config.clone();
                     UpdateConfiguration(Arc::new(c))
                 })
                 .boxed(),
@@ -118,6 +125,7 @@ impl ConfigurationSource {
                                     move |(mut watcher, mut parser)| {
                                         let path = path.clone();
                                         let uplink_config = uplink_config.clone();
+                                        let pq_oci_config = pq_oci_config.clone();
                                         async move {
                                             loop {
                                                 watcher.next().await?;
@@ -130,6 +138,8 @@ impl ConfigurationSource {
                                                     Ok(mut configuration) => {
                                                         configuration.uplink =
                                                             uplink_config.clone();
+                                                        configuration.pq_oci =
+                                                            pq_oci_config.clone();
                                                         return Some((
                                                             UpdateConfiguration(Arc::new(
                                                                 configuration,
@@ -170,6 +180,7 @@ impl ConfigurationSource {
                                 }
                             } else {
                                 configuration.uplink = uplink_config.clone();
+                                configuration.pq_oci = pq_oci_config.clone();
                                 stream::once(future::ready(UpdateConfiguration(Arc::new(
                                     configuration,
                                 ))))
@@ -248,6 +259,7 @@ mod tests {
         let events: Vec<Event> = ConfigurationSource::parse_empty_document(
             ConfigurationParser::with_inputs(expansion),
             None,
+            None,
         )
         .collect()
         .await;
@@ -272,6 +284,7 @@ mod tests {
         let events: Vec<Event> = ConfigurationSource::parse_empty_document(
             ConfigurationParser::with_inputs(expansion),
             None,
+            None,
         )
         .collect()
         .await;
@@ -285,7 +298,7 @@ mod tests {
         let contents = include_str!("../../testdata/supergraph_config.router.yaml");
         write_and_flush(&mut file, contents).await;
         let mut stream = ConfigurationSource::File { path, watch: true }
-            .into_stream(Some(UplinkConfig::default()))
+            .into_stream(Some(UplinkConfig::default()), None)
             .boxed();
 
         // First update is guaranteed
@@ -315,7 +328,7 @@ mod tests {
             path: temp_dir().join("does_not_exit"),
             watch: true,
         }
-        .into_stream(Some(UplinkConfig::default()));
+        .into_stream(Some(UplinkConfig::default()), None);
 
         // First update fails because the file is invalid.
         assert!(matches!(stream.next().await.unwrap(), NoMoreConfiguration));
@@ -326,7 +339,7 @@ mod tests {
         let (path, mut file) = create_temp_file();
         write_and_flush(&mut file, "Garbage").await;
         let mut stream = ConfigurationSource::File { path, watch: true }
-            .into_stream(Some(UplinkConfig::default()));
+            .into_stream(Some(UplinkConfig::default()), None);
 
         // First update fails because the file is invalid.
         assert!(matches!(stream.next().await.unwrap(), NoMoreConfiguration));
@@ -339,7 +352,7 @@ mod tests {
         write_and_flush(&mut file, contents).await;
 
         let mut stream = ConfigurationSource::File { path, watch: false }
-            .into_stream(Some(UplinkConfig::default()));
+            .into_stream(Some(UplinkConfig::default()), None);
         assert!(matches!(
             stream.next().await.unwrap(),
             UpdateConfiguration(_)
