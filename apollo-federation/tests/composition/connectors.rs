@@ -712,7 +712,7 @@ mod tests {
                     recentQuakes(limit: Int): [Quake]
                     @connect(
                         source: "quakes"
-                        mcp: { tool: "search_events", arguments: "limit: $args.limit" }
+                        mcp: { tool: "search_events", arguments: "$args { limit }" }
                         selection: "$.events { id magnitude }"
                     )
 
@@ -722,7 +722,7 @@ mod tests {
                     quake(id: ID!): Quake
                     @connect(
                         source: "quakes"
-                        mcp: { tool: "get_event", arguments: "event_id: $args.id" }
+                        mcp: { tool: "get_event", arguments: "$args { event_id: id }" }
                         selection: "id magnitude"
                         entity: true
                     )

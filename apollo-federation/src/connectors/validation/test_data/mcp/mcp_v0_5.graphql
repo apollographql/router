@@ -9,7 +9,7 @@ type Query {
   recentQuakes(limit: Int): [Quake]
     @connect(
       source: "quakes"
-      mcp: { tool: "earthquake_search_events", arguments: "limit: $args.limit" }
+      mcp: { tool: "earthquake_search_events", arguments: "$args { limit }" }
       selection: "$.events { id magnitude }"
     )
   # Valid: a tool that takes no arguments.
@@ -24,7 +24,7 @@ type Query {
     @connect(
       source: "quakes"
       entity: true
-      mcp: { tool: "earthquake_get_event", arguments: "event_id: $args.id" }
+      mcp: { tool: "earthquake_get_event", arguments: "$args { event_id: id }" }
       selection: "id magnitude"
     )
   # Invalid: `mcp:` and `http:` together.

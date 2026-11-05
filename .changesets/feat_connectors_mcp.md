@@ -11,7 +11,7 @@ type Query {
   recentQuakes(limit: Int): [Quake]
     @connect(
       source: "quakes"
-      mcp: { tool: "search_events", arguments: "limit: $args.limit" }
+      mcp: { tool: "search_events", arguments: "$args { limit }" }
       selection: "$.events { id magnitude }"
     )
 }

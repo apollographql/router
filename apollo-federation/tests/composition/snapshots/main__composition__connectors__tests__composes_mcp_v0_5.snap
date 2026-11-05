@@ -53,9 +53,9 @@ input join__ContextArgument {
 }
 
 type Query @join__type(graph: QUAKES) {
-  recentQuakes(limit: Int): [Quake] @join__directive(name: "connect", graphs: [QUAKES], args: {source: "quakes", mcp: {tool: "search_events", arguments: "limit: $args.limit"}, selection: "$.events { id magnitude }"})
+  recentQuakes(limit: Int): [Quake] @join__directive(name: "connect", graphs: [QUAKES], args: {source: "quakes", mcp: {tool: "search_events", arguments: "$args { limit }"}, selection: "$.events { id magnitude }"})
   latestQuake: Quake @join__directive(name: "connect", graphs: [QUAKES], args: {source: "quakes", mcp: {tool: "latest_event"}, selection: "id magnitude"})
-  quake(id: ID!): Quake @join__directive(name: "connect", graphs: [QUAKES], args: {source: "quakes", mcp: {tool: "get_event", arguments: "event_id: $args.id"}, selection: "id magnitude", entity: true})
+  quake(id: ID!): Quake @join__directive(name: "connect", graphs: [QUAKES], args: {source: "quakes", mcp: {tool: "get_event", arguments: "$args { event_id: id }"}, selection: "id magnitude", entity: true})
   stations: [Station] @join__directive(name: "connect", graphs: [QUAKES], args: {source: "quakes", mcp: {tool: "list_stations"}, selection: "$.stations { id }"})
   checkedQuake: Quake @join__directive(name: "connect", graphs: [QUAKES], args: {source: "quakes", mcp: {tool: "latest_event"}, selection: "id magnitude", errors: {message: "$(result.content->first.text ?? error.message)", extensions: "code: $('QUAKE_TOOL_FAILED')"}})
 }
