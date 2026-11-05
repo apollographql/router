@@ -123,6 +123,7 @@ impl<'de> Visitor<'de> for ConfigurationVisitor {
                 "tls" => config.tls = map.next_value()?,
                 "apq" => config.apq = map.next_value()?,
                 "persisted_queries" => config.persisted_queries = map.next_value()?,
+                "registry" => config.registry = map.next_value()?,
                 "limits" => config.limits = map.next_value()?,
                 "plugins" => config.plugins = map.next_value()?,
                 "batching" => config.batching = map.next_value()?,

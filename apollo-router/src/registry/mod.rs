@@ -89,9 +89,36 @@ pub(crate) fn validate_oci_reference(
         })
 }
 
-/// Configuration for fetching an OCI Bundle
-/// This struct does not change on router reloads - they are all sourced from CLI options.
-#[derive(Debug, Clone)]
+/// How the router authenticates to an OCI registry.
+#[derive(
+    Debug,
+    Clone,
+    Copy,
+    Default,
+    PartialEq,
+    Eq,
+    serde::Deserialize,
+    serde::Serialize,
+    schemars::JsonSchema,
+)]
+#[serde(rename_all = "snake_case")]
+pub enum RegistryAuthMode {
+    /// Send the graph API key to an Apollo-hosted registry; use the Docker credential store for
+    /// any other host.
+    #[default]
+    Auto,
+    /// Always send the graph API key, for a proxy or mirror that forwards to Apollo's registry
+    /// under another hostname.
+    ApolloKey,
+    /// Always use the Docker credential store (`~/.docker/config.json` and credential helpers).
+    DockerCredentials,
+    /// Send no credentials.
+    Anonymous,
+}
+
+/// Configuration for fetching one OCI artifact: a resolved slot of the `registry` section, or
+/// the CLI's `--graph-artifact-reference`.
+#[derive(Debug, Clone, Default, PartialEq)]
 pub struct OciConfig {
     /// The Apollo key: `<YOUR_GRAPH_API_KEY>`.
     /// Only required (and present) when `reference` points at an Apollo-hosted registry.
@@ -110,6 +137,9 @@ pub struct OciConfig {
     /// Determined once at config creation from the registry hostname and
     /// the `APOLLO_GRAPH_ARTIFACT_UNSECURE_HOSTS` environment variable.
     pub use_ssl: bool,
+
+    /// How to authenticate to the registry.
+    pub auth: RegistryAuthMode,
 }
 
 #[derive(Debug, Clone)]
@@ -218,18 +248,44 @@ pub(crate) fn is_apollo_graph_artifact_reference(reference: &str) -> bool {
         .is_ok_and(|r| is_apollo_registry(r.resolve_registry()))
 }
 
-fn build_auth(reference: &Reference, apollo_key: Option<&str>) -> RegistryAuth {
+fn build_auth(
+    reference: &Reference,
+    apollo_key: Option<&str>,
+    mode: RegistryAuthMode,
+) -> RegistryAuth {
     let server = reference
         .resolve_registry()
         .strip_suffix('/')
         .unwrap_or_else(|| reference.resolve_registry());
 
-    // Check if the server registry ends with apollographql.com
-    if is_apollo_registry(server)
-        && let Some(apollo_key) = apollo_key
-    {
-        tracing::debug!("using registry authentication");
-        return RegistryAuth::Basic(APOLLO_REGISTRY_USERNAME.to_string(), apollo_key.to_string());
+    match mode {
+        RegistryAuthMode::Anonymous => return RegistryAuth::Anonymous,
+        RegistryAuthMode::ApolloKey => {
+            if let Some(apollo_key) = apollo_key {
+                tracing::debug!("using registry authentication");
+                return RegistryAuth::Basic(
+                    APOLLO_REGISTRY_USERNAME.to_string(),
+                    apollo_key.to_string(),
+                );
+            }
+            tracing::warn!(
+                "registry auth is apollo_key but no APOLLO_KEY is set; sending no credentials"
+            );
+            return RegistryAuth::Anonymous;
+        }
+        RegistryAuthMode::DockerCredentials => {}
+        RegistryAuthMode::Auto => {
+            // Check if the server registry ends with apollographql.com
+            if is_apollo_registry(server)
+                && let Some(apollo_key) = apollo_key
+            {
+                tracing::debug!("using registry authentication");
+                return RegistryAuth::Basic(
+                    APOLLO_REGISTRY_USERNAME.to_string(),
+                    apollo_key.to_string(),
+                );
+            }
+        }
     }
 
     match docker_credential::get_credential(server) {
@@ -451,7 +507,11 @@ impl OciConfig {
 /// Authenticated with the graph API key from the config
 pub(crate) async fn fetch_oci_manifest_digest(oci_config: &OciConfig) -> Result<String, OciError> {
     let reference: Reference = oci_config.reference.as_str().parse()?;
-    let auth = build_auth(&reference, oci_config.apollo_key.as_deref());
+    let auth = build_auth(
+        &reference,
+        oci_config.apollo_key.as_deref(),
+        oci_config.auth,
+    );
     let protocol = oci_config.client_protocol();
 
     let client = Client::new(ClientConfig {
@@ -509,7 +569,11 @@ async fn fetch_manifest_digest_from_reference(
 /// inferring the correct protocol, and calling the internal fetch function.
 pub(crate) async fn fetch_schema_oci(oci_config: &OciConfig) -> Result<OciContent, OciError> {
     let reference: Reference = oci_config.reference.as_str().parse()?;
-    let auth = build_auth(&reference, oci_config.apollo_key.as_deref());
+    let auth = build_auth(
+        &reference,
+        oci_config.apollo_key.as_deref(),
+        oci_config.auth,
+    );
     let protocol = oci_config.client_protocol();
 
     tracing::debug!(
@@ -791,7 +855,11 @@ async fn fetch_pq_chunks(
     chunk_cache: &mut HashMap<String, String>,
 ) -> Result<FetchedPqChunks, OciError> {
     let reference: Reference = oci_config.reference.as_str().parse()?;
-    let auth = build_auth(&reference, oci_config.apollo_key.as_deref());
+    let auth = build_auth(
+        &reference,
+        oci_config.apollo_key.as_deref(),
+        oci_config.auth,
+    );
     let mut client = Client::new(ClientConfig {
         protocol: oci_config.client_protocol(),
         ..Default::default()
@@ -881,17 +949,45 @@ async fn fetch_entitlement_id(
 
 type OciLicenseStream = Pin<Box<dyn Stream<Item = Result<Option<License>, OciError>> + Send>>;
 
+/// The license, discovered from the graph artifact `oci_config` names: its manifest's
+/// entitlement identifier annotation points at `entitlements/<id>:latest` in the same registry
+/// and under the same path prefix as the graph repository.
 pub(crate) fn create_oci_license_stream(
     oci_config: OciConfig,
 ) -> Result<OciLicenseStream, anyhow::Error> {
     // Validate the reference to determine its type
     validate_oci_reference(&oci_config.reference)?;
     // An infinite polling stream is intended here
-    Ok(Box::pin(stream_license_from_oci(oci_config)))
+    Ok(Box::pin(stream_license_from_oci(oci_config, None)))
+}
+
+/// The license from an explicitly named entitlement artifact (`registry.artifacts.entitlement`):
+/// no discovery, the reference is polled as given.
+pub(crate) fn create_oci_entitlement_license_stream(
+    oci_config: OciConfig,
+) -> Result<OciLicenseStream, anyhow::Error> {
+    validate_oci_reference(&oci_config.reference)?;
+    let entitlement_reference: Reference = oci_config.reference.parse()?;
+    Ok(Box::pin(stream_license_from_oci(
+        oci_config,
+        Some(entitlement_reference),
+    )))
+}
+
+/// The repository the entitlement lives in, next to the graph repository: `entitlements/<id>`
+/// under whatever path prefix the graph repository has. A registry that mounts Apollo's
+/// repositories under a prefix (a pull-through cache at `mirror/apollo-remote/<graph>`) holds the
+/// entitlement under that same prefix.
+fn entitlement_repository(graph_repository: &str, entitlement_id: &str) -> String {
+    match graph_repository.rsplit_once('/') {
+        Some((prefix, _graph)) => format!("{prefix}/entitlements/{entitlement_id}"),
+        None => format!("entitlements/{entitlement_id}"),
+    }
 }
 
 fn stream_license_from_oci(
     oci_config: OciConfig,
+    explicit_entitlement: Option<Reference>,
 ) -> impl Stream<Item = Result<Option<License>, OciError>> {
     let (sender, receiver) = channel(2);
 
@@ -909,7 +1005,11 @@ fn stream_license_from_oci(
                 return;
             }
         };
-        let auth = build_auth(&graph_reference, oci_config.apollo_key.as_deref());
+        let auth = build_auth(
+            &graph_reference,
+            oci_config.apollo_key.as_deref(),
+            oci_config.auth,
+        );
         let protocol = oci_config.client_protocol();
         let mut client = Client::new(ClientConfig {
             protocol: oci_config.client_protocol(),
@@ -927,7 +1027,12 @@ fn stream_license_from_oci(
             MissingAnnotation,
             HasAnnotation,
         }
-        let mut graph_manifest_state = GraphManifestState::Unread;
+        // An explicit entitlement reference needs no discovery.
+        let mut graph_manifest_state = if explicit_entitlement.is_some() {
+            GraphManifestState::HasAnnotation
+        } else {
+            GraphManifestState::Unread
+        };
 
         loop {
             match graph_manifest_state {
@@ -990,10 +1095,14 @@ fn stream_license_from_oci(
                 // Step 2: Poll the entitlement artifact's `latest` tag and fetch the license
                 GraphManifestState::HasAnnotation => {
                     // Build the license Reference
-                    let license_repository = format!("entitlements/{entitlement_id}");
-                    let registry = graph_reference.registry().to_string();
-                    let license_reference =
-                        Reference::with_tag(registry, license_repository, "latest".to_string());
+                    let license_reference = match &explicit_entitlement {
+                        Some(reference) => reference.clone(),
+                        None => Reference::with_tag(
+                            graph_reference.registry().to_string(),
+                            entitlement_repository(graph_reference.repository(), &entitlement_id),
+                            "latest".to_string(),
+                        ),
+                    };
 
                     // Compare the old entitlement digest to the new one
                     // Retry if digest not found, otherwise Error
@@ -1168,6 +1277,7 @@ pub(crate) mod test_helpers {
 
     use super::APOLLO_PERSISTED_QUERY_CHUNK_MEDIA_TYPE;
     use super::OciConfig;
+    use super::RegistryAuthMode;
 
     pub(crate) fn calculate_manifest_digest(manifest: &OciManifest) -> String {
         let manifest_bytes = serde_json::to_vec(manifest).unwrap();
@@ -1182,6 +1292,7 @@ pub(crate) mod test_helpers {
             hot_reload: false,
             poll_interval: Duration::from_millis(10),
             use_ssl: false,
+            auth: RegistryAuthMode::Auto,
         }
     }
 
@@ -1445,6 +1556,7 @@ mod tests {
             hot_reload: false,
             poll_interval: Duration::from_millis(10),
             use_ssl: false,
+            auth: RegistryAuthMode::Auto,
         }
     }
 
@@ -1617,7 +1729,7 @@ mod tests {
         let apollo_key = "test-api-key".to_string();
 
         // Call build_auth
-        let auth = build_auth(&reference, Some(&apollo_key));
+        let auth = build_auth(&reference, Some(&apollo_key), RegistryAuthMode::Auto);
 
         // Check that it returns the correct RegistryAuth
         match auth {
@@ -1637,7 +1749,7 @@ mod tests {
             .parse()
             .unwrap();
 
-        let auth = build_auth(&reference, None);
+        let auth = build_auth(&reference, None, RegistryAuthMode::Auto);
 
         if let RegistryAuth::Basic(username, _) = auth {
             assert_ne!(username, APOLLO_REGISTRY_USERNAME);
@@ -1653,7 +1765,7 @@ mod tests {
         // Mock the docker_credential::get_credential function
         // Since we can't easily mock this in Rust without additional libraries,
         // we'll just verify that it doesn't return the Apollo registry auth
-        let auth = build_auth(&reference, Some(&apollo_key));
+        let auth = build_auth(&reference, Some(&apollo_key), RegistryAuthMode::Auto);
 
         // Check that it doesn't return the Apollo registry auth
         if let RegistryAuth::Basic(username, _) = auth {
@@ -1667,7 +1779,7 @@ mod tests {
         // require one; it falls through to docker-credential/anonymous auth.
         let reference: Reference = "docker.io/library/alpine:latest".parse().unwrap();
 
-        let auth = build_auth(&reference, None);
+        let auth = build_auth(&reference, None, RegistryAuthMode::Auto);
 
         if let RegistryAuth::Basic(username, _) = auth {
             assert_ne!(username, "apollo_registry");
@@ -1949,7 +2061,7 @@ mod tests {
         .await;
         let oci_config = mock_oci_config_with_reference(image_reference.to_string());
 
-        let results = stream_license_from_oci(oci_config)
+        let results = stream_license_from_oci(oci_config, None)
             .take(1)
             .collect::<Vec<_>>()
             .await;
@@ -2063,7 +2175,7 @@ mod tests {
             .expect("url must be valid");
         let oci_config = mock_oci_config_with_reference(image_reference.to_string());
 
-        let mut stream = stream_license_from_oci(oci_config);
+        let mut stream = stream_license_from_oci(oci_config, None);
 
         // First poll: new digest, license should be fetched.
         let first_result = stream.next().await;
@@ -2216,7 +2328,7 @@ mod tests {
             .expect("url must be valid");
         let oci_config = mock_oci_config_with_reference(image_reference.to_string());
 
-        let mut stream = stream_license_from_oci(oci_config);
+        let mut stream = stream_license_from_oci(oci_config, None);
         let expected = License::from_str(TEST_LICENSE_JWT).expect("test JWT must parse");
 
         // First poll: entitlement digest 1 is new → fetch.
@@ -2359,10 +2471,11 @@ mod tests {
             hot_reload: true,
             poll_interval: Duration::from_millis(10),
             use_ssl: false,
+            auth: RegistryAuthMode::Auto,
         };
 
         let start_time = tokio::time::Instant::now();
-        let mut stream = stream_license_from_oci(oci_config);
+        let mut stream = stream_license_from_oci(oci_config, None);
 
         // First stream item should be the 429 error.
         let result = timeout(Duration::from_secs(20), stream.next()).await;
@@ -2537,7 +2650,7 @@ mod tests {
             .expect("url must be valid");
         let oci_config = mock_oci_config_with_reference(image_reference.to_string());
 
-        let mut stream = stream_license_from_oci(oci_config);
+        let mut stream = stream_license_from_oci(oci_config, None);
 
         // Poll 1: blob 500 → stream emits Err.
         let first_result = timeout(Duration::from_secs(5), stream.next())
@@ -2579,7 +2692,7 @@ mod tests {
         .await;
         let oci_config = mock_oci_config_with_reference(image_reference.to_string());
 
-        let mut stream = stream_license_from_oci(oci_config);
+        let mut stream = stream_license_from_oci(oci_config, None);
 
         let first_result = timeout(Duration::from_secs(5), stream.next())
             .await
@@ -2620,7 +2733,7 @@ mod tests {
         // Deliberately mount nothing under `entitlements/{entitlement_id}`.
 
         let oci_config = mock_oci_config_with_reference(image_reference.to_string());
-        let mut stream = stream_license_from_oci(oci_config);
+        let mut stream = stream_license_from_oci(oci_config, None);
 
         let item = timeout(Duration::from_millis(300), stream.next()).await;
         assert!(
@@ -2641,7 +2754,7 @@ mod tests {
             setup_license_mocks(mock_server, entitlement_id, vec![unrelated_layer()]).await;
 
         let oci_config = mock_oci_config_with_reference(image_reference.to_string());
-        let mut stream = stream_license_from_oci(oci_config);
+        let mut stream = stream_license_from_oci(oci_config, None);
 
         let first_result = timeout(Duration::from_secs(5), stream.next())
             .await
@@ -2779,7 +2892,7 @@ mod tests {
             .expect("url must be valid");
         let oci_config = mock_oci_config_with_reference(image_reference.to_string());
 
-        let mut stream = stream_license_from_oci(oci_config);
+        let mut stream = stream_license_from_oci(oci_config, None);
 
         // First poll: layer missing → Err.
         let first_result = timeout(Duration::from_secs(5), stream.next())
@@ -3139,6 +3252,7 @@ mod tests {
             hot_reload: true,
             poll_interval: Duration::from_millis(10),
             use_ssl: false,
+            auth: RegistryAuthMode::Auto,
         };
 
         let result = create_oci_schema_stream(oci_config);
@@ -3175,6 +3289,7 @@ mod tests {
             hot_reload: false,
             poll_interval: Duration::from_millis(10),
             use_ssl: false,
+            auth: RegistryAuthMode::Auto,
         };
 
         let result = create_oci_schema_stream(oci_config);
@@ -3201,6 +3316,7 @@ mod tests {
             hot_reload: true,
             poll_interval: Duration::from_millis(10),
             use_ssl: true,
+            auth: RegistryAuthMode::Auto,
         };
 
         let result = create_oci_schema_stream(oci_config);
@@ -3289,6 +3405,7 @@ mod tests {
             hot_reload: false,
             poll_interval: Duration::from_millis(10),
             use_ssl: false,
+            auth: RegistryAuthMode::Auto,
         };
 
         let result = create_oci_schema_stream(oci_config_digest);
@@ -3520,6 +3637,7 @@ mod tests {
             hot_reload: true,
             poll_interval: Duration::from_millis(10),
             use_ssl: false,
+            auth: RegistryAuthMode::Auto,
         };
 
         let start_time = tokio::time::Instant::now();

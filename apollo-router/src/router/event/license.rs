@@ -8,6 +8,7 @@ use futures::prelude::*;
 
 use crate::registry::OciConfig;
 use crate::registry::OciError;
+use crate::registry::create_oci_entitlement_license_stream;
 use crate::registry::create_oci_license_stream;
 use crate::router::Event;
 use crate::router::Event::NoMoreLicense;
@@ -131,6 +132,17 @@ pub enum LicenseSource {
     /// Apollo graph artifact OCI registry.
     #[display("OCI")]
     OCI(OciConfig),
+
+    /// An explicitly named entitlement artifact in an OCI registry (`registry.artifacts.entitlement`).
+    /// EXPERIMENTAL and not subject to semver.
+    #[display("OCI")]
+    #[from(ignore)]
+    OCIEntitlement(OciConfig),
+
+    /// The license that goes with the graph artifact declared in the configuration's `registry`
+    /// section, driven off the configuration stream. EXPERIMENTAL and not subject to semver.
+    #[display("Registry")]
+    FromRegistryConfiguration,
 }
 
 impl Default for LicenseSource {
@@ -146,6 +158,10 @@ const VALID_AUDIENCES_USER_SUPLIED_LICENSES: [Audience; 2] = [Audience::Offline,
 impl LicenseSource {
     /// Convert this license into a stream regardless of if is static or not. Allows for unified handling later.
     pub(crate) fn into_stream(self) -> impl Stream<Item = Event> {
+        if let LicenseSource::FromRegistryConfiguration = self {
+            // Driven by the configuration stream instead (see `router::event::registry`).
+            return stream::empty().boxed();
+        }
         match self {
             LicenseSource::Static { license } => stream::once(future::ready(license))
                 .validate_audience(VALID_AUDIENCES_USER_SUPLIED_LICENSES)
@@ -247,9 +263,18 @@ impl LicenseSource {
                     })
                     .boxed()
             }
-            LicenseSource::OCI(oci_config) => {
+            // Handled by the early return above.
+            LicenseSource::FromRegistryConfiguration => stream::empty().boxed(),
+            LicenseSource::OCI(_) | LicenseSource::OCIEntitlement(_) => {
                 tracing::debug!("using oci as license source");
-                match create_oci_license_stream(oci_config) {
+                let created = match self {
+                    LicenseSource::OCI(oci_config) => create_oci_license_stream(oci_config),
+                    LicenseSource::OCIEntitlement(oci_config) => {
+                        create_oci_entitlement_license_stream(oci_config)
+                    }
+                    _ => unreachable!("matched above"),
+                };
+                match created {
                     Ok(stream) => stream
                         .filter_map(|res| {
                             future::ready(match res {
@@ -325,6 +350,7 @@ impl LicenseSource {
         }
         .expand_licenses()
         .chain(stream::iter(vec![NoMoreLicense]))
+        .boxed()
     }
 }
 
