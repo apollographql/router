@@ -176,6 +176,9 @@ pub(crate) struct HttpClientInputsMaps {
     /// Client inputs for connector sources, keyed by `source_config_key()`
     /// (`{subgraph_name}.{source_or_synthetic}`).
     pub(crate) connectors: IndexMap<String, HttpClientInputs>,
+    /// The connector sources, keyed the same way, whose connectors call MCP tools with
+    /// `@connect(mcp:)`. They hold MCP sessions unless the router config says otherwise.
+    pub(crate) mcp_sources: HashSet<String>,
 }
 
 /// Parses TLS and DNS client inputs for every non-connector subgraph and every
@@ -238,6 +241,23 @@ pub(crate) fn parse_http_client_inputs(
         .map(|c| c.source_config_keys.clone())
         .unwrap_or_default();
 
+    let mcp_sources: HashSet<String> = schema
+        .connectors
+        .as_ref()
+        .map(|c| {
+            c.by_service_name
+                .values()
+                .filter(|connector| {
+                    connector
+                        .transport
+                        .as_ref()
+                        .is_some_and(|transport| transport.mcp.is_some())
+                })
+                .map(|connector| connector.source_config_key())
+                .collect()
+        })
+        .unwrap_or_default();
+
     let mut connector_inputs = IndexMap::new();
     for name in connector_sources.iter() {
         let connector_tls_root_store =
@@ -255,6 +275,7 @@ pub(crate) fn parse_http_client_inputs(
     Ok(HttpClientInputsMaps {
         subgraphs: subgraph_inputs,
         connectors: connector_inputs,
+        mcp_sources,
     })
 }
 

@@ -190,6 +190,7 @@ pub(crate) fn build_http_services(
     let HttpClientInputsMaps {
         subgraphs: subgraph_inputs,
         connectors: connector_inputs,
+        mcp_sources,
     } = client_inputs;
     let subgraph_services = subgraph_inputs
         .into_iter()
@@ -198,7 +199,7 @@ pub(crate) fn build_http_services(
             (name, service)
         })
         .collect();
-    let mut mcp_sessions = mcp_session::layers(configuration);
+    let mut mcp_sessions = mcp_session::layers(configuration, &mcp_sources);
     let connector_services = connector_inputs
         .into_iter()
         .map(|(source, inputs)| {

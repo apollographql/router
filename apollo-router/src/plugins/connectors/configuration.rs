@@ -89,8 +89,9 @@ pub(crate) struct SourceConfiguration {
 #[apollo_configuration::configuration]
 #[derive(Serialize)]
 pub(crate) struct McpSourceConfiguration {
-    /// Whether the router opens MCP sessions for this source (default: off)
-    pub(crate) sessions: McpSessionsMode,
+    /// Whether the router opens MCP sessions for this source (default: auto for a source that
+    /// declares `@source(mcp:)`, off otherwise)
+    pub(crate) sessions: Option<McpSessionsMode>,
 
     /// Request headers that tell sessions apart, such as a tenant or conversation id. A caller
     /// gets one session per login (the `iss`, `sub` and `sid` of a validated JWT) or, without
@@ -114,7 +115,6 @@ pub(crate) struct McpSourceConfiguration {
 #[derive(Copy, PartialEq, Eq, Serialize)]
 pub(crate) enum McpSessionsMode {
     /// Send requests as written, with no session
-    #[config(default)]
     Off,
     /// Initialize a session per caller before its first request, and stop if the server does
     /// not issue one

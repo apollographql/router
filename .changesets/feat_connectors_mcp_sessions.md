@@ -14,6 +14,6 @@ With `sessions: auto`, the router sends `initialize` before a caller's first req
 
 Callers never share a session. The router keys sessions by the `iss`, `sub` and `sid` claims of a JWT validated by its authentication plugin, so a login keeps its session across token refreshes, or otherwise by the `Authorization`, `Cookie` and `Proxy-Authorization` headers sent to the source. `identity_headers` lists more headers to split sessions by. `max_sessions` (default 50) and `idle_timeout` (default 30m) bound how many sessions are held; a session dropped to make room or for idling is closed with `DELETE`.
 
-Sessions are off by default. The router reports adoption with the `opt.source.mcp_sessions` attribute of the `apollo.router.config.connectors` gauge.
+Sessions are off by default, except for a source that declares `@source(mcp:)`, which holds them unless its configuration sets `sessions: off`. The router reports adoption with the `opt.source.mcp_sessions` attribute of the `apollo.router.config.connectors` gauge.
 
 By [@benjamn](https://github.com/benjamn)

@@ -6731,9 +6731,16 @@ expression: "&schema"
           "type": "integer"
         },
         "sessions": {
-          "$ref": "#/$defs/McpSessionsMode",
-          "default": "off",
-          "description": "Whether the router opens MCP sessions for this source (default: off)"
+          "anyOf": [
+            {
+              "$ref": "#/$defs/McpSessionsMode"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Whether the router opens MCP sessions for this source (default: auto for a source that\ndeclares `@source(mcp:)`, off otherwise)"
         }
       },
       "type": "object"

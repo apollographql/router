@@ -11,6 +11,7 @@
 //! as it goes on the wire, after every plugin has had its turn.
 
 use std::collections::HashMap;
+use std::collections::HashSet;
 use std::num::NonZeroUsize;
 use std::sync::Arc;
 use std::sync::atomic::AtomicU64;
@@ -76,20 +77,45 @@ const MAX_HANDSHAKE_BODY: usize = 1 << 20;
 /// Headers that identify the caller whenever the request carries no validated JWT.
 const DEFAULT_IDENTITY_HEADERS: [HeaderName; 3] = [AUTHORIZATION, COOKIE, PROXY_AUTHORIZATION];
 
-/// A session layer for each connector source configured with `mcp.sessions: auto`, keyed like
-/// the connector HTTP clients (`{subgraph_name}.{source_name}`).
-pub(crate) fn layers(configuration: &Configuration) -> HashMap<String, McpSessionLayer> {
-    let Some(config) =
-        configuration.typed_plugin_config::<ConnectorsConfig>(&format!("apollo.{PLUGIN_NAME}"))
-    else {
-        return HashMap::new();
-    };
-    config
-        .sources
+/// A session layer for each connector source that holds MCP sessions, keyed like the connector
+/// HTTP clients (`{subgraph_name}.{source_name}`).
+///
+/// `mcp_sources` are the sources whose schema says they are MCP servers, with `@source(mcp:)`.
+/// They hold sessions unless their router config sets `mcp.sessions: off`. Any other source
+/// holds sessions only if its router config sets `mcp.sessions: auto`, for connectors that write
+/// the MCP request themselves with `http:`.
+pub(crate) fn layers(
+    configuration: &Configuration,
+    mcp_sources: &HashSet<String>,
+) -> HashMap<String, McpSessionLayer> {
+    let config =
+        configuration.typed_plugin_config::<ConnectorsConfig>(&format!("apollo.{PLUGIN_NAME}"));
+    let configured = config
         .iter()
-        .filter_map(|(source, source_config)| {
-            let mcp = source_config.mcp.as_ref()?;
-            (mcp.sessions == McpSessionsMode::Auto)
+        .flat_map(|config| config.sources.iter())
+        .filter_map(|(source, source_config)| Some((source, source_config.mcp.as_ref()?)));
+    let defaults = McpSourceConfiguration::default();
+    let unconfigured = mcp_sources
+        .iter()
+        .filter(|source| {
+            !config.as_ref().is_some_and(|config| {
+                config
+                    .sources
+                    .get(*source)
+                    .is_some_and(|source_config| source_config.mcp.is_some())
+            })
+        })
+        .map(|source| (source, &defaults));
+
+    configured
+        .chain(unconfigured)
+        .filter_map(|(source, mcp)| {
+            let default_mode = if mcp_sources.contains(source) {
+                McpSessionsMode::Auto
+            } else {
+                McpSessionsMode::Off
+            };
+            (mcp.sessions.unwrap_or(default_mode) == McpSessionsMode::Auto)
                 .then(|| (source.clone(), McpSessionLayer::new(source, mcp)))
         })
         .collect()
