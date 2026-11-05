@@ -480,7 +480,7 @@ pub(crate) trait InternalServiceBuilderExt<L>: Sized {
     ///
     /// ```rust,ignore
     /// ServiceBuilder::new()
-    ///     .apply_plugin_layer(&plugins, LimitsPlugin::endpoint_header_list_layer)
+    ///     .apply_plugin_layer(&plugins, LimitsPlugin::endpoint_header_list_limit_layer)
     ///     .service(endpoint_service)
     /// ```
     fn apply_plugin_layer<P, OutLayer>(
