@@ -1,3 +1,7 @@
+use apollo_federation::query_plan::FetchDataRewrite;
+
+use crate::query_plan::build_query_plan_support::find_fetch_nodes_for_subgraph;
+
 mod include_skip;
 
 #[test]
@@ -175,6 +179,221 @@ fn it_handles_multiple_requires_within_the_same_entity_fetch() {
           },
         }
       "###
+    );
+}
+
+#[test]
+fn it_aliases_conflicting_requires_nested_under_an_aliased_field() {
+    // `o` has different types in `T2` and `T3`, so one occurrence is aliased in the Subgraph1
+    // fetch. Inside both `o` selections, `x` also has different types in `A` and `B`, so it
+    // needs an alias too, including under the aliased `o`.
+    let planner = planner!(
+        Subgraph1: r#"
+          type Query {
+            is: [I!]!
+          }
+
+          interface I {
+            id: ID!
+            o: P
+            g: Int
+            h: Int
+          }
+
+          type T1 implements I {
+            id: ID!
+            o: P
+            g: Int
+            h: Int
+          }
+
+          type T2 implements I @key(fields: "id") {
+            id: ID!
+            o: P!
+            g: Int @external
+            h: Int @external
+          }
+
+          type T3 implements I @key(fields: "id") {
+            id: ID!
+            o: P
+            g: Int @external
+            h: Int @external
+          }
+
+          type P {
+            u: [U!]!
+          }
+
+          union U = A | B
+
+          type A {
+            x: Int!
+          }
+
+          type B {
+            x: Int
+          }
+        "#,
+        Subgraph2: r#"
+          type T2 @key(fields: "id") {
+            id: ID!
+            o: P! @external
+            g: Int @requires(fields: "o { u { ... on A { x } } }")
+            h: Int @requires(fields: "o { u { ... on B { x } } }")
+          }
+
+          type T3 @key(fields: "id") {
+            id: ID!
+            o: P @external
+            g: Int @requires(fields: "o { u { ... on A { x } } }")
+            h: Int @requires(fields: "o { u { ... on B { x } } }")
+          }
+
+          type P {
+            u: [U!]! @external
+          }
+
+          union U = A | B
+
+          type A {
+            x: Int! @external
+          }
+
+          type B {
+            x: Int @external
+          }
+        "#,
+    );
+    let plan = assert_plan!(
+        &planner,
+        r#"
+          {
+            is {
+              g
+              h
+            }
+          }
+        "#,
+        @r#"
+    QueryPlan {
+      Sequence {
+        Fetch(service: "Subgraph1") {
+          {
+            is {
+              __typename
+              ... on T1 {
+                g
+                h
+              }
+              ... on T2 {
+                __typename
+                id
+                o {
+                  u {
+                    __typename
+                    ... on B {
+                      x
+                    }
+                    ... on A {
+                      x__alias_0: x
+                    }
+                  }
+                }
+              }
+              ... on T3 {
+                __typename
+                id
+                o__alias_0: o {
+                  u {
+                    __typename
+                    ... on B {
+                      x
+                    }
+                    ... on A {
+                      x__alias_0: x
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        Flatten(path: "is.@") {
+          Fetch(service: "Subgraph2") {
+            {
+              ... on T2 {
+                __typename
+                id
+                o {
+                  u {
+                    ... on B {
+                      x
+                    }
+                    ... on A {
+                      x
+                    }
+                  }
+                }
+              }
+              ... on T3 {
+                __typename
+                id
+                o {
+                  u {
+                    ... on B {
+                      x
+                    }
+                    ... on A {
+                      x
+                    }
+                  }
+                }
+              }
+            } =>
+            {
+              ... on T2 {
+                g
+                h
+              }
+              ... on T3 {
+                g
+                h
+              }
+            }
+          },
+        },
+      },
+    }
+    "#
+    );
+    let fetch_nodes = find_fetch_nodes_for_subgraph("Subgraph1", &plan);
+    assert_eq!(fetch_nodes.len(), 1);
+    let renames = fetch_nodes[0]
+        .output_rewrites
+        .iter()
+        .map(|rewrite| match rewrite.as_ref() {
+            FetchDataRewrite::KeyRenamer(renamer) => format!(
+                "{} -> {}",
+                renamer
+                    .path
+                    .iter()
+                    .map(|element| element.to_string())
+                    .collect::<Vec<_>>()
+                    .join("/"),
+                renamer.rename_key_to
+            ),
+            other => panic!("unexpected rewrite {other:?}"),
+        })
+        .collect::<Vec<_>>();
+    // `o` is renamed back first, so the nested renames are keyed under `o`, not `o__alias_0`.
+    assert_eq!(
+        renames,
+        [
+            "is/... on T3/o__alias_0 -> o",
+            "is/... on T2/o/u/... on A/x__alias_0 -> x",
+            "is/... on T3/o/u/... on A/x__alias_0 -> x",
+        ]
     );
 }
 

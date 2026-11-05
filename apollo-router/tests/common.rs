@@ -1,5 +1,4 @@
 use std::collections::HashMap;
-use std::collections::hash_map::Entry;
 use std::ffi::OsString;
 use std::fs;
 use std::net::SocketAddr;
@@ -8,7 +7,6 @@ use std::path::PathBuf;
 use std::process::Stdio;
 use std::sync::Arc;
 use std::sync::LazyLock;
-use std::sync::OnceLock;
 use std::time::Duration;
 use std::time::SystemTime;
 use std::time::UNIX_EPOCH;
@@ -253,10 +251,6 @@ async fn mock_license_uplink() -> wiremock::MockServer {
     server
 }
 
-/// Global registry to keep track of allocated ports across all tests
-/// This helps avoid port conflicts between concurrent tests
-static ALLOCATED_PORTS: OnceLock<Arc<Mutex<HashMap<u16, String>>>> = OnceLock::new();
-
 /// Global endpoint for JWKS used in testing. If you need to mint a test key, refer to the internal
 /// router team's documentation for a script
 #[allow(dead_code)]
@@ -267,35 +261,6 @@ pub static TEST_JWKS_ENDPOINT: LazyLock<PathBuf> = LazyLock::new(|| {
         .join("testdata")
         .join("license.jwks.json")
 });
-
-fn get_allocated_ports() -> &'static Arc<Mutex<HashMap<u16, String>>> {
-    ALLOCATED_PORTS.get_or_init(|| Arc::new(Mutex::new(HashMap::new())))
-}
-
-/// Allocate a port that's currently available
-/// The port is not actually bound, just marked as allocated to avoid conflicts
-fn allocate_port(name: &str) -> std::io::Result<u16> {
-    let ports_registry = get_allocated_ports();
-
-    // Try to find an available port
-    for _ in 0..100 {
-        // Try up to 100 times to find a port
-        let listener = TcpListener::bind("127.0.0.1:0")?;
-        let port = listener.local_addr()?.port();
-        drop(listener); // Release the port immediately
-
-        let mut ports = ports_registry.lock();
-        if let Entry::Vacant(e) = ports.entry(port) {
-            e.insert(name.to_string());
-            return Ok(port);
-        }
-    }
-
-    Err(std::io::Error::new(
-        std::io::ErrorKind::AddrInUse,
-        "Could not find available port after 100 attempts",
-    ))
-}
 
 #[derive(Clone)]
 pub struct Query {
@@ -454,17 +419,6 @@ impl IntegrationTest {
         self.bind_address
             .lock()
             .expect("no bind address set, router must be started first.")
-    }
-
-    /// Reserve a port for use in the test and return it
-    /// The port placeholder will be immediately replaced in the config file
-    /// Panics if the placeholder is not found in the config
-    /// This helps avoid port conflicts between concurrent tests
-    #[allow(dead_code)]
-    pub fn reserve_address(&mut self, placeholder_name: &str) -> u16 {
-        let port = allocate_port(placeholder_name).expect("Failed to allocate port");
-        self.set_address(placeholder_name, port);
-        port
     }
 
     /// Reserve a specific port for use in the test
@@ -1297,6 +1251,56 @@ impl IntegrationTest {
     #[allow(dead_code)]
     pub async fn assert_started(&mut self) {
         self.wait_for_log_message("GraphQL endpoint exposed").await;
+    }
+
+    /// Waits until the router answers an HTTP request on its GraphQL address.
+    ///
+    /// `assert_started` only waits for the `GraphQL endpoint exposed` log line. The router
+    /// prints it before its accept loop is running and before it binds its other listeners,
+    /// so a request sent straight after it can fail. Any HTTP response counts as ready.
+    ///
+    /// # Panics
+    ///
+    /// - At once, with the exit status and the router's logs, if the router process exits.
+    /// - With the router's logs, if the router hasn't answered within `deadline`.
+    #[allow(dead_code)]
+    pub async fn wait_for_router_ready(&mut self, deadline: Duration) {
+        let url = format!("http://{}/", self.bind_address());
+        let client = reqwest::Client::builder()
+            .timeout(Duration::from_millis(200))
+            .build()
+            .expect("build reqwest client");
+        let start = Instant::now();
+        while start.elapsed() < deadline {
+            let router = self.router.as_mut().expect("router must have been started");
+            if let Some(status) = router.try_wait().expect("check router process") {
+                self.drain_logs_until_quiet().await;
+                panic!(
+                    "router exited ({status}) before accepting HTTP requests. Log dump below:\n\n{logs}",
+                    logs = self.logs.join("\n")
+                );
+            }
+            if client.head(&url).send().await.is_ok() {
+                return;
+            }
+            tokio::time::sleep(Duration::from_millis(20)).await;
+        }
+        self.read_logs();
+        panic!(
+            "router at {url} did not accept HTTP requests within {deadline:?}. Log dump below:\n\n{logs}",
+            logs = self.logs.join("\n")
+        );
+    }
+
+    /// Collects log lines until none arrives for a second. The stdout reader task can still
+    /// be delivering a just-exited router's last lines, which usually hold the error.
+    #[allow(dead_code)]
+    async fn drain_logs_until_quiet(&mut self) {
+        while let Ok(Some(line)) =
+            tokio::time::timeout(Duration::from_secs(1), self.stdio_rx.recv()).await
+        {
+            self.logs.push(line);
+        }
     }
 
     #[allow(dead_code)]

@@ -7,7 +7,6 @@ use tower::BoxError;
 use crate::metrics::aggregation::MeterProviderType;
 use crate::plugins::telemetry::config::Conf;
 use crate::plugins::telemetry::metrics::NamedMetricExporter;
-use crate::plugins::telemetry::metrics::OverflowMetricExporter;
 use crate::plugins::telemetry::metrics::RetryMetricExporter;
 use crate::plugins::telemetry::otlp::Protocol;
 use crate::plugins::telemetry::otlp::TelemetryDataKind;
@@ -32,7 +31,7 @@ impl MetricsConfigurator for super::super::otlp::Config {
 
         // // Wrap with retry, then overflow detection, then error prefixing
         let named_exporter = NamedMetricExporter::new(
-            OverflowMetricExporter::new_push(RetryMetricExporter::new(exporter)),
+            builder.public_overflow_exporter(RetryMetricExporter::new(exporter)),
             "otlp",
         );
         builder.with_reader(

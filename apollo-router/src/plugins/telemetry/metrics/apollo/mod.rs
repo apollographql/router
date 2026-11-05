@@ -33,6 +33,7 @@ use crate::plugins::telemetry::apollo_exporter::get_uname;
 use crate::plugins::telemetry::config::ApolloMetricsReferenceMode;
 use crate::plugins::telemetry::config::Conf;
 use crate::plugins::telemetry::metrics::NamedMetricExporter;
+use crate::plugins::telemetry::metrics::OverflowCounting;
 use crate::plugins::telemetry::metrics::OverflowMetricExporter;
 use crate::plugins::telemetry::metrics::RetryMetricExporter;
 use crate::plugins::telemetry::otlp::Protocol;
@@ -40,6 +41,7 @@ use crate::plugins::telemetry::otlp::TelemetryDataKind;
 use crate::plugins::telemetry::otlp::process_endpoint;
 use crate::plugins::telemetry::reload::metrics::MetricsBuilder;
 use crate::plugins::telemetry::reload::metrics::MetricsConfigurator;
+use crate::plugins::telemetry::reload::metrics::instrument_default_buckets;
 
 pub(crate) mod histogram;
 pub(crate) mod studio;
@@ -192,11 +194,17 @@ impl Config {
 
         // Wrap with retry, then overflow detection, then error prefixing
         let named_exporter = NamedMetricExporter::new(
-            OverflowMetricExporter::new_push(RetryMetricExporter::new(exporter)),
+            OverflowMetricExporter::new(
+                RetryMetricExporter::new(exporter),
+                OverflowCounting::EveryExport,
+            ),
             "apollo",
         );
         let named_realtime_exporter = NamedMetricExporter::new(
-            OverflowMetricExporter::new_push(RetryMetricExporter::new(realtime_exporter)),
+            OverflowMetricExporter::new(
+                RetryMetricExporter::new(realtime_exporter),
+                OverflowCounting::EveryExport,
+            ),
             "apollo",
         );
 
@@ -230,14 +238,18 @@ impl Config {
             .with_reader(MeterProviderType::Apollo, default_reader)
             .with_resource(MeterProviderType::Apollo, resource.clone());
 
-        // Configure histogram buckets for Apollo metrics
+        // Configure histogram buckets for Apollo metrics, preferring per-instrument
+        // defaults for histograms that don't measure durations
         let apollo_buckets = default_buckets();
         builder.with_view(MeterProviderType::Apollo, move |instrument: &Instrument| {
             if instrument.kind() == InstrumentKind::Histogram {
+                let boundaries = instrument_default_buckets(instrument.name())
+                    .map(<[f64]>::to_vec)
+                    .unwrap_or_else(|| apollo_buckets.clone());
                 Some(
                     Stream::builder()
                         .with_aggregation(Aggregation::ExplicitBucketHistogram {
-                            boundaries: apollo_buckets.clone(),
+                            boundaries,
                             record_min_max: true,
                         })
                         .build()

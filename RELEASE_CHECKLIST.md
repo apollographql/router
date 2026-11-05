@@ -175,8 +175,9 @@ Start following the steps below to start a release PR.  The process is **not ful
    Running this command will:
 
      - Bump the necessary versions to the version specified, including those in the documentation.
-     - Run our compliance checks and update the `licenses.html` file as appropriate.
-     - Ensure we're not using any incompatible licenses in the release.
+     - Update the `licenses.html` file as appropriate.
+
+   It does not run `cargo deny`. On the pushed tag, CI's `check_compliance` job checks all security advisories, and publishing waits for it to pass. To catch an advisory before you tag, run `cargo xtask check-compliance`.
 
 7. Now, review and stage the changes produced by the previous step.  This is most safely done using the `--patch` (or `-p`) flag to `git add` (`-u` ignores untracked files).
 
@@ -237,8 +238,9 @@ Start following the steps below to start a release PR.  The process is **not ful
 
      - Bump the necessary versions to the version specified, including those in the documentation.
      - Migrate the current set of `/.changesets/*.md` files into `/CHANGELOG.md` using the version specified.
-     - Run our compliance checks and update the `licenses.html` file as appropriate.
-     - Ensure we're not using any incompatible licenses in the release.
+     - Update the `licenses.html` file as appropriate.
+
+   It does not run `cargo deny`. On the release PR, CI's `check_compliance` job fails only on security advisories the PR introduces. On the pushed tag it checks all advisories, and publishing waits for it to pass. To catch an existing advisory before you tag, run `cargo xtask check-compliance`.
 
 7. **MANUALLY CHECK AND UPDATE** the `federation-version-support.mdx` to make sure it shows the version of Federation which is supported by the Router.
 

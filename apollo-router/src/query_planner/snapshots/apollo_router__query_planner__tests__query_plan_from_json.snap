@@ -54,6 +54,7 @@ Sequence {
                                                     type_condition: Some(
                                                         "Book",
                                                     ),
+                                                    conditions: [],
                                                     selections: [
                                                         Field(
                                                             Field {
@@ -117,6 +118,7 @@ Sequence {
                                                     type_condition: Some(
                                                         "Book",
                                                     ),
+                                                    conditions: [],
                                                     selections: [
                                                         Field(
                                                             Field {
@@ -193,6 +195,7 @@ Sequence {
                                                     type_condition: Some(
                                                         "Book",
                                                     ),
+                                                    conditions: [],
                                                     selections: [
                                                         Field(
                                                             Field {
@@ -251,6 +254,7 @@ Sequence {
                                                     type_condition: Some(
                                                         "Book",
                                                     ),
+                                                    conditions: [],
                                                     selections: [
                                                         Field(
                                                             Field {

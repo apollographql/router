@@ -370,7 +370,7 @@ impl StaticCostCalculator {
         ctx: &ScoringContext,
         subgraph: &str,
     ) -> Result<f64, DemandControlError> {
-        let mut cost = if operation.is_mutation() { 10.0 } else { 0.0 };
+        let mut cost = operation_base_cost(operation);
 
         let Some(root_type_name) = ctx.schema.root_operation(operation.operation_type) else {
             return Err(DemandControlError::QueryParseFailure(format!(
@@ -628,8 +628,19 @@ impl StaticCostCalculator {
     ) -> Result<f64, DemandControlError> {
         let mut visitor = ResponseCostCalculator::new(&self.supergraph_schema);
         visitor.visit(request, response, variables);
-        Ok(visitor.cost)
+        let base_cost: f64 = request
+            .operations
+            .iter()
+            .map(|op| operation_base_cost(op))
+            .sum();
+        Ok(base_cost + visitor.cost)
     }
+}
+
+/// Flat cost added to an operation on top of its field costs. Estimated and actual
+/// cost must both include it, or every mutation reports a constant delta.
+fn operation_base_cost(operation: &Operation) -> f64 {
+    if operation.is_mutation() { 10.0 } else { 0.0 }
 }
 
 pub(crate) struct ResponseCostCalculator<'a> {
@@ -1008,6 +1019,15 @@ mod tests {
         let variables = "{}";
 
         assert_eq!(basic_estimated_cost(schema, query, variables), 10.0)
+    }
+
+    #[test]
+    fn mutation_actual_cost_includes_base_cost() {
+        let schema = include_str!("./fixtures/basic_schema.graphql");
+        let query = include_str!("./fixtures/basic_mutation.graphql");
+        let response = br#"{"data":{"doSomething":6}}"#;
+
+        assert_eq!(basic_actual_cost(schema, query, "{}", response), 10.0)
     }
 
     #[test]

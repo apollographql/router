@@ -382,6 +382,39 @@ impl OpGraphPathContext {
         })
     }
 
+    /// Returns this context extended with the conditionals of every element of the given path
+    /// (outermost element first), skipping conditionals that are already in this context.
+    pub(crate) fn with_context_of_path(
+        &self,
+        path: &OpPath,
+    ) -> Result<OpGraphPathContext, FederationError> {
+        let mut new_conditionals: Vec<OperationConditional> = vec![];
+        for element in path.0.iter() {
+            if element.directives().is_empty() {
+                continue;
+            }
+            let mut element_conditionals: Vec<_> = element
+                .extract_operation_conditionals()?
+                .into_iter()
+                .filter(|conditional| {
+                    !self.conditionals.contains(conditional)
+                        && !new_conditionals.contains(conditional)
+                })
+                .collect();
+            // Conditionals are stored innermost-first, and this element is nested within the
+            // previous ones.
+            element_conditionals.extend(new_conditionals);
+            new_conditionals = element_conditionals;
+        }
+        if new_conditionals.is_empty() {
+            return Ok(self.clone());
+        }
+        new_conditionals.extend(self.iter().cloned());
+        Ok(OpGraphPathContext {
+            conditionals: Arc::new(new_conditionals),
+        })
+    }
+
     pub(crate) fn is_empty(&self) -> bool {
         self.conditionals.is_empty()
     }
