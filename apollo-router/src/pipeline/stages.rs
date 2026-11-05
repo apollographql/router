@@ -35,6 +35,7 @@ use crate::plugins::circuit_breaker::CircuitBreaker;
 use crate::plugins::connectors::mcp_session;
 use crate::plugins::connectors::mcp_session::McpSessionLayer;
 use crate::plugins::connectors::request_limit::RequestLimitLayer;
+use crate::plugins::connectors::tracing::connect_mcp_instrument;
 use crate::plugins::connectors::tracing::connect_spec_version_instrument;
 use crate::plugins::connectors::tracing::connect_stream_mode_instrument;
 use crate::plugins::headers::Headers;
@@ -485,6 +486,7 @@ fn build_connector_services(
             schema.connectors.as_ref(),
         ),
         _connect_stream_mode_instrument: connect_stream_mode_instrument(schema.connectors.as_ref()),
+        _connect_mcp_instrument: connect_mcp_instrument(schema.connectors.as_ref()),
         services: Arc::new(services),
     }
 }

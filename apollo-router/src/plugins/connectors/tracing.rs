@@ -59,6 +59,43 @@ pub(crate) fn connect_stream_mode_instrument(
     )
 }
 
+/// Create a gauge instrument for the number of connectors that call an MCP tool with
+/// `@connect(mcp:)`, or `None` when none does
+///
+/// Like streaming, this is switched on by the schema, so it is a schema gauge.
+pub(crate) fn connect_mcp_instrument(
+    connectors: Option<&Connectors>,
+) -> Option<ObservableGauge<u64>> {
+    let count = connect_mcp_count(connectors?);
+    if count == 0 {
+        return None;
+    }
+    Some(
+        meter_provider()
+            .meter("apollo/router")
+            .u64_observable_gauge("apollo.router.schema.connectors.mcp")
+            .with_description(
+                "Number of connect directives that call an MCP tool in the supergraph",
+            )
+            .with_callback(move |observer| observer.observe(count, &[]))
+            .build(),
+    )
+}
+
+/// The number of connectors that call an MCP tool
+fn connect_mcp_count(connectors: &Connectors) -> u64 {
+    connectors
+        .by_service_name
+        .values()
+        .filter(|connector| {
+            connector
+                .transport
+                .as_ref()
+                .is_some_and(|transport| transport.mcp.is_some())
+        })
+        .count() as u64
+}
+
 /// Map from `http.stream` mode to the number of connectors with that mode
 fn connect_stream_mode_counts(connectors: &Connectors) -> HashMap<&'static str, u64> {
     connectors
@@ -93,10 +130,12 @@ mod tests {
     use apollo_federation::connectors::Connector;
     use apollo_federation::connectors::HttpJsonTransport;
     use apollo_federation::connectors::JSONSelection;
+    use apollo_federation::connectors::McpCall;
     use apollo_federation::connectors::StreamMode;
     use apollo_federation::connectors::expand::Connectors;
 
     use crate::metrics::FutureMetricsExt as _;
+    use crate::plugins::connectors::tracing::connect_mcp_count;
     use crate::plugins::connectors::tracing::connect_spec_counts;
     use crate::plugins::connectors::tracing::connect_stream_mode_counts;
     use crate::services::connector_service::ConnectorServices;
@@ -208,6 +247,60 @@ mod tests {
         );
     }
 
+    #[test]
+    fn test_connect_mcp_count() {
+        let connector = Connector {
+            spec: ConnectSpec::V0_5,
+            schema_subtypes_map: Default::default(),
+            id: ConnectId::new(
+                "subgraph_name".into(),
+                None,
+                name!(Query),
+                name!(users),
+                None,
+                0,
+            ),
+            transport: Some(HttpJsonTransport {
+                source_template: "http://localhost/".parse().ok(),
+                connect_template: "/path".parse().unwrap(),
+                ..Default::default()
+            }),
+            selection: JSONSelection::parse("$.data").unwrap(),
+            entity_resolver: None,
+            config: Default::default(),
+            max_requests: None,
+            batch_settings: None,
+            request_headers: Default::default(),
+            response_headers: Default::default(),
+            request_variable_keys: Default::default(),
+            response_variable_keys: Default::default(),
+            error_settings: Default::default(),
+            output_type: None,
+            label: "label".into(),
+        };
+        let mut calls_mcp = connector.clone();
+        if let Some(transport) = calls_mcp.transport.as_mut() {
+            transport.mcp = Some(McpCall {
+                tool: "weather".into(),
+            });
+        }
+
+        let connectors = Connectors {
+            by_service_name: Arc::new(
+                [
+                    ("service_name_1".into(), connector.clone()),
+                    ("service_name_2".into(), calls_mcp),
+                    ("service_name_3".into(), connector),
+                ]
+                .into(),
+            ),
+            labels_by_service_name: Default::default(),
+            source_config_keys: Default::default(),
+        };
+
+        assert_eq!(connect_mcp_count(&connectors), 1);
+    }
+
     const STEEL_THREAD_SCHEMA: &str = include_str!("./testdata/steelthread.graphql");
 
     #[tokio::test]
@@ -228,6 +321,44 @@ mod tests {
                 crate::metrics::test_utils::MetricType::Gauge,
                 &[opentelemetry::KeyValue::new("connect.stream.mode", "array")],
             ));
+        }
+        .with_metrics()
+        .await;
+    }
+
+    #[tokio::test]
+    async fn test_connect_mcp_instrument() {
+        async {
+            let config = Arc::default();
+            // Six connectors call an MCP tool: five on fields and one on a type
+            let schema = Schema::parse(include_str!("./testdata/mcp.graphql"), &config).unwrap();
+            let _services = ConnectorServices::empty(Arc::from(schema));
+
+            assert_gauge!("apollo.router.schema.connectors.mcp", 6);
+        }
+        .with_metrics()
+        .await;
+    }
+
+    #[tokio::test]
+    async fn test_connect_mcp_instrument_is_absent_without_mcp_connectors() {
+        async {
+            let config = Arc::default();
+            let schema = Schema::parse(include_str!("./testdata/stream.graphql"), &config).unwrap();
+            let _services = ConnectorServices::empty(Arc::from(schema));
+
+            // No connector in this schema calls an MCP tool
+            assert!(!crate::metrics::collect_metrics().metric_exists(
+                "apollo.router.schema.connectors.mcp",
+                crate::metrics::test_utils::MetricType::Gauge,
+                &[],
+            ));
+            // ...though it does have streaming connectors, so metrics are being collected
+            assert_gauge!(
+                "apollo.router.schema.connectors.stream",
+                6,
+                connect.stream.mode = "array"
+            );
         }
         .with_metrics()
         .await;
