@@ -256,10 +256,10 @@ pub(crate) struct LimitsPlugin {
 impl LimitsPlugin {
     /// The HTTP/2 header-list check for plugin endpoints, which don't go through
     /// [`PluginPrivate::router_service`].
-    pub(crate) fn endpoint_header_list_layer(
+    pub(crate) fn endpoint_header_list_limit_layer(
         &self,
-    ) -> http2_header_list::Http2HeaderListLimitLayer {
-        http2_header_list::Http2HeaderListLimitLayer::new(
+    ) -> http2_header_list::EndpointHeaderListLimitLayer {
+        http2_header_list::EndpointHeaderListLimitLayer::new(
             self.config.router.http2_header_list_limit(),
         )
     }
