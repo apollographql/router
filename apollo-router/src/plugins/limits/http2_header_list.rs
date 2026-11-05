@@ -3,9 +3,9 @@
 //! When h2 rejects an oversized header list itself, it either answers with a bare 431 or closes
 //! the connection, and the request never reaches the Router's telemetry. So the Router advertises
 //! a larger header-list size to h2 (see [`advertised_size`]) and rejects requests over the
-//! configured limit itself (see [`exceeds_limit`]), which records the 431 like any other response.
-//! Plugin endpoints, which don't go through the limits plugin, get the same check from
-//! [`EndpointHeaderListLimitLayer`].
+//! configured limit itself, which records the 431 like any other response. Graph requests get the
+//! check from [`RouterHeaderListLimitLayer`] in the router service stack; plugin endpoints, which
+//! don't go through that stack, get it from [`EndpointHeaderListLimitLayer`].
 //! The check applies only to HTTP/2: HTTP/1.1 keeps hyper's count and buffer limits.
 
 use std::future::Ready;
@@ -18,6 +18,9 @@ use http::StatusCode;
 use http::Version;
 use tower::Layer;
 use tower::Service;
+
+use super::layer::RequestSizeLimitError;
+use crate::services::router;
 
 /// How far above the configured limit h2 may accept a header list, at most.
 ///
@@ -36,8 +39,62 @@ pub(crate) fn advertised_size(limit: ByteSize) -> u32 {
 }
 
 /// Whether `request` is an HTTP/2 request whose header list is larger than `limit`.
-pub(crate) fn exceeds_limit<B>(request: &http::Request<B>, limit: ByteSize) -> bool {
+fn exceeds_limit<B>(request: &http::Request<B>, limit: ByteSize) -> bool {
     request.version() == Version::HTTP_2 && header_list_size(request) > limit.as_u64()
+}
+
+/// Answers an HTTP/2 graph request whose header list is over the limit with a 431 GraphQL error,
+/// in the same shape as the 413 and 414 size-limit errors.
+#[derive(Clone)]
+pub(crate) struct RouterHeaderListLimitLayer {
+    limit: ByteSize,
+}
+
+impl RouterHeaderListLimitLayer {
+    pub(crate) fn new(limit: ByteSize) -> Self {
+        Self { limit }
+    }
+}
+
+impl<S> Layer<S> for RouterHeaderListLimitLayer {
+    type Service = RouterHeaderListLimit<S>;
+
+    fn layer(&self, inner: S) -> Self::Service {
+        RouterHeaderListLimit {
+            inner,
+            limit: self.limit,
+        }
+    }
+}
+
+/// The service [`RouterHeaderListLimitLayer`] wraps around the router service.
+#[derive(Clone)]
+pub(crate) struct RouterHeaderListLimit<S> {
+    inner: S,
+    limit: ByteSize,
+}
+
+impl<S> Service<router::Request> for RouterHeaderListLimit<S>
+where
+    S: Service<router::Request, Response = router::Response>,
+{
+    type Response = router::Response;
+    type Error = S::Error;
+    type Future = Either<Ready<Result<router::Response, S::Error>>, S::Future>;
+
+    fn poll_ready(&mut self, cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
+        self.inner.poll_ready(cx)
+    }
+
+    fn call(&mut self, request: router::Request) -> Self::Future {
+        if exceeds_limit(&request.router_request, self.limit) {
+            let response =
+                RequestSizeLimitError::OversizedHeaderList.into_response(request.context);
+            Either::Left(std::future::ready(Ok(response)))
+        } else {
+            Either::Right(self.inner.call(request))
+        }
+    }
 }
 
 /// Answers an HTTP/2 request whose header list is over the limit with a bare 431, for plugin

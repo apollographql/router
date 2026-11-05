@@ -6,7 +6,6 @@ pub(crate) mod operation_limits_layer;
 pub(crate) mod response_size_limit;
 
 use std::error::Error;
-use std::ops::ControlFlow;
 
 use async_trait::async_trait;
 use bytesize::ByteSize;
@@ -254,8 +253,18 @@ pub(crate) struct LimitsPlugin {
 }
 
 impl LimitsPlugin {
-    /// The HTTP/2 header-list check for plugin endpoints, which don't go through
-    /// [`PluginPrivate::router_service`].
+    /// The HTTP/2 header-list check for graph requests, applied in the router service stack ahead
+    /// of every plugin's [`PluginPrivate::router_service`].
+    pub(crate) fn router_header_list_limit_layer(
+        &self,
+    ) -> http2_header_list::RouterHeaderListLimitLayer {
+        http2_header_list::RouterHeaderListLimitLayer::new(
+            self.config.router.http2_header_list_limit(),
+        )
+    }
+
+    /// The HTTP/2 header-list check for plugin endpoints, which don't go through the router
+    /// service stack.
     pub(crate) fn endpoint_header_list_limit_layer(
         &self,
     ) -> http2_header_list::EndpointHeaderListLimitLayer {
@@ -279,22 +288,7 @@ impl PluginPrivate for LimitsPlugin {
     }
 
     fn router_service(&self, service: router::BoxCloneService) -> router::BoxCloneService {
-        let http2_header_list_limit = self.config.router.http2_header_list_limit();
         ServiceBuilder::new()
-            // Runs ahead of the body limit and of the plugins after this one (CSRF, authentication,
-            // Rhai, coprocessors), so none of them reads or forwards an oversized header list.
-            .checkpoint_async(move |request: router::Request| async move {
-                if http2_header_list::exceeds_limit(
-                    &request.router_request,
-                    http2_header_list_limit,
-                ) {
-                    Ok(ControlFlow::Break(
-                        RequestSizeLimitError::OversizedHeaderList.into_response(request.context),
-                    ))
-                } else {
-                    Ok(ControlFlow::Continue(request))
-                }
-            })
             .map_future_with_request_data(
                 |r: &router::Request| r.context.clone(),
                 |ctx, f| async { Self::map_error_to_graphql(f.await, ctx) },
@@ -448,7 +442,6 @@ mod test {
 
     use crate::Context;
     use crate::metrics::FutureMetricsExt;
-    use crate::plugin::PluginInit;
     use crate::plugin::PluginPrivate;
     use crate::plugins::limits::LimitsPlugin;
     use crate::plugins::limits::layer::BodyLimitControl;
@@ -532,12 +525,18 @@ mod test {
             .into()
     }
 
+    /// A router service that fails the test if a request reaches it.
+    fn unreachable_router_service() -> router::BoxCloneService {
+        service_fn(|_| async { panic!("the request should have been rejected") }).boxed_clone()
+    }
+
     #[tokio::test]
     async fn test_http2_header_list_limit_exceeded() {
         let plugin = plugin().await;
-        let resp = plugin
-            .router_service(|_| async { panic!("the request should have been rejected") })
-            .call(oversized_header_list_request(http::Version::HTTP_2))
+        let resp = ServiceBuilder::new()
+            .layer(plugin.router_header_list_limit_layer())
+            .service(unreachable_router_service())
+            .oneshot(oversized_header_list_request(http::Version::HTTP_2))
             .await;
         assert_rejected(
             resp,
@@ -550,30 +549,14 @@ mod test {
     #[tokio::test]
     async fn test_http2_header_list_limit_ignores_http1() {
         let plugin = plugin().await;
-        let resp = plugin
-            .router_service(|_| async { Ok(router::Response::fake_builder().build().unwrap()) })
-            .call(oversized_header_list_request(http::Version::HTTP_11))
+        let resp = ServiceBuilder::new()
+            .layer(plugin.router_header_list_limit_layer())
+            .service_fn(|_: router::Request| async {
+                Ok::<_, BoxError>(router::Response::fake_builder().build().unwrap())
+            })
+            .oneshot(oversized_header_list_request(http::Version::HTTP_11))
             .await;
         assert_ok(resp).await;
-    }
-
-    /// Creates the `apollo.<name>` plugin as the Router would, from its config section.
-    async fn create_plugin(
-        name: &str,
-        config: serde_json::Value,
-    ) -> Box<dyn crate::plugin::DynPlugin> {
-        let init = PluginInit::fake_builder()
-            .config(config.clone())
-            .full_config(serde_json::json!({ name: config }))
-            .build()
-            .with_deserialized_config()
-            .unwrap();
-        crate::plugin::plugins()
-            .find(|factory| factory.name == format!("apollo.{name}"))
-            .unwrap()
-            .create_instance(init)
-            .await
-            .unwrap()
     }
 
     #[tokio::test(flavor = "multi_thread")]
@@ -592,16 +575,15 @@ mod test {
                 .build()
                 .await
                 .expect("test harness");
-            let limits = create_plugin("limits", serde_json::json!({})).await;
-            // Telemetry wraps the plugin stack, as it does in the router pipeline.
+            let limits: PluginTestHarness<LimitsPlugin> = PluginTestHarness::builder()
+                .build()
+                .await
+                .expect("test harness");
+            // Telemetry wraps the header-list check, as it does in the router pipeline.
             let service = ServiceBuilder::new()
                 .layer(telemetry.instrument_router_layer())
-                .service(
-                    limits.router_service(
-                        service_fn(|_| async { panic!("the request should have been rejected") })
-                            .boxed_clone(),
-                    ),
-                );
+                .layer(limits.router_header_list_limit_layer())
+                .service(unreachable_router_service());
 
             let resp = service
                 .oneshot(oversized_header_list_request(http::Version::HTTP_2))
