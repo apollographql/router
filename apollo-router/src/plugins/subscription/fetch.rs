@@ -173,7 +173,6 @@ fn subscription_with_subgraph_service(
         .context(context)
         .subgraph_name(service_name.to_string())
         .subscription_stream(tx_handle)
-        .and_connection_closed_signal(Some(subscription_handle.closed_signal.resubscribe()))
         .build();
 
     let mut subscription_handle = subscription_handle.clone();
