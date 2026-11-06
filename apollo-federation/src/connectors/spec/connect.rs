@@ -35,6 +35,7 @@ pub(crate) const CONNECT_BATCH_NAME_IN_SPEC: Name = name!("ConnectBatch");
 pub(crate) const CONNECT_BODY_ARGUMENT_NAME: Name = name!("body");
 pub(crate) const BATCH_ARGUMENT_NAME: Name = name!("batch");
 pub(crate) const IS_SUCCESS_ARGUMENT_NAME: Name = name!("isSuccess");
+pub(crate) const REQUIRES_ARGUMENT_NAME: Name = name!("requires");
 pub(super) const DEFAULT_CONNECT_SPEC: ConnectSpec = ConnectSpec::V0_4;
 
 pub(crate) fn extract_connect_directive_arguments(
@@ -174,6 +175,13 @@ pub(crate) struct ConnectDirectiveArguments {
     /// Uses the JSONSelection to define a success criteria. This JSON Selection
     /// _must_ resolve to a boolean value.
     pub(crate) is_success: Option<JSONSelection>,
+
+    /// Paths that must all resolve to a non-null value for this connector to
+    /// be invoked. Each entry is a JSONSelection path over `$this`/`$args`/
+    /// `$config`/`$context`. If any path is null or missing, the connector is
+    /// not invoked and the field resolves to `null` (or `[]` for a list
+    /// field) without an error.
+    pub(crate) requires: Vec<JSONSelection>,
 }
 
 impl ConnectDirectiveArguments {
@@ -194,6 +202,7 @@ impl ConnectDirectiveArguments {
         let mut batch = None;
         let mut errors = None;
         let mut is_success = None;
+        let mut requires = Vec::new();
         for arg in args {
             let arg_name = arg.name.as_str();
 
@@ -267,6 +276,25 @@ impl ConnectDirectiveArguments {
                     JSONSelection::parse_with_spec(selection_value, connect_spec)
                         .map_err(|e| FederationError::internal(e.message))?,
                 );
+            } else if arg_name == REQUIRES_ARGUMENT_NAME.as_str() {
+                let list = arg.value.as_list().ok_or_else(|| {
+                    FederationError::internal(format!(
+                        "`requires` field in `@{directive_name}` directive is not a list"
+                    ))
+                })?;
+
+                requires = list
+                    .iter()
+                    .map(|value| {
+                        let selection_value = value.as_str().ok_or_else(|| {
+                            FederationError::internal(format!(
+                                "`requires` field in `@{directive_name}` directive must be a list of strings"
+                            ))
+                        })?;
+                        JSONSelection::parse_with_spec(selection_value, connect_spec)
+                            .map_err(|e| FederationError::internal(e.message))
+                    })
+                    .collect::<Result<Vec<_>, _>>()?;
             }
         }
 
@@ -284,6 +312,7 @@ impl ConnectDirectiveArguments {
             batch,
             errors,
             is_success,
+            requires,
         })
     }
 }
@@ -480,7 +509,7 @@ mod tests {
 
         insta::assert_snapshot!(
             actual_definition.to_string(),
-            @"directive @connect(source: String, id: String, http: connect__ConnectHTTP, batch: connect__ConnectBatch, errors: connect__ConnectorErrors, selection: connect__JSONSelection!, entity: Boolean = false, isSuccess: connect__JSONSelection) repeatable on FIELD_DEFINITION | OBJECT"
+            @"directive @connect(source: String, id: String, http: connect__ConnectHTTP, batch: connect__ConnectBatch, errors: connect__ConnectorErrors, selection: connect__JSONSelection!, entity: Boolean = false, isSuccess: connect__JSONSelection, requires: [connect__JSONSelection!]) repeatable on FIELD_DEFINITION | OBJECT"
         );
 
         let fields = schema
@@ -623,6 +652,7 @@ mod tests {
                 batch: None,
                 errors: None,
                 is_success: None,
+                requires: [],
             },
             ConnectDirectiveArguments {
                 position: Field(
@@ -766,6 +796,7 @@ mod tests {
                 batch: None,
                 errors: None,
                 is_success: None,
+                requires: [],
             },
         ]
         "#

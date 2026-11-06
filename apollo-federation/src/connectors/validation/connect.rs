@@ -12,6 +12,7 @@ use apollo_compiler::schema::ExtendedType;
 use hashbrown::HashSet;
 use itertools::Itertools;
 use multi_try::MultiTry;
+use shape::Shape;
 
 use self::entity::validate_entity_arg;
 use self::selection::Selection;
@@ -28,10 +29,15 @@ use crate::connectors::id::ObjectCategory;
 use crate::connectors::schema_type_ref::SchemaTypeRef;
 use crate::connectors::spec::connect::CONNECT_ID_ARGUMENT_NAME;
 use crate::connectors::spec::connect::CONNECT_SOURCE_ARGUMENT_NAME;
+use crate::connectors::spec::connect::REQUIRES_ARGUMENT_NAME;
 use crate::connectors::spec::http::HTTP_ARGUMENT_NAME;
 use crate::connectors::spec::source::SOURCE_NAME_ARGUMENT_NAME;
 use crate::connectors::validation::connect::http::Http;
 use crate::connectors::validation::errors::Errors;
+use crate::connectors::validation::expression;
+use crate::connectors::validation::expression::Context;
+use crate::connectors::validation::expression::MappingArgument;
+use crate::connectors::validation::expression::parse_mapping_argument;
 use crate::connectors::validation::graphql::SchemaInfo;
 
 mod entity;
@@ -134,6 +140,8 @@ struct Connect<'schema> {
     http: Option<Http<'schema>>,
     errors: Errors<'schema>,
     is_success: Option<IsSuccessArgument<'schema>>,
+    /// CNN-474 proof of concept.
+    requires: Vec<RequiresEntry<'schema>>,
     coordinate: ConnectDirectiveCoordinate<'schema>,
     schema: &'schema SchemaInfo<'schema>,
     id: Option<&'schema Node<Value>>,
@@ -285,7 +293,7 @@ impl<'schema> Connect<'schema> {
             }]);
         }
 
-        let (selection, http, errors, is_success) = Selection::parse(coordinate, schema)
+        let (selection, http, errors, is_success, requires) = Selection::parse(coordinate, schema)
             .map_err(|err| vec![err])
             .and_try(if mapping_only {
                 // For mapping-only connectors, skip Http::parse entirely
@@ -306,6 +314,7 @@ impl<'schema> Connect<'schema> {
             .and_try(
                 IsSuccessArgument::parse_for_connector(coordinate, schema).map_err(|err| vec![err]),
             )
+            .and_try(RequiresEntry::parse_all(coordinate, schema))
             .map_err(|nested| nested.into_iter().flatten().collect_vec())?;
 
         let id = coordinate
@@ -320,6 +329,7 @@ impl<'schema> Connect<'schema> {
             http,
             errors,
             is_success,
+            requires,
             coordinate,
             schema,
             id,
@@ -378,6 +388,10 @@ impl<'schema> Connect<'schema> {
 
         if let Some(is_success_argument) = self.is_success {
             messages.extend(is_success_argument.type_check(self.schema).err());
+        }
+
+        for requires_entry in self.requires {
+            messages.extend(requires_entry.type_check(self.schema).err());
         }
 
         let mut seen: Vec<ResolvedField> = match self.selection.type_check(self.schema) {
@@ -488,5 +502,109 @@ impl fmt::Display for ConnectSourceCoordinate<'_> {
             element = self.connect.element,
             source = self.source,
         )
+    }
+}
+
+// --- @connect(requires:) -----------------------------------------------------
+// CNN-474 proof of concept.
+
+#[derive(Clone, Copy)]
+struct RequiresCoordinate<'schema> {
+    connect: ConnectDirectiveCoordinate<'schema>,
+    index: usize,
+}
+
+impl fmt::Display for RequiresCoordinate<'_> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(
+            f,
+            "`@{connect_directive_name}({REQUIRES_ARGUMENT_NAME}:)[{index}]` on `{element}`",
+            connect_directive_name = self.connect.directive.name,
+            index = self.index,
+            element = self.connect.element,
+        )
+    }
+}
+
+/// A single entry of `@connect(requires: [...])`, parsed but not yet type-checked.
+struct RequiresEntry<'schema> {
+    mapping: MappingArgument,
+    coordinate: RequiresCoordinate<'schema>,
+}
+
+impl<'schema> RequiresEntry<'schema> {
+    /// Parse every entry of `@connect(requires:)`, if present. An absent `requires`
+    /// argument parses as an empty list, not an error.
+    fn parse_all(
+        coordinate: ConnectDirectiveCoordinate<'schema>,
+        schema: &'schema SchemaInfo,
+    ) -> Result<Vec<Self>, Vec<Message>> {
+        let Some(value) = coordinate
+            .directive
+            .specified_argument_by_name(&REQUIRES_ARGUMENT_NAME)
+        else {
+            return Ok(Vec::new());
+        };
+
+        let Some(list) = value.as_list() else {
+            return Err(vec![Message {
+                code: Code::InvalidRequires,
+                message: format!(
+                    "`@{connect_directive_name}({REQUIRES_ARGUMENT_NAME}:)` on `{element}` must be a list of strings",
+                    connect_directive_name = coordinate.directive.name,
+                    element = coordinate.element,
+                ),
+                locations: value
+                    .line_column_range(&schema.sources)
+                    .into_iter()
+                    .collect(),
+            }]);
+        };
+
+        let (entries, messages): (Vec<Self>, Vec<Message>) = list
+            .iter()
+            .enumerate()
+            .map(|(index, node)| {
+                let requires_coordinate = RequiresCoordinate {
+                    connect: coordinate,
+                    index,
+                };
+                parse_mapping_argument(node, requires_coordinate, Code::InvalidRequires, schema)
+                    .map(|mapping| Self {
+                        mapping,
+                        coordinate: requires_coordinate,
+                    })
+            })
+            .partition_result();
+
+        if messages.is_empty() {
+            Ok(entries)
+        } else {
+            Err(messages)
+        }
+    }
+
+    /// Check that only available variables are used. Unlike `isSuccess`, there's no
+    /// expected output shape to check against: any resolvable value counts, and
+    /// nullness is checked at runtime, not at compose time.
+    fn type_check(self, schema: &SchemaInfo) -> Result<(), Message> {
+        expression::validate(
+            &self.mapping.expression,
+            &Context::for_connect_request(
+                schema,
+                self.coordinate.connect,
+                &self.mapping.node,
+                Code::InvalidRequires,
+            ),
+            &Shape::unknown([]),
+        )
+        .map_err(|mut message| {
+            message.message = format!(
+                "In {coordinate}: {message}",
+                coordinate = self.coordinate,
+                message = message.message
+            );
+            message
+        })
     }
 }
