@@ -13,7 +13,7 @@ expression: query_plan
   "inputRewrites": null,
   "outputRewrites": null,
   "contextRewrites": null,
-  "schemaAwareHash": "247714c94d3ad9dd88583ad043a8f426cfd40005234d502f3ef7534385f467b4",
+  "schemaAwareHash": "16494eb0e4107c33221a63143f7f571f4e6128ef57b6d3c30317febf309ed841",
   "authorization": {
     "is_authenticated": false,
     "scopes": [],
