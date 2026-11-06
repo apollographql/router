@@ -43,9 +43,11 @@ use crate::configuration::Batching;
 use crate::graphql;
 use crate::layers::DEFAULT_BUFFER_SIZE;
 use crate::layers::ServiceBuilderExt;
+use crate::layers::find_plugin;
 use crate::layers::unconstrained_buffer::UnconstrainedBuffer;
 #[cfg(test)]
 use crate::plugin::test::MockSupergraphService;
+use crate::plugins::limits::LimitsPlugin;
 use crate::plugins::telemetry::config_new::attributes::HTTP_REQUEST_BODY;
 use crate::plugins::telemetry::config_new::attributes::HTTP_REQUEST_HEADERS;
 use crate::plugins::telemetry::config_new::attributes::HTTP_REQUEST_URI;
@@ -65,6 +67,7 @@ use crate::services::MULTIPART_DEFER_ACCEPT;
 use crate::services::MULTIPART_DEFER_CONTENT_TYPE;
 use crate::services::MULTIPART_SUBSCRIPTION_ACCEPT;
 use crate::services::MULTIPART_SUBSCRIPTION_CONTENT_TYPE;
+use crate::services::Plugins;
 use crate::services::RouterRequest;
 use crate::services::RouterResponse;
 use crate::services::SupergraphCreator;
@@ -702,6 +705,10 @@ impl RouterFactory for RouterCreator {
     fn pipeline_ref(&self) -> Arc<PipelineRef> {
         self.pipeline_handle.pipeline_ref.clone()
     }
+
+    fn plugins(&self) -> Arc<Plugins> {
+        self.supergraph_creator.plugins()
+    }
 }
 
 impl RouterCreator {
@@ -748,17 +755,31 @@ impl RouterCreator {
             configuration.batching.clone(),
         ));
 
+        let plugins = supergraph_creator.plugins();
+        let header_list_limit = find_plugin::<LimitsPlugin>(&plugins)
+            .expect("the limits plugin is always loaded")
+            .router_header_list_limit_layer();
+        // The HTTP/2 header-list check goes just inside telemetry, so telemetry records its 431,
+        // and before every other plugin, traffic shaping included, so none of them sees a header
+        // list over the limit. Without telemetry, it goes outermost.
+        let mut plugin_stack = router_service.boxed();
+        let mut header_list_limit_applied = false;
+        for (name, plugin) in plugins.iter().rev() {
+            if name == "apollo.telemetry" {
+                plugin_stack = header_list_limit.layer(plugin_stack).boxed();
+                header_list_limit_applied = true;
+            }
+            plugin_stack = plugin.router_service(plugin_stack);
+        }
+        if !header_list_limit_applied {
+            plugin_stack = header_list_limit.layer(plugin_stack).boxed();
+        }
+
         // NOTE: This is the start of the router pipeline (router_service)
         let sb = UnconstrainedBuffer::new(
             ServiceBuilder::new()
                 .layer(static_page.clone())
-                .service(
-                    supergraph_creator
-                        .plugins()
-                        .iter()
-                        .rev()
-                        .fold(router_service.boxed(), |acc, (_, e)| e.router_service(acc)),
-                )
+                .service(plugin_stack)
                 .boxed(),
             DEFAULT_BUFFER_SIZE,
         );
