@@ -19,7 +19,6 @@ use serde_json_bytes::Value;
 use sha2::Digest;
 use sha2::Sha256;
 use static_assertions::assert_impl_all;
-use tokio::sync::broadcast;
 use tokio::sync::mpsc;
 use tokio_stream::Stream;
 use tower::BoxError;
@@ -69,8 +68,6 @@ pub struct Request {
     pub(crate) subgraph_name: String,
     /// Channel to send the subscription stream to listen on events coming from subgraph in a task
     pub(crate) subscription_stream: Option<mpsc::Sender<BoxGqlStream>>,
-    /// Channel triggered when the client connection has been dropped
-    pub(crate) connection_closed_signal: Option<broadcast::Receiver<()>>,
 
     pub(crate) query_hash: Arc<QueryHash>,
 
@@ -102,7 +99,6 @@ impl Request {
         context: Context,
         subscription_stream: Option<mpsc::Sender<BoxGqlStream>>,
         subgraph_name: String,
-        connection_closed_signal: Option<broadcast::Receiver<()>>,
         executable_document: Option<Arc<Valid<apollo_compiler::ExecutableDocument>>>,
     ) -> Request {
         Self {
@@ -112,7 +108,6 @@ impl Request {
             context,
             subgraph_name,
             subscription_stream,
-            connection_closed_signal,
             // It's NOT GREAT! to have an empty hash value here.
             // This value is populated based on the subgraph query hash in the query planner code.
             // At the time of writing it's in `crate::query_planner::fetch::FetchNode::fetch_node`.
@@ -137,7 +132,6 @@ impl Request {
         context: Option<Context>,
         subscription_stream: Option<mpsc::Sender<BoxGqlStream>>,
         subgraph_name: Option<String>,
-        connection_closed_signal: Option<broadcast::Receiver<()>>,
     ) -> Request {
         Request::new(
             supergraph_request.unwrap_or_default(),
@@ -146,7 +140,6 @@ impl Request {
             context.unwrap_or_default(),
             subscription_stream,
             subgraph_name.unwrap_or_default(),
-            connection_closed_signal,
             None,
         )
     }
@@ -221,10 +214,6 @@ impl Clone for Request {
             context: self.context.clone(),
             subgraph_name: self.subgraph_name.clone(),
             subscription_stream: self.subscription_stream.clone(),
-            connection_closed_signal: self
-                .connection_closed_signal
-                .as_ref()
-                .map(|s| s.resubscribe()),
             query_hash: self.query_hash.clone(),
             authorization: self.authorization.clone(),
             executable_document: self.executable_document.clone(),
