@@ -152,6 +152,9 @@ fn root_fields(
         .get(None)
         .map_err(|_| InvalidOperation("no operation document".into()))?;
 
+    let variables = graphql_utils::variables_with_defaults(op, &variables.variables)
+        .map_err(|err| InvalidArguments(format!("cannot get operation variables: {err}")))?;
+
     op.selection_set
         .selections
         .iter()
@@ -163,8 +166,8 @@ fn root_fields(
                     .unwrap_or_else(|| &field.name)
                     .to_string();
 
-                let args = graphql_utils::field_arguments_map(field, &variables.variables)
-                    .map_err(|err| {
+                let args =
+                    graphql_utils::field_arguments_map(field, &variables).map_err(|err| {
                         InvalidArguments(format!("cannot get inputs from field arguments: {err}"))
                     })?;
 
@@ -315,6 +318,10 @@ fn entities_with_fields_from_request(
 
     let (entities_field, typename_requested) = graphql_utils::get_entity_fields(operation, op)?;
 
+    let operation_variables = graphql_utils::variables_with_defaults(op, &variables.variables)
+        .map_err(|err| InvalidArguments(format!("cannot get operation variables: {err}")))?;
+    let operation_variables = &operation_variables;
+
     let types_and_fields = entities_field
         .selection_set
         .selections
@@ -411,10 +418,11 @@ fn entities_with_fields_from_request(
             ));
 
             representations.iter().map(move |(i, representation)| {
-                let args = graphql_utils::field_arguments_map(field, &variables.variables)
-                    .map_err(|err| {
+                let args = graphql_utils::field_arguments_map(field, operation_variables).map_err(
+                    |err| {
                         InvalidArguments(format!("cannot get inputs from field arguments: {err}"))
-                    })?;
+                    },
+                )?;
 
                 let response_name = field
                     .alias
@@ -711,6 +719,102 @@ mod tests {
                     selection: "$",
                     inputs: RequestInputs {
                         args: {"var":"variable"},
+                        this: {},
+                        batch: []
+                    },
+                },
+            ],
+        )
+        "###);
+    }
+
+    #[test]
+    fn test_root_fields_variable_defaults() {
+        let schema = Arc::new(
+            Schema::parse_and_validate("type Query {b(var: String, n: Int = 5): String}", "./")
+                .unwrap(),
+        );
+
+        // The router forwards only the variables the client sent, so
+        // operation defaults and field defaults have to be applied here.
+        let operation = Arc::new(
+            ExecutableDocument::parse_and_validate(
+                &schema,
+                r#"query(
+                    $withDefault: String = "op-default"
+                    $noDefault: String
+                    $nWithDefault: Int = 2
+                    $nNoDefault: Int
+                    $sentNull: String = "unused"
+                ) {
+                    opDefaults: b(var: $withDefault, n: $nWithDefault)
+                    fieldDefault: b(var: $noDefault, n: $nNoDefault)
+                    explicitNull: b(var: $sentNull)
+                }"#
+                .to_string(),
+                "./",
+            )
+            .unwrap(),
+        );
+
+        let variables = create_test_variables(serde_json_bytes::json!({ "sentNull": null }));
+
+        let connector = Connector {
+            spec: ConnectSpec::V0_1,
+            schema_subtypes_map: Connector::subtypes_map_from_schema(&schema),
+            id: ConnectId::new(
+                "subgraph_name".into(),
+                None,
+                name!(Query),
+                name!(b),
+                None,
+                0,
+            ),
+            transport: Some(HttpJsonTransport {
+                source_template: "http://localhost/api".parse().ok(),
+                connect_template: "/path".parse().unwrap(),
+                ..Default::default()
+            }),
+            selection: JSONSelection::parse("$").unwrap(),
+            entity_resolver: None,
+            config: Default::default(),
+            max_requests: None,
+            batch_settings: None,
+            request_headers: Default::default(),
+            response_headers: Default::default(),
+            request_variable_keys: Default::default(),
+            response_variable_keys: Default::default(),
+            error_settings: Default::default(),
+            output_type: None,
+            label: "test label".into(),
+        };
+
+        assert_debug_snapshot!(super::root_fields(Arc::new(connector), &operation, &variables), @r###"
+        Ok(
+            [
+                RootField {
+                    name: "opDefaults",
+                    selection: "$",
+                    inputs: RequestInputs {
+                        args: {"var":"op-default","n":2},
+                        this: {},
+                        batch: []
+                    },
+                },
+                RootField {
+                    name: "fieldDefault",
+                    selection: "$",
+                    inputs: RequestInputs {
+                        args: {"n":5},
+                        this: {},
+                        batch: []
+                    },
+                },
+                RootField {
+                    name: "explicitNull",
+                    selection: "$",
+                    inputs: RequestInputs {
+                        args: {"var":null,"n":5},
                         this: {},
                         batch: []
                     },
@@ -1288,6 +1392,108 @@ mod tests {
                 inputs: RequestInputs {
                     args: {"foo":"bye"},
                     this: {"__typename":"Entity","id":"2"},
+                    batch: []
+                },
+            },
+        ]
+        "###);
+    }
+
+    #[test]
+    fn entities_with_fields_from_request_variable_defaults() {
+        let partial_sdl = r#"
+        type Query { _: String } # just to make it valid
+
+        type Entity { # @key(fields: "id")
+          id: ID!
+          field(foo: String, n: Int = 5): T
+        }
+
+        type T {
+          selected: String
+        }
+        "#;
+
+        let subgraph_schema = Arc::new(
+            Schema::parse_and_validate(
+                format!(
+                    r#"{partial_sdl}
+        extend type Query {{
+          _entities(representations: [_Any!]!): _Entity
+        }}
+        scalar _Any
+        union _Entity = Entity
+        "#
+                ),
+                "./",
+            )
+            .unwrap(),
+        );
+
+        let operation = ExecutableDocument::parse_and_validate(
+            &subgraph_schema,
+            r#"
+                query($representations: [_Any!]!, $foo: String = "op-default", $n: Int) {
+                    _entities(representations: $representations) {
+                        __typename
+                        ... on Entity {
+                            field(foo: $foo, n: $n) { selected }
+                        }
+                    }
+                }
+            "#
+            .to_string(),
+            "./",
+        )
+        .unwrap();
+        let variables = create_test_variables(serde_json_bytes::json!({
+            "representations": [
+                { "__typename": "Entity", "id": "1" },
+            ],
+        }));
+
+        let connector = Connector {
+            spec: ConnectSpec::V0_1,
+            schema_subtypes_map: Connector::subtypes_map_from_schema(&subgraph_schema),
+            id: ConnectId::new(
+                "subgraph_name".into(),
+                None,
+                name!(Entity),
+                name!(field),
+                None,
+                0,
+            ),
+            transport: Some(HttpJsonTransport {
+                source_template: "http://localhost/api".parse().ok(),
+                connect_template: "/path".parse().unwrap(),
+                ..Default::default()
+            }),
+            selection: JSONSelection::parse("selected").unwrap(),
+            entity_resolver: None,
+            config: Default::default(),
+            max_requests: None,
+            batch_settings: None,
+            request_headers: Default::default(),
+            response_headers: Default::default(),
+            request_variable_keys: Default::default(),
+            response_variable_keys: Default::default(),
+            error_settings: Default::default(),
+            output_type: None,
+            label: "test label".into(),
+        };
+
+        assert_debug_snapshot!(super::entities_with_fields_from_request(Arc::new(connector), &operation, &variables).unwrap(), @r###"
+        [
+            EntityField {
+                index: 0,
+                field_name: "field",
+                typename: Some(
+                    "Entity",
+                ),
+                selection: "selected",
+                inputs: RequestInputs {
+                    args: {"foo":"op-default","n":5},
+                    this: {"__typename":"Entity","id":"1"},
                     batch: []
                 },
             },
