@@ -1,0 +1,1030 @@
+//! What an entity fetch sends, and what it must find to send it.
+//!
+//! Port of the representation, `keysInclude`, overwritten-key and input-rewrite sections of
+//! `Apollo/Definitions/QueryPlanSoundness.lean`.
+//!
+//! What the fetch can read and what the subgraph demands are the authorities, linked by the input
+//! rewrites; a `requires` entry only filters them ([`selected_by_one_pass`]). An object's
+//! representation is every entry whose type condition admits it, deep-merged, so the entries are
+//! checked together, one entity case at a time.
+//!
+//! - What an entry must already have fetched of a demand is the demand narrowed by the entry's
+//!   conditions, taken back through the input rewrites that can rename what the entry reads, and
+//!   selected by what the entry reads ([`required_selections`]).
+//! - What an entry sends of a demand is the demand narrowed by its conditions and selected by what
+//!   it sends ([`sent_selections`]). The router renames what the entry read instead, which comes to
+//!   the same where the rewrites are well formed, idempotent on the demand, and agree with the
+//!   entry (the model's `RequiredSelectionsRenameToSent`).
+//!
+//! Below a field an entry copies whole, which agreement cannot reach, the input rewrites are held
+//! to three structural checks: [`input_rewrites_well_formed`], [`input_rewrites_separated`] and
+//! [`input_rewrites_idempotent`].
+
+use std::sync::Arc;
+
+use apollo_compiler::Name;
+use apollo_compiler::Node;
+use apollo_compiler::collections::IndexMap;
+use apollo_compiler::collections::IndexSet;
+use apollo_compiler::executable::Selection;
+use apollo_compiler::schema::ExtendedType;
+
+use super::super::query_compare::conditions::BooleanCondition;
+use super::super::query_compare::conditions::BooleanLiteral;
+use super::super::query_compare::conditions::boolean_condition_covered_by;
+use super::super::query_compare::conditions::canonical_boolean_condition;
+use super::super::query_compare::conditions::literals_for_directives;
+use super::requires::same_keys;
+use super::returned::ReturnedTypes;
+use super::selections::apply_key_renamers;
+use super::selections::condition_directives;
+use super::selections::inline_fragment_under;
+use super::selections::invert_key_renamers;
+use super::selections::possible_types;
+use super::selections::selection_set;
+use super::selections::type_filter_covers;
+use super::selections::type_filter_meets;
+use super::selections::wrap_non_empty;
+use crate::query_plan::FetchDataPathElement;
+use crate::query_plan::FetchDataRewrite;
+use crate::query_plan::FetchNode;
+use crate::query_plan::requires_selection;
+use crate::schema::ValidFederationSchema;
+
+//==================================================================================================
+// An entry's conditions
+//==================================================================================================
+
+/// The fragments under which a `requires` selection writes a top-level key, one chain per way,
+/// outermost first. A fragment holding a field directly writes wherever it is entered, so a chain
+/// stops there; one holding only fragments continues into each.
+pub(super) fn key_guards(
+    selection: &requires_selection::Selection,
+) -> Vec<Vec<&requires_selection::InlineFragment>> {
+    match selection {
+        requires_selection::Selection::Field(_) => vec![Vec::new()],
+        requires_selection::Selection::InlineFragment(fragment) => {
+            set_key_guards(&fragment.selections)
+                .into_iter()
+                .map(|mut chain| {
+                    chain.insert(0, fragment);
+                    chain
+                })
+                .collect()
+        }
+    }
+}
+
+fn set_key_guards(
+    selections: &[requires_selection::Selection],
+) -> Vec<Vec<&requires_selection::InlineFragment>> {
+    let mut out = Vec::new();
+    for selection in selections {
+        let here = key_guards(selection);
+        if here.iter().any(Vec::is_empty) {
+            return vec![Vec::new()];
+        }
+        out.extend(here);
+    }
+    out
+}
+
+/// `selections` wherever a `requires` entry writes a key: under each of its key guards. An entry
+/// writing none sends no representation, which `Variables::new` drops, so nothing is owed or
+/// fetched there.
+pub(super) fn narrowed_by_entry_condition(
+    entry: &requires_selection::Selection,
+    parent_type: &Name,
+    selections: Vec<Selection>,
+) -> Vec<Selection> {
+    let mut out = Vec::new();
+    for chain in key_guards(entry) {
+        let mut wrapped = selections.clone();
+        for fragment in chain.iter().rev() {
+            wrapped = wrap_non_empty(
+                |selections| {
+                    inline_fragment_under(
+                        fragment.type_condition.as_ref(),
+                        parent_type,
+                        &condition_directives(&fragment.conditions),
+                        selections,
+                    )
+                },
+                wrapped,
+            );
+        }
+        out.extend(wrapped);
+    }
+    out
+}
+
+/// Whether an entry writes its keys under its own outermost fragment alone: one chain, that
+/// fragment, carrying no conditions. What it credits is then that fragment around the selections.
+pub(super) fn writes_under_its_own_type(entry: &requires_selection::Selection) -> bool {
+    match (entry, key_guards(entry).as_slice()) {
+        (requires_selection::Selection::InlineFragment(fragment), [chain]) => {
+            matches!(chain.as_slice(), [only] if std::ptr::eq(*only, fragment))
+                && fragment.conditions.is_empty()
+        }
+        _ => false,
+    }
+}
+
+/// `selections` wherever one of `entries` writes a key ([`narrowed_by_entry_condition`]).
+pub(super) fn narrowed_by_entry_conditions(
+    entries: &[&requires_selection::Selection],
+    parent_type: &Name,
+    selections: &[Selection],
+) -> Vec<Selection> {
+    entries
+        .iter()
+        .flat_map(|entry| narrowed_by_entry_condition(entry, parent_type, selections.to_vec()))
+        .collect()
+}
+
+/// Every complete assignment of the variables `entries`' conditions read, as the literals that
+/// fix it. What the router sends, and so the key the subgraph resolves it by, changes only with
+/// these.
+pub(super) fn entry_configurations(
+    entries: &[&requires_selection::Selection],
+) -> Vec<BooleanCondition> {
+    fn collect(selection: &requires_selection::Selection, out: &mut Vec<Name>) {
+        match selection {
+            requires_selection::Selection::Field(field) => {
+                field.selections.iter().for_each(|s| collect(s, out))
+            }
+            requires_selection::Selection::InlineFragment(fragment) => {
+                for condition in &fragment.conditions {
+                    if let requires_selection::ConditionValue::Variable(name) = &condition.if_
+                        && !out.contains(name)
+                    {
+                        out.push(name.clone());
+                    }
+                }
+                fragment.selections.iter().for_each(|s| collect(s, out))
+            }
+        }
+    }
+    let mut variables = Vec::new();
+    entries
+        .iter()
+        .for_each(|entry| collect(entry, &mut variables));
+    let mut configurations: Vec<BooleanCondition> = vec![Vec::new()];
+    for variable in variables.iter().rev() {
+        configurations = configurations
+            .into_iter()
+            .flat_map(|configuration| {
+                [true, false].map(|positive| {
+                    let literal = if positive {
+                        BooleanLiteral::Positive(variable.clone())
+                    } else {
+                        BooleanLiteral::Negative(variable.clone())
+                    };
+                    let mut extended = vec![literal];
+                    extended.extend(configuration.iter().cloned());
+                    extended
+                })
+            })
+            .collect();
+    }
+    configurations
+}
+
+//==================================================================================================
+// Selecting by an entry
+//==================================================================================================
+
+/// `source` filtered by a run of an entry's fields, in one pass: each source field one of `fields`
+/// selects, below it `source` whole if one selects it bare and filtered by what the others select,
+/// and each source fragment kept once around them. The model's `SelectionSet.keptBy`.
+fn kept_by(fields: &[&apollo_compiler::executable::Field], source: &[Selection]) -> Vec<Selection> {
+    let mut out = Vec::new();
+    for selection in source {
+        match selection {
+            Selection::Field(field) => {
+                let key = field.response_name();
+                let at_key: Vec<_> = fields
+                    .iter()
+                    .filter(|entry| entry.response_name() == key)
+                    .collect();
+                if at_key.is_empty() {
+                    continue;
+                }
+                let below = &field.selection_set.selections;
+                let mut kept = if at_key
+                    .iter()
+                    .any(|entry| entry.selection_set.selections.is_empty())
+                {
+                    below.clone()
+                } else {
+                    Vec::new()
+                };
+                let entry_below: Vec<Selection> = at_key
+                    .iter()
+                    .flat_map(|entry| entry.selection_set.selections.iter().cloned())
+                    .collect();
+                kept.extend(selected_by_one_pass(below, &entry_below));
+                let mut copy = (**field).clone();
+                copy.selection_set.selections = kept;
+                out.push(Selection::Field(Node::new(copy)));
+            }
+            Selection::InlineFragment(fragment) => out.extend(wrap_non_empty(
+                |selections| {
+                    let mut copy = (**fragment).clone();
+                    copy.selection_set.selections = selections;
+                    Selection::InlineFragment(Node::new(copy))
+                },
+                kept_by(fields, &fragment.selection_set.selections),
+            )),
+            Selection::FragmentSpread(_) => {}
+        }
+    }
+    out
+}
+
+/// `source` filtered by an entry's reading: what `source` selects under each key the entry
+/// selects, as `source` writes it, inside the entry's fragments. Below a bare entry field, which
+/// copies the whole value, `source` is kept whole. Nothing is added.
+///
+/// The model's `SelectionSet.selectedByOnePass`: the source is filtered once per run of the
+/// entry's fields ([`kept_by`]), where the specification's `selectedBy` filters it once per field
+/// and copies its fragments around every key. The two compare alike by inclusion wherever the
+/// checker mounts them (`selectedByOnePass_correct`); one name's occurrences keep their source
+/// order, and only different names may interleave differently.
+pub(super) fn selected_by_one_pass(source: &[Selection], entry: &[Selection]) -> Vec<Selection> {
+    let mut out = Vec::new();
+    let mut rest = entry;
+    while let Some((first, tail)) = rest.split_first() {
+        match first {
+            Selection::Field(_) => {
+                let run = rest
+                    .iter()
+                    .take_while(|selection| matches!(selection, Selection::Field(_)))
+                    .count();
+                let fields: Vec<&apollo_compiler::executable::Field> = rest[..run]
+                    .iter()
+                    .filter_map(|selection| match selection {
+                        Selection::Field(field) => Some(&**field),
+                        _ => None,
+                    })
+                    .collect();
+                out.extend(kept_by(&fields, source));
+                rest = &rest[run..];
+            }
+            Selection::InlineFragment(fragment) => {
+                out.extend(wrap_non_empty(
+                    |selections| {
+                        Selection::InlineFragment(Node::new(
+                            apollo_compiler::executable::InlineFragment {
+                                type_condition: fragment.type_condition.clone(),
+                                directives: fragment.directives.clone(),
+                                selection_set: selection_set(
+                                    fragment.selection_set.ty.clone(),
+                                    selections,
+                                ),
+                            },
+                        ))
+                    },
+                    selected_by_one_pass(source, &fragment.selection_set.selections),
+                ));
+                rest = tail;
+            }
+            Selection::FragmentSpread(_) => rest = tail,
+        }
+    }
+    out
+}
+
+/// What an entry must already have fetched to send `demand`: the demand where the entry writes a
+/// key, taken back through the input rewrites that can rename what the entry reads
+/// ([`input_rewrites_for`]), and selected by what the entry reads (`as_read`).
+pub(super) fn required_selections(
+    schema: &ValidFederationSchema,
+    fetch: &FetchNode,
+    entry: &requires_selection::Selection,
+    as_read: &Selection,
+    parent_type: &Name,
+    demand: &[Selection],
+) -> Vec<Selection> {
+    let inverted = invert_key_renamers(
+        schema,
+        type_filter_covers,
+        &input_rewrites_for(fetch, entry),
+        narrowed_by_entry_condition(entry, parent_type, demand.to_vec()),
+    );
+    selected_by_one_pass(&inverted, std::slice::from_ref(as_read))
+}
+
+/// What an entry sends of `demand`: the demand where the entry writes a key, selected by what the
+/// entry sends (`as_sent`).
+pub(super) fn sent_selections(
+    entry: &requires_selection::Selection,
+    as_sent: &Selection,
+    parent_type: &Name,
+    demand: &[Selection],
+) -> Vec<Selection> {
+    selected_by_one_pass(
+        &narrowed_by_entry_condition(entry, parent_type, demand.to_vec()),
+        std::slice::from_ref(as_sent),
+    )
+}
+
+//==================================================================================================
+// Key paths an entry reads
+//==================================================================================================
+
+/// A path of response keys into a representation: a fetch data path without its type tests and
+/// list indices.
+type KeyPath = Vec<Name>;
+
+/// The response keys a path follows, indices passed over.
+fn key_path(path: &[FetchDataPathElement]) -> KeyPath {
+    path.iter()
+        .filter_map(|element| match element {
+            FetchDataPathElement::Key(name, _) => Some(name.clone()),
+            _ => None,
+        })
+        .collect()
+}
+
+/// Whether an entry reads the key path `path`: lists it directly, or, if `allow_copy`, any path
+/// under a field it copies whole.
+fn reads_path(allow_copy: bool, entry: &requires_selection::Selection, path: &[Name]) -> bool {
+    match entry {
+        requires_selection::Selection::Field(field) => {
+            let Some((key, rest)) = path.split_first() else {
+                return false;
+            };
+            field.alias.as_ref().unwrap_or(&field.name) == key
+                && (rest.is_empty()
+                    || (allow_copy && field.selections.is_empty())
+                    || field
+                        .selections
+                        .iter()
+                        .any(|selection| reads_path(allow_copy, selection, rest)))
+        }
+        requires_selection::Selection::InlineFragment(fragment) => fragment
+            .selections
+            .iter()
+            .any(|selection| reads_path(allow_copy, selection, path)),
+    }
+}
+
+/// The fetch's input rewrites that apply to what `entry` reads: the value setters, and each key
+/// renamer from a key path it reads, listed or copied.
+pub(super) fn input_rewrites_for(
+    fetch: &FetchNode,
+    entry: &requires_selection::Selection,
+) -> Vec<Arc<FetchDataRewrite>> {
+    fetch
+        .input_rewrites
+        .iter()
+        .filter(|rewrite| match rewrite.as_ref() {
+            FetchDataRewrite::KeyRenamer(renamer) => {
+                reads_path(true, entry, &key_path(&renamer.path))
+            }
+            FetchDataRewrite::ValueSetter(_) => true,
+        })
+        .cloned()
+        .collect()
+}
+
+//==================================================================================================
+// The input rewrites
+//==================================================================================================
+
+/// The key path a key renamer renames from, and the one it renames to.
+fn renaming(rewrite: &FetchDataRewrite) -> Option<(KeyPath, KeyPath)> {
+    match rewrite {
+        FetchDataRewrite::KeyRenamer(renamer) => {
+            let from = key_path(&renamer.path);
+            let mut to = from.clone();
+            to.pop();
+            to.push(renamer.rename_key_to.clone());
+            Some((from, to))
+        }
+        FetchDataRewrite::ValueSetter(_) => None,
+    }
+}
+
+/// Whether a key renamer tests the type of an object it reaches, with a `TypenameEquals` or a
+/// type condition on a key or index, renaming for some types and not others. A value setter may:
+/// it changes a value, never a key.
+fn filters_by_type(rewrite: &FetchDataRewrite) -> bool {
+    match rewrite {
+        FetchDataRewrite::KeyRenamer(renamer) => renamer.path.iter().any(|element| match element {
+            FetchDataPathElement::TypenameEquals(_) => true,
+            FetchDataPathElement::Key(_, condition) | FetchDataPathElement::AnyIndex(condition) => {
+                condition.is_some()
+            }
+            FetchDataPathElement::Parent => false,
+        }),
+        FetchDataRewrite::ValueSetter(_) => false,
+    }
+}
+
+fn renamings(fetch: &FetchNode) -> Vec<(KeyPath, KeyPath)> {
+    fetch
+        .input_rewrites
+        .iter()
+        .filter_map(|rewrite| renaming(rewrite))
+        .collect()
+}
+
+fn display_key_path(path: &[Name]) -> String {
+    path.iter().map(Name::as_str).collect::<Vec<_>>().join(".")
+}
+
+/// The input rewrites rename each key path one way, whatever the types and conditions they meet,
+/// and never rename what they renamed or what lies below what they rename: no key renamer filters
+/// by type, two renaming from one key path rename it to one, none renames from below a key path
+/// another renames from, and none renames from a key path one renames to. `Err` says which.
+pub(super) fn input_rewrites_well_formed(fetch: &FetchNode) -> Result<(), String> {
+    if fetch
+        .input_rewrites
+        .iter()
+        .any(|rewrite| filters_by_type(rewrite))
+    {
+        return Err("an input key renamer tests the type of what it renames".to_string());
+    }
+    let renamings = renamings(fetch);
+    for one in &renamings {
+        for other in &renamings {
+            if other.0.starts_with(&one.0) && one != other {
+                return Err(format!(
+                    "input key renamers rename `{}` and `{}` below it two ways",
+                    display_key_path(&one.0),
+                    display_key_path(&other.0)
+                ));
+            }
+            if one.0 == other.1 {
+                return Err(format!(
+                    "an input key renamer renames `{}`, which another renames to",
+                    display_key_path(&one.0)
+                ));
+            }
+        }
+    }
+    Ok(())
+}
+
+/// The object types whose representations may hold the key path `path`: those of each entry that
+/// reads it, listed or, where `allow_copy`, copied.
+fn types_reading(
+    schema: &ValidFederationSchema,
+    fetch: &FetchNode,
+    allow_copy: bool,
+    path: &[Name],
+) -> Vec<Name> {
+    fetch
+        .requires
+        .iter()
+        .flat_map(|entry| match entry {
+            requires_selection::Selection::InlineFragment(fragment) => {
+                match &fragment.type_condition {
+                    Some(require_type) if reads_path(allow_copy, entry, path) => {
+                        possible_types(schema, require_type)
+                    }
+                    _ => Vec::new(),
+                }
+            }
+            requires_selection::Selection::Field(_) => Vec::new(),
+        })
+        .collect()
+}
+
+/// The key paths the input rewrites send under the key path `key`, each with whether it counts as
+/// read where an entry copies whole a field on the way to it: `key` itself, read under its own
+/// name, does not; each key path renamed onto it does, as the copy gives no evidence of what it
+/// holds.
+fn sent_under(fetch: &FetchNode, key: &[Name]) -> Vec<(KeyPath, bool)> {
+    let mut out = vec![(key.to_vec(), false)];
+    out.extend(
+        renamings(fetch)
+            .into_iter()
+            .filter(|renamed| renamed.1 == key)
+            .map(|renamed| (renamed.0, true)),
+    );
+    out
+}
+
+/// No object type's representations hold two key paths the input rewrites send under one key, as
+/// fields under one response key must merge. `Err` names the key.
+pub(super) fn input_rewrites_separated(
+    schema: &ValidFederationSchema,
+    fetch: &FetchNode,
+) -> Result<(), String> {
+    for renamed in renamings(fetch) {
+        let sent = sent_under(fetch, &renamed.1);
+        for one in &sent {
+            for other in &sent {
+                if one.0 == other.0 {
+                    continue;
+                }
+                let other_types = types_reading(schema, fetch, other.1, &other.0);
+                if let Some(shared) = types_reading(schema, fetch, one.1, &one.0)
+                    .into_iter()
+                    .find(|ty| other_types.contains(ty))
+                {
+                    return Err(format!(
+                        "input key renamers send `{}` and `{}` under one key `{}` for `{shared}`",
+                        display_key_path(&one.0),
+                        display_key_path(&other.0),
+                        display_key_path(&renamed.1)
+                    ));
+                }
+            }
+        }
+    }
+    Ok(())
+}
+
+/// The input rewrites are idempotent on a demand: renamed by them, the demand keeps its keys, so
+/// they rename only aliases, never a key the subgraph demands.
+pub(super) fn input_rewrites_idempotent(
+    schema: &ValidFederationSchema,
+    fetch: &FetchNode,
+    demand: &[Selection],
+) -> bool {
+    same_keys(
+        &apply_key_renamers(
+            schema,
+            type_filter_meets,
+            &fetch.input_rewrites,
+            demand.to_vec(),
+        ),
+        demand,
+    )
+}
+
+//==================================================================================================
+// Keys an entry overwrites
+//==================================================================================================
+
+/// The keys a selection writes at its own level, through its inline fragments.
+fn keys_written(selection: &requires_selection::Selection, out: &mut Vec<Name>) {
+    match selection {
+        requires_selection::Selection::Field(field) => {
+            out.push(field.alias.as_ref().unwrap_or(&field.name).clone())
+        }
+        requires_selection::Selection::InlineFragment(fragment) => fragment
+            .selections
+            .iter()
+            .for_each(|selection| keys_written(selection, out)),
+    }
+}
+
+/// The keys a field of a field set overwrites, an earlier selection of the same list having written
+/// them, at any level: `execute_selection_set` replaces a field's value under its key, and
+/// deep-merges only a fragment's.
+pub(super) fn overwritten_keys(selections: &[requires_selection::Selection]) -> Vec<Name> {
+    let mut out = Vec::new();
+    for (index, selection) in selections.iter().enumerate() {
+        match selection {
+            requires_selection::Selection::Field(field) => {
+                out.extend(overwritten_keys(&field.selections))
+            }
+            requires_selection::Selection::InlineFragment(fragment) => {
+                out.extend(overwritten_keys(&fragment.selections))
+            }
+        }
+        let mut written = Vec::new();
+        keys_written(selection, &mut written);
+        out.extend(
+            selections[index + 1..]
+                .iter()
+                .filter_map(|later| match later {
+                    requires_selection::Selection::Field(field) => {
+                        Some(field.alias.as_ref().unwrap_or(&field.name).clone())
+                    }
+                    requires_selection::Selection::InlineFragment(_) => None,
+                })
+                .filter(|key| written.contains(key)),
+        );
+    }
+    out
+}
+
+//==================================================================================================
+// Inclusion by response key, arguments aside
+//==================================================================================================
+
+/// The object types a type name grounds to, and a field's result types, looked up once per check:
+/// the key walk meets the same names at every copy of a position, and in every fetch.
+pub(super) struct SchemaTypeLookup<'s> {
+    schema: &'s ValidFederationSchema,
+    possible_types_by_type: std::cell::RefCell<IndexMap<Name, Arc<Vec<Name>>>>,
+    result_types_by_field: std::cell::RefCell<IndexMap<ObjectField, Arc<Vec<Name>>>>,
+}
+
+/// A field, by the object type it is selected at and its name.
+type ObjectField = (Name, Name);
+
+impl<'s> SchemaTypeLookup<'s> {
+    pub(super) fn new(schema: &'s ValidFederationSchema) -> Self {
+        SchemaTypeLookup {
+            schema,
+            possible_types_by_type: Default::default(),
+            result_types_by_field: Default::default(),
+        }
+    }
+
+    pub(super) fn possible_types(&self, type_name: &Name) -> Arc<Vec<Name>> {
+        if let Some(types) = self.possible_types_by_type.borrow().get(type_name) {
+            return types.clone();
+        }
+        let types = Arc::new(possible_types(self.schema, type_name));
+        self.possible_types_by_type
+            .borrow_mut()
+            .insert(type_name.clone(), types.clone());
+        types
+    }
+
+    /// The object types a field returns, read at an object type; none for a field it does not
+    /// declare.
+    pub(super) fn field_result_types(
+        &self,
+        object_type: &Name,
+        field_name: &Name,
+    ) -> Arc<Vec<Name>> {
+        let key = (object_type.clone(), field_name.clone());
+        if let Some(types) = self.result_types_by_field.borrow().get(&key) {
+            return types.clone();
+        }
+        let types = match self.schema.schema().types.get(object_type) {
+            Some(ExtendedType::Object(ty)) => match ty.fields.get(field_name) {
+                Some(field) => (*self.possible_types(field.ty.inner_named_type())).clone(),
+                None => Vec::new(),
+            },
+            _ => Vec::new(),
+        };
+        let types = Arc::new(types);
+        self.result_types_by_field
+            .borrow_mut()
+            .insert(key, types.clone());
+        types
+    }
+
+    /// The object types `types` narrowed by an inline fragment's type condition.
+    fn narrow_types(&self, types: &[Name], condition: Option<&Name>) -> Vec<Name> {
+        match condition {
+            None => types.to_vec(),
+            Some(condition) => {
+                let admitted = self.possible_types(condition);
+                types
+                    .iter()
+                    .filter(|ty| admitted.contains(ty))
+                    .cloned()
+                    .collect()
+            }
+        }
+    }
+
+    /// The object types a field named `field_name` returns, read at any of `types`.
+    fn child_types(&self, types: &[Name], field_name: &Name) -> Vec<Name> {
+        let mut out: IndexSet<Name> = IndexSet::default();
+        for object_type in types {
+            out.extend(
+                self.field_result_types(object_type, field_name)
+                    .iter()
+                    .cloned(),
+            );
+        }
+        out.into_iter().collect()
+    }
+}
+
+/// A selection set the key index holds on to: the covering side's own top level, or the selections
+/// of a field found in it. Holding the node rather than borrowing its selections is what lets one
+/// index serve every fetch reading the same buffer.
+#[derive(Clone)]
+enum HeldSelections {
+    /// The top level of what a fetch can read.
+    Buffer(Arc<Vec<Selection>>),
+    /// What a field found in it selects.
+    BelowField(Node<apollo_compiler::executable::Field>),
+}
+
+impl HeldSelections {
+    fn selections(&self) -> &[Selection] {
+        match self {
+            HeldSelections::Buffer(selections) => selections,
+            HeldSelections::BelowField(field) => &field.selection_set.selections,
+        }
+    }
+}
+
+/// Where the covering side's keys at one level are found: selection sets, all read at the same
+/// object types under the same condition. Copies of one position, which a plan's buffer holds one
+/// per fetch mounted there, share both and are merged, so the walk below reads them once.
+struct MergedCopies {
+    object_types: Vec<Name>,
+    condition: BooleanCondition,
+    selection_sets: Vec<HeldSelections>,
+}
+
+/// Adds `selection_set`, read at `object_types` under `condition`, to the copies sharing both, or
+/// as new ones.
+fn add_copy(
+    copies: &mut Vec<MergedCopies>,
+    object_types: Vec<Name>,
+    condition: BooleanCondition,
+    selection_set: HeldSelections,
+) {
+    match copies
+        .iter_mut()
+        .find(|merged| merged.object_types == object_types && merged.condition == condition)
+    {
+        Some(merged) => merged.selection_sets.push(selection_set),
+        None => copies.push(MergedCopies {
+            object_types,
+            condition,
+            selection_sets: vec![selection_set],
+        }),
+    }
+}
+
+/// A field as an occurrence of a response key: the object types and condition it is selected
+/// under, its field name, and its selections. Occurrences of one key that agree on all but their
+/// selections are one, their fields pooled.
+struct KeyOccurrence {
+    object_types: Vec<Name>,
+    condition: BooleanCondition,
+    field_name: Name,
+    fields: Vec<Node<apollo_compiler::executable::Field>>,
+}
+
+/// The fields under response key `key` that one level of `selections` selects, through its
+/// fragments, read at `types` under `condition`; a field whose directives never hold is left out.
+fn occurrences_of(
+    type_lookup: &SchemaTypeLookup<'_>,
+    key: &Name,
+    types: &[Name],
+    condition: &BooleanCondition,
+    selections: &[Selection],
+    out: &mut Vec<KeyOccurrence>,
+) {
+    for selection in selections {
+        match selection {
+            Selection::Field(field) => {
+                if field.response_name() != key {
+                    continue;
+                }
+                let Some(literals) = literals_for_directives(&field.directives) else {
+                    continue;
+                };
+                let mut condition = condition.clone();
+                condition.extend(literals);
+                match out.iter_mut().find(|occurrence| {
+                    occurrence.field_name == field.name
+                        && occurrence.object_types == types
+                        && occurrence.condition == condition
+                }) {
+                    Some(occurrence) => occurrence.fields.push(field.clone()),
+                    None => out.push(KeyOccurrence {
+                        object_types: types.to_vec(),
+                        condition,
+                        field_name: field.name.clone(),
+                        fields: vec![field.clone()],
+                    }),
+                }
+            }
+            Selection::InlineFragment(fragment) => {
+                let Some(literals) = literals_for_directives(&fragment.directives) else {
+                    continue;
+                };
+                let narrowed = type_lookup.narrow_types(types, fragment.type_condition.as_ref());
+                if literals.is_empty() {
+                    occurrences_of(
+                        type_lookup,
+                        key,
+                        &narrowed,
+                        condition,
+                        &fragment.selection_set.selections,
+                        out,
+                    );
+                } else {
+                    let mut condition = condition.clone();
+                    condition.extend(literals);
+                    occurrences_of(
+                        type_lookup,
+                        key,
+                        &narrowed,
+                        &condition,
+                        &fragment.selection_set.selections,
+                        out,
+                    );
+                }
+            }
+            Selection::FragmentSpread(_) => {}
+        }
+    }
+}
+
+/// The model's `keysInclude`: whether every key a covered side selects, from the root, is selected
+/// by the covering side at the same object types and under conditions covering its own,
+/// recursively, below each field only at the object types the plan returns for it. Arguments are
+/// not compared; a bare covered field asks for its key alone.
+///
+/// The covering side is indexed as it is asked: each position, its copies merged by object types and condition,
+/// and the occurrences of each key looked up there once. Every entry of an entity fetch is compared
+/// with what the fetch can read, and fetches run in parallel read the same buffer, so one index
+/// serves them all and the positions they share are walked once.
+pub(super) struct ReadableKeyIndex {
+    root_types: Vec<Name>,
+    positions: std::cell::RefCell<Vec<IndexedPosition>>,
+}
+
+/// One position of the covering side: where its keys are found, and what each key asked for so
+/// far matched there.
+struct IndexedPosition {
+    copies: Vec<MergedCopies>,
+    matches_by_key: IndexMap<Name, std::rc::Rc<KeyMatch>>,
+}
+
+/// What one key matches at a position.
+struct KeyMatch {
+    /// The object types and condition of each occurrence.
+    reached_under: Vec<(Vec<Name>, BooleanCondition)>,
+    /// The position below the occurrences.
+    position_below: usize,
+}
+
+impl ReadableKeyIndex {
+    pub(super) fn new(
+        type_lookup: &SchemaTypeLookup<'_>,
+        root_type: &Name,
+        covering: Arc<Vec<Selection>>,
+    ) -> Self {
+        let root_types = (*type_lookup.possible_types(root_type)).clone();
+        let root = IndexedPosition {
+            copies: vec![MergedCopies {
+                object_types: root_types.clone(),
+                condition: Vec::new(),
+                selection_sets: vec![HeldSelections::Buffer(covering)],
+            }],
+            matches_by_key: IndexMap::default(),
+        };
+        ReadableKeyIndex {
+            root_types,
+            positions: std::cell::RefCell::new(vec![root]),
+        }
+    }
+
+    /// What `key` matches at position `node`, looked up once.
+    fn lookup(
+        &self,
+        type_lookup: &SchemaTypeLookup<'_>,
+        node: usize,
+        key: &Name,
+    ) -> std::rc::Rc<KeyMatch> {
+        if let Some(found) = self.positions.borrow()[node].matches_by_key.get(key) {
+            return found.clone();
+        }
+        let mut matching = Vec::new();
+        {
+            let positions = self.positions.borrow();
+            for merged in &positions[node].copies {
+                for held in &merged.selection_sets {
+                    occurrences_of(
+                        type_lookup,
+                        key,
+                        &merged.object_types,
+                        &merged.condition,
+                        held.selections(),
+                        &mut matching,
+                    );
+                }
+            }
+        }
+        let mut clauses: Vec<(Vec<Name>, BooleanCondition)> = Vec::new();
+        let mut below = Vec::new();
+        for occurrence in matching {
+            let clause = (
+                occurrence.object_types.clone(),
+                occurrence.condition.clone(),
+            );
+            if !clauses.contains(&clause) {
+                clauses.push(clause);
+            }
+            let child_types =
+                type_lookup.child_types(&occurrence.object_types, &occurrence.field_name);
+            for field in occurrence.fields {
+                add_copy(
+                    &mut below,
+                    child_types.clone(),
+                    occurrence.condition.clone(),
+                    HeldSelections::BelowField(field),
+                );
+            }
+        }
+        let mut positions = self.positions.borrow_mut();
+        positions.push(IndexedPosition {
+            copies: below,
+            matches_by_key: IndexMap::default(),
+        });
+        let found = std::rc::Rc::new(KeyMatch {
+            reached_under: clauses,
+            position_below: positions.len() - 1,
+        });
+        positions[node]
+            .matches_by_key
+            .insert(key.clone(), found.clone());
+        found
+    }
+
+    /// Whether the covering side includes `covered` by key. `Err` names the first key it does
+    /// not.
+    pub(super) fn includes(
+        &self,
+        type_lookup: &SchemaTypeLookup<'_>,
+        returned: &ReturnedTypes,
+        covered: &[Selection],
+    ) -> Result<(), String> {
+        self.included_at(
+            type_lookup,
+            returned,
+            0,
+            &self.root_types,
+            &Vec::new(),
+            covered,
+        )
+    }
+
+    /// One level: `Err` names the first key `covered` selects that the position `node` does not,
+    /// at an object type and condition.
+    fn included_at(
+        &self,
+        type_lookup: &SchemaTypeLookup<'_>,
+        returned: &ReturnedTypes,
+        node: usize,
+        types: &[Name],
+        condition: &BooleanCondition,
+        covered: &[Selection],
+    ) -> Result<(), String> {
+        for selection in covered {
+            match selection {
+                Selection::Field(field) => {
+                    let Some(literals) = literals_for_directives(&field.directives) else {
+                        continue;
+                    };
+                    let mut extended = condition.clone();
+                    extended.extend(literals);
+                    let Some(reached) = canonical_boolean_condition(&extended) else {
+                        continue;
+                    };
+                    let key = field.response_name();
+                    let found = self.lookup(type_lookup, node, key);
+                    for object_type in types {
+                        let clauses: Vec<BooleanCondition> = found
+                            .reached_under
+                            .iter()
+                            .filter(|(clause_types, _)| clause_types.contains(object_type))
+                            .map(|(_, clause)| clause.clone())
+                            .collect();
+                        if !boolean_condition_covered_by(&reached, &clauses) {
+                            return Err(format!("`{key}` is not read on {object_type}"));
+                        }
+                    }
+                    if !field.selection_set.selections.is_empty() {
+                        let returned_children: Vec<Name> = type_lookup
+                            .child_types(types, &field.name)
+                            .into_iter()
+                            .filter(|child| {
+                                types.iter().any(|object_type| {
+                                    returned.returns(object_type, &field.name, child)
+                                })
+                            })
+                            .collect();
+                        self.included_at(
+                            type_lookup,
+                            returned,
+                            found.position_below,
+                            &returned_children,
+                            &extended,
+                            &field.selection_set.selections,
+                        )
+                        .map_err(|reason| format!("in `{key}`: {reason}"))?;
+                    }
+                }
+                Selection::InlineFragment(fragment) => {
+                    let Some(literals) = literals_for_directives(&fragment.directives) else {
+                        continue;
+                    };
+                    let mut extended = condition.clone();
+                    extended.extend(literals);
+                    self.included_at(
+                        type_lookup,
+                        returned,
+                        node,
+                        &type_lookup.narrow_types(types, fragment.type_condition.as_ref()),
+                        &extended,
+                        &fragment.selection_set.selections,
+                    )?;
+                }
+                Selection::FragmentSpread(_) => {}
+            }
+        }
+        Ok(())
+    }
+}

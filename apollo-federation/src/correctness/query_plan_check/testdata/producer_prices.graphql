@@ -1,0 +1,125 @@
+# The supergraph for the producer-price tests in `tests/returned_types.rs`, composed with
+# `composition::compose` from the three subgraphs below, each of which also links federation v2.3
+# importing `@key`, `@shareable`, `@external`, `@requires` and `@provides`. Recompose it when they
+# change.
+#
+# `supplier` and `other` share `Product.price`, a `Price`, which `supplier` declares as
+# `FixedPrice` alone and `other` as `FixedPrice | RangePrice`; composition only hints at the
+# mismatch. `estimates` resolves a `Product` and serves `estimate`, requiring the price at both
+# types.
+#
+# Subgraph `supplier`:
+#
+#   type Query {
+#     product: Product @shareable
+#   }
+#
+#   type Product @key(fields: "id") {
+#     id: ID!
+#     price: Price @shareable
+#   }
+#
+#   union Price = FixedPrice
+#
+#   type FixedPrice @shareable {
+#     value: Int
+#   }
+#
+# Subgraph `other`:
+#
+#   type Query {
+#     product: Product @shareable
+#   }
+#
+#   type Product @key(fields: "id") {
+#     id: ID!
+#     price: Price @shareable
+#   }
+#
+#   union Price = FixedPrice | RangePrice
+#
+#   type FixedPrice @shareable {
+#     value: Int
+#   }
+#
+#   type RangePrice @shareable {
+#     minValue: Int
+#   }
+#
+# Subgraph `estimates`:
+#
+#   type Product @key(fields: "id") {
+#     id: ID!
+#     price: Price @external
+#     estimate: String @requires(fields: "price { ... on FixedPrice { value } ... on RangePrice { minValue } }")
+#   }
+#
+#   union Price = FixedPrice | RangePrice
+#
+#   type FixedPrice @shareable {
+#     value: Int
+#   }
+#
+#   type RangePrice @shareable {
+#     minValue: Int
+#   }
+
+
+schema @link(url: "https://specs.apollo.dev/link/v1.0") @link(url: "https://specs.apollo.dev/join/v0.3", for: EXECUTION) {
+  query: Query
+}
+
+directive @link(url: String, as: String, for: link__Purpose, import: [link__Import]) repeatable on SCHEMA
+
+directive @join__graph(name: String!, url: String!) on ENUM_VALUE
+
+directive @join__type(graph: join__Graph!, key: join__FieldSet, extension: Boolean! = false, resolvable: Boolean! = true, isInterfaceObject: Boolean! = false) repeatable on OBJECT | INTERFACE | UNION | ENUM | INPUT_OBJECT | SCALAR
+
+directive @join__field(graph: join__Graph, requires: join__FieldSet, provides: join__FieldSet, type: String, external: Boolean, override: String, usedOverridden: Boolean) repeatable on FIELD_DEFINITION | INPUT_FIELD_DEFINITION
+
+directive @join__implements(graph: join__Graph!, interface: String!) repeatable on OBJECT | INTERFACE
+
+directive @join__unionMember(graph: join__Graph!, member: String!) repeatable on UNION
+
+directive @join__enumValue(graph: join__Graph!) repeatable on ENUM_VALUE
+
+enum link__Purpose {
+  """
+  `SECURITY` features provide metadata necessary to securely resolve fields.
+  """
+  SECURITY
+  """
+  `EXECUTION` features provide metadata necessary for operation execution.
+  """
+  EXECUTION
+}
+
+scalar link__Import
+
+enum join__Graph {
+  ESTIMATES @join__graph(name: "estimates", url: "http://estimates")
+  OTHER @join__graph(name: "other", url: "http://other")
+  SUPPLIER @join__graph(name: "supplier", url: "http://supplier")
+}
+
+scalar join__FieldSet
+
+type Product @join__type(graph: ESTIMATES, key: "id") @join__type(graph: OTHER, key: "id") @join__type(graph: SUPPLIER, key: "id") {
+  id: ID!
+  price: Price @join__field(graph: ESTIMATES, external: true) @join__field(graph: OTHER) @join__field(graph: SUPPLIER)
+  estimate: String @join__field(graph: ESTIMATES, requires: "price { ... on FixedPrice { value } ... on RangePrice { minValue } }")
+}
+
+union Price @join__type(graph: ESTIMATES) @join__type(graph: OTHER) @join__type(graph: SUPPLIER) @join__unionMember(graph: ESTIMATES, member: "FixedPrice") @join__unionMember(graph: OTHER, member: "FixedPrice") @join__unionMember(graph: SUPPLIER, member: "FixedPrice") @join__unionMember(graph: ESTIMATES, member: "RangePrice") @join__unionMember(graph: OTHER, member: "RangePrice") = FixedPrice | RangePrice
+
+type FixedPrice @join__type(graph: ESTIMATES) @join__type(graph: OTHER) @join__type(graph: SUPPLIER) {
+  value: Int
+}
+
+type RangePrice @join__type(graph: ESTIMATES) @join__type(graph: OTHER) {
+  minValue: Int
+}
+
+type Query @join__type(graph: ESTIMATES) @join__type(graph: OTHER) @join__type(graph: SUPPLIER) {
+  product: Product @join__field(graph: OTHER) @join__field(graph: SUPPLIER)
+}

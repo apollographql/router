@@ -1,0 +1,107 @@
+# The supergraph for the key-per-implementation tests in `tests/conditional_requires.rs`, composed
+# with `composition::compose` from the four subgraphs below, each of which also links federation
+# v2.3 importing `@key` and `@interfaceObject`. Recompose it when they change.
+#
+# `one` lists `I`s, implemented by `A` and `B`. The other three declare `I` as an interface
+# object, resolved by `id` or `sku` (`bothkeys`), by `id` alone (`idkey`), or by the compound key
+# `id sku` (`compoundkey`).
+#
+# Subgraph `one`:
+#
+#   type Query {
+#     items: [I]
+#   }
+#
+#   interface I @key(fields: "id") @key(fields: "sku") @key(fields: "id sku") {
+#     id: ID!
+#     sku: ID!
+#   }
+#
+#   type A implements I @key(fields: "id") @key(fields: "sku") @key(fields: "id sku") {
+#     id: ID!
+#     sku: ID!
+#   }
+#
+#   type B implements I @key(fields: "id") @key(fields: "sku") @key(fields: "id sku") {
+#     id: ID!
+#     sku: ID!
+#   }
+#
+# Subgraph `bothkeys`:
+#
+#   type I @key(fields: "id") @key(fields: "sku") @interfaceObject {
+#     id: ID!
+#     sku: ID!
+#   }
+#
+# Subgraph `idkey`:
+#
+#   type I @key(fields: "id") @interfaceObject {
+#     id: ID!
+#   }
+#
+# Subgraph `compoundkey`:
+#
+#   type I @key(fields: "id sku") @interfaceObject {
+#     id: ID!
+#     sku: ID!
+#   }
+
+schema @link(url: "https://specs.apollo.dev/link/v1.0") @link(url: "https://specs.apollo.dev/join/v0.3", for: EXECUTION) {
+  query: Query
+}
+
+directive @link(url: String, as: String, for: link__Purpose, import: [link__Import]) repeatable on SCHEMA
+
+directive @join__graph(name: String!, url: String!) on ENUM_VALUE
+
+directive @join__type(graph: join__Graph!, key: join__FieldSet, extension: Boolean! = false, resolvable: Boolean! = true, isInterfaceObject: Boolean! = false) repeatable on OBJECT | INTERFACE | UNION | ENUM | INPUT_OBJECT | SCALAR
+
+directive @join__field(graph: join__Graph, requires: join__FieldSet, provides: join__FieldSet, type: String, external: Boolean, override: String, usedOverridden: Boolean) repeatable on FIELD_DEFINITION | INPUT_FIELD_DEFINITION
+
+directive @join__implements(graph: join__Graph!, interface: String!) repeatable on OBJECT | INTERFACE
+
+directive @join__unionMember(graph: join__Graph!, member: String!) repeatable on UNION
+
+directive @join__enumValue(graph: join__Graph!) repeatable on ENUM_VALUE
+
+enum link__Purpose {
+  """
+  `SECURITY` features provide metadata necessary to securely resolve fields.
+  """
+  SECURITY
+  """
+  `EXECUTION` features provide metadata necessary for operation execution.
+  """
+  EXECUTION
+}
+
+scalar link__Import
+
+enum join__Graph {
+  BOTHKEYS @join__graph(name: "bothkeys", url: "http://bothkeys")
+  COMPOUNDKEY @join__graph(name: "compoundkey", url: "http://compoundkey")
+  IDKEY @join__graph(name: "idkey", url: "http://idkey")
+  ONE @join__graph(name: "one", url: "http://one")
+}
+
+scalar join__FieldSet
+
+interface I @join__type(graph: BOTHKEYS, key: "id", isInterfaceObject: true) @join__type(graph: BOTHKEYS, key: "sku", isInterfaceObject: true) @join__type(graph: COMPOUNDKEY, key: "id sku", isInterfaceObject: true) @join__type(graph: IDKEY, key: "id", isInterfaceObject: true) @join__type(graph: ONE, key: "id") @join__type(graph: ONE, key: "sku") @join__type(graph: ONE, key: "id sku") {
+  id: ID!
+  sku: ID! @join__field(graph: BOTHKEYS) @join__field(graph: COMPOUNDKEY) @join__field(graph: ONE)
+}
+
+type Query @join__type(graph: BOTHKEYS) @join__type(graph: COMPOUNDKEY) @join__type(graph: IDKEY) @join__type(graph: ONE) {
+  items: [I] @join__field(graph: ONE)
+}
+
+type A implements I @join__implements(graph: ONE, interface: "I") @join__type(graph: ONE, key: "id") @join__type(graph: ONE, key: "sku") @join__type(graph: ONE, key: "id sku") {
+  id: ID!
+  sku: ID!
+}
+
+type B implements I @join__implements(graph: ONE, interface: "I") @join__type(graph: ONE, key: "id") @join__type(graph: ONE, key: "sku") @join__type(graph: ONE, key: "id sku") {
+  id: ID!
+  sku: ID!
+}
