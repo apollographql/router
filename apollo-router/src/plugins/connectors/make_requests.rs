@@ -152,9 +152,6 @@ fn root_fields(
         .get(None)
         .map_err(|_| InvalidOperation("no operation document".into()))?;
 
-    let variables = graphql_utils::variables_with_defaults(op, &variables.variables)
-        .map_err(|err| InvalidArguments(format!("cannot get operation variables: {err}")))?;
-
     op.selection_set
         .selections
         .iter()
@@ -166,8 +163,8 @@ fn root_fields(
                     .unwrap_or_else(|| &field.name)
                     .to_string();
 
-                let args =
-                    graphql_utils::field_arguments_map(field, &variables).map_err(|err| {
+                let args = graphql_utils::field_arguments_map(field, op, &variables.variables)
+                    .map_err(|err| {
                         InvalidArguments(format!("cannot get inputs from field arguments: {err}"))
                     })?;
 
@@ -318,10 +315,6 @@ fn entities_with_fields_from_request(
 
     let (entities_field, typename_requested) = graphql_utils::get_entity_fields(operation, op)?;
 
-    let operation_variables = graphql_utils::variables_with_defaults(op, &variables.variables)
-        .map_err(|err| InvalidArguments(format!("cannot get operation variables: {err}")))?;
-    let operation_variables = &operation_variables;
-
     let types_and_fields = entities_field
         .selection_set
         .selections
@@ -418,11 +411,10 @@ fn entities_with_fields_from_request(
             ));
 
             representations.iter().map(move |(i, representation)| {
-                let args = graphql_utils::field_arguments_map(field, operation_variables).map_err(
-                    |err| {
+                let args = graphql_utils::field_arguments_map(field, op, &variables.variables)
+                    .map_err(|err| {
                         InvalidArguments(format!("cannot get inputs from field arguments: {err}"))
-                    },
-                )?;
+                    })?;
 
                 let response_name = field
                     .alias
