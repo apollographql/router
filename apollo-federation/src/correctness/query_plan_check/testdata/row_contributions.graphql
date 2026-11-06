@@ -1,0 +1,128 @@
+# The supergraph for the row-contribution tests in `tests/returned_types.rs`, composed with
+# `composition::compose` from the four subgraphs below, each of which also links federation v2.3
+# importing `@key`, `@shareable`, `@external`, `@requires` and `@provides`. Recompose it when they
+# change.
+#
+# `rows` serves a list of `I`, each an `A` or a `B`; `a` and `b` each declare one of them, resolve
+# it by `id` and serve its `datum`; `consumer` serves `result` on both, requiring `datum`.
+#
+# Subgraph `rows`:
+#
+#   type Query {
+#     rows: [I]
+#   }
+#
+#   interface I {
+#     id: ID!
+#   }
+#
+#   type A implements I @key(fields: "id") {
+#     id: ID!
+#   }
+#
+#   type B implements I @key(fields: "id") {
+#     id: ID!
+#   }
+#
+# Subgraph `a`:
+#
+#   interface I {
+#     id: ID!
+#   }
+#
+#   type A implements I @key(fields: "id") {
+#     id: ID!
+#     datum: String
+#   }
+#
+# Subgraph `b`:
+#
+#   interface I {
+#     id: ID!
+#   }
+#
+#   type B implements I @key(fields: "id") {
+#     id: ID!
+#     datum: String
+#   }
+#
+# Subgraph `consumer`:
+#
+#   interface I {
+#     id: ID!
+#     result: String
+#   }
+#
+#   type A implements I @key(fields: "id") {
+#     id: ID!
+#     datum: String @external
+#     result: String @requires(fields: "datum")
+#   }
+#
+#   type B implements I @key(fields: "id") {
+#     id: ID!
+#     datum: String @external
+#     result: String @requires(fields: "datum")
+#   }
+
+
+schema @link(url: "https://specs.apollo.dev/link/v1.0") @link(url: "https://specs.apollo.dev/join/v0.3", for: EXECUTION) {
+  query: Query
+}
+
+directive @link(url: String, as: String, for: link__Purpose, import: [link__Import]) repeatable on SCHEMA
+
+directive @join__graph(name: String!, url: String!) on ENUM_VALUE
+
+directive @join__type(graph: join__Graph!, key: join__FieldSet, extension: Boolean! = false, resolvable: Boolean! = true, isInterfaceObject: Boolean! = false) repeatable on OBJECT | INTERFACE | UNION | ENUM | INPUT_OBJECT | SCALAR
+
+directive @join__field(graph: join__Graph, requires: join__FieldSet, provides: join__FieldSet, type: String, external: Boolean, override: String, usedOverridden: Boolean) repeatable on FIELD_DEFINITION | INPUT_FIELD_DEFINITION
+
+directive @join__implements(graph: join__Graph!, interface: String!) repeatable on OBJECT | INTERFACE
+
+directive @join__unionMember(graph: join__Graph!, member: String!) repeatable on UNION
+
+directive @join__enumValue(graph: join__Graph!) repeatable on ENUM_VALUE
+
+enum link__Purpose {
+  """
+  `SECURITY` features provide metadata necessary to securely resolve fields.
+  """
+  SECURITY
+  """
+  `EXECUTION` features provide metadata necessary for operation execution.
+  """
+  EXECUTION
+}
+
+scalar link__Import
+
+enum join__Graph {
+  A @join__graph(name: "a", url: "http://a")
+  B @join__graph(name: "b", url: "http://b")
+  CONSUMER @join__graph(name: "consumer", url: "http://consumer")
+  ROWS @join__graph(name: "rows", url: "http://rows")
+}
+
+scalar join__FieldSet
+
+interface I @join__type(graph: A) @join__type(graph: B) @join__type(graph: CONSUMER) @join__type(graph: ROWS) {
+  id: ID!
+  result: String @join__field(graph: CONSUMER)
+}
+
+type A implements I @join__implements(graph: A, interface: "I") @join__implements(graph: CONSUMER, interface: "I") @join__implements(graph: ROWS, interface: "I") @join__type(graph: A, key: "id") @join__type(graph: CONSUMER, key: "id") @join__type(graph: ROWS, key: "id") {
+  id: ID!
+  datum: String @join__field(graph: A) @join__field(graph: CONSUMER, external: true)
+  result: String @join__field(graph: CONSUMER, requires: "datum")
+}
+
+type Query @join__type(graph: A) @join__type(graph: B) @join__type(graph: CONSUMER) @join__type(graph: ROWS) {
+  rows: [I] @join__field(graph: ROWS)
+}
+
+type B implements I @join__implements(graph: B, interface: "I") @join__implements(graph: CONSUMER, interface: "I") @join__implements(graph: ROWS, interface: "I") @join__type(graph: B, key: "id") @join__type(graph: CONSUMER, key: "id") @join__type(graph: ROWS, key: "id") {
+  id: ID!
+  datum: String @join__field(graph: B) @join__field(graph: CONSUMER, external: true)
+  result: String @join__field(graph: CONSUMER, requires: "datum")
+}

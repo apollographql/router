@@ -1,0 +1,107 @@
+# The supergraph for the mutation-root resolvability tests in `tests/resolvable.rs`, composed with
+# `composition::compose` from the two subgraphs below, each of which also links federation v2.3
+# importing `@key`, `@shareable`, `@external`, `@requires` and `@provides`. Recompose it when they
+# change.
+#
+# `orders` serves the mutation `buy` and resolves a `Sub`'s `vendor`, but marks `Vendor.orderId`
+# `@external`, reading it only as a `@requires` input; `vendors` resolves it. The shape of the
+# corpus plan that asked `orders` for `orderId`.
+#
+# Subgraph `orders`:
+#
+#   type Query {
+#     ping: String
+#   }
+#
+#   type Mutation {
+#     buy: Purchase
+#   }
+#
+#   type Purchase {
+#     sub: Sub
+#   }
+#
+#   type Sub @key(fields: "id") {
+#     id: ID!
+#     vendor: Vendor! @shareable
+#     orders: [Int] @requires(fields: "vendor { orderId }")
+#   }
+#
+#   type Vendor @shareable {
+#     id: ID!
+#     orderId: ID @external
+#   }
+#
+# Subgraph `vendors`:
+#
+#   type Sub @key(fields: "id") {
+#     id: ID!
+#     vendor: Vendor! @shareable
+#   }
+#
+#   type Vendor @shareable {
+#     id: ID!
+#     orderId: ID
+#   }
+
+schema @link(url: "https://specs.apollo.dev/link/v1.0") @link(url: "https://specs.apollo.dev/join/v0.3", for: EXECUTION) {
+  query: Query
+  mutation: Mutation
+}
+
+directive @link(url: String, as: String, for: link__Purpose, import: [link__Import]) repeatable on SCHEMA
+
+directive @join__graph(name: String!, url: String!) on ENUM_VALUE
+
+directive @join__type(graph: join__Graph!, key: join__FieldSet, extension: Boolean! = false, resolvable: Boolean! = true, isInterfaceObject: Boolean! = false) repeatable on OBJECT | INTERFACE | UNION | ENUM | INPUT_OBJECT | SCALAR
+
+directive @join__field(graph: join__Graph, requires: join__FieldSet, provides: join__FieldSet, type: String, external: Boolean, override: String, usedOverridden: Boolean) repeatable on FIELD_DEFINITION | INPUT_FIELD_DEFINITION
+
+directive @join__implements(graph: join__Graph!, interface: String!) repeatable on OBJECT | INTERFACE
+
+directive @join__unionMember(graph: join__Graph!, member: String!) repeatable on UNION
+
+directive @join__enumValue(graph: join__Graph!) repeatable on ENUM_VALUE
+
+enum link__Purpose {
+  """
+  `SECURITY` features provide metadata necessary to securely resolve fields.
+  """
+  SECURITY
+  """
+  `EXECUTION` features provide metadata necessary for operation execution.
+  """
+  EXECUTION
+}
+
+scalar link__Import
+
+enum join__Graph {
+  ORDERS @join__graph(name: "orders", url: "http://orders")
+  VENDORS @join__graph(name: "vendors", url: "http://vendors")
+}
+
+scalar join__FieldSet
+
+type Query @join__type(graph: ORDERS) @join__type(graph: VENDORS) {
+  ping: String @join__field(graph: ORDERS)
+}
+
+type Mutation @join__type(graph: ORDERS) {
+  buy: Purchase
+}
+
+type Purchase @join__type(graph: ORDERS) {
+  sub: Sub
+}
+
+type Sub @join__type(graph: ORDERS, key: "id") @join__type(graph: VENDORS, key: "id") {
+  id: ID!
+  vendor: Vendor!
+  orders: [Int] @join__field(graph: ORDERS, requires: "vendor { orderId }")
+}
+
+type Vendor @join__type(graph: ORDERS) @join__type(graph: VENDORS) {
+  id: ID!
+  orderId: ID @join__field(graph: ORDERS, external: true) @join__field(graph: VENDORS)
+}

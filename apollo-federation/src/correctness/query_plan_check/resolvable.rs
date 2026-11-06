@@ -20,41 +20,42 @@
 //! subgraph; a window is followed down the fetch's operation as the walk descends.
 
 use apollo_compiler::Name;
+use apollo_compiler::collections::IndexSet;
 use apollo_compiler::executable::FieldSet;
 use apollo_compiler::executable::Selection;
 use apollo_compiler::schema::ExtendedType;
 
 use super::ComparisonError;
-use super::selections::possible_types;
+use super::representation::SchemaTypeLookup;
 use super::subgraph::Subgraph;
 use crate::schema::ValidFederationSchema;
 
 /// One selection of a `@provides` window: a field-set selection with its arguments left out, since
 /// they do not bear on whether a field can be resolved. Without them windows can be compared, so
 /// the walk can pool the runtime types it reaches with the same window.
-#[derive(Clone, PartialEq, Eq)]
-enum WindowSelection {
-    Field(Name, Window),
-    InlineFragment(Option<Name>, Window),
+#[derive(Clone, PartialEq, Eq, Hash)]
+enum ProvidesSelection {
+    Field(Name, ProvidesWindow),
+    InlineFragment(Option<Name>, ProvidesWindow),
 }
 
 /// What a `@provides` field set grants: field names under type conditions, with the window below
 /// each. Two windows open at one position grant what either does, so they are appended.
-type Window = Vec<WindowSelection>;
+type ProvidesWindow = Vec<ProvidesSelection>;
 
 /// A runtime type with the window open on it.
-type State = (Name, Window);
+type ResolutionState = (Name, ProvidesWindow);
 
 /// The window a parsed `@provides` field set opens.
-fn window_of(selections: &[Selection]) -> Window {
+fn window_of(selections: &[Selection]) -> ProvidesWindow {
     selections
         .iter()
         .filter_map(|selection| match selection {
-            Selection::Field(field) => Some(WindowSelection::Field(
+            Selection::Field(field) => Some(ProvidesSelection::Field(
                 field.name.clone(),
                 window_of(&field.selection_set.selections),
             )),
-            Selection::InlineFragment(fragment) => Some(WindowSelection::InlineFragment(
+            Selection::InlineFragment(fragment) => Some(ProvidesSelection::InlineFragment(
                 fragment.type_condition.clone(),
                 window_of(&fragment.selection_set.selections),
             )),
@@ -66,27 +67,28 @@ fn window_of(selections: &[Selection]) -> Window {
 
 /// Spec `DoesFragmentTypeApply` at a known runtime object type.
 fn does_fragment_type_apply(
-    schema: &ValidFederationSchema,
+    type_lookup: &SchemaTypeLookup<'_>,
     object_type: &Name,
     type_condition: Option<&Name>,
 ) -> bool {
-    type_condition.is_none_or(|condition| possible_types(schema, condition).contains(object_type))
+    type_condition
+        .is_none_or(|condition| type_lookup.possible_types(condition).contains(object_type))
 }
 
 /// One level of a window at a runtime type: each field it names there, with the window below that
 /// occurrence.
 fn fields_at<'w>(
-    schema: &ValidFederationSchema,
+    type_lookup: &SchemaTypeLookup<'_>,
     object_type: &Name,
-    window: &'w Window,
-    out: &mut Vec<(&'w Name, &'w Window)>,
+    window: &'w ProvidesWindow,
+    out: &mut Vec<(&'w Name, &'w ProvidesWindow)>,
 ) {
     for selection in window {
         match selection {
-            WindowSelection::Field(name, below) => out.push((name, below)),
-            WindowSelection::InlineFragment(type_condition, selections) => {
-                if does_fragment_type_apply(schema, object_type, type_condition.as_ref()) {
-                    fields_at(schema, object_type, selections, out);
+            ProvidesSelection::Field(name, below) => out.push((name, below)),
+            ProvidesSelection::InlineFragment(type_condition, selections) => {
+                if does_fragment_type_apply(type_lookup, object_type, type_condition.as_ref()) {
+                    fields_at(type_lookup, object_type, selections, out);
                 }
             }
         }
@@ -96,13 +98,13 @@ fn fields_at<'w>(
 /// A window's grant of a field at a runtime type: `None` if the window does not name the field
 /// there, and otherwise the windows below the field's occurrences there, together.
 fn grant(
-    schema: &ValidFederationSchema,
+    type_lookup: &SchemaTypeLookup<'_>,
     object_type: &Name,
     field_name: &Name,
-    window: &Window,
-) -> Option<Window> {
+    window: &ProvidesWindow,
+) -> Option<ProvidesWindow> {
     let mut fields = Vec::new();
-    fields_at(schema, object_type, window, &mut fields);
+    fields_at(type_lookup, object_type, window, &mut fields);
     let mut occurrences = fields
         .into_iter()
         .filter(|(name, _)| *name == field_name)
@@ -130,6 +132,8 @@ fn field_type(
 struct Walk<'a> {
     subgraph: Subgraph<'a>,
     schema: &'a ValidFederationSchema,
+    /// The subgraph's possible types, looked up once per fetch.
+    type_lookup: SchemaTypeLookup<'a>,
 }
 
 impl Walk<'_> {
@@ -139,9 +143,10 @@ impl Walk<'_> {
         &self,
         object_type: &Name,
         field_name: &Name,
-        window: &Window,
-    ) -> Result<Window, ComparisonError> {
-        let mut below = grant(self.schema, object_type, field_name, window).unwrap_or_default();
+        window: &ProvidesWindow,
+    ) -> Result<ProvidesWindow, ComparisonError> {
+        let mut below =
+            grant(&self.type_lookup, object_type, field_name, window).unwrap_or_default();
         if let Some(fields) = self.subgraph.provides(object_type, field_name)?
             && let Some(child_type) = field_type(self.schema, object_type, field_name)
         {
@@ -166,7 +171,7 @@ impl Walk<'_> {
     /// malformed `@provides`.
     fn selections_resolvable(
         &self,
-        states: &[State],
+        states: &[ResolutionState],
         selections: &[Selection],
     ) -> Result<Option<String>, ComparisonError> {
         for selection in selections {
@@ -176,7 +181,8 @@ impl Walk<'_> {
                     if !field.name.starts_with("__") {
                         for (object_type, window) in states {
                             if self.subgraph.is_external(object_type, &field.name)
-                                && grant(self.schema, object_type, &field.name, window).is_none()
+                                && grant(&self.type_lookup, object_type, &field.name, window)
+                                    .is_none()
                             {
                                 return Ok(Some(format!(
                                     "`{object_type}.{}` is `@external` there, \
@@ -186,28 +192,26 @@ impl Walk<'_> {
                             }
                         }
                     }
-                    let mut below: Vec<State> = Vec::new();
+                    let mut below: IndexSet<ResolutionState> = IndexSet::default();
                     for (object_type, window) in states {
                         let Some(child_type) = field_type(self.schema, object_type, &field.name)
                         else {
                             continue;
                         };
                         let child_window = self.window_below(object_type, &field.name, window)?;
-                        for runtime_type in possible_types(self.schema, &child_type) {
-                            let state = (runtime_type, child_window.clone());
-                            if !below.contains(&state) {
-                                below.push(state);
-                            }
+                        for runtime_type in self.type_lookup.possible_types(&child_type).iter() {
+                            below.insert((runtime_type.clone(), child_window.clone()));
                         }
                     }
+                    let below: Vec<ResolutionState> = below.into_iter().collect();
                     self.selections_resolvable(&below, &field.selection_set.selections)?
                 }
                 Selection::InlineFragment(fragment) => {
-                    let applying: Vec<State> = states
+                    let applying: Vec<ResolutionState> = states
                         .iter()
                         .filter(|(object_type, _)| {
                             does_fragment_type_apply(
-                                self.schema,
+                                &self.type_lookup,
                                 object_type,
                                 fragment.type_condition.as_ref(),
                             )
@@ -238,8 +242,9 @@ pub(super) fn check_fetch_selects_resolvable(
     let walk = Walk {
         subgraph: Subgraph::new(subgraph_schema)?,
         schema: subgraph_schema,
+        type_lookup: SchemaTypeLookup::new(subgraph_schema),
     };
-    match walk.selections_resolvable(&[(root_type.clone(), Window::new())], selections)? {
+    match walk.selections_resolvable(&[(root_type.clone(), ProvidesWindow::new())], selections)? {
         None => Ok(()),
         Some(reason) => Err(ComparisonError::new(format!(
             "fetch to {subgraph_name} selects what the subgraph does not resolve: {reason}"

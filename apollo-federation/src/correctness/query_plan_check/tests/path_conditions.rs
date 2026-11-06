@@ -367,6 +367,69 @@ fn fetch_under_an_index_condition_is_accepted() {
     .unwrap();
 }
 
+/// `catalog` fetches the items' keys, then `reviews` their `blurb` twice: at `items.@`, which
+/// reaches every item, and at `items.@|[]`, which reaches none.
+fn check_live_and_dead_blurb(options: CheckerOptions) -> Result<(), CorrectnessError> {
+    let fixture = catalog();
+    let requires = requires_by_id(&["Book", "Film"]);
+    let operation = entities("... on Book { blurb } ... on Film { blurb }");
+    let blurb_at = |path: &[FetchDataPathElement]| {
+        format!(
+            r#"{{ "Flatten": {{
+                "path": {},
+                "node": {{ "Fetch": {{
+                    "subgraph_name": "reviews",
+                    "requires": {requires},
+                    "operation_document": "{operation}",
+                    {FETCH_TAIL}
+                }} }}
+            }} }}"#,
+            serde_json::to_string(path).unwrap()
+        )
+    };
+    let plan = fixture.written_plan(&format!(
+        r#"{{ "Sequence": {{ "nodes": [
+            {{ "Fetch": {{
+                "subgraph_name": "catalog",
+                "operation_document": "{{ items {{ {ITEM_KEYS} }} }}",
+                {FETCH_TAIL}
+            }} }},
+            {},
+            {}
+        ] }} }}"#,
+        blurb_at(&[key("items", None), index(None)]),
+        blurb_at(&[key("items", None), index(Some(&[]))]),
+    ));
+    crate::correctness::check_plan_with_options(
+        &fixture.api_schema,
+        &fixture.supergraph_schema,
+        &fixture.subgraphs,
+        &fixture.operation(ITEMS_BLURB),
+        &plan,
+        options,
+    )
+}
+
+// FED-516: the planner wrote a fetch under `…|[]`, which never runs. The plan is otherwise
+// complete, so it is the report alone that rejects it.
+#[test]
+fn dead_fetch_beside_a_live_one_is_reported() {
+    expect_rejected(
+        check_live_and_dead_blurb(CheckerOptions::default()),
+        "no runtime type",
+    );
+}
+
+// With the report off the dead fetch is harmless: the live one fetches every `blurb`.
+#[test]
+fn dead_fetch_beside_a_live_one_is_accepted_without_the_report() {
+    check_live_and_dead_blurb(CheckerOptions {
+        check_empty_flatten_path_type_condition: false,
+        ..Default::default()
+    })
+    .unwrap();
+}
+
 //==================================================================================================
 // The `__typename` a path condition tests
 
@@ -452,4 +515,21 @@ fn fetched_value_does_not_excuse_the_test() {
         fixture.check(&plan, CHILD_VALUE),
         "tests `__typename` at `parent|[Parent]`",
     );
+}
+
+// With the parent's `__typename` fetched too, the entity fetch's test is met, and the plan is
+// complete without it.
+#[test]
+fn fetched_value_with_the_test_is_accepted() {
+    let fixture = parents();
+    let plan = root_then_entities(
+        &fixture,
+        "first",
+        "{ parent { __typename child { __typename id value } } }",
+        &[key("parent", Some(&["Parent"])), key("child", None)],
+        "children",
+        &["Child"],
+        "value",
+    );
+    fixture.check(&plan, CHILD_VALUE).unwrap();
 }

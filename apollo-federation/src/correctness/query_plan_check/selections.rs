@@ -274,7 +274,104 @@ pub(super) fn under_directives(
         })
 }
 
-fn selection_set(ty: Name, selections: Vec<Selection>) -> SelectionSet {
+/// An inline fragment on `type_condition` under `directives`, the first on it and the rest nested
+/// inside ([`under_directives`]), as `wrap_selection_with_type_and_conditions` writes one.
+pub(super) fn inline_fragment_under(
+    type_condition: Option<&Name>,
+    parent_type: &Name,
+    directives: &ast::DirectiveList,
+    selections: Vec<Selection>,
+) -> Selection {
+    let ty = type_condition.unwrap_or(parent_type).clone();
+    let (first, rest) = match directives.split_first() {
+        Some((first, rest)) => (
+            ast::DirectiveList(vec![first.clone()]),
+            ast::DirectiveList(rest.to_vec()),
+        ),
+        None => (ast::DirectiveList::default(), ast::DirectiveList::default()),
+    };
+    Selection::InlineFragment(Node::new(InlineFragment {
+        type_condition: type_condition.cloned(),
+        directives: first,
+        selection_set: selection_set(ty.clone(), under_directives(&rest, &ty, selections)),
+    }))
+}
+
+/// `selections` with fragments that say nothing removed: a fragment with no directives on the
+/// type of the fragment directly enclosing it is spliced into it, and adjacent sibling fragments
+/// on one type under the same directives are merged into the first. Neither changes what is
+/// selected, under which types and conditions, or in which order, so inclusion reads the result as
+/// it reads `selections`; it only has fewer fragments to read. Only adjacent fragments are merged,
+/// since field collection takes the first field of a response key as the group's representative.
+pub(super) fn collapse_fragments(selections: Vec<Selection>) -> Vec<Selection> {
+    collapse_under(None, selections)
+}
+
+fn collapse_under(enclosing: Option<&Name>, selections: Vec<Selection>) -> Vec<Selection> {
+    let mut out: Vec<Selection> = Vec::with_capacity(selections.len());
+    for selection in selections {
+        match selection {
+            Selection::Field(field) => {
+                let mut copy = (*field).clone();
+                copy.selection_set.selections =
+                    collapse_under(None, std::mem::take(&mut copy.selection_set.selections));
+                out.push(Selection::Field(Node::new(copy)));
+            }
+            Selection::InlineFragment(fragment) => {
+                let mut copy = (*fragment).clone();
+                let inner = collapse_under(
+                    copy.type_condition.as_ref(),
+                    std::mem::take(&mut copy.selection_set.selections),
+                );
+                if copy.directives.is_empty()
+                    && copy.type_condition.is_some()
+                    && copy.type_condition.as_ref() == enclosing
+                {
+                    out.extend(inner);
+                    continue;
+                }
+                if let Some(Selection::InlineFragment(previous)) = out.last_mut()
+                    && previous.type_condition == copy.type_condition
+                    && previous.directives == copy.directives
+                {
+                    previous.make_mut().selection_set.selections.extend(inner);
+                    continue;
+                }
+                copy.selection_set.selections = inner;
+                out.push(Selection::InlineFragment(Node::new(copy)));
+            }
+            Selection::FragmentSpread(_) => out.push(selection),
+        }
+    }
+    out
+}
+
+/// A `requires` entry's `@skip`/`@include` conditions as the directives they stand for.
+pub(super) fn condition_directives(
+    conditions: &[crate::query_plan::requires_selection::Condition],
+) -> ast::DirectiveList {
+    use crate::query_plan::requires_selection::ConditionValue;
+    ast::DirectiveList(
+        conditions
+            .iter()
+            .map(|condition| {
+                let value = match &condition.if_ {
+                    ConditionValue::Boolean(value) => ast::Value::Boolean(*value),
+                    ConditionValue::Variable(name) => ast::Value::Variable(name.clone()),
+                };
+                Node::new(ast::Directive {
+                    name: condition.kind.directive_name(),
+                    arguments: vec![Node::new(ast::Argument {
+                        name: apollo_compiler::name!("if"),
+                        value: Node::new(value),
+                    })],
+                })
+            })
+            .collect(),
+    )
+}
+
+pub(super) fn selection_set(ty: Name, selections: Vec<Selection>) -> SelectionSet {
     let mut set = SelectionSet::new(ty);
     set.selections = selections;
     set
@@ -655,9 +752,16 @@ fn rename_key_at(
             new_key,
             selections,
         ),
-        FetchDataPathElement::Key(name, _) => {
-            rename_key_under(schema, applies, name, rest, new_key, selections)
-        }
+        FetchDataPathElement::Key(name, _) => rename_key_under(
+            schema,
+            applies,
+            type_filter,
+            guards,
+            name,
+            rest,
+            new_key,
+            selections,
+        ),
         FetchDataPathElement::TypenameEquals(type_name) => {
             let mut type_filter = type_filter.to_vec();
             type_filter.push(type_name.clone());
@@ -687,11 +791,15 @@ fn rename_key_at(
     }
 }
 
-/// Descends past one response key, carrying the rest of the path. A new level starts with no type
-/// filter and no guards, as `rename_at_path` starts with a fresh one.
+/// Descends past one response key, carrying the rest of the path, where `applies` admits the
+/// filter against the guards in force, as `rename_at_path` filters before it descends. A new level
+/// starts with no type filter and no guards, as `rename_at_path` starts with a fresh one.
+#[allow(clippy::too_many_arguments)]
 fn rename_key_under(
     schema: &ValidFederationSchema,
     applies: TypeFilterTest,
+    type_filter: &[Name],
+    guards: &[Name],
     name: &Name,
     path: &[FetchDataPathElement],
     new_key: &Name,
@@ -700,7 +808,9 @@ fn rename_key_under(
     selections
         .into_iter()
         .map(|selection| match selection {
-            Selection::Field(field) if field.response_name() == name => {
+            Selection::Field(field)
+                if field.response_name() == name && applies(schema, type_filter, guards) =>
+            {
                 let mut copy = (*field).clone();
                 copy.selection_set.selections = rename_key_at(
                     schema,
@@ -715,9 +825,15 @@ fn rename_key_under(
             }
             Selection::InlineFragment(fragment) => {
                 let mut copy = (*fragment).clone();
+                let mut inner_guards = guards.to_vec();
+                if let Some(type_condition) = &fragment.type_condition {
+                    inner_guards.push(type_condition.clone());
+                }
                 copy.selection_set.selections = rename_key_under(
                     schema,
                     applies,
+                    type_filter,
+                    &inner_guards,
                     name,
                     path,
                     new_key,

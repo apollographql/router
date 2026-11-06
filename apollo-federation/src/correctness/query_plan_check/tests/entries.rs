@@ -1,0 +1,983 @@
+//! A fetch's entries, their conditions, and the representation merged from them.
+//!
+//! Ports of the model's tests on what an entry sends of a narrowed demand, on the input key
+//! renamers an entry reads through, and of its `EntryConditions` and `Representations` tests. Most
+//! check a whole plan: a root fetch supplying the inputs, then one entity fetch. The rest call the
+//! definition under test directly, where the model evaluates it directly too.
+
+use apollo_compiler::ExecutableDocument;
+use apollo_compiler::Name;
+use apollo_compiler::executable::Selection;
+use apollo_compiler::name;
+use apollo_compiler::schema::Schema;
+
+use super::super::representation::input_rewrites_separated;
+use super::super::representation::key_guards;
+use super::super::requires::Reading;
+use super::super::requires::entry_selections;
+use super::super::requires::same_keys;
+use super::super::selections::apply_key_renamers;
+use super::super::selections::type_filter_admits;
+use super::Fixture;
+use crate::correctness::CorrectnessError;
+use crate::query_plan::FetchDataPathElement;
+use crate::query_plan::FetchDataRewrite;
+use crate::query_plan::FetchNode;
+use crate::query_plan::QueryPlan;
+use crate::query_plan::requires_selection;
+use crate::schema::ValidFederationSchema;
+
+//==================================================================================================
+// Writing plans
+
+/// A `requires` field, read under its own name.
+fn field(name: &str) -> String {
+    format!(r#"{{ "kind": "Field", "name": "{name}" }}"#)
+}
+
+/// A `requires` field read under `alias`.
+fn aliased(alias: &str, name: &str) -> String {
+    format!(r#"{{ "kind": "Field", "alias": "{alias}", "name": "{name}" }}"#)
+}
+
+/// A `requires` field with a selection set.
+fn field_with(name: &str, selections: &[String]) -> String {
+    format!(
+        r#"{{ "kind": "Field", "name": "{name}", "selections": [{}] }}"#,
+        selections.join(", ")
+    )
+}
+
+/// A `requires` inline fragment, read only where each of `included` holds, each an `@include`
+/// on a variable.
+fn fragment(type_condition: Option<&str>, included: &[&str], selections: &[String]) -> String {
+    let conditions: Vec<(&str, &str)> = included
+        .iter()
+        .map(|variable| ("include", *variable))
+        .collect();
+    fragment_under(type_condition, &conditions, selections)
+}
+
+/// A `requires` inline fragment under `conditions`, each a directive kind (`include` or `skip`)
+/// on a variable.
+fn fragment_under(
+    type_condition: Option<&str>,
+    conditions: &[(&str, &str)],
+    selections: &[String],
+) -> String {
+    let type_condition = type_condition
+        .map(|name| format!(r#""typeCondition": "{name}", "#))
+        .unwrap_or_default();
+    let conditions = conditions
+        .iter()
+        .map(|(kind, variable)| format!(r#"{{ "kind": "{kind}", "if": "{variable}" }}"#))
+        .collect::<Vec<_>>()
+        .join(", ");
+    format!(
+        r#"{{ "kind": "InlineFragment", {type_condition}"conditions": [{conditions}], "selections": [{}] }}"#,
+        selections.join(", ")
+    )
+}
+
+fn on(type_condition: &str, selections: &[String]) -> String {
+    fragment(Some(type_condition), &[], selections)
+}
+
+/// An input key renamer from the key `path` reaches to `to`.
+fn renamer(path: &[FetchDataPathElement], to: &str) -> String {
+    format!(
+        r#"{{ "KeyRenamer": {{ "path": {}, "rename_key_to": "{to}" }} }}"#,
+        serde_json::to_string(path).unwrap()
+    )
+}
+
+fn key(name: &str) -> FetchDataPathElement {
+    FetchDataPathElement::Key(Name::new(name).unwrap(), None)
+}
+
+fn typename_equals(type_name: &str) -> FetchDataPathElement {
+    FetchDataPathElement::TypenameEquals(Name::new(type_name).unwrap())
+}
+
+/// A fetch, as the JSON plan writes it. An entity fetch has `requires`, and `operation` is then
+/// what it selects under `_entities`. `variables` are the Boolean variables `operation` reads.
+fn fetch_json(
+    subgraph: &str,
+    variables: &[&str],
+    requires: &[String],
+    input_rewrites: &[String],
+    operation: &str,
+) -> String {
+    let declarations = variables
+        .iter()
+        .map(|variable| format!("${variable}: Boolean!"))
+        .collect::<Vec<_>>();
+    let operation = if requires.is_empty() {
+        if declarations.is_empty() {
+            operation.to_string()
+        } else {
+            format!("query({}) {operation}", declarations.join(", "))
+        }
+    } else {
+        let declarations = std::iter::once("$representations: [_Any!]!".to_string())
+            .chain(declarations)
+            .collect::<Vec<_>>();
+        format!(
+            "query({}) {{ _entities(representations: $representations) {{ {operation} }} }}",
+            declarations.join(", ")
+        )
+    };
+    let variable_usages = variables
+        .iter()
+        .map(|variable| format!(r#""{variable}""#))
+        .collect::<Vec<_>>()
+        .join(", ");
+    format!(
+        r#"{{
+            "subgraph_name": "{subgraph}",
+            "id": null,
+            "variable_usages": [{variable_usages}],
+            "requires": [{}],
+            "operation_document": "{operation}",
+            "operation_name": null,
+            "operation_kind": "query",
+            "input_rewrites": [{}],
+            "output_rewrites": [],
+            "context_rewrites": []
+        }}"#,
+        requires.join(", "),
+        input_rewrites.join(", ")
+    )
+}
+
+/// `root`, a root fetch, then `entities`, an entity fetch, at `path`.
+fn root_then_entities(fixture: &Fixture, root: &str, path: &str, entities: &str) -> QueryPlan {
+    fixture.written_plan(&format!(
+        r#"{{ "Sequence": {{ "nodes": [
+            {{ "Fetch": {root} }},
+            {{ "Flatten": {{ "path": {path}, "node": {{ "Fetch": {entities} }} }} }}
+        ] }} }}"#
+    ))
+}
+
+#[track_caller]
+fn assert_rejected(result: Result<(), CorrectnessError>, reason: &str) {
+    let error = result.expect_err("expected the check to reject this plan");
+    assert!(error.to_string().contains(reason), "{error}");
+}
+
+//==================================================================================================
+// What an entry sends of a narrowed demand
+
+/// `locations` serves each location's `media`, a `Photo` or a `Video`; `gallery` resolves a
+/// `Location` by `id`, its `photoCount` requiring `media { ... on Photo { id } }` and its
+/// `mediaCount` requiring `media { id }`.
+fn gallery() -> Fixture {
+    Fixture::new(include_str!("../testdata/media_requires.graphql"))
+}
+
+/// Every location's `count`, asked of `gallery` through one entry reading `media` as `media`.
+fn check_media_count(count: &str, media: &[String]) -> Result<(), CorrectnessError> {
+    let fixture = gallery();
+    let entry = on(
+        "Location",
+        &[field("__typename"), field("id"), field_with("media", media)],
+    );
+    let plan = root_then_entities(
+        &fixture,
+        &fetch_json(
+            "locations",
+            &[],
+            &[],
+            &[],
+            "{ locations { __typename id media { __typename id } } }",
+        ),
+        r#"[{ "Key": ["locations", null] }, { "AnyIndex": null }]"#,
+        &fetch_json(
+            "gallery",
+            &[],
+            &[entry],
+            &[],
+            &format!("... on Location {{ {count} }}"),
+        ),
+    );
+    fixture.check(&plan, &format!("{{ locations {{ {count} }} }}"))
+}
+
+// `gallery` asks only for each photo's `id`; the entry sends every medium's `id`, a video's too,
+// which the plan fetched, so sending more than the demand is fine.
+#[test]
+fn entry_wider_than_a_narrowed_demand_covers_it() {
+    check_media_count("photoCount", &[field("id")]).unwrap();
+}
+
+// `gallery` asks for every medium's `id`, and the entry sends it only for a photo: a video is sent
+// without its `id`.
+#[test]
+fn narrower_entry_does_not_cover_the_demand() {
+    assert_rejected(
+        check_media_count("mediaCount", &[on("Photo", &[field("id")])]),
+        "the entries do not send what the subgraph demands",
+    );
+}
+
+//==================================================================================================
+// The input key renamers an entry reads through
+
+/// `catalog` serves the feed of `Book`s and `Film`s and declares `Item` an entity interface;
+/// `reviews` resolves a `Book` or a `Film` by `id`, its `blurb` requiring `isbn`; `notes` declares
+/// `Item` an interface object, resolved by `id`, its `note` requiring `isbn`.
+fn books() -> Fixture {
+    Fixture::new(include_str!("../testdata/book_film_isbn.graphql"))
+}
+
+const FEED_PATH: &str = r#"[{ "Key": ["feed", null] }, { "AnyIndex": null }]"#;
+
+/// The `requires` entry for `type_name`, its key and `input`.
+fn entry_on(type_name: &str, input: String) -> String {
+    on(type_name, &[field("__typename"), field("id"), input])
+}
+
+/// `catalog` fetching the feed, each `Book` selecting `__typename id book` and, if given, each
+/// `Film` selecting `__typename id film`.
+fn feed_fetch(book: &str, film: Option<&str>) -> String {
+    let film = film
+        .map(|film| format!(" ... on Film {{ __typename id {film} }}"))
+        .unwrap_or_default();
+    fetch_json(
+        "catalog",
+        &[],
+        &[],
+        &[],
+        &format!("{{ feed {{ __typename ... on Book {{ __typename id {book} }}{film} }} }}"),
+    )
+}
+
+/// The feed fetched by `feed`, then every `Book`'s `blurb` from `reviews` through `entry`.
+fn check_book_blurbs(
+    feed: &str,
+    entry: String,
+    input_rewrites: &[String],
+) -> Result<(), CorrectnessError> {
+    let fixture = books();
+    let plan = root_then_entities(
+        &fixture,
+        &feed_fetch(feed, None),
+        FEED_PATH,
+        &fetch_json(
+            "reviews",
+            &[],
+            &[entry],
+            input_rewrites,
+            "... on Book { blurb }",
+        ),
+    );
+    fixture.check(&plan, "{ feed { ... on Book { blurb } } }")
+}
+
+/// The feed fetched by `book` and `film`, then every item's `blurb` from `reviews`, one entry for
+/// each type.
+fn check_item_blurbs(
+    (book, book_input): (&str, String),
+    (film, film_input): (&str, String),
+    input_rewrites: &[String],
+) -> Result<(), CorrectnessError> {
+    let fixture = books();
+    let plan = root_then_entities(
+        &fixture,
+        &feed_fetch(book, Some(film)),
+        FEED_PATH,
+        &fetch_json(
+            "reviews",
+            &[],
+            &[entry_on("Book", book_input), entry_on("Film", film_input)],
+            input_rewrites,
+            "... on Book { blurb } ... on Film { blurb }",
+        ),
+    );
+    fixture.check(
+        &plan,
+        "{ feed { ... on Book { blurb } ... on Film { blurb } } }",
+    )
+}
+
+fn rename_isbn_back() -> String {
+    renamer(&[key("__require_0_isbn")], "isbn")
+}
+
+// The renamer is from `__require_0_isbn`, which the entry does not read, so the router renames
+// nothing in what it reads and sends `isbn` read under its own name. The plan fetched `isbn` only
+// under the alias, so the plain `isbn` the entry reads is not there.
+#[test]
+fn renamer_the_entry_does_not_read_leaves_it_alone() {
+    assert_rejected(
+        check_book_blurbs(
+            "__require_0_isbn: isbn",
+            entry_on("Book", field("isbn")),
+            &[rename_isbn_back()],
+        ),
+        "reads a key the plan has not fetched",
+    );
+}
+
+// With `isbn` fetched under its own name the router reads it there, and the renamer renames
+// nothing.
+#[test]
+fn renamer_the_entry_does_not_read_is_accepted() {
+    check_book_blurbs(
+        "isbn",
+        entry_on("Book", field("isbn")),
+        &[rename_isbn_back()],
+    )
+    .unwrap();
+}
+
+/// A fetch to `reviews` sent `entries`, with only `rename_isbn_back` as its input rewrites.
+fn renaming_fetch(entries: &[String]) -> FetchNode {
+    serde_json::from_str(&fetch_json(
+        "reviews",
+        &[],
+        entries,
+        &[rename_isbn_back()],
+        "... on Book { blurb } ... on Film { blurb }",
+    ))
+    .unwrap()
+}
+
+// The alias and a plain `isbn` are both sent as `isbn`. A `Book` representation and a `Film` one
+// each hold one of them; a `Book` representation holding both would carry two values under one
+// key.
+#[test]
+fn alias_beside_plain_field_is_separated_only_across_types() {
+    let fixture = books();
+    let aliased_book = entry_on("Book", aliased("__require_0_isbn", "isbn"));
+    let across_types = renaming_fetch(&[aliased_book.clone(), entry_on("Film", field("isbn"))]);
+    let one_type = renaming_fetch(&[aliased_book, entry_on("Book", field("isbn"))]);
+    assert!(input_rewrites_separated(&fixture.supergraph_schema, &across_types).is_ok());
+    assert!(input_rewrites_separated(&fixture.supergraph_schema, &one_type).is_err());
+}
+
+// Only `Book` aliases its input, and the renamer applies to every type. No `Film` entry reads the
+// alias, so a `Film` representation is sent the `isbn` it read under its own name.
+#[test]
+fn unscoped_renamer_shared_across_entity_types_is_accepted() {
+    check_item_blurbs(
+        (
+            "__require_0_isbn: isbn",
+            aliased("__require_0_isbn", "isbn"),
+        ),
+        ("isbn", field("isbn")),
+        &[rename_isbn_back()],
+    )
+    .unwrap();
+}
+
+// The same renamer scoped to `Book`: an input renamer that renames for some types and not others
+// is not one the checker can read the entries through.
+#[test]
+fn renamer_scoped_to_its_type_is_rejected() {
+    assert_rejected(
+        check_item_blurbs(
+            (
+                "__require_0_isbn: isbn",
+                aliased("__require_0_isbn", "isbn"),
+            ),
+            ("isbn", field("isbn")),
+            &[renamer(
+                &[typename_equals("Book"), key("__require_0_isbn")],
+                "isbn",
+            )],
+        ),
+        "tests the type of what it renames",
+    );
+}
+
+// `X -> isbn` on `Book` and `Y -> isbn` on `Film`: each renamer filters by type, which an input
+// renamer may not.
+#[test]
+fn renamers_onto_one_key_for_disjoint_types_are_rejected() {
+    assert_rejected(
+        check_item_blurbs(
+            ("X: isbn", aliased("X", "isbn")),
+            ("Y: isbn", aliased("Y", "isbn")),
+            &[
+                renamer(&[typename_equals("Book"), key("X")], "isbn"),
+                renamer(&[typename_equals("Film"), key("Y")], "isbn"),
+            ],
+        ),
+        "tests the type of what it renames",
+    );
+}
+
+// The same aliases without type filters: both rename onto `isbn`, but a `Book` representation
+// holds only `X` and a `Film` one only `Y`, so each is sent one `isbn`.
+#[test]
+fn two_aliases_for_one_field_on_disjoint_types_are_accepted() {
+    check_item_blurbs(
+        ("X: isbn", aliased("X", "isbn")),
+        ("Y: isbn", aliased("Y", "isbn")),
+        &[renamer(&[key("X")], "isbn"), renamer(&[key("Y")], "isbn")],
+    )
+    .unwrap();
+}
+
+// One alias `a` for `isbn` on both types, and one renamer naming it back for both.
+#[test]
+fn shared_alias_across_disjoint_types_is_accepted() {
+    check_item_blurbs(
+        ("a: isbn", aliased("a", "isbn")),
+        ("a: isbn", aliased("a", "isbn")),
+        &[renamer(&[key("a")], "isbn")],
+    )
+    .unwrap();
+}
+
+// `a` holds `isbn` on a `Book` but `title` on a `Film`, and the one renamer sends it as `isbn`
+// for both: a `Film` would be sent its title as its `isbn`. (The model's `Film` aliases `id`,
+// which an operation cannot select beside a `String` under one response key.)
+#[test]
+fn shared_alias_for_different_fields_is_rejected() {
+    assert_rejected(
+        check_item_blurbs(
+            ("a: isbn", aliased("a", "isbn")),
+            ("a: title", aliased("a", "title")),
+            &[renamer(&[key("a")], "isbn")],
+        ),
+        "does not agree with the fetch's input rewrites",
+    );
+}
+
+//==================================================================================================
+// An interface object's entries
+
+/// The feed fetched by `feed`, then every `Book`'s `note` from `notes`, which knows only `Item`,
+/// through `entry`.
+fn check_book_notes(
+    feed: &str,
+    entry: String,
+    input_rewrites: &[String],
+) -> Result<(), CorrectnessError> {
+    let fixture = books();
+    let plan = root_then_entities(
+        &fixture,
+        &feed_fetch(feed, None),
+        FEED_PATH,
+        &fetch_json(
+            "notes",
+            &[],
+            &[entry],
+            input_rewrites,
+            "... on Item { note }",
+        ),
+    );
+    fixture.check(&plan, "{ feed { ... on Book { note } } }")
+}
+
+// `isbn` aliased for a `Book` and named back by a renamer scoped to `Book`, which an input renamer
+// may not be, though the interface object's case is written at `Item`.
+#[test]
+fn interface_object_with_renamer_scoped_to_its_type_is_rejected() {
+    assert_rejected(
+        check_book_notes(
+            "__require_0_isbn: isbn",
+            entry_on("Book", aliased("__require_0_isbn", "isbn")),
+            &[renamer(
+                &[typename_equals("Book"), key("__require_0_isbn")],
+                "isbn",
+            )],
+        ),
+        "tests the type of what it renames",
+    );
+}
+
+// The `Item` case is sent only `Book` representations, so it is checked at `Book` alone. No
+// `Film` is sent, and nothing is compared for one: there is nothing to compare.
+#[test]
+fn interface_object_compares_no_empty_operation() {
+    check_book_notes("isbn", entry_on("Book", field("isbn")), &[]).unwrap();
+}
+
+//==================================================================================================
+// A renamer's type filter
+
+// `rename_at_path` tests a `TypenameEquals` before descending past the key after it, so a renamer
+// written `|Book.a.b` renames `b` below a `Book`'s `a` and not below a `Film`'s.
+#[test]
+fn typename_equals_filters_the_descent() {
+    let schema = Schema::parse_and_validate(
+        r#"
+            type Query { feed: [Item] }
+            interface Item { a: A }
+            type Book implements Item { a: A }
+            type Film implements Item { a: A }
+            type A { b: Int }
+        "#,
+        "schema.graphql",
+    )
+    .unwrap();
+    let schema = ValidFederationSchema::new(schema).unwrap();
+    let feed = |operation: &str| -> Vec<Selection> {
+        let document =
+            ExecutableDocument::parse_and_validate(schema.schema(), operation, "operation.graphql")
+                .unwrap();
+        let Selection::Field(feed) = &document
+            .operations
+            .get(None)
+            .unwrap()
+            .selection_set
+            .selections[0]
+        else {
+            unreachable!("the operation selects `feed`")
+        };
+        feed.selection_set.selections.clone()
+    };
+    let rewrite = serde_json::from_str::<FetchDataRewrite>(&renamer(
+        &[typename_equals("Book"), key("a"), key("b")],
+        "c",
+    ))
+    .unwrap();
+    let renamed = apply_key_renamers(
+        &schema,
+        type_filter_admits,
+        &[rewrite.into()],
+        feed("{ feed { ... on Book { a { b } } ... on Film { a { b } } } }"),
+    );
+    assert!(same_keys(
+        &renamed,
+        &feed("{ feed { ... on Book { a { c: b } } ... on Film { a { b } } } }"),
+    ));
+}
+
+//==================================================================================================
+// An entry's conditions
+
+/// `first` serves each `T` and its `a`, `e` and `u`; `second` resolves a `T` by `id`, its `b`
+/// requiring `a`, its `d` requiring `e`, its `both` requiring `u { left right }`, and its `c`
+/// requiring nothing. `T` implements `I`, which has `a`.
+fn representations() -> Fixture {
+    Fixture::new(include_str!("../testdata/entry_representations.graphql"))
+}
+
+fn key_inputs() -> Vec<String> {
+    vec![field("__typename"), field("id")]
+}
+
+fn key_inputs_and(more: Vec<String>) -> Vec<String> {
+    let mut inputs = key_inputs();
+    inputs.extend(more);
+    inputs
+}
+
+/// `first` fetches `fetched` under `t`, then `second` is sent `entries` and runs `cases` under
+/// `_entities`, for a client asking `asked` under `t`. Any of them may read `$x` and `$y`.
+fn check_t(
+    fetched: &str,
+    entries: &[String],
+    cases: &str,
+    asked: &str,
+) -> Result<(), CorrectnessError> {
+    let fixture = representations();
+    let variables = |text: &str| {
+        ["x", "y"]
+            .into_iter()
+            .filter(|variable| text.contains(&format!("${variable}")))
+            .collect::<Vec<_>>()
+    };
+    let plan = root_then_entities(
+        &fixture,
+        &fetch_json(
+            "first",
+            &variables(fetched),
+            &[],
+            &[],
+            &format!("{{ t {{ {fetched} }} }}"),
+        ),
+        r#"[{ "Key": ["t", null] }]"#,
+        &fetch_json("second", &variables(cases), entries, &[], cases),
+    );
+    let declared = variables(asked)
+        .iter()
+        .map(|variable| format!("${variable}: Boolean!"))
+        .collect::<Vec<_>>();
+    let declarations = if declared.is_empty() {
+        String::new()
+    } else {
+        format!("({})", declared.join(", "))
+    };
+    fixture.check(&plan, &format!("query{declarations} {{ t {{ {asked} }} }}"))
+}
+
+const KEY_AND_A: &str = "__typename id a";
+
+// The entry is read only where `$x` holds, and `b` is asked only there: where `$x` is false the
+// router sends nothing, and nothing is owed.
+#[test]
+fn conditioned_entry_for_a_conditioned_field_is_accepted() {
+    check_t(
+        KEY_AND_A,
+        &[fragment(
+            Some("T"),
+            &["x"],
+            &key_inputs_and(vec![field("a")]),
+        )],
+        "... on T { b }",
+        "b @include(if: $x)",
+    )
+    .unwrap();
+}
+
+// The same entry for a `b` asked whatever `$x` is: where `$x` is false no representation is sent,
+// so nothing fetches `b`.
+#[test]
+fn conditioned_entry_for_an_unconditioned_field_is_rejected() {
+    assert_rejected(
+        check_t(
+            KEY_AND_A,
+            &[fragment(
+                Some("T"),
+                &["x"],
+                &key_inputs_and(vec![field("a")]),
+            )],
+            "... on T { b }",
+            "b",
+        ),
+        "query plan does not fetch everything the operation requests",
+    );
+}
+
+// The entry sends `a` only where `$x` holds, but `b` is selected whatever `$x` is: where it is
+// false, `second` is asked for `b` without its input.
+#[test]
+fn input_left_out_where_its_field_is_selected_is_rejected() {
+    assert_rejected(
+        check_t(
+            KEY_AND_A,
+            &[on(
+                "T",
+                &key_inputs_and(vec![fragment(None, &["x"], &[field("a")])]),
+            )],
+            "... on T { b }",
+            "b",
+        ),
+        "the entries do not send what the subgraph demands",
+    );
+}
+
+// `a` is sent under the condition `b` is selected under, as the router writes it since
+// `89df93e07b`.
+#[test]
+fn input_conditioned_as_its_field_is_accepted() {
+    check_t(
+        KEY_AND_A,
+        &[on(
+            "T",
+            &key_inputs_and(vec![fragment(None, &["x"], &[field("a")])]),
+        )],
+        "... on T { b @include(if: $x) }",
+        "b @include(if: $x)",
+    )
+    .unwrap();
+}
+
+// `a` sent whatever `$x` is, for a `b` selected only under `$x`, as the router wrote it before
+// `89df93e07b`: sending more than the demand is fine, `a` being fetched.
+#[test]
+fn input_sent_beyond_a_conditioned_demand_is_accepted() {
+    check_t(
+        KEY_AND_A,
+        &[on("T", &key_inputs_and(vec![field("a")]))],
+        "... on T { b @include(if: $x) }",
+        "b @include(if: $x)",
+    )
+    .unwrap();
+}
+
+// The same, with `a` fetched only under `$x`: where it is false the router reads a missing `a`.
+#[test]
+fn input_sent_beyond_a_conditioned_demand_unfetched_is_rejected() {
+    assert_rejected(
+        check_t(
+            "__typename id a @include(if: $x)",
+            &[on("T", &key_inputs_and(vec![field("a")]))],
+            "... on T { b @include(if: $x) }",
+            "b @include(if: $x)",
+        ),
+        "reads a key the plan has not fetched",
+    );
+}
+
+// `a` sent for a `c` that requires nothing: more than the demand, and fetched.
+#[test]
+fn input_sent_without_a_demand_is_accepted() {
+    check_t(
+        KEY_AND_A,
+        &[on("T", &key_inputs_and(vec![field("a")]))],
+        "... on T { c }",
+        "c",
+    )
+    .unwrap();
+}
+
+// `@skip` and `@include` are not repeatable, so an entry's two conditions are read as one fragment
+// each, nested, as a fetch's conditions are.
+#[test]
+fn entry_conditions_are_nested_one_fragment_each() {
+    let fixture = representations();
+    let schema = &fixture.supergraph_schema;
+    let entry: requires_selection::Selection =
+        serde_json::from_str(&fragment(Some("T"), &["x", "y"], &[field("a")])).unwrap();
+    let as_sent = entry_selections(schema, &name!("T"), Reading::AsSent, &[entry]).unwrap();
+    let document = ExecutableDocument::parse_and_validate(
+        schema.schema(),
+        "query($x: Boolean!, $y: Boolean!) \
+         { t { ... on T @include(if: $x) { ... @include(if: $y) { a } } } }",
+        "operation.graphql",
+    )
+    .unwrap();
+    let Selection::Field(t) = &document
+        .operations
+        .get(None)
+        .unwrap()
+        .selection_set
+        .selections[0]
+    else {
+        unreachable!("the operation selects `t`")
+    };
+    assert_eq!(
+        as_sent[0].to_string(),
+        t.selection_set.selections[0].to_string()
+    );
+}
+
+// The router's plan for `handles_multiple_conditions_on_abstract_types`: the entry's keys, and the
+// `c` asked, sit under `@include` and `@skip` on one variable, which never both hold. The entry
+// writes no key, so the router sends no representation, and nothing is owed or asked of a `T`.
+#[test]
+fn entry_writing_no_key_is_accepted() {
+    let both = "... on T @include(if: $x) { ... on T @skip(if: $x) { c } }";
+    check_t(
+        KEY_AND_A,
+        &[fragment(
+            Some("T"),
+            &["x"],
+            &[fragment_under(Some("T"), &[("skip", "x")], &key_inputs())],
+        )],
+        both,
+        both,
+    )
+    .unwrap();
+}
+
+// The entry writes its keys only where `$x` holds and `$y` does not, and `c` is asked wherever `$x`
+// holds: where both hold no representation is sent, so nothing fetches `c`.
+#[test]
+fn field_asked_where_the_entry_writes_no_key_is_rejected() {
+    assert_rejected(
+        check_t(
+            KEY_AND_A,
+            &[fragment(
+                Some("T"),
+                &["x"],
+                &[fragment_under(None, &[("skip", "y")], &key_inputs())],
+            )],
+            "... on T { c }",
+            "c @include(if: $x)",
+        ),
+        "query plan does not fetch everything the operation requests",
+    );
+}
+
+// The same entry with its keys on its own fragment writes them wherever `$x` holds, which is where
+// `c` is asked.
+#[test]
+fn entry_writing_its_keys_on_its_own_fragment_is_accepted() {
+    check_t(
+        KEY_AND_A,
+        &[fragment(
+            Some("T"),
+            &["x"],
+            &key_inputs_and(vec![fragment_under(None, &[("skip", "y")], &[field("a")])]),
+        )],
+        "... on T { c }",
+        "c @include(if: $x)",
+    )
+    .unwrap();
+}
+
+// A fragment holding a field writes wherever it is entered, so a chain stops there; one holding
+// only fragments continues into each.
+#[test]
+fn key_guards_stop_at_a_fragment_holding_a_field() {
+    let chains = |entry: String| -> Vec<Vec<(Option<String>, usize)>> {
+        let entry: requires_selection::Selection = serde_json::from_str(&entry).unwrap();
+        key_guards(&entry)
+            .into_iter()
+            .map(|chain| {
+                chain
+                    .into_iter()
+                    .map(|fragment| {
+                        (
+                            fragment
+                                .type_condition
+                                .as_ref()
+                                .map(|name| name.to_string()),
+                            fragment.conditions.len(),
+                        )
+                    })
+                    .collect()
+            })
+            .collect()
+    };
+    assert_eq!(
+        chains(fragment(
+            Some("T"),
+            &["x"],
+            &key_inputs_and(vec![fragment_under(None, &[("skip", "y")], &[field("a")])]),
+        )),
+        vec![vec![(Some("T".to_string()), 1)]],
+    );
+    assert_eq!(
+        chains(fragment(
+            Some("T"),
+            &["x"],
+            &[fragment_under(Some("T"), &[("skip", "x")], &key_inputs())],
+        )),
+        vec![vec![(Some("T".to_string()), 1), (Some("T".to_string()), 1)]],
+    );
+}
+
+//==================================================================================================
+// One representation per object, out of every entry that applies to it
+
+const KEY_FIELDS: &str = "__typename id";
+
+// The key in one entry and `a` in another: the router merges both into the one representation it
+// sends, which then has what `b` needs, though neither entry alone does.
+#[test]
+fn representation_split_across_entries_is_accepted() {
+    check_t(
+        KEY_AND_A,
+        &[on("T", &key_inputs()), on("T", &[field("a")])],
+        "... on T { b }",
+        "b",
+    )
+    .unwrap();
+}
+
+// The router's shape since `89df93e07b`: the key unconditionally, and `a` in an entry of its own
+// under the condition `b` is selected under.
+#[test]
+fn conditioned_input_entry_is_accepted() {
+    check_t(
+        KEY_AND_A,
+        &[
+            on("T", &key_inputs()),
+            fragment(Some("T"), &["x"], &[field("a")]),
+        ],
+        "... on T { b @include(if: $x) }",
+        "b @include(if: $x)",
+    )
+    .unwrap();
+}
+
+// The same entries for a `b` selected whatever `$x` is: where it is false, the representation has
+// no `a`.
+#[test]
+fn conditioned_input_entry_for_an_unconditioned_field_is_rejected() {
+    assert_rejected(
+        check_t(
+            KEY_AND_A,
+            &[
+                on("T", &key_inputs()),
+                fragment(Some("T"), &["x"], &[field("a")]),
+            ],
+            "... on T { b }",
+            "b",
+        ),
+        "the entries do not send what the subgraph demands",
+    );
+}
+
+// An entry on `I` is merged into a `T`'s representation beside the one on `T`.
+#[test]
+fn entries_on_an_interface_and_its_implementation_are_accepted() {
+    check_t(
+        KEY_AND_A,
+        &[on("T", &key_inputs()), on("I", &[field("a")])],
+        "... on T { b }",
+        "b",
+    )
+    .unwrap();
+}
+
+// Two `_entities` fragments on `T` are one entity case, demanding `a` for `b` and `e` for `d` of
+// one representation, which the one entry carries.
+#[test]
+fn case_fragments_on_one_type_are_read_together() {
+    check_t(
+        "__typename id a e",
+        &[on("T", &key_inputs_and(vec![field("a"), field("e")]))],
+        "... on T { b } ... on T { d }",
+        "b d",
+    )
+    .unwrap();
+}
+
+// The same, with `e` missing from the entry: `second` is asked for `d` without its input.
+#[test]
+fn input_missing_for_one_case_fragment_is_rejected() {
+    assert_rejected(
+        check_t(
+            "__typename id a e",
+            &[on("T", &key_inputs_and(vec![field("a")]))],
+            "... on T { b } ... on T { d }",
+            "b d",
+        ),
+        "the entries do not send what the subgraph demands",
+    );
+}
+
+// A fragment excluded outright, by `@include(if: false)`, is never run, so its `b` demands no `a`.
+#[test]
+fn case_fragment_excluded_outright_demands_nothing() {
+    check_t(
+        KEY_FIELDS,
+        &[on("T", &key_inputs())],
+        "... on T { c } ... on T @include(if: false) { b }",
+        "c",
+    )
+    .unwrap();
+}
+
+/// `second` asked for `both`, whose `u { left right }` the entry reads as `selections`.
+fn check_both(selections: Vec<String>) -> Result<(), CorrectnessError> {
+    check_t(
+        "__typename id u { left right }",
+        &[on("T", &key_inputs_and(selections))],
+        "... on T { both }",
+        "both",
+    )
+}
+
+// `u { right }` is read inside a fragment, then `u { left }` as a field after it, which replaces
+// the value the fragment put under `u`: `second` is sent no `right`.
+#[test]
+fn field_overwriting_what_a_fragment_read_is_rejected() {
+    assert_rejected(
+        check_both(vec![
+            on("T", &[field_with("u", &[field("right")])]),
+            field_with("u", &[field("left")]),
+        ]),
+        "overwrites `u`, which it read before",
+    );
+}
+
+// The other order: the fragment's `u` is deep-merged into the field's, and both are sent.
+#[test]
+fn fragment_merged_into_a_field_is_accepted() {
+    check_both(vec![
+        field_with("u", &[field("left")]),
+        on("T", &[field_with("u", &[field("right")])]),
+    ])
+    .unwrap();
+}
