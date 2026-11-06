@@ -79,6 +79,7 @@ use crate::plugins::healthcheck::Config as HealthCheck;
 use crate::router_factory::RouterFactory;
 use crate::services::MULTIPART_DEFER_ACCEPT;
 use crate::services::MULTIPART_DEFER_CONTENT_TYPE;
+use crate::services::Plugins;
 use crate::services::RouterRequest;
 use crate::services::RouterResponse;
 use crate::services::SupergraphResponse;
@@ -141,6 +142,7 @@ type MockRouterServiceType = tower_test::mock::Mock<RouterRequest, RouterRespons
 #[derive(Clone)]
 struct TestRouterFactory {
     inner: MockRouterServiceType,
+    plugins: Arc<Plugins>,
 }
 
 impl RouterFactory for TestRouterFactory {
@@ -158,6 +160,10 @@ impl RouterFactory for TestRouterFactory {
             None,
             "dummy".to_string(),
         ))
+    }
+
+    fn plugins(&self) -> Arc<Plugins> {
+        self.plugins.clone()
     }
 }
 
@@ -185,6 +191,10 @@ impl RouterFactory for CountingRouterFactory {
             None,
             "dummy".to_string(),
         ))
+    }
+
+    fn plugins(&self) -> Arc<Plugins> {
+        Arc::new(Plugins::default())
     }
 }
 
@@ -327,6 +337,7 @@ async fn init(
         .create(
             TestRouterFactory {
                 inner: service.into_inner(),
+                plugins: Default::default(),
             },
             Arc::new(
                 Configuration::fake_builder()
@@ -376,6 +387,21 @@ async fn init(
 }
 
 pub(super) async fn init_with_config(
+    router_service: impl Service<
+        router::Request,
+        Response = router::Response,
+        Error = BoxError,
+        Future = BoxFuture<'static, router::ServiceResult>,
+    > + Send
+    + 'static,
+    conf: Arc<Configuration>,
+    web_endpoints: MultiMap<ListenAddr, Endpoint>,
+) -> Result<(HttpServerHandle, Client), ApolloRouterError> {
+    init_with_plugins(router_service, conf, web_endpoints, Default::default()).await
+}
+
+/// Like [`init_with_config`], with the plugin registry the server layers plugin endpoints from.
+pub(super) async fn init_with_plugins(
     mut router_service: impl Service<
         router::Request,
         Response = router::Response,
@@ -385,6 +411,7 @@ pub(super) async fn init_with_config(
     + 'static,
     conf: Arc<Configuration>,
     web_endpoints: MultiMap<ListenAddr, Endpoint>,
+    plugins: Arc<Plugins>,
 ) -> Result<(HttpServerHandle, Client), ApolloRouterError> {
     let server_factory = AxumHttpServerFactory::new();
     let (service, mut handle) = tower_test::mock::spawn();
@@ -404,6 +431,7 @@ pub(super) async fn init_with_config(
         .create(
             TestRouterFactory {
                 inner: service.into_inner(),
+                plugins,
             },
             conf,
             None,
@@ -462,6 +490,7 @@ async fn init_unix(
         .create(
             TestRouterFactory {
                 inner: service.into_inner(),
+                plugins: Default::default(),
             },
             Arc::new(
                 Configuration::fake_builder()
@@ -2410,6 +2439,7 @@ async fn it_supports_server_restart() {
 
     let supergraph_service_factory = TestRouterFactory {
         inner: service.into_inner(),
+        plugins: Default::default(),
     };
 
     let (all_connections_stopped_sender, _) = mpsc::channel::<()>(1);

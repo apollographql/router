@@ -36,6 +36,7 @@ use crate::plugins::connectors::request_limit::RequestLimitLayer;
 use crate::plugins::connectors::tracing::connect_spec_version_instrument;
 use crate::plugins::headers::Headers;
 use crate::plugins::include_subgraph_errors::IncludeSubgraphErrors;
+use crate::plugins::limits::LimitsPlugin;
 use crate::plugins::limits::operation_limits_layer::EnforceOperationLimitsLayer;
 use crate::plugins::limits::response_size_limit::SubgraphResponseSizeLimitLayer;
 use crate::plugins::subscription::APOLLO_SUBSCRIPTION_PLUGIN;
@@ -660,6 +661,9 @@ pub(crate) fn build_router_service(
         .apply_required_plugin_layer(&plugins, Headers::router_masking_layer)
         .apply_plugin_layer(&plugins, Telemetry::allocation_metrics_layer)
         .apply_plugin_layer(&plugins, Telemetry::instrument_router_layer)
+        // Enforce the header list limit before the plugins, so no downstream layer sees anything
+        // over the limit.
+        .apply_required_plugin_layer(&plugins, LimitsPlugin::router_header_list_limit_layer)
         .rust_plugins(plugins, |plugin, service| plugin.router_service(service))
         .layer(content_negotiation::RouterContentNegotiationLayer::default())
         .layer(DisplayRouterRequestLayer)

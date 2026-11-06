@@ -459,12 +459,13 @@ impl<'a> TestHarness<'a> {
             query_parsing_service,
             schema,
             &config,
-            plugins,
+            plugins.clone(),
         );
 
         let routers = make_axum_router(
             &config,
             web_endpoints,
+            &plugins,
             Arc::new(LicenseState::Licensed {
                 limits: Default::default(),
             }),
