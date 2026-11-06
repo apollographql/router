@@ -818,7 +818,11 @@ impl RouterStage {
                     .await
                     .map_err(|error| {
                         succeeded = false;
-                        tracing::error!("coprocessor: router request stage error: {error}");
+                        // Client abort while this stage is the first body reader is not a
+                        // coprocessor failure; handle_graphql maps it to HTTP 499.
+                        if !router::body::is_client_request_body_read_error(error.as_ref()) {
+                            tracing::error!("coprocessor: router request stage error: {error}");
+                        }
                         error
                     });
                     if executed {
@@ -1071,7 +1075,7 @@ where
     // First, extract the data we need from our request and prepare our
     // external call. Use our configuration to figure out which data to send.
     let (parts, body) = request.router_request.into_parts();
-    let bytes = router::body::into_bytes(body).await?;
+    let bytes = router::body::into_client_request_bytes(body).await?;
 
     let headers_to_send = request_config
         .headers
