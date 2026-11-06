@@ -251,7 +251,7 @@ pub(super) trait CacheStorage {
         test,
         any(not(feature = "ci"), all(target_arch = "x86_64", target_os = "linux"))
     ))]
-    async fn truncate_namespace(&self) -> StorageResult<()>;
+    async fn truncate_namespace_for_test(&self) -> StorageResult<()>;
 }
 
 fn flatten_storage_error<V, E>(value: Result<Result<V, Error>, E>) -> Result<V, Error>

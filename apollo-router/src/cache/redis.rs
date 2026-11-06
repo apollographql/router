@@ -779,13 +779,6 @@ impl RedisCacheStorage {
     pub(crate) async fn get<K: KeyType, V: ValueType>(
         &self,
         key: RedisKey<K>,
-    ) -> Result<RedisValue<V>, RedisError> {
-        self.get_with_options(key, Options::default()).await
-    }
-
-    pub(crate) async fn get_with_options<K: KeyType, V: ValueType>(
-        &self,
-        key: RedisKey<K>,
         options: Options,
     ) -> Result<RedisValue<V>, RedisError> {
         let key = self.make_key(key);
@@ -827,7 +820,7 @@ impl RedisCacheStorage {
     ///
     /// The outer `Result` covers total failures (ie the standalone node is down), while the inner
     /// `Result`s cover partial cluster failures and values not being found.
-    pub(crate) async fn get_multiple_with_options<K: KeyType, V: ValueType>(
+    pub(crate) async fn get_multiple<K: KeyType, V: ValueType>(
         &self,
         keys: Vec<RedisKey<K>>,
         options: Options,
@@ -879,6 +872,11 @@ impl RedisCacheStorage {
         }
     }
 
+    /// Insert a value into the cache.
+    ///
+    /// # Errors
+    /// Even if the insert fails, this function does not return an error. Instead, the error is
+    /// recorded in metrics only.
     pub(crate) async fn insert<K: KeyType, V: ValueType>(
         &self,
         key: RedisKey<K>,
@@ -903,9 +901,8 @@ impl RedisCacheStorage {
         }
     }
 
-    /// Delete keys *without* adding the `namespace` prefix because `keys` is from
-    /// `scan_with_namespaced_results` and already includes it.
-    pub(crate) async fn delete_from_scan_result_with_options<I>(
+    /// Delete keys *without* adding the `namespace` prefix. The caller must add the namespace.
+    pub(crate) async fn delete_raw_keys<I>(
         &self,
         keys: I,
         options: Options,
@@ -1106,7 +1103,10 @@ fn setup_event_listeners(caller: &'static str, client: &Client) {
     any(not(feature = "ci"), all(target_arch = "x86_64", target_os = "linux"))
 ))]
 impl RedisCacheStorage {
-    pub(crate) async fn truncate_namespace(&self) -> Result<(), RedisError> {
+    /// Test helper that deletes all keys in this storage's namespace.
+    ///
+    /// If the storage doesn't have a namespace, this silently does nothing.
+    pub(crate) async fn truncate_namespace_for_test(&self) -> Result<(), RedisError> {
         use std::pin::Pin;
 
         use fred::prelude::Key;
@@ -1132,11 +1132,12 @@ impl RedisCacheStorage {
         }
 
         // remove all members of this namespace
-        self.delete_from_scan_result(keys.into_iter()).await?;
+        self.delete_raw_keys(keys.into_iter(), Default::default())
+            .await?;
         Ok(())
     }
 
-    pub(crate) fn strip_namespace(&self, key: String) -> String {
+    fn strip_namespace(&self, key: String) -> String {
         match &self.namespace {
             Some(namespace) => key
                 .strip_prefix(&format!("{namespace}:"))
@@ -1146,80 +1147,37 @@ impl RedisCacheStorage {
         }
     }
 
-    pub(crate) async fn get_multiple<K: KeyType, V: ValueType>(
-        &self,
-        keys: Vec<RedisKey<K>>,
-    ) -> Result<Vec<Result<RedisValue<V>, RedisError>>, RedisError> {
-        self.get_multiple_with_options(keys, Options::default())
-            .await
-    }
+    /// Test helper that returns a list of all keys in this namespace,
+    /// with the namespace string stripped from each key.
+    pub(crate) async fn all_keys_in_namespace_for_test(&self) -> Result<Vec<String>, BoxError> {
+        use fred::types::scan::Scanner;
+        use futures::stream::BoxStream;
+        use tokio_stream::StreamExt as _;
 
-    /// Inserts multiple records. Returns Ok(()) on success, emitting traces for successful
-    /// inserts, and otherwise an error and error traces and error-level log
-    pub(crate) async fn insert_multiple<K: KeyType, V: ValueType>(
-        &self,
-        data: &[(RedisKey<K>, RedisValue<V>)],
-        ttl: Option<Duration>,
-    ) -> Result<(), RedisError> {
-        tracing::trace!("inserting into redis: {:#?}", data);
-        let expiration = self.expiration(ttl);
+        let pattern = self.make_key(RedisKey("*"));
 
-        // NB: if we were using MSET here, we'd need to split the keys by hash slot. however, fred
-        // seems to split the pipeline by hash slot in the background.
-        let pipeline = self.pipeline().await?;
-        for (key, value) in data {
-            let key = self.make_key(key.clone());
-            let _: Result<(), _> = pipeline
-                .set(key, value.clone(), expiration.clone(), None, false)
-                .await;
-        }
+        let client = self.client().await?;
+        let mut scan_stream: BoxStream<_> = if self.is_cluster {
+            // NOTE: scans might be better send to only the read replicas, but the read-only client
+            // doesn't have a scan_cluster(), just a paginated version called scan_page()
+            Box::pin(client.scan_cluster(pattern, None, None))
+        } else {
+            Box::pin(client.scan(pattern, None, None))
+        };
 
-        let result: Result<Vec<()>, _> = pipeline.all().await;
-        match result {
-            Ok(values) => tracing::trace!("successfully inserted {} values", values.len()),
-            Err(err) => {
-                tracing::trace!("caught error during insert: {err:?}");
-                self.record_query_error(&err);
+        let mut keys = Vec::default();
+        while let Some(result) = scan_stream.next().await {
+            if let Some(page_keys) = result?.take_results() {
+                let mut str_keys: Vec<String> = page_keys
+                    .into_iter()
+                    .map(|k| k.into_string().unwrap())
+                    .map(|k| self.strip_namespace(k))
+                    .collect();
+                keys.append(&mut str_keys);
             }
         }
 
-        Ok(())
-    }
-
-    /// Delete keys *without* adding the `namespace` prefix because `keys` is from
-    /// `scan_with_namespaced_results` and already includes it.
-    pub(crate) async fn delete_from_scan_result<I>(&self, keys: I) -> Result<u32, RedisError>
-    where
-        I: Iterator<Item = fred::types::Key>,
-    {
-        self.delete_from_scan_result_with_options(keys, Options::default())
-            .await
-    }
-
-    /// The keys returned in `ScanResult` do include the prefix from `namespace` configuration.
-    pub(crate) async fn scan_with_namespaced_results(
-        &self,
-        pattern: String,
-        count: Option<u32>,
-    ) -> Result<
-        std::pin::Pin<
-            Box<
-                dyn futures::Stream<Item = Result<fred::types::scan::ScanResult, RedisError>>
-                    + Send,
-            >,
-        >,
-        RedisError,
-    > {
-        let pattern = self.make_key(RedisKey(pattern));
-        if self.is_cluster {
-            // NOTE: scans might be better send to only the read replicas, but the read-only client
-            // doesn't have a scan_cluster(), just a paginated version called scan_page()
-            Ok(Box::pin(
-                self.client().await?.scan_cluster(pattern, count, None),
-            ))
-        } else {
-            Ok(Box::pin(self.client().await?.scan(pattern, count, None)))
-        }
+        Ok(keys)
     }
 }
 
@@ -1467,13 +1425,14 @@ mod test {
                     .insert(single.clone(), RedisValue("one".to_string()), None)
                     .await;
                 storage
-                    .insert_multiple(&[(multiple.clone(), RedisValue("two".to_string()))], None)
-                    .await?;
+                    .insert(multiple.clone(), RedisValue("two".to_string()), None)
+                    .await;
 
-                let value: RedisValue<String> = storage.get(single.clone()).await?;
+                let value: RedisValue<String> =
+                    storage.get(single.clone(), Default::default()).await?;
                 assert_eq!(value.0, "one");
                 let values = storage
-                    .get_multiple::<_, String>(vec![single, multiple])
+                    .get_multiple::<_, String>(vec![single, multiple], Default::default())
                     .await?
                     .into_iter()
                     .map(|value| value.map(|value| value.0))
@@ -1917,7 +1876,7 @@ mod test {
             storage
                 .insert(key.clone(), RedisValue("after".to_string()), None)
                 .await;
-            let fetched: RedisValue<String> = storage.get(key).await?;
+            let fetched: RedisValue<String> = storage.get(key, Default::default()).await?;
             assert_eq!(fetched.0, "after");
             Ok(())
         }
@@ -2061,38 +2020,36 @@ mod test {
         }
 
         /// Pipeline operations (batched commands) should work after client recreation.
-        /// insert_multiple uses pipeline() under the hood.
+        /// `get` uses pipeline() under the hood when it needs to reset the TTL.
         #[tokio::test]
         #[rstest::rstest]
         async fn pipeline_operations_work_after_recreation(
             #[values(Standalone, PrimaryWithReplica, Sentinel, Cluster)] deployment: Deployment,
         ) -> Result<(), BoxError> {
             let _guard = lock_for_static().lock().await;
-            let storage = RedisCacheStorage::new(redis_config(deployment), "test").await?;
+
+            let mut config = redis_config(deployment);
+            config.reset_ttl = true;
+
+            let storage = RedisCacheStorage::new(config, "test").await?;
             storage.create_client_pool().await?;
 
             storage.inner.write().take();
             let _ = storage.client().await;
             wait_for_recreation(&storage).await;
 
-            let data = vec![
-                (
-                    RedisKey("pipe_key_1".to_string()),
-                    RedisValue("val_1".to_string()),
-                ),
-                (
-                    RedisKey("pipe_key_2".to_string()),
-                    RedisValue("val_2".to_string()),
-                ),
-            ];
-            storage.insert_multiple(&data, None).await?;
+            storage
+                .insert(
+                    RedisKey("ttl_key".to_string()),
+                    RedisValue("val".to_string()),
+                    None, // the standard redis test config sets a TTL
+                )
+                .await;
 
-            let fetched1: RedisValue<String> =
-                storage.get(RedisKey("pipe_key_1".to_string())).await?;
-            let fetched2: RedisValue<String> =
-                storage.get(RedisKey("pipe_key_2".to_string())).await?;
-            assert_eq!(fetched1.0, "val_1");
-            assert_eq!(fetched2.0, "val_2");
+            let fetched: RedisValue<String> = storage
+                .get(RedisKey("ttl_key".to_string()), Default::default())
+                .await?;
+            assert_eq!(fetched.0, "val");
             Ok(())
         }
 
@@ -2176,41 +2133,7 @@ mod test {
             Ok(())
         }
 
-        /// scan_with_namespaced_results should work after client recreation
-        #[tokio::test]
-        #[rstest::rstest]
-        async fn scan_works_after_recreation(
-            #[values(Standalone, PrimaryWithReplica, Sentinel, Cluster)] deployment: Deployment,
-        ) -> Result<(), BoxError> {
-            let _guard = lock_for_static().lock().await;
-            use fred::types::scan::Scanner;
-            use futures::StreamExt;
-
-            let storage = RedisCacheStorage::new(redis_config(deployment), "test").await?;
-            storage.create_client_pool().await?;
-            let key = RedisKey("scan_test_key".to_string());
-            storage
-                .insert(key, RedisValue("value".to_string()), None)
-                .await;
-
-            storage.inner.write().take();
-            let _ = storage.client().await;
-            wait_for_recreation(&storage).await;
-
-            let mut stream = storage
-                .scan_with_namespaced_results("*".to_string(), Some(100))
-                .await?;
-            let mut found_keys = Vec::new();
-            while let Some(result) = stream.next().await {
-                if let Some(keys) = result?.take_results() {
-                    found_keys.extend(keys);
-                }
-            }
-            assert!(!found_keys.is_empty(), "scan should find at least one key");
-            Ok(())
-        }
-
-        /// Tests that `insert_multiple` and `get_multiple` are successful when run against clustered Redis.
+        /// Tests that `get_multiple` is successful when run against clustered Redis.
         ///
         /// Clustered Redis works by hashing each key to one of 16384 hash slots, and assigning each hash
         /// slot to a node. Operations which interact with multiple keys (`MGET`, `MSET`) *cannot* be
@@ -2248,18 +2171,18 @@ mod test {
 
             // insert values
             let keys: Vec<_> = data.keys().cloned().collect();
-            let data: Vec<_> = data.into_iter().collect();
-            let _ = storage.insert_multiple(&data, None).await;
+            for (key, value) in data {
+                storage.insert(key, value, None).await;
+            }
 
-            // make a `get` call for each key and ensure that it has the expected value. this tests both
-            // the `get` and `insert_multiple` functions
+            // make a `get` call for each key and ensure that it has the expected value.
             for key in &keys {
-                let value: RedisValue<usize> = storage.get(key.clone()).await?;
+                let value: RedisValue<usize> = storage.get(key.clone(), Default::default()).await?;
                 assert_eq!(value.0, expected_value);
             }
 
             // test the `mget` functionality
-            let values = storage.get_multiple(keys).await?;
+            let values = storage.get_multiple(keys, Default::default()).await?;
             for value in values {
                 let value: RedisValue<usize> = value?;
                 assert_eq!(value.0, expected_value);
@@ -2382,7 +2305,9 @@ mod test {
 
             let data = [("a", "1"), ("b", "2"), ("c", "3")]
                 .map(|(k, v)| (RedisKey(k.to_string()), RedisValue(v.to_string())));
-            let _ = storage.insert_multiple(&data, None).await;
+            for (key, value) in &data {
+                storage.insert(key.clone(), value.clone(), None).await;
+            }
 
             // check different orders of fetches to make everything is ordered correctly, including
             // when some values are none
@@ -2406,7 +2331,7 @@ mod test {
                     .map(|value| value.map(ToString::to_string))
                     .collect();
 
-                let values = storage.get_multiple(keys).await?;
+                let values = storage.get_multiple(keys, Default::default()).await?;
                 let parsed_values: Vec<Option<String>> =
                     values.into_iter().map(|v| v.ok().map(|v| v.0)).collect();
                 assert_eq!(parsed_values, expected_values);

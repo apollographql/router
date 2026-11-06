@@ -1150,7 +1150,7 @@ impl ResponseCache {
         use std::net::Ipv4Addr;
         use std::net::SocketAddr;
         if truncate_namespace {
-            storage.truncate_namespace().await?;
+            storage.truncate_namespace_for_test().await?;
         }
 
         let storage = Arc::new(StorageInterface {
