@@ -56,6 +56,8 @@ use crate::schema::position::SchemaRootDefinitionKind;
 use crate::utils::FallibleIterator;
 use crate::utils::logging::snapshot;
 
+#[cfg(test)]
+mod excluded_conditions_tests;
 pub(crate) mod operation;
 pub(crate) mod transition;
 
@@ -279,8 +281,12 @@ impl ExcludedConditions {
         self.0.contains(condition)
     }
 
-    /// Immutable version of `push`.
+    /// Immutable version of `push`. Like `ExcludedDestinations::add_excluded`, this keeps the
+    /// `Vec` free of duplicates, which the set equality below relies on.
     pub(crate) fn add_item(&self, value: &SelectionSet) -> ExcludedConditions {
+        if self.0.iter().any(|excluded| excluded.as_ref() == value) {
+            return self.clone();
+        }
         let mut result = self.0.as_ref().clone();
         result.push(value.clone().into());
         ExcludedConditions(Arc::new(result))
@@ -288,6 +294,8 @@ impl ExcludedConditions {
 }
 
 impl PartialEq for ExcludedConditions {
+    /// See if two `ExcludedConditions` have the same set of values, regardless of their ordering.
+    /// This is only a set equality because `add_item` never inserts duplicates.
     fn eq(&self, other: &ExcludedConditions) -> bool {
         Arc::ptr_eq(&self.0, &other.0)
             || (self.0.len() == other.0.len() && self.0.iter().all(|x| other.0.contains(x)))
