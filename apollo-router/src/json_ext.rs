@@ -595,16 +595,18 @@ fn iterate_path<'a, F>(
                             }
 
                             if let Value::Array(array) = value {
-                                for (i, value) in array.iter().enumerate() {
+                                parent.push(PathElement::Index(i));
+                                for (j, value) in array.iter().enumerate() {
                                     if let Value::Object(o) = value
                                         && let Some(Value::String(type_name)) = o.get("__typename")
                                         && tc.iter().any(|tc| tc.as_str() == type_name.as_str())
                                     {
-                                        parent.push(PathElement::Index(i));
+                                        parent.push(PathElement::Index(j));
                                         iterate_path(schema, parent, &path[1..], value, f);
                                         parent.pop();
                                     }
                                 }
+                                parent.pop();
                             }
                         }
                     } else {
@@ -1528,6 +1530,33 @@ mod tests {
                 }),
             ],
         );
+    }
+
+    /// Each callback path must identify the value it accompanies in the original document.
+    #[test]
+    fn conditional_flatten_callback_paths_preserve_both_nested_array_indices() {
+        let schema = test_schema();
+        let document = json!({"items": [
+            [{"__typename": "B"}, {"__typename": "A", "x": 1}],
+            [{"__typename": "A", "x": 2}]
+        ]});
+        let path = Path(vec![
+            PathElement::Key("items".into(), None),
+            PathElement::Flatten(Some(vec!["A".into()])),
+            PathElement::Key("x".into(), None),
+        ]);
+        let mut selected = Vec::new();
+        document.select_values_and_paths(&schema, &path, |p, v| selected.push((p.clone(), v)));
+        assert_eq!(
+            selected,
+            vec![
+                (Path::from("items/0/1/x"), &Value::from(1)),
+                (Path::from("items/1/0/x"), &Value::from(2)),
+            ]
+        );
+        for (p, v) in selected {
+            assert_eq!(document.get_path(&schema, &p).ok(), Some(v));
+        }
     }
 
     #[test]
