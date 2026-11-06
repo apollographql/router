@@ -1,5 +1,5 @@
 # Test workflow — exercises `cargo xtask release new` on a GitHub Actions
-# runner.  Same shape as `test-release-prep.yml`: side-branch sandbox now,
+# runner.  Same shape as `release-prep.yml`: side-branch sandbox now,
 # graduates to `release-dispatch-new.yml` on the default branch later.
 #
 # Two trigger paths:
@@ -27,7 +27,7 @@
 # and open the draft release PR.  workflow_dispatch defaults dry_run to
 # true.
 
-name: Test release new
+name: "Release: new"
 
 on:
   workflow_dispatch:
