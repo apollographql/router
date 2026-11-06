@@ -1,4 +1,4 @@
-### Connectors URL and header templates accept `{` and `}` inside string literals in expressions
+### Connectors URL and header templates accept `{` and `}` inside string literals in expressions ([PR #10363](https://github.com/apollographql/router/pull/10363))
 
 A `{...}` expression in a connector URL template, header value, or `@cacheTag` format ended at the first unmatched `}`, even when that brace was inside a string literal in the expression. A valid template such as `/search?q={$("}")}` or `{$args.id->eq("{")}` failed to parse with an "Unterminated string literal" or "missing closing }" error, both at composition and at router startup.
 
