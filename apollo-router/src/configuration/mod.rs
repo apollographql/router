@@ -61,6 +61,7 @@ use crate::plugins::subscription::APOLLO_SUBSCRIPTION_PLUGIN;
 use crate::plugins::subscription::APOLLO_SUBSCRIPTION_PLUGIN_NAME;
 use crate::plugins::subscription::SubscriptionConfig;
 use crate::plugins::subscription::notification::Notify;
+use crate::registry::OciConfig;
 use crate::uplink::UplinkConfig;
 
 pub(crate) mod connector;
@@ -217,6 +218,13 @@ pub struct Configuration {
     #[serde(skip)]
     pub uplink: Option<UplinkConfig>,
 
+    /// OCI persisted-queries artifact configuration: the standalone artifact the persisted
+    /// query manifest is fetched from, independent of the schema image. Like `uplink`, this is
+    /// not user configuration: it is injected from CLI options / environment variables onto
+    /// every configuration instance.
+    #[serde(skip)]
+    pub(crate) pq_oci: Option<OciConfig>,
+
     // FIXME(@goto-bus-stop): Sticking this on Configuration is a serious hack just to have
     // it available everywhere, it is actually not configuration at all
     #[serde(default, skip_serializing, skip_deserializing)]
@@ -312,6 +320,7 @@ impl<'de> serde::Deserialize<'de> for Configuration {
             // serde(skip)
             notify,
             uplink: None,
+            pq_oci: None,
             validated_yaml: None,
             raw_yaml: None,
         }
@@ -344,6 +353,7 @@ impl Configuration {
         operation_limits: Option<limits::Config>,
         chaos: Option<chaos::Config>,
         uplink: Option<UplinkConfig>,
+        pq_oci: Option<OciConfig>,
         experimental_type_conditioned_fetching: Option<bool>,
         experimental_hoist_orphan_errors: Option<SubgraphConfiguration<HoistOrphanErrors>>,
         batching: Option<Batching>,
@@ -373,6 +383,7 @@ impl Configuration {
             },
             tls: tls.unwrap_or_default(),
             uplink,
+            pq_oci,
             batching: batching.unwrap_or_default(),
             experimental_type_conditioned_fetching: experimental_type_conditioned_fetching
                 .unwrap_or_default(),
@@ -495,6 +506,7 @@ impl Configuration {
         operation_limits: Option<limits::Config>,
         chaos: Option<chaos::Config>,
         uplink: Option<UplinkConfig>,
+        pq_oci: Option<OciConfig>,
         batching: Option<Batching>,
         experimental_type_conditioned_fetching: Option<bool>,
         server: Option<Server>,
@@ -521,6 +533,7 @@ impl Configuration {
             apq: apq.unwrap_or_default(),
             persisted_queries: persisted_query.unwrap_or_default(),
             uplink,
+            pq_oci,
             experimental_type_conditioned_fetching: experimental_type_conditioned_fetching
                 .unwrap_or_default(),
             experimental_hoist_orphan_errors: Default::default(),

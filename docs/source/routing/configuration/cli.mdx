@@ -189,7 +189,28 @@ For default behavior and possible values, see [Apollo Uplink](/federation/manage
 An OCI reference to a graph artifact that contains the supergraph schema for the router to run.<br/><br/>
 
 When you set this option, the router uses the schema from the specified graph artifact instead of Apollo Uplink.
-The router still fetches entitlements and persisted queries from Uplink.<br/><br/>
+The router still fetches entitlements from Uplink, and persisted queries too unless `--pq-artifact-reference` is also set.<br/><br/>
+
+</td>
+</tr>
+
+<tr>
+<td style="min-width: 150px;">
+
+##### `--pq-artifact-reference`
+
+`APOLLO_PQ_ARTIFACT_REFERENCE`
+
+</td>
+<td>
+
+⚠️ This option is in preview.<br/><br/>
+
+An OCI reference to the persisted-queries artifact of a graph variant, which GraphOS publishes separately from the graph artifact that holds the schema.<br/><br/>
+
+When you set this option, the router reads its [persisted query manifest](/graphos/routing/security/persisted-queries) from the specified artifact instead of Apollo Uplink. The reference type decides how the artifact is followed: a tag reference is the variant's pointer, which the router polls so that a persisted query publish hot-swaps the manifest in place; a SHA256 digest reference is fetched once and pinned. This does not depend on `--hot-reload`, so you can combine a digest-pinned graph artifact reference with a polled persisted-queries tag.<br/><br/>
+
+Local manifest files configured with `persisted_queries.local_manifests` still take precedence.<br/><br/>
 
 </td>
 </tr>
