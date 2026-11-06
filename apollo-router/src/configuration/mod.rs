@@ -821,8 +821,8 @@ pub(crate) struct Supergraph {
 
     /// Abort request handling when the client drops the connection.
     /// Default: true.
-    /// When set to false, telemetry will be recorded for canceled requests, but request
-    /// handling will continue running until completion even after the client disconnects.
+    /// When set to false, request handling will continue running until completion even after
+    /// the client disconnects. Either way, the request is recorded with status 499.
     pub(crate) early_cancel: bool,
 
     /// Enable errors generated during response reformatting and result coercion to be returned in

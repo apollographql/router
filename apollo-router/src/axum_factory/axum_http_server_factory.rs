@@ -60,6 +60,9 @@ use crate::plugins::telemetry::config_new::router::instruments::ResponseBodySize
 use crate::router::ApolloRouterError;
 use crate::router_factory::RouterFactory;
 use crate::services::router;
+use crate::services::router::client_connection::ClientConnection;
+use crate::services::router::client_connection::ClientConnectionLayer;
+use crate::services::router::client_connection::client_closed_request;
 use crate::uplink::license_enforcement::LicenseState;
 
 static BARE_WILDCARD_PATH_REGEX: Lazy<Regex> = Lazy::new(|| {
@@ -316,6 +319,9 @@ fn main_endpoint(
 
     let mut main_route = main_router(configuration).layer(
         ServiceBuilder::new()
+            // Watching the client connection comes first, so the router sees the client's body
+            // exactly as hyper delivers it, before decompression or any other layer.
+            .layer(ClientConnectionLayer)
             // Telemetry layers MUST be first. This means that they will be hit first during execution of the pipeline
             // Adding layers before telemetry will cause us to lose metrics and spans.
             .layer(middleware::from_fn(metrics_handler))
@@ -351,14 +357,21 @@ fn main_endpoint(
 }
 
 async fn metrics_handler(request: Request<axum::body::Body>, next: Next) -> Response {
+    // hyper drops this future when the client disconnects before the response is ready.
+    let unanswered = scopeguard::guard((), |()| record_operation(client_closed_request()));
     let resp = next.run(request).await;
+    scopeguard::ScopeGuard::into_inner(unanswered);
+    record_operation(resp.status());
+    resp
+}
+
+fn record_operation(status: StatusCode) {
     u64_counter!(
         "apollo.router.operations",
         "The number of graphql operations performed by the Router",
         1,
-        "http.response.status_code" = resp.status().as_u16() as i64
+        "http.response.status_code" = status.as_u16() as i64
     );
-    resp
 }
 
 #[derive(Clone)]
@@ -407,25 +420,24 @@ async fn handle_graphql(
         .get(ACCEPT_ENCODING)
         .cloned();
 
+    let mut cancel_handler = CancelHandler::new(&context, log_on_broken_pipe);
     let res = if early_cancel {
-        service.oneshot(request).await
+        Ok(service.oneshot(request).await)
     } else {
-        // to make sure we can record request handling when the client closes the connection prematurely,
-        // we execute the request in a separate task that will run until we get the first response, which
-        // means it went through the entire pipeline at least once (not looking at deferred responses or
-        // subscription events). This is a bit wasteful, so to avoid unneeded subgraph calls, we insert in
-        // the context a flag to indicate that the request is canceled and subgraph calls should not be made
-        let mut cancel_handler = CancelHandler::new(&context, log_on_broken_pipe);
+        // With early_cancel off, the request runs in a separate task that keeps going until we get
+        // the first response, which means it went through the entire pipeline at least once (not
+        // looking at deferred responses or subscription events). If the client leaves first, the
+        // cancel handler closes the request's client connection so no more subgraph calls are made.
         let task = service
             .oneshot(request)
             .with_current_subscriber()
             .in_current_span();
-        let res = match tokio::task::spawn(task).await {
-            Ok(res) => res,
-            Err(err) => return internal_server_error(err),
-        };
-        cancel_handler.on_response();
-        res
+        tokio::task::spawn(task).await
+    };
+    cancel_handler.on_response();
+    let res = match res {
+        Ok(res) => res,
+        Err(err) => return internal_server_error(err),
     };
 
     match res {
@@ -518,19 +530,24 @@ impl<'a> CancelHandler<'a> {
 
 impl Drop for CancelHandler<'_> {
     fn drop(&mut self) {
+        let Some(connection) = self
+            .context
+            .extensions()
+            .with_lock(|lock| lock.get::<ClientConnection>().cloned())
+        else {
+            return;
+        };
+        // hyper drops the handler when the client leaves after sending its request; a client that
+        // leaves while sending it closes the connection from the request body instead.
         if !self.got_first_response {
-            if self.log_on_broken_pipe {
-                self.span
-                    .in_scope(|| tracing::error!("broken pipe: the client closed the connection"));
-            }
-            self.context
-                .extensions()
-                .with_lock(|lock| lock.insert(CanceledRequest));
+            connection.close();
+        }
+        if connection.is_closed() && self.log_on_broken_pipe {
+            self.span
+                .in_scope(|| tracing::error!("broken pipe: the client closed the connection"));
         }
     }
 }
-
-pub(crate) struct CanceledRequest;
 
 #[cfg(test)]
 mod tests {
