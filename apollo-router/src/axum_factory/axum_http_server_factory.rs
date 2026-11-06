@@ -40,6 +40,7 @@ use tracing::instrument::WithSubscriber;
 use super::ENDPOINT_CALLBACK;
 use super::ListenAddrAndRouter;
 use super::listeners::ListenersAndRouters;
+use super::listeners::endpoint_router;
 use super::listeners::ensure_endpoints_consistency;
 use super::listeners::ensure_listenaddrs_consistency;
 use super::listeners::extra_endpoints;
@@ -61,6 +62,7 @@ use crate::plugins::telemetry::config_new::router::instruments::ResponseBodySize
 use crate::router::ApolloRouterError;
 use crate::router_factory::Endpoint;
 use crate::router_factory::RouterFactory;
+use crate::services::Plugins;
 use crate::services::router;
 use crate::uplink::license_enforcement::APOLLO_ROUTER_LICENSE_EXPIRED;
 use crate::uplink::license_enforcement::LICENSE_EXPIRED_SHORT_MESSAGE;
@@ -114,15 +116,17 @@ where
 
     ensure_endpoints_consistency(configuration, &endpoints)?;
 
+    let plugins = service_factory.plugins();
     let mut main_endpoint = main_endpoint(
         service_factory,
         configuration,
         endpoints
             .remove(&configuration.supergraph.listen)
             .unwrap_or_default(),
+        &plugins,
         license,
     )?;
-    let mut extra_endpoints = extra_endpoints(endpoints);
+    let mut extra_endpoints = extra_endpoints(endpoints, &plugins);
 
     // put any extra endpoint that uses the main ListenAddr into the main router
     if let Some(routers) = extra_endpoints.remove(&main_endpoint.0) {
@@ -350,6 +354,7 @@ fn main_endpoint<RF>(
     service_factory: RF,
     configuration: &Configuration,
     endpoints_on_main_listener: Vec<Endpoint>,
+    plugins: &Plugins,
     license: Arc<LicenseState>,
 ) -> Result<ListenAddrAndRouter, ApolloRouterError>
 where
@@ -398,14 +403,7 @@ where
 
     let route = endpoints_on_main_listener
         .into_iter()
-        .fold(main_route, |acc, r| {
-            let mut router = r.into_router();
-            if let Some(main_endpoint_layer) = ENDPOINT_CALLBACK.get() {
-                router = main_endpoint_layer(router);
-            }
-
-            acc.merge(router)
-        });
+        .fold(main_route, |acc, r| acc.merge(endpoint_router(r, plugins)));
 
     let listener = configuration.supergraph.listen.clone();
     Ok(ListenAddrAndRouter(listener, route))
