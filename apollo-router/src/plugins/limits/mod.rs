@@ -1,3 +1,4 @@
+pub(crate) mod http2_header_list;
 mod layer;
 mod limited;
 
@@ -154,6 +155,20 @@ pub(crate) struct RouterLimitsConfig {
     pub(crate) introspection_max_depth: bool,
 }
 
+/// The HTTP/2 header-list limit when `http2_max_headers_list_bytes` is unset.
+///
+/// This is hyper's own default. The Router names it so it doesn't depend on a private hyper
+/// constant to know which limit applies.
+pub(crate) const DEFAULT_HTTP2_MAX_HEADERS_LIST_BYTES: ByteSize = ByteSize::kib(16);
+
+impl RouterLimitsConfig {
+    /// The HTTP/2 header-list limit in effect: the configured value or the default.
+    pub(crate) fn http2_header_list_limit(&self) -> ByteSize {
+        self.http2_max_headers_list_bytes
+            .unwrap_or(DEFAULT_HTTP2_MAX_HEADERS_LIST_BYTES)
+    }
+}
+
 impl Default for RouterLimitsConfig {
     fn default() -> Self {
         Self {
@@ -245,8 +260,30 @@ impl Config {
     }
 }
 
-struct LimitsPlugin {
+pub(crate) struct LimitsPlugin {
     config: Config,
+}
+
+impl LimitsPlugin {
+    /// The HTTP/2 header-list check for graph requests, applied in the router service stack ahead
+    /// of every plugin's [`PluginPrivate::router_service`].
+    pub(crate) fn router_header_list_limit_layer(
+        &self,
+    ) -> http2_header_list::RouterHeaderListLimitLayer {
+        http2_header_list::RouterHeaderListLimitLayer::new(
+            self.config.router.http2_header_list_limit(),
+        )
+    }
+
+    /// The HTTP/2 header-list check for plugin endpoints, which don't go through the router
+    /// service stack.
+    pub(crate) fn endpoint_header_list_limit_layer(
+        &self,
+    ) -> http2_header_list::EndpointHeaderListLimitLayer {
+        http2_header_list::EndpointHeaderListLimitLayer::new(
+            self.config.router.http2_header_list_limit(),
+        )
+    }
 }
 
 #[async_trait]
@@ -351,11 +388,15 @@ impl LimitsPlugin {
 
 impl RequestSizeLimitError {
     /// 413 for an oversized body; 414 for an oversized URI, per RFC 9110 (the query string is
-    /// part of the request-target, not the content, so `Payload Too Large` doesn't apply to it).
+    /// part of the request-target, not the content, so `Payload Too Large` doesn't apply to it);
+    /// 431 for an oversized header list, per RFC 6585.
     fn status_code(&self) -> StatusCode {
         match self {
             RequestSizeLimitError::BodyTooLarge => StatusCode::PAYLOAD_TOO_LARGE,
             RequestSizeLimitError::QueryTooLarge => StatusCode::URI_TOO_LONG,
+            RequestSizeLimitError::OversizedHeaderList => {
+                StatusCode::REQUEST_HEADER_FIELDS_TOO_LARGE
+            }
         }
     }
 
@@ -402,11 +443,17 @@ impl From<ConnectorConfiguration<ConnectorLimits>> for Config {
 mod test {
     use http::StatusCode;
     use tower::BoxError;
+    use tower::ServiceBuilder;
+    use tower::ServiceExt;
+    use tower::service_fn;
 
     use crate::Context;
+    use crate::metrics::FutureMetricsExt;
+    use crate::plugin::PluginPrivate;
     use crate::plugins::limits::LimitsPlugin;
     use crate::plugins::limits::SubgraphResponseSizeLimit;
     use crate::plugins::limits::layer::BodyLimitControl;
+    use crate::plugins::telemetry::Telemetry;
     use crate::plugins::test::PluginTestHarness;
     use crate::services::connector::request_service::TransportOutcome;
     use crate::services::router;
@@ -470,6 +517,100 @@ mod test {
             StatusCode::PAYLOAD_TOO_LARGE,
             "Request body payload too large",
         )
+        .await;
+    }
+
+    /// A request whose header list is just over the default 16 KiB HTTP/2 limit.
+    fn oversized_header_list_request(version: http::Version) -> router::Request {
+        http::Request::builder()
+            .version(version)
+            .uri("http://localhost:4000/")
+            .header("cookie", "v".repeat(16 * 1024))
+            .body(router::body::empty())
+            .unwrap()
+            .into()
+    }
+
+    /// A router service that fails the test if a request reaches it.
+    fn unreachable_router_service() -> router::BoxService {
+        service_fn(|_| async { panic!("the request should have been rejected") }).boxed()
+    }
+
+    #[tokio::test]
+    async fn test_http2_header_list_limit_exceeded() {
+        let plugin = plugin().await;
+        let resp = ServiceBuilder::new()
+            .layer(plugin.router_header_list_limit_layer())
+            .service(unreachable_router_service())
+            .oneshot(oversized_header_list_request(http::Version::HTTP_2))
+            .await;
+        assert_rejected(
+            resp,
+            StatusCode::REQUEST_HEADER_FIELDS_TOO_LARGE,
+            "Request header fields too large",
+        )
+        .await;
+    }
+
+    #[tokio::test]
+    async fn test_http2_header_list_limit_ignores_http1() {
+        let plugin = plugin().await;
+        let resp = ServiceBuilder::new()
+            .layer(plugin.router_header_list_limit_layer())
+            .service_fn(|_: router::Request| async {
+                Ok::<_, BoxError>(router::Response::fake_builder().build().unwrap())
+            })
+            .oneshot(oversized_header_list_request(http::Version::HTTP_11))
+            .await;
+        assert_ok(resp).await;
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn test_http2_header_list_limit_exceeded_is_recorded() {
+        async {
+            let telemetry: PluginTestHarness<Telemetry> = PluginTestHarness::builder()
+                .config(
+                    r#"
+                    telemetry:
+                      instrumentation:
+                        instruments:
+                          router:
+                            http.server.request.duration: true
+                    "#,
+                )
+                .build()
+                .await
+                .expect("test harness");
+            let limits: PluginTestHarness<LimitsPlugin> = PluginTestHarness::builder()
+                .build()
+                .await
+                .expect("test harness");
+            // Telemetry wraps the header-list check, as it does in the router pipeline.
+            let service = PluginPrivate::router_service(
+                &*telemetry,
+                ServiceBuilder::new()
+                    .layer(limits.router_header_list_limit_layer())
+                    .service(unreachable_router_service())
+                    .boxed(),
+            );
+
+            let resp = service
+                .oneshot(oversized_header_list_request(http::Version::HTTP_2))
+                .await
+                .unwrap();
+            assert_eq!(
+                resp.response.status(),
+                StatusCode::REQUEST_HEADER_FIELDS_TOO_LARGE
+            );
+            assert_histogram_count!(
+                "http.server.request.duration",
+                1,
+                "error.type" = "Request Header Fields Too Large",
+                "http.request.method" = "GET",
+                "http.response.status_code" = 431
+            );
+        }
+        .with_metrics()
         .await;
     }
 

@@ -42,8 +42,10 @@ use crate::cache::DeduplicatingCache;
 use crate::configuration::Batching;
 use crate::graphql;
 use crate::layers::DEFAULT_BUFFER_SIZE;
+use crate::layers::InternalServiceBuilderExt;
 use crate::layers::ServiceBuilderExt;
 use crate::layers::unconstrained_buffer::UnconstrainedBuffer;
+use crate::plugins::limits::LimitsPlugin;
 use crate::plugins::telemetry::config_new::attributes::HTTP_REQUEST_BODY;
 use crate::plugins::telemetry::config_new::attributes::HTTP_REQUEST_HEADERS;
 use crate::plugins::telemetry::config_new::attributes::HTTP_REQUEST_URI;
@@ -63,6 +65,7 @@ use crate::services::MULTIPART_DEFER_ACCEPT;
 use crate::services::MULTIPART_DEFER_CONTENT_TYPE;
 use crate::services::MULTIPART_SUBSCRIPTION_ACCEPT;
 use crate::services::MULTIPART_SUBSCRIPTION_CONTENT_TYPE;
+use crate::services::Plugins;
 use crate::services::RouterRequest;
 use crate::services::RouterResponse;
 use crate::services::SupergraphCreator;
@@ -678,6 +681,10 @@ impl RouterFactory for RouterCreator {
     fn pipeline_ref(&self) -> Arc<PipelineRef> {
         self.pipeline_handle.pipeline_ref.clone()
     }
+
+    fn plugins(&self) -> Arc<Plugins> {
+        self.supergraph_creator.plugins()
+    }
 }
 
 impl RouterCreator {
@@ -728,13 +735,10 @@ impl RouterCreator {
         let sb = UnconstrainedBuffer::new(
             ServiceBuilder::new()
                 .layer(static_page.clone())
-                .service(
-                    supergraph_creator
-                        .plugins()
-                        .iter()
-                        .rev()
-                        .fold(router_service.boxed(), |acc, (_, e)| e.router_service(acc)),
-                )
+                .service(plugin_router_service(
+                    &supergraph_creator.plugins(),
+                    router_service.boxed(),
+                ))
                 .boxed(),
             DEFAULT_BUFFER_SIZE,
         );
@@ -758,6 +762,38 @@ impl RouterCreator {
     + use<> {
         // Note: We have to box our cloned service to erase the type of the Buffer.
         self.sb.clone().boxed()
+    }
+}
+
+/// Wraps `service` in every plugin's router service, the first registered plugin outermost, with
+/// the HTTP/2 header-list check just inside telemetry.
+pub(crate) fn plugin_router_service(
+    plugins: &Plugins,
+    service: router::BoxService,
+) -> router::BoxService {
+    let header_list_limit = |service: router::BoxService| {
+        ServiceBuilder::new()
+            .apply_plugin_layer(plugins, LimitsPlugin::router_header_list_limit_layer)
+            .service(service)
+            .boxed()
+    };
+    let mut header_list_checked = false;
+    let service = plugins.iter().rev().fold(service, |acc, (name, plugin)| {
+        // The header-list check sits just inside telemetry so that telemetry records its 431, and
+        // ahead of every other plugin, traffic shaping included, so none of them sees an
+        // oversized header list or answers it first.
+        let acc = if name == "apollo.telemetry" {
+            header_list_checked = true;
+            header_list_limit(acc)
+        } else {
+            acc
+        };
+        plugin.router_service(acc)
+    });
+    if header_list_checked {
+        service
+    } else {
+        header_list_limit(service)
     }
 }
 
