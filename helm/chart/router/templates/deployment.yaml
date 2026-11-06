@@ -81,7 +81,6 @@ spec:
           env:
             - name: APOLLO_ROUTER_OFFICIAL_HELM_CHART
               value: "true"
-          {{- if or .Values.managedFederation.apiKey .Values.managedFederation.existingSecret .Values.managedFederation.graphRef .Values.extraEnvVars }}
             {{- if or .Values.managedFederation.apiKey .Values.managedFederation.existingSecret }}
             - name: APOLLO_KEY
               valueFrom:
@@ -97,7 +96,12 @@ spec:
             {{- if .Values.extraEnvVars }}
             {{- tpl (toYaml .Values.extraEnvVars) $ | nindent 12 }}
             {{- end }}
-          {{- end }}
+            {{- range $name, $spec := .Values.extraEnvVarsMap }}
+            {{- if $spec }}
+            - name: {{ $name }}
+              {{- tpl (toYaml $spec) $ | nindent 14 }}
+            {{- end }}
+            {{- end }}
           {{- if or .Values.extraEnvVarsCM .Values.extraEnvVarsSecret }}
           envFrom:
             {{- if .Values.extraEnvVarsCM }}
