@@ -1105,6 +1105,15 @@ mod tests {
         }
         assert_eq!(spans.0.load(Ordering::SeqCst), 2, "one router span per 431");
 
+        // Over the advertised size, h2 sends its own bare 431 and the Router never sees the request.
+        let response = send_h2c(&addr, "/", &cookie_crumbs(96 * 1024)).await;
+        assert_eq!(
+            response.status(),
+            StatusCode::REQUEST_HEADER_FIELDS_TOO_LARGE
+        );
+        assert_eq!(response.headers().get(CONTENT_TYPE), None);
+        assert_eq!(spans.0.load(Ordering::SeqCst), 2, "not recorded");
+
         let response = send_h2c(&addr, "/custom", &cookie_crumbs(4 * 1024)).await;
         assert_eq!(response.status(), StatusCode::OK);
         let response = send_h2c(&addr, "/custom", &cookie_crumbs(20 * 1024)).await;
@@ -1112,56 +1121,6 @@ mod tests {
             response.status(),
             StatusCode::REQUEST_HEADER_FIELDS_TOO_LARGE
         );
-
-        server.shutdown().await.unwrap();
-    }
-
-    #[tokio::test]
-    async fn it_advertises_a_larger_http2_header_list_size_than_the_limit() {
-        use tokio::io::AsyncReadExt;
-        use tokio::io::AsyncWriteExt;
-
-        const SETTINGS_FRAME: u8 = 0x4;
-        const SETTINGS_MAX_HEADER_LIST_SIZE: u16 = 0x6;
-
-        let (supergraph_mock, _supergraph_handle) = tower_test::mock::pair::<
-            crate::services::supergraph::Request,
-            crate::services::supergraph::Response,
-        >();
-        let (server, _) = init_with_config(
-            crate::pipeline::from_supergraph_mock(supergraph_mock).await,
-            Arc::new(Configuration::fake_builder().build().unwrap()),
-            MultiMap::new(),
-        )
-        .await
-        .unwrap();
-        let (ip, port) = server
-            .graphql_listen_address()
-            .as_ref()
-            .unwrap()
-            .ip_and_port()
-            .unwrap();
-
-        // The server's SETTINGS frame is the first frame it sends after the client preface.
-        let mut stream = tokio::net::TcpStream::connect((ip, port)).await.unwrap();
-        stream
-            .write_all(b"PRI * HTTP/2.0\r\n\r\nSM\r\n\r\n\0\0\0\x04\0\0\0\0\0")
-            .await
-            .unwrap();
-        let mut header = [0u8; 9];
-        stream.read_exact(&mut header).await.unwrap();
-        assert_eq!(header[3], SETTINGS_FRAME);
-        let len = u32::from_be_bytes([0, header[0], header[1], header[2]]) as usize;
-        let mut payload = vec![0u8; len];
-        stream.read_exact(&mut payload).await.unwrap();
-
-        let max_header_list_size = payload
-            .as_chunks::<6>()
-            .0
-            .iter()
-            .find(|s| u16::from_be_bytes([s[0], s[1]]) == SETTINGS_MAX_HEADER_LIST_SIZE)
-            .map(|s| u32::from_be_bytes([s[2], s[3], s[4], s[5]]));
-        assert_eq!(max_header_list_size, Some(64 * 1024));
 
         server.shutdown().await.unwrap();
     }
