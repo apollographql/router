@@ -15,7 +15,7 @@ use query_inclusion_fuzz::plan_model;
 
 fn main() {
     let fixture = Fixture::new();
-    println!("{}", plan_model::schema_digest(fixture.supergraph_schema()));
+    println!("{}", plan_model::schema_digest(&fixture));
 
     let mut cases = 0usize;
     let mut new_rejects = 0usize;

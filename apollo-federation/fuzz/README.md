@@ -265,11 +265,19 @@ and that contextual data is available — so its divergences are counted, not fa
 
 ## The fixture
 
-One composed supergraph, checked in at `fixtures/supergraph.graphql` and never generated: the
-grammar varies the operation and the plan, not the schema. It is small enough to transcribe into
-the Lean oracle by hand and still exercises what the checker decides — an interface root under a
-list, two entity types with `@key(fields: "id")` and a `@requires` field each, and a third
-implementation with no key at all.
+One composed supergraph, checked in at `fixtures/supergraph.graphql` and never generated during a
+run: the grammar varies the operation and the plan, not the schema. Its subgraphs are in
+`runners/compose_plan_fixture.rs`, which recomposes it; a change there has to be mirrored by hand
+in the Lean oracle, and the digest checks the parts that can drift.
+
+- `Query.is: [I!]!`, an interface root under a list, in Subgraph1.
+- `T2` and `T3` keyed by `id` in Subgraph2, each with `g @requires(fields: "f cs { ... on C { a } }")`.
+- `T1`, a third implementation Subgraph2 does not know.
+- `I.u: U`, where Subgraph1's `U` is `T1 | T2` and Subgraph2 adds `T3`, so a fetch returns fewer
+  types than the supergraph admits.
+- `T2.peer: T3 @provides(fields: "f")` in Subgraph2, an `@external` field inside a window.
+- Subgraph3 declaring `I` an interface object with `h`, which keys `I` and every implementation in
+  Subgraph1.
 
 ## Why a case is an operation plus a perturbation
 
@@ -329,6 +337,70 @@ representations need. The `legacy` lane accepts both — `interpret_defer_node` 
 deferred block the state after the whole primary block — so they are among its advisory
 divergences.
 
+### Entries
+
+Eight perturbations rewrite the `requires` entries, reaching entry conditions, nested type
+conditions and the key guards. The variable an entry tests is the case's guard, or `v0` when the
+case has none, so each is correct with a guard and wrong without one.
+
+| perturbation | entry | correct |
+| --- | --- | --- |
+| `EntriesNestedUnderTheInterface` | `... on I { ... on T2 { … } }` | yes; the model rejects, see below |
+| `OneEntryOnTheInterface` | one `... on I { … }` for every type | no: `T1` representations are sent |
+| `EntriesIncludedByTheGuard` | `... on T2 @include(if: $v) { … }` | with a guard |
+| `EntriesSkippedByTheGuard` | `... on T2 @skip(if: $v) { … }` | no |
+| `RequiredFieldsUnderACondition` | `f cs` under `... @include(if: $v)` | with a guard |
+| `RequiredFieldsUnderTheInterface` | `f cs` under `... on I` | yes |
+| `RequiredFieldsUnderASiblingType` | `f cs` under `... on T1` | no |
+| `KeyUnderACondition` | `id` under `... @include(if: $v)` | with a guard |
+
+**A conservative point of the model, found here.** An entry nested under `... on I` reads a `T1`
+object as `{}`, and the router skips an empty representation (`make_variables` in
+`apollo-router/src/query_planner/fetch.rs`), so nothing is sent for it. The model counts `T1` as
+sent and rejects. No planner writes the shape, and the porting guide keeps the rejection.
+
+### Plan shapes, paths and resolution
+
+| perturbation | what the plan does | correct |
+| --- | --- | --- |
+| `EntityFetchPerType` | one entity fetch per type, in parallel, reading one buffer | yes |
+| `EntityFetchesInSequence` | the same in sequence, the second reading what the first wrote | yes |
+| `ConditionedFlattenPath` | `is.@\|[T2,T3]`, the types the fetch has cases for | yes |
+| `ConditionMissesAType` | the condition names the first type only | with one type |
+| `ConditionOnEveryImplementation` | the condition names `T1` too | yes |
+| `ConditionedPathWithoutTypename` | the same, nothing selecting `__typename` at `is` outside a fragment | when the client selects it |
+| `EntityFetchSelectsExternal` | the entity fetch selects `cs { a }`, `@external` in Subgraph2 | no |
+| `ProvidesWindowExceeded` | under `peer`, `cs { a }`, which `@provides` does not cover | no |
+
+### Union narrowing and interface objects
+
+Two slots ask for `u`: one for `T2`, which Subgraph1 returns, and one for `T3`, which it never
+does. The base fetch cannot name `T3` under `u`, so it selects `u { __typename }`, and only the
+returned-type narrowing makes that plan correct. The slot `h` is fetched from Subgraph3 with one
+entry at `I` and the value setter naming every representation `I`, as the planner writes it.
+
+| perturbation | what the plan does | correct |
+| --- | --- | --- |
+| `InterfaceObjectEntryForOneType` | the entry is `... on T2`, so others get no `h` | no |
+| `InterfaceObjectWithoutTypenameSetter` | no value setter | no |
+| `InterfaceObjectSentAsAnotherType` | the setter names every representation `T2` | no |
+| `InterfaceObjectKeyOverwritten` | a second setter writes every representation's `id` | no |
+
+**A gap in the model, found here and since closed.** The model used to pass over value setters, so
+without this one it accepted a plan sending Subgraph3 `__typename`s `T1`, `T2` or `T3`, types it
+does not define. Each representation must now be sent with a `__typename` that resolves to its
+entity case (`sentTypename`, `SentTypeResolvesToCase`): the case's type, or a type that includes
+the object in the subgraph as the case does, such as an entity interface over it. Its key is read
+at the type it is sent as, and an input value setter may set nothing but `__typename`.
+
+**Not reached: an entity-interface destination.** Every entity fetch here goes to Subgraph2, which
+keys `T2` and `T3` but declares no `I`, so no plan sends an implementation under an interface the
+destination keys, as the corpus's `kiva-marketplace` plans do. That shape is covered only by the
+checker's own tests (`tests/entries.rs`). Reaching it would take a subgraph keying `I` and the
+cases beside it, in the composed fixture and the oracle both. The oracle's Subgraph2 also takes the
+supergraph's schema, where `I` includes `T2`, while the composed Subgraph2 has no `I`. That
+difference changes no verdict yet, but it would once a plan sends a Subgraph2 object as `I`.
+
 ### Not reached yet
 
 Shapes the model has tests for and this lane still cannot build.
@@ -343,18 +415,13 @@ aliased shapes above with an argument attached; the old one does not, and the co
 rather than the checker's. Deferred until the planner's aliasing settles — at which point this is
 a fixture change, not a new field.
 
-**Interface objects.** An entity fetch whose `requires` entries cover only some implementations,
-which is what `FetchNode::selected_selection_set` restricts and what the demand is restricted to.
-The checker's own tests cover the shape; reaching it here needs a subgraph that declares an
-interface as an interface object, the largest of the fixture changes.
+**Context reads.** No field in the fixture takes `@fromContext`, so no fetch has context rewrites
+and that check passes on every case.
 
-**Type-conditioned flatten paths, `@external` fields and narrowed fragments.** Every flatten path
-the grammar writes is unconditioned, every field it selects is one its subgraph resolves, and the
-two subgraphs agree on every type's members. So the checks for the `__typename` a path condition
-tests, for what a fetch's subgraph resolves under its `@provides` windows, and for a fragment
-narrowed to what its subgraph admits all pass on every case, and neither lane exercises them. The
-checker's own tests cover each; reaching them here needs a type-conditioned path perturbation, an
-`@external`/`@provides` pair in the fixture, and a union member one subgraph omits.
+**Subgraphs that disagree on a field's types.** Only Subgraph1 resolves `u`. Where two subgraphs
+resolve one field and declare different members, a plan asking the wider of them for the field and
+the narrower for its subfields is what `ReturnedTypes` decides differently from
+`SubgraphConstraint`.
 
 ### The field set
 
@@ -375,6 +442,12 @@ Walks the whole grammar against both Rust checkers, then plans every generated o
 rather than by the miniature planner agreeing with itself, so a rejection there is a false
 positive in the checker under test.
 
+    cargo run --release --example plan_case -- <hex>
+    cargo run --release --example plan_case -- '{ is { h } }'
+
+Prints one case, as bytes, or one operation, planned by the real planner: the plan and what each
+checker decides, with the port's reason when it rejects.
+
 ## Build the Lean oracle
 
 ```sh
@@ -391,10 +464,18 @@ the binary and `PLAN_MODEL_COMMIT` in `src/plan_oracle.rs` must match, unless
 
 ## Status
 
-The lane is green against `26c8a96`: 12,960 cases exhaustively and 20,000 sampled, **zero
-divergences** between the model and either Rust checker.
+The lane is green against `9ff02f5`: 98,215 sampled cases with **zero divergences** between the
+model and the port, and `plan_differential` reports how many cases of each perturbation the model
+accepts, so a perturbation reaching only one outcome shows. Disabling the port's entry conditions,
+typename check, resolvability check, returned-type narrowing, `@provides` windows, sent
+`__typename` check or typename-only value setters makes it diverge, each only on the perturbations
+or slots written for it.
 
-Its first campaign reported 1,114, all of which were a fixture bug in the oracle itself —
+`plan_smoke` accepts every unperturbed plan, and the real planner's 3,124 plans for the grammar's
+operations pass both checkers. The `legacy` lane rejects some unperturbed plans: the miniature
+planner's entries for `peer` read `f cs`, which only `g` demands.
+
+Its first campaign reported 1,114 divergences, all of which were a fixture bug in the oracle itself —
 [oracle-fixture-drift.md](docs/oracle-fixture-drift.md) records what it was, why the schema digest did not catch it,
 and what the digest now checks so that it would. `plan_disagreements` is the runner that distils a
 campaign's divergences into the operand pairs behind them.

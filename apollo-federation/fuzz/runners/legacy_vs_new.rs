@@ -64,7 +64,7 @@ fn main() {
     assert!(reps > 0, "--reps must be at least 1");
 
     let fixture = Fixture::new();
-    println!("{}\n", plan_model::schema_digest(fixture.supergraph_schema()));
+    println!("{}\n", plan_model::schema_digest(&fixture));
 
     let grammar = prepare_grammar(&fixture);
     let planner = prepare_planner(&fixture);

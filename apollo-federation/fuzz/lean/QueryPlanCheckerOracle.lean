@@ -53,10 +53,13 @@ def entityFields : List FieldDefinition :=
     { name := "f", outputType := .named "Int" },
     { name := "cs", outputType := .nonNull (.list (.named "C")) },
     { name := "g", outputType := .named "Int" },
+    { name := "u", outputType := .named "U" },
+    { name := "h", outputType := .named "Int" },
     typenameField
   ]
 
-def schema : Schema :=
+/-- The schema with `U`'s members as given: the supergraph's, or Subgraph1's, which lacks `T3`. -/
+def schemaWithMembers (members : List Name) : Schema :=
   {
     queryType := "Query"
     types :=
@@ -73,8 +76,37 @@ def schema : Schema :=
           },
         .interface { name := "I", fields := entityFields },
         .object { name := "T1", fields := entityFields, interfaces := ["I"] },
-        .object { name := "T2", fields := entityFields, interfaces := ["I"] },
-        .object { name := "T3", fields := entityFields, interfaces := ["I"] }
+        .object
+          {
+            name := "T2"
+            fields := entityFields ++ [{ name := "peer", outputType := .named "T3" }]
+            interfaces := ["I"]
+          },
+        .object { name := "T3", fields := entityFields, interfaces := ["I"] },
+        .union { name := "U", members := members }
+      ]
+  }
+
+def schema : Schema := schemaWithMembers ["T1", "T2", "T3"]
+
+/-- Subgraph1 declares `U` without `T3`, which only Subgraph2 adds. -/
+def subgraph1Schema : Schema := schemaWithMembers ["T1", "T2"]
+
+/-- Subgraph3 declares `I` an interface object: an object type there, an interface in the
+supergraph. -/
+def subgraph3Schema : Schema :=
+  {
+    queryType := "Query"
+    types :=
+      [
+        .object { name := "Query", fields := [typenameField] },
+        .object
+          {
+            name := "I"
+            fields :=
+              [{ name := "id", outputType := .named "ID" }, { name := "h", outputType := .named "Int" },
+                typenameField]
+          }
       ]
   }
 
@@ -109,6 +141,16 @@ def subgraph2 : Subgraph :=
     schema := schema
     keys := fun typeName =>
       if entityTypes.contains typeName then [{ fields := fieldSetOf keyFields }] else []
+    -- The `@requires` inputs are declared `@external` here, as the supergraph's `join__field`
+    -- says; an entity fetch selecting one asks for what this subgraph cannot resolve.
+    external := fun typeName fieldName =>
+      (entityTypes.contains typeName
+        && (fieldName == requiresFields || fieldName == compositeField))
+      || (typeName == "C" && fieldName == elementField)
+    -- `peer` brings `f` into Subgraph2's reach, external as it is there.
+    provides := fun typeName fieldName =>
+      if typeName == "T2" && fieldName == "peer" then Option.some (fieldSetOf requiresFields)
+      else Option.none
     requires := fun typeName fieldName =>
       if entityTypes.contains typeName && fieldName == "g" then
         Option.some
@@ -122,23 +164,34 @@ def subgraph2 : Subgraph :=
         Option.none
   }
 
+/-- Every implementation of `I`, and `I` itself, is keyed here, which Subgraph3's interface object
+asks of the subgraph defining the interface. -/
 def subgraph1 : Subgraph :=
   {
-    schema := schema
+    schema := subgraph1Schema
     keys := fun typeName =>
-      if entityTypes.contains typeName then [{ fields := fieldSetOf keyFields }] else []
+      if typeName == "I" || objectTypes.contains typeName then [{ fields := fieldSetOf keyFields }]
+      else []
+    external := fun typeName fieldName => entityTypes.contains typeName && fieldName == "g"
+  }
+
+def subgraph3 : Subgraph :=
+  {
+    schema := subgraph3Schema
+    keys := fun typeName => if typeName == "I" then [{ fields := fieldSetOf keyFields }] else []
   }
 
 def subgraphs : Subgraphs := fun name =>
   if name == "Subgraph1" then Option.some subgraph1
   else if name == "Subgraph2" then Option.some subgraph2
+  else if name == "Subgraph3" then Option.some subgraph3
   else Option.none
 
 -----------------------------------------------------------------------------------------
 -- The grammar (mirrors `plan_model`)
 -----------------------------------------------------------------------------------------
 
-def selectionSlots : Nat := 8
+def selectionSlots : Nat := 12
 
 def maxSelections : Nat := 3
 
@@ -160,14 +213,29 @@ def selectionSource (slot : Nat) (directives : List DirectiveApplication) : Sele
   | 4 => under "T2" directives [leaf "g"]
   | 5 => under "T3" directives [leaf "g"]
   | 6 => under "T2" [] [leaf "f"]
-  | _ => under "T3" [] [leaf "id"]
+  | 7 => under "T3" [] [leaf "id"]
+  | 8 => under "T2" directives [.field "peer" "peer" [] [] [leaf "f"]]
+  | 9 => .field "u" "u" [] [] [under "T3" [] [leaf "id"]]
+  | 10 => .field "u" "u" [] [] [under "T2" [] [leaf "id"]]
+  | _ => leaf "h"
 
 /-- Which entity type a slot needs an entity fetch for, if any. -/
 def slotNeedsEntityFetch (slot : Nat) : Option Name :=
   match slot % selectionSlots with
-  | 4 => Option.some "T2"
+  | 4 | 8 => Option.some "T2"
   | 5 => Option.some "T3"
   | _ => Option.none
+
+/-- The slot resolved by Subgraph3's interface object. -/
+def interfaceObjectSlot : Nat := 11
+
+/-- What the base fetch selects for a slot it resolves: the slot as written, but for the member
+Subgraph1's `U` lacks, which it cannot name. `none` for a slot another subgraph resolves. -/
+def fetchedSource (slot : Nat) : Option Selection :=
+  match slot % selectionSlots with
+  | 9 => Option.some (.field "u" "u" [] [] [leaf "__typename"])
+  | 11 => Option.none
+  | other => if (slotNeedsEntityFetch other).isNone then Option.some (selectionSource other []) else Option.none
 
 inductive Perturbation where
   | unchanged
@@ -192,6 +260,26 @@ inductive Perturbation where
   | deferOnTheWholePrimary
   | deferOnTheBaseFetchOnly
   | deferOnTheFirstEntityInput
+  | entriesNestedUnderTheInterface
+  | oneEntryOnTheInterface
+  | entriesIncludedByTheGuard
+  | entriesSkippedByTheGuard
+  | requiredFieldsUnderACondition
+  | requiredFieldsUnderTheInterface
+  | requiredFieldsUnderASiblingType
+  | keyUnderACondition
+  | entityFetchPerType
+  | entityFetchesInSequence
+  | conditionedFlattenPath
+  | conditionMissesAType
+  | conditionOnEveryImplementation
+  | conditionedPathWithoutTypename
+  | entityFetchSelectsExternal
+  | providesWindowExceeded
+  | interfaceObjectEntryForOneType
+  | interfaceObjectWithoutTypenameSetter
+  | interfaceObjectSentAsAnotherType
+  | interfaceObjectKeyOverwritten
 deriving Repr, DecidableEq
 
 def perturbations : List Perturbation :=
@@ -217,7 +305,27 @@ def perturbations : List Perturbation :=
     .deferOnEveryInput,
     .deferOnTheWholePrimary,
     .deferOnTheBaseFetchOnly,
-    .deferOnTheFirstEntityInput
+    .deferOnTheFirstEntityInput,
+    .entriesNestedUnderTheInterface,
+    .oneEntryOnTheInterface,
+    .entriesIncludedByTheGuard,
+    .entriesSkippedByTheGuard,
+    .requiredFieldsUnderACondition,
+    .requiredFieldsUnderTheInterface,
+    .requiredFieldsUnderASiblingType,
+    .keyUnderACondition,
+    .entityFetchPerType,
+    .entityFetchesInSequence,
+    .conditionedFlattenPath,
+    .conditionMissesAType,
+    .conditionOnEveryImplementation,
+    .conditionedPathWithoutTypename,
+    .entityFetchSelectsExternal,
+    .providesWindowExceeded,
+    .interfaceObjectEntryForOneType,
+    .interfaceObjectWithoutTypenameSetter,
+    .interfaceObjectSentAsAnotherType,
+    .interfaceObjectKeyOverwritten
   ]
 
 /-- The aliases, if any, the composite half of the demand is read under: on the list itself, and
@@ -327,6 +435,9 @@ def decodeCase : List Nat -> Option Case
 namespace Case
 
 /-- The entity types this operation needs an entity fetch for, in fixture order. -/
+def usesInterfaceObject (case : Case) : Bool :=
+  case.slots.contains interfaceObjectSlot
+
 def entityCasesOf (case : Case) : List Name :=
   entityTypes.filter fun entityType =>
     case.slots.any fun slot => slotNeedsEntityFetch slot == Option.some entityType
@@ -382,9 +493,12 @@ def deferredDependencies (case : Case) : Option (List FetchId) :=
 /-- What the base fetch selects under `is`: everything Subgraph1 resolves without an entity
 fetch. -/
 def baseFetchBody (case : Case) : SelectionSet :=
-  leaf "__typename"
-  :: (case.slots.filter fun slot => (slotNeedsEntityFetch slot).isNone).map
-      fun slot => selectionSource slot []
+  -- Without `__typename` the body would be empty for a case selecting only entity fields.
+  leaf (if case.perturbation == .conditionedPathWithoutTypename then keyFields else "__typename")
+  :: case.slots.filterMap fetchedSource
+  -- The interface object's key, which its representations carry.
+  ++ (if Case.usesInterfaceObject case && case.perturbation != .dropKeyField then [leaf keyFields]
+      else [])
 
 /-- What Subgraph1 is asked for to make one entity type fetchable. -/
 def entityInputBody (case : Case) (entityType : Name) : SelectionSet :=
@@ -401,26 +515,65 @@ def entityInputBody (case : Case) (entityType : Name) : SelectionSet :=
           ++ (if case.perturbation == .oneFieldSentUnderTwoKeys then [leaf requiresFields]
               else [])
           ++ [compositeSelection case.perturbation])
-  [leaf "__typename", under entityType [] inner]
+  if case.perturbation == .conditionedPathWithoutTypename then [under entityType [] inner]
+  else [leaf "__typename", under entityType [] inner]
 
-def requiresEntries (case : Case) : List RequiresSelection :=
+/-- The variable a conditioned entry tests: the case's guard, or `v0` when it has none. -/
+def entryVariable (case : Case) : Name :=
+  case.guard.getD (variables[0]?.getD "v0")
+
+def includeEntry (case : Case) : List DirectiveApplication :=
+  [.include (.variable (entryVariable case))]
+
+/-- What one entity type's entry reads inside its fragment. -/
+def entryBody (case : Case) (entityType : Name) : List RequiresSelection :=
   let keyField := if case.perturbation == .wrongKeyField then requiresFields else keyFields
-  let entries :=
-    (Case.entityCasesOf case).map fun entityType =>
-      RequiresSelection.inlineFragment (Option.some entityType) []
-        -- The entry reads a field under its alias, which is where the plan fetched it; the
-        -- renamer names it back to what the subgraph demands.
-        ([.field none "__typename" [] [], .field none keyField [] [],
-          .field (inputAliasOf case.perturbation entityType) requiresFields [] []]
-         ++ (if case.perturbation == .oneFieldSentUnderTwoKeys then
-               [.field none requiresFields [] []]
-             else
-               [])
-         ++ [compositeEntry case.perturbation])
-  if case.perturbation == .dropRequiresEntry && entries.length > 1 then
-    entries.dropLast
+  let key : List RequiresSelection := [.field none keyField [] []]
+  let key :=
+    if case.perturbation == .keyUnderACondition then
+      [RequiresSelection.inlineFragment none (includeEntry case) key]
+    else
+      key
+  -- The entry reads a field under its alias, which is where the plan fetched it; the renamer
+  -- names it back to what the subgraph demands.
+  let required : List RequiresSelection :=
+    [.field (inputAliasOf case.perturbation entityType) requiresFields [] []]
+    ++ (if case.perturbation == .oneFieldSentUnderTwoKeys then
+          [.field none requiresFields [] []]
+        else
+          [])
+    ++ [compositeEntry case.perturbation]
+  let required :=
+    match case.perturbation with
+    | .requiredFieldsUnderACondition => [RequiresSelection.inlineFragment none (includeEntry case) required]
+    | .requiredFieldsUnderTheInterface => [RequiresSelection.inlineFragment (some "I") [] required]
+    | .requiredFieldsUnderASiblingType => [RequiresSelection.inlineFragment (some "T1") [] required]
+    | _perturbation => required
+  [.field none "__typename" [] []] ++ key ++ required
+
+/-- The `requires` entries of an entity fetch with cases for `types`. -/
+def requiresEntries (case : Case) (types : List Name) : List RequiresSelection :=
+  if case.perturbation == .oneEntryOnTheInterface then
+    match types.head? with
+    | Option.none => []
+    | Option.some first => [.inlineFragment (some "I") [] (entryBody case first)]
   else
-    entries
+    let entries :=
+      types.map fun entityType =>
+        let body := entryBody case entityType
+        match case.perturbation with
+        | .entriesNestedUnderTheInterface =>
+            RequiresSelection.inlineFragment (some "I") []
+              [.inlineFragment (some entityType) [] body]
+        | .entriesIncludedByTheGuard =>
+            .inlineFragment (some entityType) (includeEntry case) body
+        | .entriesSkippedByTheGuard =>
+            .inlineFragment (some entityType) [.skip (.variable (entryVariable case))] body
+        | _perturbation => .inlineFragment (some entityType) [] body
+    if case.perturbation == .dropRequiresEntry && entries.length > 1 then
+      entries.dropLast
+    else
+      entries
 
 def entityCaseTypes (case : Case) : List Name :=
   let cases := Case.entityCasesOf case
@@ -428,9 +581,60 @@ def entityCaseTypes (case : Case) : List Name :=
 
 /-- An index consumes no response key, so dropping it would not be a perturbation; naming a key
 the plan never fetched does mount nowhere. -/
-def flattenPath (case : Case) : FetchDataPath :=
+def flattenPath (case : Case) (cases : List Name) : FetchDataPath :=
   let key := if case.perturbation == .flattenWrongKey then "g" else "is"
-  [.key key Option.none, .anyIndex Option.none]
+  let condition :=
+    match case.perturbation with
+    | .conditionedFlattenPath => Option.some cases
+    | .conditionOnEveryImplementation | .conditionedPathWithoutTypename => Option.some objectTypes
+    | .conditionMissesAType => Option.some (cases.take 1)
+    | _perturbation => Option.none
+  [.key key Option.none, .anyIndex condition]
+
+/-- What the entity fetch selects in `entityType`'s case: `g` and `peer { f }` as the operation
+asks for them. -/
+def entitySelections (case : Case) (entityType : Name) : List Selection :=
+  let asks (slot : Nat) : Bool :=
+    case.slots.contains slot && slotNeedsEntityFetch slot == Option.some entityType
+  let composite : Selection := .field compositeField compositeField [] [] [leaf elementField]
+  (if asks 4 || asks 5 then [leaf "g"] else [])
+  ++ (if asks 8 then
+        [.field "peer" "peer" [] []
+          (if case.perturbation == .providesWindowExceeded then [leaf requiresFields, composite]
+           else [leaf requiresFields])]
+      else [])
+  ++ (if case.perturbation == .entityFetchSelectsExternal then [composite] else [])
+
+/-- The fetch asking Subgraph3's interface object for `h`: one entry at `I`, and the value setter
+naming every representation `I`, as the planner writes them. -/
+def interfaceObjectFetch (case : Case) : PlanNode :=
+  let entryType : Name :=
+    if case.perturbation == .interfaceObjectEntryForOneType then "T2" else "I"
+  let setter (key value : String) : FetchDataRewrite :=
+    .valueSetter [.typenameEquals "I", .key key Option.none] (.string value)
+  let rewrites : List FetchDataRewrite :=
+    match case.perturbation with
+    | .interfaceObjectWithoutTypenameSetter => []
+    | .interfaceObjectSentAsAnotherType => [setter "__typename" "T2"]
+    | .interfaceObjectKeyOverwritten => [setter "__typename" "I", setter keyFields "1"]
+    | _ => [setter "__typename" "I"]
+  PlanNode.flatten [.key "is" Option.none, .anyIndex Option.none]
+    (.fetch
+      (fetchOf "Subgraph3"
+        [.inlineFragment (Option.some entryType) []
+          [.field Option.none "__typename" [] [], .field Option.none keyFields [] []]]
+        [.field entitiesFieldName entitiesFieldName [] [] [under "I" [] [leaf "h"]]]
+        rewrites))
+
+/-- The entity fetch for `cases`, mounted at its flatten path. -/
+def entityFetchFor (case : Case) (cases : List Name) : FetchNode :=
+  fetchOf "Subgraph2" (requiresEntries case cases)
+    [.field entitiesFieldName entitiesFieldName [] []
+      (cases.map fun entityType => under entityType [] (entitySelections case entityType))]
+    (inputRewritesOf case.perturbation)
+
+def mountedFor (case : Case) (cases : List Name) : PlanNode :=
+  PlanNode.flatten (flattenPath case cases) (.fetch (entityFetchFor case cases))
 
 def buildPlan (case : Case) : QueryPlan :=
   let inputs :=
@@ -443,16 +647,24 @@ def buildPlan (case : Case) : QueryPlan :=
             (fetchOf "Subgraph1" []
               [.field "is" "is" [] [] (entityInputBody case entityType)]
               (id := Option.some (baseFetchId + 1 + index)))
+  -- The interface object's fetch reads only the base fetch, so it runs right after the inputs,
+  -- outside any condition or deferred block the entity fetch is put in.
+  let inputs :=
+    if Case.usesInterfaceObject case then
+      [PlanNode.sequence [.parallel inputs, interfaceObjectFetch case]]
+    else
+      inputs
   let cases := entityCaseTypes case
   if cases.isEmpty then
     { node := Option.some (.plan (.parallel inputs)) }
   else
-    let entityFetch :=
-      fetchOf "Subgraph2" (requiresEntries case)
-        [.field entitiesFieldName entitiesFieldName [] []
-          (cases.map fun entityType => under entityType [] [leaf "g"])]
-        (inputRewritesOf case.perturbation)
-    let mounted := PlanNode.flatten (flattenPath case) (.fetch entityFetch)
+    let split := cases.map fun one => mountedFor case [one]
+    let mounted :=
+      match case.perturbation with
+      | .entityFetchPerType => if split.length > 1 then PlanNode.parallel split else mountedFor case cases
+      | .entityFetchesInSequence =>
+          if split.length > 1 then PlanNode.sequence split else mountedFor case cases
+      | _perturbation => mountedFor case cases
     let condition :=
       if case.perturbation == .guardEntityFetch then
         variables[variables.length - 1]?
@@ -511,7 +723,12 @@ mutual
 end
 
 /-- The types the digest reports field declarations for, in a fixed order. -/
-def digestTypes : List Name := ["Query", "C", "I", "T1", "T2", "T3"]
+def digestTypes : List Name := ["Query", "C", "I", "T1", "T2", "T3", "U"]
+
+/-- The subgraph types the digest reports, where a subgraph declares a type differently from the
+supergraph. -/
+def digestSubgraphTypes : List (Name × Schema × Name) :=
+  [("Subgraph1", subgraph1Schema, "U"), ("Subgraph3", subgraph3Schema, "I")]
 
 /-- One type's fields as `name:NamedType`, sorted, so the two copies of the fixture can be
 compared on what each type actually declares. Wrappers are dropped: the Rust side reads the
@@ -522,15 +739,22 @@ def declaredFields : TypeDefinition -> List FieldDefinition
   | .interface interfaceType => interfaceType.fields
   | _typeDefinition => []
 
-def renderTypeFields (typeName : Name) : String :=
-  let fields :=
-    match schema.types.find? (fun ty => ty.name == typeName) with
-    | Option.none => []
-    | Option.some ty =>
-        (declaredFields ty).map fun (field : FieldDefinition) =>
-          toString field.name ++ ":" ++ toString field.outputType.namedType
-  typeName ++ "{ " ++ String.intercalate space (fields.mergeSort (fun a b => decide (a <= b)))
-    ++ " }"
+def sortStrings (strings : List String) : List String :=
+  strings.mergeSort (fun a b => decide (a <= b))
+
+def renderTypeFields (schema : Schema) (typeName : Name) : String :=
+  match schema.types.find? (fun ty => ty.name == typeName) with
+  -- A union declares members rather than fields.
+  | Option.some (.union unionType) =>
+      typeName ++ "=" ++ String.intercalate "|" (sortStrings (unionType.members.map toString))
+  | found =>
+      let fields :=
+        match found with
+        | Option.none => []
+        | Option.some ty =>
+            (declaredFields ty).map fun (field : FieldDefinition) =>
+              toString field.name ++ ":" ++ toString field.outputType.namedType
+      typeName ++ "{ " ++ String.intercalate space (sortStrings fields) ++ " }"
 
 def renderNames (names : List Name) : String :=
   String.intercalate space (names.map toString)
@@ -544,7 +768,11 @@ def schemaDigest : String :=
   ++ " | requires: " ++ toString requiresFields
   ++ " | variables: " ++ renderNames variables
   ++ " | selections: " ++ String.intercalate space slots
-  ++ " | fields: " ++ String.intercalate space (digestTypes.map renderTypeFields)
+  ++ " | fields: " ++ String.intercalate space (digestTypes.map (renderTypeFields schema))
+  ++ " | subgraphs: "
+  ++ String.intercalate space
+      (digestSubgraphTypes.map fun (subgraphName, subgraphSchema, typeName) =>
+        toString subgraphName ++ "." ++ renderTypeFields subgraphSchema typeName)
 
 -----------------------------------------------------------------------------------------
 -- The line protocol
@@ -619,11 +847,8 @@ partial def loop : IO Unit := do
         let returned := ((buildPlan testCase).returnedTypes schema subgraphs).eraseDups
         let available := (inputs.check schema subgraphs returned operation [] [] [] []).1
         let cases := entityCaseTypes testCase
-        let entityFetch :=
-          fetchOf "Subgraph2" (requiresEntries testCase)
-            [.field entitiesFieldName entitiesFieldName [] []
-              (cases.map fun entityType => under entityType [] [leaf "g"])]
-        let path := flattenPath testCase
+        let entityFetch := { entityFetchFor testCase cases with inputRewrites := [] }
+        let path := flattenPath testCase cases
         let guarded : BooleanCondition :=
           match testCase.guard with
           | Option.none => []
@@ -685,7 +910,7 @@ partial def loop : IO Unit := do
           match testCase.guard with
           | Option.none => []
           | Option.some variableName => [.positive variableName]
-        match (entityCaseTypes testCase).head?, requiresEntries testCase with
+        match (entityCaseTypes testCase).head?, requiresEntries testCase (entityCaseTypes testCase) with
         | Option.some entityType, (firstEntry@(.inlineFragment (Option.some requireType) _ _)) :: _ =>
             match (subgraph2.keys entityType).head? with
             | Option.none => IO.println "ok=nokey"
@@ -695,13 +920,9 @@ partial def loop : IO Unit := do
                 -- The test is decided on the demand restricted to the entry's type and taken
                 -- back through the fetch's input rewrites, not on the raw demand; building the
                 -- fetch is how this diagnostic gets at the rewrites.
-                let entityFetch :=
-                  fetchOf "Subgraph2" (requiresEntries testCase)
-                    [.field entitiesFieldName entitiesFieldName [] []
-                      ((entityCaseTypes testCase).map fun ty => under ty [] [leaf "g"])]
-                    (inputRewritesOf testCase.perturbation)
+                let entityFetch := entityFetchFor testCase (entityCaseTypes testCase)
                 let required :=
-                  requiredAt schema (flattenPath testCase) guarded available
+                  requiredAt schema (flattenPath testCase (entityCaseTypes testCase)) guarded available
                     (entityFetch.requiredSelections schema firstEntry computed)
                 IO.println s!"ok={renderSelections available} ||| {renderSelections required}"
         | _, _ => IO.println "ok=nocase"

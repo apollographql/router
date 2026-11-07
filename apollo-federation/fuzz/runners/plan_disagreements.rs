@@ -43,7 +43,7 @@ fn main() {
     let fixture = Fixture::new();
     assert_eq!(
         oracle.schema_digest(),
-        plan_model::schema_digest(fixture.supergraph_schema()),
+        plan_model::schema_digest(&fixture),
         "the two copies of the fixture have drifted apart"
     );
 

@@ -34,7 +34,7 @@ fn main() {
     let fixture = Fixture::new();
     assert_eq!(
         oracle.schema_digest(),
-        plan_model::schema_digest(fixture.supergraph_schema()),
+        plan_model::schema_digest(&fixture),
         "the two copies of the fixture have drifted apart; every verdict below would be \
          meaningless"
     );
@@ -45,6 +45,9 @@ fn main() {
     let mut divergences = Vec::new();
     let mut divergence_count = 0usize;
     let mut legacy_divergences = 0usize;
+    // Per perturbation: cases compared, and of those the model accepted. A perturbation the model
+    // always accepts or always rejects reaches only one side of what it was written for.
+    let mut by_perturbation = vec![(0usize, 0usize); plan_model::PERTURBATIONS.len()];
 
     for bytes in inputs(budget) {
         let lean = oracle.check(&bytes);
@@ -82,8 +85,14 @@ fn main() {
         );
 
         compared += 1;
+        let tally = &mut by_perturbation[plan_model::PERTURBATIONS
+            .iter()
+            .position(|perturbation| *perturbation == case.perturbation)
+            .expect("a listed perturbation")];
+        tally.0 += 1;
         if lean {
             lean_accepts += 1;
+            tally.1 += 1;
         }
         if lean != new.is_ok() {
             divergence_count += 1;
@@ -111,6 +120,14 @@ fn main() {
     println!("lean accepted:       {lean_accepts}");
     println!("port divergences:    {divergence_count}");
     println!("legacy divergences:  {legacy_divergences} (advisory)");
+    println!("\n{:<34} {:>8} {:>8}", "perturbation", "cases", "accepted");
+    for (perturbation, (cases, accepted)) in plan_model::PERTURBATIONS.iter().zip(&by_perturbation)
+    {
+        println!(
+            "{:<34} {cases:>8} {accepted:>8}",
+            format!("{perturbation:?}")
+        );
+    }
     if !divergences.is_empty() {
         println!("\nport against the model:");
         for line in &divergences {

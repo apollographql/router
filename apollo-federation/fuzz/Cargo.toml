@@ -51,6 +51,14 @@ name = "plan_disagreements"
 path = "runners/plan_disagreements.rs"
 
 [[example]]
+name = "compose_plan_fixture"
+path = "runners/compose_plan_fixture.rs"
+
+[[example]]
+name = "plan_case"
+path = "runners/plan_case.rs"
+
+[[example]]
 name = "plan_probe"
 path = "runners/plan_probe.rs"
 

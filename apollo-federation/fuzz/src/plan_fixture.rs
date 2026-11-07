@@ -1,18 +1,20 @@
 //! The federated fixture both sides of the plan lane hold.
 //!
-//! One composed supergraph, checked in beside this package and never generated: the grammar varies
-//! the operation and the plan, not the schema. It is the supergraph of
-//! `it_handles_multiple_requires_within_the_same_entity_fetch`, chosen because it is small enough
-//! to transcribe into the Lean oracle by hand and still exercises what the checker decides —
-//! an interface root under a list, two entity types with `@key(fields: "id")`, a `@requires`
-//! field on each, and a third implementation with no key at all.
+//! One composed supergraph, checked in beside this package and never generated during a run: the
+//! grammar varies the operation and the plan, not the schema. Its subgraphs are in
+//! `runners/compose_plan_fixture.rs`, extending those of
+//! `it_handles_multiple_requires_within_the_same_entity_fetch`; it stays small enough to transcribe
+//! into the Lean oracle by hand.
 //!
 //! ```text
 //! Query.is: [I!]!                          (Subgraph1)
-//! interface I { id: ID!, f: Int, g: Int }
-//! T1 implements I { id, f, g }             (Subgraph1 only, no key)
-//! T2 implements I @key("id")               f: Int! in Subgraph1, g @requires("f") in Subgraph2
-//! T3 implements I @key("id")               f: Int  in Subgraph1, g @requires("f") in Subgraph2
+//! interface I @key("id") { id f cs g u h }
+//! T1 implements I                          (Subgraph1 only)
+//! T2 implements I @key("id")               g @requires("f cs { ... on C { a } }") in Subgraph2,
+//!                                          peer: T3 @provides("f") in Subgraph2
+//! T3 implements I @key("id")               g @requires("f cs { ... on C { a } }") in Subgraph2
+//! union U = T1 | T2 | T3                   Subgraph1 declares only T1 | T2
+//! I @interfaceObject { id h }              (Subgraph3)
 //! ```
 //!
 //! Holding a real [`QueryPlanner`] rather than only the schemas buys the planner-driven lane: an

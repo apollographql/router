@@ -31,6 +31,7 @@ use apollo_federation::query_plan::DeferredDependency;
 use apollo_federation::query_plan::FetchDataKeyRenamer;
 use apollo_federation::query_plan::FetchDataPathElement;
 use apollo_federation::query_plan::FetchDataRewrite;
+use apollo_federation::query_plan::FetchDataValueSetter;
 use apollo_federation::query_plan::FetchNode;
 use apollo_federation::query_plan::FlattenNode;
 use apollo_federation::query_plan::ParallelNode;
@@ -64,7 +65,11 @@ pub const VARIABLES: [&str; 2] = ["v0", "v1"];
 /// A canonical rendering of everything the two sides must agree on, so the oracle can prove it
 /// holds the same fixture. Compared before any case runs.
 /// The types the digest reports field declarations for, in a fixed order.
-pub const DIGEST_TYPES: [&str; 6] = ["Query", "C", "I", "T1", "T2", "T3"];
+pub const DIGEST_TYPES: [&str; 7] = ["Query", "C", "I", "T1", "T2", "T3", "U"];
+
+/// The subgraph types the digest reports, where a subgraph declares a type differently from the
+/// supergraph: Subgraph1's `U` lacks `T3`, and Subgraph3's `I` is an object, an interface object.
+pub const DIGEST_SUBGRAPH_TYPES: [(&str, &str); 2] = [("Subgraph1", "U"), ("Subgraph3", "I")];
 
 /// A canonical rendering of everything the two sides must agree on, so the oracle can prove it
 /// holds the same fixture. Compared before any case runs.
@@ -75,7 +80,8 @@ pub const DIGEST_TYPES: [&str; 6] = ["Query", "C", "I", "T1", "T2", "T3"];
 /// modelling introspection, and apollo-compiler knows it natively — so it is part of what the two
 /// must agree on even though only one of them writes it down. Wrappers are dropped, neither
 /// checker looking past a field's named type.
-pub fn schema_digest(schema: &ValidFederationSchema) -> String {
+pub fn schema_digest(fixture: &crate::plan_fixture::Fixture) -> String {
+    let schema = fixture.supergraph_schema();
     let objects = OBJECT_TYPES.join(" ");
     let entities = ENTITY_TYPES.join(" ");
     let variables = VARIABLES.join(" ");
@@ -84,11 +90,26 @@ pub fn schema_digest(schema: &ValidFederationSchema) -> String {
         .iter()
         .map(|type_name| render_type_fields(schema, type_name))
         .collect();
+    let subgraph_fields: Vec<String> = DIGEST_SUBGRAPH_TYPES
+        .iter()
+        .map(|(subgraph_name, type_name)| {
+            let subgraph = fixture
+                .subgraph_schemas()
+                .get(*subgraph_name)
+                .expect("a fixture subgraph");
+            format!(
+                "{subgraph_name}.{}",
+                render_type_fields(subgraph, type_name)
+            )
+        })
+        .collect();
     format!(
         "objects: {objects} | entities: {entities} | key: {KEY_FIELDS} | \
-         requires: {REQUIRES_FIELDS} | variables: {variables} | selections: {} | fields: {}",
+         requires: {REQUIRES_FIELDS} | variables: {variables} | selections: {} | fields: {} | \
+         subgraphs: {}",
         selections.join(" "),
-        fields.join(" ")
+        fields.join(" "),
+        subgraph_fields.join(" ")
     )
 }
 
@@ -105,6 +126,13 @@ fn render_type_fields(schema: &ValidFederationSchema, type_name: &str) -> String
             .iter()
             .map(|(name, field)| format!("{name}:{}", field.ty.inner_named_type()))
             .collect(),
+        // A union declares members rather than fields.
+        Some(ExtendedType::Union(ty)) => {
+            let mut members: Vec<String> =
+                ty.members.iter().map(|member| member.to_string()).collect();
+            members.sort();
+            return format!("{type_name}={}", members.join("|"));
+        }
         _ => Vec::new(),
     };
     fields.push("__typename:String".to_string());
@@ -117,7 +145,7 @@ fn render_type_fields(schema: &ValidFederationSchema, type_name: &str) -> String
 //==================================================================================================
 
 /// How many distinct selections the grammar can put under `is`.
-pub const SELECTION_SLOTS: u8 = 8;
+pub const SELECTION_SLOTS: u8 = 12;
 
 /// The most selections one operation carries. Beyond three the plans stop differing in kind.
 pub const MAX_SELECTIONS: usize = 3;
@@ -127,6 +155,11 @@ pub const MAX_SELECTIONS: usize = 3;
 /// `g` never appears unguarded by a type condition: on `T1` it is resolved by Subgraph1 and on
 /// `T2`/`T3` by Subgraph2, so an unguarded `g` would make the planner type-explode and the
 /// miniature planner below would stop resembling it.
+///
+/// The last four reach the rest of the fixture: `peer { f }` is resolved inside Subgraph2's
+/// `@provides` window; `u { ... on T3 { id } }` asks for a member Subgraph1, which resolves `u`,
+/// never returns; `u { ... on T2 { id } }` for one it does; and `h` is resolved by Subgraph3's
+/// interface object.
 fn selection_source(slot: u8) -> String {
     match slot % SELECTION_SLOTS {
         0 => "id".to_string(),
@@ -136,14 +169,33 @@ fn selection_source(slot: u8) -> String {
         4 => "... on T2 { g }".to_string(),
         5 => "... on T3 { g }".to_string(),
         6 => "... on T2 { f }".to_string(),
-        _ => "... on T3 { id }".to_string(),
+        7 => "... on T3 { id }".to_string(),
+        8 => "... on T2 { peer { f } }".to_string(),
+        9 => "u { ... on T3 { id } }".to_string(),
+        10 => "u { ... on T2 { id } }".to_string(),
+        _ => "h".to_string(),
     }
 }
+
+/// What the base fetch selects for a slot it resolves: the slot as written, but for the member
+/// Subgraph1's `U` lacks, which it cannot even name. `None` for a slot another subgraph resolves.
+fn fetched_source(slot: u8) -> Option<String> {
+    match slot % SELECTION_SLOTS {
+        9 => Some("u { __typename }".to_string()),
+        11 => None,
+        other => slot_needs_entity_fetch(other)
+            .is_none()
+            .then(|| selection_source(other)),
+    }
+}
+
+/// The slot resolved by Subgraph3's interface object.
+const INTERFACE_OBJECT_SLOT: u8 = 11;
 
 /// Which entity type a slot needs an entity fetch for, if any.
 fn slot_needs_entity_fetch(slot: u8) -> Option<&'static str> {
     match slot % SELECTION_SLOTS {
-        4 => Some("T2"),
+        4 | 8 => Some("T2"),
         5 => Some("T3"),
         _ => None,
     }
@@ -219,9 +271,52 @@ pub enum Perturbation {
     /// The block depends only on the first entity type's input fetch. Enough when the case has one
     /// entity type; with two, the second type's representations cannot be built.
     DeferOnTheFirstEntityInput,
+    /// Each entry nested in a fragment on the interface, `... on I { ... on T2 { … } }`.
+    EntriesNestedUnderTheInterface,
+    /// One entry on the interface for every entity type, which also reads `T1` objects.
+    OneEntryOnTheInterface,
+    /// Each entry under `@include` of the case's guard, or of `v0` when the case has none.
+    EntriesIncludedByTheGuard,
+    /// Each entry under `@skip` of the same variable.
+    EntriesSkippedByTheGuard,
+    /// The required fields inside each entry under `@include` of that variable.
+    RequiredFieldsUnderACondition,
+    /// The required fields inside each entry under `... on I`, which admits the entry's type.
+    RequiredFieldsUnderTheInterface,
+    /// The required fields inside each entry under `... on T1`, which never matches it.
+    RequiredFieldsUnderASiblingType,
+    /// The key field inside each entry under `@include` of that variable.
+    KeyUnderACondition,
+    /// One entity fetch per entity type, in parallel, each reading the same buffer.
+    EntityFetchPerType,
+    /// The same fetches in sequence, so the second reads what the first wrote.
+    EntityFetchesInSequence,
+    /// The flatten path conditioned on the entity types the fetch has cases for, `is.@|[T2,T3]`.
+    ConditionedFlattenPath,
+    /// The path conditioned on the first of them only.
+    ConditionMissesAType,
+    /// The path conditioned on every implementation of `I`, `T1` included.
+    ConditionOnEveryImplementation,
+    /// The same, with no fetch selecting `__typename` at `is` outside a fragment, so the router
+    /// has no `__typename` to test on a `T1` unless the client asked for it.
+    ConditionedPathWithoutTypename,
+    /// The entity fetch also selects `cs { a }`, which is `@external` in Subgraph2.
+    EntityFetchSelectsExternal,
+    /// Under `peer`, the entity fetch also selects `cs { a }`, which `@provides` does not cover.
+    ProvidesWindowExceeded,
+    /// The interface object's entry is `... on T2` rather than `... on I`, so the router sends
+    /// Subgraph3 only `T2` representations and `h` is never fetched for the others.
+    InterfaceObjectEntryForOneType,
+    /// The interface object's fetch without the value setter naming every representation `I`. The
+    /// router would send Subgraph3 `__typename`s it does not know; see the README.
+    InterfaceObjectWithoutTypenameSetter,
+    /// The value setter names every representation `T2` instead, running another type's resolver.
+    InterfaceObjectSentAsAnotherType,
+    /// A second value setter overwrites every representation's `id`, sending one key for all.
+    InterfaceObjectKeyOverwritten,
 }
 
-pub const PERTURBATIONS: [Perturbation; 22] = [
+pub const PERTURBATIONS: [Perturbation; 42] = [
     Perturbation::None,
     Perturbation::DropRequiredField,
     Perturbation::DropRequiresEntry,
@@ -244,6 +339,26 @@ pub const PERTURBATIONS: [Perturbation; 22] = [
     Perturbation::DeferOnTheWholePrimary,
     Perturbation::DeferOnTheBaseFetchOnly,
     Perturbation::DeferOnTheFirstEntityInput,
+    Perturbation::EntriesNestedUnderTheInterface,
+    Perturbation::OneEntryOnTheInterface,
+    Perturbation::EntriesIncludedByTheGuard,
+    Perturbation::EntriesSkippedByTheGuard,
+    Perturbation::RequiredFieldsUnderACondition,
+    Perturbation::RequiredFieldsUnderTheInterface,
+    Perturbation::RequiredFieldsUnderASiblingType,
+    Perturbation::KeyUnderACondition,
+    Perturbation::EntityFetchPerType,
+    Perturbation::EntityFetchesInSequence,
+    Perturbation::ConditionedFlattenPath,
+    Perturbation::ConditionMissesAType,
+    Perturbation::ConditionOnEveryImplementation,
+    Perturbation::ConditionedPathWithoutTypename,
+    Perturbation::EntityFetchSelectsExternal,
+    Perturbation::ProvidesWindowExceeded,
+    Perturbation::InterfaceObjectEntryForOneType,
+    Perturbation::InterfaceObjectWithoutTypenameSetter,
+    Perturbation::InterfaceObjectSentAsAnotherType,
+    Perturbation::InterfaceObjectKeyOverwritten,
 ];
 
 /// The alias a planner gives a `@requires` input it has to fetch apart from the client's own
@@ -364,6 +479,11 @@ impl Case {
         format!("{declarations} {{ is {{ {body}}} }}")
     }
 
+    /// Whether the operation selects the field Subgraph3's interface object resolves.
+    pub fn uses_interface_object(&self) -> bool {
+        self.slots.contains(&INTERFACE_OBJECT_SLOT)
+    }
+
     /// The entity types this operation needs an entity fetch for, in fixture order.
     pub fn entity_types(&self) -> impl Iterator<Item = &'static str> + '_ {
         ENTITY_TYPES.into_iter().filter(move |entity_type| {
@@ -381,12 +501,23 @@ impl Case {
 /// What the base fetch to Subgraph1 selects under `is`: everything the operation asks for that
 /// Subgraph1 resolves without an entity fetch.
 fn base_fetch_body(case: &Case) -> String {
-    let mut body = String::from("__typename ");
+    // Without `__typename` the body would be empty for a case selecting only entity fields.
+    let mut body = String::from(
+        if case.perturbation == Perturbation::ConditionedPathWithoutTypename {
+            "id "
+        } else {
+            "__typename "
+        },
+    );
     for slot in &case.slots {
-        if slot_needs_entity_fetch(*slot).is_some() {
-            continue;
+        if let Some(fetched) = fetched_source(*slot) {
+            body.push_str(&fetched);
+            body.push(' ');
         }
-        body.push_str(&selection_source(*slot));
+    }
+    // The interface object's key, which its representations carry.
+    if case.uses_interface_object() && case.perturbation != Perturbation::DropKeyField {
+        body.push_str(KEY_FIELDS);
         body.push(' ');
     }
     body
@@ -419,52 +550,144 @@ fn entity_input_body(case: &Case, entity_type: &str) -> String {
         inner.push(' ');
         inner.push_str(&composite_body(case));
     }
-    format!("__typename ... on {entity_type} {{ {inner} }} ")
+    if case.perturbation == Perturbation::ConditionedPathWithoutTypename {
+        format!("... on {entity_type} {{ {inner} }} ")
+    } else {
+        format!("__typename ... on {entity_type} {{ {inner} }} ")
+    }
 }
 
-/// The `requires` entries of the entity fetch: one per entity case, naming what the plan claims to
-/// have already fetched about it.
-fn requires_entries(case: &Case) -> Vec<requires_selection::Selection> {
+/// The variable a conditioned entry tests: the case's guard, or `v0` when it has none.
+fn entry_variable(case: &Case) -> &'static str {
+    case.guard.unwrap_or(VARIABLES[0])
+}
+
+fn entry_condition(
+    kind: requires_selection::ConditionKind,
+    variable: &str,
+) -> requires_selection::Condition {
+    requires_selection::Condition {
+        kind,
+        if_: requires_selection::ConditionValue::Variable(Name::new(variable).expect("variable")),
+    }
+}
+
+fn entry_fragment(
+    type_condition: Option<&str>,
+    conditions: Vec<requires_selection::Condition>,
+    selections: Vec<requires_selection::Selection>,
+) -> requires_selection::Selection {
+    requires_selection::Selection::InlineFragment(requires_selection::InlineFragment {
+        type_condition: type_condition.map(|name| Name::new(name).expect("type name")),
+        conditions,
+        selections,
+    })
+}
+
+fn entry_field(
+    alias: Option<&str>,
+    name: &str,
+    selections: Vec<requires_selection::Selection>,
+) -> requires_selection::Selection {
+    requires_selection::Selection::Field(requires_selection::Field {
+        alias: alias.map(|alias| Name::new(alias).expect("alias")),
+        name: Name::new(name).expect("field name"),
+        selections,
+    })
+}
+
+/// What one entity type's entry reads inside its fragment.
+fn entry_body(case: &Case, entity_type: &str) -> Vec<requires_selection::Selection> {
     let key_field = if case.perturbation == Perturbation::WrongKeyField {
         REQUIRES_FIELDS
     } else {
         KEY_FIELDS
     };
-    let mut entries: Vec<requires_selection::Selection> = case
-        .entity_types()
+    let include = || {
+        vec![entry_condition(
+            requires_selection::ConditionKind::Include,
+            entry_variable(case),
+        )]
+    };
+    let mut key = vec![entry_field(None, key_field, Vec::new())];
+    if case.perturbation == Perturbation::KeyUnderACondition {
+        key = vec![entry_fragment(None, include(), key)];
+    }
+    // The entry reads a field under its alias, which is where the plan fetched it; the renamer
+    // names it back to what the subgraph demands.
+    let mut required = vec![entry_field(
+        input_alias(case, entity_type),
+        REQUIRES_FIELDS,
+        Vec::new(),
+    )];
+    if case.perturbation == Perturbation::OneFieldSentUnderTwoKeys {
+        required.push(entry_field(None, REQUIRES_FIELDS, Vec::new()));
+    }
+    let (list_alias, element_alias) = composite_aliases(case);
+    required.push(entry_field(
+        list_alias,
+        COMPOSITE_FIELD,
+        vec![entry_field(element_alias, ELEMENT_FIELD, Vec::new())],
+    ));
+    let required = match case.perturbation {
+        Perturbation::RequiredFieldsUnderACondition => {
+            vec![entry_fragment(None, include(), required)]
+        }
+        Perturbation::RequiredFieldsUnderTheInterface => {
+            vec![entry_fragment(Some("I"), Vec::new(), required)]
+        }
+        Perturbation::RequiredFieldsUnderASiblingType => {
+            vec![entry_fragment(Some("T1"), Vec::new(), required)]
+        }
+        _ => required,
+    };
+    let mut body = vec![entry_field(None, "__typename", Vec::new())];
+    body.extend(key);
+    body.extend(required);
+    body
+}
+
+/// The `requires` entries of an entity fetch with cases for `entity_types`: one per entity case,
+/// naming what the plan claims to have already fetched about it.
+fn requires_entries(case: &Case, entity_types: &[&str]) -> Vec<requires_selection::Selection> {
+    if case.perturbation == Perturbation::OneEntryOnTheInterface {
+        let Some(first) = entity_types.first() else {
+            return Vec::new();
+        };
+        return vec![entry_fragment(
+            Some("I"),
+            Vec::new(),
+            entry_body(case, first),
+        )];
+    }
+    let mut entries: Vec<requires_selection::Selection> = entity_types
+        .iter()
         .map(|entity_type| {
-            requires_selection::Selection::InlineFragment(requires_selection::InlineFragment {
-                type_condition: Some(Name::new(entity_type).expect("type name")),
-                conditions: Vec::new(),
-                selections: {
-                    let field = |alias: Option<&str>, name: &str| {
-                        requires_selection::Selection::Field(requires_selection::Field {
-                            alias: alias.map(|alias| Name::new(alias).expect("alias")),
-                            name: Name::new(name).expect("field name"),
-                            selections: Vec::new(),
-                        })
-                    };
-                    // The entry reads a field under its alias, which is where the plan fetched
-                    // it; the renamer names it back to what the subgraph demands.
-                    let mut selections = vec![
-                        field(None, "__typename"),
-                        field(None, key_field),
-                        field(input_alias(case, entity_type), REQUIRES_FIELDS),
-                    ];
-                    if case.perturbation == Perturbation::OneFieldSentUnderTwoKeys {
-                        selections.push(field(None, REQUIRES_FIELDS));
-                    }
-                    let (list_alias, element_alias) = composite_aliases(case);
-                    selections.push(requires_selection::Selection::Field(
-                        requires_selection::Field {
-                            alias: list_alias.map(|alias| Name::new(alias).expect("alias")),
-                            name: Name::new(COMPOSITE_FIELD).expect("field name"),
-                            selections: vec![field(element_alias, ELEMENT_FIELD)],
-                        },
-                    ));
-                    selections
-                },
-            })
+            let body = entry_body(case, entity_type);
+            match case.perturbation {
+                Perturbation::EntriesNestedUnderTheInterface => entry_fragment(
+                    Some("I"),
+                    Vec::new(),
+                    vec![entry_fragment(Some(entity_type), Vec::new(), body)],
+                ),
+                Perturbation::EntriesIncludedByTheGuard => entry_fragment(
+                    Some(entity_type),
+                    vec![entry_condition(
+                        requires_selection::ConditionKind::Include,
+                        entry_variable(case),
+                    )],
+                    body,
+                ),
+                Perturbation::EntriesSkippedByTheGuard => entry_fragment(
+                    Some(entity_type),
+                    vec![entry_condition(
+                        requires_selection::ConditionKind::Skip,
+                        entry_variable(case),
+                    )],
+                    body,
+                ),
+                _ => entry_fragment(Some(entity_type), Vec::new(), body),
+            }
         })
         .collect();
     if case.perturbation == Perturbation::DropRequiresEntry && entries.len() > 1 {
@@ -486,16 +709,108 @@ fn entity_cases(case: &Case) -> Vec<&'static str> {
 ///
 /// Dropping the index would *not* be a perturbation: an index consumes no response key, so `is`
 /// and `is.@` mount to the same place. Naming a key the plan never fetched does mount nowhere.
-fn flatten_path(case: &Case) -> Vec<FetchDataPathElement> {
+///
+/// A conditioned path names the entity types `cases` the fetch has cases for, only the first, or
+/// every implementation of `I`.
+fn flatten_path(case: &Case, cases: &[&str]) -> Vec<FetchDataPathElement> {
     let key = if case.perturbation == Perturbation::FlattenWrongKey {
         "g"
     } else {
         "is"
     };
+    let names = |types: &[&str]| {
+        Some(
+            types
+                .iter()
+                .map(|name| Name::new(name).expect("type name"))
+                .collect(),
+        )
+    };
+    let condition = match case.perturbation {
+        Perturbation::ConditionedFlattenPath => names(cases),
+        Perturbation::ConditionOnEveryImplementation
+        | Perturbation::ConditionedPathWithoutTypename => names(&OBJECT_TYPES),
+        Perturbation::ConditionMissesAType => names(&cases[..1.min(cases.len())]),
+        _ => None,
+    };
     vec![
         FetchDataPathElement::Key(Name::new(key).expect("field name"), Default::default()),
-        FetchDataPathElement::AnyIndex(Default::default()),
+        FetchDataPathElement::AnyIndex(condition),
     ]
+}
+
+/// What the entity fetch selects in `entity_type`'s case: `g` and `peer { f }` as the operation
+/// asks for them.
+fn entity_selections(case: &Case, entity_type: &str) -> String {
+    let asks =
+        |slot: u8| case.slots.contains(&slot) && slot_needs_entity_fetch(slot) == Some(entity_type);
+    let mut selected = String::new();
+    if asks(4) || asks(5) {
+        selected.push_str("g ");
+    }
+    if asks(8) {
+        if case.perturbation == Perturbation::ProvidesWindowExceeded {
+            selected.push_str("peer { f cs { a } } ");
+        } else {
+            selected.push_str("peer { f } ");
+        }
+    }
+    if case.perturbation == Perturbation::EntityFetchSelectsExternal {
+        selected.push_str("cs { a } ");
+    }
+    selected
+}
+
+/// The fetch asking Subgraph3's interface object for `h`: one entry at `I`, and the value setter
+/// naming every representation `I`, as the planner writes them.
+fn interface_object_fetch(
+    subgraphs: &apollo_compiler::collections::IndexMap<Arc<str>, ValidFederationSchema>,
+    case: &Case,
+) -> PlanNode {
+    let entry_type = if case.perturbation == Perturbation::InterfaceObjectEntryForOneType {
+        "T2"
+    } else {
+        "I"
+    };
+    let requires = vec![entry_fragment(
+        Some(entry_type),
+        Vec::new(),
+        vec![
+            entry_field(None, "__typename", Vec::new()),
+            entry_field(None, KEY_FIELDS, Vec::new()),
+        ],
+    )];
+    let setter = |key: &str, value: &str| {
+        Arc::new(FetchDataRewrite::ValueSetter(FetchDataValueSetter {
+            path: vec![
+                FetchDataPathElement::TypenameEquals(Name::new("I").expect("type name")),
+                FetchDataPathElement::Key(Name::new(key).expect("key"), None),
+            ],
+            set_value_to: value.into(),
+        }))
+    };
+    let input_rewrites = match case.perturbation {
+        Perturbation::InterfaceObjectWithoutTypenameSetter => Vec::new(),
+        Perturbation::InterfaceObjectSentAsAnotherType => vec![setter("__typename", "T2")],
+        Perturbation::InterfaceObjectKeyOverwritten => {
+            vec![setter("__typename", "I"), setter(KEY_FIELDS, "1")]
+        }
+        _ => vec![setter("__typename", "I")],
+    };
+    PlanNode::Flatten(FlattenNode {
+        path: vec![
+            FetchDataPathElement::Key(Name::new("is").expect("field name"), None),
+            FetchDataPathElement::AnyIndex(None),
+        ],
+        node: Box::new(PlanNode::Fetch(Box::new(fetch_node(
+            subgraphs.get("Subgraph3").expect("Subgraph3"),
+            "Subgraph3",
+            None,
+            "query($representations: [_Any!]!) { _entities(representations: $representations) { ... on I { h } } }",
+            requires,
+            input_rewrites,
+        )))),
+    })
 }
 
 /// The base fetch's id. The entity input fetches follow it, one per entity type in case order.
@@ -636,6 +951,18 @@ pub fn build_plan(
         ))));
     }
 
+    // The interface object's fetch reads only the base fetch, so it runs right after the inputs,
+    // outside any condition or deferred block the entity fetch is put in.
+    let inputs = if case.uses_interface_object() {
+        vec![PlanNode::Sequence(SequenceNode {
+            nodes: vec![
+                PlanNode::Parallel(ParallelNode { nodes: inputs }),
+                interface_object_fetch(subgraphs, case),
+            ],
+        })]
+    } else {
+        inputs
+    };
     if cases.is_empty() {
         return QueryPlan {
             node: Some(TopLevelPlanNode::Parallel(ParallelNode { nodes: inputs })),
@@ -644,23 +971,38 @@ pub fn build_plan(
     }
 
     let subgraph2 = subgraphs.get("Subgraph2").expect("Subgraph2");
-    let body: String = cases
-        .iter()
-        .map(|entity_type| format!("... on {entity_type} {{ g }} "))
-        .collect();
-    let entity_fetch = fetch_node(
-        subgraph2,
-        "Subgraph2",
-        None,
-        &format!("query($representations: [_Any!]!) {{ _entities(representations: $representations) {{ {body}}} }}"),
-        requires_entries(case),
-        input_rewrites(case),
-    );
-
-    let mut mounted = PlanNode::Flatten(FlattenNode {
-        path: flatten_path(case),
-        node: Box::new(PlanNode::Fetch(Box::new(entity_fetch))),
-    });
+    let entity_fetch = |cases: &[&str]| {
+        let body: String = cases
+            .iter()
+            .map(|entity_type| {
+                format!(
+                    "... on {entity_type} {{ {}}} ",
+                    entity_selections(case, entity_type)
+                )
+            })
+            .collect();
+        PlanNode::Flatten(FlattenNode {
+            path: flatten_path(case, cases),
+            node: Box::new(PlanNode::Fetch(Box::new(fetch_node(
+                subgraph2,
+                "Subgraph2",
+                None,
+                &format!("query($representations: [_Any!]!) {{ _entities(representations: $representations) {{ {body}}} }}"),
+                requires_entries(case, cases),
+                input_rewrites(case),
+            )))),
+        })
+    };
+    let split: Vec<PlanNode> = cases.iter().map(|one| entity_fetch(&[one])).collect();
+    let mut mounted = match case.perturbation {
+        Perturbation::EntityFetchPerType if split.len() > 1 => {
+            PlanNode::Parallel(ParallelNode { nodes: split })
+        }
+        Perturbation::EntityFetchesInSequence if split.len() > 1 => {
+            PlanNode::Sequence(SequenceNode { nodes: split })
+        }
+        _ => entity_fetch(&cases),
+    };
     // The operation's own guard is compiled into a condition node above the fetch it guards, which
     // is what makes a guarded case correct; `GuardEntityFetch` adds one the operation lacks.
     let condition = match (case.guard, case.perturbation) {
