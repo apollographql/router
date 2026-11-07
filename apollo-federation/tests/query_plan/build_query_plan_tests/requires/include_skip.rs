@@ -179,65 +179,61 @@ fn it_handles_an_at_requires_where_multiple_conditional_are_involved() {
               }
             }
           "#,
-        @r###"
-          QueryPlan {
-            Include(if: $test1) {
-              Sequence {
-                Fetch(service: "Subgraph1") {
+        @r#"
+    QueryPlan {
+      Include(if: $test1) {
+        Sequence {
+          Fetch(service: "Subgraph1") {
+            {
+              a {
+                __typename
+                idA
+              }
+            }
+          },
+          Include(if: $test2) {
+            Sequence {
+              Flatten(path: "a") {
+                Fetch(service: "Subgraph2") {
                   {
-                    a {
+                    ... on A {
                       __typename
                       idA
                     }
+                  } =>
+                  {
+                    ... on A {
+                      b {
+                        __typename
+                        idB
+                        required
+                      }
+                    }
                   }
                 },
-                Include(if: $test2) {
-                  Sequence {
-                    Flatten(path: "a") {
-                      Fetch(service: "Subgraph2") {
-                        {
-                          ... on A {
-                            __typename
-                            idA
-                          }
-                        } =>
-                        {
-                          ... on A {
-                            b {
-                              __typename
-                              idB
-                              required
-                            }
-                          }
-                        }
-                      },
-                    },
-                    Flatten(path: "a.b.@") {
-                      Fetch(service: "Subgraph3") {
-                        {
-                          ... on B {
-                            ... on B {
-                              __typename
-                              idB
-                              required
-                            }
-                          }
-                        } =>
-                        {
-                          ... on B {
-                            ... on B {
-                              c
-                            }
-                          }
-                        }
-                      },
-                    },
-                  },
+              },
+              Flatten(path: "a.b.@") {
+                Fetch(service: "Subgraph3") {
+                  {
+                    ... on B {
+                      __typename
+                      idB
+                      required
+                    }
+                  } =>
+                  {
+                    ... on B {
+                      c
+                    }
+                  }
                 },
               },
             },
-          }
-        "###
+          },
+        },
+      },
+    }
+    "#
     );
 }
 
@@ -274,21 +270,19 @@ fn unnecessary_include_is_stripped_from_fragments() {
           }
         }
         "#,
-        @r###"
-        QueryPlan {
-          Include(if: $test) {
-            Fetch(service: "Subgraph1") {
-              {
-                foo {
-                  ... on Foo {
-                    id
-                  }
-                }
-              }
-            },
-          },
-        }
-        "###
+        @r#"
+    QueryPlan {
+      Include(if: $test) {
+        Fetch(service: "Subgraph1") {
+          {
+            foo {
+              id
+            }
+          }
+        },
+      },
+    }
+    "#
     );
     assert_plan!(
         &planner,
@@ -306,26 +300,22 @@ fn unnecessary_include_is_stripped_from_fragments() {
           }
         }
         "#,
-        @r###"
-        QueryPlan {
-          Include(if: $test) {
-            Fetch(service: "Subgraph1") {
-              {
-                foo {
-                  ... on Foo {
-                    id
-                    bar {
-                      ... on Bar {
-                        id
-                      }
-                    }
-                  }
-                }
+        @r#"
+    QueryPlan {
+      Include(if: $test) {
+        Fetch(service: "Subgraph1") {
+          {
+            foo {
+              id
+              bar {
+                id
               }
-            },
-          },
-        }
-        "###
+            }
+          }
+        },
+      },
+    }
+    "#
     );
 }
 
@@ -370,26 +360,24 @@ fn selections_are_not_overwritten_after_removing_directives() {
             }
           }
           "#,
-        @r###"
-        QueryPlan {
-          Include(if: $test) {
-            Fetch(service: "Subgraph1") {
-              {
-                foo {
+        @r#"
+    QueryPlan {
+      Include(if: $test) {
+        Fetch(service: "Subgraph1") {
+          {
+            foo {
+              id
+              foo {
+                bar {
                   id
-                  foo {
-                    ... on Foo {
-                      bar {
-                        id
-                      }
-                    }
-                  }
                 }
               }
-            },
-          },
-        }
-        "###
+            }
+          }
+        },
+      },
+    }
+    "#
     );
 }
 
@@ -1049,6 +1037,105 @@ fn requires_under_a_fully_conditional_fragment_gets_a_condition_node() {
                   }
                 }
               }
+            },
+          },
+        },
+      },
+    }
+    "#
+    );
+}
+
+#[test]
+fn conditional_requiring_field_on_an_interface_member_is_not_double_wrapped() {
+    let planner = planner!(
+        Subgraph1: r#"
+            type Query {
+              cards: [Card]
+            }
+
+            interface Card {
+              id: ID!
+            }
+
+            type GridCard implements Card @key(fields: "id") {
+              id: ID!
+              odds: Int @external
+              display: String @requires(fields: "odds")
+            }
+
+            type ListCard implements Card @key(fields: "id") {
+              id: ID!
+            }
+        "#,
+        Subgraph2: r#"
+            type GridCard @key(fields: "id") {
+              id: ID!
+              odds: Int
+            }
+        "#,
+    );
+    assert_plan!(
+        &planner,
+        r#"
+            query Q($a: Boolean!, $v: Boolean!) {
+              cards @include(if: $a) {
+                id
+                ... on GridCard {
+                  display @include(if: $v)
+                }
+              }
+            }
+          "#,
+        @r#"
+    QueryPlan {
+      Include(if: $a) {
+        Sequence {
+          Fetch(service: "Subgraph1") {
+            {
+              cards {
+                __typename
+                id
+                ... on GridCard {
+                  __typename
+                  id
+                }
+              }
+            }
+          },
+          Include(if: $v) {
+            Sequence {
+              Flatten(path: "cards.@") {
+                Fetch(service: "Subgraph2") {
+                  {
+                    ... on GridCard {
+                      __typename
+                      id
+                    }
+                  } =>
+                  {
+                    ... on GridCard {
+                      odds
+                    }
+                  }
+                },
+              },
+              Flatten(path: "cards.@") {
+                Fetch(service: "Subgraph1") {
+                  {
+                    ... on GridCard {
+                      __typename
+                      odds
+                      id
+                    }
+                  } =>
+                  {
+                    ... on GridCard {
+                      display
+                    }
+                  }
+                },
+              },
             },
           },
         },
