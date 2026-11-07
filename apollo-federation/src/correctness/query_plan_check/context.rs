@@ -344,7 +344,8 @@ pub(super) fn path_conditions(
 }
 
 /// A `TypenameEquals` narrows the level it stands at, the rewrite reading the value only off data
-/// of that runtime type; a copy narrowed to nothing is no copy at all.
+/// of that runtime type; a copy narrowed to nothing at any level, the last included, is no copy at
+/// all, the router's path reader finding no object there.
 fn conditions_reached(
     schema: &ValidFederationSchema,
     parent_type: &Name,
@@ -353,6 +354,9 @@ fn conditions_reached(
     selections: &[Selection],
 ) -> Vec<ReachedCondition> {
     let Some((head, rest)) = path.split_first() else {
+        if reached.current.narrowed.is_empty() {
+            return Vec::new();
+        }
         return vec![reached.clone()];
     };
     let narrowed = |current: LevelTypes| ReachedCondition {

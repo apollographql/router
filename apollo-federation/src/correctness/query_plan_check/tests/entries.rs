@@ -91,6 +91,20 @@ fn renamer(path: &[FetchDataPathElement], to: &str) -> String {
     )
 }
 
+/// A value setter writing `value` at `path`.
+fn value_setter(path: &[FetchDataPathElement], value: &str) -> String {
+    format!(
+        r#"{{ "ValueSetter": {{ "path": {}, "set_value_to": "{value}" }} }}"#,
+        serde_json::to_string(path).unwrap()
+    )
+}
+
+/// The value setter the planner writes to send every object `type_name` admits as `type_name`, an
+/// interface's name (`compute_input_rewrites_on_key_fetch`).
+fn send_as(type_name: &str) -> String {
+    value_setter(&[typename_equals(type_name), key("__typename")], type_name)
+}
+
 fn key(name: &str) -> FetchDataPathElement {
     FetchDataPathElement::Key(Name::new(name).unwrap(), None)
 }
@@ -451,8 +465,19 @@ fn shared_alias_for_different_fields_is_rejected() {
 // An interface object's entries
 
 /// The feed fetched by `feed`, then every `Book`'s `note` from `notes`, which knows only `Item`,
-/// through `entry`.
+/// through `entry`, sending it as `Item` ([`send_as`]) before `input_rewrites`.
 fn check_book_notes(
+    feed: &str,
+    entry: String,
+    input_rewrites: &[String],
+) -> Result<(), CorrectnessError> {
+    let mut sent_as_item = vec![send_as("Item")];
+    sent_as_item.extend_from_slice(input_rewrites);
+    check_book_notes_rewritten(feed, entry, &sent_as_item)
+}
+
+/// [`check_book_notes`] with `input_rewrites` alone.
+fn check_book_notes_rewritten(
     feed: &str,
     entry: String,
     input_rewrites: &[String],
@@ -495,6 +520,162 @@ fn interface_object_with_renamer_scoped_to_its_type_is_rejected() {
 #[test]
 fn interface_object_compares_no_empty_operation() {
     check_book_notes("isbn", entry_on("Book", field("isbn")), &[]).unwrap();
+}
+
+// The same with no value setter: a `Book` is sent as `Book`, which `notes` does not resolve.
+#[test]
+fn interface_object_sent_under_its_own_name_is_rejected() {
+    assert_rejected(
+        check_book_notes_rewritten("isbn", entry_on("Book", field("isbn")), &[]),
+        "a `Book` is sent as `Book`",
+    );
+}
+
+// A setter sending a `Book` as `Film` runs `Film`'s resolver on the `Book`'s `id`, which can
+// resolve another entity. (The model has `notes` resolve `Film` too; the check here reads only the
+// name sent, whatever the subgraph resolves.)
+#[test]
+fn interface_object_sent_under_another_name_is_rejected() {
+    assert_rejected(
+        check_book_notes_rewritten(
+            "isbn",
+            entry_on("Book", field("isbn")),
+            &[value_setter(
+                &[typename_equals("Item"), key("__typename")],
+                "Film",
+            )],
+        ),
+        "a `Book` is sent as `Film`",
+    );
+}
+
+// A setter overwriting the key `id` sends every `Book` with one `id`.
+#[test]
+fn interface_object_with_a_key_overwritten_is_rejected() {
+    assert_rejected(
+        check_book_notes(
+            "isbn",
+            entry_on("Book", field("isbn")),
+            &[value_setter(&[typename_equals("Item"), key("id")], "1")],
+        ),
+        "not a representation's `__typename`",
+    );
+}
+
+//==================================================================================================
+// An entity interface's entries
+
+/// `catalog` serves the feed; `reviews` and `ratings` declare `Item` an entity interface, the
+/// latter with its key not resolvable; `shelves` and `racks` declare `Item` a plain interface,
+/// which only `shelves`'s `Book` implements.
+fn entity_interfaces() -> Fixture {
+    Fixture::new(include_str!("../testdata/entity_interface.graphql"))
+}
+
+/// The feed, each `Book` with its `isbn`, then `subgraph` asked `cases` for every `Book` through
+/// one entry, with `input_rewrites`.
+fn check_entity_interface(
+    subgraph: &str,
+    cases: &str,
+    input_rewrites: &[String],
+    operation: &str,
+) -> Result<(), CorrectnessError> {
+    let fixture = entity_interfaces();
+    let plan = root_then_entities(
+        &fixture,
+        &feed_fetch("isbn", None),
+        FEED_PATH,
+        &fetch_json(
+            subgraph,
+            &[],
+            &[entry_on("Book", field("isbn"))],
+            input_rewrites,
+            cases,
+        ),
+    );
+    fixture.check(&plan, operation)
+}
+
+/// [`check_entity_interface`] as the planner writes a fetch to an entity interface: a `Book` case
+/// beside the interface's own.
+fn check_book_and_item(
+    subgraph: &str,
+    field: &str,
+    input_rewrites: &[String],
+) -> Result<(), CorrectnessError> {
+    check_entity_interface(
+        subgraph,
+        &format!("... on Book {{ {field} }} ... on Item {{ id }}"),
+        input_rewrites,
+        &format!("{{ feed {{ ... on Book {{ {field} }} }} }}"),
+    )
+}
+
+// The planner sends every `Book` as `Item`. `reviews` resolves it through `Item`'s reference
+// resolver, which returns the `Book`, so the `Book` case applies too. The corpus's
+// `kiva-marketplace` plans have this shape.
+#[test]
+fn implementation_case_sent_as_its_entity_interface_is_accepted() {
+    check_book_and_item("reviews", "blurb", &[send_as("Item")]).unwrap();
+}
+
+// No setter: a `Book` sent as `Book` is resolved as a `Book`, which the `Item` case applies to as
+// well. The planner always writes the setter here; accepted because it is sound.
+#[test]
+fn entity_interface_case_sent_as_the_implementation_is_accepted() {
+    check_book_and_item("reviews", "blurb", &[]).unwrap();
+}
+
+// `Item`'s key is not resolvable in `ratings`, so nothing sent as `Item` is resolved there,
+// whatever `Book`'s own key. The key read is the sent type's.
+#[test]
+fn sent_as_an_interface_without_a_resolvable_key_is_rejected() {
+    assert_rejected(
+        check_book_and_item("ratings", "rating", &[send_as("Item")]),
+        "will not resolve the entity from this key",
+    );
+}
+
+// A `Book` sent as `Film` resolves another entity, which neither case applies to.
+#[test]
+fn implementation_sent_as_a_sibling_is_rejected() {
+    assert_rejected(
+        check_book_and_item(
+            "reviews",
+            "blurb",
+            &[value_setter(
+                &[typename_equals("Book"), key("__typename")],
+                "Film",
+            )],
+        ),
+        "a `Book` is sent as `Film`, which resolves to no object the case applies to",
+    );
+}
+
+/// [`check_entity_interface`] with the `Item` case alone, a `Book` sent as `Book`.
+fn check_item_case_alone(subgraph: &str) -> Result<(), CorrectnessError> {
+    check_entity_interface(
+        subgraph,
+        "... on Item { id }",
+        &[],
+        "{ feed { ... on Book { id } } }",
+    )
+}
+
+// `shelves` resolves a `Book` sent as `Book` to a `Book`, which its `Item` case applies to.
+#[test]
+fn plain_interface_case_sent_an_implementation_is_accepted() {
+    check_item_case_alone("shelves").unwrap();
+}
+
+// In `racks` the `Item` case applies to nothing resolved as a `Book`, though the supergraph's
+// `Item` includes `Book`. The case's inclusion is read in the subgraph's schema.
+#[test]
+fn case_excluding_the_object_in_the_subgraph_is_rejected() {
+    assert_rejected(
+        check_item_case_alone("racks"),
+        "a `Book` is sent as `Book`, which resolves to no object the case applies to",
+    );
 }
 
 //==================================================================================================

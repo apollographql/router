@@ -433,7 +433,7 @@ pub(super) fn admitted_types(schema: &ValidFederationSchema, guards: &[Name]) ->
 }
 
 /// Is `object_name` one of the runtime types of `type_name`?
-fn type_includes_object(
+pub(super) fn type_includes_object(
     schema: &ValidFederationSchema,
     type_name: &Name,
     object_name: &Name,

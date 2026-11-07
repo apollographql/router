@@ -18,7 +18,8 @@
 //!
 //! Below a field an entry copies whole, which agreement cannot reach, the input rewrites are held
 //! to three structural checks: [`input_rewrites_well_formed`], [`input_rewrites_separated`] and
-//! [`input_rewrites_idempotent`].
+//! [`input_rewrites_idempotent`]. An input value setter may set only a representation's
+//! `__typename`, and [`sent_typename`] follows the setters to the name each object is sent as.
 
 use std::sync::Arc;
 
@@ -34,6 +35,7 @@ use super::super::query_compare::conditions::BooleanLiteral;
 use super::super::query_compare::conditions::boolean_condition_covered_by;
 use super::super::query_compare::conditions::canonical_boolean_condition;
 use super::super::query_compare::conditions::literals_for_directives;
+use super::context::display_path;
 use super::requires::same_keys;
 use super::returned::ReturnedTypes;
 use super::selections::apply_key_renamers;
@@ -44,7 +46,9 @@ use super::selections::possible_types;
 use super::selections::selection_set;
 use super::selections::type_filter_covers;
 use super::selections::type_filter_meets;
+use super::selections::type_includes_object;
 use super::selections::wrap_non_empty;
+use crate::operation::TYPENAME_FIELD;
 use crate::query_plan::FetchDataPathElement;
 use crate::query_plan::FetchDataRewrite;
 use crate::query_plan::FetchNode;
@@ -423,6 +427,49 @@ fn filters_by_type(rewrite: &FetchDataRewrite) -> bool {
     }
 }
 
+/// Whether a value setter's path sets the `__typename` of a representation sent as `typename`: it
+/// ends there ([`ends_at_typename`]), and each `TypenameEquals` on the way matches `typename`, as
+/// `is_object_of_type` matches a type or one of its subtypes.
+fn sets_typename_of(
+    schema: &ValidFederationSchema,
+    typename: &Name,
+    path: &[FetchDataPathElement],
+) -> bool {
+    ends_at_typename(path)
+        && path.iter().all(|element| match element {
+            FetchDataPathElement::TypenameEquals(type_name) => {
+                type_name == typename || type_includes_object(schema, type_name, typename)
+            }
+            _ => true,
+        })
+}
+
+/// The `__typename` an object of type `object_type` is sent as: its own, set in turn by each input
+/// value setter ending at it ([`sets_typename_of`]), as `apply_rewrites` applies the rewrites in
+/// order. `None` once one sets it to anything but a type name. The planner writes one to send an
+/// interface's name (`compute_input_rewrites_on_key_fetch`).
+pub(super) fn sent_typename(
+    schema: &ValidFederationSchema,
+    rewrites: &[Arc<FetchDataRewrite>],
+    object_type: &Name,
+) -> Option<Name> {
+    let mut typename = object_type.clone();
+    for rewrite in rewrites {
+        let FetchDataRewrite::ValueSetter(setter) = rewrite.as_ref() else {
+            continue;
+        };
+        if !sets_typename_of(schema, &typename, &setter.path) {
+            continue;
+        }
+        // A string that is no GraphQL name names no type, so it can never be the case's.
+        typename = setter
+            .set_value_to
+            .as_str()
+            .and_then(|value| Name::new(value).ok())?;
+    }
+    Some(typename)
+}
+
 fn renamings(fetch: &FetchNode) -> Vec<(KeyPath, KeyPath)> {
     fetch
         .input_rewrites
@@ -435,11 +482,47 @@ fn display_key_path(path: &[Name]) -> String {
     path.iter().map(Name::as_str).collect::<Vec<_>>().join(".")
 }
 
-/// The input rewrites rename each key path one way, whatever the types and conditions they meet,
-/// and never rename what they renamed or what lies below what they rename: no key renamer filters
-/// by type, two renaming from one key path rename it to one, none renames from below a key path
-/// another renames from, and none renames from a key path one renames to. `Err` says which.
+/// Whether a fetch data path ends at a representation's own `__typename`: every element before its
+/// last a `TypenameEquals`.
+fn ends_at_typename(path: &[FetchDataPathElement]) -> bool {
+    match path.split_last() {
+        Some((FetchDataPathElement::Key(name, _), before)) => {
+            *name == TYPENAME_FIELD
+                && before
+                    .iter()
+                    .all(|element| matches!(element, FetchDataPathElement::TypenameEquals(_)))
+        }
+        _ => false,
+    }
+}
+
+/// The value setter that sets anything but a representation's own `__typename`
+/// ([`ends_at_typename`]), such as a key field, which would send another entity's key.
+fn sets_more_than_typename(rewrite: &FetchDataRewrite) -> Option<&[FetchDataPathElement]> {
+    match rewrite {
+        FetchDataRewrite::ValueSetter(setter) if !ends_at_typename(&setter.path) => {
+            Some(&setter.path)
+        }
+        _ => None,
+    }
+}
+
+/// The input rewrites set no value but `__typename`, rename each key path one way, whatever the
+/// types and conditions they meet, and never rename what they renamed or what lies below what they
+/// rename: every value setter sets only `__typename`, no key renamer filters by type, two renaming
+/// from one key path rename it to one, none renames from below a key path another renames from, and
+/// none renames from a key path one renames to. `Err` says which.
 pub(super) fn input_rewrites_well_formed(fetch: &FetchNode) -> Result<(), String> {
+    if let Some(path) = fetch
+        .input_rewrites
+        .iter()
+        .find_map(|rewrite| sets_more_than_typename(rewrite))
+    {
+        return Err(format!(
+            "an input value setter sets `{}`, not a representation's `__typename`",
+            display_path(path)
+        ));
+    }
     if fetch
         .input_rewrites
         .iter()
