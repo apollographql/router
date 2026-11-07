@@ -1,0 +1,189 @@
+# A contextual value read off the object a fetch runs on.
+#
+# `catalog` serves `item`, an `Item` that is a `Product` or an `Other`, a list of them in `items`,
+# and a `Product` in `concrete`. In `details`, `Product` and `Other` set the context `product`, and
+# a `Details`' `label` takes `title` from it, its `summary` `note` from its `info { note }`, an
+# `Info` being a `Detail` or a `Summary`. The fetch for `details` runs on the item and reads the
+# context off the object it runs on, with no climb.
+#
+# Composed with `apollo_federation::composition::compose` from the two subgraphs below. Recompose
+# it when they change. The plans beside it in `plans/` are the planner's plans over it, with default
+# options, produced by the revision that added the files:
+#
+#   item_product_details_label.json
+#     { item { ... on Product { details { label } } } }
+#   items_product_details_label.json
+#     { items { ... on Product { details { label } } } }
+#   item_members_details_label.json
+#     { item { ... on Product { details { label } } ... on Other { details { label } } } }
+#   items_members_details_label.json
+#     { items { ... on Product { details { label } } ... on Other { details { label } } } }
+#   concrete_details_summary.json
+#     { concrete { details { summary } } }
+#
+# Subgraph `catalog`:
+#
+#   extend schema @link(url: "https://specs.apollo.dev/federation/v2.8", import: ["@key"])
+#
+#   type Query {
+#     item: Item
+#     items: [Item!]!
+#     concrete: Product
+#   }
+#
+#   union Item = Product | Other
+#
+#   type Product @key(fields: "id") {
+#     id: ID!
+#     title: String
+#     otherTitle: String
+#     info: Info
+#   }
+#
+#   type Other @key(fields: "id") {
+#     id: ID!
+#     title: String
+#     info: Info
+#   }
+#
+#   interface Info {
+#     note: String
+#   }
+#
+#   type Detail implements Info {
+#     note: String
+#   }
+#
+#   type Summary implements Info {
+#     note: String
+#   }
+#
+# Subgraph `details`:
+#
+#   extend schema
+#     @link(
+#       url: "https://specs.apollo.dev/federation/v2.8"
+#       import: ["@key", "@external", "@context", "@fromContext"]
+#     )
+#
+#   type Product @key(fields: "id") @context(name: "product") {
+#     id: ID!
+#     title: String @external
+#     info: Info @external
+#     details: Details
+#   }
+#
+#   type Other @key(fields: "id") @context(name: "product") {
+#     id: ID!
+#     title: String @external
+#     info: Info @external
+#     details: Details
+#   }
+#
+#   interface Info {
+#     note: String
+#   }
+#
+#   type Details @key(fields: "id") {
+#     id: ID!
+#     label(title: String @fromContext(field: "$product { title }")): String
+#     summary(note: String @fromContext(field: "$product { info { note } }")): String
+#   }
+
+schema @link(url: "https://specs.apollo.dev/link/v1.0") @link(url: "https://specs.apollo.dev/join/v0.5", for: EXECUTION) @link(url: "https://specs.apollo.dev/context/v0.1", for: SECURITY) {
+  query: Query
+}
+
+directive @link(url: String, as: String, for: link__Purpose, import: [link__Import]) repeatable on SCHEMA
+
+directive @join__graph(name: String!, url: String!) on ENUM_VALUE
+
+directive @join__type(graph: join__Graph!, key: join__FieldSet, extension: Boolean! = false, resolvable: Boolean! = true, isInterfaceObject: Boolean! = false) repeatable on OBJECT | INTERFACE | UNION | ENUM | INPUT_OBJECT | SCALAR
+
+directive @join__field(graph: join__Graph, requires: join__FieldSet, provides: join__FieldSet, type: String, external: Boolean, override: String, usedOverridden: Boolean, overrideLabel: String, contextArguments: [join__ContextArgument!]) repeatable on FIELD_DEFINITION | INPUT_FIELD_DEFINITION
+
+directive @join__implements(graph: join__Graph!, interface: String!) repeatable on OBJECT | INTERFACE
+
+directive @join__unionMember(graph: join__Graph!, member: String!) repeatable on UNION
+
+directive @join__enumValue(graph: join__Graph!) repeatable on ENUM_VALUE
+
+directive @join__directive(graphs: [join__Graph!], name: String!, args: join__DirectiveArguments) repeatable on SCHEMA | OBJECT | INTERFACE | FIELD_DEFINITION
+
+directive @context(name: String!) repeatable on INTERFACE | OBJECT | UNION
+
+directive @context__fromContext(field: context__ContextFieldValue) on ARGUMENT_DEFINITION
+
+enum link__Purpose {
+  """
+  `SECURITY` features provide metadata necessary to securely resolve fields.
+  """
+  SECURITY
+  """
+  `EXECUTION` features provide metadata necessary for operation execution.
+  """
+  EXECUTION
+}
+
+scalar link__Import
+
+enum join__Graph {
+  CATALOG @join__graph(name: "catalog", url: "http://catalog")
+  DETAILS @join__graph(name: "details", url: "http://details")
+}
+
+scalar join__FieldSet
+
+scalar join__DirectiveArguments
+
+scalar join__FieldValue
+
+input join__ContextArgument {
+  name: String!
+  type: String!
+  context: String!
+  selection: join__FieldValue!
+}
+
+scalar context__ContextFieldValue
+
+type Query @join__type(graph: CATALOG) @join__type(graph: DETAILS) {
+  item: Item @join__field(graph: CATALOG)
+  items: [Item!]! @join__field(graph: CATALOG)
+  concrete: Product @join__field(graph: CATALOG)
+}
+
+union Item @join__type(graph: CATALOG) @join__unionMember(graph: CATALOG, member: "Product") @join__unionMember(graph: CATALOG, member: "Other") = Product | Other
+
+type Product @join__type(graph: CATALOG, key: "id") @join__type(graph: DETAILS, key: "id") @context(name: "details__product") {
+  id: ID!
+  title: String @join__field(graph: CATALOG) @join__field(graph: DETAILS, external: true)
+  otherTitle: String @join__field(graph: CATALOG)
+  info: Info @join__field(graph: CATALOG) @join__field(graph: DETAILS, external: true)
+  details: Details @join__field(graph: DETAILS)
+}
+
+type Other @join__type(graph: CATALOG, key: "id") @join__type(graph: DETAILS, key: "id") @context(name: "details__product") {
+  id: ID!
+  title: String @join__field(graph: CATALOG) @join__field(graph: DETAILS, external: true)
+  info: Info @join__field(graph: CATALOG) @join__field(graph: DETAILS, external: true)
+  details: Details @join__field(graph: DETAILS)
+}
+
+interface Info @join__type(graph: CATALOG) @join__type(graph: DETAILS) {
+  note: String
+}
+
+type Detail implements Info @join__implements(graph: CATALOG, interface: "Info") @join__type(graph: CATALOG) {
+  note: String
+}
+
+type Summary implements Info @join__implements(graph: CATALOG, interface: "Info") @join__type(graph: CATALOG) {
+  note: String
+}
+
+type Details @join__type(graph: DETAILS, key: "id") {
+  id: ID!
+  label: String @join__field(graph: DETAILS, contextArguments: [{context: "details__product", name: "title", type: "String", selection: "{ title }"}])
+  summary: String @join__field(graph: DETAILS, contextArguments: [{context: "details__product", name: "note", type: "String", selection: "{ info { note } }"}])
+}
