@@ -292,6 +292,23 @@ fn absent_value_is_not_met() {
     ));
 }
 
+/// The same absent value, for a fetch whose path ends under a type condition no object there
+/// matches: the fetch never runs, so it reads nothing.
+#[test]
+fn position_matching_no_object_demands_nothing() {
+    let path = vec![
+        key(name!("t")),
+        key(name!("u")),
+        FetchDataPathElement::AnyIndex(Some(vec![name!("I")])),
+    ];
+    assert!(context_met(
+        &path,
+        &[],
+        "{ t { u { id } } }",
+        vec![rewrite_on(name!("A")), rewrite_on(name!("B"))]
+    ));
+}
+
 /// The value is guarded past the levels the two paths share, and nothing about the fetch says what
 /// that object is.
 #[test]

@@ -31,10 +31,14 @@
 //! A `requires` entry is not the authority on that; the demand and the input rewrites are. An
 //! object's representation is every entry whose type condition admits it, merged, so the entries
 //! are checked together, one entity case and object type at a time, in every configuration of
-//! their `@skip`/`@include` conditions, through a resolvable `@key` of the case's own: what each
-//! entry must already have fetched of the demand is readable, and what the entries send covers the
-//! demand as narrowed by their conditions. Both are read off the demand by what the entry reads and
-//! sends ([`representation`]); the entry adds nothing. A planner may fetch a `@requires` input under
+//! their `@skip`/`@include` conditions, through a resolvable `@key` of the type each object is sent
+//! as: that `__typename` is the case's type, or a type that includes the object in the subgraph as
+//! the case does, such as an entity interface over it; what each entry must already have fetched
+//! of the demand is readable; and what the entries send covers the demand as narrowed by their
+//! conditions. An input value setter may set nothing but that `__typename`; the planner writes one
+//! to send an interface's or interface object's implementations under the interface's name. What
+//! is fetched and sent is read off the demand by what the entry reads and sends
+//! ([`representation`]); the entry adds nothing. A planner may fetch a `@requires` input under
 //! an alias and name it back with an input key renamer, which is what the router's
 //! `execute_selection_set` and `apply_rewrites` do between them.
 //!
@@ -147,6 +151,7 @@ use self::representation::narrowed_by_entry_conditions;
 use self::representation::overwritten_keys;
 use self::representation::required_selections;
 use self::representation::sent_selections;
+use self::representation::sent_typename;
 use self::representation::writes_under_its_own_type;
 use self::requires::Reading;
 use self::requires::check_requires_conflict;
@@ -1019,10 +1024,12 @@ impl Checker<'_> {
             .map_err(|e| e.to_string())
     }
 
-    /// One entity case met for each object type it is sent, in every configuration of the
-    /// entries that can send that type, through a resolvable key of its own: the input rewrites
-    /// are idempotent on its demand, what each of those entries must already have fetched is
-    /// readable, and together they send the demand, narrowed by their conditions.
+    /// One entity case met for each object type it is sent: the object is sent with a `__typename`
+    /// ([`sent_typename`]) that resolves to the case ([`Subgraph::sent_type_resolves_to_case`]), and
+    /// in every configuration of the entries that can send that type, through a resolvable key of
+    /// the sent type, the input rewrites are idempotent on its demand, what each of those entries
+    /// must already have fetched is readable, and together they send the demand, narrowed by their
+    /// conditions.
     #[allow(clippy::too_many_arguments)]
     fn check_representation_meets_case(
         &self,
@@ -1060,14 +1067,29 @@ impl Checker<'_> {
             check_requires_conflict(self.supergraph_schema, &requires)
                 .map_err(|e| fail(format!("entity case `{entity_type}`: {}", e.description())))?;
         }
-        let keys = subgraph.keys(entity_type)?;
-        if keys.is_empty() {
-            return Err(fail(format!(
-                "the subgraph declares no `@key` on `{entity_type}`"
-            )));
-        }
-
         for object_type in object_types {
+            let Some(sent) =
+                sent_typename(self.supergraph_schema, &fetch.input_rewrites, object_type)
+            else {
+                return Err(fail(format!(
+                    "entity case `{entity_type}`: a `{object_type}` is sent with a `__typename` \
+                     that names no type"
+                )));
+            };
+            if !subgraph.sent_type_resolves_to_case(&sent, object_type, entity_type) {
+                return Err(fail(format!(
+                    "entity case `{entity_type}`: a `{object_type}` is sent as `{sent}`, which \
+                     resolves to no object the case applies to"
+                )));
+            }
+            // The subgraph runs the sent type's reference resolver, so the key is read there.
+            let keys = subgraph.keys(&sent)?;
+            if keys.is_empty() {
+                return Err(fail(format!(
+                    "entity case `{entity_type}`: a `{object_type}` is sent as `{sent}`, on which \
+                     the subgraph declares no `@key`"
+                )));
+            }
             let for_type: Vec<&Entry<'_>> = entries
                 .iter()
                 .filter(|entry| {

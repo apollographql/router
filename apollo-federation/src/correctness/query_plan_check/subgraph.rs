@@ -15,6 +15,7 @@ use apollo_compiler::executable::Selection;
 use apollo_compiler::schema::ExtendedType;
 
 use super::ComparisonError;
+use super::selections::type_includes_object;
 use crate::link::federation_spec_definition::FederationSpecDefinition;
 use crate::link::federation_spec_definition::get_federation_spec_definition_from_subgraph;
 use crate::schema::ValidFederationSchema;
@@ -68,6 +69,22 @@ impl<'a> Subgraph<'a> {
                 })
             })
             .collect()
+    }
+
+    /// Whether an object of type `object_type`, sent with `__typename` `sent`, resolves to an
+    /// object entity case `entity_type` applies to (the model's `SentTypeResolvesToCase`): `sent`
+    /// is the case's type, or `sent` and the case both include `object_type` in this subgraph, as
+    /// the object's own type or an entity interface over it does. An interface object is an object
+    /// type here, so it includes no implementation and is met only by the first disjunct.
+    pub(super) fn sent_type_resolves_to_case(
+        &self,
+        sent: &Name,
+        object_type: &Name,
+        entity_type: &Name,
+    ) -> bool {
+        sent == entity_type
+            || (type_includes_object(self.schema, sent, object_type)
+                && type_includes_object(self.schema, entity_type, object_type))
     }
 
     /// The `@requires` field set of a field, by parent type and field name.

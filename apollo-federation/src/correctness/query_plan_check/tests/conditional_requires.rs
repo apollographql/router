@@ -640,7 +640,7 @@ fn implementation_keys() -> Fixture {
 }
 
 /// `one` fetches every item's `__typename id sku`, then `subgraph` is sent `id` for an `A` and
-/// `b_key` for a `B`, and asked for each `I`.
+/// `b_key` for a `B`, each as an `I`, and asked for each `I`.
 fn keyed_checked(subgraph: &str, b_key: &str) -> Result<(), CorrectnessError> {
     let fixture = implementation_keys();
     let entries = [
@@ -664,7 +664,10 @@ fn keyed_checked(subgraph: &str, b_key: &str) -> Result<(), CorrectnessError> {
         fetch(
             subgraph,
             &requires,
-            "",
+            r#"{ "ValueSetter": {
+                "path": [{ "TypenameEquals": "I" }, { "Key": ["__typename", null] }],
+                "set_value_to": "I"
+            } }"#,
             "query($representations: [_Any!]!) \
              { _entities(representations: $representations) { ... on I { __typename } } }",
         ),
