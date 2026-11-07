@@ -614,3 +614,69 @@ telemetry:
           attributes:
             subgraph.name: true
 ```
+
+### Count HTTP requests by status code
+
+To count requests by response status code, use the standard `http.server.request.duration` and `http.client.request.duration` histograms. A histogram records a count of its measurements alongside the measurements themselves, so the count of each histogram is the number of requests the router or a subgraph handled.
+
+The attributes on each instrument differ:
+
+- Router: `http.server.request.duration` has the `http.response.status_code` attribute by default when [`default_requirement_level`](#default_requirement_level) is `required`, its default value.
+- Subgraph: `http.client.request.duration` has only the `subgraph.name` attribute by default. Add `http.response.status_code` with the [`subgraph_response_status` selector](/router/configuration/telemetry/instrumentation/selectors#subgraph).
+
+The following configuration groups the count of both instruments by status code. Setting the router attribute explicitly keeps it enabled regardless of `default_requirement_level`.
+
+```yaml title="router.yaml"
+telemetry:
+  instrumentation:
+    instruments:
+      router:
+        http.server.request.duration:
+          attributes:
+            http.response.status_code: true
+      subgraph:
+        http.client.request.duration:
+          attributes:
+            subgraph.name: true
+            http.response.status_code:
+              subgraph_response_status: code
+```
+
+The Prometheus exporter exposes these counts as `http_server_request_duration_seconds_count` and `http_client_request_duration_seconds_count`. To see requests per second for each router status code, query `sum by (http_response_status_code) (rate(http_server_request_duration_seconds_count[5m]))`.
+
+To count only a subset of requests, such as server errors, define a [custom instrument](#custom-instruments) with `value: unit` and a [`condition`](#condition). The following example defines two counters that count only requests with a `5xx` status code:
+
+- `acme.router.server_errors` counts requests the router handles.
+- `acme.subgraph.server_errors` counts requests to each subgraph.
+
+```yaml title="router.yaml"
+telemetry:
+  instrumentation:
+    instruments:
+      router:
+        acme.router.server_errors:
+          value: unit
+          type: counter
+          unit: "{request}"
+          description: "Number of HTTP requests with a 5xx response status code"
+          condition:
+            gt:
+              - response_status: code
+              - 499
+          attributes:
+            http.response.status_code: true
+      subgraph:
+        acme.subgraph.server_errors:
+          value: unit
+          type: counter
+          unit: "{request}"
+          description: "Number of subgraph requests with a 5xx response status code"
+          condition:
+            gt:
+              - subgraph_response_status: code
+              - 499
+          attributes:
+            subgraph.name: true
+            http.response.status_code:
+              subgraph_response_status: code
+```
