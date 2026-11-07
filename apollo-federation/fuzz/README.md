@@ -416,7 +416,9 @@ rather than the checker's. Deferred until the planner's aliasing settles — at 
 a fixture change, not a new field.
 
 **Context reads.** No field in the fixture takes `@fromContext`, so no fetch has context rewrites
-and that check passes on every case.
+or passes a contextual argument, and the context checks (availability, bindings, the reading
+against the declaration, and no contextual argument on a root fetch) pass on every case. They are
+covered only by the checker's own tests (`tests/context_arguments.rs`, `tests/context_reads.rs`).
 
 **Subgraphs that disagree on a field's types.** Only Subgraph1 resolves `u`. Where two subgraphs
 resolve one field and declare different members, a plan asking the wider of them for the field and
@@ -464,7 +466,7 @@ the binary and `PLAN_MODEL_COMMIT` in `src/plan_oracle.rs` must match, unless
 
 ## Status
 
-The lane is green against `9ff02f5`: 98,215 sampled cases with **zero divergences** between the
+The lane is green against `dd306b8`: 98,215 sampled cases with **zero divergences** between the
 model and the port, and `plan_differential` reports how many cases of each perturbation the model
 accepts, so a perturbation reaching only one outcome shows. Disabling the port's entry conditions,
 typename check, resolvability check, returned-type narrowing, `@provides` windows, sent
