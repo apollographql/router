@@ -136,7 +136,7 @@ pub struct CheckerOptions {
     /// The planner writes an empty type condition when it has decided the position admits
     /// nothing, and the judgement is right: the fetch under such a path can never run. It is dead
     /// code in the plan rather than a soundness violation, and the checker is otherwise silent
-    /// about it, since a path that reaches no type mounts no requirement.
+    /// about it, since a path that reaches no object leaves the fetch nowhere to run.
     pub check_empty_flatten_path_type_condition: bool,
 
     /// Report two `@requires` on one entity that demand the same response key with different
@@ -145,8 +145,9 @@ pub struct CheckerOptions {
     /// A fetch can only make one of the two calls, so one of the two fields is fed data it did
     /// not ask for. Neither the plan nor the rest of this checker can see it: the plan's own
     /// `requires` entry has had its arguments dropped by `trim_requires_selection_set`, and the
-    /// demand the entry is compared against is a concatenation of the two field sets, which
-    /// `query_compare` reads as one call because GraphQL validation would have merged them.
+    /// demand the entry is compared against is a concatenation of the two field sets, which the
+    /// model, and so the rest of this checker, reads as satisfied by a fetched field making either
+    /// call.
     pub check_requires_conflict: bool,
 }
 
@@ -168,6 +169,11 @@ impl Default for CheckerOptions {
 /// is one its subgraph can resolve where it selects it, not `@external` outside a `@provides`
 /// window naming it there, and that every contextual argument a fetch passes is bound by a context
 /// rewrite reading what the argument's declaration asks for.
+///
+/// It also asks that every type condition on the path a fetch runs at reads a fetched `__typename`
+/// value, and reads what an object of the response can be from the declarations of the fetches
+/// writing it and of the subgraphs sharing the field, where legacy bounds a field's possible types
+/// by every subgraph declaring the field.
 pub fn check_plan(
     api_schema: &ValidFederationSchema,
     supergraph_schema: &ValidFederationSchema,

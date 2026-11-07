@@ -2,24 +2,29 @@
 //!
 //! Port of `Apollo/Implementations/QueryPlanChecker.lean` in `apollo-graphql-lean`, where
 //! `CheckQueryPlanCorrect` states that the checker accepts exactly the plans that are complete and
-//! sound, and `checkQueryPlan_correct` proves it.
+//! sound, under the premises below, and `checkQueryPlan_correct` proves it.
 //!
-//! The check is two halves:
+//! The check walks the plan once, building what it fetches as the copies fetches write and the
+//! contributions on them ([`response`], where a copy and a contribution are defined), and checks
+//! each fetch where it is reached, while the state that reached it is in hand. No fetch site is
+//! ever collected.
 //!
-//! ```text
-//! let fetched = plan.walk();
-//! includes(operation_with(fetched), operation) && fetched.requirements_met
-//! ```
-//!
-//! - **Completeness** — walk the plan once accumulating what it fetches, mount each fetch's
-//!   selections at the path it runs at, then ask whether the result includes the client operation.
-//!   That question is [`super::query_compare::includes`], itself a port of the model's
-//!   `includesBool`.
-//! - **Soundness** — every fetch's subgraph can resolve what the fetch selects, every contextual
-//!   argument the fetch passes is bound by a context rewrite reading what its declaration asks for,
-//!   and every entity fetch's `requires` is matched by its entity cases, each checked where the
-//!   fetch is reached, while the state that reached it is in hand. No fetch site is ever
-//!   collected.
+//! - **Completeness** — the client operation is covered by that response: every field it asks for
+//!   is fetched on every copy it can be asked at, whatever runtime types the copies have, which
+//!   [`coverage::Coverage::covers`] decides. A copy is the value one response key holds at one
+//!   parent copy, and every fetch writing that key there writes the same value, so their
+//!   contributions combine; a different parent, alias or list holds a different copy, owed its own
+//!   fields. What a copy can be is read from every contribution to it: each declares the possible
+//!   runtime types of its result in its own subgraph, at the subgraph type it was selected on, each
+//!   standing for a supergraph object, and the copy can be what every active contribution allows
+//!   (`hypothesis.rs`). A list one subgraph declares over fewer members than the supergraph holds
+//!   returns only those members from that subgraph, and a field with no possible object result
+//!   types owes nothing below it, while the field itself is still owed.
+//! - **Soundness** — every fetch's subgraph can resolve what the fetch selects, the type conditions
+//!   on the path it runs at read a fetched `__typename` value, every contextual argument the fetch
+//!   passes is bound by a context rewrite reading what its declaration asks for, and an entity
+//!   fetch's `requires` is matched by its entity cases on the copies the plan supplies, which hold
+//!   what the subgraph demands, as they hold the contextual values it reads.
 //!
 //! # What a fetch must already have found
 //!
@@ -28,30 +33,68 @@
 //! rewrites — the demand says which field each key must hold and with which arguments, which the
 //! entry cannot, `trim_requires_selection_set` having dropped its arguments; the rewrites say
 //! which key it is read from. The entry is checked against the two rather than read from: it has
-//! the demand's shape by field name, and it agrees with the rewrites, which link each alias it
-//! reads under to the field it names. A planner may fetch a `@requires` input under an alias and
-//! name it back with an input key renamer, which is what the router's `execute_selection_set` and
-//! `apply_rewrites` do between them.
+//! the demand's shape by field name, on each copy the plan supplies under it, and it agrees with
+//! the rewrites, which link each alias it reads under to the field it names. A planner may fetch a
+//! `@requires` input under an alias and name it back with an input key renamer, which is what the
+//! router's `execute_selection_set` and `apply_rewrites` do between them.
+//!
+//! # What the checker assumes of the supergraph and the subgraphs
+//!
+//! Reading what a copy can be from the subgraphs contributing to it rests on the *declaration
+//! correspondence*: each subgraph's declarations correspond to the supergraph's, every object a
+//! subgraph declares standing for supergraph objects, which the model states as
+//! `Subgraph.DeclarationCorrespondence` and takes as a premise. Composition establishes it for what
+//! composition checks: the `join__type`, `join__implements` and `join__unionMember` annotations at
+//! the consumed join version tie each subgraph's types, implementations and members to the
+//! supergraph's, an absent annotation proving no exclusion; an `@interfaceObject` names a
+//! supergraph interface and stands for each of its objects; and `merge_interface.rs` rejects an
+//! interface object beside an implementation of its interface in one subgraph, and two interface
+//! objects in one subgraph whose interfaces share an object. The checker checks none of it: it
+//! reads the supergraph it is given, and `Supergraph::new_with_router_specs` validates that schema
+//! and its specs and reruns no composition.
+//!
+//! One assumption goes further than any composition rule is known to: that every subgraph-declared
+//! result of a field of an interface object fits the corresponding field at every supergraph object
+//! the interface object may represent. It is unestablished. The checker relies on it wherever it
+//! grounds an interface object's results, and checks it nowhere; what would discharge it is a
+//! composition rule enforcing it, or a survey over the corpus showing every interface object's
+//! fields to satisfy it.
+//!
+//! Reading it from subgraphs the plan does not ask rests on *sharing conformance*: the subgraphs
+//! resolving one field at one supergraph parent, with the same arguments, return the same value, so
+//! each of their declarations bounds what the value can be whichever subgraph is asked
+//! (`sharing.rs`); the two declarations of a progressive override, which resolve the field under
+//! opposite conditions on its label, are alternatives rather than interchangeable. Apollo's resolver-consistency guidance asks it of every shared field, and
+//! composition's `shareable_runtime_types::hints_for_interfaces` reads a shared interface field's
+//! result as the intersection of its declarations; composition does not verify that deployed
+//! resolvers agree. It supplies no field and no `__typename` value, only a bound on runtime types.
+//! The same premise is what lets repeated writes of one key at one parent combine: the router's
+//! `type_aware_deep_merge` merges objects field by field and lists index by index, and two fetches
+//! writing one list are read as writing the same elements in the same order.
+//!
+//! What the checker does not assume, nor check, is that resolvers obey their declarations and
+//! return the entity they were given, an interface object's particular supergraph object included:
+//! that is source conformance, an assumption about execution.
 //!
 //! # Differences from the model
 //!
-//! - **The subgraph oracle.** Every comparison of the composed response, completeness and each
-//!   requirement alike, is restricted by `SubgraphConstraint`, the legacy checker's oracle, which
-//!   narrows the types a field's result can have to the ones the subgraphs declaring the field
-//!   can return; it is passed to `includes_with_constraint` here, so this reaches parity with
-//!   legacy rather than with the model alone, which compares the composed response unrestricted.
 //! - **No fuel.** `conditionMatchesRequirementFuel` carries a budget that is an artifact of Lean's
 //!   termination checker; the model's own notes say an implementation should simply loop.
+//! - **Configurations are decided, not enumerated.** The model asks each obligation under every
+//!   Boolean assignment and every configuration of the copies' runtime types. Here a copy's
+//!   runtime type is a variable and every obligation is a region of configurations to be covered
+//!   by others, decided over the variables it mentions (`region.rs`, `hypothesis.rs`); a
+//!   configuration the model would enumerate is never built.
 //! - **What a deferred block's dependencies sent is recorded, not recomputed.** The model walks
-//!   the primary block a second time, in `PrimaryDeferBlock.dependencySelections`, to find what
-//!   the fetches a deferred block `depends` on sent it. Each fetch's response is what the walk
-//!   already returns for it, so it is recorded under the fetch's id as the walk passes, as
-//!   `FetchNode::deferred_fetches` sends it, guarded only by the condition branches inside the
-//!   primary block.
-//! - **Each distinct copy of a key, once.** Exact structural duplicates of a reproduced copy,
-//!   source locations aside, are kept once per level, every distinct guarded contribution kept in
-//!   first-occurrence order, verdicts unchanged; the model's `selectionsUnderKey` keeps them all
-//!   and inclusion reads them as one. Kept, they double along a chain of fetches at one site.
+//!   the primary block a second time, in `PrimaryDeferBlock.dependencyResponse`, to find what the
+//!   fetches a deferred block `depends` on sent it. Each fetch's additions are what the walk
+//!   already returns for it, so they are recorded under the fetch's id as the walk passes, with the
+//!   contributions above them that lead to them, the model's `withResponseAncestors`, as
+//!   `FetchNode::deferred_fetches` sends them.
+//! - **Each distinct contribution of a fetch, once.** A contribution identical to one the same
+//!   fetch has already made on the same copy, in everything the model identifies one by — copy,
+//!   key, subgraph parent type, field, arguments and guard — is kept once, and what is selected
+//!   under the duplicate is still produced; verdicts are unchanged. The model keeps them all.
 //! - **`@context` data availability.** Every contextual value a fetch reads must already be
 //!   fetched wherever the fetch runs. The legacy checker does not check this at all: at run time
 //!   a rewrite path that reaches nothing simply drops the argument, so nothing notices.
@@ -59,74 +102,63 @@
 //!   [`CheckerOptions::check_empty_flatten_path_type_condition`], on by default, reports a flatten
 //!   path element whose condition is the empty list, `…|[]`, a fetch the planner decided can never
 //!   run. The model reads that condition as it reads any condition naming no object of its
-//!   position, an interface's or a union's name among them: the fetch below contributes nothing
-//!   and the requirements mounted for it disappear, and its own position, read to the object it
-//!   runs on with the last element's condition narrowing that object, reaches nothing, so no
-//!   contextual value is owed for it, while its structural checks remain. This checker decides
-//!   the same with the option off. The report is this port's own and reads only whether the
-//!   written list is empty, so a nonempty condition naming no object of its position is not
-//!   reported.
+//!   position, an interface's or a union's name among them: the path reaches no copy, so the
+//!   fetch runs nowhere, owes nothing there and adds nothing, while its structural checks remain.
+//!   This checker decides the same with the option off. The report is this port's own and reads
+//!   only whether the written list is empty, so a nonempty condition naming no object of its
+//!   position is not reported.
 //! - **A key's condition before an index**, a limit this port shares with the model: a condition
 //!   on a key whose value is a list is read as carrying into the index, so `items|[Book, Film].@`
 //!   is credited, while Router's executor compares the list itself, which has no `__typename`,
 //!   and selects nothing there, a shape no planner writes.
-//! - **Validity** and **condition variables** — the two sections below.
+//! - **Validity** — the section below.
 //!
-//! # Validity of the operations the walk builds
+//! # Validity of the operations the checker reads
 //!
-//! The model assumes the operations it compares are valid and carries that as a premise of its
-//! correctness statement, `QueryPlanWellFormed`, naming three: the plan read as an operation, what
-//! each entity fetch has already fetched, and what each `@key` demands of it, inverted through the
-//! fetch's input rewrites. The checker does not decide it for any of them.
+//! The model assumes the client operation and every fetch's own operation are valid, and carries
+//! that in its correctness statement (`QueryPlanWellFormed` and its premise on the operation); the
+//! checker decides neither. Nothing else is assumed valid, since the checker builds no operation:
+//! a fetch's selections are read into the response field by field, on the copies they reach, and
+//! what a requirement demands is read against the response as a demand, never as an operation.
 //!
-//! The first two are read off the buffer of what the plan has fetched, and that buffer is a
-//! *response shape written in selection syntax*: it keys a response name by type condition and has
-//! no field-merging rule, where an operation does. When a fetch's output rewrites rename a key the
-//! planner had aliased apart — which it does exactly when two disjoint entity types need the same
-//! `@requires` field at incompatible types — the two meet under one name and `FieldsInSetCanMerge`
-//! rejects a plan whose data never collides. The legacy checker does not hit this because it
-//! renames inside a response shape, where the two never meet.
-//!
-//! The third is assembled out of `@key` and `@requires` field sets, which supergraph composition
-//! has already validated, so re-checking them here would only cost time.
+//! Where the fields a demand selects under one key at one supergraph type make one call — the
+//! client operation's validity gives it, and a requirement assembled from one entity's field sets
+//! has it unless two `@requires` demand one key differently, which
+//! [`CheckerOptions::check_requires_conflict`] reports — every fetched field that can be active
+//! with one of them has to make it. Where they make several, the model's reading, some active
+//! demanded call made by every active fetched field, is asked assignment by assignment over the
+//! key's own guards.
 //!
 //! # Unfetched introspection
 //!
 //! The client operation is compared with some introspection removed, mirroring the legacy
 //! checker's policy. The planner ignores `__schema` and `__type`, so no plan ever fetches them.
 //! The router answers a *root* `__typename` without asking a subgraph, so no fetch carries it;
-//! below the root it is fetched like any other field and is compared. This is query-plan policy
-//! rather than part of the inclusion relation, which is why it lives here and not in
-//! `query_compare`.
-//!
-//! # Condition variables
-//!
-//! A variable a condition node branches on is declared `Boolean!` in every operation the checker
-//! builds, the client operation included, and loses its default. The guards synthesized for a
-//! condition branch are `@skip`/`@include`, whose `if:` argument is `Boolean!` — but the branch
-//! may come from `@defer(if:)`, whose argument is nullable. Executing a condition node reads the
-//! value as a Boolean and the inclusion relation case-splits over true and false, so tightening
-//! the declaration changes nothing either decides; it is only what makes the synthesized guard
-//! well-typed. Both sides get the same treatment, so they still agree on what they share.
+//! below the root it is fetched like any other field and is owed. This is query-plan policy
+//! rather than part of the coverage relation, which is why it lives here and not in [`response`].
 
 mod context;
+mod coverage;
+mod hypothesis;
+mod region;
 mod requires;
 mod resolution;
+mod response;
 mod selections;
+mod sharing;
 mod subgraph;
 #[cfg(test)]
 mod test_support;
 #[cfg(test)]
 mod tests;
 
+use std::cell::RefCell;
 use std::sync::Arc;
 
 use apollo_compiler::ExecutableDocument;
 use apollo_compiler::Name;
 use apollo_compiler::Node;
-use apollo_compiler::ast;
 use apollo_compiler::collections::IndexMap;
-use apollo_compiler::collections::IndexSet;
 use apollo_compiler::executable;
 use apollo_compiler::executable::FragmentMap;
 use apollo_compiler::executable::Selection;
@@ -138,11 +170,20 @@ use self::context::check_context_readings;
 use self::context::check_context_rewrites;
 use self::context::context_uses;
 use self::context::context_variables;
-use self::context::fetch_positions;
 use self::context::remove_context_arguments;
+use self::coverage::Coverage;
+use self::coverage::Demand;
+use self::coverage::Supplies;
+use self::coverage::render_clause;
+use self::hypothesis::Hypothesis;
+use self::region::Algebra;
+use self::region::Clause;
+use self::region::Work;
+use self::region::boolean;
+use self::region::everything;
 use self::requires::Reading;
 use self::requires::check_requires_conflict;
-use self::requires::condition_matches_requirement;
+use self::requires::condition_matches_supplied;
 use self::requires::entry_selections;
 use self::requires::inline_fragment;
 use self::requires::key_half;
@@ -150,21 +191,27 @@ use self::requires::requires_half;
 use self::requires::same_keys;
 use self::requires::to_requires_field_set;
 use self::resolution::check_fetch_resolves;
+use self::response::ContributionId;
+use self::response::CopyId;
+use self::response::Mount;
+use self::response::Position;
+use self::response::Production;
+use self::response::Response;
+use self::response::View;
+use self::response::every_object;
+use self::response::union;
 use self::selections::apply_key_renamers;
 use self::selections::inline_fragment_spreads;
 use self::selections::invert_key_renamers;
-use self::selections::selections_at;
-use self::selections::type_filter_admits;
 use self::selections::type_filter_covers;
 use self::selections::type_filter_meets;
-use self::selections::under_condition;
 use self::selections::wrap_non_empty;
+use self::sharing::Sharing;
 use self::subgraph::KeyDirective;
 use self::subgraph::Subgraph;
-use super::query_compare;
 use super::query_compare::conditions::BooleanLiteral;
+use super::query_compare::schema_view::SchemaView;
 use super::response_shape_compare::ComparisonError;
-use super::subgraph_constraint::SubgraphConstraint;
 use crate::correctness::CheckerOptions;
 use crate::query_plan::DeferredDependency;
 use crate::query_plan::FetchDataPathElement;
@@ -181,13 +228,6 @@ use crate::schema::position::INTROSPECTION_TYPENAME_FIELD_NAME;
 // Walking the plan
 //==================================================================================================
 
-/// What a walk of the plan produced.
-struct Walked {
-    /// Everything the plan fetches, as one selection set mounted at the query root. Order is
-    /// load-bearing: append, never reorder.
-    fetched: Vec<Selection>,
-}
-
 /// The state a fetch is reached with.
 #[derive(Clone, Copy)]
 struct Reached<'a> {
@@ -195,9 +235,31 @@ struct Reached<'a> {
     path: &'a [FetchDataPathElement],
     /// The condition-node branches in effect, read as a conjunction.
     condition: &'a [BooleanLiteral],
-    /// Where the fetch records its own response, when it runs in the primary block of a `defer`
-    /// node whose deferred blocks may name it as a dependency.
+    /// Where the fetch records what it sends, when it runs in the primary block of a `defer` node
+    /// whose deferred blocks may name it as a dependency.
     deferred: Option<&'a DeferredFetches>,
+}
+
+/// Where a fetch's soundness is decided: the model's `FetchSite`, with the copy it runs on found
+/// once.
+struct Site<'s> {
+    fetch: &'s FetchNode,
+    /// Where the fetch runs, as a path of response keys from the query root.
+    path: &'s [FetchDataPathElement],
+    schema: &'s SchemaView<'s>,
+    /// The copy the path addresses.
+    position: &'s Position,
+    /// The configurations the fetch runs there in: its path's type conditions, the condition-node
+    /// branches it runs under and, for an entity fetch, the runtime types some `requires` entry is
+    /// written at.
+    region: Clause,
+    /// The admissible configurations of what was fetched before the fetch, where its position and
+    /// the copies it reads are.
+    hypothesis: &'s Hypothesis<'s>,
+    /// What the fetch can read, where what it is sent has to be.
+    readable: View<'s>,
+    /// What the fetch can read, by copy and key, for the walks over it.
+    supplies: Supplies<'s>,
 }
 
 /// What each fetch in a `defer` node's primary block sends the deferred blocks that name it.
@@ -206,51 +268,43 @@ struct Reached<'a> {
 /// response rather than everything fetched before it. A nested `defer` node keeps its own, so no
 /// fetch inside one is recorded here.
 struct DeferredFetches {
-    /// The condition branches in force at the `defer` node. A response is guarded only by the
-    /// branches inside the primary block; the ones above guard the deferred blocks as well.
-    outer_conditions: usize,
-    /// Each fetch's id and response, in the order the walk passed them.
-    responses: std::cell::RefCell<Vec<(u64, Vec<Selection>)>>,
+    /// Each fetch's id and what it sends: its additions, with the contributions above them that
+    /// lead to them and none of those copies' other values. In the order the walk passed them.
+    responses: RefCell<Vec<(u64, Vec<ContributionId>)>>,
 }
 
 impl DeferredFetches {
-    fn new(outer_conditions: usize) -> Self {
+    fn new() -> Self {
         DeferredFetches {
-            outer_conditions,
             responses: Default::default(),
         }
     }
 
-    /// What the fetches a deferred block depends on sent it, in the order they ran. `depends`
-    /// holds fetch ids as strings.
-    fn responses_of(&self, depends: &[DeferredDependency]) -> Vec<Selection> {
-        self.responses
-            .borrow()
-            .iter()
-            .filter(|(id, _)| {
-                let id = id.to_string();
-                depends.iter().any(|dependency| dependency.id == id)
-            })
-            .flat_map(|(_, response)| response.iter().cloned())
-            .collect()
+    /// What the fetches a deferred block depends on sent it. `depends` holds fetch ids as strings.
+    fn responses_of(&self, depends: &[DeferredDependency]) -> Vec<ContributionId> {
+        let mut sent = Vec::new();
+        for (id, response) in self.responses.borrow().iter() {
+            let id = id.to_string();
+            if depends.iter().any(|dependency| dependency.id == id) {
+                sent = union(&sent, response);
+            }
+        }
+        sent
     }
 }
 
 pub(crate) struct Checker<'a> {
     supergraph_schema: &'a ValidFederationSchema,
-    /// The schema index every inclusion test runs against. Built once: it is derived from the
-    /// schema alone, and rebuilding it per test costs more than the tests themselves on a
-    /// supergraph with many types.
-    comparator: query_compare::QueryComparator<'a>,
-    /// Read for each fetch's `@key` and `@requires` declarations.
+    /// The supergraph's possible types, indexed once: every supergraph type condition, a demand's
+    /// or a `requires` entry's, and every supergraph object a subgraph object stands for, is read
+    /// here.
+    schema_view: SchemaView<'a>,
+    /// Read for each fetch's declarations and the cases of what it returns.
     subgraphs_by_name: &'a IndexMap<Arc<str>, ValidFederationSchema>,
-    /// Every operation the walk builds inherits its declarations and operation type.
-    operation: &'a executable::Operation,
-    /// The subgraph oracle an inclusion test narrows possible types with.
-    constraint: SubgraphConstraint<'a>,
-    /// Every variable a condition node of this plan branches on.
-    condition_variables: IndexSet<Name>,
-    root_type: Name,
+    /// Every subgraph's declarations, for the sharing clause.
+    sharing: Sharing<'a>,
+    /// The supergraph's objects, the sets of them literals hold, and the work counters.
+    algebra: Algebra,
     /// The checks that are off unless the caller asks for them.
     options: CheckerOptions,
 }
@@ -263,51 +317,47 @@ impl<'a> Checker<'a> {
     fn new(
         supergraph_schema: &'a ValidFederationSchema,
         subgraphs_by_name: &'a IndexMap<Arc<str>, ValidFederationSchema>,
-        operation: &'a executable::Operation,
-        plan: &QueryPlan,
-        root_type: Name,
         options: CheckerOptions,
     ) -> Result<Self, ComparisonError> {
+        let schema_view = SchemaView::new(supergraph_schema)
+            .map_err(|e| ComparisonError::new(format!("failed to index the supergraph: {e}")))?;
+        let sharing = Sharing::new(subgraphs_by_name)?;
         Ok(Checker {
             supergraph_schema,
-            comparator: query_compare::QueryComparator::new(supergraph_schema)
-                .map_err(|e| ComparisonError::new(e.to_string()))?,
+            schema_view,
             subgraphs_by_name,
-            operation,
-            constraint: SubgraphConstraint::new(supergraph_schema, subgraphs_by_name),
-            condition_variables: condition_variables(plan),
-            root_type,
+            sharing,
+            algebra: Algebra::new(supergraph_schema),
             options,
         })
     }
 }
 
-/// Restricts every selection in `body` to `require_types`, the union of the type conditions this
-/// fetch's `requires` entries are written at. What that union does not cover reaches nothing and
-/// so contributes nothing, which is how a fetch covering only some of an interface object's
-/// implementations resolves nothing for the rest.
+/// Does every type condition on the path a fetch runs at read a fetched `__typename` value? The
+/// model's `FetchSitePathObserved`.
 ///
-/// Conditions are compared by name, not by the object types they include, which is a shortcut: a
-/// `body` whose selections are all fragments on those conditions is already restricted and is
-/// returned unchanged. That is the common case and the one worth recognizing, the alternative
-/// leaving the rest of the checker a copy of `body` per condition to walk. Anything else is
-/// restricted by adding one sibling inline fragment per condition, each carrying a copy of
-/// `body`.
-fn restrict_to_entry_types(require_types: &[&Name], body: Vec<Selection>) -> Vec<Selection> {
-    let body_already_restricted = body.iter().all(|selection| match selection {
-        Selection::InlineFragment(fragment) => fragment
-            .type_condition
-            .as_ref()
-            .is_some_and(|type_condition| require_types.contains(&type_condition)),
-        _ => false,
-    });
-    if body_already_restricted {
-        return body;
+/// A conditioned key or index is followed only into copies whose `__typename` value names a type
+/// the condition names: the router's `iterate_path` reads it there, and finds nothing where it was
+/// not fetched. The position was found without reading those values, so a missing one does not
+/// erase the position it is owed at; it has to be readable there wherever the fetch runs at that
+/// position, under the guards it was fetched under.
+fn check_path_observed(site: &Site<'_>) -> Result<(), ComparisonError> {
+    let hypothesis = site.hypothesis;
+    let response = site.readable.response;
+    for read in &site.position.reads {
+        let supplies = hypothesis.supplies(site.readable.typename_guards(*read));
+        if let Some(example) = hypothesis.uncovered(site.position.copy, &site.region, &supplies) {
+            return Err(ComparisonError::new(format!(
+                "fetch to {}: the path `{}` reads the `__typename` of {}, which the plan has \
+                 not fetched there{}",
+                site.fetch.subgraph_name,
+                display_path(site.path),
+                response.describe(*read),
+                render_clause(hypothesis.algebra, response, &example),
+            )));
+        }
     }
-    require_types
-        .iter()
-        .map(|require_type| inline_fragment((*require_type).clone(), body.clone()))
-        .collect()
+    Ok(())
 }
 
 /// Reports a flatten path element narrowed to no runtime type at all.
@@ -315,10 +365,10 @@ fn restrict_to_entry_types(require_types: &[&Name], body: Vec<Selection>) -> Vec
 /// The planner writes an empty type condition — `…@|[]` — when it has worked out that the
 /// position admits nothing, which says the fetch under the path can never run. The judgement is
 /// right; emitting the fetch anyway is not. The rest of this checker is silent about it, and
-/// correctly so: a path element that reaches no type mounts no requirement and admits no
-/// fragment, so the fetch demands nothing and contributes nothing. That makes it dead code in the
-/// plan rather than a soundness violation, which is why
-/// [`CheckerOptions::check_empty_flatten_path_type_condition`] can turn it off.
+/// correctly so: a path element that reaches no copy leaves the fetch no position to run at, so
+/// it owes nothing and adds nothing. That makes it dead code in the plan rather than a soundness
+/// violation, which is why [`CheckerOptions::check_empty_flatten_path_type_condition`] can turn it
+/// off.
 fn check_path_reaches_a_type(path: &[FetchDataPathElement]) -> Result<(), ComparisonError> {
     for element in path {
         let condition = match element {
@@ -349,115 +399,58 @@ fn display_path(path: &[FetchDataPathElement]) -> String {
         .join(".")
 }
 
-/// Every variable a condition node of a plan branches on.
-fn condition_variables(plan: &QueryPlan) -> IndexSet<Name> {
-    fn walk(node: &PlanNode, out: &mut IndexSet<Name>) {
-        match node {
-            PlanNode::Fetch(_) => {}
-            PlanNode::Sequence(sequence) => sequence.nodes.iter().for_each(|n| walk(n, out)),
-            PlanNode::Parallel(parallel) => parallel.nodes.iter().for_each(|n| walk(n, out)),
-            PlanNode::Flatten(flatten) => walk(&flatten.node, out),
-            PlanNode::Defer(defer) => {
-                defer.primary.node.iter().for_each(|n| walk(n, out));
-                defer
-                    .deferred
-                    .iter()
-                    .filter_map(|block| block.node.as_ref())
-                    .for_each(|n| walk(n, out));
-            }
-            PlanNode::Condition(node) => {
-                out.insert(node.condition_variable.clone());
-                node.if_clause.iter().for_each(|n| walk(n, out));
-                node.else_clause.iter().for_each(|n| walk(n, out));
-            }
-        }
-    }
-
-    let mut out = IndexSet::default();
-    match &plan.node {
-        None => {}
-        Some(TopLevelPlanNode::Subscription(subscription)) => {
-            subscription.rest.iter().for_each(|n| walk(n, &mut out));
-        }
-        Some(TopLevelPlanNode::Fetch(_)) => {}
-        Some(TopLevelPlanNode::Sequence(node)) => {
-            node.nodes.iter().for_each(|n| walk(n, &mut out));
-        }
-        Some(TopLevelPlanNode::Parallel(node)) => {
-            node.nodes.iter().for_each(|n| walk(n, &mut out));
-        }
-        Some(TopLevelPlanNode::Flatten(node)) => walk(&node.node, &mut out),
-        Some(TopLevelPlanNode::Defer(node)) => {
-            node.primary.node.iter().for_each(|n| walk(n, &mut out));
-            node.deferred
-                .iter()
-                .filter_map(|block| block.node.as_ref())
-                .for_each(|n| walk(n, &mut out));
-        }
-        Some(TopLevelPlanNode::Condition(node)) => {
-            out.insert(node.condition_variable.clone());
-            node.if_clause.iter().for_each(|n| walk(n, &mut out));
-            node.else_clause.iter().for_each(|n| walk(n, &mut out));
-        }
-    }
-    out
-}
-
 //==================================================================================================
 // Walking node tree
 //==================================================================================================
 
 impl<'a> Checker<'a> {
-    /// Walks a plan node once, returning what it adds to `available`.
+    /// Walks a plan node once, returning the fields it adds to the response.
     ///
     /// Each fetch is checked where it is reached, while the state that reached it is in hand, so
     /// no fetch site is ever collected. The threading is the model's: a sequence's children run in
     /// order, parallel children all see the same input, a defer node's deferred blocks start after
     /// its primary block.
     ///
-    /// Two states are threaded. `available` is everything fetched before the node, and is what a
-    /// contribution or a requirement is mounted into; `readable` is what of that the node can
-    /// read, and is what a requirement is compared with. They differ only inside a deferred
-    /// block.
+    /// Two views of the response are threaded. `available` is everything fetched before the node,
+    /// which locates where a fetch runs and what each boundary can hold; `readable` is what of that
+    /// the node can read, which supplies the values a fetch is sent. They differ only inside a
+    /// deferred block. Both are sorted lists of contribution ids into `response`.
     fn walk_node(
         &self,
+        response: &mut Response,
         node: &PlanNode,
         reached: Reached<'_>,
-        available: &[Selection],
-        readable: &[Selection],
-    ) -> Result<Vec<Selection>, ComparisonError> {
+        available: &[ContributionId],
+        readable: &[ContributionId],
+    ) -> Result<Vec<ContributionId>, ComparisonError> {
         match node {
             PlanNode::Fetch(fetch) => {
-                let contributed = self.walk_fetch(fetch, reached, available, readable)?;
+                let added = self.walk_fetch(response, fetch, reached, available, readable)?;
                 if let (Some(deferred), Some(id)) = (reached.deferred, fetch.id) {
-                    deferred.responses.borrow_mut().push((
-                        id,
-                        under_condition(
-                            &reached.condition[deferred.outer_conditions..],
-                            &self.root_type,
-                            contributed.clone(),
-                        ),
-                    ));
+                    let sent = response.sent(&self.algebra, available, &added);
+                    deferred.responses.borrow_mut().push((id, sent));
                 }
-                Ok(contributed)
+                Ok(added)
             }
             PlanNode::Sequence(sequence) => {
                 // Each child sees, and can read, what the previous ones added.
-                let mut added: Vec<Selection> = Vec::new();
+                let mut added: Vec<ContributionId> = Vec::new();
                 for child in &sequence.nodes {
-                    let mut seen = available.to_vec();
-                    seen.extend(added.iter().cloned());
-                    let mut seen_readable = readable.to_vec();
-                    seen_readable.extend(added.iter().cloned());
-                    added.extend(self.walk_node(child, reached, &seen, &seen_readable)?);
+                    let seen = union(available, &added);
+                    let seen_readable = union(readable, &added);
+                    let child_added =
+                        self.walk_node(response, child, reached, &seen, &seen_readable)?;
+                    added = union(&added, &child_added);
                 }
                 Ok(added)
             }
             PlanNode::Parallel(parallel) => {
                 // Every child sees the same input.
-                let mut added: Vec<Selection> = Vec::new();
+                let mut added: Vec<ContributionId> = Vec::new();
                 for child in &parallel.nodes {
-                    added.extend(self.walk_node(child, reached, available, readable)?);
+                    let child_added =
+                        self.walk_node(response, child, reached, available, readable)?;
+                    added = union(&added, &child_added);
                 }
                 Ok(added)
             }
@@ -468,6 +461,7 @@ impl<'a> Checker<'a> {
                 let mut path = reached.path.to_vec();
                 path.extend(flatten.path.iter().cloned());
                 self.walk_node(
+                    response,
                     &flatten.node,
                     Reached {
                         path: &path,
@@ -480,9 +474,10 @@ impl<'a> Checker<'a> {
             PlanNode::Defer(defer) => {
                 // The primary block's fetches record what they send, for the deferred blocks that
                 // name them.
-                let deferred_fetches = DeferredFetches::new(reached.condition.len());
+                let deferred_fetches = DeferredFetches::new();
                 let primary = match &defer.primary.node {
                     Some(node) => self.walk_node(
+                        response,
                         node,
                         Reached {
                             deferred: Some(&deferred_fetches),
@@ -495,22 +490,21 @@ impl<'a> Checker<'a> {
                 };
                 // Every deferred block starts after the whole primary block, so that is what was
                 // fetched before it. What it can read is less: what the `defer` node could read,
-                // and the responses of the fetches it depends on — or the whole primary block
-                // when it names none, `DeferredNode::execute` then waiting for all of it.
-                let mut block_available = available.to_vec();
-                block_available.extend(primary.iter().cloned());
+                // and what the fetches it depends on send it — or the whole primary block when it
+                // names none, `DeferredNode::execute` then waiting for all of it.
+                let block_available = union(available, &primary);
                 let mut added = primary.clone();
                 for block in &defer.deferred {
                     let Some(node) = &block.node else {
                         continue;
                     };
-                    let mut block_readable = readable.to_vec();
-                    if block.depends.is_empty() {
-                        block_readable.extend(primary.iter().cloned());
+                    let block_readable = if block.depends.is_empty() {
+                        union(readable, &primary)
                     } else {
-                        block_readable.extend(deferred_fetches.responses_of(&block.depends));
-                    }
-                    added.extend(self.walk_node(
+                        union(readable, &deferred_fetches.responses_of(&block.depends))
+                    };
+                    let block_added = self.walk_node(
+                        response,
                         node,
                         Reached {
                             deferred: None,
@@ -518,11 +512,13 @@ impl<'a> Checker<'a> {
                         },
                         &block_available,
                         &block_readable,
-                    )?);
+                    )?;
+                    added = union(&added, &block_added);
                 }
                 Ok(added)
             }
             PlanNode::Condition(node) => {
+                // Each branch's fields carry the branch's literal in their guards.
                 let mut added = Vec::new();
                 let branches = [
                     (
@@ -539,8 +535,9 @@ impl<'a> Checker<'a> {
                         continue;
                     };
                     let mut condition = reached.condition.to_vec();
-                    condition.push(literal.clone());
-                    let inner = self.walk_node(
+                    condition.push(literal);
+                    let branch_added = self.walk_node(
+                        response,
                         clause,
                         Reached {
                             condition: &condition,
@@ -549,145 +546,255 @@ impl<'a> Checker<'a> {
                         available,
                         readable,
                     )?;
-                    added.extend(under_condition(
-                        std::slice::from_ref(&literal),
-                        &self.root_type,
-                        inner,
-                    ));
+                    added = union(&added, &branch_added);
                 }
                 Ok(added)
             }
         }
     }
 
-    /// Walks a root plan node. A subscription plan is read as a query, as
-    /// `interpret_subscription_node` reads it.
-    fn walk_top_level(&self, node: &TopLevelPlanNode) -> Result<Walked, ComparisonError> {
+    /// Walks a root plan node, returning everything the plan fetches. A subscription plan is read
+    /// as a query, as `interpret_subscription_node` reads it.
+    fn walk_top_level(
+        &self,
+        response: &mut Response,
+        node: &TopLevelPlanNode,
+    ) -> Result<Vec<ContributionId>, ComparisonError> {
         let reached = Reached {
             path: &[],
             condition: &[],
             deferred: None,
         };
-        let fetched = match node {
+        match node {
             TopLevelPlanNode::Subscription(subscription) => {
                 // The primary fetch opens the stream, so it precedes the rest of the plan.
-                let primary = self.walk_fetch(&subscription.primary, reached, &[], &[])?;
+                let primary =
+                    self.walk_fetch(response, &subscription.primary, reached, &[], &[])?;
                 let mut added = primary.clone();
                 if let Some(rest) = &subscription.rest {
-                    added.extend(self.walk_node(rest, reached, &primary, &primary)?);
+                    let rest_added = self.walk_node(response, rest, reached, &primary, &primary)?;
+                    added = union(&added, &rest_added);
                 }
-                added
+                Ok(added)
             }
             TopLevelPlanNode::Fetch(fetch) => {
-                self.walk_node(&PlanNode::Fetch(fetch.clone()), reached, &[], &[])?
+                self.walk_node(response, &PlanNode::Fetch(fetch.clone()), reached, &[], &[])
             }
-            TopLevelPlanNode::Sequence(node) => {
-                self.walk_node(&PlanNode::Sequence(node.clone()), reached, &[], &[])?
-            }
-            TopLevelPlanNode::Parallel(node) => {
-                self.walk_node(&PlanNode::Parallel(node.clone()), reached, &[], &[])?
-            }
-            TopLevelPlanNode::Flatten(node) => {
-                self.walk_node(&PlanNode::Flatten(node.clone()), reached, &[], &[])?
-            }
+            TopLevelPlanNode::Sequence(node) => self.walk_node(
+                response,
+                &PlanNode::Sequence(node.clone()),
+                reached,
+                &[],
+                &[],
+            ),
+            TopLevelPlanNode::Parallel(node) => self.walk_node(
+                response,
+                &PlanNode::Parallel(node.clone()),
+                reached,
+                &[],
+                &[],
+            ),
+            TopLevelPlanNode::Flatten(node) => self.walk_node(
+                response,
+                &PlanNode::Flatten(node.clone()),
+                reached,
+                &[],
+                &[],
+            ),
             TopLevelPlanNode::Defer(node) => {
-                self.walk_node(&PlanNode::Defer(node.clone()), reached, &[], &[])?
+                self.walk_node(response, &PlanNode::Defer(node.clone()), reached, &[], &[])
             }
-            TopLevelPlanNode::Condition(node) => {
-                self.walk_node(&PlanNode::Condition(node.clone()), reached, &[], &[])?
-            }
-        };
-        Ok(Walked { fetched })
+            TopLevelPlanNode::Condition(node) => self.walk_node(
+                response,
+                &PlanNode::Condition(node.clone()),
+                reached,
+                &[],
+                &[],
+            ),
+        }
     }
 
-    /// What one fetch contributes, mounted where it runs.
+    /// What one fetch adds to the response, on the copy it runs on.
     ///
     /// Every fetch is checked here against its subgraph's declarations, what the subgraph can
-    /// resolve and the contextual arguments it is passed, and an entity fetch against its
-    /// requirements too, while the state that reached it is in hand, so no fetch site is ever
-    /// collected.
+    /// resolve and the contextual arguments it is passed, the `__typename` values its path reads
+    /// and, for an entity fetch, its requirements and contextual values, while the state that
+    /// reached it is in hand, so no fetch site is ever collected.
     fn walk_fetch(
         &self,
+        response: &mut Response,
         fetch: &FetchNode,
         reached: Reached<'_>,
-        available: &[Selection],
-        readable: &[Selection],
-    ) -> Result<Vec<Selection>, ComparisonError> {
+        available: &[ContributionId],
+        readable: &[ContributionId],
+    ) -> Result<Vec<ContributionId>, ComparisonError> {
         let subgraph = self.subgraph(fetch)?;
         let operation = self.fetch_body(fetch)?;
         check_fetch_resolves(&subgraph, &fetch.subgraph_name, reached.path, &operation)?;
         let context_variables = context_variables(&fetch.context_rewrites);
         let uses = context_uses(&subgraph, &operation)?;
         check_context_arguments(fetch, reached.path, &uses, &context_variables)?;
-        // Where the fetch runs, which the readings and the availability of what it reads are both
-        // judged over, found once; a fetch with no context rewrite is asked neither.
-        let positions = if fetch.context_rewrites.is_empty() {
-            Vec::new()
+        // A root fetch selects its whole operation; an entity fetch selects what its operation asks
+        // of the entities it was given, read at the subgraph type each one is in the subgraph.
+        let entity_selections = if fetch.requires.is_empty() {
+            None
         } else {
-            fetch_positions(
-                self.supergraph_schema,
-                &self.root_type,
-                available,
-                reached.path,
-                fetch,
-            )
+            Some(entity_body(fetch, &operation.selections)?)
         };
-        check_context_readings(
-            self.supergraph_schema,
-            &subgraph,
-            &self.root_type,
-            reached.path,
-            available,
-            &positions,
-            fetch,
-            &uses,
-        )?;
-        let body = operation.selections;
-        // A root fetch selects its whole operation and requires nothing; an entity fetch selects
-        // what its operation asks of the entities it was given, which are those of a type some
-        // `requires` entry is written at: `execute_selection_set` keeps an entry's fragment only
-        // for an entity of a matching type, and an entity no entry matches gets an empty
-        // representation, which is never sent. So the selections are kept once per entry type,
-        // under that type. For an interface object, one subgraph type standing for every
-        // implementation, a fetch whose entries cover only some of them resolves nothing for the
-        // rest; `interpret_fetch_node` merges every `_entities` fragment regardless.
-        let selected = if fetch.requires.is_empty() {
-            body
+        let algebra = &self.algebra;
+
+        // Where the fetch runs, which everything asked of it there is judged over, found once.
+        let Some(position) = response.position(algebra, reached.path) else {
+            return Ok(Vec::new());
+        };
+        let Some(region) = self.site_region(response, &position, reached.condition, fetch) else {
+            return Ok(Vec::new());
+        };
+        let base = {
+            let available_view = response.view(available);
+            let hypothesis = Hypothesis::new(algebra, available_view);
+            let site = Site {
+                fetch,
+                path: reached.path,
+                schema: &self.schema_view,
+                position: &position,
+                region: region.clone(),
+                hypothesis: &hypothesis,
+                readable: response.view(readable),
+                supplies: Supplies::new(response.view(readable)),
+            };
+            check_context_readings(&site, &subgraph, &uses)?;
+            check_path_observed(&site)?;
+            if let Some(entity_selections) = &entity_selections {
+                self.check_fetch(fetch, &subgraph, entity_selections, &site)?;
+                // Context rewrites are an entity fetch's business:
+                // `add_context_renamers_for_selection_set` runs on the node that has just been
+                // given its key inputs, and the router resolves none for a fetch that requires
+                // nothing.
+                check_context_rewrites(&site)?;
+            }
+            // The fetch adds where what was fetched before it reaches its position, and the
+            // `__typename` values its path reads were fetched, under their guards.
+            let domain = every_object(algebra);
+            let mut base = algebra.product(
+                &available_view.reach(algebra, &position.steps),
+                std::slice::from_ref(&region),
+            );
+            for read in &position.reads {
+                base = algebra.simplify(
+                    algebra.product(&base, &available_view.typename_guards(*read)),
+                    &domain,
+                );
+            }
+            algebra.simplify(base, &domain)
+        };
+        if base.is_empty() {
+            return Ok(Vec::new());
+        }
+
+        // The subgraph types the fetch's operation is read at: the root type, or each possible
+        // runtime type of `_entities`, with the supergraph objects it stands for. A root type
+        // stands for the supergraph's root type of the fetch's own operation kind, on whatever
+        // copy its path reaches: a query fetch flattened at a `Query` a mutation's field returns
+        // runs on that `Query`, and at an empty path the copy is the response's root, which only
+        // a fetch of the response's own kind stands for. An interface object stands for each of
+        // its interface's objects, and the copy it contributes to keeps the entity's supergraph
+        // runtime type.
+        let cases = if fetch.requires.is_empty() {
+            let Some(root) = self
+                .supergraph_schema
+                .schema()
+                .root_operation(fetch.operation_kind)
+            else {
+                return Err(ComparisonError::new(format!(
+                    "fetch to {}: the supergraph has no {} root type",
+                    fetch.subgraph_name, fetch.operation_kind
+                )));
+            };
+            vec![(operation.ty.clone(), algebra.objects([root]))]
         } else {
-            let entity_body = entity_body(fetch, &body)?;
-            self.check_fetch(fetch, &subgraph, &entity_body, reached, available, readable)?;
-            // Context rewrites are an entity fetch's business:
-            // `add_context_renamers_for_selection_set` runs on the node that has just been given
-            // its key inputs, and the router resolves none for a fetch that requires nothing.
-            check_context_rewrites(
-                self.supergraph_schema,
-                &self.root_type,
-                reached.path,
-                reached.condition,
-                &positions,
-                readable,
-                fetch,
-            )?;
-            restrict_to_entry_types(&require_types(fetch)?, entity_body)
+            let mut cases: Vec<(Name, Vec<Name>)> = Vec::new();
+            for (subgraph_type, object) in subgraph
+                .field_runtime_types(
+                    &algebra.work,
+                    &self.schema_view,
+                    &operation.ty,
+                    &ENTITIES_FIELD_NAME,
+                )
+                .into_iter()
+                .flatten()
+            {
+                match cases.iter_mut().find(|(known, _)| *known == subgraph_type) {
+                    Some((_, objects)) => objects.push(object),
+                    None => cases.push((subgraph_type, vec![object])),
+                }
+            }
+            cases
+                .into_iter()
+                .map(|(subgraph_type, objects)| (subgraph_type, algebra.objects(&objects)))
+                .collect()
         };
-        // The entity cases were read off the fetch's own operation above; what it *contributes*
-        // is that selection set under the key renames its output rewrites apply and without the
-        // synthetic arguments its context rewrites bind. `interpret_fetch_node` applies the two
-        // in this order.
-        let contributed = apply_key_renamers(
-            self.supergraph_schema,
-            type_filter_admits,
-            &fetch.output_rewrites,
-            selected,
+        // What the fetch adds is its operation without the synthetic arguments its context
+        // rewrites bind, under the key renames its output rewrites apply. `interpret_fetch_node`
+        // applies the two in this order.
+        let producer = response.new_producer(fetch.subgraph_name.clone());
+        let production = Production {
+            subgraph: &subgraph,
+            subgraph_name: &fetch.subgraph_name,
+            sharing: &self.sharing,
+            supergraph: &self.schema_view,
+            algebra,
+            producer,
+        };
+        let selections = remove_context_arguments(
+            &context_variables,
+            entity_selections.unwrap_or(operation.selections),
         );
-        let contributed = remove_context_arguments(&context_variables, contributed);
-        Ok(selections_at(
-            self.supergraph_schema,
-            available,
-            None,
-            reached.path,
-            &contributed,
-        ))
+        response.produce_fetch(
+            &production,
+            Mount {
+                copy: position.copy,
+                base,
+                cases,
+            },
+            &selections,
+            &fetch.output_rewrites,
+        )
+    }
+
+    /// The configurations a fetch runs at its position in: the model's `FetchSite.ActiveAt` with
+    /// `fetchPositions`. Its path's type conditions, the condition-node branches it runs under and,
+    /// for an entity fetch, the runtime types some `requires` entry is written at, read in the
+    /// supergraph, an interface entry standing for its objects: the router applies the fetch's
+    /// `requires` selection to each object the path selects and sends a representation only where
+    /// it yields a non-empty object (`Variables::new` in the router's `query_planner/fetch.rs`).
+    /// `None` where it runs nowhere.
+    fn site_region(
+        &self,
+        response: &Response,
+        position: &Position,
+        condition: &[BooleanLiteral],
+        fetch: &FetchNode,
+    ) -> Option<Clause> {
+        let algebra = &self.algebra;
+        let mut region = algebra.conjoin(
+            &position.region,
+            &algebra.clause(condition.iter().map(boolean))?,
+        )?;
+        if !fetch.requires.is_empty() {
+            let mut sent: Vec<Name> = Vec::new();
+            for entry in &fetch.requires {
+                if let requires_selection::Selection::InlineFragment(fragment) = entry
+                    && let Some(type_name) = &fragment.type_condition
+                {
+                    sent.push(type_name.clone());
+                    sent.extend(self.schema_view.possible_types(type_name).iter().cloned());
+                }
+            }
+            let literal = response.type_literal(algebra, position.copy, algebra.objects(&sent))?;
+            region = algebra.conjoin(&region, &literal)?;
+        }
+        Some(region)
     }
 
     /// The subgraph a fetch is sent to.
@@ -730,7 +837,7 @@ impl<'a> Checker<'a> {
 
 /// The federation entity entry point. An entity fetch's operation selects exactly this one root
 /// field, and its subselections are what the fetch contributes where it was flattened to.
-const ENTITIES_FIELD_NAME: &str = "_entities";
+const ENTITIES_FIELD_NAME: Name = name!("_entities");
 
 /// What an entity fetch asks of the entities it was given, with its shape checked.
 ///
@@ -755,8 +862,8 @@ fn entity_body(fetch: &FetchNode, body: &[Selection]) -> Result<Vec<Selection>, 
 
 impl Checker<'_> {
     /// Whether one entity fetch is well formed and its requirements and entity cases match each
-    /// other. Whether the contextual data it reads is already fetched is asked beside this, in
-    /// [`Self::walk_fetch`], which has where the fetch runs in hand.
+    /// other on the copies it runs on, `positions`. Whether the contextual data it reads is
+    /// already fetched is asked beside this, in [`Self::walk_fetch`].
     ///
     /// Each `requires` entry must be matched by some entity case, and each case by some entry.
     /// Legacy checks only the first direction, plus the count kept here, and does not check
@@ -766,9 +873,7 @@ impl Checker<'_> {
         fetch: &FetchNode,
         subgraph: &Subgraph<'_>,
         entity_body: &[Selection],
-        reached: Reached<'_>,
-        available: &[Selection],
-        readable: &[Selection],
+        site: &Site<'_>,
     ) -> Result<(), ComparisonError> {
         let grouped;
         let fetch = if fetch.requires.iter().any(has_conditions) {
@@ -790,10 +895,6 @@ impl Checker<'_> {
                 require_types.len()
             )));
         }
-
-        // What the fetch can read, which every requirement is compared with. Bound once per
-        // fetch, not per entry or per `@key`.
-        let readable_doc = self.operation_with(readable.to_vec());
 
         // Only `key.fields` varies across the keys tried, so hoist the rest per case.
         let mut per_case = Vec::with_capacity(cases.len());
@@ -851,9 +952,7 @@ impl Checker<'_> {
                     cases[case].0,
                     &fetch.input_rewrites,
                     &per_case[case],
-                    reached,
-                    available,
-                    &readable_doc,
+                    site,
                 )?);
             }
             Ok(is_match(&table[entry][case]))
@@ -980,17 +1079,18 @@ impl Checker<'_> {
     }
 
     /// Whether one `requires` entry is matched by one entity case: the subgraph resolves that
-    /// case from a key the plan has already fetched, and the entry declares exactly that key.
+    /// case from a key, and on every copy the fetch runs on that the entry is written for, the
+    /// entry declares what the subgraph demands there and the plan has fetched it. The model's
+    /// `checkRequirementMatchesCase`.
     ///
     /// `None` means matched; `Some(why)` says why not, per `@key` tried. An `Err` is a malformed
     /// plan or schema, not a mismatch.
     ///
-    /// The `@key`-does-not-apply arm below has no test; `tests.rs` does not reach it. It needs two things at once: entity types whose keys name different
-    /// fields, so that one type's key can fail to typecheck at another's entry, and a plan whose
-    /// pairs of equal type do not settle the table, so that the search looks at any other pair at
-    /// all. A plan the planner produced never supplies the second. Covering it means writing a
-    /// plan whose diagonal fails by hand.
-    #[allow(clippy::too_many_arguments)]
+    /// The `@key`-does-not-apply arm below has no test; `tests.rs` does not reach it. It needs two
+    /// things at once: entity types whose keys name different fields, so that one type's key can
+    /// fail to typecheck at another's entry, and a plan whose pairs of equal type do not settle
+    /// the table, so that the search looks at any other pair at all. A plan the planner produced
+    /// never supplies the second. Covering it means writing a plan whose diagonal fails by hand.
     fn requirement_matches_case(
         &self,
         require_item: &requires_selection::Selection,
@@ -1002,16 +1102,34 @@ impl Checker<'_> {
             Vec<Selection>,
             Vec<requires_selection::Selection>,
         ),
-        reached: Reached<'_>,
-        available: &[Selection],
-        readable_doc: &Valid<ExecutableDocument>,
+        site: &Site<'_>,
     ) -> Result<Option<String>, ComparisonError> {
         let (keys, requires_selections, requires_field_set) = hoisted;
+        let hypothesis = site.hypothesis;
+        let algebra = hypothesis.algebra;
+        let response = site.readable.response;
+        let copy = site.position.copy;
         if keys.is_empty() {
             return Ok(Some(format!(
                 "  the subgraph declares no `@key` on `{entity_type}`"
             )));
         }
+        // The configurations the entry is sent in. The router builds this entry's representation
+        // only for entities of its type, and the demand's `@requires` half sits at the subgraph's
+        // entity type, which for an interface object reaches every implementation; another
+        // implementation's inputs are its own entry's business.
+        let mut written_at = vec![require_type.clone()];
+        written_at.extend(
+            self.schema_view
+                .possible_types(require_type)
+                .iter()
+                .cloned(),
+        );
+        let served: Option<Clause> = response
+            .type_literal(algebra, copy, algebra.objects(&written_at))
+            .and_then(|literal| algebra.conjoin(&site.region, &literal))
+            .filter(|region| hypothesis.feasible(copy, region));
+        let no_fragments = FragmentMap::default();
         let mut unmatched = Vec::new();
         for key in keys {
             if !key.resolvable {
@@ -1037,67 +1155,63 @@ impl Checker<'_> {
             };
             let mut demanded = to_requires_field_set(&key_selections);
             demanded.extend(requires_field_set.iter().cloned());
-            if let Err(mismatch) = condition_matches_requirement(
-                self.supergraph_schema,
-                std::slice::from_ref(&require_item),
-                &demanded.iter().collect::<Vec<_>>(),
-            ) {
-                unmatched.push(format!(
-                    "  @key({}): the entry does not declare what the subgraph demands:\n{}",
-                    key.fields,
-                    indent(&mismatch.to_string())
-                ));
-                continue;
-            }
+            let demanded: Vec<&requires_selection::Selection> = demanded.iter().collect();
             // The subgraph is sent the demand, so what must already be fetched is the demand's
             // preimage under the fetch's input rewrites: each one inverted, where its filter
-            // covers the position.
-            //
-            // Asked only at the entry's own type. The router builds this entry's representation
-            // only for entities of that type, and the demand's `@requires` half sits at the
-            // subgraph's entity type, which for an interface object reaches every implementation;
-            // another implementation's inputs are its own entry's business. Restricting first is
-            // also what lets a renamer be inverted at all: `type_filter_covers` asks whether a
-            // filter admits every type a position can hold, which a position nothing is known
-            // about never satisfies.
-            //
-            // Mounted where the fetch runs and guarded by the condition it runs under, so the
-            // comparison happens at the query root.
-            let mut computed = key_selections;
-            computed.extend(requires_selections.iter().cloned());
-            let computed = invert_key_renamers(
+            // covers the position, at the entry's own type, which is also what lets a renamer be
+            // inverted at all, `type_filter_covers` asking whether a filter admits every type a
+            // position can hold.
+            let mut demand = key_selections;
+            demand.extend(requires_selections.iter().cloned());
+            let required = invert_key_renamers(
                 self.supergraph_schema,
                 type_filter_covers,
                 input_rewrites,
                 wrap_non_empty(
                     |selections| inline_fragment(require_type.clone(), selections),
-                    computed,
+                    demand,
                 ),
             );
-            let required = under_condition(
-                reached.condition,
-                &self.root_type,
-                selections_at(
-                    self.supergraph_schema,
-                    available,
-                    None,
-                    reached.path,
-                    &computed,
-                ),
-            );
-            let required_doc = self.operation_with(required);
-            // Mounted into what was fetched before the fetch, compared with what it can read: a
+            let required: Vec<&Selection> = required.iter().collect();
+            let Some(served) = &served else {
+                return Ok(None);
+            };
+            let served = vec![served.clone()];
+            // Matched on the copies the plan supplies, and read from what the fetch can read: a
             // deferred block that cannot read a requirement there is rejected rather than having
             // the requirement vanish from it.
-            if let Err(e) = self.comparator.includes_with_constraint(
-                &self.constraint,
-                readable_doc,
-                &required_doc,
+            if let Err(mismatch) = condition_matches_supplied(
+                self.supergraph_schema,
+                &self.schema_view,
+                hypothesis,
+                copy,
+                &served,
+                &[require_item],
+                &demanded,
+                &Demand::of(algebra, served.clone(), required.clone()),
             ) {
                 unmatched.push(format!(
-                    "  @key({}): the plan has not fetched what the subgraph demands:\n{}",
+                    "  @key({}): the entry does not declare what the subgraph demands at \
+                     {}:\n{}",
                     key.fields,
-                    indent(&e.to_string())
+                    response.describe(copy),
+                    indent(&mismatch.to_string())
+                ));
+                continue;
+            }
+            let coverage = Coverage {
+                schema: &self.schema_view,
+                fragments: &no_fragments,
+                hypothesis,
+                supplied: &site.supplies,
+            };
+            if let Err(uncovered) = coverage.covers(copy, Demand::of(algebra, served, required)) {
+                unmatched.push(format!(
+                    "  @key({}): the plan has not fetched what the subgraph demands at \
+                     {}:\n{}",
+                    key.fields,
+                    response.describe(copy),
+                    indent(&uncovered.to_string())
                 ));
                 continue;
             }
@@ -1214,81 +1328,8 @@ fn entity_cases<'a>(
 }
 
 //==================================================================================================
-// The operations the walk builds
+// The client operation
 //==================================================================================================
-
-impl Checker<'_> {
-    /// The client operation with a different selection set, carrying its own variable
-    /// declarations so the two remain comparable.
-    ///
-    /// Assumed valid rather than validated; see the module docs.
-    fn operation_with(&self, selections: Vec<Selection>) -> Valid<ExecutableDocument> {
-        // Declare only what this selection set uses: the client may declare more, and GraphQL
-        // rejects an unused declaration. Only shared declarations are compared, so this is safe.
-        let used = variable_usages(&selections);
-        let mut built = executable::Operation {
-            description: None,
-            operation_type: self.operation.operation_type,
-            name: self.operation.name.clone(),
-            variables: self.variable_declarations(Some(&used)),
-            directives: Default::default(),
-            selection_set: executable::SelectionSet::new(self.root_type.clone()),
-        };
-        built.selection_set.selections = selections;
-        let mut document = ExecutableDocument::new();
-        document.operations.insert(Node::new(built));
-        Valid::assume_valid(document)
-    }
-
-    /// The client operation with unfetched introspection removed; see
-    /// [`without_unfetched_introspection`].
-    fn without_introspection(
-        &self,
-        source: &Valid<ExecutableDocument>,
-    ) -> Valid<ExecutableDocument> {
-        let operation = self.operation;
-        let mut built = operation.clone();
-        built.variables = self.variable_declarations(None);
-        built.selection_set.selections = without_unfetched_introspection(
-            &operation.selection_set.selections,
-            &source.fragments,
-            true,
-        );
-        // The operation's fragment definitions come with it: spreads are resolved where they are
-        // reached, so the definitions have to still be there to reach.
-        let mut document = ExecutableDocument::new();
-        document.fragments = source.fragments.clone();
-        document.operations.insert(Node::new(built));
-        Valid::assume_valid(document)
-    }
-
-    /// The client operation's variable declarations as every operation the checker builds them,
-    /// optionally narrowed to the ones a selection set uses.
-    ///
-    /// Condition variables are retyped `Boolean!`; see the module docs.
-    fn variable_declarations(
-        &self,
-        used: Option<&IndexSet<Name>>,
-    ) -> Vec<Node<ast::VariableDefinition>> {
-        self.operation
-            .variables
-            .iter()
-            .filter(|variable| used.is_none_or(|used| used.contains(&variable.name)))
-            .map(|variable| {
-                if !self.condition_variables.contains(&variable.name) {
-                    return variable.clone();
-                }
-                Node::new(ast::VariableDefinition {
-                    description: variable.description.clone(),
-                    name: variable.name.clone(),
-                    ty: Node::new(ast::Type::NonNullNamed(name!("Boolean"))),
-                    default_value: None,
-                    directives: variable.directives.clone(),
-                })
-            })
-            .collect()
-    }
-}
 
 /// The client operation, with the introspection a query plan is not expected to fetch removed:
 /// `__schema` and `__type` anywhere, and `__typename` at the operation's root only.
@@ -1417,62 +1458,6 @@ fn indent(text: &str) -> String {
         .join("\n")
 }
 
-/// Every variable a selection set references, including inside list and input-object values.
-fn variable_usages(selections: &[Selection]) -> IndexSet<Name> {
-    let mut used = IndexSet::default();
-    collect_variable_usages(selections, &mut used);
-    used
-}
-
-fn collect_variable_usages(selections: &[Selection], used: &mut IndexSet<Name>) {
-    for selection in selections {
-        let (arguments, directives, children) = match selection {
-            Selection::Field(field) => (
-                Some(&field.arguments),
-                &field.directives,
-                &field.selection_set.selections,
-            ),
-            Selection::InlineFragment(fragment) => (
-                None,
-                &fragment.directives,
-                &fragment.selection_set.selections,
-            ),
-            // Spreads are inlined before a fetch's selections join the buffer.
-            Selection::FragmentSpread(_) => continue,
-        };
-        if let Some(arguments) = arguments {
-            for argument in arguments {
-                collect_value_variables(&argument.value, used);
-            }
-        }
-        for directive in directives.iter() {
-            for argument in &directive.arguments {
-                collect_value_variables(&argument.value, used);
-            }
-        }
-        collect_variable_usages(children, used);
-    }
-}
-
-fn collect_value_variables(value: &ast::Value, used: &mut IndexSet<Name>) {
-    match value {
-        ast::Value::Variable(name) => {
-            used.insert(name.clone());
-        }
-        ast::Value::List(values) => {
-            for value in values {
-                collect_value_variables(value, used);
-            }
-        }
-        ast::Value::Object(fields) => {
-            for (_, value) in fields {
-                collect_value_variables(value, used);
-            }
-        }
-        _ => {}
-    }
-}
-
 //==================================================================================================
 // Checker entry point
 //==================================================================================================
@@ -1503,46 +1488,98 @@ pub fn check_plan_with_options(
     plan: &QueryPlan,
     options: CheckerOptions,
 ) -> Result<(), ComparisonError> {
-    let operation = operation_doc.operations.get(None).map_err(|_| {
-        ComparisonError::new("expected exactly one operation in the input document".to_string())
-    })?;
-    let root_type = supergraph_schema
+    check_plan_counted(
+        supergraph_schema,
+        subgraphs_by_name,
+        operation_doc,
+        plan,
+        options,
+    )
+    .0
+}
+
+/// [`check_plan_with_options`], with the work it took: the counters the growth laws read.
+fn check_plan_counted(
+    supergraph_schema: &ValidFederationSchema,
+    subgraphs_by_name: &IndexMap<Arc<str>, ValidFederationSchema>,
+    operation_doc: &Valid<ExecutableDocument>,
+    plan: &QueryPlan,
+    options: CheckerOptions,
+) -> (Result<(), ComparisonError>, Work) {
+    let operation = match operation_doc.operations.get(None) {
+        Ok(operation) => operation,
+        Err(_) => {
+            return (
+                Err(ComparisonError::new(
+                    "expected exactly one operation in the input document".to_string(),
+                )),
+                Work::default(),
+            );
+        }
+    };
+    let Some(root_type) = supergraph_schema
         .schema()
         .root_operation(operation.operation_type)
         .cloned()
-        .ok_or_else(|| {
-            ComparisonError::new(format!(
+    else {
+        return (
+            Err(ComparisonError::new(format!(
                 "schema has no {} root type",
                 operation.operation_type
-            ))
-        })?;
-
-    let checker = Checker::new(
-        supergraph_schema,
-        subgraphs_by_name,
-        operation,
-        plan,
-        root_type.clone(),
-        options,
-    )?;
-    let Some(node) = &plan.node else {
-        // A plan with no node fetches nothing, which is correct only for an operation that asks
-        // for nothing fetchable.
-        return Ok(());
+            ))),
+            Work::default(),
+        );
     };
-    let walked = checker.walk_top_level(node)?;
+    let checker = match Checker::new(supergraph_schema, subgraphs_by_name, options) {
+        Ok(checker) => checker,
+        Err(e) => return (Err(e), Work::default()),
+    };
+    let verdict = checker.check(
+        operation_doc,
+        &operation.selection_set.selections,
+        root_type,
+        plan,
+    );
+    (verdict, checker.algebra.work)
+}
 
-    // Completeness: everything the plan fetches, read as one operation, must include the client
-    // operation. `SubgraphConstraint` restricts this comparison of the composed response, which the
-    // model makes unrestricted: the remaining difference § Differences from the model names.
-    let plan_doc = checker.operation_with(walked.fetched);
-    let operation_doc = checker.without_introspection(operation_doc);
-    checker
-        .comparator
-        .includes_with_constraint(&checker.constraint, &plan_doc, &operation_doc)
-        .map_err(|e| {
+impl Checker<'_> {
+    /// Walks the plan, checking each fetch where it is reached, then the client operation against
+    /// everything fetched.
+    fn check(
+        &self,
+        operation_doc: &Valid<ExecutableDocument>,
+        selections: &[Selection],
+        root_type: Name,
+        plan: &QueryPlan,
+    ) -> Result<(), ComparisonError> {
+        let mut response = Response::new(root_type);
+        let fetched = match &plan.node {
+            Some(node) => self.walk_top_level(&mut response, node)?,
+            // A plan with no node fetches nothing, which is correct only for an operation that
+            // asks for nothing fetchable.
+            None => Vec::new(),
+        };
+
+        // Completeness: the response the plan fetches covers the client operation, at every
+        // admissible configuration of the copies it fetched.
+        let client = without_unfetched_introspection(selections, &operation_doc.fragments, true);
+        let view = response.view(&fetched);
+        let hypothesis = Hypothesis::new(&self.algebra, view);
+        Coverage {
+            schema: &self.schema_view,
+            fragments: &operation_doc.fragments,
+            hypothesis: &hypothesis,
+            supplied: &Supplies::new(view),
+        }
+        .covers(
+            CopyId::ROOT,
+            Demand::of(&self.algebra, everything(), client.iter().collect()),
+        )
+        .map_err(|uncovered| {
             ComparisonError::new(format!(
-                "query plan does not fetch everything the operation requests:\n{e}"
+                "query plan does not fetch everything the operation requests:\n{uncovered}"
             ))
         })
+    }
 }

@@ -1,0 +1,63 @@
+{
+  "Sequence": {
+    "nodes": [
+      {
+        "Fetch": {
+          "subgraph_name": "catalog",
+          "id": null,
+          "variable_usages": [],
+          "operation_document": "query BookEnrichment__catalog__0 { items { __typename id name ... on Book { __typename id } } }",
+          "operation_name": "BookEnrichment__catalog__0",
+          "operation_kind": "query",
+          "input_rewrites": [],
+          "output_rewrites": [],
+          "context_rewrites": []
+        }
+      },
+      {
+        "Flatten": {
+          "path": [
+            {
+              "Key": [
+                "items",
+                null
+              ]
+            },
+            {
+              "AnyIndex": null
+            }
+          ],
+          "node": {
+            "Fetch": {
+              "subgraph_name": "pricing",
+              "id": null,
+              "variable_usages": [],
+              "requires": [
+                {
+                  "kind": "InlineFragment",
+                  "typeCondition": "Book",
+                  "selections": [
+                    {
+                      "kind": "Field",
+                      "name": "__typename"
+                    },
+                    {
+                      "kind": "Field",
+                      "name": "id"
+                    }
+                  ]
+                }
+              ],
+              "operation_document": "query BookEnrichment__pricing__1($representations: [_Any!]!) { _entities(representations: $representations) { ... on Book { price } } }",
+              "operation_name": "BookEnrichment__pricing__1",
+              "operation_kind": "query",
+              "input_rewrites": [],
+              "output_rewrites": [],
+              "context_rewrites": []
+            }
+          }
+        }
+      }
+    ]
+  }
+}

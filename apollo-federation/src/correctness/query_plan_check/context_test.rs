@@ -6,21 +6,34 @@
 //! and `B`, which both declare `prop` and `u`, and `Query.concrete` is a `T`, which has the same
 //! fields and no implementations to choose between.
 //!
-//! Plans as a whole are not covered here, only the fetch-level machinery.
+//! Plans as a whole are not covered here, only the fetch-level machinery: what a fetch reads is
+//! what one root fetch before it produced, from a subgraph whose schema is this one.
 
+use apollo_compiler::collections::IndexMap;
 use apollo_compiler::executable;
-use apollo_compiler::executable::Selection;
 use apollo_compiler::name;
-use apollo_compiler::schema::Schema;
 
+use super::super::super::query_compare::conditions::BooleanLiteral;
+use super::super::Site;
+use super::super::coverage::Supplies;
+use super::super::hypothesis::Hypothesis;
+use super::super::region::Algebra;
+use super::super::region::boolean;
+use super::super::response::Mount;
+use super::super::response::Production;
+use super::super::response::Response;
+use super::super::sharing::Sharing;
 use super::super::test_support::recursive_chain;
 use super::super::test_support::recursive_subgraph;
 use super::super::test_support::selections;
 use super::*;
 use crate::query_plan::FetchDataKeyRenamer;
+use crate::query_plan::requires_selection;
 use crate::query_plan::serializable_document::SerializableDocument;
 
 const SCHEMA_STR: &str = r#"
+    extend schema @link(url: "https://specs.apollo.dev/federation/v2.8", import: ["@key"])
+
     type Query {
         t: I!
         media: I
@@ -52,9 +65,14 @@ const SCHEMA_STR: &str = r#"
     }
 "#;
 
-fn schema() -> ValidFederationSchema {
-    let schema = Schema::parse_and_validate(SCHEMA_STR, "schema.graphql").unwrap();
-    ValidFederationSchema::new(schema).unwrap()
+/// The schema, as the subgraph the earlier fetch is sent to; it is the supergraph too.
+fn subgraph() -> crate::subgraph::typestate::Subgraph<crate::subgraph::typestate::Validated> {
+    crate::subgraph::typestate::Subgraph::parse("before", "http://before", SCHEMA_STR)
+        .expect("valid subgraph")
+        .expand_links()
+        .expect("links expand")
+        .validate()
+        .expect("valid subgraph schema")
 }
 
 fn key(name: Name) -> FetchDataPathElement {
@@ -78,43 +96,8 @@ fn rewrite_on(type_name: Name) -> Arc<FetchDataRewrite> {
 }
 
 //==================================================================================================
-// Dropping the synthetic arguments
+// The variables a fetch's rewrites bind
 //==================================================================================================
-
-/// The fetch resolving `u` passes the contextual value as an argument the client never wrote, and
-/// a rewrite binding that variable.
-fn context_selections(schema: &ValidFederationSchema) -> Vec<Selection> {
-    selections(
-        schema,
-        r#"query($contextual: String) { t { ... on A { u(ctx: $contextual) { id } } } }"#,
-    )
-}
-
-#[test]
-fn context_argument_is_dropped() {
-    let schema = schema();
-    let stripped = remove_context_arguments(&[name!("contextual")], context_selections(&schema));
-    assert_eq!(
-        stripped
-            .iter()
-            .map(|s| s.serialize().no_indent().to_string())
-            .collect::<Vec<_>>(),
-        vec!["t { ... on A { u { id } } }"]
-    );
-}
-
-/// An argument the client did write stays, the variable not being one a rewrite binds.
-#[test]
-fn other_arguments_stay() {
-    let schema = schema();
-    let kept = remove_context_arguments(&[], context_selections(&schema));
-    assert_eq!(
-        kept.iter()
-            .map(|s| s.serialize().no_indent().to_string())
-            .collect::<Vec<_>>(),
-        vec!["t { ... on A { u(ctx: $contextual) { id } } }"]
-    );
-}
 
 #[test]
 fn context_variables_are_the_renamers_targets() {
@@ -180,20 +163,57 @@ fn no_climb_stays_under_the_fetch() {
 // Reading the value where the fetch runs
 //==================================================================================================
 
-/// What a fetch at `path` needs of `available`, as the checker asks it.
+/// What a fetch at `path` needs of `available`, as the checker asks it outside a deferred block,
+/// where a fetch can read everything placed before it. `available` is what a root fetch before it
+/// selected. Every path here ends at a `U`, so the fetch is sent the `U` entities there: its
+/// position is narrowed to the types its `requires` entries are written at.
 fn context_met(
     path: &[FetchDataPathElement],
     condition: &[BooleanLiteral],
     available: &str,
     rewrites: Vec<Arc<FetchDataRewrite>>,
 ) -> bool {
-    let schema = schema();
-    let available = selections(&schema, available);
+    let subgraph = subgraph();
+    let schema = subgraph.validated_schema();
+    let view = SchemaView::new(schema).expect("schema index");
+    let declarations = Subgraph::new(schema).expect("subgraph metadata");
+    let subgraphs: IndexMap<Arc<str>, ValidFederationSchema> =
+        [("before".into(), schema.clone())].into_iter().collect();
+    let algebra = Algebra::new(schema);
+    let sharing = Sharing::new(&subgraphs).expect("subgraph metadata");
+    let mut response = Response::new(name!("Query"));
+    let producer = response.new_producer("before".into());
+    let mut added = response
+        .produce_fetch(
+            &Production {
+                subgraph: &declarations,
+                subgraph_name: "before",
+                sharing: &sharing,
+                supergraph: &view,
+                algebra: &algebra,
+                producer,
+            },
+            Mount {
+                copy: CopyId::ROOT,
+                base: everything(),
+                cases: vec![(name!("Query"), algebra.objects([&name!("Query")]))],
+            },
+            &selections(schema, available),
+            &[],
+        )
+        .expect("produced");
+    added.sort();
     let fetch = FetchNode {
         subgraph_name: "s".into(),
         id: None,
         variable_usages: Vec::new(),
-        requires: Vec::new(),
+        requires: vec![requires_selection::Selection::InlineFragment(
+            requires_selection::InlineFragment {
+                type_condition: Some(name!("U")),
+                conditions: Vec::new(),
+                selections: Vec::new(),
+            },
+        )],
         operation_document: SerializableDocument::from_string(""),
         operation_name: None,
         operation_kind: executable::OperationType::Query,
@@ -202,17 +222,32 @@ fn context_met(
         context_rewrites: rewrites,
         protocol: Default::default(),
     };
-    // Outside a deferred block, what a fetch can read is everything fetched before it.
-    let positions = fetch_positions(&schema, &name!("Query"), &available, path, &fetch);
-    check_context_rewrites(
-        &schema,
-        &name!("Query"),
+    let state = response.view(&added);
+    let Some(position) = response.position(&algebra, path) else {
+        return true;
+    };
+    let Some(region) = algebra
+        .clause(condition.iter().map(boolean))
+        .and_then(|condition| algebra.conjoin(&position.region, &condition))
+        .and_then(|region| {
+            let literal =
+                response.type_literal(&algebra, position.copy, algebra.objects([&name!("U")]))?;
+            algebra.conjoin(&region, &literal)
+        })
+    else {
+        return true;
+    };
+    let hypothesis = Hypothesis::new(&algebra, state);
+    check_context_rewrites(&Site {
+        fetch: &fetch,
         path,
-        condition,
-        &positions,
-        &available,
-        &fetch,
-    )
+        schema: &view,
+        position: &position,
+        region,
+        hypothesis: &hypothesis,
+        readable: state,
+        supplies: Supplies::new(state),
+    })
     .is_ok()
 }
 
@@ -282,8 +317,8 @@ fn absent_value_is_not_met() {
     ));
 }
 
-/// The value is guarded past the levels the two paths share, and nothing about the fetch says what
-/// that object is.
+/// The value is fetched only where `media`'s runtime type is `A`, past the levels the two paths
+/// share, and `media` can be a `B`, which holds none.
 #[test]
 fn narrowing_past_the_shared_levels_is_not_met() {
     let rewrite = renamer(vec![

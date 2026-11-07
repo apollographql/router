@@ -36,25 +36,6 @@ pub(crate) enum BooleanLiteral {
 }
 
 impl BooleanLiteral {
-    /// The directive this literal was written as: `@include(if: $v)` for a positive literal,
-    /// `@skip(if: $v)` for a negative one.
-    pub(crate) fn to_directive(&self) -> ast::Directive {
-        let (name, variable) = match self {
-            BooleanLiteral::Positive(variable) => ("include", variable),
-            BooleanLiteral::Negative(variable) => ("skip", variable),
-        };
-        ast::Directive {
-            name: Name::new_unchecked(name),
-            arguments: vec![
-                ast::Argument {
-                    name: Name::new_unchecked("if"),
-                    value: ast::Value::Variable(variable.clone()).into(),
-                }
-                .into(),
-            ],
-        }
-    }
-
     pub(crate) fn variable(&self) -> &Name {
         match self {
             BooleanLiteral::Positive(name) | BooleanLiteral::Negative(name) => name,
@@ -125,15 +106,6 @@ fn insert_literal(
         result.extend(inserted);
         Some(result)
     }
-}
-
-/// A conjunction in canonical form: sorted and duplicate-free. `None` when a literal meets its
-/// complement, which is a condition no assignment satisfies.
-pub(crate) fn canonical_boolean_condition(literals: &[BooleanLiteral]) -> Option<BooleanCondition> {
-    let Some((literal, rest)) = literals.split_first() else {
-        return Some(Vec::new());
-    };
-    insert_literal(literal, &canonical_boolean_condition(rest)?)
 }
 
 /// The assignments satisfying `condition` that do *not* satisfy `cover`, as disjoint clauses.

@@ -1,0 +1,121 @@
+# An edge's vertices, whose `x` and `y` two subgraphs resolve: `root` serves `edge`, `extra`
+# resolves an `Edge` by `id`, and `consumer` resolves `fromTo` and `onV` from both coordinates of
+# the vertices they name.
+#
+# Composed with `apollo_federation::composition::compose` from the three subgraphs below. Recompose
+# it when they change.
+#
+# Subgraph `consumer`:
+#
+#   extend schema @link(url: "https://specs.apollo.dev/federation/v2.7", import: ["@key", "@shareable", "@external", "@requires", "@provides", "@override", "@interfaceObject"])
+#
+#   type Edge @key(fields: "id") {
+#     id: ID!
+#     from: Vertex @external
+#     to: Vertex @external
+#     v: Vertex @external
+#     fromTo: String @requires(fields: "from { x y } to { x y }")
+#     onV: String @requires(fields: "v { x y }")
+#   }
+#
+#   type Vertex @shareable {
+#     x: String @external
+#     y: String @external
+#   }
+#
+# Subgraph `extra`:
+#
+#   extend schema @link(url: "https://specs.apollo.dev/federation/v2.7", import: ["@key", "@shareable", "@external", "@requires", "@provides", "@override", "@interfaceObject"])
+#
+#   type Edge @key(fields: "id") {
+#     id: ID!
+#     from: Vertex @shareable
+#     to: Vertex @shareable
+#     v: Vertex @shareable
+#   }
+#
+#   type Vertex @shareable {
+#     x: String
+#     y: String
+#   }
+#
+# Subgraph `root`:
+#
+#   extend schema @link(url: "https://specs.apollo.dev/federation/v2.7", import: ["@key", "@shareable", "@external", "@requires", "@provides", "@override", "@interfaceObject"])
+#
+#   type Query {
+#     edge: Edge
+#   }
+#
+#   type Edge @key(fields: "id") {
+#     id: ID!
+#     from: Vertex @shareable
+#     to: Vertex @shareable
+#     v: Vertex @shareable
+#   }
+#
+#   type Vertex @shareable {
+#     x: String
+#     y: String
+#   }
+
+schema @link(url: "https://specs.apollo.dev/link/v1.0") @link(url: "https://specs.apollo.dev/join/v0.4", for: EXECUTION) {
+  query: Query
+}
+
+directive @link(url: String, as: String, for: link__Purpose, import: [link__Import]) repeatable on SCHEMA
+
+directive @join__graph(name: String!, url: String!) on ENUM_VALUE
+
+directive @join__type(graph: join__Graph!, key: join__FieldSet, extension: Boolean! = false, resolvable: Boolean! = true, isInterfaceObject: Boolean! = false) repeatable on OBJECT | INTERFACE | UNION | ENUM | INPUT_OBJECT | SCALAR
+
+directive @join__field(graph: join__Graph, requires: join__FieldSet, provides: join__FieldSet, type: String, external: Boolean, override: String, usedOverridden: Boolean, overrideLabel: String) repeatable on FIELD_DEFINITION | INPUT_FIELD_DEFINITION
+
+directive @join__implements(graph: join__Graph!, interface: String!) repeatable on OBJECT | INTERFACE
+
+directive @join__unionMember(graph: join__Graph!, member: String!) repeatable on UNION
+
+directive @join__enumValue(graph: join__Graph!) repeatable on ENUM_VALUE
+
+directive @join__directive(graphs: [join__Graph!], name: String!, args: join__DirectiveArguments) repeatable on SCHEMA | OBJECT | INTERFACE | FIELD_DEFINITION
+
+enum link__Purpose {
+  """
+  `SECURITY` features provide metadata necessary to securely resolve fields.
+  """
+  SECURITY
+  """
+  `EXECUTION` features provide metadata necessary for operation execution.
+  """
+  EXECUTION
+}
+
+scalar link__Import
+
+enum join__Graph {
+  CONSUMER @join__graph(name: "consumer", url: "http://consumer")
+  EXTRA @join__graph(name: "extra", url: "http://extra")
+  ROOT @join__graph(name: "root", url: "http://root")
+}
+
+scalar join__FieldSet
+
+scalar join__DirectiveArguments
+
+type Edge @join__type(graph: CONSUMER, key: "id") @join__type(graph: EXTRA, key: "id") @join__type(graph: ROOT, key: "id") {
+  id: ID!
+  from: Vertex @join__field(graph: CONSUMER, external: true) @join__field(graph: EXTRA) @join__field(graph: ROOT)
+  to: Vertex @join__field(graph: CONSUMER, external: true) @join__field(graph: EXTRA) @join__field(graph: ROOT)
+  v: Vertex @join__field(graph: CONSUMER, external: true) @join__field(graph: EXTRA) @join__field(graph: ROOT)
+  fromTo: String @join__field(graph: CONSUMER, requires: "from { x y } to { x y }")
+  onV: String @join__field(graph: CONSUMER, requires: "v { x y }")
+}
+
+type Vertex @join__type(graph: CONSUMER) @join__type(graph: EXTRA) @join__type(graph: ROOT) {
+  x: String @join__field(graph: CONSUMER, external: true) @join__field(graph: EXTRA) @join__field(graph: ROOT)
+  y: String @join__field(graph: CONSUMER, external: true) @join__field(graph: EXTRA) @join__field(graph: ROOT)
+}
+
+type Query @join__type(graph: CONSUMER) @join__type(graph: EXTRA) @join__type(graph: ROOT) {
+  edge: Edge @join__field(graph: ROOT)
+}

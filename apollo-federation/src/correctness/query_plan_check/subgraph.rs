@@ -13,6 +13,11 @@
 //! grants is read against a fetch's operation, which is written in the subgraph's terms. So is a
 //! `@fromContext` selection, at the first type declaring its context, where composition has
 //! validated it; it is read by field name and type condition, which is all a reading of it needs.
+//!
+//! What a field's result can be is read here too: its possible runtime types, each a subgraph
+//! object with the supergraph object it stands for through the declaration correspondence, an
+//! `@interfaceObject` standing for every object of the supergraph interface of its name
+//! ([`Subgraph::field_runtime_types`]).
 
 use apollo_compiler::Name;
 use apollo_compiler::Node;
@@ -23,7 +28,10 @@ use apollo_compiler::schema::Directive;
 use apollo_compiler::schema::DirectiveDefinition;
 use apollo_compiler::schema::ExtendedType;
 
+use super::super::query_compare::schema_view::SchemaView;
 use super::ComparisonError;
+use super::region::Work;
+use super::selections::possible_types;
 use crate::error::FederationError;
 use crate::internal_error;
 use crate::link::federation_spec_definition::FederationSpecDefinition;
@@ -97,6 +105,122 @@ impl<'a> Subgraph<'a> {
         }
     }
 
+    /// Is an object one of a type's objects in this subgraph: the type itself, or a member or an
+    /// implementation of it? The model's `typeIncludesObjectBool` in the subgraph's schema, which
+    /// is where a fetch's own fragments are read.
+    pub(super) fn type_includes_object(&self, type_name: &Name, object_type: &Name) -> bool {
+        type_name == object_type || possible_types(self.schema, type_name).contains(object_type)
+    }
+
+    /// The supergraph objects a subgraph object stands for, through the declaration
+    /// correspondence: the model's `Subgraph.objectCases`. An ordinary object stands for the
+    /// supergraph object of its name; an `@interfaceObject` for every object of the supergraph
+    /// interface of its name, without choosing one, each copied. `None`, an unjustified
+    /// correspondence, when there is no such subgraph object, no supergraph object or interface of
+    /// its name, or an interface object whose interface has no object.
+    fn supergraph_objects(
+        &self,
+        work: &Work,
+        supergraph: &SchemaView<'_>,
+        subgraph_type: &Name,
+    ) -> Option<Vec<Name>> {
+        let Some(ExtendedType::Object(_)) = self.schema.schema().types.get(subgraph_type) else {
+            return None;
+        };
+        let declared = supergraph.schema().schema().types.get(subgraph_type);
+        if self.metadata.is_interface_object_type(subgraph_type) {
+            let Some(ExtendedType::Interface(_)) = declared else {
+                return None;
+            };
+            let objects = supergraph.possible_types(subgraph_type).to_vec();
+            work.correspondence_names.add(objects.len() as u64);
+            (!objects.is_empty()).then_some(objects)
+        } else {
+            matches!(declared, Some(ExtendedType::Object(_))).then(|| {
+                work.correspondence_names.add(1);
+                vec![subgraph_type.clone()]
+            })
+        }
+    }
+
+    /// Does the subgraph object `subgraph_type` stand for the supergraph object `object` through the
+    /// declaration correspondence: is `object` one of [`Self::supergraph_objects`]? Decided without
+    /// enumerating them, with the same declarations checked: an ordinary object stands for the
+    /// supergraph object of its name, and an `@interfaceObject` for a supergraph object that
+    /// declares it implements the supergraph interface of the interface object's name, which is
+    /// what makes an object one of that interface's objects. A constant number of map lookups and
+    /// one name read: `object`'s compared with `subgraph_type`, or the interface looked up among
+    /// `object`'s.
+    pub(super) fn stands_for(
+        &self,
+        work: &Work,
+        supergraph: &SchemaView<'_>,
+        subgraph_type: &Name,
+        object: &Name,
+    ) -> bool {
+        let Some(ExtendedType::Object(_)) = self.schema.schema().types.get(subgraph_type) else {
+            return false;
+        };
+        let types = &supergraph.schema().schema().types;
+        work.correspondence_names.add(1);
+        if self.metadata.is_interface_object_type(subgraph_type) {
+            matches!(types.get(subgraph_type), Some(ExtendedType::Interface(_)))
+                && matches!(
+                    types.get(object),
+                    Some(ExtendedType::Object(declared))
+                        if declared.implements_interfaces.contains(subgraph_type)
+                )
+        } else {
+            subgraph_type == object
+                && matches!(types.get(subgraph_type), Some(ExtendedType::Object(_)))
+        }
+    }
+
+    /// The possible runtime types of a value of a subgraph type, each the subgraph object and the
+    /// supergraph object it stands for: none for a leaf, and for a composite type each of its
+    /// objects in the subgraph with each supergraph object it stands for. `None` when one of those
+    /// has an unjustified correspondence. The model's `Subgraph.typeCases`.
+    fn type_runtime_types(
+        &self,
+        work: &Work,
+        supergraph: &SchemaView<'_>,
+        subgraph_type: &Name,
+    ) -> Option<Vec<(Name, Name)>> {
+        match self.schema.schema().types.get(subgraph_type)? {
+            ExtendedType::Scalar(_) | ExtendedType::Enum(_) => Some(Vec::new()),
+            ExtendedType::Object(_) | ExtendedType::Interface(_) | ExtendedType::Union(_) => {
+                let mut runtime_types = Vec::new();
+                for object in possible_types(self.schema, subgraph_type) {
+                    for stands_for in self.supergraph_objects(work, supergraph, &object)? {
+                        runtime_types.push((object.clone(), stands_for));
+                    }
+                }
+                Some(runtime_types)
+            }
+            ExtendedType::InputObject(_) => None,
+        }
+    }
+
+    /// The possible runtime types of a field's result on a subgraph object type, whatever an
+    /// operation selects of it: the model's `Subgraph.fieldCases`. `Some([])` for a scalar leaf,
+    /// and for an abstract result with no possible object result types in the subgraph, which
+    /// still owes the field; `None`, never read as either, for a missing declaration, of the parent
+    /// or the field, or an unjustified correspondence.
+    pub(super) fn field_runtime_types(
+        &self,
+        work: &Work,
+        supergraph: &SchemaView<'_>,
+        subgraph_parent: &Name,
+        field_name: &Name,
+    ) -> Option<Vec<(Name, Name)>> {
+        let Some(ExtendedType::Object(parent)) = self.schema.schema().types.get(subgraph_parent)
+        else {
+            return None;
+        };
+        let field = parent.fields.get(field_name)?;
+        self.type_runtime_types(work, supergraph, field.ty.inner_named_type())
+    }
+
     /// Whether the subgraph can resolve a field of an object type outright, outside any
     /// `@provides` window: the model's `Subgraph.resolves`.
     ///
@@ -109,6 +233,30 @@ impl<'a> Subgraph<'a> {
             field_name: field_name.clone(),
         });
         !self.metadata.is_field_external(&position)
+    }
+
+    /// The subgraph a field's progressive override takes it from: the `from` of an `@override`
+    /// carrying a `label`, by parent type and field name. Extraction keeps both declarations of a
+    /// progressive override, and the query graph resolves the field through each under opposite
+    /// conditions on the label, so neither is a provider interchangeable with the other.
+    pub(super) fn progressively_overrides(
+        &self,
+        type_name: &Name,
+        field_name: &Name,
+    ) -> Result<Option<String>, ComparisonError> {
+        self.field_directive(
+            self.federation.override_directive_definition(self.schema),
+            type_name,
+            field_name,
+            |field, directive| {
+                let Some(application) = field.directives.get(directive) else {
+                    return Ok(None);
+                };
+                let arguments = self.federation.override_directive_arguments(application)?;
+                Ok(arguments.label.map(|_| arguments.from.to_string()))
+            },
+        )
+        .map(Option::flatten)
     }
 
     /// The `@key` applications on a type. A type may carry several.

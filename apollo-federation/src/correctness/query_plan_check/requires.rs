@@ -1,11 +1,15 @@
 //! Comparing a fetch's declared `requires` against what its subgraph actually demands.
 //!
-//! Port of the `conditionMatchesRequirement` half of `Apollo/Definitions/QueryPlanSoundness.lean`.
+//! Port of the `conditionMatchesRequirement` and `ConditionMatchesSupplied` half of
+//! `Apollo/Definitions/QueryPlanSoundness.lean`.
 //!
 //! A field set is read **one level at a time**: [`level_entries`] gives that level's response keys
 //! with the object types each is reached at and what is selected under it, and
-//! [`condition_matches_requirement`] compares two field sets level by level, recursing on the
-//! merged subselections of each key. No root-to-leaf paths are materialized.
+//! [`condition_matches_supplied`] compares two field sets level by level on the copies the plan
+//! supplies, at each runtime type each copy can have, recursing on the merged subselections of
+//! each key into the copy the supplied key holds, and comparing at the supergraph declaration,
+//! [`condition_matches_requirement_at`], where no copy is supplied. No root-to-leaf paths are
+//! materialized.
 //!
 //! The model carries an explicit fuel here, one unit per level, purely to satisfy Lean's
 //! termination checker — its own notes say "an implementation should simply loop". This loops.
@@ -40,9 +44,18 @@ use apollo_compiler::Name;
 use apollo_compiler::Node;
 use apollo_compiler::ast;
 use apollo_compiler::executable;
+use apollo_compiler::executable::Field;
+use apollo_compiler::executable::FragmentMap;
 use apollo_compiler::executable::Selection;
 
+use super::super::query_compare::conditions::of_type_region_under;
+use super::super::query_compare::schema_view::SchemaView;
 use super::ComparisonError;
+use super::coverage;
+use super::hypothesis::Hypothesis;
+use super::region::Region;
+use super::region::boolean;
+use super::response::CopyId;
 use super::selections::admitted_types;
 use super::selections::intersect_types;
 use super::selections::possible_types;
@@ -255,6 +268,9 @@ enum RequirementReason {
         entry: GroundTypes,
         demand: GroundTypes,
     },
+
+    /// The demand could not be read at a supplied object.
+    Unreadable { reason: String },
 }
 
 /// The object types a side reaches a key at, as the reasons above print them.
@@ -309,6 +325,7 @@ impl fmt::Display for RequirementMismatch {
                 render_types(entry),
                 render_types(demand)
             ),
+            RequirementReason::Unreadable { reason } => write!(f, "{reason}"),
         }
     }
 }
@@ -328,20 +345,15 @@ impl RequirementMismatch {
     }
 }
 
-/// Does what a subgraph demands match what the fetch declares it requires?
+/// Does what a subgraph demands match what the fetch declares it requires, read at the object
+/// types `reached_at`, `None` where nothing is known about the position? The model's
+/// `conditionMatchesRequirementAt`, which [`condition_matches_supplied`] falls back to where the
+/// plan supplies no object to compare at.
 ///
 /// At each level both must reach the same response keys, agree on which are leaves, and the
-/// requirement's types must be covered by the condition's; then recurse on merged subselections.
-pub(super) fn condition_matches_requirement(
-    schema: &ValidFederationSchema,
-    requirement: &[&requires_selection::Selection],
-    condition: &[&requires_selection::Selection],
-) -> Result<(), RequirementMismatch> {
-    condition_matches_requirement_at(schema, &None, requirement, condition)
-}
-
-/// `condition_matches_requirement`, at a known position. `reached_at` is the object types the
-/// enclosing field can return, which is what a type condition written here is read against.
+/// requirement's types must be covered by the condition's; then recurse on merged subselections,
+/// at the object types the key's field returns. `reached_at` is what a type condition written at
+/// this level is read against.
 fn condition_matches_requirement_at(
     schema: &ValidFederationSchema,
     reached_at: &GroundTypes,
@@ -409,6 +421,227 @@ fn condition_matches_requirement_at(
     Ok(())
 }
 
+/// One level of a field set at one runtime type: the entries reached at it, an entry under a
+/// fragment the type is not in contributing none. The model's `suppliedLevelEntries`.
+fn supplied_level_entries<'a>(
+    schema: &ValidFederationSchema,
+    object_type: &Name,
+    field_set: &[&'a requires_selection::Selection],
+) -> Vec<LevelEntry<'a>> {
+    let mut entries = Vec::new();
+    level_entries(
+        schema,
+        &Some(vec![object_type.clone()]),
+        field_set,
+        &mut entries,
+    );
+    entries.retain(|entry| {
+        entry
+            .reached_at
+            .as_ref()
+            .is_some_and(|types| types.contains(object_type))
+    });
+    entries
+}
+
+/// Does what a subgraph demands match what the fetch declares, on the copies the plan supplies?
+/// The model's `ConditionMatchesSupplied`, on the copy the fetch runs on, in `region`, the
+/// configurations the fetch runs there in.
+///
+/// Both field sets are read at each runtime type the copy can have there, a fragment the type is
+/// not in contributing nothing, and must reach the same keys and agree on which are leaves. Below
+/// a key, the copies compared on are the ones the plan supplies under it: the contributions in
+/// `available` on the copy that hold the demanded field under a key the demand, `required`, reads
+/// it from, rewrites inverted, the copy each such key holds compared with what the demand selects
+/// below it. Where no such contribution is active, or one is with a missing declaration or an
+/// unjustified correspondence, the supergraph declaration is compared instead,
+/// [`condition_matches_requirement_at`] at the field's supergraph result types, so an entry cannot
+/// make a missing input prove itself unreachable, and availability still owes the input. An
+/// entry's omissions and aliases do not narrow the supplied possible runtime types: they are the
+/// contributions'.
+#[allow(clippy::too_many_arguments)]
+pub(super) fn condition_matches_supplied(
+    schema: &ValidFederationSchema,
+    schema_view: &SchemaView<'_>,
+    hypothesis: &Hypothesis<'_>,
+    copy: CopyId,
+    region: &Region,
+    requirement: &[&requires_selection::Selection],
+    condition: &[&requires_selection::Selection],
+    required: &coverage::Demand<'_>,
+) -> Result<(), RequirementMismatch> {
+    let algebra = hypothesis.algebra;
+    let available = &hypothesis.view;
+    let response = available.response;
+    let completion = hypothesis.completion();
+    let feasible = |region: &Region| {
+        region
+            .iter()
+            .any(|clause| hypothesis.feasible(copy, clause))
+    };
+    algebra.work.copies_visited.add(1);
+    let no_fragments = FragmentMap::default();
+    // The runtime types the region allows the copy, each read on its own.
+    for bit in algebra.bits(hypothesis.allowed(copy, region)) {
+        let at_type = algebra.of_bits([bit]);
+        let Some(literal) = response.type_literal(algebra, copy, at_type) else {
+            continue;
+        };
+        let at_region = algebra.simplify(
+            algebra.product(region, std::slice::from_ref(&literal)),
+            &completion,
+        );
+        if !feasible(&at_region) {
+            continue;
+        }
+        let object_type = algebra.names(at_type).remove(0);
+        let requirement_level = supplied_level_entries(schema, &object_type, requirement);
+        let condition_level = supplied_level_entries(schema, &object_type, condition);
+        // The demanded fields at this runtime type, each in the region it is demanded in.
+        let mut demanded: Vec<(&Field, Region)> = Vec::new();
+        for (demand_region, selections) in required.entries() {
+            let fields = of_type_region_under(
+                schema_view,
+                &no_fragments,
+                std::slice::from_ref(&object_type),
+                &[(Vec::new(), selections.clone())],
+            )
+            .map_err(|e| {
+                RequirementMismatch::at(RequirementReason::Unreadable {
+                    reason: e.to_string(),
+                })
+            })?;
+            for asked in fields {
+                let Some(literals) =
+                    algebra.clause(asked.condition.boolean_condition.iter().map(boolean))
+                else {
+                    continue;
+                };
+                let asked_region = algebra.simplify(
+                    algebra.product(
+                        &algebra.product(demand_region, &at_region),
+                        std::slice::from_ref(&literals),
+                    ),
+                    &completion,
+                );
+                if !asked_region.is_empty() {
+                    demanded.push((asked.field, asked_region));
+                }
+            }
+        }
+
+        let mut keys = level_keys(&requirement_level);
+        for key in level_keys(&condition_level) {
+            if !keys.contains(&key) {
+                keys.push(key);
+            }
+        }
+        for key in &keys {
+            let in_requirement = requirement_level.iter().any(|entry| entry.key == *key);
+            let in_condition = condition_level.iter().any(|entry| entry.key == *key);
+            match (in_requirement, in_condition) {
+                (false, true) => {
+                    return Err(RequirementMismatch::at(RequirementReason::NotDeclared {
+                        key: key.clone(),
+                    }));
+                }
+                (true, false) => {
+                    return Err(RequirementMismatch::at(RequirementReason::NotDemanded {
+                        key: key.clone(),
+                    }));
+                }
+                _ => {}
+            }
+            let leaf_in_entry = reaches_leaf(key, &requirement_level);
+            if leaf_in_entry != reaches_leaf(key, &condition_level) {
+                return Err(RequirementMismatch::at(
+                    RequirementReason::LeafDisagreement {
+                        key: key.clone(),
+                        leaf_in_entry,
+                    },
+                ));
+            }
+            let below_requirement = selected_under(key, &requirement_level);
+            let below_condition = selected_under(key, &condition_level);
+
+            // The demanded fields of that name, and the supplied contributions holding it under
+            // the keys they read it from, paired where they can be active together.
+            let named: Vec<&(&Field, Region)> = demanded
+                .iter()
+                .filter(|(field, _)| field.name == *key)
+                .collect();
+            let mut supplied: Region = Vec::new();
+            let mut unknown: Region = Vec::new();
+            let mut by_key: Vec<(&Name, Region)> = Vec::new();
+            for (asked, asked_region) in &named {
+                for field in available.fields_at(copy, asked.response_name()) {
+                    if field.field != *key {
+                        continue;
+                    }
+                    let joint = algebra.product(asked_region, &field.guard);
+                    if joint.is_empty() {
+                        continue;
+                    }
+                    supplied.extend(joint.iter().cloned());
+                    if field.result.is_none() {
+                        unknown.extend(joint.iter().cloned());
+                    }
+                    match by_key
+                        .iter_mut()
+                        .find(|(known, _)| *known == asked.response_name())
+                    {
+                        Some((_, known)) => known.extend(joint),
+                        None => by_key.push((asked.response_name(), joint)),
+                    }
+                }
+            }
+            let mut owed = algebra.subtract_all(at_region.clone(), &supplied, &completion);
+            owed.extend(algebra.product(&at_region, &unknown));
+            if feasible(&owed) {
+                condition_matches_requirement_at(
+                    schema,
+                    &child_types(schema, key, &Some(vec![object_type.clone()])),
+                    &below_requirement,
+                    &below_condition,
+                )
+                .map_err(|mismatch| mismatch.under(key))?;
+            }
+            let mut below = coverage::Demand::default();
+            for (asked, asked_region) in &named {
+                below.add(
+                    algebra,
+                    asked_region.clone(),
+                    asked.selection_set.selections.iter().collect(),
+                );
+            }
+            for (response_key, joint) in by_key {
+                let Some(child) = response.child(copy, response_key) else {
+                    continue;
+                };
+                let compared = algebra.simplify(
+                    algebra.subtract_all(joint, &unknown, &completion),
+                    &completion,
+                );
+                if compared.is_empty() {
+                    continue;
+                }
+                condition_matches_supplied(
+                    schema,
+                    schema_view,
+                    hypothesis,
+                    child,
+                    &compared,
+                    &below_requirement,
+                    &below_condition,
+                    &below,
+                )
+                .map_err(|mismatch| mismatch.under(key))?;
+            }
+        }
+    }
+    Ok(())
+}
+
 //==================================================================================================
 // The two readings of a `requires` entry
 //==================================================================================================
@@ -438,7 +671,7 @@ pub(super) fn entry_selections(
         match selection {
             requires_selection::Selection::Field(field) => {
                 let definition = field_definition(schema, parent_type, &field.name)?;
-                let mut built = executable::Field::new(field.name.clone(), definition);
+                let mut built = Field::new(field.name.clone(), definition);
                 if reading == Reading::AsRead {
                     built.alias = field.alias.clone();
                 }
@@ -606,9 +839,8 @@ pub(super) fn requires_half(
 /// they do disagree the fetch can only make one of them, and one of the two fields is fed data it
 /// did not ask for.
 /// - Nothing else in this checker can see it. The plan's `requires` entry has had its arguments
-///   dropped by `trim_requires_selection_set`, and the concatenation is handed to `query_compare`
-///   as one document, where the field-merging rule the model assumes makes the first occurrence
-///   stand for the rest.
+///   dropped by `trim_requires_selection_set`, and coverage reads a key the concatenation demands
+///   as two calls as the model does, satisfied by a fetched field making either.
 /// - Two demands under conditions that cannot both hold are not in conflict, so the comparison is
 ///   made only where the positions overlap.
 /// - [`CheckerOptions::check_requires_conflict`] can turn it off: the planner emits these plans
@@ -675,7 +907,7 @@ fn check_no_conflicting_demands(
 /// One demand at one level: the object types it is made at, and the field making it.
 struct Demand<'a> {
     reached_at: GroundTypes,
-    field: &'a executable::Field,
+    field: &'a Field,
 }
 
 /// The fields a selection set demands at one level. An inline fragment narrows the position of
@@ -724,7 +956,7 @@ fn render_path(path: &[Name]) -> String {
 
 /// A field's resolver call, rendered so that two are equal exactly when the call is the same.
 /// Arguments are a set keyed by name, as GraphQL gives their order no meaning.
-fn resolver_call(field: &executable::Field) -> String {
+fn resolver_call(field: &Field) -> String {
     let mut arguments: Vec<String> = field
         .arguments
         .iter()
@@ -847,8 +1079,9 @@ mod tests {
         let schema = schema();
         let entry = field_set(&schema, entry);
         let demand = field_set(&schema, demand);
-        condition_matches_requirement(
+        condition_matches_requirement_at(
             &schema,
+            &None,
             &entry.iter().collect::<Vec<_>>(),
             &demand.iter().collect::<Vec<_>>(),
         )
@@ -1029,8 +1262,9 @@ mod tests {
         }
         let entry = [field(name!("x"), vec![])];
         let demand = [field(name!("x"), vec![field(name!("y"), vec![])])];
-        let mismatch = condition_matches_requirement(
+        let mismatch = condition_matches_requirement_at(
             &schema(),
+            &None,
             &entry.iter().collect::<Vec<_>>(),
             &demand.iter().collect::<Vec<_>>(),
         )
