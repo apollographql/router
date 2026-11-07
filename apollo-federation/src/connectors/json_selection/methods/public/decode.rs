@@ -1,3 +1,5 @@
+use std::borrow::Cow;
+
 use base64::Engine as _;
 use base64::engine::general_purpose::STANDARD_PAD_INDIFFERENT;
 use base64::engine::general_purpose::URL_SAFE_PAD_INDIFFERENT;
@@ -30,7 +32,8 @@ impl_arrow_method!(DecodeMethod, decode_method, decode_shape);
 /// $('{"a":[1,2]}')->decode('json')                results in { "a": [1, 2] }
 ///
 /// The base64 codecs are lenient about the variant: "base64" and "base64url"
-/// each accept the standard or URL-safe alphabet, with or without padding.
+/// each accept the standard or URL-safe alphabet, with or without padding, and
+/// ignore ASCII whitespace such as the line breaks in wrapped base64.
 /// JSON has no byte type, so they return the decoded bytes as a UTF-8 string,
 /// and bytes that are not valid UTF-8 are an error rather than a garbled
 /// string. "json" behaves exactly like `->jsonParse`.
@@ -80,14 +83,25 @@ fn decode_base64(
             json_type_name(data)
         ));
     };
-    let input = input.as_str();
+    // Base64 is often line-wrapped (the GitHub contents API adds a newline every
+    // 60 characters), so ASCII whitespace is ignored.
+    let input: Cow<str> = if input.as_str().contains(|c: char| c.is_ascii_whitespace()) {
+        input
+            .as_str()
+            .chars()
+            .filter(|c| !c.is_ascii_whitespace())
+            .collect::<String>()
+            .into()
+    } else {
+        input.as_str().into()
+    };
 
     // The two alphabets differ only in the characters for 62 and 63, so the
     // presence of either URL-safe character picks the alphabet.
     let decoded = if input.contains(['-', '_']) {
-        URL_SAFE_PAD_INDIFFERENT.decode(input)
+        URL_SAFE_PAD_INDIFFERENT.decode(input.as_bytes())
     } else {
-        STANDARD_PAD_INDIFFERENT.decode(input)
+        STANDARD_PAD_INDIFFERENT.decode(input.as_bytes())
     };
 
     let bytes = match decoded {
@@ -226,6 +240,42 @@ mod tests {
         );
     }
 
+    // --- ASCII whitespace is ignored ---
+
+    #[rstest::rstest]
+    #[case("Zm9v Yg==", "foob")]
+    #[case(" Zm9vYg== ", "foob")]
+    #[case("Zm9v\tYg==", "foob")]
+    #[case("Zm9v\r\nYmFy", "foobar")]
+    fn decode_ignores_ascii_whitespace(
+        #[case] input: &str,
+        #[case] expected: &str,
+        #[values("base64", "base64url")] codec: &str,
+    ) {
+        assert_eq!(
+            selection!(&format!("$->decode('{codec}')")).apply_to(&json!(input)),
+            (Some(json!(expected)), vec![]),
+        );
+    }
+
+    #[test]
+    fn decode_wrapped_input_like_github_contents_api() {
+        // The GitHub contents API wraps base64 every 60 characters and ends it
+        // with a newline.
+        let original = "The quick brown fox jumps over the lazy dog. ".repeat(6);
+        let encoded = base64::engine::general_purpose::STANDARD.encode(&original);
+        let wrapped: String = encoded
+            .as_bytes()
+            .chunks(60)
+            .map(|line| format!("{}\n", std::str::from_utf8(line).unwrap()))
+            .collect();
+        assert!(wrapped.matches('\n').count() > 1);
+        assert_eq!(
+            selection!("$->decode('base64')").apply_to(&json!(wrapped)),
+            (Some(json!(original)), vec![]),
+        );
+    }
+
     // --- Round trips ---
 
     #[rstest::rstest]
@@ -252,7 +302,8 @@ mod tests {
     #[case("not base64!")]
     #[case("Z")]
     #[case("Zm9v=")]
-    #[case("Zm9v Yg==")]
+    #[case("Zm9v*Yg==")]
+    #[case("Zm9v\u{a0}Yg==")] // only ASCII whitespace is ignored
     #[case("PDw/Pz8-Pg")]
     fn decode_should_error_on_invalid_base64(#[case] input: &str) {
         let (result, errors) = selection!("$->decode('base64')").apply_to(&json!(input));
