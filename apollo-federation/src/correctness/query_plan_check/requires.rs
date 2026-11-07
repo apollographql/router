@@ -44,6 +44,7 @@ use apollo_compiler::executable::Selection;
 
 use super::ComparisonError;
 use super::selections::admitted_types;
+use super::selections::intersect_types;
 use super::selections::possible_types;
 use super::selections::under_directives;
 use super::selections::wrap_non_empty;
@@ -100,17 +101,6 @@ fn level_entries<'a>(
                     fragment.selections.iter().collect();
                 level_entries(schema, &narrowed, &nested, out);
             }
-        }
-    }
-}
-
-/// The intersection of two type conditions. `None` is unrestricted, and so is absorbed.
-fn intersect_types(left: GroundTypes, right: GroundTypes) -> GroundTypes {
-    match (left, right) {
-        (None, right) => right,
-        (left, None) => left,
-        (Some(left), Some(right)) => {
-            Some(left.into_iter().filter(|ty| right.contains(ty)).collect())
         }
     }
 }

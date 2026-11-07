@@ -1217,6 +1217,7 @@ mod tests {
 
            type Query {
              i: [I]
+             node: I
            }
 
            interface I {
@@ -1530,6 +1531,56 @@ mod tests {
                     "__typename": "A",
                     "x": 3,
                 }),
+            ],
+        );
+    }
+
+    /// A path element's type condition is compared literally with each object's `__typename`, in
+    /// the `Key` arm and the `Flatten` arm alike: naming the interface `I` selects no object,
+    /// though every object here implements it, and naming the object type `A` selects them. The
+    /// query plan checker in `apollo-federation` reads a flatten path's condition the same way,
+    /// crediting a fetch only below a condition naming an object of its position, and rests on
+    /// this.
+    #[test]
+    fn a_path_type_condition_is_compared_with_the_typename_literally() {
+        let schema = test_schema();
+        let json = json!({
+            "node": { "__typename": "A", "x": 0 },
+            "i": [{ "__typename": "A", "x": 1 }, { "__typename": "A", "x": 2 }],
+        });
+        let conditions = |names: &[&str]| Some(names.iter().map(|name| name.to_string()).collect());
+        let key = |names: &[&str]| {
+            Path(vec![PathElement::Key(
+                "node".to_string(),
+                conditions(names),
+            )])
+        };
+        let flatten = |names: &[&str]| {
+            Path(vec![
+                PathElement::Key("i".to_string(), None),
+                PathElement::Flatten(conditions(names)),
+            ])
+        };
+
+        assert!(
+            select_values(&schema, &key(&["I"]), &json)
+                .unwrap()
+                .is_empty()
+        );
+        assert_eq!(
+            select_values(&schema, &key(&["A"]), &json).unwrap(),
+            vec![&json!({ "__typename": "A", "x": 0 })],
+        );
+        assert!(
+            select_values(&schema, &flatten(&["I"]), &json)
+                .unwrap()
+                .is_empty()
+        );
+        assert_eq!(
+            select_values(&schema, &flatten(&["A"]), &json).unwrap(),
+            vec![
+                &json!({ "__typename": "A", "x": 1 }),
+                &json!({ "__typename": "A", "x": 2 }),
             ],
         );
     }
