@@ -11,6 +11,8 @@
 //! See [`Layer`] and [`tower::Service`] for more details.
 
 use std::collections::HashMap;
+use std::collections::hash_map::Entry;
+use std::hash::BuildHasher;
 use std::sync::Arc;
 use std::sync::atomic::AtomicU64;
 use std::sync::atomic::Ordering;
@@ -20,6 +22,8 @@ use futures::FutureExt;
 use futures::future::BoxFuture;
 use futures::future::Shared;
 use futures::future::WeakShared;
+use http::uri::Authority;
+use http::uri::PathAndQuery;
 use parking_lot::Mutex;
 use tower::BoxError;
 use tower::Layer;
@@ -28,6 +32,8 @@ use crate::batching::BatchQuery;
 use crate::error::FetchError;
 use crate::graphql::Request;
 use crate::http_ext;
+use crate::json_ext::Object;
+use crate::json_ext::Value;
 use crate::plugins::authorization::CacheKeyMetadata;
 use crate::query_planner::fetch::OperationKind;
 use crate::services::SubgraphRequest;
@@ -104,33 +110,178 @@ impl Drop for OutcomeRecorder {
                 "Subgraph requests that reached query deduplication, by outcome",
                 "{request}",
                 1,
-                "subgraph.name" = self.subgraph_name.to_string(),
+                "subgraph.name" = self.subgraph_name.clone(),
                 "apollo.router.subgraph_deduplication.outcome" = outcome
             );
         }
     }
 }
 
-type CacheKey = (http_ext::Request<Request>, Arc<CacheKeyMetadata>);
-
-/// The key `request` waits under for an identical fetch in flight.
+/// The key `request` waits under for an identical fetch in flight: its method, HTTP version,
+/// URI, headers (in order), authorization metadata and body, encoded as bytes.
 ///
-/// The operation name is left out of the key, both the `operationName` field and the name in
+/// Two requests share a key only if all of these are equal. Every variable-length part is
+/// length-prefixed and every JSON value is tagged with its type, so no two different requests
+/// encode to the same bytes. The wait map compares whole keys, so requests whose hashes collide
+/// still never share a fetch.
+///
+/// The operation name is left out of the body, both the `operationName` field and the name in
 /// the query text: the planner gives every fetch node its own name, so two fetch nodes that
 /// send the same query with the same variables would otherwise never share a fetch. Requests
 /// reach this layer as the planner wrote them, a single operation starting with
 /// `query <operationName>`. A query in any other shape keeps its name in the key.
-fn cache_key(request: &SubgraphRequest) -> CacheKey {
-    let mut http_request: http_ext::Request<Request> = (&request.subgraph_request).into();
-    let body = http_request.body_mut();
-    if let (Some(name), Some(query)) = (&body.operation_name, &body.query)
-        && let Some(rest) = query.strip_prefix(&format!("query {name}"))
-        && !rest.starts_with(|c: char| c == '_' || c.is_ascii_alphanumeric())
-    {
-        body.query = Some(format!("query{rest}"));
-        body.operation_name = None;
+fn cache_key(request: &SubgraphRequest) -> Vec<u8> {
+    let http_request = &request.subgraph_request;
+    // Large enough for most subgraph requests, so the key is built without growing.
+    let mut key = KeyWriter(Vec::with_capacity(1024));
+    key.bytes(http_request.method().as_str().as_bytes());
+    key.0.push(version_tag(http_request.version()));
+    let uri = http_request.uri();
+    key.optional(uri.scheme_str());
+    key.optional(uri.authority().map(Authority::as_str));
+    key.optional(uri.path_and_query().map(PathAndQuery::as_str));
+    key.len(http_request.headers().len());
+    for (name, value) in http_request.headers() {
+        key.bytes(name.as_str().as_bytes());
+        key.bytes(value.as_bytes());
     }
-    (http_request, request.authorization.clone())
+    // Exhaustive, so a field added to the metadata can't be left out of the key unnoticed.
+    let CacheKeyMetadata {
+        is_authenticated,
+        scopes,
+        policies,
+    } = &*request.authorization;
+    key.0.push((*is_authenticated).into());
+    key.strings(scopes);
+    key.strings(policies);
+    key.body(http_request.body());
+    key.0
+}
+
+/// Appends length-prefixed parts of a cache key.
+struct KeyWriter(Vec<u8>);
+
+impl KeyWriter {
+    fn len(&mut self, len: usize) {
+        self.0.extend_from_slice(&len.to_le_bytes());
+    }
+
+    fn bytes(&mut self, bytes: &[u8]) {
+        self.len(bytes.len());
+        self.0.extend_from_slice(bytes);
+    }
+
+    fn optional(&mut self, part: Option<&str>) {
+        match part {
+            Some(part) => {
+                self.0.push(1);
+                self.bytes(part.as_bytes());
+            }
+            None => self.0.push(0),
+        }
+    }
+
+    fn strings(&mut self, strings: &[String]) {
+        self.len(strings.len());
+        for string in strings {
+            self.bytes(string.as_bytes());
+        }
+    }
+
+    /// Appends a request body. Two bodies get the same bytes exactly when they serialize to the
+    /// same JSON, except that the operation name is left out as [`cache_key`] describes.
+    fn body(&mut self, body: &Request) {
+        // Exhaustive, so a field added to the request can't be left out of the key unnoticed.
+        let Request {
+            query,
+            operation_name,
+            variables,
+            extensions,
+        } = body;
+        let unnamed = match (query, operation_name) {
+            (Some(query), Some(name)) => query_after_name(query, name),
+            _ => None,
+        };
+        match unnamed {
+            // The same bytes as this query sent without a name: `query` followed by the rest.
+            Some(rest) => {
+                self.0.push(1);
+                self.len("query".len() + rest.len());
+                self.0.extend_from_slice(b"query");
+                self.0.extend_from_slice(rest.as_bytes());
+                self.optional(None);
+            }
+            None => {
+                self.optional(query.as_deref());
+                self.optional(operation_name.as_deref());
+            }
+        }
+        self.object(variables);
+        self.object(extensions);
+    }
+
+    fn object(&mut self, object: &Object) {
+        self.len(object.len());
+        for (name, value) in object {
+            self.bytes(name.as_str().as_bytes());
+            self.value(value);
+        }
+    }
+
+    fn value(&mut self, value: &Value) {
+        match value {
+            Value::Null => self.0.push(0),
+            Value::Bool(false) => self.0.push(1),
+            Value::Bool(true) => self.0.push(2),
+            Value::Number(number) => {
+                if let Some(number) = number.as_u64() {
+                    self.0.push(3);
+                    self.0.extend_from_slice(&number.to_le_bytes());
+                } else if let Some(number) = number.as_i64() {
+                    self.0.push(4);
+                    self.0.extend_from_slice(&number.to_le_bytes());
+                } else {
+                    // A float, as the JSON text it serializes to.
+                    self.0.push(5);
+                    self.bytes(number.to_string().as_bytes());
+                }
+            }
+            Value::String(string) => {
+                self.0.push(6);
+                self.bytes(string.as_str().as_bytes());
+            }
+            Value::Array(items) => {
+                self.0.push(7);
+                self.len(items.len());
+                for item in items {
+                    self.value(item);
+                }
+            }
+            Value::Object(object) => {
+                self.0.push(8);
+                self.object(object);
+            }
+        }
+    }
+}
+
+fn version_tag(version: http::Version) -> u8 {
+    match version {
+        http::Version::HTTP_09 => 0,
+        http::Version::HTTP_10 => 1,
+        http::Version::HTTP_11 => 2,
+        http::Version::HTTP_2 => 3,
+        http::Version::HTTP_3 => 4,
+        _ => u8::MAX,
+    }
+}
+
+/// The rest of `query` after `query <name>`, if it starts that way.
+fn query_after_name<'a>(query: &'a str, name: &str) -> Option<&'a str> {
+    query
+        .strip_prefix("query ")?
+        .strip_prefix(name)
+        .filter(|rest| !rest.starts_with(|c: char| c == '_' || c.is_ascii_alphanumeric()))
 }
 
 type Fetch = BoxFuture<'static, Result<CloneSubgraphResponse, CloneFetchError>>;
@@ -143,7 +294,9 @@ struct InFlight {
     fetch: WeakShared<Fetch>,
 }
 
-type WaitMap = Arc<Mutex<HashMap<CacheKey, InFlight>>>;
+/// The fetches in flight, by [`cache_key`]. `H` hashes keys; tests replace it with a hasher
+/// that makes every key collide.
+type WaitMap<H> = Arc<Mutex<HashMap<Arc<[u8]>, InFlight, H>>>;
 
 static NEXT_FETCH_ID: AtomicU64 = AtomicU64::new(0);
 
@@ -188,50 +341,50 @@ impl From<CloneFetchError> for BoxError {
 
 /// Removes a fetch's wait map entry when the fetch completes or is dropped, unless a newer
 /// fetch for the same key has replaced it.
-struct RemoveFromWaitMap {
-    wait_map: WaitMap,
-    key: CacheKey,
+struct RemoveFromWaitMap<H: BuildHasher> {
+    wait_map: WaitMap<H>,
+    key: Arc<[u8]>,
     id: u64,
 }
 
-impl Drop for RemoveFromWaitMap {
+impl<H: BuildHasher> Drop for RemoveFromWaitMap<H> {
     fn drop(&mut self) {
         let mut wait_map = self.wait_map.lock();
-        if wait_map
-            .get(&self.key)
-            .is_some_and(|in_flight| in_flight.id == self.id)
+        if let Entry::Occupied(entry) = wait_map.entry(self.key.clone())
+            && entry.get().id == self.id
         {
-            wait_map.remove(&self.key);
+            entry.remove();
         }
     }
 }
 
 #[derive(Clone)]
-pub(crate) struct QueryDeduplicationService<S: Clone> {
+pub(crate) struct QueryDeduplicationService<S: Clone, H = ahash::RandomState> {
     service: S,
-    wait_map: WaitMap,
+    wait_map: WaitMap<H>,
     subgraph_name: Arc<str>,
 }
 
-impl<S> QueryDeduplicationService<S>
+impl<S, H> QueryDeduplicationService<S, H>
 where
     S: tower::Service<SubgraphRequest, Response = SubgraphResponse, Error = BoxError>
         + Clone
         + Send
         + 'static,
     <S as tower::Service<SubgraphRequest>>::Future: Send + 'static,
+    H: BuildHasher + Default + Send + Sync + 'static,
 {
     fn new(service: S, subgraph_name: Arc<str>) -> Self {
         QueryDeduplicationService {
             service,
-            wait_map: Arc::new(Mutex::new(HashMap::new())),
+            wait_map: Arc::new(Mutex::new(HashMap::default())),
             subgraph_name,
         }
     }
 
     async fn dedup(
         mut service: S,
-        wait_map: WaitMap,
+        wait_map: WaitMap<H>,
         request: SubgraphRequest,
         recorder: &mut OutcomeRecorder,
     ) -> Result<SubgraphResponse, BoxError> {
@@ -266,7 +419,7 @@ where
     /// with `service` as its [`Outcome::Leader`].
     fn join_or_start(
         mut service: S,
-        wait_map: &WaitMap,
+        wait_map: &WaitMap<H>,
         request: SubgraphRequest,
     ) -> (Shared<Fetch>, Outcome) {
         let key = cache_key(&request);
@@ -274,12 +427,13 @@ where
         // the fetch's `RemoveFromWaitMap`, which takes the lock.
         let mut locked_wait_map = wait_map.lock();
         if let Some(fetch) = locked_wait_map
-            .get(&key)
+            .get(key.as_slice())
             .and_then(|in_flight| in_flight.fetch.upgrade())
         {
             return (fetch, Outcome::Follower);
         }
 
+        let key: Arc<[u8]> = key.into();
         let id = NEXT_FETCH_ID.fetch_add(1, Ordering::Relaxed);
         let remove_from_wait_map = RemoveFromWaitMap {
             wait_map: wait_map.clone(),
@@ -304,13 +458,14 @@ where
     }
 }
 
-impl<S> tower::Service<SubgraphRequest> for QueryDeduplicationService<S>
+impl<S, H> tower::Service<SubgraphRequest> for QueryDeduplicationService<S, H>
 where
     S: tower::Service<SubgraphRequest, Response = SubgraphResponse, Error = BoxError>
         + Clone
         + Send
         + 'static,
     <S as tower::Service<SubgraphRequest>>::Future: Send + 'static,
+    H: BuildHasher + Default + Send + Sync + 'static,
 {
     type Response = SubgraphResponse;
     type Error = BoxError;
@@ -341,6 +496,10 @@ where
 
 #[cfg(test)]
 mod tests {
+    use std::hash::BuildHasher;
+    use std::hash::BuildHasherDefault;
+    use std::hash::Hasher;
+    use std::sync::Arc;
     use std::time::Duration;
 
     use futures::FutureExt;
@@ -358,6 +517,7 @@ mod tests {
     use crate::batching::BatchQuery;
     use crate::graphql;
     use crate::metrics::FutureMetricsExt;
+    use crate::plugins::authorization::CacheKeyMetadata;
     use crate::plugins::traffic_shaping::timeout::SubgraphTimeoutLayer;
     use crate::query_planner::fetch::OperationKind;
     use crate::services::SubgraphRequest;
@@ -452,8 +612,19 @@ mod tests {
     /// Sends `first` and then `second` while `first` is in flight, answers every request that
     /// reaches the subgraph, and returns how many did.
     async fn subgraph_requests_for(first: SubgraphRequest, second: SubgraphRequest) -> usize {
+        subgraph_requests_hashed_by::<ahash::RandomState>(first, second).await
+    }
+
+    /// [`subgraph_requests_for`] with a wait map that hashes keys with `H`.
+    async fn subgraph_requests_hashed_by<H>(
+        first: SubgraphRequest,
+        second: SubgraphRequest,
+    ) -> usize
+    where
+        H: BuildHasher + Default + Send + Sync + 'static,
+    {
         let (mock, mut handle) = tower_test::mock::pair::<SubgraphRequest, SubgraphResponse>();
-        let mut svc = dedup_service(mock);
+        let mut svc = QueryDeduplicationService::<_, H>::new(mock, SUBGRAPH.into());
 
         svc.ready().await.expect("it is ready");
         let mut fut1 = svc.call(first);
@@ -507,21 +678,131 @@ mod tests {
         assert_eq!(sent, 2, "each fetch node sends its own representations");
     }
 
-    /// The cache key of a request sending `query` named `operation_name`, with fixed variables.
-    fn test_cache_key(query: &str, operation_name: Option<&str>) -> super::CacheKey {
-        let body = graphql::Request::fake_builder()
-            .query(query)
-            .and_operation_name(operation_name.map(str::to_string))
-            .variable(
-                "representations",
-                json!([{ "__typename": "Product", "upc": "1" }]),
-            )
-            .build();
+    /// Hashes every key to the same value, so every wait map lookup collides.
+    #[derive(Default)]
+    struct SameHash;
+
+    impl Hasher for SameHash {
+        fn finish(&self) -> u64 {
+            0
+        }
+
+        fn write(&mut self, _bytes: &[u8]) {}
+    }
+
+    type CollidingHashes = BuildHasherDefault<SameHash>;
+
+    /// An entity fetch whose HTTP request is built by `http_request`.
+    fn entity_fetch_with(http_request: http::request::Builder) -> SubgraphRequest {
+        let body = entity_fetch("Op__products__1", "1")
+            .subgraph_request
+            .into_body();
+        SubgraphRequest::fake_builder()
+            .subgraph_request(http_request.body(body).expect("a valid request"))
+            .build()
+    }
+
+    #[tokio::test]
+    async fn identical_queries_share_a_fetch_when_hashes_collide() {
+        let sent = subgraph_requests_hashed_by::<CollidingHashes>(
+            entity_fetch("Op__products__1", "1"),
+            entity_fetch("Op__products__1", "1"),
+        )
+        .await;
+        assert_eq!(sent, 1);
+    }
+
+    #[tokio::test]
+    async fn queries_that_differ_never_share_a_fetch_when_hashes_collide() {
+        let mut authenticated = entity_fetch("Op__products__1", "1");
+        authenticated.authorization = Arc::new(CacheKeyMetadata {
+            is_authenticated: true,
+            ..Default::default()
+        });
+        let cases = [
+            (
+                "a header",
+                entity_fetch_with(http::Request::builder().header("authorization", "Bearer a")),
+                entity_fetch_with(http::Request::builder().header("authorization", "Bearer b")),
+            ),
+            (
+                "a variable",
+                entity_fetch("Op__products__1", "1"),
+                entity_fetch("Op__products__1", "2"),
+            ),
+            (
+                "the URI",
+                entity_fetch_with(http::Request::builder().uri("http://products-a/graphql")),
+                entity_fetch_with(http::Request::builder().uri("http://products-b/graphql")),
+            ),
+            (
+                "the authorization metadata",
+                entity_fetch("Op__products__1", "1"),
+                authenticated,
+            ),
+        ];
+        for (difference, first, second) in cases {
+            let sent = subgraph_requests_hashed_by::<CollidingHashes>(first, second).await;
+            assert_eq!(
+                sent, 2,
+                "queries differing in {difference} each reach the subgraph"
+            );
+        }
+    }
+
+    /// The cache key of a request sending `body`.
+    fn key_of(body: graphql::Request) -> Vec<u8> {
         super::cache_key(
             &SubgraphRequest::fake_builder()
                 .subgraph_request(http::Request::new(body))
                 .build(),
         )
+    }
+
+    /// The cache key of a request sending `query` named `operation_name`, with fixed variables.
+    fn test_cache_key(query: &str, operation_name: Option<&str>) -> Vec<u8> {
+        key_of(
+            graphql::Request::fake_builder()
+                .query(query)
+                .and_operation_name(operation_name.map(str::to_string))
+                .variable(
+                    "representations",
+                    json!([{ "__typename": "Product", "upc": "1" }]),
+                )
+                .build(),
+        )
+    }
+
+    #[test]
+    fn cache_key_tells_apart_variables_that_serialize_differently() {
+        let key_with = |value: serde_json_bytes::Value| {
+            key_of(
+                graphql::Request::fake_builder()
+                    .query("query($v:JSON){f(v:$v)}")
+                    .variable("v", value)
+                    .build(),
+            )
+        };
+        let pairs = [
+            (json!(1), json!("1")),
+            (json!(1), json!(1.0)),
+            (json!(-1), json!(u64::MAX)),
+            (json!(0.0), json!(-0.0)),
+            (json!(null), json!(false)),
+            (json!(["a", "b"]), json!(["ab"])),
+            (json!({ "a": "bc" }), json!({ "ab": "c" })),
+            (json!([[]]), json!([{}])),
+        ];
+        for (first, second) in pairs {
+            assert!(
+                key_with(first.clone()) != key_with(second.clone()),
+                "{first} and {second} get different keys"
+            );
+        }
+        assert!(
+            key_with(json!({ "n": 1.5 })) == key_with(json!({ "n": 1.5 })),
+            "equal variables share a key"
+        );
     }
 
     #[test]
