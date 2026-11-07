@@ -23,6 +23,7 @@ pub(crate) use tower_compat::*;
 use crate::Configuration;
 use crate::Context;
 use crate::context::PERSISTED_QUERY_ID;
+use crate::context::PERSISTED_QUERY_SOURCE;
 use crate::graphql::Error as GraphQLError;
 use crate::plugins::telemetry::CLIENT_NAME;
 use crate::services::SupergraphRequest;
@@ -188,6 +189,9 @@ impl PersistedQueryExpander {
                 let _ = request
                     .context
                     .insert(PERSISTED_QUERY_ID, persisted_query_id.to_string());
+                let _ = request
+                    .context
+                    .insert(PERSISTED_QUERY_SOURCE, "id".to_string());
                 u64_counter!(
                     "apollo.router.operations.persisted_queries",
                     "Total requests with persisted queries enabled",
@@ -323,6 +327,9 @@ impl PersistedQueryExpander {
             });
             // Store PQ ID in public context for access by Rhai/coprocessors/plugins
             let _ = request.context.insert(PERSISTED_QUERY_ID, pq_id);
+            let _ = request
+                .context
+                .insert(PERSISTED_QUERY_SOURCE, "freeform".to_string());
         }
 
         u64_counter!(
@@ -632,6 +639,88 @@ mod tests {
         // Verify PQ ID is in public context
         let pq_id_from_context: Option<String> = request.context.get(PERSISTED_QUERY_ID).unwrap();
         assert_eq!(pq_id_from_context, Some(id));
+
+        // Verify resolution source is tagged as the client-sent ID path
+        let pq_source_from_context: Option<String> =
+            request.context.get(PERSISTED_QUERY_SOURCE).unwrap();
+        assert_eq!(pq_source_from_context.as_deref(), Some("id"));
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn pq_source_stored_as_freeform_when_body_matched_against_manifest() {
+        // The body must be schema-valid against the test supergraph so the
+        // query-parsing layer accepts it and the freeform-match code path runs.
+        // fake_manifest()'s body doesn't satisfy that, so we build a tiny
+        // manifest ourselves — same pattern as `pq_layer_freeform_graphql_with_safelist`.
+        let body = "query SomeOp { me { id } }".to_string();
+        let manifest = PersistedQueryManifest::from(vec![ManifestOperation {
+            id: "freeform-match-id".to_string(),
+            body: body.clone(),
+            client_name: None,
+        }]);
+        let (_mock_guard, uplink_config) = mock_pq_uplink(&manifest).await;
+
+        // Observe-mode config: PQ enabled, safelist off, log_unknown on. This is
+        // the `LogUnlessInSafelist` behavior branch (see
+        // `freeform_graphql_behavior.rs:238-263`), the only non-safelist mode
+        // that performs the body-to-manifest match that populates `pq_id`.
+        let config = Configuration::fake_builder()
+            .persisted_query(
+                PersistedQueries::builder()
+                    .enabled(true)
+                    .log_unknown(true)
+                    .build(),
+            )
+            .uplink(uplink_config)
+            .apq(Apq::fake_builder().enabled(false).build())
+            .supergraph(Supergraph::fake_builder().introspection(true).build())
+            .build()
+            .unwrap();
+
+        let pq_layer = Arc::new(PersistedQueryExpander::new(&config).await.unwrap());
+        let schema = Arc::new(
+            Schema::parse(
+                include_str!("../../../testdata/supergraph.graphql"),
+                &Default::default(),
+            )
+            .unwrap(),
+        );
+        let query_parsing_service =
+            crate::pipeline::build_query_parsing_service(schema, Arc::new(config));
+
+        let (mut service, mut handle) = pq_safelist_mock(pq_layer, query_parsing_service);
+
+        // Capture the context from the request that actually reaches the mock
+        // service after the PQ layers have run.
+        let captured_context: Arc<parking_lot::Mutex<Option<Context>>> =
+            Arc::new(parking_lot::Mutex::new(None));
+        let captured_context_driver = captured_context.clone();
+        let driver = tokio::spawn(async move {
+            let (req, responder) = handle.next_request().await.unwrap();
+            *captured_context_driver.lock() = Some(req.context.clone());
+            responder.send_response(SupergraphResponse::fake_builder().build().unwrap());
+        });
+
+        let incoming_request = SupergraphRequest::fake_builder()
+            .query(body)
+            .build()
+            .unwrap();
+
+        service
+            .ready()
+            .await
+            .unwrap()
+            .call(incoming_request)
+            .await
+            .expect("pq service should not return an error");
+        crate::plugin::test::await_mock_driver(driver).await;
+
+        let ctx = captured_context
+            .lock()
+            .clone()
+            .expect("mock service never received a request");
+        let pq_source: Option<String> = ctx.get(PERSISTED_QUERY_SOURCE).unwrap();
+        assert_eq!(pq_source.as_deref(), Some("freeform"));
     }
 
     #[tokio::test(flavor = "multi_thread")]
