@@ -32,7 +32,8 @@ impl_arrow_method!(EncodeMethod, encode_method, encode_shape);
 /// "base64" uses the RFC 4648 §4 standard alphabet with padding, and
 /// "base64url" uses the RFC 4648 §5 URL-safe alphabet without padding. JSON has
 /// no byte type, so both encode the UTF-8 bytes of a string input. "json"
-/// behaves exactly like `->jsonStringify` and accepts any input.
+/// behaves exactly like `->jsonStringify` and accepts any input. Like other
+/// methods, it produces no value when the codec argument has none.
 fn encode_method(
     method_name: &WithRange<String>,
     method_args: Option<&MethodArgs>,

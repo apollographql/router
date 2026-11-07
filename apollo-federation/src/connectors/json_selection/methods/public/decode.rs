@@ -36,7 +36,8 @@ impl_arrow_method!(DecodeMethod, decode_method, decode_shape);
 /// ignore ASCII whitespace such as the line breaks in wrapped base64.
 /// JSON has no byte type, so they return the decoded bytes as a UTF-8 string,
 /// and bytes that are not valid UTF-8 are an error rather than a garbled
-/// string. "json" behaves exactly like `->jsonParse`.
+/// string. "json" behaves exactly like `->jsonParse`. Like other methods, it
+/// produces no value when the codec argument has none.
 fn decode_method(
     method_name: &WithRange<String>,
     method_args: Option<&MethodArgs>,
