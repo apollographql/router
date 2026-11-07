@@ -1,0 +1,64 @@
+extend schema
+@link(
+    url: "https://specs.apollo.dev/connect/v0.4"
+    import: ["@connect", "@source"]
+)
+@source(name: "api", http: { baseURL: "http://127.0.0.1" })
+
+type Query {
+    validCodecs(id: String!): T
+    @connect(
+        source: "api"
+        http: { GET: "/t/{$args.id->encode('base64url')}" }
+        selection: """
+        id
+        status: code->decode("base64")
+        encoded: code->encode("json")
+        """
+    )
+
+    # INVALID - caught at composition: a literal codec is checked when the
+    # schema is validated, so a typo fails here instead of on every request.
+    misspelledEncodeCodec: T
+    @connect(
+        source: "api"
+        http: { GET: "/t" }
+        selection: """
+        id
+        status: code->encode("base46")
+        """
+    )
+
+    # INVALID - the same check applies to `->decode`.
+    unsupportedDecodeCodec: T
+    @connect(
+        source: "api"
+        http: { GET: "/t" }
+        selection: """
+        id
+        status: code->decode("hex")
+        """
+    )
+
+    # INVALID - and to expressions in the URL.
+    misspelledCodecInUrl(id: String!): T
+    @connect(
+        source: "api"
+        http: { GET: "/t/{$args.id->encode('base46')}" }
+        selection: "id"
+    )
+
+    # INVALID - and to expressions in the body.
+    misspelledCodecInBody(id: String!): T
+    @connect(
+        source: "api"
+        http: { POST: "/t", body: "id: $args.id->encode('base46')" }
+        selection: "id"
+    )
+}
+
+type T {
+    id: ID
+    status: String
+    encoded: String
+}
