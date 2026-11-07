@@ -494,7 +494,7 @@ mod shape_tests {
             shape_with_arg(
                 codec_path,
                 Shape::string([]),
-                Shape::record([("codec".to_string(), Shape::string([]))].into(), [])
+                Shape::closed_record([("codec".to_string(), Shape::string([]))].into(), [])
             ),
             Shape::unknown([get_location()])
         );

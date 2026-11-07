@@ -983,7 +983,7 @@ mod codec_shape_tests {
     }
 
     fn codec_record(codec: Shape) -> Shape {
-        Shape::record([("codec".to_string(), codec)].into(), [])
+        Shape::closed_record([("codec".to_string(), codec)].into(), [])
     }
 
     #[rstest::rstest]

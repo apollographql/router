@@ -395,7 +395,7 @@ mod shape_tests {
                     range: None,
                 }),
                 Shape::empty_object([]),
-                Shape::record([("codec".to_string(), Shape::string([]))].into(), []),
+                Shape::closed_record([("codec".to_string(), Shape::string([]))].into(), []),
             ),
             Shape::string([get_location()])
         );
