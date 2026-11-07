@@ -1,0 +1,28 @@
+telemetry:
+  instrumentation:
+    instruments:
+      default_requirement_level: none
+      supergraph:
+        # Response-stage condition: a failed request has no response header, so
+        # it must not be counted.
+        "with_response_header":
+          description: "count of responses with x-outcome"
+          type: counter
+          unit: "unit"
+          value: unit
+          attributes:
+            outcome:
+              response_header: "x-outcome"
+          condition:
+            exists:
+              response_header: "x-outcome"
+        # Error-stage condition on the error's message: a coprocessor timeout.
+        "coprocessor_timeouts":
+          description: "count of requests whose coprocessor call timed out"
+          type: counter
+          unit: "unit"
+          value: unit
+          condition:
+            eq:
+              - "request timed out"
+              - error: reason

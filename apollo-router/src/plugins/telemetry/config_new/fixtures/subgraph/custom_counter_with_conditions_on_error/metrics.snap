@@ -1,0 +1,126 @@
+---
+source: apollo-router/src/plugins/telemetry/config_new/instruments.rs
+description: Custom counter conditions are evaluated when a coprocessor call fails at the subgraph stage
+expression: "&metrics.all()"
+info:
+  telemetry:
+    instrumentation:
+      instruments:
+        default_requirement_level: none
+        subgraph:
+          with_response_header:
+            description: count of responses with x-outcome
+            type: counter
+            unit: unit
+            value: unit
+            attributes:
+              subgraph.name: true
+              outcome:
+                subgraph_response_header: x-outcome
+            condition:
+              exists:
+                subgraph_response_header: x-outcome
+          products_only:
+            description: count of requests to products
+            type: counter
+            unit: unit
+            value: unit
+            attributes:
+              subgraph.name: true
+            condition:
+              eq:
+                - subgraph_name: true
+                - products
+          requests.timeout:
+            value: unit
+            type: counter
+            unit: request
+            description: subgraph requests containing subgraph timeout
+            attributes:
+              subgraph.name: true
+            condition:
+              eq:
+                - 504
+                - subgraph_response_status: code
+          coprocessor_timeouts:
+            description: count of requests whose coprocessor call timed out
+            type: counter
+            unit: unit
+            value: unit
+            attributes:
+              subgraph.name: true
+            condition:
+              eq:
+                - request timed out
+                - error: reason
+          errors_only:
+            description: count of failed requests
+            type: counter
+            unit: unit
+            value: unit
+            attributes:
+              subgraph.name: true
+            condition:
+              exists:
+                error: reason
+---
+- name: apollo.router.operations.fetch.duration
+  description: Duration of a subgraph fetch.
+  unit: s
+  data:
+    datapoints:
+      - sum: 0.1
+        count: 2
+        attributes:
+          has_errors: false
+          subgraph.name: products
+      - sum: 0.1
+        count: 1
+        attributes:
+          has_errors: true
+          subgraph.name: products
+      - sum: 0.1
+        count: 2
+        attributes:
+          subgraph.name: products
+- name: coprocessor_timeouts
+  description: count of requests whose coprocessor call timed out
+  unit: unit
+  data:
+    datapoints:
+      - value: 1
+        attributes:
+          subgraph.name: products
+- name: errors_only
+  description: count of failed requests
+  unit: unit
+  data:
+    datapoints:
+      - value: 2
+        attributes:
+          subgraph.name: products
+- name: products_only
+  description: count of requests to products
+  unit: unit
+  data:
+    datapoints:
+      - value: 5
+        attributes:
+          subgraph.name: products
+- name: requests.timeout
+  description: subgraph requests containing subgraph timeout
+  unit: request
+  data:
+    datapoints:
+      - value: 1
+        attributes:
+          subgraph.name: products
+- name: with_response_header
+  description: count of responses with x-outcome
+  unit: unit
+  data:
+    datapoints:
+      - value: 1
+        attributes:
+          outcome: match
+          subgraph.name: products
