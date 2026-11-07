@@ -87,6 +87,7 @@ use super::super::query_compare::conditions::boolean_condition_covered_by;
 use super::super::query_compare::conditions::canonical_boolean_condition;
 use super::super::query_compare::conditions::literals_for_directives;
 use super::ComparisonError;
+use super::display_path;
 use super::selections::TypeCondition;
 use super::selections::possible_types;
 use crate::query_plan::FetchDataPathElement;
@@ -639,11 +640,4 @@ pub(super) fn check_context_rewrites(
         }
     }
     Ok(())
-}
-
-fn display_path(path: &[FetchDataPathElement]) -> String {
-    path.iter()
-        .map(|element| element.to_string())
-        .collect::<Vec<_>>()
-        .join(".")
 }

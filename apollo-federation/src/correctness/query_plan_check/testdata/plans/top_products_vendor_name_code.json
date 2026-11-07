@@ -1,0 +1,13 @@
+{
+  "Fetch": {
+    "subgraph_name": "shop",
+    "id": null,
+    "variable_usages": [],
+    "operation_document": "{ topProducts { vendor { name code } } }",
+    "operation_name": null,
+    "operation_kind": "query",
+    "input_rewrites": [],
+    "output_rewrites": [],
+    "context_rewrites": []
+  }
+}

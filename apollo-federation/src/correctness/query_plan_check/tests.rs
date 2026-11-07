@@ -1031,3 +1031,317 @@ fn a_context_value_read_through_member_names_is_accepted() {
         .check_without_dead_fetch_report(&plan, STORES_PRODUCTS_LABEL_PRICE)
         .unwrap();
 }
+
+//==================================================================================================
+// What a fetch's subgraph can resolve
+//
+// A subgraph answers a fetch only for the fields it can resolve: a field it marks `@external` is
+// resolved by another subgraph, and by this one only inside a `@provides` window of its own that
+// names it where the fetch selects it. Every fetch is checked, root fetches included. Each test
+// below is the port of a theorem of the model's `Resolution` tests, named in its comment, over the
+// world `subgraph_resolution.graphql` describes: an accepted plan is the planner's, a rejected one
+// is written here, and each fetches what its operation asks for, so that what the subgraph can
+// resolve alone decides.
+//
+// The model's `fieldTheSubgraphDoesNotDeclareIsRejected` and
+// `rootFetchToAnUnknownSubgraphIsRejected` have no counterpart here: `Fixture` validates every
+// fetch's operation against its subgraph, and reads no plan naming a subgraph it does not have.
+
+use crate::schema::position::FieldDefinitionPosition;
+use crate::schema::position::ObjectFieldDefinitionPosition;
+
+fn resolution_fixture() -> Fixture {
+    Fixture::new(include_str!("testdata/subgraph_resolution.graphql"))
+}
+
+/// A plan of one fetch, asking `subgraph` for `operation`.
+fn fetch_plan(fixture: &Fixture, subgraph: &str, operation: &str) -> QueryPlan {
+    fixture.written_plan(
+        &serde_json::json!({ "Fetch": {
+            "subgraph_name": subgraph,
+            "variable_usages": [],
+            "operation_document": operation,
+            "operation_kind": "query",
+            "input_rewrites": [],
+            "output_rewrites": [],
+            "context_rewrites": []
+        } })
+        .to_string(),
+    )
+}
+
+/// Each product's `field` with its key from `catalog`, then `shop` asked, under `_entities`, for
+/// `selection` of each, an `entity_type` it resolves by `id`.
+fn shop_entity_plan(
+    fixture: &Fixture,
+    field: &str,
+    entity_type: &str,
+    selection: &str,
+) -> QueryPlan {
+    let representation = serde_json::json!([
+        { "kind": "Field", "name": "__typename" },
+        { "kind": "Field", "name": "id" }
+    ]);
+    let entities = format!(
+        "query($representations: [_Any!]!) {{ _entities(representations: $representations) \
+         {{ ... on {entity_type} {{ {selection} }} }} }}"
+    );
+    fixture.written_plan(
+        &serde_json::json!({ "Sequence": { "nodes": [
+            { "Fetch": {
+                "subgraph_name": "catalog",
+                "variable_usages": [],
+                "operation_document": format!("{{ products {{ {field} {{ __typename id }} }} }}"),
+                "operation_kind": "query",
+                "input_rewrites": [],
+                "output_rewrites": [],
+                "context_rewrites": []
+            } },
+            { "Flatten": {
+                "path": [
+                    { "Key": ["products", null] },
+                    { "AnyIndex": null },
+                    { "Key": [field, null] }
+                ],
+                "node": { "Fetch": {
+                    "subgraph_name": "shop",
+                    "variable_usages": [],
+                    "requires": [{
+                        "kind": "InlineFragment",
+                        "typeCondition": entity_type,
+                        "selections": representation
+                    }],
+                    "operation_document": entities,
+                    "operation_kind": "query",
+                    "input_rewrites": [],
+                    "output_rewrites": [],
+                    "context_rewrites": []
+                } }
+            } }
+        ] } })
+        .to_string(),
+    )
+}
+
+/// The rejection of a plan asking `shop` for `field`, external there, where no window grants it.
+fn assert_not_resolved(fixture: &Fixture, plan: &QueryPlan, operation: &str, field: &str) {
+    let error = fixture.rejection(plan, operation);
+    assert!(
+        error.contains(&format!(
+            "fetch to shop: `{field}` is external in the subgraph, and no `@provides` window"
+        )),
+        "{error}"
+    );
+}
+
+const TOP_PRODUCTS_VENDOR_NAME: &str = "{ topProducts { vendor { name } } }";
+
+// `topProducts` opens a window naming `vendor { name }`, so `shop` can resolve `Vendor.name`,
+// external there, at the end of that path. The model's `externalFieldInsideItsWindowIsAccepted`.
+//
+// A control of preserved behaviour.
+#[test]
+fn an_external_field_inside_its_window_is_accepted() {
+    let fixture = resolution_fixture();
+    let plan = fixture.written_plan(plan_json!("top_products_vendor_name"));
+    fixture.check(&plan, TOP_PRODUCTS_VENDOR_NAME).unwrap();
+}
+
+// The window grants `name` under `vendor` alone, so under its sibling `maker` `shop` is asked for
+// `Vendor.name` where it cannot resolve it. The model's `externalFieldOnASiblingPathIsRejected`.
+//
+// A control of changed behaviour: the plan's buffer holds `name` either way, and nothing read the
+// subgraph's declarations.
+#[test]
+fn an_external_field_on_a_sibling_path_is_rejected() {
+    let fixture = resolution_fixture();
+    let operation = "{ topProducts { maker { name } } }";
+    let plan = fetch_plan(&fixture, "shop", operation);
+    assert_not_resolved(&fixture, &plan, operation, "Vendor.name");
+}
+
+const PRODUCTS_VENDOR_NAME: &str = "{ products { vendor { name } } }";
+
+// `products` opens no window, so `shop` can resolve `Vendor.name` nowhere below it, and a root
+// fetch is held to what its subgraph can resolve like any other. The model's
+// `externalFieldOutsideAWindowIsRejected`.
+//
+// A control of changed behaviour.
+#[test]
+fn an_external_field_outside_a_window_is_rejected() {
+    let fixture = resolution_fixture();
+    let plan = fetch_plan(&fixture, "shop", PRODUCTS_VENDOR_NAME);
+    assert_not_resolved(&fixture, &plan, PRODUCTS_VENDOR_NAME, "Vendor.name");
+}
+
+// The same operation asked of `catalog`, whose metadata says it can resolve `Vendor.name`: what
+// the subgraph can resolve decides, and a window is needed only for a field it cannot. The
+// planner's plan. The model's `theSameFieldResolvedOutrightIsAccepted`, which varies the metadata
+// of one subgraph where this world has the two.
+//
+// A control of preserved behaviour.
+#[test]
+fn the_same_field_resolved_outright_is_accepted() {
+    let fixture = resolution_fixture();
+    let plan = fixture.written_plan(plan_json!("products_vendor_name"));
+    fixture.check(&plan, PRODUCTS_VENDOR_NAME).unwrap();
+}
+
+// `Product.vendor` opens a window granting `code` inside the one `topProducts` opens, and the two
+// add up: `shop` can resolve both external fields under `vendor`. The model's
+// `nestedWindowAddsToTheOuterOneIsAccepted`.
+//
+// A control of preserved behaviour, which a window replacing the one it opens inside would fail.
+#[test]
+fn a_nested_window_adding_to_the_outer_one_is_accepted() {
+    let fixture = resolution_fixture();
+    let plan = fixture.written_plan(plan_json!("top_products_vendor_name_code"));
+    fixture
+        .check(&plan, "{ topProducts { vendor { name code } } }")
+        .unwrap();
+}
+
+// `featured`'s window grants `maker { name }` under `... on Gizmo`, where `shop` is asked for it.
+// The model's `conditionedWindowGrantsItsTypeIsAccepted`; the axes case `inside-the-condition`.
+//
+// A control of preserved behaviour.
+#[test]
+fn a_conditioned_window_granting_its_type_is_accepted() {
+    let fixture = resolution_fixture();
+    let plan = fixture.written_plan(plan_json!("featured_gizmo_maker_name"));
+    fixture
+        .check(&plan, "{ featured { ... on Gizmo { maker { name } } } }")
+        .unwrap();
+}
+
+// The window's condition admits `Gizmo` alone, so under `... on Widget` the maker's `name` is not
+// granted. The model's `conditionedWindowDoesNotGrantAnotherMemberIsRejected`; the axes case
+// `outside-the-condition`.
+//
+// A control of changed behaviour.
+#[test]
+fn a_conditioned_window_not_granting_another_member_is_rejected() {
+    let fixture = resolution_fixture();
+    let plan = fetch_plan(
+        &fixture,
+        "shop",
+        "{ featured { __typename ... on Widget { maker { name } } } }",
+    );
+    assert_not_resolved(
+        &fixture,
+        &plan,
+        "{ featured { ... on Widget { maker { name } } } }",
+        "Vendor.name",
+    );
+}
+
+// `maker` spelled on `Item` reaches a widget's maker too, which the window does not grant: the
+// members carry different windows and are asked one at a time, which the two fragments tested
+// apart do not show. The model's `interfaceFieldReachingAnUngrantedMemberIsRejected`; the axes case
+// `across-the-members`.
+//
+// A control of changed behaviour.
+#[test]
+fn an_interface_field_reaching_an_ungranted_member_is_rejected() {
+    let fixture = resolution_fixture();
+    let plan = fetch_plan(
+        &fixture,
+        "shop",
+        "{ featured { __typename maker { name } } }",
+    );
+    assert_not_resolved(
+        &fixture,
+        &plan,
+        "{ featured { maker { name } } }",
+        "Vendor.name",
+    );
+}
+
+// `label` spelled on `Item` is asked of every member `items` can hold, and `shop` marks
+// `Gizmo.label` external with no window open. The model's
+// `interfaceFieldReachingAnExternalMemberIsRejected`.
+//
+// A control of changed behaviour.
+#[test]
+fn an_interface_field_reaching_an_external_member_is_rejected() {
+    let fixture = resolution_fixture();
+    let operation = "{ items { label } }";
+    let plan = fetch_plan(&fixture, "shop", operation);
+    assert_not_resolved(&fixture, &plan, operation, "Gizmo.label");
+}
+
+// `shop` resolves `Widget.label` itself, and the fragment reaches no gizmo. The planner's plan. The
+// model's `memberResolvingTheFieldIsAccepted`.
+//
+// A control of preserved behaviour.
+#[test]
+fn a_member_resolving_the_field_is_accepted() {
+    let fixture = resolution_fixture();
+    let plan = fixture.written_plan(plan_json!("items_widget_label"));
+    fixture
+        .check(&plan, "{ items { ... on Widget { label } } }")
+        .unwrap();
+}
+
+// Selecting the key the fetch is keyed by asks `shop` to resolve it, which it does: `Vendor.id` is
+// marked external on the type extension its key is on, a fake external, which the metadata reads
+// as one it can resolve. The model's `keySelectedUnderEntitiesIsAccepted`.
+//
+// A control of preserved behaviour, which a reading of `@external` that missed the fake would fail.
+#[test]
+fn a_key_selected_under_entities_is_accepted() {
+    let fixture = resolution_fixture();
+    let plan = shop_entity_plan(&fixture, "vendor", "Vendor", "id");
+    fixture
+        .check(&plan, "{ products { vendor { id } } }")
+        .unwrap();
+}
+
+// `shop` marks `Brand` external as a type, its key field `id` included, so the same fetch for a
+// brand asks `shop` for a field it cannot resolve: a representation's members travel in the
+// variable, and selecting one of them is no exemption. The model's
+// `externalKeySelectedUnderEntitiesIsRejected`.
+//
+// A control of changed behaviour.
+#[test]
+fn an_external_key_selected_under_entities_is_rejected() {
+    let fixture = resolution_fixture();
+    let plan = shop_entity_plan(&fixture, "brand", "Brand", "id");
+    assert_not_resolved(&fixture, &plan, "{ products { brand { id } } }", "Brand.id");
+}
+
+// `shop` can resolve `__typename` on a type it can resolve none of the fields of, with no
+// declaration. The model's `typenameIsResolvableWithoutADeclaration`, which the model asks of its
+// walk alone and the whole checker reaches here.
+//
+// A control of preserved behaviour.
+#[test]
+fn typename_is_resolvable_without_a_declaration() {
+    let fixture = resolution_fixture();
+    let plan = shop_entity_plan(&fixture, "brand", "Brand", "__typename");
+    fixture
+        .check(&plan, "{ products { brand { __typename } } }")
+        .unwrap();
+}
+
+// What the checker reads in `shop` as extracted from the supergraph, whose `Vendor.id` keeps its
+// marking by a hand edit: the key field of the type extension is a fake external, which it can
+// resolve; `Brand.id` is external through its type, and `Vendor.name` external.
+#[test]
+fn the_extracted_shop_reads_its_externals_as_written() {
+    let fixture = resolution_fixture();
+    let metadata = fixture.subgraphs["shop"]
+        .subgraph_metadata()
+        .expect("subgraph metadata");
+    let field = |type_name, field_name| {
+        FieldDefinitionPosition::Object(ObjectFieldDefinitionPosition {
+            type_name,
+            field_name,
+        })
+    };
+    let vendor_id = field(name!("Vendor"), name!("id"));
+    assert!(metadata.is_field_fake_external(&vendor_id));
+    assert!(!metadata.is_field_external(&vendor_id));
+    assert!(metadata.is_field_external(&field(name!("Brand"), name!("id"))));
+    assert!(metadata.is_field_external(&field(name!("Vendor"), name!("name"))));
+}
