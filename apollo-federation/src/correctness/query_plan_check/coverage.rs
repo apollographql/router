@@ -57,6 +57,7 @@ use super::response::Contribution;
 use super::response::CopyId;
 use super::response::Response;
 use super::response::View;
+use crate::schema::position::INTROSPECTION_TYPENAME_FIELD_NAME;
 
 /// What is demanded on one copy: selections, each under the region it is demanded in and below the
 /// fields it is sent under, one entry per distinct list of selections and names, found by the
@@ -429,7 +430,7 @@ impl<'d> Coverage<'_, 'd> {
                 let held = hypothesis.supplies(
                     sources
                         .iter()
-                        .flat_map(|(_, held)| held.iter().cloned())
+                        .flat_map(|(_, read, written)| read.iter().chain(written).cloned())
                         .collect(),
                 );
                 for clause in &region {
@@ -440,8 +441,28 @@ impl<'d> Coverage<'_, 'd> {
                         )
                     })?;
                 }
-                for (key, held) in sources {
-                    let region = algebra.simplify(algebra.product(&region, held), &completion);
+                // A value a setter wrote is no field's: a demand reads it as the type name alone,
+                // as the router's planners write one under `__typename`.
+                let typename = *name == *INTROSPECTION_TYPENAME_FIELD_NAME;
+                if !typename {
+                    for (_, _, written) in sources {
+                        for clause in algebra.product(&region, written) {
+                            self.obligation(copy, &clause, &[], sink, |example| {
+                                Uncovered::at(format!(
+                                    "the representation sends `{name}` at {} as a value an input \
+                                     rewrite wrote, where `{name}` is asked",
+                                    describe_at(self.hypothesis, copy, example),
+                                ))
+                            })?;
+                        }
+                    }
+                }
+                for (key, read, written) in sources {
+                    let held: Region = match typename {
+                        true => read.iter().chain(written).cloned().collect(),
+                        false => read.clone(),
+                    };
+                    let region = algebra.simplify(algebra.product(&region, &held), &completion);
                     if region.is_empty() {
                         continue;
                     }

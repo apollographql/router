@@ -39,16 +39,18 @@
 //! inserts its value under the new name, replacing whatever the object held there; at an object
 //! not holding the key it does nothing. A `TypenameEquals` on the path tests the object it stands
 //! before by the `__typename` the representation holds there at that moment, and admits it where
-//! that is the type or a subtype, or where there is none (`is_object_of_type`). A value setter
-//! writes where the object holds its key; one writing `__typename` changes what later filters
-//! read. [`SentRepresentation`] follows the rewrites so, per configuration, over the locations the
+//! that is the type or a subtype, or where there is none (`is_object_of_type`). An index takes a
+//! list's elements and selects nothing at an object, and a renamer acts at an object or at each
+//! object of a list. A value setter writes at an object holding its key, never into a list's
+//! elements, its value replacing what the key held; one writing `__typename` changes what later
+//! filters read. [`SentRepresentation`] follows the rewrites so, per configuration, over the locations the
 //! representation holds: where each one now sits, whether it survives, and for one sitting under
 //! `__typename` what it holds there. A renamer moves only a location that is held, since it reaches
 //! a key through the keys above it, and a move replaces what it lands on, so one surviving location
-//! at most is sent under one path in a configuration. Three readings of a rewrite path are the
-//! router's only in part, and no planner writes them on an input rewrite: an index is passed over,
-//! where the router selects nothing at an object; a key's own type conditions are not read; and a
-//! value setter on any key but `__typename` is passed over.
+//! at most is sent under one path in a configuration; a value a setter wrote is read as the type
+//! name under `__typename` and as no field's value under any other name. Two readings of a rewrite
+//! path are the router's only in part, and no planner writes them on an input rewrite: a key's own
+//! type conditions are not read, and a value setter on any key but `__typename` is passed over.
 //!
 //! This departs from the model's `requireAgreesWithRewrites`, which rewrites an entry's selections
 //! by syntax, forwards as read and inverted as sent, wherever a renamer's path reaches, whether or
@@ -466,9 +468,82 @@ pub(super) fn check_inputs_available(
 // What the input rewrites send
 //==================================================================================================
 
-/// A rewrite path as the router follows it: each key with the `TypenameEquals` filters written
-/// before it. An index is passed over, and a key's own type conditions are not read.
-type Steps = Vec<(Vec<Name>, Name)>;
+/// A rewrite path as the router follows it: each key with the elements written before it. A key's
+/// own type conditions are not read.
+type Steps = Vec<Step>;
+
+/// One key of a rewrite path and what the path does at the value before it: the object the key's
+/// holder is, or the list of them its parent's key holds.
+struct Step {
+    before: Vec<Element>,
+    key: Name,
+}
+
+/// What a rewrite path does at a value before its next key.
+enum Element {
+    /// A `Flatten`: an array's elements, and nothing at an object.
+    Index,
+    /// A `Fragment`: the objects of an array, at any depth, or the object, its `__typename`
+    /// admitting the type.
+    Filter(Name),
+}
+
+impl Step {
+    fn filters(&self) -> Vec<Name> {
+        self.before
+            .iter()
+            .filter_map(|element| match element {
+                Element::Filter(name) => Some(name.clone()),
+                Element::Index => None,
+            })
+            .collect()
+    }
+}
+
+/// What the rewrite does where its path ends, which decides what value it can act at.
+#[derive(Clone, Copy)]
+enum Act {
+    /// A key renamer, which renames at an object or at each object of an array.
+    Rename,
+    /// A value setter, which writes at an object alone.
+    Set,
+}
+
+/// Does a path select anything at a value `depth` lists deep, through `before`, and, where `act` is
+/// what the rewrite does there, can it act at what it selects? A `Flatten` takes an array's
+/// elements and selects nothing at an object; a `Fragment` reaches the objects of an array at any
+/// depth (`iterate_path_mut`).
+fn selects(before: &[Element], depth: usize, act: Option<Act>) -> bool {
+    let mut depth = depth;
+    for element in before {
+        match element {
+            Element::Index if depth == 0 => return false,
+            Element::Index => depth -= 1,
+            Element::Filter(_) => depth = 0,
+        }
+    }
+    match act {
+        None => true,
+        Some(Act::Rename) => depth <= 1,
+        Some(Act::Set) => depth == 0,
+    }
+}
+
+/// How many lists deep a field's declared type is, `None` where the supergraph declares no such
+/// field.
+fn list_depth(supergraph: &ValidFederationSchema, parent: &Name, field: &Name) -> Option<usize> {
+    if *field == *INTROSPECTION_TYPENAME_FIELD_NAME {
+        return Some(0);
+    }
+    let definition = supergraph.schema().type_field(parent, field).ok()?;
+    let mut ty = &definition.ty;
+    let mut depth = 0;
+    while ty.is_list() {
+        depth += 1;
+        ty = ty.item_type();
+    }
+    Some(depth)
+}
 
 /// An input rewrite that moves a key or changes what a later filter reads.
 enum Rewrite {
@@ -500,14 +575,17 @@ impl Rewrite {
             return None;
         }
         let mut steps: Steps = Vec::new();
-        let mut filters: Vec<Name> = Vec::new();
+        let mut before: Vec<Element> = Vec::new();
         for element in path {
             match element {
-                FetchDataPathElement::Key(key, _) => {
-                    steps.push((std::mem::take(&mut filters), key.clone()));
+                FetchDataPathElement::Key(key, _) => steps.push(Step {
+                    before: std::mem::take(&mut before),
+                    key: key.clone(),
+                }),
+                FetchDataPathElement::TypenameEquals(type_name) => {
+                    before.push(Element::Filter(type_name.clone()))
                 }
-                FetchDataPathElement::TypenameEquals(type_name) => filters.push(type_name.clone()),
-                FetchDataPathElement::AnyIndex(_) => {}
+                FetchDataPathElement::AnyIndex(_) => before.push(Element::Index),
                 FetchDataPathElement::Parent => return None,
             }
         }
@@ -517,7 +595,7 @@ impl Rewrite {
                 to: renamer.rename_key_to.clone(),
             }),
             FetchDataRewrite::ValueSetter(setter) => {
-                let (_, key) = steps.last().expect("a path ending at a key");
+                let key = &steps.last().expect("a path ending at a key").key;
                 (*key == *INTROSPECTION_TYPENAME_FIELD_NAME).then(|| Rewrite::Typename {
                     value: match setter.set_value_to.as_str() {
                         Some(name) => Written::Name(name.to_owned()),
@@ -535,7 +613,8 @@ impl Rewrite {
 struct Placed {
     /// The keys it sits under, from the copy the fetch runs on.
     keys: Vec<Name>,
-    /// What a setter wrote under it, where it sat under `__typename`.
+    /// What a setter wrote under it, where it sat under `__typename`: the value that replaced what
+    /// it held, and what was below it.
     written: Option<Written>,
     clause: Clause,
 }
@@ -554,8 +633,9 @@ struct Followed {
 }
 
 /// The keys held at one copy that are sent under one path, each with the configurations it is
-/// sent there in.
-type Senders = Vec<(Name, Region)>;
+/// sent there in holding what the representation read, and those it is sent there in holding a
+/// value a setter wrote.
+type Senders = Vec<(Name, Region, Region)>;
 
 /// The representation an entity fetch sends, as its input rewrites leave it: at each copy, which
 /// of the keys the representation holds there is sent under which path of keys, and where.
@@ -567,10 +647,13 @@ type Senders = Vec<(Name, Region)>;
 /// it; the location the object held under the new name, with what is below it, no longer survives.
 /// A filter admits an object holding nothing under `__typename`; one holding the field
 /// `__typename` there, where its runtime type is among the filter's types; and one holding a value
-/// a setter wrote, where that value is the filter's type, a subtype of it, or no string. A value
-/// setter writing `__typename` writes, by the same reading, at the objects it reaches that hold
-/// `__typename`. A move replaces what it lands on, so one surviving location at most sits under one
-/// path in a configuration.
+/// a setter wrote, where that value is the filter's type, a subtype of it, or no string. An index
+/// takes a list's elements and selects nothing at an object, a filter reaches the objects of a
+/// list, and where the path ends a renamer renames at an object or at each object of a list and a
+/// setter writes at an object alone, as the value under each key is declared a list or not. A
+/// value setter writing `__typename` writes, by the same reading, at the objects it reaches that
+/// hold `__typename`, its value replacing what the location held. A move replaces what it lands
+/// on, so one surviving location at most sits under one path in a configuration.
 pub(super) struct SentRepresentation {
     sent: IndexMap<(CopyId, Vec<Name>), Senders>,
 }
@@ -579,7 +662,8 @@ impl SentRepresentation {
     /// Follows the input rewrites over the locations the representation holds (`held`, where
     /// `projection` has them present). A filter reading a location under `__typename` that holds
     /// another field is refused: the router's filter then reads that field's value at execution,
-    /// which the plan does not state.
+    /// which the plan does not state. So is a rewrite reaching a value whose field the supergraph
+    /// does not declare, whose list structure decides where it acts.
     pub(super) fn new(
         supergraph: &ValidFederationSchema,
         site: &Site<'_>,
@@ -592,6 +676,7 @@ impl SentRepresentation {
         let domain = every_object(algebra);
         let anchor = site.position.copy;
         let mut followed = Vec::new();
+        let mut depths: IndexMap<CopyId, Vec<(Option<usize>, Region)>> = IndexMap::default();
         for (copy, key) in projection.present.keys() {
             let fields: Vec<(Name, Region)> = held
                 .fields_at(*copy, key)
@@ -599,6 +684,17 @@ impl SentRepresentation {
                 .collect();
             if fields.is_empty() {
                 continue;
+            }
+            if let Some(child) = response.child(*copy, key) {
+                depths
+                    .entry(child)
+                    .or_default()
+                    .extend(held.fields_at(*copy, key).map(|field| {
+                        (
+                            list_depth(supergraph, &field.subgraph_parent, &field.field),
+                            field.guard.clone(),
+                        )
+                    }));
             }
             let chain = response.ancestors(*copy);
             let Some(start) = chain.iter().position(|ancestor| *ancestor == anchor) else {
@@ -636,6 +732,7 @@ impl SentRepresentation {
         let mut follower = Follower {
             supergraph,
             site,
+            depths,
             followed,
         };
         for rewrite in rewrites.iter().filter_map(|rewrite| Rewrite::read(rewrite)) {
@@ -645,9 +742,16 @@ impl SentRepresentation {
         for followed in follower.followed {
             for placed in followed.placed {
                 let at = sent.entry((followed.copy, placed.keys)).or_default();
-                match at.iter_mut().find(|(key, _)| *key == followed.key) {
-                    Some((_, region)) => region.push(placed.clause),
-                    None => at.push((followed.key.clone(), vec![placed.clause])),
+                let index = match at.iter().position(|(key, _, _)| *key == followed.key) {
+                    Some(index) => index,
+                    None => {
+                        at.push((followed.key.clone(), Vec::new(), Vec::new()));
+                        at.len() - 1
+                    }
+                };
+                match placed.written {
+                    None => at[index].1.push(placed.clause),
+                    Some(_) => at[index].2.push(placed.clause),
                 }
             }
         }
@@ -655,8 +759,9 @@ impl SentRepresentation {
     }
 
     /// The keys held at `copy` that are sent under `path`, the keys from the copy the fetch runs
-    /// on, each with the configurations it is sent in there.
-    pub(super) fn at(&self, copy: CopyId, path: &[Name]) -> &[(Name, Region)] {
+    /// on, each with the configurations it is sent in there holding what was read, and those it is
+    /// sent in holding a value a setter wrote.
+    pub(super) fn at(&self, copy: CopyId, path: &[Name]) -> &[(Name, Region, Region)] {
         self.sent
             .get(&(copy, path.to_vec()))
             .map(Vec::as_slice)
@@ -668,28 +773,32 @@ impl SentRepresentation {
 struct Follower<'f> {
     supergraph: &'f ValidFederationSchema,
     site: &'f Site<'f>,
+    /// How many lists deep the value of the key holding each copy is, by the fields the
+    /// representation holds there, each with its guard: an object, or a list of objects.
+    depths: IndexMap<CopyId, Vec<(Option<usize>, Region)>>,
     followed: Vec<Followed>,
 }
 
-/// Where the filters written before each key admit the object holding it and where they refuse it,
-/// by the level of the key and the object: read once per rewrite.
+/// Where the path selects the object holding each key, its filters admitting it, and where it does
+/// not, by the level of the key and the object: read once per rewrite.
 type Filtered = IndexMap<(usize, CopyId), (Region, Region)>;
 
 impl Follower<'_> {
     fn apply(&mut self, rewrite: &Rewrite) -> Result<(), ComparisonError> {
         let algebra = self.site.hypothesis.algebra;
         let domain = every_object(algebra);
-        let (steps, to, value) = match rewrite {
-            Rewrite::Rename { steps, to } => (steps, Some(to), None),
-            Rewrite::Typename { steps, value } => (steps, None, Some(value)),
+        let (steps, to, value, act) = match rewrite {
+            Rewrite::Rename { steps, to } => (steps, Some(to), None, Act::Rename),
+            Rewrite::Typename { steps, value } => (steps, None, Some(value), Act::Set),
         };
         let depth = steps.len();
         // A key renamed to itself is removed and inserted again: nothing moves.
-        if to.is_some_and(|to| *to == steps[depth - 1].1) {
+        if to.is_some_and(|to| *to == steps[depth - 1].key) {
             return Ok(());
         }
-        let reaches =
-            |keys: &[Name]| keys.len() >= depth && steps.iter().zip(keys).all(|((_, s), k)| s == k);
+        let reaches = |keys: &[Name]| {
+            keys.len() >= depth && steps.iter().zip(keys).all(|(step, key)| step.key == *key)
+        };
         let mut filtered = Filtered::default();
         // What each placement the rewrite reaches does, read from the representation as the
         // rewrites before it left it: where the filters admit it and where they refuse it.
@@ -710,7 +819,7 @@ impl Follower<'_> {
                     continue;
                 }
                 let split =
-                    self.admission(&mut filtered, &followed.holders, steps, &placed.clause)?;
+                    self.admission(&mut filtered, &followed.holders, steps, act, &placed.clause)?;
                 if to.is_some() && placed.keys.len() == depth {
                     moving
                         .entry(followed.holders[depth - 1])
@@ -759,7 +868,7 @@ impl Follower<'_> {
                             && steps[..depth - 1]
                                 .iter()
                                 .zip(&at.keys)
-                                .all(|((_, s), k)| s == k);
+                                .all(|(step, key)| step.key == *key);
                         let replaced = lands
                             .then(|| moving.get(&followed.holders[depth - 1]))
                             .flatten();
@@ -784,26 +893,51 @@ impl Follower<'_> {
         Ok(())
     }
 
-    /// Where every filter of `steps` admits the holder it tests, and where one refuses it, within
-    /// `clause`.
+    /// Where the path of `steps` selects each holder it reaches and every filter admits it, so that
+    /// the rewrite acts there, and where it does not, within `clause`.
     fn admission(
         &self,
         filtered: &mut Filtered,
         holders: &[CopyId],
         steps: &Steps,
+        act: Act,
         clause: &Clause,
     ) -> Result<(Region, Region), ComparisonError> {
         let algebra = self.site.hypothesis.algebra;
         let domain = every_object(algebra);
         let mut admits: Region = vec![clause.clone()];
         let mut refuses: Region = Vec::new();
-        for (level, (filters, _)) in steps.iter().enumerate() {
-            if filters.is_empty() {
+        for (level, step) in steps.iter().enumerate() {
+            let last = (level + 1 == steps.len()).then_some(act);
+            let structural = step
+                .before
+                .iter()
+                .any(|element| matches!(element, Element::Index))
+                || last.is_some();
+            let filters = step.filters();
+            if filters.is_empty() && !structural {
                 continue;
             }
             let holder = holders[level];
             if !filtered.contains_key(&(level, holder)) {
-                let read = self.filter(holder, filters)?;
+                let (selected, unselected) = match structural {
+                    true => self.structure(holder, &step.before, last)?,
+                    false => (everything(), Vec::new()),
+                };
+                let (admitted, refused) = match filters.is_empty() {
+                    true => (everything(), Vec::new()),
+                    false => self.filter(holder, &filters)?,
+                };
+                let read = (
+                    algebra.simplify(algebra.product(&selected, &admitted), &domain),
+                    algebra.simplify(
+                        unselected
+                            .into_iter()
+                            .chain(algebra.product(&selected, &refused))
+                            .collect(),
+                        &domain,
+                    ),
+                );
                 filtered.insert((level, holder), read);
             }
             let (admitted, refused) = &filtered[&(level, holder)];
@@ -814,6 +948,40 @@ impl Follower<'_> {
             algebra.simplify(admits, &domain),
             algebra.simplify(refuses, &domain),
         ))
+    }
+
+    /// Where the path's elements `before` a key, read at the value holding the object `holder`,
+    /// select it, so that a later key or, where `last` is the rewrite's act, the rewrite itself
+    /// reaches it, and where they select nothing: by how many lists deep that value is declared.
+    /// The representation's own object is no list.
+    fn structure(
+        &self,
+        holder: CopyId,
+        before: &[Element],
+        last: Option<Act>,
+    ) -> Result<(Region, Region), ComparisonError> {
+        let response = self.site.hypothesis.view.response;
+        let depths = match holder == self.site.position.copy {
+            true => vec![(Some(0), everything())],
+            false => self.depths.get(&holder).cloned().unwrap_or_default(),
+        };
+        let algebra = self.site.hypothesis.algebra;
+        let mut selected = Vec::new();
+        for (depth, region) in depths {
+            let Some(depth) = depth else {
+                return Err(ComparisonError::new(format!(
+                    "fetch to {}: an input rewrite reaches {}, where the supergraph declares no \
+                     field whose list structure the checker can read",
+                    self.site.fetch.subgraph_name,
+                    response.describe(holder),
+                )));
+            };
+            if selects(before, depth, last) {
+                selected.extend(region);
+            }
+        }
+        let unselected = algebra.subtract_all(everything(), &selected, &every_object(algebra));
+        Ok((selected, unselected))
     }
 
     /// Where `filters` admit the object `holder` and where they refuse it, by what the
