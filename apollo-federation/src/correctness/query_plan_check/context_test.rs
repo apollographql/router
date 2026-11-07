@@ -213,7 +213,9 @@ fn context_met(
         context_rewrites: rewrites,
         protocol: Default::default(),
     };
-    // Outside a deferred block, what a fetch can read is everything fetched before it.
+    // Outside a deferred block, what a fetch can read is everything fetched before it. Every path
+    // here ends at a `U`, so the `requires` is taken as written at `U`: written at another type, it
+    // would leave the fetch running nowhere.
     check_context_rewrites(
         &schema,
         &name!("Query"),
@@ -222,6 +224,7 @@ fn context_met(
         &available,
         &available,
         &fetch,
+        &[name!("U")],
     )
     .is_ok()
 }

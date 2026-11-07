@@ -16,8 +16,7 @@ use super::super::representation::key_guards;
 use super::super::requires::Reading;
 use super::super::requires::entry_selections;
 use super::super::requires::same_keys;
-use super::super::selections::apply_key_renamers;
-use super::super::selections::type_filter_admits;
+use super::super::selections::apply_output_renamers;
 use super::Fixture;
 use crate::correctness::CorrectnessError;
 use crate::query_plan::FetchDataPathElement;
@@ -682,7 +681,9 @@ fn case_excluding_the_object_in_the_subgraph_is_rejected() {
 // A renamer's type filter
 
 // `rename_at_path` tests a `TypenameEquals` before descending past the key after it, so a renamer
-// written `|Book.a.b` renames `b` below a `Book`'s `a` and not below a `Film`'s.
+// written `|Book.a.b` renames `b` below a `Book`'s `a` and not below a `Film`'s, whose
+// `__typename` the fetch selected. Without one, `is_object_of_type` passes the `Film` too. The
+// model's `typenameEqualsFiltersTheDescent` and `typenameEqualsWithoutTypenameRenamesEverywhere`.
 #[test]
 fn typename_equals_filters_the_descent() {
     let schema = Schema::parse_and_validate(
@@ -717,15 +718,16 @@ fn typename_equals_filters_the_descent() {
         "c",
     ))
     .unwrap();
-    let renamed = apply_key_renamers(
-        &schema,
-        type_filter_admits,
-        &[rewrite.into()],
-        feed("{ feed { ... on Book { a { b } } ... on Film { a { b } } } }"),
-    );
+    let rewrites = [rewrite.into()];
+    let renamed =
+        |operation: &str| apply_output_renamers(&schema, None, &rewrites, feed(operation));
     assert!(same_keys(
-        &renamed,
-        &feed("{ feed { ... on Book { a { c: b } } ... on Film { a { b } } } }"),
+        &renamed("{ feed { __typename ... on Book { a { b } } ... on Film { a { b } } } }"),
+        &feed("{ feed { __typename ... on Book { a { c: b } } ... on Film { a { b } } } }"),
+    ));
+    assert!(same_keys(
+        &renamed("{ feed { ... on Book { a { b } } ... on Film { a { b } } } }"),
+        &feed("{ feed { ... on Book { a { c: b } } ... on Film { a { c: b } } } }"),
     ));
 }
 

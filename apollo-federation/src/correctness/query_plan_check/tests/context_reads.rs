@@ -225,32 +225,58 @@ fn owner_profile_fixture() -> Fixture {
 /// it through its store.
 fn owner_price_plan(owners: &str) -> String {
     sequence(&[
-        root_fetch(
-            "stores",
-            "{ stores { __typename owner { __typename ... on Owner { profile { __typename id } } } \
-             products { __typename id } } }",
-        ),
-        entity_fetch(
-            &format!(
-                r#"{{ "Key": ["stores", null] }}, {{ "AnyIndex": null }}, {{ "Key": ["owner", [{owners}]] }}, {{ "Key": ["profile", null] }}"#
-            ),
-            "profiles",
-            "Profile",
-            "locale",
-            "[]",
-            &[],
-        ),
-        entity_fetch(
-            r#"{ "Key": ["stores", null] }, { "AnyIndex": null }, { "Key": ["products", null] }, { "AnyIndex": null }"#,
-            "stores",
-            "Product",
-            "price(locale: $contextual)",
-            "[]",
-            &[contextual(
-                r#""Parent", { "TypenameEquals": "Store" }, { "Key": ["owner", null] }, { "Key": ["profile", null] }, { "Key": ["locale", null] }"#,
-            )],
-        ),
+        owner_stores_fetch(),
+        locale_fetch(owners),
+        owner_price_fetch(),
     ])
+}
+
+/// [`owner_price_plan`] with the root fetch selecting `profiles` under each owner.
+fn owner_price_plan_selecting(profiles: &str, owners: &str) -> String {
+    sequence(&[
+        stores_fetch(profiles),
+        locale_fetch(owners),
+        owner_price_fetch(),
+    ])
+}
+
+/// The root fetch, selecting `profiles` under each store's owner.
+fn stores_fetch(profiles: &str) -> String {
+    root_fetch(
+        "stores",
+        &format!(
+            "{{ stores {{ __typename owner {{ __typename {profiles} }} \
+             products {{ __typename id }} }} }}"
+        ),
+    )
+}
+
+/// The profile's `locale`, fetched for the owners of the types `owners` names.
+fn locale_fetch(owners: &str) -> String {
+    entity_fetch(
+        &format!(
+            r#"{{ "Key": ["stores", null] }}, {{ "AnyIndex": null }}, {{ "Key": ["owner", [{owners}]] }}, {{ "Key": ["profile", null] }}"#
+        ),
+        "profiles",
+        "Profile",
+        "locale",
+        "[]",
+        &[],
+    )
+}
+
+/// Every product's `price`, its `locale` read off its store's owner's profile through the store.
+fn owner_price_fetch() -> String {
+    entity_fetch(
+        r#"{ "Key": ["stores", null] }, { "AnyIndex": null }, { "Key": ["products", null] }, { "AnyIndex": null }"#,
+        "stores",
+        "Product",
+        "price(locale: $contextual)",
+        "[]",
+        &[contextual(
+            r#""Parent", { "TypenameEquals": "Store" }, { "Key": ["owner", null] }, { "Key": ["profile", null] }, { "Key": ["locale", null] }"#,
+        )],
+    )
 }
 
 fn check_every_store_price(fixture: &Fixture, plan: &str) -> Result<(), CorrectnessError> {
@@ -263,7 +289,8 @@ fn check_every_store_price(fixture: &Fixture, plan: &str) -> Result<(), Correctn
 // `owner|[Person, Company]` admits every owner, so the router fetches `locale` for every
 // profile, and each product reads it off its own store whatever the owner is. The root fetch's
 // fragment on `Owner` reaches exactly those two types, so the value sits under that fragment once,
-// rather than once per type the path names.
+// rather than once per type the path names; guarding it by both names would mount a copy narrowed
+// to each instead, siblings that serve the same (`split_owner_context_is_accepted`).
 #[test]
 fn context_value_under_a_fragment_stating_its_condition_is_accepted() {
     let fixture = owner_profile_fixture();
@@ -278,6 +305,83 @@ fn context_value_missing_for_one_owner_type_is_rejected() {
     let fixture = owner_profile_fixture();
     let error = check_every_store_price(&fixture, &owner_price_plan(r#""Person""#))
         .expect_err("a company's products are sent no `locale`");
+    assert_context_value_missing(error, "Store");
+}
+
+/// Each owner's profile key selected separately under `Person` and under `Company`.
+const SPLIT_PROFILES: &str = "... on Person { profile { __typename id } } \
+                              ... on Company { profile { __typename id } }";
+
+// The `locale` fetched for both owner types under the separate selections: each copy is narrowed
+// to its owner type past the levels the two paths share, but the two are siblings, alike but at
+// the owner, and together serve every product.
+#[test]
+fn split_owner_context_is_accepted() {
+    let fixture = owner_profile_fixture();
+    check_every_store_price(
+        &fixture,
+        &owner_price_plan_selecting(SPLIT_PROFILES, r#""Person", "Company""#),
+    )
+    .unwrap();
+}
+
+// The `locale` fetched under the separate selections for a `Person` alone: a company's products
+// are sent none, and the `Person` copy has no sibling to cover them.
+#[test]
+fn missing_owner_context_is_rejected() {
+    let fixture = owner_profile_fixture();
+    let error = check_every_store_price(
+        &fixture,
+        &owner_price_plan_selecting(SPLIT_PROFILES, r#""Person""#),
+    )
+    .expect_err("a company's products are sent no `locale`");
+    assert_context_value_missing(error, "Store");
+}
+
+/// The root fetch, the `locale` for persons, then `company`, then every price: one `locale` fetch
+/// per owner type.
+fn locale_per_owner_plan(company: &str) -> String {
+    sequence(&[
+        owner_stores_fetch(),
+        locale_fetch(r#""Person""#),
+        company.to_string(),
+        owner_price_fetch(),
+    ])
+}
+
+/// The root fetch selecting each owner's profile key inside a fragment on `Owner`.
+fn owner_stores_fetch() -> String {
+    stores_fetch("... on Owner { profile { __typename id } }")
+}
+
+// Each fetch mounts the `locale` under its own path condition, a copy narrowed to its owner type;
+// the two are siblings and together serve every product.
+#[test]
+fn locale_fetched_per_owner_type_is_accepted() {
+    let fixture = owner_profile_fixture();
+    check_every_store_price(
+        &fixture,
+        &locale_per_owner_plan(&locale_fetch(r#""Company""#)),
+    )
+    .unwrap();
+}
+
+// The companies' `locale` fetched only where `$company` is true: the two copies are guarded
+// differently, so they are no siblings, and where `$company` is false a company's products are
+// sent none.
+#[test]
+fn locale_fetched_per_owner_type_under_different_guards_is_rejected() {
+    let fixture = owner_profile_fixture();
+    let company = format!(
+        r#"{{ "Condition": {{
+            "condition_variable": "company",
+            "if_clause": {},
+            "else_clause": null
+        }} }}"#,
+        locale_fetch(r#""Company""#)
+    );
+    let error = check_every_store_price(&fixture, &locale_per_owner_plan(&company))
+        .expect_err("where `$company` is false a company's products are sent no `locale`");
     assert_context_value_missing(error, "Store");
 }
 
