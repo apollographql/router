@@ -82,3 +82,37 @@ This image is recommended only for Kubernetes-based deployments, and is used by 
 Running the Apollo Router directly from its binary speeds up local development and enables embedded use cases where containers are unavailable. 
 
 Follow the [quickstart](/graphos/routing/get-started) to run a router binary.
+
+## Troubleshooting
+
+### Certificate validation errors or "invalid license" failures
+
+**Symptom:** The router logs show `certificate verify failed` or `invalid license` errors at startup, or the router repeatedly fails to fetch the supergraph schema.
+
+**Cause:** A transparent or egress proxy (such as Zscaler or Netskope) is intercepting TLS connections between the router and Apollo Uplink. The router rejects the proxy's certificate because it's not in its trust store.
+
+**Resolution:** Add your proxy's root CA certificate to your container image. See [HTTP proxy configuration](/graphos/routing/self-hosted/containerization/proxy-certificates) for step-by-step instructions.
+
+### OOMKilled pods
+
+**Symptom:** Kubernetes terminates the router pod with an `OOMKilled` exit reason. Running `kubectl describe pod <pod-name>` shows `Reason: OOMKilled` and the pod restarts repeatedly.
+
+**Cause:** The router's memory limit is too low for the traffic volume or operation complexity it's handling.
+
+**Resolution:** Start with a memory limit of `2G` and no CPU limit, then tune based on observed usage. See [Managing router resources in Kubernetes](/graphos/routing/self-hosted/resource-management) for recommended starting values and guidance on setting horizontal pod autoscaling targets.
+
+### Health check failures
+
+**Symptom:** The router pod is running but the load balancer or Kubernetes liveness probe marks it unhealthy, causing the pod to be removed from rotation or restarted.
+
+**Cause:** The load balancer or probe is hitting the wrong port or path. By default, the router's health check endpoint listens on port `8088` at `/health`. If your infrastructure expects a different port or path, the check will fail even when the router is healthy.
+
+**Resolution:** Verify the router is reachable at `http://<router-host>:8088/health`. If you need a different port or path, configure `health_check` in your `router.yaml`:
+
+```yaml title="router.yaml"
+health_check:
+  listen: 127.0.0.1:8090
+  path: /healthz
+```
+
+See [Health checks](/graphos/routing/self-hosted/health-checks) for full configuration options and how to test the endpoint with `curl`.
