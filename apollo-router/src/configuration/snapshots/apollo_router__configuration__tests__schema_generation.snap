@@ -349,6 +349,63 @@ expression: "&schema"
       },
       "type": "object"
     },
+    "ArtifactReference": {
+      "additionalProperties": false,
+      "description": "One artifact slot.",
+      "properties": {
+        "reference": {
+          "description": "An OCI reference: `<repository>:<tag>` or `<repository>@sha256:<digest>`, relative to the\nregistry's host and prefix. A reference whose first path segment is a host (it contains\na `.` or a `:`, or is `localhost`) is taken as absolute and used as written.",
+          "type": "string"
+        }
+      },
+      "required": [
+        "reference"
+      ],
+      "type": "object"
+    },
+    "Artifacts": {
+      "additionalProperties": false,
+      "description": "The artifact filling each slot. Every reference is relative to `registry.host` and\n`registry.prefix` unless it names a host itself.",
+      "properties": {
+        "entitlement": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/ArtifactReference"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "The entitlement artifact carrying the router's license. Normally unset: the router reads\nthe entitlement identifier off the graph artifact's manifest and fetches\n`entitlements/<id>:latest` next to it. Set it only to point the license at a different\nrepository than that derivation gives."
+        },
+        "graph": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/ArtifactReference"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "The graph artifact carrying the supergraph schema: `<graph>:<variant>` to follow the\nvariant, or `<graph>@sha256:<digest>` to pin a launch. The same artifact\n`APOLLO_GRAPH_ARTIFACT_REFERENCE` names; the environment variable overrides this slot."
+        },
+        "persisted_queries": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/ArtifactReference"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "The persisted-queries artifact: `persistedqueries/<graph>:<variant>` to follow the\nvariant's persisted query list, or a digest to pin a revision. Tag references are always\nfollowed, independently of `--hot-reload`. Unset, persisted queries come from Apollo\nUplink (or `persisted_queries.local_manifests`, which takes precedence over both)."
+        }
+      },
+      "type": "object"
+    },
     "AssumeRoleProvider": {
       "additionalProperties": false,
       "description": "Specify assumed role configuration.",
@@ -7933,6 +7990,78 @@ expression: "&schema"
       ],
       "type": "object"
     },
+    "Registry": {
+      "additionalProperties": false,
+      "description": "Where the router fetches its artifacts from.",
+      "properties": {
+        "artifacts": {
+          "$ref": "#/$defs/Artifacts",
+          "default": {
+            "entitlement": null,
+            "graph": null,
+            "persisted_queries": null
+          },
+          "description": "The artifacts to fetch, by slot."
+        },
+        "auth": {
+          "$ref": "#/$defs/RegistryAuthMode",
+          "default": "auto",
+          "description": "How the router authenticates to the registry. `auto` (the default) sends the graph API key\nto an Apollo-hosted registry and uses the Docker credential store for any other host."
+        },
+        "host": {
+          "default": null,
+          "description": "The registry host, with an optional port: Apollo's `artifact.api.apollographql.com` when\nunset, or a pull-through cache or mirror of it such as `mirror.internal:5000`.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "insecure": {
+          "default": false,
+          "description": "Use plain HTTP instead of HTTPS for this registry (a local or in-cluster cache without\nTLS). Never set this for a registry reached over the public internet.",
+          "type": "boolean"
+        },
+        "poll_interval": {
+          "default": null,
+          "description": "How often tag references are checked for a new version, as a duration such as `30s`.\nDefaults to 30 seconds.",
+          "type": "string"
+        },
+        "prefix": {
+          "default": null,
+          "description": "The path under which the registry mounts Apollo's repositories, for caches that place an\nupstream under a prefix (`apollo-remote` makes the graph artifact\n`mirror.internal/apollo-remote/<graph>:<variant>`). Unset for a registry that mounts them\nat its root, like Apollo's own.",
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "type": "object"
+    },
+    "RegistryAuthMode": {
+      "description": "How the router authenticates to an OCI registry.",
+      "oneOf": [
+        {
+          "const": "auto",
+          "description": "Send the graph API key to an Apollo-hosted registry; use the Docker credential store for\nany other host.",
+          "type": "string"
+        },
+        {
+          "const": "apollo_key",
+          "description": "Always send the graph API key, for a proxy or mirror that forwards to Apollo's registry\nunder another hostname.",
+          "type": "string"
+        },
+        {
+          "const": "docker_credentials",
+          "description": "Always use the Docker credential store (`~/.docker/config.json` and credential helpers).",
+          "type": "string"
+        },
+        {
+          "const": "anonymous",
+          "description": "Send no credentials.",
+          "type": "string"
+        }
+      ]
+    },
     "Reload": {
       "additionalProperties": false,
       "description": "Configuration for router reload behavior.",
@@ -12336,6 +12465,22 @@ expression: "&schema"
     },
     "progressive_override": {
       "$ref": "#/$defs/Config5"
+    },
+    "registry": {
+      "$ref": "#/$defs/Registry",
+      "default": {
+        "artifacts": {
+          "entitlement": null,
+          "graph": null,
+          "persisted_queries": null
+        },
+        "auth": "auto",
+        "host": null,
+        "insecure": false,
+        "poll_interval": null,
+        "prefix": null
+      },
+      "description": "Where the router's artifacts (graph, persisted queries, entitlement) are fetched from."
     },
     "reload": {
       "$ref": "#/$defs/Reload",

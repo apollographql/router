@@ -55,6 +55,9 @@ use self::expansion::Expansion;
 pub(crate) use self::plugin_configs::ApolloPlugins;
 pub(crate) use self::plugin_configs::ParsedPlugin;
 pub(crate) use self::plugin_configs::UserPlugins;
+use self::registry::Registry;
+pub use self::registry::RegistryOverrides;
+use self::registry::ResolvedRegistry;
 pub(crate) use self::schema::generate_config_schema;
 pub(crate) use self::schema::generate_upgrade;
 use self::server::Server;
@@ -86,6 +89,7 @@ pub(crate) mod metrics;
 pub(crate) mod mode;
 mod persisted_queries;
 pub(crate) mod plugin_configs;
+pub(crate) mod registry;
 pub(crate) mod schema;
 pub(crate) mod server;
 pub(crate) mod shared;
@@ -240,6 +244,16 @@ pub struct Configuration {
     #[serde(skip)]
     pub uplink: Option<UplinkConfig>,
 
+    /// Where the router's artifacts (graph, persisted queries, entitlement) are fetched from.
+    #[serde(default)]
+    pub(crate) registry: Registry,
+
+    /// `registry` resolved against the CLI and environment inputs the router was started with
+    /// (see [`Configuration::resolve_registry`]). Not user configuration: computed on every
+    /// configuration instance, so a reload that changes the section rebuilds the pollers.
+    #[serde(skip)]
+    pub(crate) resolved_registry: ResolvedRegistry,
+
     // FIXME(@goto-bus-stop): Sticking this on Configuration is a serious hack just to have
     // it available everywhere, it is actually not configuration at all
     #[serde(default, skip_serializing, skip_deserializing)]
@@ -303,6 +317,7 @@ impl Configuration {
         persisted_query: Option<PersistedQueries>,
         operation_limits: Option<limits::Config>,
         uplink: Option<UplinkConfig>,
+        resolved_registry: Option<ResolvedRegistry>,
         experimental_type_conditioned_fetching: Option<bool>,
         experimental_hoist_orphan_errors: Option<SubgraphConfiguration<HoistOrphanErrors>>,
         batching: Option<Batching>,
@@ -328,6 +343,8 @@ impl Configuration {
             apollo_plugins,
             tls: tls.unwrap_or_default(),
             uplink,
+            registry: Default::default(),
+            resolved_registry: resolved_registry.unwrap_or_default(),
             batching: batching.unwrap_or_default(),
             experimental_type_conditioned_fetching: experimental_type_conditioned_fetching
                 .unwrap_or_default(),
@@ -381,6 +398,8 @@ impl Configuration {
             plugins: Default::default(),
             apollo_plugins: Default::default(),
             uplink: None,
+            registry: Default::default(),
+            resolved_registry: Default::default(),
             // Replaced once the document's subscription section, if any, has been read.
             notify: Self::notify(&ApolloPlugins::default())
                 .expect("without a subscription section there is no config to read"),
@@ -567,6 +586,7 @@ impl Configuration {
         persisted_query: Option<PersistedQueries>,
         operation_limits: Option<limits::Config>,
         uplink: Option<UplinkConfig>,
+        resolved_registry: Option<ResolvedRegistry>,
         batching: Option<Batching>,
         experimental_type_conditioned_fetching: Option<bool>,
         server: Option<Server>,
@@ -589,6 +609,8 @@ impl Configuration {
             apq: apq.unwrap_or_default(),
             persisted_queries: persisted_query.unwrap_or_default(),
             uplink,
+            registry: Default::default(),
+            resolved_registry: resolved_registry.unwrap_or_default(),
             experimental_type_conditioned_fetching: experimental_type_conditioned_fetching
                 .unwrap_or_default(),
             experimental_hoist_orphan_errors: Default::default(),
@@ -1818,4 +1840,17 @@ pub(crate) struct HoistOrphanErrors {
     /// Enable hoisting of orphan errors for this subgraph.
     #[serde(default)]
     pub(crate) enabled: bool,
+}
+
+impl Configuration {
+    /// Resolve the `registry` section against the CLI flags and environment variables it is
+    /// combined with, filling [`Configuration::resolved_registry`]. Called on every configuration
+    /// instance before it is applied; an error means the section is unusable as written.
+    pub(crate) fn resolve_registry(
+        &mut self,
+        overrides: &RegistryOverrides,
+    ) -> Result<(), ConfigurationError> {
+        self.resolved_registry = self.registry.resolve(overrides)?;
+        Ok(())
+    }
 }

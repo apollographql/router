@@ -323,6 +323,7 @@ fred = { version = "10.1.0", features = [
     "tcp-user-timeouts",
     "replicas",
 ] }
+flate2 = "1.0.30"
 futures-test = "0.3.30"
 insta.workspace = true
 jsonschema = { version = "0.60.0", default-features = false }

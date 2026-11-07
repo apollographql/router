@@ -26,16 +26,16 @@ use url::Url;
 use crate::LicenseSource;
 use crate::configuration::AutomaticUpgrade;
 use crate::configuration::ConfigurationParser;
+use crate::configuration::RegistryOverrides;
 use crate::configuration::generate_config_schema;
 use crate::configuration::generate_upgrade;
+use crate::configuration::registry::Registry;
 use crate::metrics::meter_provider_internal;
 use crate::plugin::plugins;
 use crate::plugins::telemetry::reload::otel::init_telemetry;
 use crate::plugins::telemetry::reload::otel::shutdown_installed_tracer_provider;
 use crate::registry::OciConfig;
 use crate::registry::is_apollo_graph_artifact_reference;
-use crate::registry::should_use_ssl;
-use crate::registry::validate_oci_reference;
 use crate::router::ConfigurationSource;
 use crate::router::RouterHttpServer;
 use crate::router::SchemaSource;
@@ -56,7 +56,6 @@ pub(crate) static APOLLO_ROUTER_LICENSE_SOURCE: Mutex<Option<String>> = Mutex::n
 pub(crate) static APOLLO_ROUTER_HOT_RELOAD_CLI: AtomicBool = AtomicBool::new(false);
 
 const INITIAL_UPLINK_POLL_INTERVAL: Duration = Duration::from_secs(10);
-const INITIAL_OCI_POLL_INTERVAL: Duration = Duration::from_secs(30);
 
 const FORBIDDEN_OTEL_VARS: [&str; 3] = [
     "OTEL_EXPORTER_OTLP_ENDPOINT",
@@ -247,45 +246,33 @@ impl Opt {
         })
     }
 
-    pub(crate) fn oci_config(&self) -> Result<OciConfig, anyhow::Error> {
-        let graph_artifact_reference = self
-            .graph_artifact_reference
-            .clone()
-            .ok_or(Self::err_require_opt("APOLLO_GRAPH_ARTIFACT_REFERENCE"))?;
-        let (validated_reference, _) = validate_oci_reference(&graph_artifact_reference)?;
-
-        // Allow test-only override of poll interval via TEST_APOLLO_OCI_POLL_INTERVAL environment variable
-        let poll_interval = std::env::var("TEST_APOLLO_OCI_POLL_INTERVAL")
-            .ok()
-            .and_then(|s| {
-                s.parse::<u64>()
-                    .ok()
-                    .filter(|&val| (1..=60).contains(&val))
-                    .map(Duration::from_secs)
-            })
-            .unwrap_or(INITIAL_OCI_POLL_INTERVAL);
-
-        let use_ssl = should_use_ssl(&validated_reference);
-
-        // `APOLLO_KEY` is only required to authenticate with Apollo's own registry.
-        // A non-Apollo OCI registry should not require a GraphOS account.
-        let apollo_key = if is_apollo_graph_artifact_reference(&validated_reference) {
-            Some(
-                self.apollo_key
-                    .clone()
-                    .ok_or(Self::err_require_opt("APOLLO_KEY"))?,
-            )
-        } else {
-            self.apollo_key.clone()
-        };
-
-        Ok(OciConfig {
-            apollo_key,
-            reference: validated_reference,
+    /// The CLI and environment inputs the configuration's `registry` section is resolved
+    /// against.
+    pub(crate) fn registry_overrides(&self) -> RegistryOverrides {
+        RegistryOverrides {
+            graph_reference: self.graph_artifact_reference.clone(),
+            apollo_key: self.apollo_key.clone(),
             hot_reload: self.hot_reload,
-            poll_interval,
-            use_ssl,
-        })
+            // Test-only override of the poll interval, in whole seconds.
+            poll_interval: std::env::var("TEST_APOLLO_OCI_POLL_INTERVAL")
+                .ok()
+                .and_then(|s| {
+                    s.parse::<u64>()
+                        .ok()
+                        .filter(|&val| (1..=60).contains(&val))
+                        .map(Duration::from_secs)
+                }),
+        }
+    }
+
+    /// The graph artifact named by `APOLLO_GRAPH_ARTIFACT_REFERENCE`, resolved the same way the
+    /// configuration's `registry` section would resolve it: `APOLLO_KEY` is only required when
+    /// the reference points at an Apollo-hosted registry.
+    pub(crate) fn oci_config(&self) -> Result<OciConfig, anyhow::Error> {
+        Registry::default()
+            .resolve(&self.registry_overrides())?
+            .graph
+            .ok_or(Self::err_require_opt("APOLLO_GRAPH_ARTIFACT_REFERENCE"))
     }
 
     /// Order of precedence for licenses:
@@ -302,6 +289,7 @@ impl Opt {
     pub(crate) fn license_source(
         &self,
         current_directory: &std::path::Path,
+        registry_from_configuration: bool,
     ) -> Result<LicenseSource, anyhow::Error> {
         // Validate that license sources are not conflicting. This only applies to
         // Apollo-hosted graph artifact references: those are expected to carry an
@@ -344,6 +332,10 @@ impl Opt {
                     }
                 }
                 (Some(_license), _, _, _, _) => LicenseSource::Env,
+                // The graph artifact comes from router.yaml, so its entitlement does too.
+                (_, _, None, _, _) if registry_from_configuration => {
+                    LicenseSource::FromRegistryConfiguration
+                }
                 (_, _, Some(_graph_artifact_reference), _, _) => {
                     LicenseSource::OCI(self.oci_config()?)
                 }
@@ -372,6 +364,74 @@ impl Opt {
     fn prohibit_env_vars(env_vars: &[&'static str]) -> Result<(), anyhow::Error> {
         reject_environment_variables(&env_variables_set(env_vars))
     }
+}
+
+/// Read `APOLLO_KEY_PATH`, refusing a file that other users can read or that the router's user
+/// does not own.
+fn read_apollo_key_file(
+    current_directory: &Path,
+    apollo_key_path: &Path,
+) -> Result<String, anyhow::Error> {
+    let apollo_key_path = if apollo_key_path.is_relative() {
+        current_directory.join(apollo_key_path)
+    } else {
+        apollo_key_path.to_path_buf()
+    };
+
+    if !apollo_key_path.exists() {
+        tracing::error!(
+            "Apollo key at path '{}' does not exist.",
+            apollo_key_path.to_string_lossy()
+        );
+        return Err(anyhow!(
+            "Apollo key at path '{}' does not exist.",
+            apollo_key_path.to_string_lossy()
+        ));
+    }
+    // On unix systems, Check that the executing user is the only user who may
+    // read the key file.
+    // Note: We could, in future, add support for Windows.
+    #[cfg(unix)]
+    {
+        let meta = std::fs::metadata(apollo_key_path.clone())
+            .map_err(|err| anyhow!("Failed to read Apollo key file: {}", err))?;
+        let mode = meta.mode();
+        // If our mode isn't "safe", fail...
+        // safe == none of the "group" or "other" bits set.
+        if mode & 0o077 != 0 {
+            return Err(anyhow!(
+                "Apollo key file permissions ({:#o}) are too permissive",
+                mode & 0o000777
+            ));
+        }
+        let euid = unsafe { libc::geteuid() };
+        let owner = meta.uid();
+        if euid != owner {
+            return Err(anyhow!(
+                "Apollo key file owner id ({owner}) does not match effective user id ({euid})"
+            ));
+        }
+    }
+    std::fs::read_to_string(&apollo_key_path)
+        .map(|apollo_key| apollo_key.trim().to_string())
+        .map_err(|err| anyhow!("Failed to read Apollo key file: {}", err))
+}
+
+/// Whether the configuration file at `path` declares `registry.artifacts.graph`. A cheap probe
+/// of the document, before it is parsed for real, so the schema source can be chosen at
+/// startup; anything unreadable here is reported by the real parse.
+fn config_declares_registry_graph(path: &Path) -> bool {
+    std::fs::read_to_string(path)
+        .ok()
+        .and_then(|text| serde_yaml::from_str::<serde_yaml::Value>(&text).ok())
+        .and_then(|document| {
+            document
+                .get("registry")?
+                .get("artifacts")?
+                .get("graph")
+                .cloned()
+        })
+        .is_some_and(|graph| !graph.is_null())
 }
 
 /// This is the main router entrypoint.
@@ -601,7 +661,13 @@ impl Executable {
         // 3. Env APOLLO_ROUTER_SUPERGRAPH_URLS
         // 4. Env APOLLO_GRAPH_ARTIFACT_REFERENCE (CLI/env only). APOLLO_KEY is only
         //    required here when the reference points at an Apollo-hosted registry.
-        // 5. Env APOLLO_KEY and APOLLO_GRAPH_REF (CLI/env only)
+        // 5. `registry.artifacts.graph` in the configuration file
+        // 6. Env APOLLO_KEY and APOLLO_GRAPH_REF (CLI/env only)
+        let registry_graph_declared = opt.graph_artifact_reference.is_none()
+            && matches!(
+                &configuration,
+                Some(ConfigurationSource::File { path, .. }) if config_declares_registry_graph(path)
+            );
         #[cfg(unix)]
         let akp = &opt.apollo_key_path;
         #[cfg(not(unix))]
@@ -663,68 +729,32 @@ impl Executable {
                 }
             }
             (_, None, None, _, Some(apollo_key_path)) => {
-                let apollo_key_path = if apollo_key_path.is_relative() {
-                    current_directory.join(apollo_key_path)
-                } else {
-                    apollo_key_path.clone()
-                };
-
-                if !apollo_key_path.exists() {
-                    tracing::error!(
-                        "Apollo key at path '{}' does not exist.",
-                        apollo_key_path.to_string_lossy()
-                    );
-                    return Err(anyhow!(
-                        "Apollo key at path '{}' does not exist.",
-                        apollo_key_path.to_string_lossy()
-                    ));
-                } else {
-                    // On unix systems, Check that the executing user is the only user who may
-                    // read the key file.
-                    // Note: We could, in future, add support for Windows.
-                    #[cfg(unix)]
-                    {
-                        let meta = std::fs::metadata(apollo_key_path.clone())
-                            .map_err(|err| anyhow!("Failed to read Apollo key file: {}", err))?;
-                        let mode = meta.mode();
-                        // If our mode isn't "safe", fail...
-                        // safe == none of the "group" or "other" bits set.
-                        if mode & 0o077 != 0 {
-                            return Err(anyhow!(
-                                "Apollo key file permissions ({:#o}) are too permissive",
-                                mode & 0o000777
-                            ));
-                        }
-                        let euid = unsafe { libc::geteuid() };
-                        let owner = meta.uid();
-                        if euid != owner {
-                            return Err(anyhow!(
-                                "Apollo key file owner id ({owner}) does not match effective user id ({euid})"
-                            ));
-                        }
+                opt.apollo_key = Some(read_apollo_key_file(&current_directory, apollo_key_path)?);
+                match opt.graph_artifact_reference {
+                    None if registry_graph_declared => {
+                        tracing::info!("{apollo_router_msg}");
+                        tracing::info!("{apollo_telemetry_msg}");
+                        SchemaSource::FromRegistryConfiguration
                     }
-                    //The key file exists try and load it
-                    match std::fs::read_to_string(&apollo_key_path) {
-                        Ok(apollo_key) => {
-                            opt.apollo_key = Some(apollo_key.trim().to_string());
-                        }
-                        Err(err) => {
-                            return Err(anyhow!("Failed to read Apollo key file: {}", err));
-                        }
-                    };
-                    match opt.graph_artifact_reference {
-                        None => SchemaSource::Registry(opt.uplink_config()?),
-                        Some(_) => SchemaSource::OCI(opt.oci_config()?),
-                    }
+                    None => SchemaSource::Registry(opt.uplink_config()?),
+                    Some(_) => SchemaSource::OCI(opt.oci_config()?),
                 }
             }
             (_, None, None, Some(_apollo_key), None) => {
                 tracing::info!("{apollo_router_msg}");
                 tracing::info!("{apollo_telemetry_msg}");
                 match opt.graph_artifact_reference {
+                    None if registry_graph_declared => SchemaSource::FromRegistryConfiguration,
                     None => SchemaSource::Registry(opt.uplink_config()?),
                     Some(_) => SchemaSource::OCI(opt.oci_config()?),
                 }
+            }
+            // No APOLLO_KEY anywhere, but router.yaml declares a graph artifact: valid for a
+            // non-Apollo registry, and the resolver enforces APOLLO_KEY for an Apollo-hosted one.
+            (_, None, None, None, None) if registry_graph_declared => {
+                tracing::info!("{apollo_router_msg}");
+                tracing::info!("{apollo_telemetry_msg}");
+                SchemaSource::FromRegistryConfiguration
             }
             // No APOLLO_KEY anywhere, but a graph artifact reference was given: this
             // is valid when the reference points at a non-Apollo OCI registry.
@@ -773,7 +803,10 @@ impl Executable {
         let license = if let Some(license) = license {
             license
         } else {
-            opt.license_source(&current_directory)?
+            opt.license_source(
+                &current_directory,
+                matches!(schema_source, SchemaSource::FromRegistryConfiguration),
+            )?
         };
         tracing::info!("using {} as license source", license);
         *APOLLO_ROUTER_LICENSE_SOURCE.lock() = Some(license.to_string());
@@ -809,6 +842,7 @@ impl Executable {
             .is_telemetry_disabled(opt.anonymous_telemetry_disabled)
             .and_configuration(configuration)
             .and_uplink(uplink_config)
+            .registry_overrides(opt.registry_overrides())
             .schema(schema_source)
             .license(license)
             .shutdown(shutdown.unwrap_or(ShutdownSource::CtrlC))
@@ -900,6 +934,22 @@ fn setup_panic_handler() {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn config_declares_registry_graph_probe() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("router.yaml");
+        std::fs::write(&path, "supergraph:\n  introspection: false\n").unwrap();
+        assert!(!super::config_declares_registry_graph(&path));
+
+        // The shape the integration harness writes: a serde_json document re-serialized as YAML.
+        let document: serde_json::Value = serde_yaml::from_str(
+            "registry:\n  host: \"127.0.0.1:1\"\n  artifacts:\n    graph:\n      reference: \"test-repo:latest\"\n",
+        )
+        .unwrap();
+        std::fs::write(&path, serde_yaml::to_string(&document).unwrap()).unwrap();
+        assert!(super::config_declares_registry_graph(&path));
+    }
+
     use std::path::Path;
 
     use crate::configuration::AutomaticUpgrade;
@@ -1060,6 +1110,8 @@ mod tests {
                 apollo_plugins: Default::default(),
                 notify: Default::default(),
                 uplink: None,
+                registry: Default::default(),
+                resolved_registry: Default::default(),
                 validated_yaml: None,
                 raw_yaml: None,
             }));
@@ -1142,6 +1194,8 @@ mod tests {
                 apollo_plugins: Default::default(),
                 notify: Default::default(),
                 uplink: None,
+                registry: Default::default(),
+                resolved_registry: Default::default(),
                 validated_yaml: None,
                 raw_yaml: None,
             }));
@@ -1330,7 +1384,7 @@ mod tests {
             };
 
             let current_directory = std::env::current_dir().unwrap();
-            let source = opt.license_source(&current_directory).unwrap();
+            let source = opt.license_source(&current_directory, false).unwrap();
             assert!(
                 matches!(source, LicenseSource::OCI(_)),
                 "expected OCI license source, got {source:?}"
@@ -1354,7 +1408,7 @@ mod tests {
             };
 
             let current_directory = std::env::current_dir().unwrap();
-            let source = opt.license_source(&current_directory).unwrap();
+            let source = opt.license_source(&current_directory, false).unwrap();
             assert!(
                 matches!(source, LicenseSource::OCI(_)),
                 "expected OCI license source, got {source:?}"
@@ -1375,7 +1429,7 @@ mod tests {
             };
 
             let current_directory = std::env::current_dir().unwrap();
-            let source = opt.license_source(&current_directory).unwrap();
+            let source = opt.license_source(&current_directory, false).unwrap();
             assert!(
                 matches!(source, LicenseSource::OCI(_)),
                 "expected OCI license source, got {source:?}"
@@ -1394,7 +1448,7 @@ mod tests {
             };
 
             let current_directory = std::env::current_dir().unwrap();
-            let source = opt.license_source(&current_directory).unwrap();
+            let source = opt.license_source(&current_directory, false).unwrap();
             assert!(
                 matches!(source, LicenseSource::Registry(_)),
                 "expected Registry (Uplink) license source, got {source:?}"
@@ -1406,7 +1460,7 @@ mod tests {
             let opt = base_opt();
 
             let current_directory = std::env::current_dir().unwrap();
-            let source = opt.license_source(&current_directory).unwrap();
+            let source = opt.license_source(&current_directory, false).unwrap();
             assert!(
                 matches!(source, LicenseSource::Static { .. }),
                 "expected the default license source, got {source:?}"
@@ -1429,7 +1483,7 @@ mod tests {
 
             let current_directory = std::env::current_dir().unwrap();
             let err = opt
-                .license_source(&current_directory)
+                .license_source(&current_directory, false)
                 .expect_err("Should fail with conflicting license sources");
             let error_msg = err.to_string();
             assert!(
@@ -1453,7 +1507,7 @@ mod tests {
 
             let current_directory = std::env::current_dir().unwrap();
             let err = opt
-                .license_source(&current_directory)
+                .license_source(&current_directory, false)
                 .expect_err("Should fail with conflicting license sources");
             let error_msg = err.to_string();
             assert!(
@@ -1478,7 +1532,7 @@ mod tests {
             };
 
             let current_directory = std::env::current_dir().unwrap();
-            let source = opt.license_source(&current_directory).expect(
+            let source = opt.license_source(&current_directory, false).expect(
                 "self-hosted graph artifact reference must not conflict with an explicit license",
             );
             assert!(
@@ -1499,7 +1553,7 @@ mod tests {
             };
 
             let current_directory = std::env::current_dir().unwrap();
-            let source = opt.license_source(&current_directory).expect(
+            let source = opt.license_source(&current_directory, false).expect(
                 "self-hosted graph artifact reference must not conflict with an explicit license",
             );
             assert!(

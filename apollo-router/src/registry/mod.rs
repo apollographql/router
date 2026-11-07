@@ -1,3 +1,4 @@
+use std::collections::HashMap;
 use std::pin::Pin;
 use std::string::FromUtf8Error;
 use std::time::Duration;
@@ -88,9 +89,36 @@ pub(crate) fn validate_oci_reference(
         })
 }
 
-/// Configuration for fetching an OCI Bundle
-/// This struct does not change on router reloads - they are all sourced from CLI options.
-#[derive(Debug, Clone)]
+/// How the router authenticates to an OCI registry.
+#[derive(
+    Debug,
+    Clone,
+    Copy,
+    Default,
+    PartialEq,
+    Eq,
+    serde::Deserialize,
+    serde::Serialize,
+    schemars::JsonSchema,
+)]
+#[serde(rename_all = "snake_case")]
+pub enum RegistryAuthMode {
+    /// Send the graph API key to an Apollo-hosted registry; use the Docker credential store for
+    /// any other host.
+    #[default]
+    Auto,
+    /// Always send the graph API key, for a proxy or mirror that forwards to Apollo's registry
+    /// under another hostname.
+    ApolloKey,
+    /// Always use the Docker credential store (`~/.docker/config.json` and credential helpers).
+    DockerCredentials,
+    /// Send no credentials.
+    Anonymous,
+}
+
+/// Configuration for fetching one OCI artifact: a resolved slot of the `registry` section, or
+/// the CLI's `--graph-artifact-reference`.
+#[derive(Debug, Clone, Default, PartialEq)]
 pub struct OciConfig {
     /// The Apollo key: `<YOUR_GRAPH_API_KEY>`.
     /// Only required (and present) when `reference` points at an Apollo-hosted registry.
@@ -109,6 +137,9 @@ pub struct OciConfig {
     /// Determined once at config creation from the registry hostname and
     /// the `APOLLO_GRAPH_ARTIFACT_UNSECURE_HOSTS` environment variable.
     pub use_ssl: bool,
+
+    /// How to authenticate to the registry.
+    pub auth: RegistryAuthMode,
 }
 
 #[derive(Debug, Clone)]
@@ -129,6 +160,8 @@ pub(crate) enum OciError {
     LayerParse(FromUtf8Error),
     #[error("unable to parse license: {0}")]
     LicenseParse(LicenseError),
+    #[error("unable to decompress persisted query chunk layer: {0}")]
+    ChunkDecompress(std::io::Error),
 }
 
 const APOLLO_REGISTRY_ENDING: &str = "apollographql.com";
@@ -138,6 +171,12 @@ const APOLLO_SCHEMA_MEDIA_TYPE: &str = "application/apollo.schema";
 const ENTITLEMENT_MEDIA_TYPE: &str = "application/vnd.apollographql.entitlement.v1+jwt";
 const APOLLO_MANIFEST_ENTITLEMENT_ID_ANNOTATION: &str = "com.apollograph.graph.entitlement.id";
 const APOLLO_MANIFEST_LAUNCH_ID_ANNOTATION: &str = "com.apollograph.launch.id";
+/// Media type of persisted query chunk layers on a graph artifact image. Each blob is the
+/// gzipped JSON of one persisted query manifest chunk (the same document the router reads
+/// from GCS when Uplink serves chunk URLs); the layer digest is the SHA-256 of the gzipped
+/// bytes.
+const APOLLO_PERSISTED_QUERY_CHUNK_MEDIA_TYPE: &str =
+    "application/vnd.apollo.persisted-query-chunk.v1+gzip";
 
 impl From<oci_client::ParseError> for OciError {
     fn from(value: oci_client::ParseError) -> Self {
@@ -209,18 +248,44 @@ pub(crate) fn is_apollo_graph_artifact_reference(reference: &str) -> bool {
         .is_ok_and(|r| is_apollo_registry(r.resolve_registry()))
 }
 
-fn build_auth(reference: &Reference, apollo_key: Option<&str>) -> RegistryAuth {
+fn build_auth(
+    reference: &Reference,
+    apollo_key: Option<&str>,
+    mode: RegistryAuthMode,
+) -> RegistryAuth {
     let server = reference
         .resolve_registry()
         .strip_suffix('/')
         .unwrap_or_else(|| reference.resolve_registry());
 
-    // Check if the server registry ends with apollographql.com
-    if is_apollo_registry(server)
-        && let Some(apollo_key) = apollo_key
-    {
-        tracing::debug!("using registry authentication");
-        return RegistryAuth::Basic(APOLLO_REGISTRY_USERNAME.to_string(), apollo_key.to_string());
+    match mode {
+        RegistryAuthMode::Anonymous => return RegistryAuth::Anonymous,
+        RegistryAuthMode::ApolloKey => {
+            if let Some(apollo_key) = apollo_key {
+                tracing::debug!("using registry authentication");
+                return RegistryAuth::Basic(
+                    APOLLO_REGISTRY_USERNAME.to_string(),
+                    apollo_key.to_string(),
+                );
+            }
+            tracing::warn!(
+                "registry auth is apollo_key but no APOLLO_KEY is set; sending no credentials"
+            );
+            return RegistryAuth::Anonymous;
+        }
+        RegistryAuthMode::DockerCredentials => {}
+        RegistryAuthMode::Auto => {
+            // Check if the server registry ends with apollographql.com
+            if is_apollo_registry(server)
+                && let Some(apollo_key) = apollo_key
+            {
+                tracing::debug!("using registry authentication");
+                return RegistryAuth::Basic(
+                    APOLLO_REGISTRY_USERNAME.to_string(),
+                    apollo_key.to_string(),
+                );
+            }
+        }
     }
 
     match docker_credential::get_credential(server) {
@@ -442,7 +507,11 @@ impl OciConfig {
 /// Authenticated with the graph API key from the config
 pub(crate) async fn fetch_oci_manifest_digest(oci_config: &OciConfig) -> Result<String, OciError> {
     let reference: Reference = oci_config.reference.as_str().parse()?;
-    let auth = build_auth(&reference, oci_config.apollo_key.as_deref());
+    let auth = build_auth(
+        &reference,
+        oci_config.apollo_key.as_deref(),
+        oci_config.auth,
+    );
     let protocol = oci_config.client_protocol();
 
     let client = Client::new(ClientConfig {
@@ -500,7 +569,11 @@ async fn fetch_manifest_digest_from_reference(
 /// inferring the correct protocol, and calling the internal fetch function.
 pub(crate) async fn fetch_schema_oci(oci_config: &OciConfig) -> Result<OciContent, OciError> {
     let reference: Reference = oci_config.reference.as_str().parse()?;
-    let auth = build_auth(&reference, oci_config.apollo_key.as_deref());
+    let auth = build_auth(
+        &reference,
+        oci_config.apollo_key.as_deref(),
+        oci_config.auth,
+    );
     let protocol = oci_config.client_protocol();
 
     tracing::debug!(
@@ -643,6 +716,203 @@ pub(crate) fn stream_schema_from_oci(
     ReceiverStream::new(receiver).boxed()
 }
 
+/// The persisted query chunks of one graph artifact image: the decompressed JSON documents of
+/// each persisted-query chunk layer, in manifest layer order (the order the persisted query
+/// manifest is assembled in).
+pub(crate) type OciPersistedQueryChunks = Vec<String>;
+
+/// Type alias for the OCI persisted query chunk stream
+pub(crate) type OciPersistedQueryChunkStream =
+    Pin<Box<dyn Stream<Item = Result<OciPersistedQueryChunks, OciError>> + Send>>;
+
+/// Create a persisted query chunk stream from the persisted-queries artifact's OCI config.
+/// The reference type alone decides the behavior: a tag is the variant's pointer and is polled
+/// for moves, a digest is immutable and is fetched exactly once. Unlike the schema stream, the
+/// `--hot-reload` flag plays no part (it governs local file watching, and like Uplink-sourced
+/// persisted queries, a pointer tag is always followed). The artifact is standalone: it lives in
+/// its own repository and is fetched and polled independently of the schema image, so a
+/// persisted query publish and a schema publish never wait on each other.
+pub(crate) fn create_oci_pq_chunk_stream(
+    oci_config: OciConfig,
+) -> Result<OciPersistedQueryChunkStream, anyhow::Error> {
+    let (_, ref_type) = validate_oci_reference(&oci_config.reference)?;
+
+    match ref_type {
+        OciReferenceType::Tag => Ok(Box::pin(stream_pq_chunks_from_oci(oci_config))),
+        OciReferenceType::Digest => {
+            let stream = stream::once(async move {
+                fetch_pq_chunks(&oci_config, &mut HashMap::new())
+                    .await
+                    .map(|fetched| fetched.chunks)
+            });
+            Ok(Box::pin(stream))
+        }
+    }
+}
+
+/// The persisted-queries artifact's chunk documents, in manifest layer order, with their layer
+/// digests (for change detection across polls).
+struct FetchedPqChunks {
+    chunks: OciPersistedQueryChunks,
+    chunk_digests: Vec<String>,
+}
+
+/// Regularly poll the persisted-queries artifact for chunk changes at the configured interval.
+/// HEADs the manifest digest each tick and only GETs the manifest when it moved; chunk blobs
+/// are cached by digest across polls, so a persisted query publish fetches only new or changed
+/// chunks.
+///
+/// A zero-layer artifact is an emptied list and emits an empty manifest (which, in enforcing
+/// mode, blocks all traffic); an absent tag means no list is linked to this variant and
+/// surfaces as a fetch error rather than an empty manifest, so the two stay distinguishable.
+pub(crate) fn stream_pq_chunks_from_oci(
+    oci_config: OciConfig,
+) -> impl Stream<Item = Result<OciPersistedQueryChunks, OciError>> {
+    let (sender, receiver) = channel(2);
+
+    let task = async move {
+        let mut last_digest: Option<String> = None;
+        let mut last_chunk_digests: Option<Vec<String>> = None;
+        let mut chunk_cache: HashMap<String, String> = HashMap::new();
+        let mut polling_time = oci_config.poll_interval;
+        loop {
+            match fetch_oci_manifest_digest(&oci_config).await {
+                Ok(current_digest) => {
+                    if last_digest.as_deref() == Some(current_digest.as_str()) {
+                        tracing::debug!(
+                            "oci manifest digest unchanged, skipping persisted query chunk fetch"
+                        );
+                    } else {
+                        match fetch_pq_chunks(&oci_config, &mut chunk_cache).await {
+                            Ok(FetchedPqChunks {
+                                chunks,
+                                chunk_digests,
+                            }) => {
+                                if last_chunk_digests.as_ref() == Some(&chunk_digests) {
+                                    // The manifest moved but carries the same persisted query
+                                    // layers (an annotation-only change); remember the digest so
+                                    // the manifest isn't refetched every tick, but don't swap the
+                                    // manifest downstream.
+                                    tracing::debug!(
+                                        "oci persisted query chunk layers unchanged, skipping update"
+                                    );
+                                    last_digest = Some(current_digest);
+                                } else if let Err(e) = sender.send(Ok(chunks)).await {
+                                    tracing::debug!(
+                                        "failed to push to stream. This is likely to be because the router is shutting down: {e}"
+                                    );
+                                    break;
+                                } else {
+                                    // Only advance on a successful send so a failed fetch retries
+                                    last_digest = Some(current_digest);
+                                    last_chunk_digests = Some(chunk_digests);
+                                }
+                            }
+                            Err(err) => {
+                                if let Some(retry_after) = parse_rate_limit_error(&err) {
+                                    polling_time = retry_after.max(Duration::from_secs(10)); // Minimum 10 second backoff
+                                }
+
+                                if let Err(e) = sender.send(Err(err)).await {
+                                    tracing::debug!(
+                                        "failed to send error to oci stream. This is likely to be because the router is shutting down: {e}"
+                                    );
+                                    break;
+                                }
+                            }
+                        }
+                    }
+                }
+                Err(err) => {
+                    if let Some(retry_after) = parse_rate_limit_error(&err) {
+                        polling_time = retry_after.max(Duration::from_secs(10)); // Minimum 10 second backoff
+                    }
+
+                    if let Err(e) = sender.send(Err(err)).await {
+                        tracing::debug!(
+                            "failed to send error to oci stream. This is likely to be because the router is shutting down: {e}"
+                        );
+                        break;
+                    }
+                }
+            }
+
+            tokio::time::sleep(polling_time).await;
+            polling_time = oci_config.poll_interval;
+        }
+    };
+    drop(tokio::task::spawn(task.with_current_subscriber()));
+
+    ReceiverStream::new(receiver).boxed()
+}
+
+/// Fetch the persisted-queries artifact's manifest and materialize its chunk layers, reusing
+/// `chunk_cache` (digest -> decompressed JSON) for layers already fetched on a previous poll.
+/// Returns the chunks in manifest layer order together with their layer digests. The cache is
+/// replaced with exactly the surviving layers, so chunks dropped from the artifact are evicted.
+async fn fetch_pq_chunks(
+    oci_config: &OciConfig,
+    chunk_cache: &mut HashMap<String, String>,
+) -> Result<FetchedPqChunks, OciError> {
+    let reference: Reference = oci_config.reference.as_str().parse()?;
+    let auth = build_auth(
+        &reference,
+        oci_config.apollo_key.as_deref(),
+        oci_config.auth,
+    );
+    let mut client = Client::new(ClientConfig {
+        protocol: oci_config.client_protocol(),
+        ..Default::default()
+    });
+
+    let (manifest, _) = fetch_oci_manifest(
+        &mut client,
+        &auth,
+        &reference,
+        Some(oci_config),
+        "persisted queries",
+    )
+    .await?;
+
+    let chunk_layers: Vec<_> = manifest
+        .layers
+        .iter()
+        .filter(|layer| layer.media_type == APOLLO_PERSISTED_QUERY_CHUNK_MEDIA_TYPE)
+        .cloned()
+        .collect();
+
+    let mut chunks = Vec::with_capacity(chunk_layers.len());
+    let mut chunk_digests = Vec::with_capacity(chunk_layers.len());
+    let mut new_cache = HashMap::new();
+    for layer in &chunk_layers {
+        let chunk = match chunk_cache.get(&layer.digest) {
+            Some(cached) => cached.clone(),
+            None => {
+                let compressed =
+                    fetch_oci_blob(&mut client, &reference, layer, "persisted queries").await?;
+                decompress_pq_chunk(&compressed)?
+            }
+        };
+        new_cache.insert(layer.digest.clone(), chunk.clone());
+        chunk_digests.push(layer.digest.clone());
+        chunks.push(chunk);
+    }
+    *chunk_cache = new_cache;
+
+    Ok(FetchedPqChunks {
+        chunks,
+        chunk_digests,
+    })
+}
+
+/// Decompress a gzipped persisted query chunk blob into its JSON document.
+fn decompress_pq_chunk(compressed: &[u8]) -> Result<String, OciError> {
+    let mut decoder = flate2::read::GzDecoder::new(compressed);
+    let mut json = String::new();
+    std::io::Read::read_to_string(&mut decoder, &mut json).map_err(OciError::ChunkDecompress)?;
+    Ok(json)
+}
+
 fn parse_rate_limit_error(error: &OciError) -> Option<Duration> {
     if let OciError::Distribution(OciDistributionError::RegistryError { envelope, .. }) = error
         && let Some(error) = envelope
@@ -679,17 +949,45 @@ async fn fetch_entitlement_id(
 
 type OciLicenseStream = Pin<Box<dyn Stream<Item = Result<Option<License>, OciError>> + Send>>;
 
+/// The license, discovered from the graph artifact `oci_config` names: its manifest's
+/// entitlement identifier annotation points at `entitlements/<id>:latest` in the same registry
+/// and under the same path prefix as the graph repository.
 pub(crate) fn create_oci_license_stream(
     oci_config: OciConfig,
 ) -> Result<OciLicenseStream, anyhow::Error> {
     // Validate the reference to determine its type
     validate_oci_reference(&oci_config.reference)?;
     // An infinite polling stream is intended here
-    Ok(Box::pin(stream_license_from_oci(oci_config)))
+    Ok(Box::pin(stream_license_from_oci(oci_config, None)))
+}
+
+/// The license from an explicitly named entitlement artifact (`registry.artifacts.entitlement`):
+/// no discovery, the reference is polled as given.
+pub(crate) fn create_oci_entitlement_license_stream(
+    oci_config: OciConfig,
+) -> Result<OciLicenseStream, anyhow::Error> {
+    validate_oci_reference(&oci_config.reference)?;
+    let entitlement_reference: Reference = oci_config.reference.parse()?;
+    Ok(Box::pin(stream_license_from_oci(
+        oci_config,
+        Some(entitlement_reference),
+    )))
+}
+
+/// The repository the entitlement lives in, next to the graph repository: `entitlements/<id>`
+/// under whatever path prefix the graph repository has. A registry that mounts Apollo's
+/// repositories under a prefix (a pull-through cache at `mirror/apollo-remote/<graph>`) holds the
+/// entitlement under that same prefix.
+fn entitlement_repository(graph_repository: &str, entitlement_id: &str) -> String {
+    match graph_repository.rsplit_once('/') {
+        Some((prefix, _graph)) => format!("{prefix}/entitlements/{entitlement_id}"),
+        None => format!("entitlements/{entitlement_id}"),
+    }
 }
 
 fn stream_license_from_oci(
     oci_config: OciConfig,
+    explicit_entitlement: Option<Reference>,
 ) -> impl Stream<Item = Result<Option<License>, OciError>> {
     let (sender, receiver) = channel(2);
 
@@ -707,7 +1005,11 @@ fn stream_license_from_oci(
                 return;
             }
         };
-        let auth = build_auth(&graph_reference, oci_config.apollo_key.as_deref());
+        let auth = build_auth(
+            &graph_reference,
+            oci_config.apollo_key.as_deref(),
+            oci_config.auth,
+        );
         let protocol = oci_config.client_protocol();
         let mut client = Client::new(ClientConfig {
             protocol: oci_config.client_protocol(),
@@ -725,7 +1027,12 @@ fn stream_license_from_oci(
             MissingAnnotation,
             HasAnnotation,
         }
-        let mut graph_manifest_state = GraphManifestState::Unread;
+        // An explicit entitlement reference needs no discovery.
+        let mut graph_manifest_state = if explicit_entitlement.is_some() {
+            GraphManifestState::HasAnnotation
+        } else {
+            GraphManifestState::Unread
+        };
 
         loop {
             match graph_manifest_state {
@@ -788,10 +1095,14 @@ fn stream_license_from_oci(
                 // Step 2: Poll the entitlement artifact's `latest` tag and fetch the license
                 GraphManifestState::HasAnnotation => {
                     // Build the license Reference
-                    let license_repository = format!("entitlements/{entitlement_id}");
-                    let registry = graph_reference.registry().to_string();
-                    let license_reference =
-                        Reference::with_tag(registry, license_repository, "latest".to_string());
+                    let license_reference = match &explicit_entitlement {
+                        Some(reference) => reference.clone(),
+                        None => Reference::with_tag(
+                            graph_reference.registry().to_string(),
+                            entitlement_repository(graph_reference.repository(), &entitlement_id),
+                            "latest".to_string(),
+                        ),
+                    };
 
                     // Compare the old entitlement digest to the new one
                     // Retry if digest not found, otherwise Error
@@ -939,6 +1250,151 @@ async fn fetch_license_from_reference(
     Ok(license)
 }
 
+/// Mock-registry helpers shared between this module's tests and the persisted query manifest
+/// poller's tests (which exercise the OCI manifest source end to end).
+#[cfg(test)]
+pub(crate) mod test_helpers {
+    use std::collections::BTreeMap;
+    use std::io::Write;
+    use std::time::Duration;
+
+    use futures::future::join_all;
+    use oci_client::Reference;
+    use oci_client::client::ImageLayer;
+    use oci_client::manifest::IMAGE_MANIFEST_MEDIA_TYPE;
+    use oci_client::manifest::OCI_IMAGE_MEDIA_TYPE;
+    use oci_client::manifest::OciDescriptor;
+    use oci_client::manifest::OciImageManifest;
+    use oci_client::manifest::OciManifest;
+    use sha2::Digest;
+    use sha2::Sha256;
+    use url::Url;
+    use wiremock::Mock;
+    use wiremock::MockServer;
+    use wiremock::ResponseTemplate;
+    use wiremock::matchers::method;
+    use wiremock::matchers::path;
+
+    use super::APOLLO_PERSISTED_QUERY_CHUNK_MEDIA_TYPE;
+    use super::OciConfig;
+    use super::RegistryAuthMode;
+
+    pub(crate) fn calculate_manifest_digest(manifest: &OciManifest) -> String {
+        let manifest_bytes = serde_json::to_vec(manifest).unwrap();
+        let hash = Sha256::digest(&manifest_bytes);
+        format!("sha256:{}", hex::encode(hash))
+    }
+
+    pub(crate) fn mock_oci_config_with_reference(reference: String) -> OciConfig {
+        OciConfig {
+            apollo_key: Some("test-api-key".to_string()),
+            reference: reference.clone(),
+            hot_reload: false,
+            poll_interval: Duration::from_millis(10),
+            use_ssl: false,
+            auth: RegistryAuthMode::Auto,
+        }
+    }
+
+    /// Gzip-compress bytes the way the graph artifact writer stores persisted query chunks.
+    pub(crate) fn gzip(bytes: &[u8]) -> Vec<u8> {
+        let mut encoder = flate2::write::GzEncoder::new(Vec::new(), flate2::Compression::default());
+        encoder.write_all(bytes).unwrap();
+        encoder.finish().unwrap()
+    }
+
+    /// A persisted query chunk layer as it appears on a graph artifact image: gzipped JSON
+    /// under the persisted query chunk media type.
+    pub(crate) fn pq_chunk_layer(chunk_json: &str) -> ImageLayer {
+        ImageLayer {
+            data: gzip(chunk_json.as_bytes()).into(),
+            media_type: APOLLO_PERSISTED_QUERY_CHUNK_MEDIA_TYPE.to_string(),
+            annotations: None,
+        }
+    }
+
+    pub(crate) async fn setup_mocks(
+        mock_server: &MockServer,
+        layers: Vec<ImageLayer>,
+        manifest_annotations: Option<BTreeMap<String, String>>,
+    ) -> Reference {
+        let graph_id = "test-graph-id";
+        let reference = "latest";
+
+        let layer_descriptors = join_all(layers.iter().map(async |layer| {
+            let blob_digest = layer.sha256_digest();
+            let blob_url = Url::parse(&format!(
+                "{}/v2/{graph_id}/blobs/{blob_digest}",
+                mock_server.uri()
+            ))
+            .expect("url must be valid");
+            Mock::given(method("GET"))
+                .and(path(blob_url.path()))
+                .respond_with(
+                    ResponseTemplate::new(200)
+                        .append_header(http::header::CONTENT_TYPE, "application/octet-stream")
+                        .set_body_bytes(layer.data.clone()),
+                )
+                .mount(mock_server)
+                .await;
+            OciDescriptor {
+                media_type: layer.media_type.clone(),
+                digest: blob_digest,
+                size: layer.data.len().try_into().unwrap(),
+                urls: None,
+                annotations: None,
+                artifact_type: None,
+            }
+        }))
+        .await;
+
+        let manifest_url = Url::parse(&format!(
+            "{}/v2/{}/manifests/{}",
+            mock_server.uri(),
+            graph_id,
+            reference
+        ))
+        .expect("url must be valid");
+        let oci_manifest = OciManifest::Image(OciImageManifest {
+            schema_version: 2,
+            media_type: Some(IMAGE_MANIFEST_MEDIA_TYPE.to_string()),
+            config: Default::default(),
+            layers: layer_descriptors,
+            subject: None,
+            artifact_type: None,
+            annotations: manifest_annotations,
+        });
+        let manifest_digest = calculate_manifest_digest(&oci_manifest);
+
+        // Set up HEAD request for manifest digest (used by fetch_oci_manifest_digest)
+        let _ = Mock::given(method("HEAD"))
+            .and(path(manifest_url.path()))
+            .respond_with(
+                ResponseTemplate::new(200)
+                    .append_header("Docker-Content-Digest", manifest_digest.clone())
+                    .append_header(http::header::CONTENT_TYPE, OCI_IMAGE_MEDIA_TYPE),
+            )
+            .mount(mock_server)
+            .await;
+
+        // Set up GET request for full manifest (used by pull_image_manifest)
+        let _ = Mock::given(method("GET"))
+            .and(path(manifest_url.path()))
+            .respond_with(
+                ResponseTemplate::new(200)
+                    .append_header("Docker-Content-Digest", manifest_digest)
+                    .append_header(http::header::CONTENT_TYPE, OCI_IMAGE_MEDIA_TYPE)
+                    .set_body_bytes(serde_json::to_vec(&oci_manifest).unwrap()),
+            )
+            .mount(mock_server)
+            .await;
+
+        format!("{}/{graph_id}:{reference}", mock_server.address())
+            .parse::<Reference>()
+            .expect("url must be valid")
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use std::collections::BTreeMap;
@@ -973,6 +1429,7 @@ mod tests {
     use wiremock::matchers::method;
     use wiremock::matchers::path;
 
+    use super::test_helpers::pq_chunk_layer;
     use super::*;
 
     // Same test JWT used by `license_enforcement::test_license_parse`. Signed
@@ -1099,6 +1556,7 @@ mod tests {
             hot_reload: false,
             poll_interval: Duration::from_millis(10),
             use_ssl: false,
+            auth: RegistryAuthMode::Auto,
         }
     }
 
@@ -1271,7 +1729,7 @@ mod tests {
         let apollo_key = "test-api-key".to_string();
 
         // Call build_auth
-        let auth = build_auth(&reference, Some(&apollo_key));
+        let auth = build_auth(&reference, Some(&apollo_key), RegistryAuthMode::Auto);
 
         // Check that it returns the correct RegistryAuth
         match auth {
@@ -1291,7 +1749,7 @@ mod tests {
             .parse()
             .unwrap();
 
-        let auth = build_auth(&reference, None);
+        let auth = build_auth(&reference, None, RegistryAuthMode::Auto);
 
         if let RegistryAuth::Basic(username, _) = auth {
             assert_ne!(username, APOLLO_REGISTRY_USERNAME);
@@ -1307,7 +1765,7 @@ mod tests {
         // Mock the docker_credential::get_credential function
         // Since we can't easily mock this in Rust without additional libraries,
         // we'll just verify that it doesn't return the Apollo registry auth
-        let auth = build_auth(&reference, Some(&apollo_key));
+        let auth = build_auth(&reference, Some(&apollo_key), RegistryAuthMode::Auto);
 
         // Check that it doesn't return the Apollo registry auth
         if let RegistryAuth::Basic(username, _) = auth {
@@ -1321,7 +1779,7 @@ mod tests {
         // require one; it falls through to docker-credential/anonymous auth.
         let reference: Reference = "docker.io/library/alpine:latest".parse().unwrap();
 
-        let auth = build_auth(&reference, None);
+        let auth = build_auth(&reference, None, RegistryAuthMode::Auto);
 
         if let RegistryAuth::Basic(username, _) = auth {
             assert_ne!(username, "apollo_registry");
@@ -1603,7 +2061,7 @@ mod tests {
         .await;
         let oci_config = mock_oci_config_with_reference(image_reference.to_string());
 
-        let results = stream_license_from_oci(oci_config)
+        let results = stream_license_from_oci(oci_config, None)
             .take(1)
             .collect::<Vec<_>>()
             .await;
@@ -1717,7 +2175,7 @@ mod tests {
             .expect("url must be valid");
         let oci_config = mock_oci_config_with_reference(image_reference.to_string());
 
-        let mut stream = stream_license_from_oci(oci_config);
+        let mut stream = stream_license_from_oci(oci_config, None);
 
         // First poll: new digest, license should be fetched.
         let first_result = stream.next().await;
@@ -1870,7 +2328,7 @@ mod tests {
             .expect("url must be valid");
         let oci_config = mock_oci_config_with_reference(image_reference.to_string());
 
-        let mut stream = stream_license_from_oci(oci_config);
+        let mut stream = stream_license_from_oci(oci_config, None);
         let expected = License::from_str(TEST_LICENSE_JWT).expect("test JWT must parse");
 
         // First poll: entitlement digest 1 is new → fetch.
@@ -2013,10 +2471,11 @@ mod tests {
             hot_reload: true,
             poll_interval: Duration::from_millis(10),
             use_ssl: false,
+            auth: RegistryAuthMode::Auto,
         };
 
         let start_time = tokio::time::Instant::now();
-        let mut stream = stream_license_from_oci(oci_config);
+        let mut stream = stream_license_from_oci(oci_config, None);
 
         // First stream item should be the 429 error.
         let result = timeout(Duration::from_secs(20), stream.next()).await;
@@ -2191,7 +2650,7 @@ mod tests {
             .expect("url must be valid");
         let oci_config = mock_oci_config_with_reference(image_reference.to_string());
 
-        let mut stream = stream_license_from_oci(oci_config);
+        let mut stream = stream_license_from_oci(oci_config, None);
 
         // Poll 1: blob 500 → stream emits Err.
         let first_result = timeout(Duration::from_secs(5), stream.next())
@@ -2233,7 +2692,7 @@ mod tests {
         .await;
         let oci_config = mock_oci_config_with_reference(image_reference.to_string());
 
-        let mut stream = stream_license_from_oci(oci_config);
+        let mut stream = stream_license_from_oci(oci_config, None);
 
         let first_result = timeout(Duration::from_secs(5), stream.next())
             .await
@@ -2274,7 +2733,7 @@ mod tests {
         // Deliberately mount nothing under `entitlements/{entitlement_id}`.
 
         let oci_config = mock_oci_config_with_reference(image_reference.to_string());
-        let mut stream = stream_license_from_oci(oci_config);
+        let mut stream = stream_license_from_oci(oci_config, None);
 
         let item = timeout(Duration::from_millis(300), stream.next()).await;
         assert!(
@@ -2295,7 +2754,7 @@ mod tests {
             setup_license_mocks(mock_server, entitlement_id, vec![unrelated_layer()]).await;
 
         let oci_config = mock_oci_config_with_reference(image_reference.to_string());
-        let mut stream = stream_license_from_oci(oci_config);
+        let mut stream = stream_license_from_oci(oci_config, None);
 
         let first_result = timeout(Duration::from_secs(5), stream.next())
             .await
@@ -2433,7 +2892,7 @@ mod tests {
             .expect("url must be valid");
         let oci_config = mock_oci_config_with_reference(image_reference.to_string());
 
-        let mut stream = stream_license_from_oci(oci_config);
+        let mut stream = stream_license_from_oci(oci_config, None);
 
         // First poll: layer missing → Err.
         let first_result = timeout(Duration::from_secs(5), stream.next())
@@ -2793,6 +3252,7 @@ mod tests {
             hot_reload: true,
             poll_interval: Duration::from_millis(10),
             use_ssl: false,
+            auth: RegistryAuthMode::Auto,
         };
 
         let result = create_oci_schema_stream(oci_config);
@@ -2829,6 +3289,7 @@ mod tests {
             hot_reload: false,
             poll_interval: Duration::from_millis(10),
             use_ssl: false,
+            auth: RegistryAuthMode::Auto,
         };
 
         let result = create_oci_schema_stream(oci_config);
@@ -2855,6 +3316,7 @@ mod tests {
             hot_reload: true,
             poll_interval: Duration::from_millis(10),
             use_ssl: true,
+            auth: RegistryAuthMode::Auto,
         };
 
         let result = create_oci_schema_stream(oci_config);
@@ -2943,6 +3405,7 @@ mod tests {
             hot_reload: false,
             poll_interval: Duration::from_millis(10),
             use_ssl: false,
+            auth: RegistryAuthMode::Auto,
         };
 
         let result = create_oci_schema_stream(oci_config_digest);
@@ -3174,6 +3637,7 @@ mod tests {
             hot_reload: true,
             poll_interval: Duration::from_millis(10),
             use_ssl: false,
+            auth: RegistryAuthMode::Auto,
         };
 
         let start_time = tokio::time::Instant::now();
@@ -3214,5 +3678,277 @@ mod tests {
             "Should have slept for at least 10 seconds due to backoff, but elapsed time was {:?}",
             elapsed
         );
+    }
+
+    const CHUNK_ONE_JSON: &str = r#"{"format":"apollo-persisted-query-manifest","version":1,"operations":[{"id":"op-1","body":"query { one }"}]}"#;
+    const CHUNK_TWO_JSON: &str = r#"{"format":"apollo-persisted-query-manifest","version":1,"operations":[{"id":"op-2","body":"query { two }"}]}"#;
+
+    fn image_manifest_for_layers(
+        layers: &[&ImageLayer],
+        annotations: Option<BTreeMap<String, String>>,
+    ) -> (String, Vec<u8>) {
+        let descriptors = layers
+            .iter()
+            .map(|layer| OciDescriptor {
+                media_type: layer.media_type.clone(),
+                digest: layer.sha256_digest(),
+                size: layer.data.len().try_into().unwrap(),
+                urls: None,
+                annotations: None,
+                artifact_type: None,
+            })
+            .collect();
+        let manifest = OciManifest::Image(OciImageManifest {
+            schema_version: 2,
+            media_type: Some(IMAGE_MANIFEST_MEDIA_TYPE.to_string()),
+            config: Default::default(),
+            layers: descriptors,
+            subject: None,
+            artifact_type: None,
+            annotations,
+        });
+        let digest = calculate_manifest_digest(&manifest);
+        let body = serde_json::to_vec(&manifest).unwrap();
+        (digest, body)
+    }
+
+    /// Mount a blob GET that counts its fetches, returning the counter.
+    async fn mount_counting_blob(mock_server: &MockServer, layer: &ImageLayer) -> Arc<AtomicUsize> {
+        let count = Arc::new(AtomicUsize::new(0));
+        let counter = count.clone();
+        let data = layer.data.clone();
+        Mock::given(method("GET"))
+            .and(path(format!(
+                "/v2/test-graph-id/blobs/{}",
+                layer.sha256_digest()
+            )))
+            .respond_with(move |_request: &Request| {
+                counter.fetch_add(1, Ordering::SeqCst);
+                ResponseTemplate::new(200)
+                    .append_header(http::header::CONTENT_TYPE, "application/octet-stream")
+                    .set_body_bytes(data.clone())
+            })
+            .mount(mock_server)
+            .await;
+        count
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn stream_pq_chunks_from_oci_success() {
+        let mock_server = &MockServer::start().await;
+
+        let image_reference = setup_mocks(
+            mock_server,
+            vec![
+                pq_chunk_layer(CHUNK_ONE_JSON),
+                pq_chunk_layer(CHUNK_TWO_JSON),
+            ],
+            None,
+        )
+        .await;
+        let oci_config = mock_oci_config_with_reference(image_reference.to_string());
+
+        let results = stream_pq_chunks_from_oci(oci_config)
+            .take(1)
+            .collect::<Vec<_>>()
+            .await;
+
+        assert_eq!(results.len(), 1);
+        match &results[0] {
+            // Chunks arrive in manifest layer order.
+            Ok(chunks) => assert_eq!(
+                chunks,
+                &vec![CHUNK_ONE_JSON.to_string(), CHUNK_TWO_JSON.to_string()]
+            ),
+            Err(e) => panic!("expected success, got error: {e}"),
+        }
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn stream_pq_chunks_from_oci_emits_empty_set_without_chunk_layers() {
+        let mock_server = &MockServer::start().await;
+
+        // A zero-layer artifact is the build of an emptied list: it still emits (an empty set),
+        // because the manifest poller blocks startup on the first emission, and in enforcing
+        // mode that empty manifest deliberately blocks all traffic. An absent tag (no list
+        // linked) is a fetch error instead, so the two stay distinguishable.
+        let image_reference = setup_mocks(mock_server, vec![], None).await;
+        let oci_config = mock_oci_config_with_reference(image_reference.to_string());
+
+        let results = stream_pq_chunks_from_oci(oci_config)
+            .take(1)
+            .collect::<Vec<_>>()
+            .await;
+
+        assert_eq!(results.len(), 1);
+        match &results[0] {
+            Ok(chunks) => assert!(chunks.is_empty()),
+            Err(e) => panic!("expected success, got error: {e}"),
+        }
+    }
+
+    /// Mount HEAD/GET manifest mocks whose response is read from the returned shared slot, so a
+    /// test can move the tag by replacing the slot's (digest, body).
+    async fn mount_switchable_manifest(
+        mock_server: &MockServer,
+        initial: (String, Vec<u8>),
+    ) -> Arc<Mutex<(String, Vec<u8>)>> {
+        let current_manifest = Arc::new(Mutex::new(initial));
+        let manifest_path = "/v2/test-graph-id/manifests/latest";
+        {
+            let current = current_manifest.clone();
+            Mock::given(method("HEAD"))
+                .and(path(manifest_path))
+                .respond_with(move |_request: &Request| {
+                    let (digest, _) = current.lock().clone();
+                    ResponseTemplate::new(200)
+                        .append_header("Docker-Content-Digest", digest)
+                        .append_header(http::header::CONTENT_TYPE, OCI_IMAGE_MEDIA_TYPE)
+                })
+                .mount(mock_server)
+                .await;
+        }
+        {
+            let current = current_manifest.clone();
+            Mock::given(method("GET"))
+                .and(path(manifest_path))
+                .respond_with(move |_request: &Request| {
+                    let (digest, body) = current.lock().clone();
+                    ResponseTemplate::new(200)
+                        .append_header("Docker-Content-Digest", digest)
+                        .append_header(http::header::CONTENT_TYPE, OCI_IMAGE_MEDIA_TYPE)
+                        .set_body_bytes(body)
+                })
+                .mount(mock_server)
+                .await;
+        }
+        current_manifest
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn stream_pq_chunks_caches_chunks_and_skips_chunk_identical_publishes() {
+        let mock_server = &MockServer::start().await;
+
+        let chunk_one = pq_chunk_layer(CHUNK_ONE_JSON);
+        let chunk_two = pq_chunk_layer(CHUNK_TWO_JSON);
+
+        let v1 = image_manifest_for_layers(&[&chunk_one], None);
+        // The manifest digest moves (annotation-only change, like a pointer re-tag carrying a
+        // new ordering ID) but the chunk layers are identical.
+        let v2 = image_manifest_for_layers(
+            &[&chunk_one],
+            Some(BTreeMap::from([(
+                "com.example.note".to_string(),
+                "annotation only".to_string(),
+            )])),
+        );
+        // A persisted query publish adds a chunk.
+        let v3 = image_manifest_for_layers(&[&chunk_one, &chunk_two], None);
+
+        let chunk_one_fetches = mount_counting_blob(mock_server, &chunk_one).await;
+        let chunk_two_fetches = mount_counting_blob(mock_server, &chunk_two).await;
+
+        let current_manifest = mount_switchable_manifest(mock_server, v1).await;
+
+        let oci_config = mock_oci_config_with_reference(format!(
+            "{}/test-graph-id:latest",
+            mock_server.address()
+        ));
+        let mut stream = Box::pin(stream_pq_chunks_from_oci(oci_config));
+
+        let first = timeout(Duration::from_secs(30), stream.next())
+            .await
+            .expect("first emission should arrive")
+            .expect("stream should not end")
+            .expect("first emission should succeed");
+        assert_eq!(first, vec![CHUNK_ONE_JSON.to_string()]);
+        assert_eq!(chunk_one_fetches.load(Ordering::SeqCst), 1);
+
+        // Move the tag to the chunk-identical publish: no emission, and the unchanged chunk is
+        // not refetched. 200ms covers ~20 polls at the 10ms test interval.
+        *current_manifest.lock() = v2;
+        let nothing = timeout(Duration::from_millis(200), stream.next()).await;
+        assert!(
+            nothing.is_err(),
+            "a publish with identical chunk layers must not emit a persisted query update"
+        );
+        assert_eq!(chunk_one_fetches.load(Ordering::SeqCst), 1);
+
+        // Move the tag to the publish that adds a chunk: one emission with both chunks in layer
+        // order, fetching only the new blob.
+        *current_manifest.lock() = v3;
+        let second = timeout(Duration::from_secs(30), stream.next())
+            .await
+            .expect("second emission should arrive")
+            .expect("stream should not end")
+            .expect("second emission should succeed");
+        assert_eq!(
+            second,
+            vec![CHUNK_ONE_JSON.to_string(), CHUNK_TWO_JSON.to_string()]
+        );
+        assert_eq!(chunk_one_fetches.load(Ordering::SeqCst), 1);
+        assert_eq!(chunk_two_fetches.load(Ordering::SeqCst), 1);
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn stream_pq_chunks_bad_gzip_emits_error() {
+        let mock_server = &MockServer::start().await;
+
+        let corrupt_chunk = ImageLayer {
+            data: b"not gzip data".to_vec().into(),
+            media_type: APOLLO_PERSISTED_QUERY_CHUNK_MEDIA_TYPE.to_string(),
+            annotations: None,
+        };
+        let image_reference = setup_mocks(mock_server, vec![corrupt_chunk], None).await;
+        let oci_config = mock_oci_config_with_reference(image_reference.to_string());
+
+        let results = stream_pq_chunks_from_oci(oci_config)
+            .take(1)
+            .collect::<Vec<_>>()
+            .await;
+
+        assert_eq!(results.len(), 1);
+        assert!(
+            matches!(&results[0], Err(OciError::ChunkDecompress(_))),
+            "expected a chunk decompression error, got {:?}",
+            results[0].as_ref().map(|chunks| chunks.len())
+        );
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn create_oci_pq_chunk_stream_follows_tag_regardless_of_hot_reload() {
+        for hot_reload in [false, true] {
+            let oci_config = OciConfig {
+                hot_reload,
+                ..mock_oci_config_with_reference(
+                    "registry.example.com/test-graph:latest".to_string(),
+                )
+            };
+            assert!(
+                create_oci_pq_chunk_stream(oci_config).is_ok(),
+                "a tag reference must be accepted with hot_reload={hot_reload}"
+            );
+        }
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn create_oci_pq_chunk_stream_fetches_digest_once_regardless_of_hot_reload() {
+        for hot_reload in [false, true] {
+            let oci_config = OciConfig {
+                hot_reload,
+                ..mock_oci_config_with_reference(format!(
+                    "registry.example.com/test-graph@sha256:{}",
+                    "a".repeat(64)
+                ))
+            };
+            let stream = create_oci_pq_chunk_stream(oci_config).unwrap_or_else(|e| {
+                panic!("a digest reference must be accepted with hot_reload={hot_reload}: {e}")
+            });
+            // One fetch, then the stream ends: nothing polls an immutable reference. The fetch
+            // itself fails here (no registry behind the mock config), which is fine.
+            let results = stream.collect::<Vec<_>>().await;
+            assert_eq!(results.len(), 1, "hot_reload={hot_reload}");
+            assert!(results[0].is_err(), "hot_reload={hot_reload}");
+        }
     }
 }
