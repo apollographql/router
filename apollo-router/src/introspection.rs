@@ -1,30 +1,29 @@
 //! Implements GraphQL schema introspection.
 use std::future::Ready;
-use std::num::NonZeroUsize;
+use std::hash::Hash;
 use std::sync::Arc;
 
+use apollo_cache_memory::InMemoryConfig;
+use apollo_cache_memory::ServiceBuilderExt as _;
 use futures::future::BoxFuture;
 use futures::future::Either;
-use sha2::Digest;
-use sha2::Sha256;
 use tower::BoxError;
 use tower::ServiceBuilder;
 use tower::ServiceExt as _;
 use tower::util::BoxCloneService;
 
 use crate::Configuration;
-use crate::cache::storage::CacheStorage;
 use crate::compute_job;
 use crate::compute_job::ComputeJobType;
 use crate::graphql;
 use crate::json_ext::Object;
 use crate::services::query_parsing::ParsedDocument;
 use crate::spec;
-use crate::spec::QueryHash;
 
-const DEFAULT_INTROSPECTION_CACHE_CAPACITY: NonZeroUsize = NonZeroUsize::new(5).unwrap();
+const DEFAULT_INTROSPECTION_CACHE_CAPACITY: u64 = 5;
 
 /// Request type for [IntrospectionService].
+#[derive(Clone)]
 pub(crate) struct IntrospectionRequest {
     /// The GraphQL schema to introspect.
     pub(crate) schema: Arc<spec::Schema>,
@@ -34,8 +33,24 @@ pub(crate) struct IntrospectionRequest {
     pub(crate) variables: Object,
 }
 
-/// In-memory cache storage for introspection.
-pub(crate) type IntrospectionCache = Arc<CacheStorage<IntrospectionCacheKey, graphql::Response>>;
+impl PartialEq for IntrospectionRequest {
+    fn eq(&self, other: &Self) -> bool {
+        Arc::ptr_eq(&self.schema, &other.schema)
+            && self.document.hash == other.document.hash
+            && self.variables == other.variables
+    }
+}
+
+impl Eq for IntrospectionRequest {}
+
+impl Hash for IntrospectionRequest {
+    fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
+        // The document's `hash` field includes the schema, the query text, and the operation name,
+        // so it covers most of the introspection request
+        self.document.hash.hash(state);
+        self.variables.hash(state);
+    }
+}
 
 /// A terminal service that handles (partial) execution of introspection.
 pub(crate) type IntrospectionService =
@@ -44,10 +59,7 @@ pub(crate) type IntrospectionService =
 #[derive(Clone)]
 enum Mode {
     Disabled,
-    Enabled {
-        storage: IntrospectionCache,
-        max_depth: MaxDepth,
-    },
+    Enabled { max_depth: MaxDepth },
 }
 
 #[derive(Copy, Clone)]
@@ -59,12 +71,7 @@ enum MaxDepth {
 /// Determine the introspection mode based on YAML configuration.
 fn introspection_mode(configuration: &Configuration) -> Mode {
     if configuration.supergraph.introspection {
-        let storage = Arc::new(CacheStorage::new_in_memory(
-            DEFAULT_INTROSPECTION_CACHE_CAPACITY,
-            "introspection",
-        ));
         Mode::Enabled {
-            storage,
             max_depth: if configuration.limits.router.introspection_max_depth {
                 MaxDepth::Check
             } else {
@@ -86,8 +93,11 @@ pub(crate) fn introspection_service(configuration: &Configuration) -> Introspect
         .layer(RejectMixedIntrospectionLayer::new());
 
     match introspection_mode(configuration) {
-        Mode::Enabled { storage, max_depth } => builder
-            .layer(IntrospectionCacheLayer::new(storage))
+        Mode::Enabled { max_depth } => builder
+            .cache_in_memory(
+                "introspection",
+                InMemoryConfig::<DEFAULT_INTROSPECTION_CACHE_CAPACITY>::default(),
+            )
             .service(IntrospectionExecutionService::new(max_depth))
             .boxed_clone(),
         Mode::Disabled => builder
@@ -219,112 +229,6 @@ where
     }
 }
 
-#[derive(Clone, Debug, Hash, PartialEq, Eq)]
-pub(crate) struct IntrospectionCacheKey {
-    /// Hash of the GraphQL query against a specific schema.
-    operation: Arc<QueryHash>,
-    /// Hash of the variables used to execute the introspection query.
-    variables: sha2::digest::Output<Sha256>,
-}
-
-impl std::fmt::Display for IntrospectionCacheKey {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(
-            f,
-            "introspect:{}:variables:{}",
-            self.operation,
-            hex::encode(self.variables)
-        )
-    }
-}
-
-/// In-memory caching service for introspection requests.
-///
-/// A stopgap solution until Apollo Platform provides apollo-cache-memory!
-#[derive(Clone)]
-struct IntrospectionCacheService<S> {
-    inner: S,
-    cache: IntrospectionCache,
-}
-
-/// In-memory caching layer for introspection requests. It uses a fixed cache size.
-impl<S> IntrospectionCacheService<S> {
-    fn new(inner: S, cache: IntrospectionCache) -> Self {
-        Self { inner, cache }
-    }
-}
-
-/// A stopgap solution until Apollo Platform provides apollo-cache-memory!
-struct IntrospectionCacheLayer {
-    cache: IntrospectionCache,
-}
-
-impl IntrospectionCacheLayer {
-    fn new(cache: IntrospectionCache) -> Self {
-        Self { cache }
-    }
-}
-
-impl<S> tower::Layer<S> for IntrospectionCacheLayer {
-    type Service = IntrospectionCacheService<S>;
-
-    fn layer(&self, inner: S) -> Self::Service {
-        IntrospectionCacheService::new(inner, self.cache.clone())
-    }
-}
-
-impl<S> tower::Service<IntrospectionRequest> for IntrospectionCacheService<S>
-where
-    S: tower::Service<IntrospectionRequest, Response = graphql::Response> + Clone + Send + 'static,
-    S::Error: Send,
-    S::Future: Send + 'static,
-{
-    type Response = graphql::Response;
-    type Error = S::Error;
-    type Future = BoxFuture<'static, Result<Self::Response, Self::Error>>;
-
-    fn poll_ready(
-        &mut self,
-        _cx: &mut std::task::Context<'_>,
-    ) -> std::task::Poll<Result<(), Self::Error>> {
-        // This should indicate _cache_ readiness--we don't have that concept right now though.
-        // We might not use the inner service so we ready it only on cache misses.
-        std::task::Poll::Ready(Ok(()))
-    }
-
-    fn call(&mut self, req: IntrospectionRequest) -> Self::Future {
-        let mut inner = self.inner.clone();
-        let cache = self.cache.clone();
-
-        Box::pin(async move {
-            let cache_key = if let Ok(variable_key) = serde_json::to_string(&req.variables) {
-                let mut hasher = Sha256::new();
-                hasher.update(variable_key);
-                IntrospectionCacheKey {
-                    operation: req.document.hash.clone(),
-                    variables: hasher.finalize(),
-                }
-            } else {
-                tracing::warn!(
-                    "Failed to serialize variables for introspection cache key, skipping cache: {:?}",
-                    req.variables
-                );
-
-                return inner.ready().await?.call(req).await;
-            };
-
-            if let Some(response) = cache.get(&cache_key, |_| unreachable!()).await {
-                return Ok(response);
-            }
-
-            let response = inner.ready().await?.call(req).await?;
-            cache.insert(cache_key, response.clone()).await;
-
-            Ok(response)
-        })
-    }
-}
-
 /// Terminal service for executing GraphQL introspection queries against a schema.
 ///
 /// Only the introspection parts of the input GraphQL query are executed. Non-introspection parts
@@ -406,86 +310,81 @@ fn execute_introspection(
 
 #[cfg(test)]
 mod tests {
-    use std::num::NonZeroUsize;
     use std::sync::Arc;
 
     use tower::Service as _;
     use tower::ServiceBuilder;
     use tower::ServiceExt as _;
 
-    use super::IntrospectionCacheLayer;
     use super::IntrospectionRequest;
     use super::RejectMixedIntrospectionLayer;
     use super::introspection_service;
     use crate::Configuration;
-    use crate::cache::storage::CacheStorage;
     use crate::graphql;
+    use crate::metrics::FutureMetricsExt as _;
     use crate::spec::Query;
     use crate::spec::Schema;
 
     #[tokio::test]
     async fn introspection_cache_hit() {
-        let (mock, mut handle) =
-            tower_test::mock::pair::<IntrospectionRequest, graphql::Response>();
-        let driver = tokio::task::spawn(async move {
-            let (_request, responder) = handle.next_request().await.unwrap();
-            responder.send_response(
-                graphql::Response::builder()
-                    .data(serde_json_bytes::json!({
-                        "__schema": {
-                            "queryType": {
-                                "name": "Query",
-                            },
-                        },
-                    }))
-                    .build(),
+        async {
+            let mut config = Configuration::default();
+            config.supergraph.introspection = true;
+            let schema = Arc::new(
+                Schema::parse(include_str!("testdata/supergraph.graphql"), &config).unwrap(),
             );
-        });
+            let query = "{ __schema { queryType { name } } }";
 
-        let config = Configuration::default();
-        let schema =
-            Arc::new(Schema::parse(include_str!("testdata/supergraph.graphql"), &config).unwrap());
-        let query = "{ __schema { queryType { name } } }";
+            let mut service = introspection_service(&config);
 
-        let cache = Arc::new(CacheStorage::new_in_memory(
-            NonZeroUsize::new(5).unwrap(),
-            "introspection",
-        ));
-        let mut service = ServiceBuilder::new()
-            .layer(IntrospectionCacheLayer::new(cache))
-            .service(mock);
+            // Two identical requests should result in one `cache.status = miss`, then one
+            // `cache.status = hit` metric
+            let mut responses = vec![];
+            for _ in 0..2 {
+                let document = Query::parse_document(query, None, &schema, &config).unwrap();
+                let response = service
+                    .ready()
+                    .await
+                    .unwrap()
+                    .call(IntrospectionRequest {
+                        schema: schema.clone(),
+                        document,
+                        variables: Default::default(),
+                    })
+                    .await
+                    .unwrap();
+                responses.push(response);
+            }
 
-        // We should be able to call the mock service twice with the same query, despite only handling
-        // one request.
+            assert_eq!(responses[0], responses[1]);
+            assert_eq!(
+                responses[0].data,
+                Some(serde_json_bytes::json!({
+                    "__schema": {
+                        "queryType": {
+                            "name": "Query",
+                        },
+                    },
+                })),
+            );
 
-        let document = Query::parse_document(query, None, &schema, &config).unwrap();
-        service
-            .ready()
-            .await
-            .unwrap()
-            .call(IntrospectionRequest {
-                schema: schema.clone(),
-                document,
-                variables: Default::default(),
-            })
-            .await
-            .unwrap();
-
-        let document = Query::parse_document(query, None, &schema, &config).unwrap();
-        service
-            .ready()
-            .await
-            .unwrap()
-            .call(IntrospectionRequest {
-                schema: schema.clone(),
-                document,
-                variables: Default::default(),
-            })
-            .await
-            .unwrap();
-
-        drop(service);
-        crate::plugin::test::await_mock_driver(driver).await;
+            assert_histogram_count!(
+                "apollo.platform.cache.lookup.duration",
+                1u64,
+                "cache.type" = "memory",
+                "cache.name" = "introspection",
+                "cache.status" = "miss"
+            );
+            assert_histogram_count!(
+                "apollo.platform.cache.lookup.duration",
+                1u64,
+                "cache.type" = "memory",
+                "cache.name" = "introspection",
+                "cache.status" = "hit"
+            );
+        }
+        .with_metrics()
+        .await
     }
 
     #[tokio::test]
