@@ -7,11 +7,12 @@
 //!
 //! A fetch data path names **response keys, not fields**, so the field a path element stands for
 //! can only be recovered by following the path through what has already been fetched. A key may
-//! also be reached by more than one field, so following it reproduces *every* copy. Two elements
-//! reach nothing and appear in no flatten path: `TypenameEquals` addresses data by runtime type
-//! rather than by response key, and `Parent` moves up, so it cannot be followed downwards. Both
-//! are used only by fetch data rewrites — and by `@context`, which this checker does not verify,
-//! as the legacy one does not either.
+//! also be reached by more than one field, so following it reproduces *every* distinct copy. Two
+//! elements reach nothing and appear in no flatten path: `TypenameEquals` addresses data by
+//! runtime type rather than by response key, and `Parent` moves up, so it cannot be followed
+//! downwards. Both are used only by fetch data rewrites, `@context`'s among them, whose paths
+//! `context.rs` follows itself: a leading `Parent` resolved against the path the fetch runs at,
+//! a `TypenameEquals` read as narrowing the level it stands at.
 //!
 //! # Fragment spreads
 //!
@@ -42,6 +43,7 @@ use std::sync::Arc;
 use apollo_compiler::Name;
 use apollo_compiler::Node;
 use apollo_compiler::ast;
+use apollo_compiler::collections::IndexSet;
 use apollo_compiler::executable::FragmentMap;
 use apollo_compiler::executable::InlineFragment;
 use apollo_compiler::executable::Selection;
@@ -323,13 +325,21 @@ pub(super) fn selections_at(
     }
 }
 
-/// Every copy of a response key reachable in `available`, carrying the rest of the path.
+/// Every distinct copy of a response key reachable in `available`, carrying the rest of the path.
 ///
 /// Inline fragments admitted by `pending` are descended into and reproduced, so a reached field
 /// keeps the type condition that guarded it. Inside a fragment what is carried is the narrowing
 /// the path and the fragment leave between them ([`pending_inside`]): a field found below
 /// fragments that state the narrowing is reproduced under them alone, with no guard of its own, so
 /// a condition of `n` types over `n` sibling fragments mounts one copy per fragment.
+///
+/// A reproduced copy that repeats one already reproduced here exactly, source locations aside, is
+/// kept once, where it first occurs. Every fetch mounted at or below a key leaves its own copy of
+/// the path to it, and a later fetch mounted there reproduces each of them as the same selection:
+/// the path as it was first selected, holding what that one fetch mounts. The buffer is read as a
+/// response shape, in which equal selections merge, so a repetition adds nothing but its size;
+/// kept, the copies would double with every fetch along a chain of fetches at one site. Copies
+/// that differ in anything else, a guard included, are all kept, in their order.
 #[allow(clippy::too_many_arguments)]
 fn selections_under_key(
     schema: &ValidFederationSchema,
@@ -340,7 +350,7 @@ fn selections_under_key(
     path: &[FetchDataPathElement],
     mounted: &[Selection],
 ) -> Vec<Selection> {
-    let mut out = Vec::new();
+    let mut out = IndexSet::default();
     for selection in available {
         match selection {
             Selection::Field(field) => {
@@ -401,7 +411,7 @@ fn selections_under_key(
             Selection::FragmentSpread(_) => {}
         }
     }
-    out
+    out.into_iter().collect()
 }
 
 //==================================================================================================
@@ -755,7 +765,7 @@ mod tests {
     }
 
     const SHELVES: &str = r#"
-        type Query { shelves: [Shelf!]! }
+        type Query { shelves(sort: String): [Shelf!]! }
         interface Shelf { id: ID!, items: [Item!]! }
         type Fiction implements Shelf { id: ID!, items: [Item!]! }
         type Science implements Shelf { id: ID!, items: [Item!]! }
@@ -818,8 +828,7 @@ mod tests {
     /// The path's condition names three kinds of shelf and the fetch wrote a fragment on each: a
     /// field found under each fragment is mounted once, under that fragment alone, which states the
     /// narrowing. A later fetch mounted at the same path into those copies alone finds one copy per
-    /// fragment again; into the accumulated buffer, the copies beside the selections they were
-    /// mounted through, it finds two per fragment, one through each.
+    /// fragment again.
     ///
     /// A control of changed behaviour: guarding the field again by every type of the condition
     /// mounts nine copies, six under a type contradicting the fragment enclosing it.
@@ -859,5 +868,76 @@ mod tests {
                 "Shelf", "Fiction", "Book", "Science", "Book", "Poetry", "Book"
             ]
         );
+    }
+
+    /// Each selection on one line, which is how a test compares reproduced copies by content.
+    fn printed(selections: &[Selection]) -> Vec<String> {
+        selections
+            .iter()
+            .map(|selection| selection.serialize().no_indent().to_string())
+            .collect()
+    }
+
+    /// `items` selecting `selected`, under a fragment on each kind of shelf the condition names.
+    fn on_each_kind(selected: &str) -> String {
+        ["Fiction", "Science", "Poetry"]
+            .map(|kind| format!("... on {kind} {{ items {{ {selected} }} }}"))
+            .join(" ")
+    }
+
+    /// Six copies of `shelves`, `kinds` what the first selects and `any_shelf` what the second
+    /// selects under `... on Shelf`. Each operation is parsed alone, as each fetch's own is:
+    /// copies of one response key that differ in an argument cannot share an operation.
+    fn shelves_copies(
+        schema: &ValidFederationSchema,
+        kinds: &str,
+        any_shelf: &str,
+    ) -> Vec<Selection> {
+        [
+            format!("{{ shelves {{ {kinds} }} shelves {{ ... on Shelf {{ {any_shelf} }} }} }}"),
+            format!(
+                "query($v: Boolean!) {{ shelves @include(if: $v) {{ {kinds} }} \
+                 shelves {{ ... on Shelf @include(if: $v) {{ {any_shelf} }} }} }}"
+            ),
+            format!("{{ shelves(sort: \"title\") {{ {kinds} }} }}"),
+            format!("{{ shelves(sort: \"author\") {{ {kinds} }} }}"),
+        ]
+        .iter()
+        .flat_map(|operation| selections(schema, operation))
+        .collect()
+    }
+
+    /// A chain of fetches at one site. Fetches before it selected `shelves` six ways:
+    /// - with a fragment on each kind of shelf the condition names, and with one on `Shelf`, which
+    ///   select the same items;
+    /// - each of those again with an `@include`, the first on the field, the second on its
+    ///   fragment;
+    /// - the first with a `sort` argument, given two values.
+    ///
+    /// Three fetches are then mounted at the same path in turn, each into everything fetched
+    /// before it. Every fetch leaves its own copy of the path, and each later one finds those
+    /// copies beside the earlier ones, which reproduce as they do; a reproduced copy repeating one
+    /// already reproduced at its level is kept once. So every mount yields the six copies the six
+    /// selections give, in their order: each differs from another in a guard, a directive or an
+    /// argument alone, so all are kept.
+    ///
+    /// A control of changed behaviour: keeping every copy, the second mount yields each copy twice
+    /// and the third four times.
+    #[test]
+    fn a_chain_of_fetches_at_one_site_is_reproduced_once_per_distinct_copy() {
+        let schema = shelves();
+        let mounted = book_title(&schema);
+        let path = conditioned_path();
+        let titles = on_each_kind("... on Book { title }");
+        let expected = printed(&shelves_copies(&schema, &titles, &titles));
+
+        let mut buffer = shelves_copies(&schema, &on_each_kind("id"), "items { id }");
+        let mut mounts = Vec::new();
+        for _ in 0..3 {
+            let reproduced = selections_at(&schema, &buffer, None, &path, &mounted);
+            mounts.push(printed(&reproduced));
+            buffer.extend(reproduced);
+        }
+        assert_eq!(mounts, vec![expected; 3]);
     }
 }
