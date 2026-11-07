@@ -9,8 +9,10 @@ use apollo_compiler::Name;
 use apollo_compiler::executable::Selection;
 
 use super::super::super::CorrectnessError;
+use super::super::context::context_uses;
 use super::super::resolvable::check_fetch_selects_resolvable;
 use super::super::selections::narrow_type_conditions;
+use super::super::subgraph::Subgraph;
 use super::Fixture;
 use crate::query_plan::QueryPlan;
 use crate::query_plan::TopLevelPlanNode;
@@ -422,6 +424,11 @@ fn a_deep_interface_chain_is_walked_once() {
     let chain = (0..64).fold("leaf".to_string(), |inner, _| format!("next {{ {inner} }}"));
     let (root_type, selections) = selections(&schema, &format!("{{ root {{ {chain} }} }}"));
     check_fetch_selects_resolvable("recursive", &schema, &root_type, &selections).unwrap();
+    // The collector of contextual uses walks the same chain, pooling the runtime types below a
+    // field, and completes on it. This shows completion on this input, not a growth law.
+    let subgraph = Subgraph::new(&schema).expect("a federation subgraph");
+    let uses = context_uses(&subgraph, &schema, &root_type, &selections).unwrap();
+    assert!(uses.is_empty());
 }
 
 //==================================================================================================

@@ -135,7 +135,13 @@ use apollo_compiler::executable::Selection;
 use apollo_compiler::name;
 use apollo_compiler::validation::Valid;
 
+use self::context::ContextSite;
+use self::context::ContextUse;
+use self::context::check_context_arguments_bound;
+use self::context::check_context_declared;
 use self::context::check_context_rewrites;
+use self::context::check_root_fetch_uses_no_context;
+use self::context::context_uses;
 use self::context::context_variables;
 use self::context::display_path;
 use self::context::remove_context_arguments;
@@ -689,11 +695,24 @@ impl<'a> Checker<'a> {
         // under that type. For an interface object, one subgraph type standing for every
         // implementation, a fetch whose entries cover only some of them resolves nothing for the
         // rest; `interpret_fetch_node` merges every `_entities` fragment regardless.
+        let subgraph = Subgraph::new(subgraph_schema)?;
+        // A Rust-only shortcut, with no counterpart in the Lean model: a subgraph that applies
+        // `@fromContext` to no argument declares none for any field, so the walk could only come
+        // back empty and every contextual-argument check holds vacuously. Skipping it changes no
+        // verdict; it spares every other subgraph a second walk of each fetch's operation.
+        let uses = if subgraph.declares_context_arguments() {
+            context_uses(&subgraph, subgraph_schema, &root_type, &body)?
+        } else {
+            Vec::new()
+        };
         let selected = if fetch.requires.is_empty() {
+            check_root_fetch_uses_no_context(fetch, &uses)?;
             narrowed
         } else {
             self.check_fetch(
                 fetch,
+                &subgraph,
+                &uses,
                 &entity_body(fetch, &body)?,
                 reached,
                 available,
@@ -844,9 +863,12 @@ impl Checker<'_> {
     /// Context rewrites are an entity fetch's business: `add_context_renamers_for_selection_set`
     /// runs on the node that has just been given its key inputs, so a fetch with them has
     /// `requires`.
+    #[allow(clippy::too_many_arguments)]
     fn check_fetch(
         &self,
         fetch: &FetchNode,
+        subgraph: &Subgraph<'_>,
+        uses: &[ContextUse],
         entity_body: &[Selection],
         reached: Reached<'_>,
         available: &[Selection],
@@ -928,11 +950,10 @@ impl Checker<'_> {
         input_rewrites_well_formed(fetch).map_err(fail)?;
         input_rewrites_separated(self.supergraph_schema, fetch).map_err(fail)?;
 
-        let subgraph = Subgraph::new(self.subgraph_schema(fetch)?)?;
         for (entity_type, entity_selections) in &cases {
             self.check_representation_meets_case(
                 fetch,
-                &subgraph,
+                subgraph,
                 &entries,
                 &requires_types,
                 entity_type,
@@ -943,6 +964,7 @@ impl Checker<'_> {
             )?;
         }
         self.check_typenames_readable(fetch, reached, available, readable_doc)?;
+        check_context_arguments_bound(fetch, uses)?;
         check_context_rewrites(
             self.supergraph_schema,
             &self.root_type,
@@ -951,6 +973,20 @@ impl Checker<'_> {
             available,
             readable,
             fetch,
+            &requires_types,
+        )?;
+        check_context_declared(
+            &ContextSite {
+                schema: self.supergraph_schema,
+                root_type: &self.root_type,
+                path: reached.path,
+                available,
+                readable,
+                fetch,
+                requires_types: &requires_types,
+            },
+            subgraph,
+            uses,
         )
     }
 

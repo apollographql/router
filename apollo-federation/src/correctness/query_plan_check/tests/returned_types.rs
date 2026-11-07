@@ -591,14 +591,21 @@ fn root_and_entity_inputs_merge_at_two_vertices_is_accepted() {
 }
 
 /// `rows` serves a list of `I`, each an `A` or a `B`; `a` and `b`, each declaring one of them,
-/// resolve it and serve its `datum`; `consumer` serves `result`, which requires `datum`.
+/// resolve it and serve its `datum`; `consumer` serves `result`, which requires `datum`, and a
+/// row's `cell`, whose `contextual` takes `datum` from the row it sits in.
 fn row_contributions() -> Fixture {
     Fixture::new(include_str!("../testdata/row_contributions.graphql"))
 }
 
 /// `a` contributes the `A` rows' `datum`, and `b` the `B` rows' when `contribute_b`, before
-/// `consumer` reads it for both.
+/// `consumer` reads it for both: as `result`'s input, or when `contextual` as the value its cell's
+/// `contextual` is passed, by a rewrite reading it off the object the fetch runs on, as the planner
+/// writes it once another fetch has read the value.
 fn check_rows(contribute_b: bool) -> Result<(), CorrectnessError> {
+    check_rows_reading(contribute_b, false)
+}
+
+fn check_rows_reading(contribute_b: bool, contextual: bool) -> Result<(), CorrectnessError> {
     let fixture = row_contributions();
     let contribution = |subgraph: &str, type_name: &str| {
         flatten(
@@ -616,6 +623,32 @@ fn check_rows(contribute_b: bool) -> Result<(), CorrectnessError> {
     ];
     if contribute_b {
         nodes.push(contribution("b", "B"));
+    }
+    if contextual {
+        nodes.push(flatten(
+            "rows.@",
+            json!({ "Fetch": {
+                "subgraph_name": "consumer",
+                "variable_usages": ["ctx"],
+                "requires": [entry("A", "__typename id"), entry("B", "__typename id")],
+                "operation_document":
+                    "query($representations: [_Any!]!, $ctx: String) \
+                     { _entities(representations: $representations) \
+                     { ... on A { cell { contextual(input: $ctx) } } \
+                     ... on B { cell { contextual(input: $ctx) } } } }",
+                "operation_kind": "query",
+                "input_rewrites": [],
+                "output_rewrites": [],
+                "context_rewrites": [
+                    { "KeyRenamer": { "path": [{ "Key": ["datum", null] }], "rename_key_to": "ctx" } }
+                ]
+            } }),
+        ));
+        return check(
+            &fixture,
+            sequence(nodes),
+            "{ rows { cell { contextual } } }",
+        );
     }
     nodes.push(flatten(
         "rows.@",
@@ -641,6 +674,23 @@ fn both_contributions_supply_the_input_is_accepted() {
 #[test]
 fn narrower_contribution_leaves_the_input_is_rejected() {
     expect_rejected(check_rows(false), UNFETCHED_KEY, "`datum` is not read on B");
+}
+
+// Each row's `datum`, contributed for its own member, is the contextual value its cell's
+// `contextual` is passed.
+#[test]
+fn both_contributions_supply_the_context_value_is_accepted() {
+    check_rows_reading(true, true).unwrap();
+}
+
+// `consumer` still runs at the `B` rows, which no contribution gave a `datum`.
+#[test]
+fn narrower_contribution_leaves_the_context_value_is_rejected() {
+    expect_rejected(
+        check_rows_reading(false, true),
+        "the contextual value for `$ctx` is not always fetched",
+        "for data of: Query / B",
+    );
 }
 
 /// A store's `owner` is a `Person` or a `Company`, and `profiles` resolves an owner's `Profile`

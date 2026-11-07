@@ -464,8 +464,8 @@ fn is_object_type(schema: &ValidFederationSchema, type_name: &Name) -> bool {
 /// A fragment whose runtime types are all among those names states the narrowing itself, so
 /// nothing is left for a field below it to be guarded by, and the field is reproduced under the
 /// fragments alone. Guarding it again would add a copy per name: `n` names over `n` sibling
-/// fragments would mount `n²` copies, each narrowed apart, where a reader needs one copy admitting
-/// every type. A fragment with no type condition narrows nothing.
+/// fragments would mount `n²` copies, each narrowed apart, multiplying every later mount through
+/// them. A fragment with no type condition narrows nothing.
 fn pending_inside(
     schema: &ValidFederationSchema,
     pending: Option<&TypeCondition>,
