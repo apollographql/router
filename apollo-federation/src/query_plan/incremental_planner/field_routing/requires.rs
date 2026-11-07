@@ -149,54 +149,47 @@ pub(super) fn condition_directives(directives: &DirectiveList) -> DirectiveList 
         .collect()
 }
 
-/// The @skip/@include conditions on the last field of `op_path` and on the
-/// inline fragments after it, as condition-only fragments, which a key hop
-/// must carry into the entity fetch's op path. Type conditions are dropped:
-/// the entity root and the key inputs already narrow the type, and the type
-/// may not exist in the entity's subgraph (an @interfaceObject's
-/// implementations).
-///
-/// FIXME: conditions above the last field are not propagated across key
-/// hops. See `non_trailing_skip_is_dropped`.
-pub(super) fn trailing_condition_fragments(
+/// Replay every @skip/@include along the path at the entity fetch's root.
+/// Ancestor conditions still gate descendants after a key hop, even when
+/// their original field and type scopes are outside the new fetch.
+pub(super) fn path_condition_fragments(
     op_path: &SharedPath<Arc<OpPathElement>>,
 ) -> Vec<Arc<OpPathElement>> {
-    let mut trailing = Vec::new();
-    for element in op_path.iter() {
-        match element.as_ref() {
-            OpPathElement::Field(field) => {
-                trailing.clear();
-                let conditions = condition_directives(&field.directives);
-                if conditions.is_empty() {
-                    continue;
-                }
-                let Ok(Ok(field_type)) = field
-                    .output_base_type()
-                    .map(CompositeTypeDefinitionPosition::try_from)
-                else {
-                    continue;
-                };
-                trailing.push(Arc::new(OpPathElement::InlineFragment(InlineFragment {
-                    schema: field.schema.clone(),
-                    parent_type_position: field_type,
-                    type_condition_position: None,
-                    directives: conditions,
-                    selection_id: SelectionId::new(),
-                })));
-            }
-            OpPathElement::InlineFragment(frag) => {
-                let conditions = condition_directives(&frag.directives);
-                if conditions.is_empty() {
-                    continue;
-                }
-                trailing.push(Arc::new(OpPathElement::InlineFragment(
-                    frag.with_updated_directives(conditions)
-                        .with_updated_type_condition(None),
-                )));
-            }
+    let Some(last) = op_path.last() else {
+        return Vec::new();
+    };
+    let (schema, parent_type) = match last.as_ref() {
+        OpPathElement::Field(field) => {
+            let Ok(Ok(field_type)) = field
+                .output_base_type()
+                .map(CompositeTypeDefinitionPosition::try_from)
+            else {
+                return Vec::new();
+            };
+            (&field.schema, field_type)
         }
-    }
-    trailing
+        OpPathElement::InlineFragment(fragment) => (&fragment.schema, fragment.casted_type()),
+    };
+    op_path
+        .iter()
+        .filter_map(|element| {
+            let directives = match element.as_ref() {
+                OpPathElement::Field(field) => condition_directives(&field.directives),
+                OpPathElement::InlineFragment(fragment) => {
+                    condition_directives(&fragment.directives)
+                }
+            };
+            (!directives.is_empty()).then(|| {
+                Arc::new(OpPathElement::InlineFragment(InlineFragment {
+                    schema: schema.clone(),
+                    parent_type_position: parent_type.clone(),
+                    type_condition_position: None,
+                    directives,
+                    selection_id: SelectionId::new(),
+                }))
+            })
+        })
+        .collect()
 }
 
 /// `op_path` with @skip/@include stripped from its inline-fragment elements,
@@ -211,32 +204,9 @@ pub(super) fn unconditioned_input_path(
     input_path_keeping(op_path, &DirectiveList::new())
 }
 
-/// `op_path` for appending the key inputs of an entity fetch gated on the
-/// @skip/@include of `trailing_condition_fragments(op_path)`: like
-/// `unconditioned_input_path`, but the conditions the fetch is gated on are
-/// kept, so that a fetch whose selections all sit under one such condition
-/// (a re-fetch lifted under it) can be gated on it as well. The entity
-/// fetch's representation must be built under the same conditions
-/// (`trailing_conditions_context`): it is not gated on them once it merges
-/// with a differently gated fetch, and must then read only the keys of the
-/// branches that hold.
-pub(super) fn gated_input_path(
-    op_path: &SharedPath<Arc<OpPathElement>>,
-) -> SharedPath<Arc<OpPathElement>> {
-    let gate: DirectiveList = trailing_condition_fragments(op_path)
-        .iter()
-        .flat_map(|element| match element.as_ref() {
-            OpPathElement::InlineFragment(frag) => frag.directives.iter().cloned().collect(),
-            OpPathElement::Field(_) => Vec::new(),
-        })
-        .collect();
-    input_path_keeping(op_path, &gate)
-}
-
 /// `op_path` followed by the @skip/@include on the `selection` field itself
-/// (`email @include(if: $x)`) as a condition-only fragment, so that
-/// `gated_input_path` and `trailing_conditions_context` also keep the
-/// conditions that gate the field's fetch through the field.
+/// (`email @include(if: $x)`) as a condition-only fragment, so that key
+/// inputs and their representation context retain the field's conditions.
 pub(super) fn with_own_conditions(
     op_path: &SharedPath<Arc<OpPathElement>>,
     selection: &Selection,
@@ -258,13 +228,12 @@ pub(super) fn with_own_conditions(
     })))
 }
 
-/// The @skip/@include of `trailing_condition_fragments(op_path)`, which
-/// `gated_input_path` keeps on the key inputs, as the context to build the
-/// entity representation under.
-pub(super) fn trailing_conditions_context(
+/// The conditions governing the key inputs also govern their contribution
+/// to the entity representation when differently gated fetches merge.
+pub(super) fn path_conditions_context(
     op_path: &SharedPath<Arc<OpPathElement>>,
 ) -> Result<OpGraphPathContext, FederationError> {
-    trailing_condition_fragments(op_path)
+    op_path
         .iter()
         .try_fold(OpGraphPathContext::default(), |context, element| {
             context.with_context_of(element)
@@ -361,7 +330,7 @@ impl FieldRoutingSearchSpace {
                 conditions: conditions.clone(),
                 condition_alias_rewrites: alias_rewrites,
                 // Under the same conditions as the key (`commit_key_hop`).
-                needed_under: trailing_conditions_context(&with_own_conditions(
+                needed_under: path_conditions_context(&with_own_conditions(
                     &pending.op_path,
                     &pending.selection,
                 ))?,
@@ -536,7 +505,7 @@ mod tests {
 
     fn field_element() -> Arc<OpPathElement> {
         let schema = apollo_compiler::schema::Schema::parse_and_validate(
-            "type Query { x: Int }",
+            "type Query { x: X } type X { value: Int }",
             "schema.graphql",
         )
         .expect("valid schema");
@@ -561,33 +530,31 @@ mod tests {
     /// (e.g. @defer) is not a condition, matching the filter used by
     /// `unconditioned_input_path`.
     #[test]
-    fn trailing_condition_fragments_only_match_skip_include() {
+    fn path_condition_fragments_only_match_skip_include() {
         let skip = SharedPath::new().pushed(fragment_with_directive("skip"));
-        assert_eq!(trailing_condition_fragments(&skip).len(), 1);
+        assert_eq!(path_condition_fragments(&skip).len(), 1);
 
         let other = SharedPath::new().pushed(fragment_with_directive("defer"));
         assert_eq!(
-            trailing_condition_fragments(&other).len(),
+            path_condition_fragments(&other).len(),
             0,
             "a non-condition directive must not be treated as @skip/@include",
         );
     }
 
-    /// A @skip/@include before (not after) the last field is dropped.
-    /// The JS planner propagates all path conditions via OpGraphPathContext;
-    /// this helper only captures trailing ones, so a non-trailing condition
-    /// can be bypassed when a separate unconditional path satisfies the
-    /// same data dependency.
     #[test]
-    fn non_trailing_skip_is_dropped() {
+    fn non_trailing_skip_is_preserved() {
         let path = SharedPath::new()
             .pushed(fragment_with_directive("skip"))
             .pushed(field_element());
-        assert_eq!(
-            trailing_condition_fragments(&path).len(),
-            0,
-            "known gap: non-trailing @skip is not propagated across key hops",
-        );
+        let fragments = path_condition_fragments(&path);
+        assert_eq!(fragments.len(), 1);
+        assert!(matches!(
+            fragments[0].as_ref(),
+            OpPathElement::InlineFragment(fragment)
+                if fragment.parent_type_position.type_name() == &name!("X")
+                    && fragment.type_condition_position.is_none()
+        ));
     }
 
     /// Only top-level fields get aliases; a fragment keeps the names of the
