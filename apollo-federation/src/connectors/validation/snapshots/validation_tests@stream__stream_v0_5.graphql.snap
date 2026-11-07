@@ -1,0 +1,42 @@
+---
+source: apollo-federation/src/connectors/validation/mod.rs
+expression: errors
+input_file: apollo-federation/src/connectors/validation/test_data/stream/stream_v0_5.graphql
+---
+[
+    Message {
+        code: InvalidStream,
+        message: "`@connect(http: {stream:})` on `Query.last` must be \"array\", but found \"last\".",
+        locations: [
+            29:40..29:46,
+        ],
+    },
+    Message {
+        code: InvalidStream,
+        message: "`@connect(http: {stream:})` on `Query.everyWeather` makes `$` a list of events, and this selection maps every one of them, but `Query.everyWeather` resolves one value. Pick one event, for example with `$->last`.",
+        locations: [
+            36:40..36:47,
+        ],
+    },
+    Message {
+        code: InvalidStream,
+        message: "`@connect(http: {stream:})` on `Query.maybeWeather` makes `$` a list of events, and this selection maps every one of them, but `Query.maybeWeather` resolves one value. Pick one event, for example with `$->last`.",
+        locations: [
+            43:40..43:47,
+        ],
+    },
+    Message {
+        code: InvalidStream,
+        message: "`@connect(http: {stream:})` on `Shelf` makes `$` a list of events, and this selection maps every one of them, but `Shelf` resolves one value. Pick one event, for example with `$->last`.",
+        locations: [
+            112:49..112:56,
+        ],
+    },
+    Message {
+        code: InvalidStream,
+        message: "`@connect(http: {stream:})` on `Order` can't be used with `$batch`.",
+        locations: [
+            124:62..124:69,
+        ],
+    },
+]

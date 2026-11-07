@@ -25,12 +25,15 @@ use crate::connectors::ConnectSpec;
 use crate::connectors::Connector;
 use crate::connectors::JSONSelection;
 use crate::connectors::ProblemLocation;
+use crate::connectors::StreamMode;
 use crate::connectors::runtime::errors::RuntimeError;
 use crate::connectors::runtime::inputs::ContextReader;
 use crate::connectors::runtime::key::ResponseKey;
 use crate::connectors::runtime::mapping::Problem;
 use crate::connectors::runtime::mapping::aggregate_apply_to_errors;
 use crate::connectors::runtime::responses::DeserializeError::ContentDecoding;
+use crate::connectors::runtime::stream_framing::StreamFraming;
+use crate::connectors::runtime::stream_framing::json_events;
 
 const ENTITIES: &str = "_entities";
 const TYPENAME: &str = "__typename";
@@ -42,25 +45,61 @@ pub enum HandleResponseError {
 }
 
 /// Converts a response body into a json Value based on the Content-Type header.
-pub fn deserialize_response(body: &[u8], headers: &HeaderMap) -> Result<Value, DeserializeError> {
-    // If the body is empty, there's nothing to parse. We check body.is_empty()
-    // directly because spec-compliant HTTP 204 responses must not include a
-    // Content-Length header — so we can't rely on that header alone to detect
-    // empty bodies. The Content-Length: 0 check is kept for non-compliant
-    // servers that do send it, but body.is_empty() covers both cases.
-    if body.is_empty()
+///
+/// `stream` is the connector's `http.stream` mode. Without one, a streamed body
+/// (`text/event-stream`, JSON Lines) isn't understood and becomes null. With
+/// `array`, the result is the list of the body's JSON events, whether or not
+/// the body is a stream: a plain body is a list of one, and an empty body an
+/// empty list.
+pub fn deserialize_response(
+    body: &[u8],
+    headers: &HeaderMap,
+    stream: Option<StreamMode>,
+) -> Result<Value, DeserializeError> {
+    match stream {
+        None => deserialize_body(body, headers),
+        Some(StreamMode::Array) => {
+            if is_empty_body(body, headers) {
+                Ok(Value::Array(Vec::new()))
+            } else if let Some(framing) = content_type(headers)
+                .as_ref()
+                .and_then(StreamFraming::from_content_type)
+            {
+                Ok(Value::Array(json_events(framing, body)))
+            } else {
+                deserialize_body(body, headers).map(|value| Value::Array(vec![value]))
+            }
+        }
+    }
+}
+
+/// If the body is empty, there's nothing to parse. We check body.is_empty()
+/// directly because spec-compliant HTTP 204 responses must not include a
+/// Content-Length header — so we can't rely on that header alone to detect
+/// empty bodies. The Content-Length: 0 check is kept for non-compliant
+/// servers that do send it, but body.is_empty() covers both cases.
+fn is_empty_body(body: &[u8], headers: &HeaderMap) -> bool {
+    body.is_empty()
         || headers
             .get(CONTENT_LENGTH)
             .and_then(|len| len.to_str().ok())
             .and_then(|s| s.parse::<usize>().ok())
             .is_some_and(|content_length| content_length == 0)
-    {
+}
+
+fn content_type(headers: &HeaderMap) -> Option<Mime> {
+    headers
+        .get(CONTENT_TYPE)
+        .and_then(|h| h.to_str().ok()?.parse::<Mime>().ok())
+}
+
+/// Converts a single (not streamed) response body into a json Value.
+fn deserialize_body(body: &[u8], headers: &HeaderMap) -> Result<Value, DeserializeError> {
+    if is_empty_body(body, headers) {
         return Ok(Value::Null);
     }
 
-    let content_type = headers
-        .get(CONTENT_TYPE)
-        .and_then(|h| h.to_str().ok()?.parse::<Mime>().ok());
+    let content_type = content_type(headers);
 
     if content_type.is_none()
         || content_type
@@ -1087,6 +1126,7 @@ mod tests {
     use super::map_response;
     use crate::connectors::ConnectSpec;
     use crate::connectors::JSONSelection;
+    use crate::connectors::StreamMode;
     use crate::connectors::runtime::inputs::RequestInputs;
     use crate::connectors::runtime::key::ResponseKey;
 
@@ -1168,7 +1208,7 @@ mod tests {
     fn empty_body_no_content_length_returns_null() {
         // Spec-compliant 204: no Content-Length header, no body.
         let headers = HeaderMap::new();
-        let result = deserialize_response(b"", &headers).unwrap();
+        let result = deserialize_response(b"", &headers, None).unwrap();
         assert_eq!(result, Value::Null);
     }
 
@@ -1176,8 +1216,55 @@ mod tests {
     fn empty_body_with_content_length_zero_returns_null() {
         // Non-compliant server that sends Content-Length: 0 on a 204.
         let headers = headers_with(&[("content-length", "0")]);
-        let result = deserialize_response(b"", &headers).unwrap();
+        let result = deserialize_response(b"", &headers, None).unwrap();
         assert_eq!(result, Value::Null);
+    }
+
+    const MCP_TOOL_CALL_SSE: &[u8] = b"event: message\n\
+        data: {\"method\":\"notifications/progress\",\"params\":{\"progress\":1}}\n\
+        \n\
+        event: message\n\
+        data: {\"id\":1,\"result\":{\"temp\":18}}\n\
+        \n";
+
+    #[rstest::rstest]
+    #[case::sse(
+        "text/event-stream",
+        MCP_TOOL_CALL_SSE,
+        json!([
+            {"method": "notifications/progress", "params": {"progress": 1}},
+            {"id": 1, "result": {"temp": 18}},
+        ])
+    )]
+    #[case::json_lines("application/x-ndjson", b"{\"n\":1}\n{\"n\":2}", json!([{"n": 1}, {"n": 2}]))]
+    #[case::plain_json("application/json", b"{\"id\":1,\"result\":{\"temp\":18}}", json!([{"id": 1, "result": {"temp": 18}}]))]
+    #[case::no_content_type("", b"[1,2]", json!([[1, 2]]))]
+    #[case::empty("application/json", b"", json!([]))]
+    fn array_stream_mode_folds_any_body_into_a_list_of_events(
+        #[case] content_type: &str,
+        #[case] body: &[u8],
+        #[case] expected: Value,
+    ) {
+        let headers = if content_type.is_empty() {
+            HeaderMap::new()
+        } else {
+            headers_with(&[("content-type", content_type)])
+        };
+        let result = deserialize_response(body, &headers, Some(StreamMode::Array)).unwrap();
+        assert_eq!(result, expected);
+    }
+
+    #[test]
+    fn a_streamed_body_without_a_stream_mode_is_null() {
+        let headers = headers_with(&[("content-type", "text/event-stream")]);
+        let result = deserialize_response(MCP_TOOL_CALL_SSE, &headers, None).unwrap();
+        assert_eq!(result, Value::Null);
+    }
+
+    #[test]
+    fn array_stream_mode_still_rejects_an_invalid_json_body() {
+        let headers = headers_with(&[("content-type", "application/json")]);
+        assert!(deserialize_response(b"{", &headers, Some(StreamMode::Array)).is_err());
     }
 
     #[test]

@@ -77,6 +77,7 @@ pub use self::models::Label;
 pub use self::models::MakeUriError;
 pub use self::models::OriginatingDirective;
 pub use self::models::SourceName;
+pub use self::models::StreamMode;
 pub use self::spec::connect::ConnectBatchArguments;
 use crate::schema::position::ObjectFieldDefinitionPosition;
 use crate::schema::position::ObjectOrInterfaceFieldDefinitionPosition;
