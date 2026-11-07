@@ -75,3 +75,5 @@ mod with_warning;
 pub(crate) use with_warning::WithWarningMethod;
 mod with_error;
 pub(crate) use with_error::WithErrorMethod;
+mod if_then;
+pub(crate) use if_then::IfThenMethod;
