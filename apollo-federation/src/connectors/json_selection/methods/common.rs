@@ -901,6 +901,13 @@ mod codec_shape_tests {
         )
     }
 
+    // Shape equality ignores errors, so errors are compared as rendered shapes.
+    fn get_codec_error(args: Option<Vec<LitExpr>>, dollar_shape: Shape) -> String {
+        get_codec(args, dollar_shape)
+            .expect_err("expected an error shape")
+            .pretty_print()
+    }
+
     fn string_arg(value: &str) -> Option<Vec<LitExpr>> {
         Some(vec![LitExpr::String(value.to_string())])
     }
@@ -930,13 +937,10 @@ mod codec_shape_tests {
     #[case("")]
     fn codec_arg_shape_rejects_unsupported_literal_codecs(#[case] name: &str) {
         assert_eq!(
-            get_codec(string_arg(name), Shape::none()),
-            Err(Shape::error(
-                format!(
-                    "Method ->encode does not support codec \"{name}\", expected \"base64\", \"base64url\", or \"json\""
-                ),
-                [get_location()]
-            ))
+            get_codec_error(string_arg(name), Shape::none()),
+            format!(
+                r#"Unknown (err "Method ->encode does not support codec \"{name}\", expected \"base64\", \"base64url\", or \"json\"")"#
+            )
         );
     }
 
@@ -945,40 +949,30 @@ mod codec_shape_tests {
     #[case(Some(vec![]))]
     fn codec_arg_shape_requires_an_argument(#[case] args: Option<Vec<LitExpr>>) {
         assert_eq!(
-            get_codec(args, Shape::none()),
-            Err(Shape::error(
-                "Method ->encode requires a codec argument (\"base64\", \"base64url\", or \"json\")"
-                    .to_string(),
-                [get_location()]
-            ))
+            get_codec_error(args, Shape::none()),
+            r#"Unknown (err "Method ->encode requires a codec argument (\"base64\", \"base64url\", or \"json\")")"#
         );
     }
 
     #[test]
     fn codec_arg_shape_rejects_extra_arguments() {
         assert_eq!(
-            get_codec(
+            get_codec_error(
                 Some(vec![
                     LitExpr::String("base64".to_string()),
                     LitExpr::String("json".to_string()),
                 ]),
                 Shape::none()
             ),
-            Err(Shape::error(
-                "Method ->encode accepts exactly 1 argument (codec), got 2".to_string(),
-                [get_location()]
-            ))
+            r#"Unknown (err "Method ->encode accepts exactly 1 argument (codec), got 2")"#
         );
     }
 
     #[test]
     fn codec_arg_shape_rejects_non_string_literal() {
         assert_eq!(
-            get_codec(Some(vec![LitExpr::Number(Number::from(64))]), Shape::none()),
-            Err(Shape::error(
-                "Method ->encode requires a string codec argument".to_string(),
-                [get_location()]
-            ))
+            get_codec_error(Some(vec![LitExpr::Number(Number::from(64))]), Shape::none()),
+            r#"Unknown (err "Method ->encode requires a string codec argument")"#
         );
     }
 
@@ -997,11 +991,8 @@ mod codec_shape_tests {
     #[test]
     fn codec_arg_shape_rejects_dynamic_non_string_codec() {
         assert_eq!(
-            get_codec(codec_path_arg(), codec_record(Shape::int([]))),
-            Err(Shape::error(
-                "Method ->encode requires a string codec argument".to_string(),
-                [get_location()]
-            ))
+            get_codec_error(codec_path_arg(), codec_record(Shape::int([]))),
+            r#"Unknown (err "Method ->encode requires a string codec argument")"#
         );
     }
 }

@@ -332,12 +332,10 @@ mod shape_tests {
         #[case] input: Shape,
         #[values("base64", "base64url")] codec: &str,
     ) {
+        // Shape equality ignores errors, so errors are compared as rendered shapes.
         assert_eq!(
-            get_shape(codec, input),
-            Shape::error(
-                "Method ->encode requires a string input".to_string(),
-                [get_location()]
-            )
+            get_shape(codec, input).pretty_print(),
+            r#"Unknown (err "Method ->encode requires a string input")"#
         );
     }
 
@@ -357,19 +355,18 @@ mod shape_tests {
             input.clone(),
             Shape::none(),
         );
-        assert_eq!(get_shape("json", input), expected);
-        assert_eq!(expected, Shape::string([get_location()]));
+        assert_eq!(
+            get_shape("json", input).pretty_print(),
+            expected.pretty_print()
+        );
+        assert_eq!(expected.pretty_print(), "String");
     }
 
     #[test]
     fn encode_shape_errors_for_unsupported_codec() {
         assert_eq!(
-            get_shape("url", Shape::string([])),
-            Shape::error(
-                r#"Method ->encode does not support codec "url", expected "base64", "base64url", or "json""#
-                    .to_string(),
-                [get_location()]
-            )
+            get_shape("url", Shape::string([])).pretty_print(),
+            r#"Unknown (err "Method ->encode does not support codec \"url\", expected \"base64\", \"base64url\", or \"json\"")"#
         );
     }
 
@@ -396,8 +393,9 @@ mod shape_tests {
                 }),
                 Shape::empty_object([]),
                 Shape::closed_record([("codec".to_string(), Shape::string([]))].into(), []),
-            ),
-            Shape::string([get_location()])
+            )
+            .pretty_print(),
+            "String"
         );
     }
 }
