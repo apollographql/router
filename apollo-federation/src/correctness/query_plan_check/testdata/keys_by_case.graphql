@@ -1,0 +1,161 @@
+# A member written per case into one set of rows, received under two keys by case.
+#
+# `sched` serves `products`, each `Product`'s `event` an `Event`, which `sched` declares with no
+# `team`: a `Match`'s `team` is a `Club` and a `Race`'s a `Crew`, each written on its own type.
+# `req` resolves a `Product`'s `cost`, requiring `event { team { f } }`. A client asking a `Match`'s
+# `team: note` holds the response key `team` with a `note` there, so a plan fetches a `Match`'s
+# `team` for `req` under an alias and a `Race`'s under `team` itself: `req`'s entry reads the member
+# per case, and an input key renamer names the alias back to `team` where the representation holds
+# it.
+#
+# Composed with `apollo_federation::composition::compose` from the two subgraphs below, each at
+# `http://<name>`. Recompose it when they change.
+#
+# Subgraph `req`:
+#
+#   extend schema @link(url: "https://specs.apollo.dev/federation/v2.3", import: ["@key", "@external", "@requires"])
+#
+#   type Product @key(fields: "id") {
+#     id: ID!
+#     event: Event @external
+#     cost: Int @requires(fields: "event { team { f } }")
+#   }
+#
+#   interface Event {
+#     team: Team
+#   }
+#
+#   type Match implements Event {
+#     team: Club @external
+#   }
+#
+#   type Race implements Event {
+#     team: Crew @external
+#   }
+#
+#   interface Team {
+#     f: Int
+#   }
+#
+#   type Club implements Team {
+#     f: Int @external
+#   }
+#
+#   type Crew implements Team {
+#     f: Int @external
+#   }
+#
+# Subgraph `sched`:
+#
+#   extend schema @link(url: "https://specs.apollo.dev/federation/v2.3", import: ["@key", "@shareable"])
+#
+#   type Query {
+#     products: [Product]
+#   }
+#
+#   type Product @key(fields: "id") {
+#     id: ID!
+#     event: Event
+#   }
+#
+#   interface Event {
+#     note: Int
+#   }
+#
+#   type Match implements Event {
+#     team: Club
+#     note: Int
+#   }
+#
+#   type Race implements Event {
+#     team: Crew
+#     note: Int
+#   }
+#
+#   interface Team {
+#     f: Int
+#   }
+#
+#   type Club implements Team {
+#     f: Int @shareable
+#   }
+#
+#   type Crew implements Team {
+#     f: Int @shareable
+#   }
+
+schema @link(url: "https://specs.apollo.dev/link/v1.0") @link(url: "https://specs.apollo.dev/join/v0.3", for: EXECUTION) {
+  query: Query
+}
+
+directive @link(url: String, as: String, for: link__Purpose, import: [link__Import]) repeatable on SCHEMA
+
+directive @join__graph(name: String!, url: String!) on ENUM_VALUE
+
+directive @join__type(graph: join__Graph!, key: join__FieldSet, extension: Boolean! = false, resolvable: Boolean! = true, isInterfaceObject: Boolean! = false) repeatable on OBJECT | INTERFACE | UNION | ENUM | INPUT_OBJECT | SCALAR
+
+directive @join__field(graph: join__Graph, requires: join__FieldSet, provides: join__FieldSet, type: String, external: Boolean, override: String, usedOverridden: Boolean) repeatable on FIELD_DEFINITION | INPUT_FIELD_DEFINITION
+
+directive @join__implements(graph: join__Graph!, interface: String!) repeatable on OBJECT | INTERFACE
+
+directive @join__unionMember(graph: join__Graph!, member: String!) repeatable on UNION
+
+directive @join__enumValue(graph: join__Graph!) repeatable on ENUM_VALUE
+
+enum link__Purpose {
+  """
+  `SECURITY` features provide metadata necessary to securely resolve fields.
+  """
+  SECURITY
+  """
+  `EXECUTION` features provide metadata necessary for operation execution.
+  """
+  EXECUTION
+}
+
+scalar link__Import
+
+enum join__Graph {
+  REQ @join__graph(name: "req", url: "http://req")
+  SCHED @join__graph(name: "sched", url: "http://sched")
+}
+
+scalar join__FieldSet
+
+type Product @join__type(graph: REQ, key: "id") @join__type(graph: SCHED, key: "id") {
+  id: ID!
+  event: Event @join__field(graph: REQ, external: true) @join__field(graph: SCHED)
+  cost: Int @join__field(graph: REQ, requires: "event { team { f } }")
+}
+
+interface Event @join__type(graph: REQ) @join__type(graph: SCHED) {
+  team: Team @join__field(graph: REQ)
+  note: Int @join__field(graph: SCHED)
+}
+
+type Match implements Event @join__implements(graph: REQ, interface: "Event") @join__implements(graph: SCHED, interface: "Event") @join__type(graph: REQ) @join__type(graph: SCHED) {
+  team: Club @join__field(graph: REQ, external: true) @join__field(graph: SCHED)
+  note: Int @join__field(graph: SCHED)
+}
+
+type Race implements Event @join__implements(graph: REQ, interface: "Event") @join__implements(graph: SCHED, interface: "Event") @join__type(graph: REQ) @join__type(graph: SCHED) {
+  team: Crew @join__field(graph: REQ, external: true) @join__field(graph: SCHED)
+  note: Int @join__field(graph: SCHED)
+}
+
+interface Team @join__type(graph: REQ) @join__type(graph: SCHED) {
+  f: Int
+}
+
+type Club implements Team @join__implements(graph: REQ, interface: "Team") @join__implements(graph: SCHED, interface: "Team") @join__type(graph: REQ) @join__type(graph: SCHED) {
+  f: Int @join__field(graph: REQ, external: true) @join__field(graph: SCHED)
+}
+
+type Crew implements Team @join__implements(graph: REQ, interface: "Team") @join__implements(graph: SCHED, interface: "Team") @join__type(graph: REQ) @join__type(graph: SCHED) {
+  f: Int @join__field(graph: REQ, external: true) @join__field(graph: SCHED)
+}
+
+type Query @join__type(graph: REQ) @join__type(graph: SCHED) {
+  products: [Product] @join__field(graph: SCHED)
+}
+

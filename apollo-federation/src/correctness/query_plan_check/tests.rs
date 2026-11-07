@@ -726,6 +726,546 @@ fn a_renamer_filtered_on_another_type_leaves_the_alias_unnamed() {
 }
 
 //==================================================================================================
+// A key renamed where the representation holds it
+//
+// The router projects each entity onto the `requires` entries and applies the input rewrites to
+// what it projected (`Variables::new`): a key renamer moves its key at every object its path
+// reaches that holds the key, and nowhere else, its new name replacing what the object held under
+// it (`DataRewrite::maybe_apply`); a `TypenameEquals` on the path admits an object by the
+// `__typename` the representation holds there, and every object where it holds none
+// (`is_object_of_type`). The plans read a member the response holds under two keys by case, one
+// inline fragment per case, and the shapes beside them the router misreads.
+
+/// A field of a `requires` entry read under an alias, with what is selected under it.
+fn aliased_with(alias: &str, name: &str, below: Vec<serde_json::Value>) -> serde_json::Value {
+    let mut field = aliased_input(alias, name);
+    field["selections"] = serde_json::Value::Array(below);
+    field
+}
+
+/// `sched` fetching each product's `event`, then `req` sent each product as `__typename`, `id` and
+/// `event { <event> }`, under the input rewrites `rewrites`.
+fn cost_of_events(
+    fixture: &Fixture,
+    sched: serde_json::Value,
+    event: Vec<serde_json::Value>,
+    rewrites: serde_json::Value,
+) -> QueryPlan {
+    let req = with(
+        entity_fetch(
+            "req",
+            "Product",
+            serde_json::Value::Array(key_inputs_and(vec![input("event", event)])),
+            "cost",
+        ),
+        "input_rewrites",
+        rewrites,
+    );
+    plan_of(
+        fixture,
+        sequence(vec![
+            sched,
+            flatten(
+                serde_json::json!([key("products"), { "AnyIndex": null }]),
+                req,
+            ),
+        ]),
+    )
+}
+
+fn keys_by_case_fixture() -> Fixture {
+    Fixture::new(include_str!("testdata/keys_by_case.graphql"))
+}
+
+/// A client asking each product's `cost` and a `Match`'s `team: note`.
+const COST_AND_MATCH_NOTE: &str = "{ products { cost event { ... on Match { team: note } } } }";
+
+/// `sched` fetching at each `event` its `__typename` and `at_event`, a `Match`'s `team` under
+/// `team__alias_0` beside the client's `note`, which an output rewrite names `team`, and a
+/// `Race`'s `team` under its own name; then `req`, as [`cost_of_events`] sends it.
+fn team_by_case(
+    fixture: &Fixture,
+    at_event: &str,
+    event: Vec<serde_json::Value>,
+    rewrites: serde_json::Value,
+) -> QueryPlan {
+    let sched = with(
+        root_fetch(
+            "sched",
+            &format!(
+                "{{ products {{ __typename id event {{ __typename {at_event} \
+                 ... on Match {{ team__alias_0: team {{ f }} team__alias_1: note }} \
+                 ... on Race {{ team {{ f }} }} }} }} }}"
+            ),
+        ),
+        "output_rewrites",
+        renaming(
+            &[key("products"), key("event"), key("team__alias_1")],
+            "team",
+        ),
+    );
+    cost_of_events(fixture, sched, event, rewrites)
+}
+
+/// `req`'s `event` read per case: a `Match`'s `team` under `team__alias_0`, a `Race`'s under `team`.
+fn team_read_by_case() -> Vec<serde_json::Value> {
+    vec![
+        entry(
+            Some("Match"),
+            vec![],
+            vec![aliased_with(
+                "team__alias_0",
+                "team",
+                vec![input("f", vec![])],
+            )],
+        ),
+        entry(
+            Some("Race"),
+            vec![],
+            vec![input("team", vec![input("f", vec![])])],
+        ),
+    ]
+}
+
+/// `event/team__alias_0 → team`, with `filters` written before the alias.
+fn team_named_back(filters: &[serde_json::Value]) -> serde_json::Value {
+    let mut path = vec![key("event")];
+    path.extend(filters.iter().cloned());
+    path.push(key("team__alias_0"));
+    renaming(&path, "team")
+}
+
+// At a `Match` the representation holds `team__alias_0`, which the renamer names `team`; at a
+// `Race` it holds `team` and no alias, so the renamer renames nothing there and `team` is sent as
+// itself. Both cases send `req` its `team { f }`.
+//
+// The constructive planner's rendering of a member received under two keys by case. A control of
+// changed behaviour: read as a bijection, the renamer claimed the `Race`'s `team` as an alias too.
+#[test]
+fn a_member_renamed_where_its_alias_is_held_is_accepted() {
+    let fixture = keys_by_case_fixture();
+    let plan = team_by_case(&fixture, "", team_read_by_case(), team_named_back(&[]));
+    fixture.check(&plan, COST_AND_MATCH_NOTE).unwrap();
+}
+
+// Without the `Race` fragment the representation holds nothing at a `Race`'s `event`: the renamer
+// finds no `team__alias_0` there, and nothing is sent as `team`.
+//
+// A control of preserved behaviour, its reason the name the subgraph is not sent.
+#[test]
+fn a_renamer_whose_key_is_absent_where_its_name_is_owed_is_rejected() {
+    let fixture = keys_by_case_fixture();
+    let plan = team_by_case(
+        &fixture,
+        "",
+        team_read_by_case()[..1].to_vec(),
+        team_named_back(&[]),
+    );
+    let error = fixture.rejection(&plan, COST_AND_MATCH_NOTE);
+    assert!(
+        error.contains("does not hold `team` at `products.event`, a `Race`"),
+        "{error}"
+    );
+}
+
+// One key over both cases: the entry reads `team__alias_0` at a `Race` too, where the plan fetched
+// none, and the router would project it as `null` and rename that.
+//
+// A control of preserved behaviour.
+#[test]
+fn an_alias_read_over_both_cases_where_one_fetched_it_is_rejected() {
+    let fixture = keys_by_case_fixture();
+    let plan = team_by_case(
+        &fixture,
+        "",
+        vec![aliased_with(
+            "team__alias_0",
+            "team",
+            vec![input("f", vec![])],
+        )],
+        team_named_back(&[]),
+    );
+    let error = fixture.rejection(&plan, COST_AND_MATCH_NOTE);
+    assert!(
+        error.contains("the representation reads `team__alias_0` at `products.event`, a `Race`")
+            && error.contains(READ_UNFETCHED),
+        "{error}"
+    );
+}
+
+// A `TypenameEquals` admits an object whose representation holds no `__typename`: filtered on
+// `Race`, the renamer still names a `Match`'s alias back, since the entry reads no `__typename` at
+// `event`. Reading `__typename` there, the filter stops at a `Match`, which is sent no `team`.
+//
+// A control of changed behaviour, then one of preserved behaviour whose reason is the name the
+// subgraph is not sent.
+#[test]
+fn a_filter_reads_the_typename_the_representation_holds() {
+    let fixture = keys_by_case_fixture();
+    let filtered = team_named_back(&[typename_equals("Race")]);
+    let plan = team_by_case(&fixture, "", team_read_by_case(), filtered.clone());
+    fixture.check(&plan, COST_AND_MATCH_NOTE).unwrap();
+    let mut typed = vec![input("__typename", vec![])];
+    typed.extend(team_read_by_case());
+    let plan = team_by_case(&fixture, "", typed, filtered);
+    let error = fixture.rejection(&plan, COST_AND_MATCH_NOTE);
+    assert!(
+        error.contains("does not hold `team` at `products.event`, a `Match`"),
+        "{error}"
+    );
+}
+
+fn copies_by_case_fixture() -> Fixture {
+    Fixture::new(include_str!("testdata/copies_by_case.graphql"))
+}
+
+/// A client asking each product's `cost` and a `Match`'s `team { f: g }`.
+const COST_AND_MATCH_G: &str = "{ products { cost event { ... on Match { team { f: g } } } } }";
+
+/// `sched` fetching beneath a `Match`'s `team` `on_match` beside the client's `f: g`, and beneath a
+/// `Race`'s `on_race`; then `req`, as [`cost_of_events`] sends it.
+fn f_by_copy(
+    fixture: &Fixture,
+    on_match: &str,
+    on_race: &str,
+    event: Vec<serde_json::Value>,
+    rewrites: serde_json::Value,
+) -> QueryPlan {
+    let sched = root_fetch(
+        "sched",
+        &format!(
+            "{{ products {{ __typename id event {{ __typename \
+             ... on Match {{ team {{ {on_match} f: g }} }} \
+             ... on Race {{ team {{ {on_race} }} }} }} }} }}"
+        ),
+    );
+    cost_of_events(fixture, sched, event, rewrites)
+}
+
+/// `event/team/<alias> → f`, with `filters` written before `team`.
+fn f_named_back(filters: &[serde_json::Value], alias: &str) -> serde_json::Value {
+    let mut path = vec![key("event")];
+    path.extend(filters.iter().cloned());
+    path.extend([key("team"), key(alias)]);
+    renamer(serde_json::Value::Array(path), "f")
+}
+
+/// `req`'s `event { team { … } }` with the given `team` selections.
+fn team_reading(below: Vec<serde_json::Value>) -> Vec<serde_json::Value> {
+    vec![input("team", below)]
+}
+
+// Each copy's `f` is held under an alias of its own, `f__alias_0` beneath a `Match`'s `team` and
+// `f__alias_1` beneath a `Race`'s, and each renamer names its alias back to `f` where the
+// representation holds it: the two never meet at one object.
+//
+// The constructive planner's rendering of a field read beneath two parent copies. A control of
+// changed behaviour: read as a bijection, the later renamer, inverted first, claimed every `f`.
+#[test]
+fn two_renamers_onto_one_name_held_apart_are_accepted() {
+    let fixture = copies_by_case_fixture();
+    let plan = f_by_copy(
+        &fixture,
+        "f__alias_0: f",
+        "f__alias_1: f",
+        vec![
+            entry(
+                Some("Match"),
+                vec![],
+                team_reading(vec![aliased_input("f__alias_0", "f")]),
+            ),
+            entry(
+                Some("Race"),
+                vec![],
+                team_reading(vec![aliased_input("f__alias_1", "f")]),
+            ),
+        ],
+        serde_json::json!([
+            f_named_back(&[], "f__alias_0"),
+            f_named_back(&[], "f__alias_1")
+        ]),
+    );
+    fixture.check(&plan, COST_AND_MATCH_G).unwrap();
+}
+
+/// The two renamers of [`f_by_copy`]'s aliases, in the order given.
+fn f_aliases_named_back(aliases: [&str; 2]) -> serde_json::Value {
+    serde_json::json!([f_named_back(&[], aliases[0]), f_named_back(&[], aliases[1])])
+}
+
+// Both aliases of `f` fetched and read beneath both copies: at every object both are held, both are
+// renamed to `f`, and the later rename replaces the earlier's value with its own, which is `f`'s
+// as well. The router sends `req` its `f` at both cases.
+//
+// A control of changed behaviour: what it shows is a collapse of two keys onto one name served
+// faithfully where the survivor is the demanded field, which the bijection refused.
+#[test]
+fn two_aliases_of_one_field_renamed_onto_it_are_accepted() {
+    let fixture = copies_by_case_fixture();
+    let both = "f__alias_0: f f__alias_1: f";
+    let plan = f_by_copy(
+        &fixture,
+        both,
+        both,
+        team_reading(vec![
+            aliased_input("f__alias_0", "f"),
+            aliased_input("f__alias_1", "f"),
+        ]),
+        f_aliases_named_back(["f__alias_0", "f__alias_1"]),
+    );
+    fixture.check(&plan, COST_AND_MATCH_G).unwrap();
+}
+
+// The second alias holds `g`: renamed onto `f` last, its value is what `req` is sent as `f`, and the
+// two renamers agree nowhere. Renamed first, it is replaced by `f`'s own, and `req` is served.
+//
+// A control of preserved behaviour whose reason is the survivor's call, then one of changed
+// behaviour: the rewrites' order decides which value is sent.
+#[test]
+fn of_two_renamers_onto_one_name_the_later_is_sent() {
+    let fixture = copies_by_case_fixture();
+    let both = "f__alias_0: f f__alias_1: g";
+    let plan = |order: [&str; 2]| {
+        f_by_copy(
+            &fixture,
+            both,
+            both,
+            team_reading(vec![
+                aliased_input("f__alias_0", "f"),
+                aliased_input("f__alias_1", "g"),
+            ]),
+            f_aliases_named_back(order),
+        )
+    };
+    let error = fixture.rejection(&plan(["f__alias_0", "f__alias_1"]), COST_AND_MATCH_G);
+    assert!(
+        error.contains("the representation holds `f__alias_1` at `products.event.team`")
+            && error.contains("as `g`, where `f` is asked"),
+        "{error}"
+    );
+    fixture
+        .check(&plan(["f__alias_1", "f__alias_0"]), COST_AND_MATCH_G)
+        .unwrap();
+}
+
+// One alias beneath both copies, renamed by a renamer whose filter on `Match` precedes `team`: the
+// router tests the `event` holding `team`, whose `__typename` the entry reads, and renames beneath
+// a `Match` alone, so a `Race` is sent `f__alias_0` and no `f`. Unfiltered, the renamer names it
+// back beneath both.
+//
+// A control of changed behaviour, then one of preserved behaviour: a filter before an earlier key
+// was passed over, which accepted the plan the router misreads.
+#[test]
+fn a_filter_before_an_earlier_key_reads_the_object_holding_it() {
+    let fixture = copies_by_case_fixture();
+    let reading = || {
+        let mut event = vec![input("__typename", vec![])];
+        event.extend(team_reading(vec![aliased_input("f__alias_0", "f")]));
+        event
+    };
+    let plan = f_by_copy(
+        &fixture,
+        "f__alias_0: f",
+        "f__alias_0: f",
+        reading(),
+        serde_json::json!([f_named_back(&[typename_equals("Match")], "f__alias_0")]),
+    );
+    let error = fixture.rejection(&plan, COST_AND_MATCH_G);
+    assert!(
+        error.contains("does not hold `f` at `products.event.team`")
+            && error.contains("`products.event` is `Race`"),
+        "{error}"
+    );
+    let plan = f_by_copy(
+        &fixture,
+        "f__alias_0: f",
+        "f__alias_0: f",
+        reading(),
+        serde_json::json!([f_named_back(&[], "f__alias_0")]),
+    );
+    fixture.check(&plan, COST_AND_MATCH_G).unwrap();
+}
+
+/// A value setter writing `value` under `event`'s `__typename`.
+fn event_typename_set_to(value: &str) -> serde_json::Value {
+    serde_json::json!({ "ValueSetter": {
+        "path": [key("event"), key("__typename")],
+        "set_value_to": value
+    } })
+}
+
+/// The renamer of a `Match`'s alias back to `team`, filtered on `Race`.
+fn team_named_back_on_race() -> serde_json::Value {
+    team_named_back(&[typename_equals("Race")])[0].clone()
+}
+
+// `sched` and the entry read each event's `__typename` under `t` as well, and a renamer names `t`
+// back to `__typename`. Run first, it puts `Match` under a `Match` event's `__typename`, where the
+// filter on `Race` then stops the alias's renamer, and `req` is sent no `team` there. Run after it,
+// the filter meets an event holding no `__typename` and admits it.
+//
+// A control of preserved behaviour whose reason is the name not sent, then one of changed
+// behaviour: a filter reads the representation as the rewrites before it left it, which a reading
+// of the projection as first projected would not.
+#[test]
+fn a_filter_reads_the_typename_an_earlier_renamer_moved() {
+    let fixture = keys_by_case_fixture();
+    let mut event = vec![aliased_input("t", "__typename")];
+    event.extend(team_read_by_case());
+    let typename_back = renamer(serde_json::json!([key("event"), key("t")]), "__typename");
+    let plan = |rewrites: serde_json::Value| {
+        team_by_case(&fixture, "t: __typename", event.clone(), rewrites)
+    };
+    let error = fixture.rejection(
+        &plan(serde_json::json!([
+            typename_back,
+            team_named_back_on_race()
+        ])),
+        COST_AND_MATCH_NOTE,
+    );
+    assert!(
+        error.contains("does not hold `team` at `products.event`, a `Match`"),
+        "{error}"
+    );
+    fixture
+        .check(
+            &plan(serde_json::json!([
+                team_named_back_on_race(),
+                typename_back
+            ])),
+            COST_AND_MATCH_NOTE,
+        )
+        .unwrap();
+}
+
+// The entry reads each event's `__typename`, and a value setter writes `Race` there. Run first, it
+// has a `Match` event hold `Race` when the filter on `Race` reads it, which admits it, and the
+// alias is named back. Run after it, the filter reads `Match` and stops the renamer.
+//
+// A control of changed behaviour, then one of preserved behaviour whose reason is the name not sent.
+#[test]
+fn a_filter_reads_the_typename_an_earlier_setter_wrote() {
+    let fixture = keys_by_case_fixture();
+    let mut event = vec![input("__typename", vec![])];
+    event.extend(team_read_by_case());
+    let plan = |rewrites: serde_json::Value| team_by_case(&fixture, "", event.clone(), rewrites);
+    fixture
+        .check(
+            &plan(serde_json::json!([
+                event_typename_set_to("Race"),
+                team_named_back_on_race()
+            ])),
+            COST_AND_MATCH_NOTE,
+        )
+        .unwrap();
+    let error = fixture.rejection(
+        &plan(serde_json::json!([
+            team_named_back_on_race(),
+            event_typename_set_to("Race")
+        ])),
+        COST_AND_MATCH_NOTE,
+    );
+    assert!(
+        error.contains("does not hold `team` at `products.event`, a `Match`"),
+        "{error}"
+    );
+}
+
+// A renamer moves a `Match`'s `team` object under `__typename`, and a filter on `Match` then reads
+// it there: which way the router's filter goes depends on that value at execution, which the plan
+// does not state.
+//
+// A control of preserved behaviour whose reason is the filter the checker cannot read.
+#[test]
+fn a_filter_reading_another_fields_value_under_typename_is_rejected() {
+    let fixture = keys_by_case_fixture();
+    let plan = team_by_case(
+        &fixture,
+        "",
+        team_read_by_case(),
+        serde_json::json!([
+            renamer(
+                serde_json::json!([key("event"), key("team__alias_0")]),
+                "__typename"
+            ),
+            renamer(
+                serde_json::json!([key("event"), typename_equals("Match"), key("team")]),
+                "team"
+            )
+        ]),
+    );
+    let error = fixture.rejection(&plan, COST_AND_MATCH_NOTE);
+    assert!(
+        error.contains("`TypenameEquals(Match)`")
+            && error.contains("where the representation holds `team` under `__typename`"),
+        "{error}"
+    );
+}
+
+// `__require_0_isbn` renamed to `b` and `b` to `isbn`: the second rewrite meets the key the first
+// left. In the other order, the first meets no `b`, and `b` is what is sent.
+//
+// A control of preserved behaviour, then one whose reason is the name not sent.
+#[test]
+fn renamers_apply_in_their_order() {
+    let fixture = fixture();
+    let plan = |rewrites: serde_json::Value| {
+        book_requires_plan(
+            &fixture,
+            "__typename id __require_0_isbn: isbn",
+            aliased_isbn(),
+            rewrites,
+        )
+    };
+    let to_b = renamer(serde_json::json!([key("__require_0_isbn")]), "b");
+    let to_isbn = renamer(serde_json::json!([key("b")]), "isbn");
+    check_blurb_plan(&fixture, &plan(serde_json::json!([to_b, to_isbn]))).unwrap();
+    let error = check_blurb_plan(&fixture, &plan(serde_json::json!([to_isbn, to_b])))
+        .expect_err("`b` is sent")
+        .to_string();
+    assert!(error.contains("does not hold `isbn` at `feed`"), "{error}");
+}
+
+// `from` and `to` each read `x` under `a`, and two renamers name each back at its own object.
+//
+// A control of preserved behaviour: a renamer renames at the objects its path reaches alone.
+#[test]
+fn one_key_renamed_at_two_objects_is_renamed_at_each() {
+    let fixture = Fixture::new(include_str!("testdata/nested_inputs.graphql"));
+    let vertices = "from { a: x y } to { a: x y }";
+    let vertex = |name: &str| input(name, vec![aliased_input("a", "x"), input("y", vec![])]);
+    let plan = plan_of(
+        &fixture,
+        sequence(vec![
+            root_fetch(
+                "root",
+                &format!("{{ edge {{ __typename id {vertices} }} }}"),
+            ),
+            flatten(
+                serde_json::json!([key("edge")]),
+                with(
+                    entity_fetch(
+                        "consumer",
+                        "Edge",
+                        serde_json::Value::Array(key_inputs_and(vec![
+                            vertex("from"),
+                            vertex("to"),
+                        ])),
+                        "fromTo",
+                    ),
+                    "input_rewrites",
+                    serde_json::json!([
+                        renamer(serde_json::json!([key("from"), key("a")]), "x"),
+                        renamer(serde_json::json!([key("to"), key("a")]), "x")
+                    ]),
+                ),
+            ),
+        ]),
+    );
+    fixture.check(&plan, "{ edge { fromTo } }").unwrap();
+}
+
+//==================================================================================================
 // What a deferred block can read
 
 /// A deferred block does not see everything its primary block fetched. The router starts it from
@@ -6063,6 +6603,22 @@ fn a_demanded_copied_field_renamed_back_beside_surplus_is_accepted() {
         "onRight",
     )
     .rewrites(renaming_below_u("r", "right"))
+    .check()
+    .unwrap();
+}
+
+// A copied `extra: left` renamed onto its sibling `left`, whose value it replaces with the same
+// field's, beside the demanded `right`, which no rewrite touches.
+//
+// A control of preserved behaviour: a collapse of keys the subgraph does not read owes nothing.
+#[test]
+fn a_copied_surplus_renamed_onto_its_sibling_is_accepted() {
+    Sent::new(
+        "__typename id u { right left extra: left }",
+        copied_u(),
+        "onRight",
+    )
+    .rewrites(renaming_below_u("extra", "left"))
     .check()
     .unwrap();
 }
