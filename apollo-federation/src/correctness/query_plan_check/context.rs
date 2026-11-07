@@ -41,6 +41,11 @@
 //! levels is ignored, restricting when it runs and not where the value is. What is left is
 //! Boolean, and [`boolean_condition_covered_by`] decides that symbolically.
 //!
+//! Past the shared levels the copies are read one at a time, so a value split into copies, each
+//! narrowed to some of the types a level allows, serves no configuration even where between them
+//! they cover every type: a conservative limit, whether a fetch wrote the split or a path condition
+//! guarding a bare field made it.
+//!
 //! A level carries both the types the schema allows there and what the guards narrow that to,
 //! which is what tells a real narrowing from a vacuous one: a `... on T` where `T` is the only
 //! type the position can have narrows nothing, and reading the guard names alone would reject

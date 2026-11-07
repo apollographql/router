@@ -36,6 +36,7 @@
 //! positions a `TypenameEquals` filter applies at: [`type_filter_admits`] on an output,
 //! [`type_filter_meets`] forwards and [`type_filter_covers`] inverted on an input.
 
+use std::borrow::Cow;
 use std::sync::Arc;
 
 use apollo_compiler::Name;
@@ -206,16 +207,12 @@ fn selection_set(ty: Name, selections: Vec<Selection>) -> SelectionSet {
     set
 }
 
-/// Does `pending` admit a fragment carrying `fragment_type`?
+/// Does `pending` admit a fragment whose runtime types are `reached`?
 ///
 /// An unrestricted pending condition admits everything, and so does a fragment with no type
-/// condition of its own.
-fn type_condition_admits(
-    schema: &ValidFederationSchema,
-    pending: Option<&TypeCondition>,
-    fragment_type: Option<&Name>,
-) -> bool {
-    let (Some(type_names), Some(fragment_type)) = (pending, fragment_type) else {
+/// condition of its own, whose `reached` is `None`.
+fn type_condition_admits(pending: Option<&TypeCondition>, reached: Option<&[Name]>) -> bool {
+    let (Some(type_names), Some(reached)) = (pending, reached) else {
         return true;
     };
     // The path's condition names the concrete types the data there is narrowed to; the fragment's
@@ -224,7 +221,41 @@ fn type_condition_admits(
     // exact same object type, and skips one written on any interface or union above it.
     type_names
         .iter()
-        .any(|type_name| type_includes_object(schema, fragment_type, type_name))
+        .any(|type_name| reached.contains(type_name))
+}
+
+/// What a path element's narrowing comes to inside an inline fragment it admits, the fragment
+/// reaching `reached`: what the path and the fragment leave between them, the narrowed types the
+/// fragment reaches.
+///
+/// A fragment whose runtime types are all among those types states the narrowing itself, so
+/// nothing is left for a field below it to be guarded by, and the field is reproduced under the
+/// fragments alone, one copy admitting every runtime type the fragment reaches. Guarding it again
+/// would add a copy per type, each narrowed to that type alone: under a fragment on an object type
+/// all but one contradict it, and under a fragment on an abstract type they are compatible copies
+/// narrowed apart, which the context reader, needing one copy that admits every type past the
+/// levels it shares with a fetch, rejects. A fragment with no type condition narrows nothing.
+fn pending_inside<'a>(
+    pending: Option<&'a TypeCondition>,
+    reached: Option<&[Name]>,
+) -> Option<Cow<'a, TypeCondition>> {
+    let type_names = pending?;
+    let Some(reached) = reached else {
+        return Some(Cow::Borrowed(type_names));
+    };
+    if reached
+        .iter()
+        .all(|type_name| type_names.contains(type_name))
+    {
+        return None;
+    }
+    Some(Cow::Owned(
+        type_names
+            .iter()
+            .filter(|type_name| reached.contains(type_name))
+            .cloned()
+            .collect(),
+    ))
 }
 
 /// The object types a type name grounds to, sorted. Empty if the schema does not declare it, or it
@@ -261,24 +292,6 @@ pub(super) fn admitted_types(schema: &ValidFederationSchema, guards: &[Name]) ->
     admitted
 }
 
-/// Is `object_name` one of the runtime types of `type_name`?
-fn type_includes_object(
-    schema: &ValidFederationSchema,
-    type_name: &Name,
-    object_name: &Name,
-) -> bool {
-    let Ok(position) = schema.get_type(type_name) else {
-        return false;
-    };
-    let Ok(composite) = position.try_into() else {
-        return false;
-    };
-    schema
-        .possible_runtime_types(composite)
-        .map(|types| types.iter().any(|ty| ty.type_name == *object_name))
-        .unwrap_or(false)
-}
-
 /// The selections that `mounted` becomes when placed at `path` inside `available`.
 ///
 /// `pending` is the type condition carried from the previous path element. It filters *where* the
@@ -313,7 +326,10 @@ pub(super) fn selections_at(
 /// Every copy of a response key reachable in `available`, carrying the rest of the path.
 ///
 /// Inline fragments admitted by `pending` are descended into and reproduced, so a reached field
-/// keeps the type condition that guarded it.
+/// keeps the type condition that guarded it. Inside a fragment what is carried is the narrowing
+/// the path and the fragment leave between them ([`pending_inside`]): a field found below
+/// fragments that state the narrowing is reproduced under them alone, with no guard of its own, so
+/// a condition of `n` types over `n` sibling fragments mounts one copy per fragment.
 #[allow(clippy::too_many_arguments)]
 fn selections_under_key(
     schema: &ValidFederationSchema,
@@ -347,17 +363,24 @@ fn selections_under_key(
                     },
                     inner,
                 );
-                // An unguarded field is selected on every type the path narrowed away.
+                // An unguarded field is selected on every type the path narrowed away, unless the
+                // fragments it was found under state the narrowing and leave no `pending`.
                 out.extend(under_reached_types(pending, reproduced));
             }
             Selection::InlineFragment(fragment) => {
-                if !type_condition_admits(schema, pending, fragment.type_condition.as_ref()) {
+                // The fragment's runtime types, read once for whether it is admitted and for what
+                // it leaves of the narrowing, and only where the position is narrowed.
+                let reached = pending
+                    .and(fragment.type_condition.as_ref())
+                    .map(|fragment_type| possible_types(schema, fragment_type));
+                if !type_condition_admits(pending, reached.as_deref()) {
                     continue;
                 }
+                let inside = pending_inside(pending, reached.as_deref());
                 let inner = selections_under_key(
                     schema,
                     &fragment.selection_set.selections,
-                    pending,
+                    inside.as_deref(),
                     name,
                     type_condition,
                     path,
@@ -657,6 +680,8 @@ mod tests {
     use apollo_compiler::name;
     use apollo_compiler::schema::Schema;
 
+    use super::super::test_support::selections;
+    use super::super::test_support::under;
     use super::*;
 
     const SCHEMA: &str = r#"
@@ -684,7 +709,7 @@ mod tests {
         let at_film = vec![name!("Film")];
         for guard in [name!("Film"), name!("Media"), name!("Item")] {
             assert!(
-                type_condition_admits(&schema, Some(&at_film), Some(&guard)),
+                type_condition_admits(Some(&at_film), Some(&possible_types(&schema, &guard))),
                 "`... on {guard}` should reach data narrowed to Film"
             );
         }
@@ -696,7 +721,7 @@ mod tests {
         let at_film = vec![name!("Film")];
         for guard in [name!("Book"), name!("Printed")] {
             assert!(
-                !type_condition_admits(&schema, Some(&at_film), Some(&guard)),
+                !type_condition_admits(Some(&at_film), Some(&possible_types(&schema, &guard))),
                 "`... on {guard}` should not reach data narrowed to Film"
             );
         }
@@ -708,14 +733,12 @@ mod tests {
         let schema = schema();
         let at_either = vec![name!("Book"), name!("Film")];
         assert!(type_condition_admits(
-            &schema,
             Some(&at_either),
-            Some(&name!("Media"))
+            Some(&possible_types(&schema, &name!("Media")))
         ));
         assert!(type_condition_admits(
-            &schema,
             Some(&at_either),
-            Some(&name!("Printed"))
+            Some(&possible_types(&schema, &name!("Printed")))
         ));
     }
 
@@ -725,8 +748,116 @@ mod tests {
     #[test]
     fn an_absent_condition_admits_everything() {
         let schema = schema();
-        assert!(type_condition_admits(&schema, None, Some(&name!("Book"))));
-        assert!(type_condition_admits(&schema, Some(&[name!("Film")]), None));
-        assert!(type_condition_admits(&schema, None, None));
+        let book = possible_types(&schema, &name!("Book"));
+        assert!(type_condition_admits(None, Some(&book)));
+        assert!(type_condition_admits(Some(&[name!("Film")]), None));
+        assert!(type_condition_admits(None, None));
+    }
+
+    const SHELVES: &str = r#"
+        type Query { shelves: [Shelf!]! }
+        interface Shelf { id: ID!, items: [Item!]! }
+        type Fiction implements Shelf { id: ID!, items: [Item!]! }
+        type Science implements Shelf { id: ID!, items: [Item!]! }
+        type Poetry implements Shelf { id: ID!, items: [Item!]! }
+        type Travel implements Shelf { id: ID!, items: [Item!]! }
+        interface Item { id: ID! }
+        type Book implements Item { id: ID!, title: String }
+    "#;
+
+    fn shelves() -> ValidFederationSchema {
+        let schema = Schema::parse_and_validate(SHELVES, "schema.graphql").unwrap();
+        ValidFederationSchema::new(schema).unwrap()
+    }
+
+    /// The type conditions of every inline fragment at every depth, in document order.
+    fn fragments(selections: &[Selection]) -> Vec<String> {
+        let mut out = Vec::new();
+        for selection in selections {
+            match selection {
+                Selection::Field(field) => out.extend(fragments(&field.selection_set.selections)),
+                Selection::InlineFragment(fragment) => {
+                    out.push(
+                        fragment
+                            .type_condition
+                            .as_ref()
+                            .map(|name| name.to_string())
+                            .unwrap_or_default(),
+                    );
+                    out.extend(fragments(&fragment.selection_set.selections));
+                }
+                Selection::FragmentSpread(_) => {}
+            }
+        }
+        out
+    }
+
+    /// `shelves.@|[Fiction,Science,Poetry].items.@`: a fetch mounted into the items of three of the
+    /// four kinds of shelf.
+    fn conditioned_path() -> Vec<FetchDataPathElement> {
+        vec![
+            FetchDataPathElement::Key(name!("shelves"), None),
+            FetchDataPathElement::AnyIndex(Some(vec![
+                name!("Fiction"),
+                name!("Science"),
+                name!("Poetry"),
+            ])),
+            FetchDataPathElement::Key(name!("items"), None),
+            FetchDataPathElement::AnyIndex(None),
+        ]
+    }
+
+    /// What the fetch mounts at each item: `... on Book { title }`.
+    fn book_title(schema: &ValidFederationSchema) -> Vec<Selection> {
+        under(
+            &selections(schema, "{ shelves { items { ... on Book { title } } } }"),
+            "items",
+        )
+    }
+
+    /// The path's condition names three kinds of shelf and the fetch wrote a fragment on each: a
+    /// field found under each fragment is mounted once, under that fragment alone, which states the
+    /// narrowing. A later fetch mounted at the same path into those copies alone finds one copy per
+    /// fragment again; into the accumulated buffer, the copies beside the selections they were
+    /// mounted through, it finds two per fragment, one through each.
+    ///
+    /// A control of changed behaviour: guarding the field again by every type of the condition
+    /// mounts nine copies, six under a type contradicting the fragment enclosing it.
+    #[test]
+    fn a_field_under_a_fragment_on_a_narrowed_type_is_mounted_once() {
+        let schema = shelves();
+        let available = selections(
+            &schema,
+            "{ shelves { ... on Fiction { items { id } } ... on Science { items { id } } \
+             ... on Poetry { items { id } } } }",
+        );
+        let mounted = book_title(&schema);
+        let path = conditioned_path();
+        let one_per_fragment = ["Fiction", "Book", "Science", "Book", "Poetry", "Book"];
+
+        let first = selections_at(&schema, &available, None, &path, &mounted);
+        assert_eq!(fragments(&first), one_per_fragment);
+
+        let second = selections_at(&schema, &first, None, &path, &mounted);
+        assert_eq!(fragments(&second), one_per_fragment);
+    }
+
+    /// Under a fragment wider than the condition, one reaching a kind of shelf the path excludes,
+    /// a field found inside is guarded by each type of the condition the fragment reaches.
+    ///
+    /// A control of preserved behaviour: such a fragment states nothing, so the field is guarded
+    /// as it is without one.
+    #[test]
+    fn a_bare_field_under_a_wider_fragment_is_narrowed() {
+        let schema = shelves();
+        let available = selections(&schema, "{ shelves { ... on Shelf { items { id } } } }");
+        let mounted = book_title(&schema);
+        let reproduced = selections_at(&schema, &available, None, &conditioned_path(), &mounted);
+        assert_eq!(
+            fragments(&reproduced),
+            [
+                "Shelf", "Fiction", "Book", "Science", "Book", "Poetry", "Book"
+            ]
+        );
     }
 }

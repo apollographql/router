@@ -738,3 +738,63 @@ fn a_context_value_below_another_union_members_field_is_rejected() {
         "{error}"
     );
 }
+
+//==================================================================================================
+// A contextual value under a fragment that states its path condition
+
+fn owner_profile_fixture() -> Fixture {
+    Fixture::new(include_str!("testdata/owner_profile_context.graphql"))
+}
+
+const STORES_PRODUCTS_PRICE: &str = "{ stores { products { price } } }";
+
+/// The planner's plan, with the profile's `locale` fetched once for the owner types `owners`
+/// names, at `stores.@.owner|[…].profile`, as a planner serving several of an interface's
+/// implementations with one entity fetch writes the condition, and the root fetch selecting the
+/// owner's `profile` inside `... on Owner`, which reaches exactly `Person` and `Company`.
+fn owner_profile_plan(fixture: &Fixture, owners: &[&str]) -> QueryPlan {
+    let mut plan: serde_json::Value =
+        serde_json::from_str(plan_json!("stores_products_price")).expect("valid plan json");
+    let root = plan
+        .pointer_mut("/Sequence/nodes/0/Fetch/operation_document")
+        .expect("the root fetch's operation");
+    *root = serde_json::json!(
+        "{ stores { __typename owner { __typename ... on Owner { profile { __typename id } } } \
+         products { __typename id } } }"
+    );
+    let owner = plan
+        .pointer_mut("/Sequence/nodes/1/Flatten/path/2/Key/1")
+        .expect("the condition on the locale fetch's `owner`");
+    *owner = serde_json::json!(owners);
+    fixture.written_plan(&plan.to_string())
+}
+
+// The `locale` is fetched for both types an owner can have, below the root fetch's fragment on
+// `Owner`, which states the path's condition: it is mounted as one copy under that fragment,
+// unnarrowed past the store, the last level its path shares with the fetch for `price`, so every
+// product is sent its owner's `locale`.
+//
+// A control of changed behaviour: guarding the field again by both names mounts a copy narrowed to
+// each owner type, neither serving a fetch that runs whatever the owner is, and the plan is
+// rejected though the value was fetched for every owner.
+#[test]
+fn a_context_value_under_a_fragment_stating_its_condition_is_accepted() {
+    let fixture = owner_profile_fixture();
+    let plan = owner_profile_plan(&fixture, &["Person", "Company"]);
+    fixture.check(&plan, STORES_PRODUCTS_PRICE).unwrap();
+}
+
+// The `locale` fetched only where the owner is a `Person`: a company's products are sent none.
+//
+// A control of preserved behaviour: the fragment on `Owner` reaches `Company`, which the path
+// excludes, so it states nothing and the field keeps its guard on `Person`.
+#[test]
+fn a_context_value_missing_for_one_owner_type_is_rejected() {
+    let fixture = owner_profile_fixture();
+    let plan = owner_profile_plan(&fixture, &["Person"]);
+    let error = fixture.rejection(&plan, STORES_PRODUCTS_PRICE);
+    assert!(
+        error.contains("is not always fetched where the fetch runs"),
+        "{error}"
+    );
+}

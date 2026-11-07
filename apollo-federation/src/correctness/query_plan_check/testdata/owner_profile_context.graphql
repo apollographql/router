@@ -1,0 +1,155 @@
+# A context read through an interface field, below the level its fetch shares with the reader.
+#
+# Every product's `price` reads the `locale` on its store's owner's profile, an `Owner` being a
+# `Person` or a `Company`. `profiles` fetches the `locale` below `owner`, a level the value's path
+# does not share with the fetch for `price`, which climbs to the store from each product.
+#
+# Composed with `apollo_federation::composition::compose` from the two subgraphs below. Recompose
+# it when they change. `plans/stores_products_price.json` is the planner's plan over it, with
+# default options, for
+#
+#   { stores { products { price } } }
+#
+# produced by the revision that added the two files.
+#
+# Subgraph `stores`:
+#
+#   extend schema
+#     @link(
+#       url: "https://specs.apollo.dev/federation/v2.8"
+#       import: ["@key", "@external", "@context", "@fromContext"]
+#     )
+#
+#   type Query {
+#     stores: [Store!]!
+#   }
+#
+#   type Store @key(fields: "id") @context(name: "store") {
+#     id: ID!
+#     owner: Owner!
+#     products: [Product!]!
+#   }
+#
+#   interface Owner {
+#     profile: Profile!
+#   }
+#
+#   type Person implements Owner @key(fields: "id") {
+#     id: ID!
+#     profile: Profile!
+#   }
+#
+#   type Company implements Owner @key(fields: "id") {
+#     id: ID!
+#     profile: Profile!
+#   }
+#
+#   type Profile @key(fields: "id") {
+#     id: ID!
+#     locale: String @external
+#   }
+#
+#   type Product @key(fields: "id") {
+#     id: ID!
+#     price(locale: String @fromContext(field: "$store { owner { profile { locale } } }")): Int
+#   }
+#
+# Subgraph `profiles`:
+#
+#   extend schema @link(url: "https://specs.apollo.dev/federation/v2.8", import: ["@key"])
+#
+#   type Profile @key(fields: "id") {
+#     id: ID!
+#     locale: String
+#   }
+
+schema @link(url: "https://specs.apollo.dev/link/v1.0") @link(url: "https://specs.apollo.dev/join/v0.5", for: EXECUTION) @link(url: "https://specs.apollo.dev/context/v0.1", for: SECURITY) {
+  query: Query
+}
+
+directive @link(url: String, as: String, for: link__Purpose, import: [link__Import]) repeatable on SCHEMA
+
+directive @join__graph(name: String!, url: String!) on ENUM_VALUE
+
+directive @join__type(graph: join__Graph!, key: join__FieldSet, extension: Boolean! = false, resolvable: Boolean! = true, isInterfaceObject: Boolean! = false) repeatable on OBJECT | INTERFACE | UNION | ENUM | INPUT_OBJECT | SCALAR
+
+directive @join__field(graph: join__Graph, requires: join__FieldSet, provides: join__FieldSet, type: String, external: Boolean, override: String, usedOverridden: Boolean, overrideLabel: String, contextArguments: [join__ContextArgument!]) repeatable on FIELD_DEFINITION | INPUT_FIELD_DEFINITION
+
+directive @join__implements(graph: join__Graph!, interface: String!) repeatable on OBJECT | INTERFACE
+
+directive @join__unionMember(graph: join__Graph!, member: String!) repeatable on UNION
+
+directive @join__enumValue(graph: join__Graph!) repeatable on ENUM_VALUE
+
+directive @join__directive(graphs: [join__Graph!], name: String!, args: join__DirectiveArguments) repeatable on SCHEMA | OBJECT | INTERFACE | FIELD_DEFINITION
+
+directive @context(name: String!) repeatable on INTERFACE | OBJECT | UNION
+
+directive @context__fromContext(field: context__ContextFieldValue) on ARGUMENT_DEFINITION
+
+enum link__Purpose {
+  """
+  `SECURITY` features provide metadata necessary to securely resolve fields.
+  """
+  SECURITY
+  """
+  `EXECUTION` features provide metadata necessary for operation execution.
+  """
+  EXECUTION
+}
+
+scalar link__Import
+
+enum join__Graph {
+  PROFILES @join__graph(name: "profiles", url: "http://profiles")
+  STORES @join__graph(name: "stores", url: "http://stores")
+}
+
+scalar join__FieldSet
+
+scalar join__DirectiveArguments
+
+scalar join__FieldValue
+
+input join__ContextArgument {
+  name: String!
+  type: String!
+  context: String!
+  selection: join__FieldValue!
+}
+
+scalar context__ContextFieldValue
+
+type Profile @join__type(graph: PROFILES, key: "id") @join__type(graph: STORES, key: "id") {
+  id: ID!
+  locale: String @join__field(graph: PROFILES) @join__field(graph: STORES, external: true)
+}
+
+type Query @join__type(graph: PROFILES) @join__type(graph: STORES) {
+  stores: [Store!]! @join__field(graph: STORES)
+}
+
+type Store @join__type(graph: STORES, key: "id") @context(name: "stores__store") {
+  id: ID!
+  owner: Owner!
+  products: [Product!]!
+}
+
+interface Owner @join__type(graph: STORES) {
+  profile: Profile!
+}
+
+type Person implements Owner @join__implements(graph: STORES, interface: "Owner") @join__type(graph: STORES, key: "id") {
+  id: ID!
+  profile: Profile!
+}
+
+type Company implements Owner @join__implements(graph: STORES, interface: "Owner") @join__type(graph: STORES, key: "id") {
+  id: ID!
+  profile: Profile!
+}
+
+type Product @join__type(graph: STORES, key: "id") {
+  id: ID!
+  price: Int @join__field(graph: STORES, contextArguments: [{context: "stores__store", name: "locale", type: "String", selection: "{ owner { profile { locale } } }"}])
+}
