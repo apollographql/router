@@ -17,6 +17,7 @@ use crate::connectors::json_selection::methods::ArrowMethodImpl;
 use crate::connectors::json_selection::methods::common::Codec;
 use crate::connectors::json_selection::methods::common::codec_arg;
 use crate::connectors::json_selection::methods::common::codec_arg_shape;
+use crate::connectors::json_selection::methods::common::or_missing;
 use crate::connectors::json_selection::methods::common::string_input_shape_error;
 use crate::connectors::spec::ConnectSpec;
 use crate::impl_arrow_method;
@@ -83,21 +84,23 @@ fn encode_shape(
     input_shape: Shape,
     dollar_shape: Shape,
 ) -> Shape {
-    let codec = match codec_arg_shape(
+    let (codec, maybe_missing) = match codec_arg_shape(
         context,
         method_name,
         method_args,
         &input_shape,
         &dollar_shape,
     ) {
-        Ok(codec) => codec,
+        Ok(checked) => checked,
         Err(error) => return error,
     };
 
-    match codec {
+    let result = match codec {
         Some(Codec::Base64 | Codec::Base64Url) => {
-            string_input_shape_error(context, method_name, &input_shape)
-                .unwrap_or_else(|| Shape::string(method_name.shape_location(context.source_id())))
+            if let Some(error) = string_input_shape_error(context, method_name, &input_shape) {
+                return error;
+            }
+            Shape::string(method_name.shape_location(context.source_id()))
         }
         Some(Codec::Json) => {
             JsonStringifyMethod.shape(context, method_name, None, input_shape, dollar_shape)
@@ -105,7 +108,8 @@ fn encode_shape(
         // Every codec encodes to a string, but only some require a string
         // input, so a codec known only at runtime leaves the input unchecked.
         None => Shape::string(method_name.shape_location(context.source_id())),
-    }
+    };
+    or_missing(context, result, maybe_missing)
 }
 
 #[cfg(test)]
@@ -238,14 +242,15 @@ mod tests {
         assert_eq!(errors[0].message(), format!("Method ->encode {message}"));
     }
 
+    // Like other methods, a codec argument with no value gives no value, and
+    // reports only the errors from evaluating the argument.
     #[test]
-    fn encode_should_error_on_missing_codec_path() {
+    fn encode_should_produce_no_value_when_codec_has_no_value() {
         let (result, errors) = selection!("$->encode($.codec)").apply_to(&json!("foo"));
         assert_eq!(result, None);
-        assert!(
-            errors.iter().any(|e| e.message()
-                == "Method ->encode requires a string codec argument, but received null"),
-            "{errors:?}"
+        assert_eq!(
+            errors.iter().map(|e| e.message()).collect::<Vec<_>>(),
+            vec!["Property .codec not found in string"]
         );
     }
 
@@ -368,6 +373,36 @@ mod shape_tests {
             get_shape("url", Shape::string([])).pretty_print(),
             r#"Unknown (err "Method ->encode does not support codec \"url\", expected \"base64\", \"base64url\", or \"json\"")"#
         );
+    }
+
+    // A codec that may have no value makes the result optional from connect/v0.5.
+    #[rstest::rstest]
+    #[case(ConnectSpec::V0_4, "String")]
+    #[case(ConnectSpec::V0_5, "One<String, None>")]
+    fn encode_shape_is_optional_when_codec_may_be_missing(
+        #[case] spec: ConnectSpec,
+        #[case] expected: &str,
+    ) {
+        let location = get_location();
+        let codec_path = LitExpr::Path(crate::connectors::PathSelection {
+            path: crate::connectors::json_selection::PathList::Key(
+                crate::connectors::Key::field("codec").into_with_range(),
+                crate::connectors::json_selection::PathList::Empty.into_with_range(),
+            )
+            .into_with_range(),
+        });
+        let maybe_codec = Shape::one([Shape::string_value("base64", []), Shape::none()], []);
+        let shape = encode_shape(
+            &ShapeContext::new(location.source_id).with_spec(spec),
+            &WithRange::new("encode".to_string(), Some(location.span)),
+            Some(&MethodArgs {
+                args: vec![WithRange::new(codec_path, None)],
+                range: None,
+            }),
+            Shape::string([]),
+            Shape::closed_record([("codec".to_string(), maybe_codec)].into(), []),
+        );
+        assert_eq!(shape.pretty_print(), expected);
     }
 
     #[test]
