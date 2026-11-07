@@ -1,0 +1,110 @@
+{
+  "Sequence": {
+    "nodes": [
+      {
+        "Fetch": {
+          "subgraph_name": "directory",
+          "id": null,
+          "variable_usages": [],
+          "operation_document": "{ regions { stores { departments { __typename locale offers { __typename id } } } } }",
+          "operation_name": null,
+          "operation_kind": "query",
+          "input_rewrites": [],
+          "output_rewrites": [],
+          "context_rewrites": []
+        }
+      },
+      {
+        "Flatten": {
+          "path": [
+            {
+              "Key": [
+                "regions",
+                null
+              ]
+            },
+            {
+              "AnyIndex": null
+            },
+            {
+              "Key": [
+                "stores",
+                null
+              ]
+            },
+            {
+              "AnyIndex": null
+            },
+            {
+              "Key": [
+                "departments",
+                null
+              ]
+            },
+            {
+              "AnyIndex": null
+            },
+            {
+              "Key": [
+                "offers",
+                null
+              ]
+            },
+            {
+              "AnyIndex": null
+            }
+          ],
+          "node": {
+            "Fetch": {
+              "subgraph_name": "stores",
+              "id": null,
+              "variable_usages": [
+                "contextualArgument_2_0"
+              ],
+              "requires": [
+                {
+                  "kind": "InlineFragment",
+                  "typeCondition": "Offer",
+                  "selections": [
+                    {
+                      "kind": "Field",
+                      "name": "__typename"
+                    },
+                    {
+                      "kind": "Field",
+                      "name": "id"
+                    }
+                  ]
+                }
+              ],
+              "operation_document": "query($representations: [_Any!]!, $contextualArgument_2_0: String) { _entities(representations: $representations) { ... on Offer { label(locale: $contextualArgument_2_0) } } }",
+              "operation_name": null,
+              "operation_kind": "query",
+              "input_rewrites": [],
+              "output_rewrites": [],
+              "context_rewrites": [
+                {
+                  "KeyRenamer": {
+                    "path": [
+                      "Parent",
+                      {
+                        "TypenameEquals": "Department"
+                      },
+                      {
+                        "Key": [
+                          "locale",
+                          null
+                        ]
+                      }
+                    ],
+                    "rename_key_to": "contextualArgument_2_0"
+                  }
+                }
+              ]
+            }
+          }
+        }
+      }
+    ]
+  }
+}
