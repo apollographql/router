@@ -28,8 +28,8 @@ use crate::connectors::runtime::mapping::Problem;
 use crate::connectors::runtime::mapping::aggregate_apply_to_errors;
 use crate::connectors::runtime::mapping::aggregate_apply_to_errors_with_warning_locations;
 
-/// The default `Accept` header for a connector with an `http.stream` mode: plain JSON, or either
-/// of the streamed framings it understands.
+/// The default `Accept` header for a connector whose response may be a stream (an `http.stream`
+/// mode, or a `Subscription` field): plain JSON, or either of the streamed framings it understands.
 const STREAM_ACCEPT: &str = "application/json, text/event-stream, application/x-ndjson";
 
 /// Request to an HTTP transport
@@ -103,9 +103,10 @@ pub fn make_request(
     let header_mapping_problems =
         aggregate_apply_to_errors_with_warning_locations(header_apply_to_errors);
 
-    // A connector that can fold a stream invites one, unless the author chose their own `Accept`.
-    // Servers that may answer either way (MCP, for one) require the client to accept both.
-    if transport.stream.is_some()
+    // A connector that can read a stream invites one, unless the author chose their own `Accept`.
+    // Servers that may answer either way (MCP, for one) require the client to accept both, and
+    // refuse to open an event stream for a client that doesn't say it accepts one.
+    if transport.accepts_stream()
         && !request
             .headers_ref()
             .is_some_and(|headers| headers.contains_key(ACCEPT))
@@ -526,6 +527,16 @@ mod tests {
         let transport = HttpJsonTransport {
             connect_template: StringTemplate::from_str("http://localhost:8080/").unwrap(),
             stream: Some(StreamMode::Array),
+            ..Default::default()
+        };
+        assert_eq!(accept_header_of(&transport), vec![STREAM_ACCEPT]);
+    }
+
+    #[test]
+    fn a_subscription_connector_accepts_streams_by_default() {
+        let transport = HttpJsonTransport {
+            connect_template: StringTemplate::from_str("http://localhost:8080/").unwrap(),
+            subscription: true,
             ..Default::default()
         };
         assert_eq!(accept_header_of(&transport), vec![STREAM_ACCEPT]);

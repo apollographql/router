@@ -310,7 +310,10 @@ where
 /// error is dropped. Failing closed, because the alternative is a config that
 /// exists to keep subgraph text away from clients being bypassed by a code
 /// path that could not read it.
-fn declared_error_for_client(error: RuntimeError, context: &Context) -> Option<graphql::Error> {
+pub(crate) fn declared_error_for_client(
+    error: RuntimeError,
+    context: &Context,
+) -> Option<graphql::Error> {
     let config = context
         .extensions()
         .with_lock(|lock| lock.get::<Arc<EffectiveConfig>>().cloned())?;

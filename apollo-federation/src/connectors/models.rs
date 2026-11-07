@@ -234,7 +234,14 @@ impl Connector {
         let source_http = source.map(|s| &s.http);
         let transport = connect
             .http
-            .map(|connect_http| HttpJsonTransport::from_directive(connect_http, source_http, spec))
+            .map(|connect_http| {
+                HttpJsonTransport::from_directive(
+                    connect_http,
+                    source_http,
+                    spec,
+                    connect.position.on_subscription_type(schema),
+                )
+            })
             .transpose()?;
 
         // Get our batch and error settings
@@ -675,6 +682,7 @@ mod tests {
                         connect_path: None,
                         connect_query_params: None,
                         stream: None,
+                        subscription: false,
                     },
                 ),
                 selection: JSONSelection {
@@ -857,6 +865,7 @@ mod tests {
                         connect_path: None,
                         connect_query_params: None,
                         stream: None,
+                        subscription: false,
                     },
                 ),
                 selection: JSONSelection {

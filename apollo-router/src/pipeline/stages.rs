@@ -35,6 +35,7 @@ use crate::plugins::circuit_breaker::CircuitBreaker;
 use crate::plugins::connectors::request_limit::RequestLimitLayer;
 use crate::plugins::connectors::tracing::connect_spec_version_instrument;
 use crate::plugins::connectors::tracing::connect_stream_mode_instrument;
+use crate::plugins::connectors::tracing::connector_subscriptions_instrument;
 use crate::plugins::headers::Headers;
 use crate::plugins::include_subgraph_errors::IncludeSubgraphErrors;
 use crate::plugins::limits::LimitsPlugin;
@@ -470,6 +471,7 @@ fn build_connector_services(
             schema.connectors.as_ref(),
         ),
         _connect_stream_mode_instrument: connect_stream_mode_instrument(schema.connectors.as_ref()),
+        _connector_subscriptions_instrument: connector_subscriptions_instrument(&schema),
         services: Arc::new(services),
     }
 }

@@ -121,6 +121,11 @@ impl ConnectId {
         format!("{}:{}", self.subgraph_name, self.directive.coordinate())
     }
 
+    /// The type whose field this connector is on, or `None` for a connector on a type
+    pub fn parent_type_name(&self) -> Option<Name> {
+        self.directive.parent_type_name()
+    }
+
     /// Intended for tests in apollo-router
     pub fn new(
         subgraph_name: String,
