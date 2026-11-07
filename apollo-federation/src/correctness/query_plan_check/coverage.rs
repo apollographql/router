@@ -17,12 +17,14 @@
 //! regions.
 //!
 //! The same walk decides what an entity fetch's representation owes its subgraph, over the view
-//! of what the representation holds (`representation.rs`), with one more obligation per demanded
-//! field: the fetch's input rewrites carry the key it is held under to the field it names, and
-//! back, read under the names its own demand's fields above it are sent as, so that one key held
-//! for different fields at different runtime types is read under each one's names. Where no
-//! single key of the entity covers every configuration, the walk collects the configurations each
-//! key fails in instead of stopping at the first, so that the key can be chosen per configuration.
+//! of what the representation holds (`representation.rs`), reading the demand as the subgraph
+//! states it where the fetch's input rewrites send it: a demanded field, under the names its own
+//! demand's fields above it are sent as, is read at the key the representation holds that is sent
+//! under those names in each configuration, so that one name sent from different keys at
+//! different runtime types is read at each, and a configuration where no key is sent under it is
+//! missing. Where no single key of the entity covers every configuration, the walk collects the
+//! configurations each key fails in instead of stopping at the first, so that the key can be
+//! chosen per configuration.
 
 use std::cell::RefCell;
 use std::collections::HashMap;
@@ -50,7 +52,7 @@ use super::region::TypeSet;
 use super::region::Value;
 use super::region::Var;
 use super::region::boolean;
-use super::representation::Agreement;
+use super::representation::SentRepresentation;
 use super::response::Contribution;
 use super::response::CopyId;
 use super::response::Response;
@@ -73,8 +75,9 @@ type EntryKey = (Vec<Name>, Vec<usize>);
 /// Selections demanded in a region.
 struct Entry<'d> {
     region: Region,
-    /// The names the fields above the selections are sent as, from the agreement's anchor down:
-    /// what the rewrite agreement reads a demanded field under. Empty where no agreement is read.
+    /// The names the fields above the selections are sent as, from the copy the representation
+    /// is sent at down: where a demanded field is read in what the rewrites send. Empty where the
+    /// walk reads what was fetched.
     sent: Vec<Name>,
     selections: Vec<&'d Selection>,
 }
@@ -229,11 +232,11 @@ struct Asked<'d, 'e> {
     sent: &'e [Name],
 }
 
-/// The names a demanded field is sent under from the agreement's anchor: its demand's, then its
-/// own.
-fn sent_as(demanded: &Asked<'_, '_>) -> Vec<Name> {
-    let mut names = demanded.sent.to_vec();
-    names.push(demanded.field.name.clone());
+/// The names a demanded field is sent under from the copy the representation is sent at: its
+/// demand's, then its own.
+fn sent_as(sent: &[Name], field: &Field) -> Vec<Name> {
+    let mut names = sent.to_vec();
+    names.push(field.response_name().clone());
     names
 }
 
@@ -318,10 +321,9 @@ pub(super) struct Coverage<'c, 'd> {
     /// What supplies the demand.
     pub(super) supplied: &'c Supplies<'c>,
     pub(super) supplier: Supplier,
-    /// For a representation, the input rewrites every demanded field it sends agrees with: the
-    /// demand's own half of the model's `requireAgreesWithRewrites`, the walk starting at the copy
-    /// the agreement is anchored at and each field read under its own demand's names.
-    pub(super) agreement: Option<&'c Agreement<'c>>,
+    /// For a representation, what its input rewrites send: the walk starts at the copy it is sent
+    /// at, and reads each demanded field at the key sent under its own demand's names.
+    pub(super) sent: Option<&'c SentRepresentation>,
 }
 
 impl<'d> Coverage<'_, 'd> {
@@ -370,7 +372,7 @@ impl<'d> Coverage<'_, 'd> {
         let response = self.supplied.view.response;
         algebra.work.copies_visited.add(1);
         let completion = hypothesis.completion();
-        let mut groups: IndexMap<&'d Name, Vec<Asked<'d, '_>>> = IndexMap::default();
+        let mut groups: IndexMap<Name, Vec<Asked<'d, '_>>> = IndexMap::default();
         for entry in &demand.entries {
             // The runtime types the entry is demanded at, read together.
             let types = algebra.names(hypothesis.allowed(copy, &entry.region));
@@ -409,28 +411,64 @@ impl<'d> Coverage<'_, 'd> {
                 if region.is_empty() {
                     continue;
                 }
-                groups
-                    .entry(asked.response_name())
-                    .or_default()
-                    .push(Asked {
+                let Some(sent) = self.sent else {
+                    groups
+                        .entry(asked.response_name().clone())
+                        .or_default()
+                        .push(Asked {
+                            field: asked.field,
+                            region,
+                            sent: &entry.sent,
+                        });
+                    continue;
+                };
+                // The keys sent under the field's names, each where it is: one at most in a
+                // configuration, and none where nothing is sent under them.
+                let name = asked.response_name();
+                let sources = sent.at(copy, &sent_as(&entry.sent, asked.field));
+                let held = hypothesis.supplies(
+                    sources
+                        .iter()
+                        .flat_map(|(_, held)| held.iter().cloned())
+                        .collect(),
+                );
+                for clause in &region {
+                    self.obligation(copy, clause, &held, sink, |example| {
+                        Uncovered::at(
+                            self.supplier
+                                .missing(name, &describe_at(self.hypothesis, copy, example)),
+                        )
+                    })?;
+                }
+                for (key, held) in sources {
+                    let region = algebra.simplify(algebra.product(&region, held), &completion);
+                    if region.is_empty() {
+                        continue;
+                    }
+                    groups.entry(key.clone()).or_default().push(Asked {
                         field: asked.field,
                         region,
                         sent: &entry.sent,
                     });
+                }
             }
         }
 
         for (key, asked) in &groups {
             let supplied: Vec<&Contribution> = self.supplied.view.fields_at(copy, key).collect();
-            let supplies = self.supplied.at(hypothesis, copy, key);
-            for demanded in asked {
-                for clause in &demanded.region {
-                    self.obligation(copy, clause, &supplies, sink, |example| {
-                        Uncovered::at(
-                            self.supplier
-                                .missing(key, &describe_at(self.hypothesis, copy, example)),
-                        )
-                    })?;
+            // What a representation sends is read where it is held, so only what was fetched owes
+            // its supply here.
+            if self.sent.is_none() {
+                let supplies = self.supplied.at(hypothesis, copy, key);
+                for demanded in asked {
+                    for clause in &demanded.region {
+                        self.obligation(copy, clause, &supplies, sink, |example| {
+                            Uncovered::at(
+                                self.supplier
+                                    .missing(key, &describe_at(self.hypothesis, copy, example)),
+                            )
+                        })?;
+                    }
                 }
             }
             if self.one_call(copy, asked) {
@@ -488,22 +526,6 @@ impl<'d> Coverage<'_, 'd> {
                     }
                 }
             }
-            if let Some(agreement) = self.agreement {
-                for demanded in asked {
-                    let names = sent_as(demanded);
-                    let agrees = agreement.region(algebra, response, copy, key, &names);
-                    for clause in &demanded.region {
-                        self.obligation(copy, clause, &agrees, sink, |example| {
-                            Uncovered::at(format!(
-                                "the representation sends `{key}` at {} as `{}`, and the fetch's \
-                                 input rewrites do not carry the one to the other",
-                                describe_at(self.hypothesis, copy, example),
-                                demanded.field.name,
-                            ))
-                        })?;
-                    }
-                }
-            }
             let Some(child) = response.child(copy, key) else {
                 continue;
             };
@@ -514,8 +536,8 @@ impl<'d> Coverage<'_, 'd> {
                 }
                 // Each demanded field's subselections below the names its own demand sends it
                 // under: one key can hold different fields at different runtime types.
-                let sent = match self.agreement {
-                    Some(_) => sent_as(demanded),
+                let sent = match self.sent {
+                    Some(_) => sent_as(demanded.sent, demanded.field),
                     None => Vec::new(),
                 };
                 below.add(

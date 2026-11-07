@@ -17,16 +17,13 @@
 //!
 //! Every write at one response key at one receiving copy reads the same readable contributions,
 //! the ones under that key there, so which write survives never matters, only whether one does.
-//! The projection is read once, as three regions of configurations for each *location*, a response
+//! The projection is read once, as two regions of configurations for each *location*, a response
 //! key at a receiving copy below the one the fetch runs on, each entry read in the region of the
 //! configurations it is reached in, the conjunction of the fragments enclosing it:
 //! - *present*: where a write at the location survives. A field adds its region at its key, and
 //!   first removes it from every location below its key written earlier in the same scope, a
 //!   field's selections and a fragment's being read from an empty start; a fragment's locations are
 //!   joined into the enclosing scope's, and remove nothing.
-//! - *explicit*: where the surviving write is a field an entry names, with the names of the fields
-//!   leading to it, which is what it is sent as. A field removes its region at and below its key;
-//!   a fragment's join removes, at each location it writes, what it writes there.
 //! - *visited*: where an entry reads the location, with the field the entry names; nothing is ever
 //!   removed, a value read and later overwritten having been read all the same.
 //!
@@ -34,23 +31,45 @@
 //! present there. It is held as contributions of its own, each readable one narrowed to where its
 //! location is present, so that the coverage walk reads it as it reads anything fetched.
 //!
+//! # What the input rewrites send
+//!
+//! The router applies the fetch's input rewrites to each representation it projected, one after
+//! another, each to what the ones before it left (`apply_rewrites`). A key renamer selects the
+//! objects its path's parent reaches and, at each one holding its last key, removes that key and
+//! inserts its value under the new name, replacing whatever the object held there; at an object
+//! not holding the key it does nothing. A `TypenameEquals` on the path tests the object it stands
+//! before by the `__typename` the representation holds there at that moment, and admits it where
+//! that is the type or a subtype, or where there is none (`is_object_of_type`). A value setter
+//! writes where the object holds its key; one writing `__typename` changes what later filters
+//! read. [`SentRepresentation`] follows the rewrites so, per configuration, over the locations the
+//! representation holds: where each one now sits, whether it survives, and for one sitting under
+//! `__typename` what it holds there. A renamer moves only a location that is held, since it reaches
+//! a key through the keys above it, and a move replaces what it lands on, so one surviving location
+//! at most is sent under one path in a configuration. Three readings of a rewrite path are the
+//! router's only in part, and no planner writes them on an input rewrite: an index is passed over,
+//! where the router selects nothing at an object; a key's own type conditions are not read; and a
+//! value setter on any key but `__typename` is passed over.
+//!
+//! This departs from the model's `requireAgreesWithRewrites`, which rewrites an entry's selections
+//! by syntax, forwards as read and inverted as sent, wherever a renamer's path reaches, whether or
+//! not the representation holds the key there: a key renamed by case, which the router renames at
+//! the cases that hold it alone, has no inverse there.
+//!
 //! # What the representation owes
 //!
 //! At every configuration the fetch runs in at its copy:
 //! - every read is of a value the plan fetched there, under the field the entry names, with its
 //!   result declared ([`check_inputs_available`]): a surplus read and an overwritten one included;
-//! - every explicit selection is carried by the fetch's input rewrites from the key it is read
-//!   under to the field it names, and back ([`Agreement`]);
-//! - the representation covers what the subgraph demands for the entity's runtime type: its
-//!   `__typename`, a resolvable key, and the `@requires` field sets of every field the fetch
-//!   selects there under that selection's own conditions, read from every `_entities` fragment
-//!   admitting the type; the key may differ from one configuration to another; every demanded
-//!   field the representation holds is carried by the rewrites as well. An empty representation
-//!   owes nothing where the fetch selects nothing; a non-empty one owes a key even there.
+//! - the representation as the rewrites send it covers what the subgraph demands for the entity's
+//!   runtime type: its `__typename`, a resolvable key, and the `@requires` field sets of every field
+//!   the fetch selects there under that selection's own conditions, read from every `_entities`
+//!   fragment admitting the type; the key may differ from one configuration to another. Each
+//!   demanded field is read at the location sent under its names, and owes what a fetched one
+//!   owes there. An empty representation owes nothing where the fetch selects nothing; a non-empty
+//!   one owes a key even there.
 //!
 //! Coverage, not equality: a representation may hold more than is demanded, wherever it read it
-//! from what was fetched. A value copied whole holds what was fetched under it, whatever its keys,
-//! and owes no rename for what nothing demands.
+//! from what was fetched, and send it under any name nothing demands, renamed or not.
 //!
 //! # The Boolean boundary
 //!
@@ -88,6 +107,7 @@ use super::region::TypeSet;
 use super::region::Value;
 use super::region::Var;
 use super::region::boolean;
+use super::region::everything;
 use super::requires::check_requires_conflict;
 use super::requires::inline_fragment;
 use super::requires::key_half;
@@ -98,8 +118,6 @@ use super::response::Response;
 use super::response::View;
 use super::response::every_object;
 use super::selections::admitted_types;
-use super::selections::invert_key_renamers;
-use super::selections::type_filter_covers;
 use super::selections::under_directives;
 use super::selections::wrap_non_empty;
 use super::subgraph::KeyDirective;
@@ -111,6 +129,7 @@ use crate::query_plan::requires_selection;
 use crate::query_plan::requires_selection::ConditionKind;
 use crate::query_plan::requires_selection::ConditionValue;
 use crate::schema::ValidFederationSchema;
+use crate::schema::position::INTROSPECTION_TYPENAME_FIELD_NAME;
 
 /// A response key at a receiving copy: where a representation holds a value.
 type Location = (CopyId, Name);
@@ -121,24 +140,17 @@ type Location = (CopyId, Name);
 
 /// What a fetch's `requires` entries project at the copy it runs on: the model's
 /// `requiresProjection` and `Representation`, as regions of the configurations in which each
-/// location holds a value, is explicitly selected and is read.
+/// location holds a value and is read.
 pub(super) struct Projection {
     /// Where a write at each location survives.
     present: IndexMap<Location, Region>,
-    /// At each location, where its surviving write is an explicit selection, by the names of the
-    /// fields leading to it from the copy the fetch runs on and its own.
-    explicit: IndexMap<Location, Vec<(Vec<Name>, Region)>>,
     /// Where each location is read, by the field the entry names there.
     visited: IndexMap<(Location, Name), Region>,
 }
 
-/// What one scope has written: an entry list read from an empty start, a field's selections or a
-/// fragment's.
-#[derive(Default)]
-struct Scope {
-    present: IndexMap<Location, Region>,
-    explicit: IndexMap<Location, Vec<(Vec<Name>, Region)>>,
-}
+/// Where a write at each location survives in what one scope has written: an entry list read from
+/// an empty start, a field's selections or a fragment's.
+type Scope = IndexMap<Location, Region>;
 
 /// Projects a fetch's `requires` entries at the copy it runs on, in `region`, the configurations
 /// it runs there in.
@@ -157,10 +169,9 @@ pub(super) fn requires_projection(
         visited: IndexMap::default(),
     };
     let mut scope = Scope::default();
-    projector.project(copy, &[], region, entries, &mut scope);
+    projector.project(copy, region, entries, &mut scope);
     Projection {
-        present: scope.present,
-        explicit: scope.explicit,
+        present: scope,
         visited: projector.visited,
     }
 }
@@ -195,12 +206,10 @@ impl Projector<'_> {
         self.readable.response
     }
 
-    /// Reads an entry list at a copy, in a region, into a scope. `names` are the fields leading
-    /// to the copy from the one the fetch runs on.
+    /// Reads an entry list at a copy, in a region, into a scope.
     fn project(
         &mut self,
         copy: CopyId,
-        names: &[Name],
         region: &Clause,
         entries: &[requires_selection::Selection],
         into: &mut Scope,
@@ -221,39 +230,17 @@ impl Projector<'_> {
                         reached,
                     );
                     // A field replaces the whole value an earlier write in this scope left at its
-                    // key: what is below it goes, and so does any explicit selection at or below
-                    // it.
+                    // key: what is below it goes. Only a key holding a copy has anything below it.
                     let child = self.response().child(copy, &key);
-                    if let Some(explicit) = into.explicit.get_mut(&location) {
-                        for (_, selected) in explicit.iter_mut() {
-                            narrow(algebra, selected, reached);
-                        }
-                    }
-                    // Only a key holding a copy has anything below it.
                     if let Some(child) = child {
-                        for (at, present) in into.present.iter_mut() {
+                        for (at, present) in into.iter_mut() {
                             algebra.work.projection_scans.add(1);
                             if self.below(at.0, child) {
                                 narrow(algebra, present, reached);
                             }
                         }
-                        for (at, explicit) in into.explicit.iter_mut() {
-                            algebra.work.projection_scans.add(1);
-                            if self.below(at.0, child) {
-                                for (_, selected) in explicit.iter_mut() {
-                                    narrow(algebra, selected, reached);
-                                }
-                            }
-                        }
                     }
-                    widen(
-                        algebra,
-                        into.present.entry(location.clone()).or_default(),
-                        reached,
-                    );
-                    let mut path = names.to_vec();
-                    path.push(field.name.clone());
-                    add_explicit(algebra, &mut into.explicit, location, path.clone(), reached);
+                    widen(algebra, into.entry(location).or_default(), reached);
                     let Some(child) = child else {
                         continue;
                     };
@@ -264,20 +251,9 @@ impl Projector<'_> {
                         // Nothing earlier is left below the field in this scope, so what its
                         // selections write is added as it is.
                         let mut below = Scope::default();
-                        self.project(child, &path, region, &field.selections, &mut below);
-                        for (at, present) in below.present {
-                            widen(algebra, into.present.entry(at).or_default(), &present);
-                        }
-                        for (at, explicit) in below.explicit {
-                            for (path, selected) in explicit {
-                                add_explicit(
-                                    algebra,
-                                    &mut into.explicit,
-                                    at.clone(),
-                                    path,
-                                    &selected,
-                                );
-                            }
+                        self.project(child, region, &field.selections, &mut below);
+                        for (at, present) in below {
+                            widen(algebra, into.entry(at).or_default(), &present);
                         }
                     }
                 }
@@ -293,21 +269,10 @@ impl Projector<'_> {
                         continue;
                     };
                     let mut later = Scope::default();
-                    self.project(copy, names, &region, &fragment.selections, &mut later);
-                    // A fragment merges: an earlier explicit selection where the fragment writes
-                    // the same location is that write's now, and nothing else earlier goes.
-                    for (at, present) in later.present {
-                        if let Some(explicit) = into.explicit.get_mut(&at) {
-                            for (_, selected) in explicit.iter_mut() {
-                                narrow(algebra, selected, &present);
-                            }
-                        }
-                        widen(algebra, into.present.entry(at).or_default(), &present);
-                    }
-                    for (at, explicit) in later.explicit {
-                        for (path, selected) in explicit {
-                            add_explicit(algebra, &mut into.explicit, at.clone(), path, &selected);
-                        }
+                    self.project(copy, &region, &fragment.selections, &mut later);
+                    // A fragment merges: nothing earlier goes.
+                    for (at, present) in later {
+                        widen(algebra, into.entry(at).or_default(), &present);
                     }
                 }
             }
@@ -339,7 +304,7 @@ impl Projector<'_> {
             self.algebra.work.copied_locations.add(1);
             widen(
                 self.algebra,
-                into.present.entry((copy, key.clone())).or_default(),
+                into.entry((copy, key.clone())).or_default(),
                 reached,
             );
             if let Some(child) = response.child(copy, key) {
@@ -380,23 +345,6 @@ impl Projector<'_> {
             .response()
             .type_literal(algebra, copy, algebra.objects(&admitted))?;
         algebra.conjoin(&clause, &literal)
-    }
-}
-
-fn add_explicit(
-    algebra: &Algebra,
-    explicit: &mut IndexMap<Location, Vec<(Vec<Name>, Region)>>,
-    location: Location,
-    path: Vec<Name>,
-    added: &[Clause],
-) {
-    let at = explicit.entry(location).or_default();
-    match at.iter_mut().find(|(known, _)| *known == path) {
-        Some((_, selected)) => widen(algebra, selected, added),
-        None => {
-            algebra.work.projection_writes.add(1);
-            at.push((path, added.to_vec()));
-        }
     }
 }
 
@@ -514,232 +462,463 @@ pub(super) fn check_inputs_available(
     Ok(())
 }
 
-/// The fetch's input rewrites read against what its representation sends: the model's
-/// `requireAgreesWithRewrites` over `representationEntry`, one location at a time.
+//==================================================================================================
+// What the input rewrites send
+//==================================================================================================
+
+/// A rewrite path as the router follows it: each key with the `TypenameEquals` filters written
+/// before it. An index is passed over, and a key's own type conditions are not read.
+type Steps = Vec<(Vec<Name>, Name)>;
+
+/// An input rewrite that moves a key or changes what a later filter reads.
+enum Rewrite {
+    /// A key renamer: the key its steps end at, moved to `to`.
+    Rename { steps: Steps, to: Name },
+    /// A value setter writing `__typename`.
+    Typename { steps: Steps, value: Written },
+}
+
+/// What a value setter wrote under `__typename`.
+#[derive(Clone, PartialEq)]
+enum Written {
+    /// A string, which a filter reads as a type's name.
+    Name(String),
+    /// Anything else, which every filter admits (`is_object_of_type` reads no string there).
+    Other,
+}
+
+impl Rewrite {
+    /// One input rewrite as the router applies it, `None` for one that moves no key and changes
+    /// nothing a filter reads: a path ending anywhere but at a key, or passing a `Parent`, which
+    /// converts to a key no object holds, and a value setter on any key but `__typename`.
+    fn read(rewrite: &FetchDataRewrite) -> Option<Self> {
+        let path = match rewrite {
+            FetchDataRewrite::KeyRenamer(renamer) => &renamer.path,
+            FetchDataRewrite::ValueSetter(setter) => &setter.path,
+        };
+        if !matches!(path.last(), Some(FetchDataPathElement::Key(..))) {
+            return None;
+        }
+        let mut steps: Steps = Vec::new();
+        let mut filters: Vec<Name> = Vec::new();
+        for element in path {
+            match element {
+                FetchDataPathElement::Key(key, _) => {
+                    steps.push((std::mem::take(&mut filters), key.clone()));
+                }
+                FetchDataPathElement::TypenameEquals(type_name) => filters.push(type_name.clone()),
+                FetchDataPathElement::AnyIndex(_) => {}
+                FetchDataPathElement::Parent => return None,
+            }
+        }
+        match rewrite {
+            FetchDataRewrite::KeyRenamer(renamer) => Some(Rewrite::Rename {
+                steps,
+                to: renamer.rename_key_to.clone(),
+            }),
+            FetchDataRewrite::ValueSetter(setter) => {
+                let (_, key) = steps.last().expect("a path ending at a key");
+                (*key == *INTROSPECTION_TYPENAME_FIELD_NAME).then(|| Rewrite::Typename {
+                    value: match setter.set_value_to.as_str() {
+                        Some(name) => Written::Name(name.to_owned()),
+                        None => Written::Other,
+                    },
+                    steps,
+                })
+            }
+        }
+    }
+}
+
+/// One held location as the rewrites have left it, in one clause of configurations.
+#[derive(Clone)]
+struct Placed {
+    /// The keys it sits under, from the copy the fetch runs on.
+    keys: Vec<Name>,
+    /// What a setter wrote under it, where it sat under `__typename`.
+    written: Option<Written>,
+    clause: Clause,
+}
+
+/// A location the representation holds, followed through the rewrites.
+struct Followed {
+    copy: CopyId,
+    key: Name,
+    /// The copies from the one the fetch runs on down to `copy`: the object holding each key.
+    holders: Vec<CopyId>,
+    /// The fields the representation holds at the location, each with its guard: what a filter
+    /// reads where the location sits under `__typename`.
+    fields: Vec<(Name, Region)>,
+    /// Where it sits, in the configurations it survives in.
+    placed: Vec<Placed>,
+}
+
+/// The keys held at one copy that are sent under one path, each with the configurations it is
+/// sent there in.
+type Senders = Vec<(Name, Region)>;
+
+/// The representation an entity fetch sends, as its input rewrites leave it: at each copy, which
+/// of the keys the representation holds there is sent under which path of keys, and where.
 ///
-/// The model reads the surviving explicit selections and the demanded fields a representation
-/// holds as one entry, each nested value under an inline fragment on the runtime type of the copy
-/// it is, and asks that the rewrites, applied forwards, carry it as read to it as sent, and,
-/// inverted, back. Renaming moves keys and nothing else, so the two readings have one shape and
-/// are compared key for key: the entry agrees exactly when every location in it does. A location
-/// agrees where the renamers reaching it, applied in order to the keys it is read under from the
-/// copy the fetch runs on, end at the name of the field it is sent as, and, inverted from the last
-/// on the names it is sent as, end at the key it is read under. A renamer with a `typenameEquals`
-/// before its last key renames only where the object holding that key is of a type the filter
-/// admits, so each such renamer splits the configurations by that copy's runtime type; a filter
-/// before an earlier key is passed over, as `rename_key_under` passes it over, and an index is. A
-/// path renames the key it ends at: one ending at an index or a filter renames nothing, as
-/// `invert_key_renamers` finds no key there.
-pub(super) struct Agreement<'a> {
-    supergraph: &'a ValidFederationSchema,
-    /// The copy the fetch runs on, where every location's keys start.
-    anchor: CopyId,
-    /// The key renamers, forwards in order, and each inverted, from the last.
-    forwards: Vec<Renamer>,
-    backwards: Vec<Renamer>,
+/// The rewrites are followed in their order, each over what the ones before it left, as
+/// `apply_rewrites` applies them. A key renamer reaches every object its path's keys lead to as the
+/// locations now sit, wherever the filters before each key admit the object holding it, and at
+/// each such object holding its last key moves that location to the new name, with what is below
+/// it; the location the object held under the new name, with what is below it, no longer survives.
+/// A filter admits an object holding nothing under `__typename`; one holding the field
+/// `__typename` there, where its runtime type is among the filter's types; and one holding a value
+/// a setter wrote, where that value is the filter's type, a subtype of it, or no string. A value
+/// setter writing `__typename` writes, by the same reading, at the objects it reaches that hold
+/// `__typename`. A move replaces what it lands on, so one surviving location at most sits under one
+/// path in a configuration.
+pub(super) struct SentRepresentation {
+    sent: IndexMap<(CopyId, Vec<Name>), Senders>,
 }
 
-/// One key renamer as a path of keys, each with the type filters written before it.
-struct Renamer {
-    steps: Vec<(Vec<Name>, Name)>,
-    to: Name,
-}
-
-impl<'a> Agreement<'a> {
+impl SentRepresentation {
+    /// Follows the input rewrites over the locations the representation holds (`held`, where
+    /// `projection` has them present). A filter reading a location under `__typename` that holds
+    /// another field is refused: the router's filter then reads that field's value at execution,
+    /// which the plan does not state.
     pub(super) fn new(
-        supergraph: &'a ValidFederationSchema,
+        supergraph: &ValidFederationSchema,
+        site: &Site<'_>,
+        projection: &Projection,
+        held: View<'_>,
         rewrites: &[Arc<FetchDataRewrite>],
-        anchor: CopyId,
-    ) -> Self {
-        Agreement {
-            supergraph,
-            anchor,
-            forwards: Self::renamers(rewrites, false),
-            backwards: Self::renamers(rewrites, true),
-        }
-    }
-
-    /// The key renamers as paths of keys, forwards in order, or each inverted, from the last.
-    fn renamers(rewrites: &[Arc<FetchDataRewrite>], inverted: bool) -> Vec<Renamer> {
-        let mut renamers = Vec::new();
-        for rewrite in rewrites {
-            let FetchDataRewrite::KeyRenamer(renamer) = rewrite.as_ref() else {
-                continue;
-            };
-            // A path ending anywhere but at a key renames nothing.
-            if !matches!(renamer.path.last(), Some(FetchDataPathElement::Key(..))) {
-                continue;
-            }
-            let mut steps: Vec<(Vec<Name>, Name)> = Vec::new();
-            let mut filters: Vec<Name> = Vec::new();
-            let mut followed = true;
-            for element in &renamer.path {
-                match element {
-                    FetchDataPathElement::Key(key, _) => {
-                        steps.push((std::mem::take(&mut filters), key.clone()));
-                    }
-                    FetchDataPathElement::TypenameEquals(type_name) => {
-                        filters.push(type_name.clone())
-                    }
-                    FetchDataPathElement::AnyIndex(_) => {}
-                    FetchDataPathElement::Parent => followed = false,
-                }
-            }
-            // `Parent` moves up, so a path through one is not followed downwards.
-            if !followed {
-                continue;
-            }
-            let (to, steps) = if inverted {
-                let last = steps.len() - 1;
-                let from = std::mem::replace(&mut steps[last].1, renamer.rename_key_to.clone());
-                (from, steps)
-            } else {
-                (renamer.rename_key_to.clone(), steps)
-            };
-            renamers.push(Renamer { steps, to });
-        }
-        if inverted {
-            renamers.reverse();
-        }
-        renamers
-    }
-
-    /// The keys a location ends with once the renamers are applied, each with the configurations
-    /// it ends with it in. `holders` are the copies holding each key, from the anchor down.
-    fn renamed(
-        &self,
-        algebra: &Algebra,
-        response: &Response,
-        holders: &[CopyId],
-        keys: Vec<Name>,
-        inverted: bool,
-    ) -> Vec<(Name, Clause)> {
-        let mut states: Vec<(Vec<Name>, Clause)> = vec![(keys, Vec::new())];
-        let renamers = if inverted {
-            &self.backwards
-        } else {
-            &self.forwards
-        };
-        for renamer in renamers {
-            let depth = renamer.steps.len();
-            if depth > holders.len() {
-                continue;
-            }
-            let mut next = Vec::with_capacity(states.len());
-            for (keys, clause) in states {
-                algebra.work.agreement_states.add(1);
-                let reaches = renamer
-                    .steps
-                    .iter()
-                    .zip(&keys)
-                    .all(|((_, step), key)| step == key);
-                if !reaches {
-                    next.push((keys, clause));
-                    continue;
-                }
-                let mut renamed = keys.clone();
-                renamed[depth - 1] = renamer.to.clone();
-                let filters = &renamer.steps[depth - 1].0;
-                let Some(admitted) = admitted_types(self.supergraph, filters) else {
-                    next.push((renamed, clause));
-                    continue;
-                };
-                // The filter splits the configurations by the runtime type of the object
-                // holding the key.
-                let admitted = algebra.objects(&admitted);
-                let holder = holders[depth - 1];
-                let other = algebra.minus(algebra.every_object(), admitted);
-                for (keys, types) in [(renamed, admitted), (keys, other)] {
-                    if let Some(split) = response
-                        .type_literal(algebra, holder, types)
-                        .and_then(|literal| algebra.conjoin(&clause, &literal))
-                    {
-                        next.push((keys, split));
-                    }
-                }
-            }
-            states = next;
-        }
-        states
-            .into_iter()
-            .map(|(keys, clause)| (keys.last().cloned().expect("a location has a key"), clause))
-            .collect()
-    }
-
-    /// The configurations in which the rewrites carry the location `key` at `copy` to the field
-    /// it is sent as, the last of `names`, and back, `names` being the fields the location's keys
-    /// are sent as from the anchor down.
-    pub(super) fn region(
-        &self,
-        algebra: &Algebra,
-        response: &Response,
-        copy: CopyId,
-        key: &Name,
-        names: &[Name],
-    ) -> Region {
-        let chain = response.ancestors(copy);
-        let Some(start) = chain.iter().position(|ancestor| *ancestor == self.anchor) else {
-            return Vec::new();
-        };
-        let holders = &chain[start..];
-        let mut read: Vec<Name> = holders[1..]
-            .iter()
-            .filter_map(|copy| response.parent(*copy).map(|(_, key)| key.clone()))
-            .collect();
-        read.push(key.clone());
-        if read.len() != names.len() {
-            return Vec::new();
-        }
-        let sent = names.last().expect("a location has a name");
-        let forwards: Region = self
-            .renamed(algebra, response, holders, read, false)
-            .into_iter()
-            .filter(|(renamed, _)| renamed == sent)
-            .map(|(_, clause)| clause)
-            .collect();
-        let backwards: Region = self
-            .renamed(algebra, response, holders, names.to_vec(), true)
-            .into_iter()
-            .filter(|(renamed, _)| renamed == key)
-            .map(|(_, clause)| clause)
-            .collect();
+    ) -> Result<Self, ComparisonError> {
+        let algebra = site.hypothesis.algebra;
+        let response = held.response;
         let domain = every_object(algebra);
-        algebra.simplify(algebra.product(&forwards, &backwards), &domain)
+        let anchor = site.position.copy;
+        let mut followed = Vec::new();
+        for (copy, key) in projection.present.keys() {
+            let fields: Vec<(Name, Region)> = held
+                .fields_at(*copy, key)
+                .map(|field| (field.field.clone(), field.guard.clone()))
+                .collect();
+            if fields.is_empty() {
+                continue;
+            }
+            let chain = response.ancestors(*copy);
+            let Some(start) = chain.iter().position(|ancestor| *ancestor == anchor) else {
+                continue;
+            };
+            let holders = chain[start..].to_vec();
+            let mut keys: Vec<Name> = holders[1..]
+                .iter()
+                .filter_map(|copy| response.parent(*copy).map(|(_, key)| key.clone()))
+                .collect();
+            keys.push(key.clone());
+            let held = algebra.simplify(
+                fields
+                    .iter()
+                    .flat_map(|(_, guard)| guard.iter().cloned())
+                    .collect(),
+                &domain,
+            );
+            let placed = held
+                .into_iter()
+                .map(|clause| Placed {
+                    keys: keys.clone(),
+                    written: None,
+                    clause,
+                })
+                .collect();
+            followed.push(Followed {
+                copy: *copy,
+                key: key.clone(),
+                holders,
+                fields,
+                placed,
+            });
+        }
+        let mut follower = Follower {
+            supergraph,
+            site,
+            followed,
+        };
+        for rewrite in rewrites.iter().filter_map(|rewrite| Rewrite::read(rewrite)) {
+            follower.apply(&rewrite)?;
+        }
+        let mut sent: IndexMap<(CopyId, Vec<Name>), Senders> = IndexMap::default();
+        for followed in follower.followed {
+            for placed in followed.placed {
+                let at = sent.entry((followed.copy, placed.keys)).or_default();
+                match at.iter_mut().find(|(key, _)| *key == followed.key) {
+                    Some((_, region)) => region.push(placed.clause),
+                    None => at.push((followed.key.clone(), vec![placed.clause])),
+                }
+            }
+        }
+        Ok(SentRepresentation { sent })
+    }
+
+    /// The keys held at `copy` that are sent under `path`, the keys from the copy the fetch runs
+    /// on, each with the configurations it is sent in there.
+    pub(super) fn at(&self, copy: CopyId, path: &[Name]) -> &[(Name, Region)] {
+        self.sent
+            .get(&(copy, path.to_vec()))
+            .map(Vec::as_slice)
+            .unwrap_or_default()
     }
 }
 
-/// Is every surviving explicit selection carried by the fetch's input rewrites from the key it is
-/// read under to the field it names, and back, wherever it survives? The half of
-/// `requireAgreesWithRewrites` the entries owe whatever is demanded; the demanded half is the
-/// coverage walk's.
-pub(super) fn check_explicit_agreement(
-    site: &Site<'_>,
-    projection: &Projection,
-    agreement: &Agreement<'_>,
-) -> Result<(), ComparisonError> {
-    let hypothesis = site.hypothesis;
-    let algebra = hypothesis.algebra;
-    let response = site.readable.response;
-    for ((copy, key), explicit) in &projection.explicit {
-        for (names, region) in explicit {
-            if region.is_empty() {
+/// The locations a representation holds, as the rewrites followed so far have left them.
+struct Follower<'f> {
+    supergraph: &'f ValidFederationSchema,
+    site: &'f Site<'f>,
+    followed: Vec<Followed>,
+}
+
+/// Where the filters written before each key admit the object holding it and where they refuse it,
+/// by the level of the key and the object: read once per rewrite.
+type Filtered = IndexMap<(usize, CopyId), (Region, Region)>;
+
+impl Follower<'_> {
+    fn apply(&mut self, rewrite: &Rewrite) -> Result<(), ComparisonError> {
+        let algebra = self.site.hypothesis.algebra;
+        let domain = every_object(algebra);
+        let (steps, to, value) = match rewrite {
+            Rewrite::Rename { steps, to } => (steps, Some(to), None),
+            Rewrite::Typename { steps, value } => (steps, None, Some(value)),
+        };
+        let depth = steps.len();
+        // A key renamed to itself is removed and inserted again: nothing moves.
+        if to.is_some_and(|to| *to == steps[depth - 1].1) {
+            return Ok(());
+        }
+        let reaches =
+            |keys: &[Name]| keys.len() >= depth && steps.iter().zip(keys).all(|((_, s), k)| s == k);
+        let mut filtered = Filtered::default();
+        // What each placement the rewrite reaches does, read from the representation as the
+        // rewrites before it left it: where the filters admit it and where they refuse it.
+        let mut admitted: Vec<Vec<Option<(Region, Region)>>> = Vec::new();
+        // Where each object holds the key a renamer moves: what it lands on goes there.
+        let mut moving: IndexMap<CopyId, Region> = IndexMap::default();
+        for followed in &self.followed {
+            let mut row = Vec::with_capacity(followed.placed.len());
+            for placed in &followed.placed {
+                algebra.work.agreement_states.add(1);
+                let applies = match value {
+                    // A setter writes where the object holds `__typename` itself.
+                    Some(_) => placed.keys.len() == depth && reaches(&placed.keys),
+                    None => reaches(&placed.keys),
+                };
+                if !applies {
+                    row.push(None);
+                    continue;
+                }
+                let split =
+                    self.admission(&mut filtered, &followed.holders, steps, &placed.clause)?;
+                if to.is_some() && placed.keys.len() == depth {
+                    moving
+                        .entry(followed.holders[depth - 1])
+                        .or_default()
+                        .extend(split.0.iter().cloned());
+                }
+                row.push(Some(split));
+            }
+            admitted.push(row);
+        }
+        for (followed, row) in self.followed.iter_mut().zip(admitted) {
+            let mut placed = Vec::with_capacity(followed.placed.len());
+            for (at, split) in std::mem::take(&mut followed.placed).into_iter().zip(row) {
+                match (split, to) {
+                    (Some((admits, refuses)), Some(to)) => {
+                        for clause in admits {
+                            let mut keys = at.keys.clone();
+                            keys[depth - 1] = to.clone();
+                            placed.push(Placed {
+                                keys,
+                                written: at.written.clone(),
+                                clause,
+                            });
+                        }
+                        placed.extend(refuses.into_iter().map(|clause| Placed {
+                            clause,
+                            ..at.clone()
+                        }));
+                    }
+                    (Some((admits, refuses)), None) => {
+                        placed.extend(admits.into_iter().map(|clause| Placed {
+                            written: value.cloned(),
+                            clause,
+                            ..at.clone()
+                        }));
+                        placed.extend(refuses.into_iter().map(|clause| Placed {
+                            clause,
+                            ..at.clone()
+                        }));
+                    }
+                    (None, Some(to)) => {
+                        // A key moved onto this one's, at the object holding it, replaces it and
+                        // what is below it.
+                        let lands = at.keys.len() >= depth
+                            && at.keys[depth - 1] == *to
+                            && steps[..depth - 1]
+                                .iter()
+                                .zip(&at.keys)
+                                .all(|((_, s), k)| s == k);
+                        let replaced = lands
+                            .then(|| moving.get(&followed.holders[depth - 1]))
+                            .flatten();
+                        match replaced {
+                            Some(replaced) => placed.extend(
+                                algebra
+                                    .subtract_all(vec![at.clause.clone()], replaced, &domain)
+                                    .into_iter()
+                                    .map(|clause| Placed {
+                                        clause,
+                                        ..at.clone()
+                                    }),
+                            ),
+                            None => placed.push(at),
+                        }
+                    }
+                    (None, None) => placed.push(at),
+                }
+            }
+            followed.placed = merge(algebra, placed);
+        }
+        Ok(())
+    }
+
+    /// Where every filter of `steps` admits the holder it tests, and where one refuses it, within
+    /// `clause`.
+    fn admission(
+        &self,
+        filtered: &mut Filtered,
+        holders: &[CopyId],
+        steps: &Steps,
+        clause: &Clause,
+    ) -> Result<(Region, Region), ComparisonError> {
+        let algebra = self.site.hypothesis.algebra;
+        let domain = every_object(algebra);
+        let mut admits: Region = vec![clause.clone()];
+        let mut refuses: Region = Vec::new();
+        for (level, (filters, _)) in steps.iter().enumerate() {
+            if filters.is_empty() {
                 continue;
             }
-            let agrees = agreement.region(algebra, response, *copy, key, names);
-            for clause in region {
-                if let Some(example) = hypothesis.uncovered(*copy, clause, &agrees) {
-                    return Err(ComparisonError::new(format!(
-                        "fetch to {}: the representation sends `{key}` at {} as `{}`, and the \
-                         fetch's input rewrites do not carry the one to the other",
-                        site.fetch.subgraph_name,
-                        describe_at(hypothesis, *copy, example),
-                        names.last().expect("a location has a name"),
-                    )));
+            let holder = holders[level];
+            if !filtered.contains_key(&(level, holder)) {
+                let read = self.filter(holder, filters)?;
+                filtered.insert((level, holder), read);
+            }
+            let (admitted, refused) = &filtered[&(level, holder)];
+            refuses.extend(algebra.product(&admits, refused));
+            admits = algebra.product(&admits, admitted);
+        }
+        Ok((
+            algebra.simplify(admits, &domain),
+            algebra.simplify(refuses, &domain),
+        ))
+    }
+
+    /// Where `filters` admit the object `holder` and where they refuse it, by what the
+    /// representation holds under its `__typename` now.
+    fn filter(
+        &self,
+        holder: CopyId,
+        filters: &[Name],
+    ) -> Result<(Region, Region), ComparisonError> {
+        let hypothesis = self.site.hypothesis;
+        let algebra = hypothesis.algebra;
+        let response = hypothesis.view.response;
+        let domain = every_object(algebra);
+        let types = algebra.objects(&admitted_types(self.supergraph, filters).unwrap_or_default());
+        let inside = response.type_literal(algebra, holder, types);
+        let outside = response.type_literal(
+            algebra,
+            holder,
+            algebra.minus(algebra.every_object(), types),
+        );
+        let names = |name: &str| {
+            filters.iter().all(|filter| {
+                filter.as_str() == name || self.supergraph.schema().is_subtype(filter, name)
+            })
+        };
+        let (mut admits, mut refuses, mut typed) = (Vec::new(), Vec::new(), Vec::new());
+        for followed in self
+            .followed
+            .iter()
+            .filter(|followed| followed.copy == holder)
+        {
+            for placed in &followed.placed {
+                if placed.keys.last() != Some(&INTROSPECTION_TYPENAME_FIELD_NAME) {
+                    continue;
+                }
+                if let Some(written) = &placed.written {
+                    typed.push(placed.clause.clone());
+                    match written {
+                        Written::Name(name) if !names(name) => refuses.push(placed.clause.clone()),
+                        _ => admits.push(placed.clause.clone()),
+                    }
+                    continue;
+                }
+                for (field, guard) in &followed.fields {
+                    for clause in algebra.product(std::slice::from_ref(&placed.clause), guard) {
+                        typed.push(clause.clone());
+                        if *field != *INTROSPECTION_TYPENAME_FIELD_NAME {
+                            if let Some(example) = hypothesis.uncovered(holder, &clause, &[]) {
+                                return Err(ComparisonError::new(format!(
+                                    "fetch to {}: an input rewrite's `TypenameEquals({})` tests \
+                                     {}, where the representation holds `{field}` under \
+                                     `__typename`, which it cannot read as a type",
+                                    self.site.fetch.subgraph_name,
+                                    filters
+                                        .iter()
+                                        .map(Name::as_str)
+                                        .collect::<Vec<_>>()
+                                        .join(", "),
+                                    describe_at(hypothesis, holder, example),
+                                )));
+                            }
+                            continue;
+                        }
+                        admits.extend(inside.as_ref().and_then(|t| algebra.conjoin(&clause, t)));
+                        refuses.extend(outside.as_ref().and_then(|t| algebra.conjoin(&clause, t)));
+                    }
                 }
             }
         }
+        // An object holding nothing under `__typename` is admitted.
+        admits.extend(algebra.subtract_all(everything(), &typed, &domain));
+        Ok((
+            algebra.simplify(admits, &domain),
+            algebra.simplify(refuses, &domain),
+        ))
     }
-    Ok(())
+}
+
+/// One location's placements with those sitting alike joined, as few clauses as hold the same
+/// configurations.
+fn merge(algebra: &Algebra, placed: Vec<Placed>) -> Vec<Placed> {
+    let domain = every_object(algebra);
+    let mut alike: Vec<(Vec<Name>, Option<Written>, Region)> = Vec::new();
+    for at in placed {
+        match alike
+            .iter_mut()
+            .find(|(keys, written, _)| *keys == at.keys && *written == at.written)
+        {
+            Some((_, _, region)) => region.push(at.clause),
+            None => alike.push((at.keys, at.written, vec![at.clause])),
+        }
+    }
+    alike
+        .into_iter()
+        .flat_map(|(keys, written, region)| {
+            algebra
+                .simplify(region, &domain)
+                .into_iter()
+                .map(move |clause| Placed {
+                    keys: keys.clone(),
+                    written: written.clone(),
+                    clause,
+                })
+        })
+        .collect()
 }
 
 //==================================================================================================
@@ -877,8 +1056,8 @@ impl Checker<'_> {
     /// representation is owed? The model's `RepresentationCovers` at every copy and configuration
     /// of `FetchSiteRepresentationMet`, decided per runtime type of the copy the fetch runs on,
     /// each read at its subgraph entity type: the demand there is the key half at the runtime type
-    /// and the `@requires` half at the entity type, rewrites inverted, and some resolvable key
-    /// covers it in each configuration.
+    /// and the `@requires` half at the entity type, read where the input rewrites send it, and
+    /// some resolvable key covers it in each configuration.
     #[allow(clippy::too_many_arguments)]
     pub(super) fn check_representations(
         &self,
@@ -888,7 +1067,7 @@ impl Checker<'_> {
         entity_types: &[(Name, Vec<Name>)],
         projection: &Projection,
         held: View<'_>,
-        agreement: &Agreement<'_>,
+        sent: &SentRepresentation,
         site: &Site<'_>,
     ) -> Result<(), ComparisonError> {
         let hypothesis = site.hypothesis;
@@ -956,7 +1135,7 @@ impl Checker<'_> {
                     &requires,
                     &keys,
                     owed,
-                    agreement,
+                    sent,
                     &supplied,
                     site,
                 )?;
@@ -996,7 +1175,7 @@ impl Checker<'_> {
         requires: &[Selection],
         keys: &[KeyDirective],
         owed: Region,
-        agreement: &Agreement<'_>,
+        sent: &SentRepresentation,
         supplied: &Supplies<'_>,
         site: &Site<'_>,
     ) -> Result<(), ComparisonError> {
@@ -1011,11 +1190,10 @@ impl Checker<'_> {
             hypothesis,
             supplied,
             supplier: Supplier::Representation,
-            agreement: Some(agreement),
+            sent: Some(sent),
         };
         let at = response.describe(copy);
-        // The demand of each key that applies at the runtime type, what must be read for it once
-        // the rewrites are inverted.
+        // The demand of each key that applies at the runtime type, as the subgraph reads it.
         let mut demands: Vec<(&KeyDirective, Vec<Selection>)> = Vec::new();
         let mut first: Option<String> = None;
         for key in keys {
@@ -1025,14 +1203,9 @@ impl Checker<'_> {
                 continue;
             };
             demand.extend(requires.iter().cloned());
-            let required = invert_key_renamers(
-                self.supergraph_schema,
-                type_filter_covers,
-                &fetch.input_rewrites,
-                wrap_non_empty(
-                    |selections| inline_fragment(object.clone(), selections),
-                    demand,
-                ),
+            let required = wrap_non_empty(
+                |selections| inline_fragment(object.clone(), selections),
+                demand,
             );
             match coverage.covers(
                 copy,

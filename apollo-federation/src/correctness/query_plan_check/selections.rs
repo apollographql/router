@@ -1,5 +1,5 @@
-//! Selection-set helpers the checker shares: inlining a fetch's own fragment spreads, the object
-//! types a type condition grounds to, and following key renamers through a selection set.
+//! Selection-set helpers the checker shares: inlining a fetch's own fragment spreads and the object
+//! types a type condition grounds to.
 //!
 //! Port of the structural helpers in `Apollo/Definitions/QueryPlanSelections.lean`.
 //!
@@ -9,17 +9,9 @@
 //! fragment names are per-document, so a fetch's spreads are inlined at that boundary, each
 //! becoming an inline fragment carrying the definition's type condition.
 //!
-//! # Key renamers
-//!
-//! Input rewrites rename keys in the representation a fetch sends. Inverted, they turn a
-//! subgraph's demand into the keys it must be read under from what was fetched, a `TypenameEquals`
-//! filter undone only where it covers every object the position can hold
-//! ([`type_filter_covers`]). Whether they carry what a representation actually sends to what it
-//! names, and back, is read at each location's runtime types instead (`representation.rs`). A
-//! fetch's output rewrites rename what it adds to the response, which `Response::rename` does on
+//! A fetch's input rewrites are followed over the representation it sends (`representation.rs`),
+//! and its output rewrites rename what it adds to the response, which `Response::rename` does on
 //! the response itself.
-
-use std::sync::Arc;
 
 use apollo_compiler::Name;
 use apollo_compiler::Node;
@@ -30,8 +22,6 @@ use apollo_compiler::executable::Selection;
 use apollo_compiler::executable::SelectionSet;
 
 use super::ComparisonError;
-use crate::query_plan::FetchDataPathElement;
-use crate::query_plan::FetchDataRewrite;
 use crate::schema::ValidFederationSchema;
 
 /// A fetch's selections with its own fragment spreads inlined, each becoming an inline fragment
@@ -156,210 +146,4 @@ pub(super) fn admitted_types(schema: &ValidFederationSchema, guards: &[Name]) ->
         });
     }
     admitted
-}
-
-//==================================================================================================
-// Key renamers
-//==================================================================================================
-
-/// Which positions a `TypenameEquals` filter applies at, from the filter's own object types and the
-/// fragment guards in force where a key was reached.
-type TypeFilterTest = fn(&ValidFederationSchema, &[Name], &[Name]) -> bool;
-
-/// The key renamers among a fetch's rewrites inverted, as `apply_rewrites` would undo them: every
-/// one, the last first, so that each path is followed through the keys it was written against. A
-/// value setter changes a value but no key, so it is passed over: on the input side one fakes the
-/// `__typename` an interface object is sent with, which nothing here compares.
-///
-/// One renamer inverted names the key it renames *to* back to the key it renames, at the same
-/// position. A path that does not end at a key renames nothing, as `split_path_last_element` finds
-/// no key there.
-pub(super) fn invert_key_renamers(
-    schema: &ValidFederationSchema,
-    applies: TypeFilterTest,
-    rewrites: &[Arc<FetchDataRewrite>],
-    selections: Vec<Selection>,
-) -> Vec<Selection> {
-    let mut selections = selections;
-    for rewrite in rewrites.iter().rev() {
-        let FetchDataRewrite::KeyRenamer(renamer) = rewrite.as_ref() else {
-            continue;
-        };
-        let Some((FetchDataPathElement::Key(renamed_key, type_condition), leading)) =
-            renamer.path.split_last()
-        else {
-            continue;
-        };
-        let mut path = leading.to_vec();
-        path.push(FetchDataPathElement::Key(
-            renamer.rename_key_to.clone(),
-            type_condition.clone(),
-        ));
-        selections = rename_key_at(schema, applies, &[], &[], &path, renamed_key, selections);
-    }
-    selections
-}
-
-/// Applies one key renamer, following `rename_at_path`: the path is followed through the fetch's
-/// selections and the key it ends at is renamed; a key the path does not reach is left alone.
-#[allow(clippy::too_many_arguments)]
-fn rename_key_at(
-    schema: &ValidFederationSchema,
-    applies: TypeFilterTest,
-    type_filter: &[Name],
-    guards: &[Name],
-    path: &[FetchDataPathElement],
-    new_key: &Name,
-    selections: Vec<Selection>,
-) -> Vec<Selection> {
-    let Some((head, rest)) = path.split_first() else {
-        return selections;
-    };
-    match head {
-        FetchDataPathElement::Key(name, _) if rest.is_empty() => rename_here(
-            schema,
-            applies,
-            type_filter,
-            guards,
-            name,
-            new_key,
-            selections,
-        ),
-        FetchDataPathElement::Key(name, _) => {
-            rename_key_under(schema, applies, name, rest, new_key, selections)
-        }
-        FetchDataPathElement::TypenameEquals(type_name) => {
-            let mut type_filter = type_filter.to_vec();
-            type_filter.push(type_name.clone());
-            rename_key_at(
-                schema,
-                applies,
-                &type_filter,
-                guards,
-                rest,
-                new_key,
-                selections,
-            )
-        }
-        // An index is passed over: a selection set does not tell a list from its elements, and
-        // `apply_rewrites` renames in every element of an array. `rename_at_path` rejects one.
-        FetchDataPathElement::AnyIndex(_) => rename_key_at(
-            schema,
-            applies,
-            type_filter,
-            guards,
-            rest,
-            new_key,
-            selections,
-        ),
-        // `Parent` moves up, so it cannot be followed downwards.
-        FetchDataPathElement::Parent => selections,
-    }
-}
-
-/// Descends past one response key, carrying the rest of the path. A new level starts with no type
-/// filter and no guards, as `rename_at_path` starts with a fresh one.
-fn rename_key_under(
-    schema: &ValidFederationSchema,
-    applies: TypeFilterTest,
-    name: &Name,
-    path: &[FetchDataPathElement],
-    new_key: &Name,
-    selections: Vec<Selection>,
-) -> Vec<Selection> {
-    selections
-        .into_iter()
-        .map(|selection| match selection {
-            Selection::Field(field) if field.response_name() == name => {
-                let mut copy = (*field).clone();
-                copy.selection_set.selections = rename_key_at(
-                    schema,
-                    applies,
-                    &[],
-                    &[],
-                    path,
-                    new_key,
-                    std::mem::take(&mut copy.selection_set.selections),
-                );
-                Selection::Field(Node::new(copy))
-            }
-            Selection::InlineFragment(fragment) => {
-                let mut copy = (*fragment).clone();
-                copy.selection_set.selections = rename_key_under(
-                    schema,
-                    applies,
-                    name,
-                    path,
-                    new_key,
-                    std::mem::take(&mut copy.selection_set.selections),
-                );
-                Selection::InlineFragment(Node::new(copy))
-            }
-            selection => selection,
-        })
-        .collect()
-}
-
-/// Renames every selection at one response key, where the path ends. The rename applies only where
-/// `applies` admits the `TypenameEquals` filter against the guards in force.
-#[allow(clippy::too_many_arguments)]
-fn rename_here(
-    schema: &ValidFederationSchema,
-    applies: TypeFilterTest,
-    type_filter: &[Name],
-    guards: &[Name],
-    name: &Name,
-    new_key: &Name,
-    selections: Vec<Selection>,
-) -> Vec<Selection> {
-    selections
-        .into_iter()
-        .map(|selection| match selection {
-            Selection::Field(field)
-                if field.response_name() == name && applies(schema, type_filter, guards) =>
-            {
-                let mut copy = (*field).clone();
-                copy.alias = Some(new_key.clone());
-                Selection::Field(Node::new(copy))
-            }
-            Selection::InlineFragment(fragment) => {
-                let mut guards = guards.to_vec();
-                if let Some(type_condition) = &fragment.type_condition {
-                    guards.push(type_condition.clone());
-                }
-                let mut copy = (*fragment).clone();
-                copy.selection_set.selections = rename_here(
-                    schema,
-                    applies,
-                    type_filter,
-                    &guards,
-                    name,
-                    new_key,
-                    std::mem::take(&mut copy.selection_set.selections),
-                );
-                Selection::InlineFragment(Node::new(copy))
-            }
-            selection => selection,
-        })
-        .collect()
-}
-
-/// Does an input rewrite's filter admit *every* object type the position can hold, so that the
-/// router renames there whatever the runtime type? This is how a renamer is read inverted, where
-/// only a rename that certainly happens may be undone. A position nothing is known about is
-/// covered only by a filterless rewrite.
-pub(super) fn type_filter_covers(
-    schema: &ValidFederationSchema,
-    type_filter: &[Name],
-    guards: &[Name],
-) -> bool {
-    let Some(filter_types) = admitted_types(schema, type_filter) else {
-        return true;
-    };
-    let Some(guard_types) = admitted_types(schema, guards) else {
-        return false;
-    };
-    guard_types
-        .iter()
-        .all(|type_name| filter_types.contains(type_name))
 }

@@ -38,15 +38,14 @@
 //! their response key and fragments merging (`representation.rs`). Everything it reads must have
 //! been fetched, under the field the entry names, a value read and later overwritten included.
 //! What it must hold is the subgraph's demand, not the entries': the subgraph is sent the demand,
-//! so what must already be fetched is the demand's *preimage* under the fetch's input rewrites —
-//! the demand says which field each key must hold and with which arguments, which an entry cannot,
-//! `trim_requires_selection_set` having dropped its arguments; the rewrites say which key it is
-//! read from. The representation covers that preimage, through some resolvable key in each
-//! configuration, and may hold more; what it explicitly selects, and every demanded field it holds,
-//! agrees with the rewrites, which link each alias it is read under to the field it names. A
-//! planner may fetch a `@requires` input under an alias and name it back with an input key
-//! renamer, which is what the router's `execute_selection_set` and `apply_rewrites` do between
-//! them.
+//! so what must already be fetched is what the representation sends under each demanded name once
+//! the fetch's input rewrites have run — the demand says which field each name must hold and with
+//! which arguments, which an entry cannot, `trim_requires_selection_set` having dropped its
+//! arguments; the rewrites, applied in order where the representation holds the keys they move,
+//! say which key it is read from. The representation covers the demand so read, through some
+//! resolvable key in each configuration, and may hold more. A planner may fetch a `@requires`
+//! input under an alias and name it back with an input key renamer, which is what the router's
+//! `execute_selection_set` and `apply_rewrites` do between them.
 //!
 //! # What the checker assumes of the supergraph and the subgraphs
 //!
@@ -88,12 +87,15 @@
 //!
 //! # Differences from the model
 //!
-//! - **No fuel.** The model's coverage and its rewrite agreement over a representation carry
-//!   budgets that are artifacts of Lean's termination checker; its own notes say an
-//!   implementation should simply loop.
+//! - **No fuel.** The model's coverage over a representation carries budgets that are artifacts of
+//!   Lean's termination checker; its own notes say an implementation should simply loop.
+//! - **The input rewrites are followed as the router applies them.** The model's
+//!   `requireAgreesWithRewrites` rewrites an entry's selections by syntax, forwards as read and
+//!   inverted as sent; here they are followed over what the representation holds, a key renamed
+//!   only where it is held, each rewrite over what the earlier ones left (`representation.rs`).
 //! - **A representation is regions, not a value per configuration.** The model projects the
 //!   entries in every configuration; here the projection is read once, as the configurations in
-//!   which each location of the representation is present, explicitly selected and read, which
+//!   which each location of the representation is present and read, which
 //!   the model's projection determines because every write at one location reads the same
 //!   contributions (`representation.rs`). A key is still chosen per configuration: where no one
 //!   key covers every configuration, the configurations each key fails in are intersected.
@@ -207,9 +209,8 @@ use self::region::Clause;
 use self::region::Work;
 use self::region::boolean;
 use self::region::everything;
-use self::representation::Agreement;
 use self::representation::Projection;
-use self::representation::check_explicit_agreement;
+use self::representation::SentRepresentation;
 use self::representation::check_inputs_available;
 use self::representation::entity_fragments;
 use self::representation::requires_projection;
@@ -920,9 +921,8 @@ impl Checker<'_> {
     /// model's `checkEntityFetch`, its contextual availability asked beside it in
     /// [`Self::walk_fetch`]. The `_entities` body is read first, every selection there an inline
     /// fragment carrying a type condition; then everything the representation reads was fetched
-    /// under the fields the entries name, its explicit selections agree with the input rewrites,
-    /// and it covers what the subgraph demands, through a resolvable key in each configuration
-    /// (`representation.rs`).
+    /// under the fields the entries name, and, as the input rewrites send it, it covers what the
+    /// subgraph demands, through a resolvable key in each configuration (`representation.rs`).
     #[allow(clippy::too_many_arguments)]
     fn check_entity_fetch(
         &self,
@@ -936,12 +936,13 @@ impl Checker<'_> {
     ) -> Result<(), ComparisonError> {
         let fragments = entity_fragments(fetch, entity_body)?;
         check_inputs_available(site, projection)?;
-        let agreement = Agreement::new(
+        let sent = SentRepresentation::new(
             self.supergraph_schema,
+            site,
+            projection,
+            held,
             &fetch.input_rewrites,
-            site.position.copy,
-        );
-        check_explicit_agreement(site, projection, &agreement)?;
+        )?;
         self.check_representations(
             fetch,
             subgraph,
@@ -949,7 +950,7 @@ impl Checker<'_> {
             entity_types,
             projection,
             held,
-            &agreement,
+            &sent,
             site,
         )
     }
@@ -1329,7 +1330,7 @@ impl Checker<'_> {
             hypothesis: &hypothesis,
             supplied: &Supplies::new(view),
             supplier: Supplier::Plan,
-            agreement: None,
+            sent: None,
         }
         .covers(
             CopyId::ROOT,

@@ -503,8 +503,7 @@ fn an_entry_reading_a_key_the_plan_never_fetched_is_rejected() {
 }
 
 // The entry reads `id` under the alias the renamer names `isbn`, so `reviews` would be sent `id`'s
-// value as `isbn`. Forwards, the entry as read renames to `isbn` where the entry as sent says
-// `id`, and the rewrites and the entry disagree.
+// value as `isbn`: the demanded `isbn` is read where it is sent, and the call held there is `id`.
 #[test]
 fn a_renamed_key_naming_a_different_field_is_rejected() {
     let fixture = fixture();
@@ -512,8 +511,8 @@ fn a_renamed_key_naming_a_different_field_is_rejected() {
     let error = check_blurb_plan(&fixture, &plan).expect_err("`isbn` would carry `id`'s value");
     assert!(
         error.to_string().contains(
-            "the representation sends `__require_0_isbn` at `feed`, a `Book` as `id`, and the \
-             fetch's input rewrites do not carry the one to the other"
+            "the representation holds `__require_0_isbn` at `feed`, a `Book` as `id`, where \
+             `isbn` is asked"
         ),
         "{error}"
     );
@@ -585,10 +584,9 @@ fn an_alias_no_rewrite_names_back_is_rejected() {
     );
     let error = check_blurb_plan(&fixture, &plan).expect_err("the alias is sent as it is");
     assert!(
-        error.to_string().contains(
-            "the representation sends `__require_0_isbn` at `feed`, a `Book` as `isbn`, and the \
-             fetch's input rewrites do not carry the one to the other"
-        ),
+        error
+            .to_string()
+            .contains("the representation does not hold `isbn` at `feed`, a `Book`"),
         "{error}"
     );
 }
@@ -633,11 +631,13 @@ fn a_renamer_the_entry_does_not_use_is_rejected() {
 }
 
 // The entry reads `isbn` both under its own name and under the alias, and the renamer sends both
-// as `isbn`: inverted, it would read both from the alias.
+// as `isbn`: the alias's value replaces the other, and both are `isbn`'s, so `reviews` is sent
+// its `isbn`.
 //
-// The model's `twoFieldsSentUnderOneKeyDisagree`. A control of preserved behaviour.
+// The model's `twoFieldsSentUnderOneKeyDisagree`, which inverted reads both from the alias. A
+// control of changed behaviour: a collapse whose survivor is the demanded field is served.
 #[test]
-fn two_fields_sent_under_one_key_are_rejected() {
+fn two_fields_of_one_call_sent_under_one_key_are_accepted() {
     let fixture = fixture();
     let plan = book_requires_plan(
         &fixture,
@@ -650,18 +650,11 @@ fn two_fields_sent_under_one_key_are_rejected() {
         ]),
         renaming(&[key("__require_0_isbn")], "isbn"),
     );
-    let error = check_blurb_plan(&fixture, &plan).expect_err("two values sent as `isbn`");
-    assert!(
-        error.to_string().contains(
-            "the representation sends `isbn` at `feed`, a `Book` as `isbn`, and the fetch's \
-             input rewrites do not carry the one to the other"
-        ),
-        "{error}"
-    );
+    check_blurb_plan(&fixture, &plan).unwrap();
 }
 
 // A renamer sends the demanded `isbn` away as `foo`; its demand, its shape and the data are all in
-// order, so only the forwards reading catches it.
+// order, and the subgraph is sent no `isbn`.
 //
 // The model's `renamerSendingAFieldAwayDisagrees`. A control of preserved behaviour.
 #[test]
@@ -675,10 +668,9 @@ fn a_renamer_sending_a_field_away_is_rejected() {
     );
     let error = check_blurb_plan(&fixture, &plan).expect_err("`isbn` is sent as `foo`");
     assert!(
-        error.to_string().contains(
-            "the representation sends `isbn` at `feed`, a `Book` as `isbn`, and the fetch's \
-             input rewrites do not carry the one to the other"
-        ),
+        error
+            .to_string()
+            .contains("the representation does not hold `isbn` at `feed`, a `Book`"),
         "{error}"
     );
 }
@@ -717,10 +709,9 @@ fn a_renamer_filtered_on_another_type_leaves_the_alias_unnamed() {
     let error = check_blurb_plan(&fixture, &isbn_named_back_on(&fixture, "Film"))
         .expect_err("nothing names a `Book`'s alias");
     assert!(
-        error.to_string().contains(
-            "the representation sends `__require_0_isbn` at `feed`, a `Book` as `isbn`, and the \
-             fetch's input rewrites do not carry the one to the other"
-        ),
+        error
+            .to_string()
+            .contains("the representation does not hold `isbn` at `feed`, a `Book`"),
         "{error}"
     );
 }
@@ -1171,33 +1162,32 @@ fn a_filter_reads_the_typename_an_earlier_setter_wrote() {
     );
 }
 
-// A renamer moves a `Match`'s `team` object under `__typename`, and a filter on `Match` then reads
-// it there: which way the router's filter goes depends on that value at execution, which the plan
+// A renamer moves the alias `__require_0_isbn`, an `isbn`, under `__typename`, and a filter on `Book`
+// then reads it there: the router compares that string with `Book` at execution, which the plan
 // does not state.
 //
 // A control of preserved behaviour whose reason is the filter the checker cannot read.
 #[test]
 fn a_filter_reading_another_fields_value_under_typename_is_rejected() {
-    let fixture = keys_by_case_fixture();
-    let plan = team_by_case(
+    let fixture = fixture();
+    let plan = book_requires_plan(
         &fixture,
-        "",
-        team_read_by_case(),
+        "__typename id __require_0_isbn: isbn",
+        aliased_isbn(),
         serde_json::json!([
+            renamer(serde_json::json!([key("__require_0_isbn")]), "__typename"),
             renamer(
-                serde_json::json!([key("event"), key("team__alias_0")]),
-                "__typename"
-            ),
-            renamer(
-                serde_json::json!([key("event"), typename_equals("Match"), key("team")]),
-                "team"
+                serde_json::json!([typename_equals("Book"), key("id")]),
+                "id2"
             )
         ]),
     );
-    let error = fixture.rejection(&plan, COST_AND_MATCH_NOTE);
+    let error = check_blurb_plan(&fixture, &plan)
+        .expect_err("the filter reads an `isbn`")
+        .to_string();
     assert!(
-        error.contains("`TypenameEquals(Match)`")
-            && error.contains("where the representation holds `team` under `__typename`"),
+        error.contains("an input rewrite's `TypenameEquals(Book)` tests `feed`, a `Book`")
+            && error.contains("where the representation holds `isbn` under `__typename`"),
         "{error}"
     );
 }
@@ -6586,8 +6576,7 @@ fn a_demanded_copied_field_renamed_away_is_rejected() {
         .rewrites(renaming_below_u("right", "gone"))
         .rejection();
     assert!(
-        error.contains("the representation sends `right` at `t.u`")
-            && error.contains("do not carry the one to the other"),
+        error.contains("the representation does not hold `right` at `t.u`"),
         "{error}"
     );
 }
@@ -7601,10 +7590,9 @@ fn sent_work(fixture: &Fixture, sent: &Sent<'_>) -> (Result<(), ComparisonError>
 
 // Entries over one variable, `n` of them, each reading `a` under `$x`. Expected, before the run:
 // the projection reads `2n + 3` selections (the key's fragment and its two fields, each entry's
-// fragment and its field) and `n` literals, and the boundary `n` references; it writes `6n + 9`
-// regions (three per field read, four for the key's merge, five for the first entry's and six for
-// every later one's, which narrows the explicit selection the one before left); it scans nothing,
-// no entry reading a composite. Everything else is the same at every `n`: `a`'s regions stay one
+// fragment and its field) and `n` literals, and the boundary `n` references; it writes `3n + 6`
+// regions (two per field read, its read and its presence, two for the key's merge and one for each
+// entry's); it scans nothing, no entry reading a composite. Everything else is the same at every `n`: `a`'s regions stay one
 // clause, `$x`, so the obligations decided, the most clauses a region held, the most variables an
 // obligation kept, and the three contributions the representation holds with their literals.
 //
@@ -7625,7 +7613,7 @@ fn entries_over_one_variable_add_no_configuration_axis() {
         assert_eq!(work.entry_selections.get(), 2 * n + 3, "selections at {n}");
         assert_eq!(work.entry_literals.get(), n, "literals at {n}");
         assert_eq!(work.boolean_references.get(), n, "references at {n}");
-        assert_eq!(work.projection_writes.get(), 6 * n + 9, "writes at {n}");
+        assert_eq!(work.projection_writes.get(), 3 * n + 6, "writes at {n}");
         assert_eq!(work.projection_scans.get(), 0, "scans at {n}");
         let same = vec![
             work.obligations.get(),
@@ -7644,8 +7632,8 @@ fn entries_over_one_variable_add_no_configuration_axis() {
 
 // Independent variables over one field, `n` of them, each entry reading `a` under its own `$xᵢ`:
 // `a`'s regions are the `n` clauses `$x₁ ∨ … ∨ $xₙ`, and nothing multiplies them. Expected: each
-// clause one availability and one rewrite-agreement obligation, so the obligations grow by exactly
-// two per variable; the most clauses one region held is `n + 2`, the union of the regions the
+// clause one availability obligation, so the obligations grow by exactly one per variable; the
+// most clauses one region held is `n + 2`, the union of the regions the
 // representation's top-level locations are present in, `__typename`'s, `id`'s and `a`'s `n`,
 // before simplification absorbs it, never `2ⁿ`; the representation still holds three
 // contributions.
@@ -7668,8 +7656,8 @@ fn independent_entry_variables_are_decided_apart() {
         assert_eq!(work.entry_literals.get(), n, "literals at {n}");
         assert_eq!(work.held_contributions.get(), 3, "held at {n}");
         let (obligations, largest) = (work.obligations.get(), work.largest_region_clauses.get());
-        let rest = *base.get_or_insert(obligations - 2 * n);
-        assert_eq!(obligations, rest + 2 * n, "obligations at {n}");
+        let rest = *base.get_or_insert(obligations - n);
+        assert_eq!(obligations, rest + n, "obligations at {n}");
         assert_eq!(largest, n + 2, "the most clauses at {n}");
     }
 }
@@ -7729,10 +7717,9 @@ fn variables_behind_a_false_literal_are_read_at_the_boundary_alone() {
 
 // Independent variables on separate obligations, `n` of them, each entry reading its own `fᵢ`
 // under its own `$xᵢ`. Expected, before the run: the projection reads `2n + 3` selections and `n`
-// literals, the boundary `n` references; it writes `5n + 10` regions, no entry's location written
-// by another; the representation holds `n + 2` contributions; each `fᵢ` owes one availability and
-// one rewrite-agreement obligation over `$xᵢ` alone, so the obligations grow by exactly two per
-// entry; the most variables one obligation kept is the same at every `n`, and the most clauses one
+// literals, the boundary `n` references; it writes `3n + 6` regions, no entry's location written
+// by another; the representation holds `n + 2` contributions; each `fᵢ` owes one availability
+// obligation over `$xᵢ` alone, so the obligations grow by exactly one per entry; the most variables one obligation kept is the same at every `n`, and the most clauses one
 // region held is `n + 2`, the union of the regions the top-level locations are present in before
 // simplification absorbs it, where a product of the `n` variables would make either `2ⁿ`.
 #[test]
@@ -7757,7 +7744,7 @@ fn independent_variables_on_separate_obligations_grow_by_entry() {
         assert_eq!(work.entry_selections.get(), 2 * n + 3, "selections at {n}");
         assert_eq!(work.entry_literals.get(), n, "literals at {n}");
         assert_eq!(work.boolean_references.get(), n, "references at {n}");
-        assert_eq!(work.projection_writes.get(), 5 * n + 10, "writes at {n}");
+        assert_eq!(work.projection_writes.get(), 3 * n + 6, "writes at {n}");
         assert_eq!(work.held_contributions.get(), n + 2, "held at {n}");
         assert_eq!(
             work.largest_region_clauses.get(),
@@ -7765,26 +7752,26 @@ fn independent_variables_on_separate_obligations_grow_by_entry() {
             "the most clauses at {n}"
         );
         let (rest, support) = *base.get_or_insert((
-            work.obligations.get() - 2 * n,
+            work.obligations.get() - n,
             work.projection_support_max.get(),
         ));
-        assert_eq!(work.obligations.get(), rest + 2 * n, "obligations at {n}");
+        assert_eq!(work.obligations.get(), rest + n, "obligations at {n}");
         assert_eq!(work.projection_support_max.get(), support, "support at {n}");
     }
 }
 
-// What the key choice, a bare copy and the rewrite agreement cost, each stated before the run. A
+// What the key choice, a bare copy and the input rewrites cost, each stated before the run. A
 // key covering every configuration is chosen outright: the planner's plan tries its one key and
 // collects no failure. Where no key does, each key's failures are collected where every key before
 // it failed: `V`'s `id` fails where `$x` is false, one clause, and `id2`, asked there alone,
 // covers it and fails nowhere. A
-// bare `u` copies the two readable locations under it, `right` and `extra`. A `typenameEquals`
-// filter splits a location's agreement in two, so a renamer after it is asked of both halves: with
-// the filtered renamer before an unrelated one, the agreement follows one state more at the one
-// location the filter reaches, read once as an explicit selection and once as a demanded field,
-// than with the same renamer unfiltered.
+// bare `u` copies the two readable locations under it, `right` and `extra`. The rewrites are
+// followed once over the representation's placements, whichever obligation reads them: a renamer
+// and an unrelated one over `__typename`, `id` and the alias, each held in one clause, ask six,
+// and a `typenameEquals` filter on `Book` adds none where the alias is held at a `Book` alone, the
+// filter refusing it nowhere it is held.
 #[test]
-fn the_key_choice_and_the_agreement_read_what_they_split() {
+fn the_key_choice_and_the_rewrites_read_what_they_split() {
     let world = conditional_requires_fixture();
     let planner = Sent::new(
         "__typename id ... on T @include(if: $test) { a }",
@@ -7849,7 +7836,8 @@ fn the_key_choice_and_the_agreement_read_what_they_split() {
     };
     let filtered = renamed(vec![typename_equals("Book"), key("__require_0_isbn")]);
     let unfiltered = renamed(vec![key("__require_0_isbn")]);
-    assert_eq!(filtered, unfiltered + 2);
+    assert_eq!(unfiltered, 6);
+    assert_eq!(filtered, unfiltered);
 }
 
 //--------------------------------------------------------------------------------------------------
@@ -7930,7 +7918,7 @@ fn a_renamer_ending_at_the_key_sends_it_away() {
         .rewrites(renaming(&[key("id")], "other"))
         .rejection();
     assert!(
-        error.contains("the representation sends `id` at `t`, a `T` as `id`"),
+        error.contains("the representation does not hold `id` at `t`, a `T`"),
         "{error}"
     );
 }

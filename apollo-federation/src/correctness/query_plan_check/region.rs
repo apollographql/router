@@ -850,14 +850,15 @@ pub(super) struct Work {
     pub(super) entry_selections: Counter,
     pub(super) entry_literals: Counter,
     /// Location regions the projection wrote: a write added to a location, a field's removal
-    /// from one below it, a fragment's removal from an explicit selection it overwrites.
+    /// from one below it.
     pub(super) projection_writes: Counter,
     /// Locations a field examined for being below its key, clearing what an earlier write left
     /// there: every location of its scope, once per field whose key holds a copy.
     pub(super) projection_scans: Counter,
     /// Readable locations a bare field copied.
     pub(super) copied_locations: Counter,
-    /// Rename states the rewrite agreement followed, one per renamer and state it was asked of.
+    /// Placements of the representation's locations the input rewrites were followed over, one per
+    /// rewrite and placement it was asked of.
     pub(super) agreement_states: Counter,
     /// Resolvable keys tried per runtime type, and the clauses of the failure regions their
     /// intersection read where no one key covers every configuration.
