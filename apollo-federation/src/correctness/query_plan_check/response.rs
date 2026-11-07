@@ -131,6 +131,8 @@ pub(super) struct Response {
     contributions: Vec<Contribution>,
     /// Every contribution, by the copy it is on and the key it is read under.
     by_key: HashMap<(CopyId, Name), Vec<ContributionId>>,
+    /// The keys some contribution is read under at each copy, in the order they were first written.
+    keys: HashMap<CopyId, Vec<Name>>,
     producers: Vec<Arc<str>>,
 }
 
@@ -142,8 +144,40 @@ impl Response {
             interned: HashMap::new(),
             contributions: Vec::new(),
             by_key: HashMap::new(),
+            keys: HashMap::new(),
             producers: Vec::new(),
         }
+    }
+
+    /// Stores a contribution and indexes it by copy and key.
+    fn push(&mut self, contribution: Contribution) -> ContributionId {
+        let id = ContributionId(self.contributions.len() as u32);
+        let entry = (contribution.copy, contribution.key.clone());
+        let ids = self.by_key.entry(entry).or_default();
+        if ids.is_empty() {
+            self.keys
+                .entry(contribution.copy)
+                .or_default()
+                .push(contribution.key.clone());
+        }
+        ids.push(id);
+        self.contributions.push(contribution);
+        id
+    }
+
+    /// Stores contributions no fetch adds to the response, for a view of their own: what an
+    /// entity fetch's representation holds, each a readable contribution narrowed to where the
+    /// representation holds it. No other view lists them.
+    pub(super) fn detached(&mut self, contributions: Vec<Contribution>) -> Vec<ContributionId> {
+        contributions
+            .into_iter()
+            .map(|contribution| self.push(contribution))
+            .collect()
+    }
+
+    /// The keys some contribution is read under at a copy.
+    pub(super) fn keys_at(&self, copy: CopyId) -> &[Name] {
+        self.keys.get(&copy).map(Vec::as_slice).unwrap_or_default()
     }
 
     pub(super) fn root_type(&self) -> &Name {
@@ -979,12 +1013,7 @@ impl Response {
                 .work
                 .guard_literals
                 .add(guard.iter().map(|clause| clause.len() as u64).sum());
-            let id = ContributionId(self.contributions.len() as u32);
-            self.by_key
-                .entry((copy, contribution.key.clone()))
-                .or_default()
-                .push(id);
-            self.contributions.push(Contribution {
+            let id = self.push(Contribution {
                 copy,
                 key: contribution.key,
                 producer: production.producer,
@@ -1203,13 +1232,7 @@ impl Response {
             });
         }
         for contribution in narrowed {
-            let id = ContributionId(self.contributions.len() as u32);
-            self.by_key
-                .entry((contribution.copy, contribution.key.clone()))
-                .or_default()
-                .push(id);
-            self.contributions.push(contribution);
-            sent.push(id);
+            sent.push(self.push(contribution));
         }
         sent.sort();
         union(&sent, added)

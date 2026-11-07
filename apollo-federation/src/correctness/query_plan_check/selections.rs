@@ -11,12 +11,13 @@
 //!
 //! # Key renamers
 //!
-//! Input rewrites rename keys in the representation a fetch sends. Soundness reads them in both
-//! directions — forwards to check an entry against them, inverted to turn a subgraph's demand into
-//! what must already have been fetched — so the walk is shared and parameterized by which positions
-//! a `TypenameEquals` filter applies at: [`type_filter_meets`] forwards and [`type_filter_covers`]
-//! inverted. A fetch's output rewrites rename what it adds to the response instead, which
-//! `Response::rename` does on the response itself.
+//! Input rewrites rename keys in the representation a fetch sends. Inverted, they turn a
+//! subgraph's demand into the keys it must be read under from what was fetched, a `TypenameEquals`
+//! filter undone only where it covers every object the position can hold
+//! ([`type_filter_covers`]). Whether they carry what a representation actually sends to what it
+//! names, and back, is read at each location's runtime types instead (`representation.rs`). A
+//! fetch's output rewrites rename what it adds to the response, which `Response::rename` does on
+//! the response itself.
 
 use std::sync::Arc;
 
@@ -157,59 +158,18 @@ pub(super) fn admitted_types(schema: &ValidFederationSchema, guards: &[Name]) ->
     admitted
 }
 
-/// The intersection of two type conditions. `None` is unrestricted, and so is absorbed.
-pub(super) fn intersect_types(
-    left: Option<Vec<Name>>,
-    right: Option<Vec<Name>>,
-) -> Option<Vec<Name>> {
-    match (left, right) {
-        (None, right) => right,
-        (left, None) => left,
-        (Some(left), Some(right)) => {
-            Some(left.into_iter().filter(|ty| right.contains(ty)).collect())
-        }
-    }
-}
-
 //==================================================================================================
 // Key renamers
 //==================================================================================================
 
-/// Which positions a `TypenameEquals` filter applies at: the filter's own object types and the
+/// Which positions a `TypenameEquals` filter applies at, from the filter's own object types and the
 /// fragment guards in force where a key was reached.
 type TypeFilterTest = fn(&ValidFederationSchema, &[Name], &[Name]) -> bool;
 
-/// Applies the key renamers among a fetch's rewrites, in order, as `apply_rewrites` does.
-///
-/// A value setter changes a value but no key, so it is passed over: `apply_output_rewrite` rejects
-/// one in an output, and on the input side one fakes the `__typename` an interface object is sent
-/// with, which nothing here compares.
-pub(super) fn apply_key_renamers(
-    schema: &ValidFederationSchema,
-    applies: TypeFilterTest,
-    rewrites: &[Arc<FetchDataRewrite>],
-    selections: Vec<Selection>,
-) -> Vec<Selection> {
-    let mut selections = selections;
-    for rewrite in rewrites {
-        let FetchDataRewrite::KeyRenamer(renamer) = rewrite.as_ref() else {
-            continue;
-        };
-        selections = rename_key_at(
-            schema,
-            applies,
-            &[],
-            &[],
-            &renamer.path,
-            &renamer.rename_key_to,
-            selections,
-        );
-    }
-    selections
-}
-
-/// The inverse of [`apply_key_renamers`]: every key renamer inverted, the last first, so that each
-/// path is followed through the keys it was written against.
+/// The key renamers among a fetch's rewrites inverted, as `apply_rewrites` would undo them: every
+/// one, the last first, so that each path is followed through the keys it was written against. A
+/// value setter changes a value but no key, so it is passed over: on the input side one fakes the
+/// `__typename` an interface object is sent with, which nothing here compares.
 ///
 /// One renamer inverted names the key it renames *to* back to the key it renames, at the same
 /// position. A path that does not end at a key renames nothing, as `split_path_last_element` finds
@@ -382,25 +342,6 @@ fn rename_here(
             selection => selection,
         })
         .collect()
-}
-
-/// Does an input rewrite's filter admit *some* object type the position can hold, so that the
-/// router may rename there? This is how a renamer is read forwards. A position nothing is known
-/// about is met by any filter.
-pub(super) fn type_filter_meets(
-    schema: &ValidFederationSchema,
-    type_filter: &[Name],
-    guards: &[Name],
-) -> bool {
-    let Some(filter_types) = admitted_types(schema, type_filter) else {
-        return true;
-    };
-    let Some(guard_types) = admitted_types(schema, guards) else {
-        return true;
-    };
-    guard_types
-        .iter()
-        .any(|type_name| filter_types.contains(type_name))
 }
 
 /// Does an input rewrite's filter admit *every* object type the position can hold, so that the
