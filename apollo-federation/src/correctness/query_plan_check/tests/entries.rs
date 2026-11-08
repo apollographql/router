@@ -461,6 +461,133 @@ fn shared_alias_for_different_fields_is_rejected() {
     );
 }
 
+// The client's `team: note` holds `team` under `... on Match`, so `sched` is asked for the
+// `team { f }` that `cost` requires under `team__alias_0` there, and under `team` under
+// `... on Race`. The router renames `team__alias_0` only in a representation that holds it, so
+// every event is sent `team { f }`.
+#[test]
+fn a_key_aliased_under_one_type_condition_and_renamed_back_is_accepted() {
+    let fixture = Fixture::new(include_str!("../testdata/per_case_renamer.graphql"));
+    let plan = fixture.written_plan(
+        r#"{ "Sequence": { "nodes": [
+            { "Fetch": {
+                "subgraph_name": "sched",
+                "variable_usages": [],
+                "operation_document": "{ products { __typename id event { __typename ... on Match { team__alias_0: team { f } team__alias_1: note } ... on Race { team { f } } } } }",
+                "operation_kind": "query",
+                "input_rewrites": [],
+                "output_rewrites": [{ "KeyRenamer": {
+                    "path": [{ "Key": ["products", null] }, { "Key": ["event", null] }, { "Key": ["team__alias_1", null] }],
+                    "rename_key_to": "team"
+                } }],
+                "context_rewrites": []
+            } },
+            { "Flatten": {
+                "path": [{ "Key": ["products", null] }, { "AnyIndex": null }],
+                "node": { "Fetch": {
+                    "subgraph_name": "req",
+                    "variable_usages": [],
+                    "requires": [{ "kind": "InlineFragment", "typeCondition": "Product", "selections": [
+                        { "kind": "Field", "name": "__typename" },
+                        { "kind": "Field", "name": "id" },
+                        { "kind": "Field", "name": "event", "selections": [
+                            { "kind": "InlineFragment", "typeCondition": "Match", "selections": [
+                                { "kind": "Field", "alias": "team__alias_0", "name": "team", "selections": [
+                                    { "kind": "Field", "name": "f" }
+                                ] }
+                            ] },
+                            { "kind": "InlineFragment", "typeCondition": "Race", "selections": [
+                                { "kind": "Field", "name": "team", "selections": [
+                                    { "kind": "Field", "name": "f" }
+                                ] }
+                            ] }
+                        ] }
+                    ] }],
+                    "operation_document": "query($representations: [_Any!]!) { _entities(representations: $representations) { ... on Product { cost } } }",
+                    "operation_kind": "query",
+                    "input_rewrites": [{ "KeyRenamer": {
+                        "path": [{ "Key": ["event", null] }, { "Key": ["team__alias_0", null] }],
+                        "rename_key_to": "team"
+                    } }],
+                    "output_rewrites": [],
+                    "context_rewrites": []
+                } }
+            } }
+        ] } }"#,
+    );
+    fixture
+        .check(
+            &plan,
+            "{ products { cost event { ... on Match { team: note } } } }",
+        )
+        .unwrap();
+}
+
+// The client's `team { f: g }` holds `f` under `... on Match`, so `sched` is asked for the `f`
+// that `cost` requires under `f__alias_0` there, and under `f__alias_1` under `... on Race`. A
+// `Match` event holds only the first alias and a `Race` event only the second, so each renamer
+// renames the key it finds and every event is sent `team { f }`.
+#[test]
+fn a_key_aliased_differently_per_type_condition_and_renamed_back_is_accepted() {
+    let fixture = Fixture::new(include_str!("../testdata/renamers_onto_one_key.graphql"));
+    let plan = fixture.written_plan(
+        r#"{ "Sequence": { "nodes": [
+            { "Fetch": {
+                "subgraph_name": "sched",
+                "variable_usages": [],
+                "operation_document": "{ products { __typename id event { __typename ... on Match { team { f__alias_0: f f: g } } ... on Race { team { f__alias_1: f } } } } }",
+                "operation_kind": "query",
+                "input_rewrites": [],
+                "output_rewrites": [],
+                "context_rewrites": []
+            } },
+            { "Flatten": {
+                "path": [{ "Key": ["products", null] }, { "AnyIndex": null }],
+                "node": { "Fetch": {
+                    "subgraph_name": "req",
+                    "variable_usages": [],
+                    "requires": [{ "kind": "InlineFragment", "typeCondition": "Product", "selections": [
+                        { "kind": "Field", "name": "__typename" },
+                        { "kind": "Field", "name": "id" },
+                        { "kind": "Field", "name": "event", "selections": [
+                            { "kind": "InlineFragment", "typeCondition": "Match", "selections": [
+                                { "kind": "Field", "name": "team", "selections": [
+                                    { "kind": "Field", "alias": "f__alias_0", "name": "f" }
+                                ] }
+                            ] },
+                            { "kind": "InlineFragment", "typeCondition": "Race", "selections": [
+                                { "kind": "Field", "name": "team", "selections": [
+                                    { "kind": "Field", "alias": "f__alias_1", "name": "f" }
+                                ] }
+                            ] }
+                        ] }
+                    ] }],
+                    "operation_document": "query($representations: [_Any!]!) { _entities(representations: $representations) { ... on Product { cost } } }",
+                    "operation_kind": "query",
+                    "input_rewrites": [
+                        { "KeyRenamer": {
+                            "path": [{ "Key": ["event", null] }, { "Key": ["team", null] }, { "Key": ["f__alias_0", null] }],
+                            "rename_key_to": "f"
+                        } },
+                        { "KeyRenamer": {
+                            "path": [{ "Key": ["event", null] }, { "Key": ["team", null] }, { "Key": ["f__alias_1", null] }],
+                            "rename_key_to": "f"
+                        } }
+                    ],
+                    "output_rewrites": [],
+                    "context_rewrites": []
+                } }
+            } }
+        ] } }"#,
+    );
+    fixture
+        .check(
+            &plan,
+            "{ products { cost event { ... on Match { team { f: g } } } } }",
+        )
+        .unwrap();
+}
+
 //==================================================================================================
 // An interface object's entries
 
