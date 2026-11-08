@@ -710,7 +710,9 @@ fn a_member_the_subgraph_returns_there_is_still_owed() {
 mod conditional_requires;
 mod context_arguments;
 mod context_reads;
+mod deferred_reads;
 mod entries;
+mod growing_families;
 mod input_rewrites;
 mod output_renames;
 mod path_conditions;

@@ -4,7 +4,8 @@
 # they change.
 #
 # `gallery`'s `photoCount` demands the `id` of a location's photos alone, its `mediaCount` the `id`
-# of every medium, a `Photo` or a `Video`.
+# of every medium, a `Photo` or a `Video`, and its `typedMediaCount` the same through a fragment on
+# `Media` itself.
 #
 # Subgraph `locations`:
 #
@@ -38,6 +39,8 @@
 #     photoCount: Int @requires(fields: "media { ... on Photo { id } }")
 #     "Requires the `id` of every medium."
 #     mediaCount: Int @requires(fields: "media { id }")
+#     "Requires the `id` of every medium, through a fragment on `Media`."
+#     typedMediaCount: Int @requires(fields: "media { ... on Media { id } }")
 #   }
 #
 #   interface Media {
@@ -97,6 +100,8 @@ type Location @join__type(graph: GALLERY, key: "id") @join__type(graph: LOCATION
   photoCount: Int @join__field(graph: GALLERY, requires: "media { ... on Photo { id } }")
   """Requires the `id` of every medium."""
   mediaCount: Int @join__field(graph: GALLERY, requires: "media { id }")
+  """Requires the `id` of every medium, through a fragment on `Media`."""
+  typedMediaCount: Int @join__field(graph: GALLERY, requires: "media { ... on Media { id } }")
 }
 
 interface Media @join__type(graph: GALLERY) @join__type(graph: LOCATIONS) {

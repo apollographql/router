@@ -29,11 +29,11 @@ use crate::schema::ValidFederationSchema;
 
 /// `t` is an `I`, which is an `A` or a `B`.
 const SCHEMA: &str = r#"
-    type Query { t: I! }
+    type Query { t(sort: String): I! }
     interface I { prop: String, u: U }
     type A implements I { prop: String, u: U }
     type B implements I { prop: String, u: U }
-    type U { id: ID }
+    type U { id: ID, name: String }
 "#;
 
 fn schema() -> ValidFederationSchema {
@@ -141,6 +141,83 @@ fn field_under_a_fragment_on_a_narrowed_type_is_mounted_once() {
     );
 }
 
+/// `U.name`, which a fetch at `t|...|.u` mounts.
+fn u_name(schema: &ValidFederationSchema) -> Selection {
+    executable::Field::new(
+        name!("name"),
+        schema.schema().type_field("U", "name").unwrap().clone(),
+    )
+    .into()
+}
+
+// Upstream's `a_bare_field_under_a_wider_fragment_is_narrowed`.
+// Under a fragment on `I`, which also reaches the `B` the path `t|[A].u` excludes, the fragment
+// states nothing, so `u` found inside it is guarded by `A` as it is without one.
+#[test]
+fn field_under_a_fragment_wider_than_the_condition_is_narrowed() {
+    let schema = schema();
+    let path = [key("t", Some(&["A"])), key("u", None)];
+    let available = selections(&schema, "{ t { ... on I { u { id } } } }");
+    assert_eq!(
+        print(selections_at(
+            &schema,
+            &available,
+            None,
+            &path,
+            &[u_name(&schema)]
+        )),
+        print(selections(
+            &schema,
+            "{ t { ... on I { ... on A { u { name } } } } }"
+        )),
+    );
+}
+
+/// Six copies of `t` selecting `inner` at `u`: under a fragment on each member and under one on
+/// `I`; each of those again under an `@include`, on the field and on its fragment; and the first
+/// with a `sort` argument, given two values. Each operation is parsed alone, as each fetch's own
+/// is: copies of one response key that differ in an argument cannot share an operation.
+fn t_copies(schema: &ValidFederationSchema, inner: &str) -> Vec<Selection> {
+    let members = format!("... on A {{ u {{ {inner} }} }} ... on B {{ u {{ {inner} }} }}");
+    let any = format!("u {{ {inner} }}");
+    [
+        format!("{{ t {{ {members} }} t {{ ... on I {{ {any} }} }} }}"),
+        format!(
+            "query($v: Boolean!) {{ t @include(if: $v) {{ {members} }} \
+             t {{ ... on I @include(if: $v) {{ {any} }} }} }}"
+        ),
+        format!("{{ t(sort: \"title\") {{ {members} }} }}"),
+        format!("{{ t(sort: \"author\") {{ {members} }} }}"),
+    ]
+    .iter()
+    .flat_map(|operation| selections(schema, operation))
+    .collect()
+}
+
+// Upstream's `a_chain_of_fetches_at_one_site_is_reproduced_once_per_distinct_copy`.
+// Three fetches are mounted at `t|[A,B].u` in turn, each into everything fetched before it. Each
+// leaves its own copy of `t`, which a later one reproduces as it reproduces the copy it was
+// mounted through, so a copy repeating one already reproduced is kept once: every mount yields
+// the six copies, each differing from another in a guard, a directive or an argument alone.
+// Keeping every copy, the second mount yields each twice and the third four times, doubling
+// along the chain.
+#[test]
+fn chain_of_fetches_at_one_site_mounts_each_distinct_copy_once() {
+    let schema = schema();
+    let path = [key("t", Some(&["A", "B"])), key("u", None)];
+    let mounted = [u_name(&schema)];
+    let expected = print(t_copies(&schema, "name"));
+
+    let mut buffer = t_copies(&schema, "id");
+    let mut mounts = Vec::new();
+    for _ in 0..3 {
+        let reproduced = selections_at(&schema, &buffer, None, &path, &mounted);
+        mounts.push(print(reproduced.clone()));
+        buffer.extend(reproduced);
+    }
+    assert_eq!(mounts, vec![expected; 3]);
+}
+
 //==================================================================================================
 // A path condition's names
 
@@ -244,6 +321,13 @@ fn check_featured_author(condition: &[&str]) -> Result<(), CorrectnessError> {
 
 /// `featured|condition`: the featured item's `blurb`, the condition on the key ending the path.
 fn check_featured_blurb(condition: &[&str]) -> Result<(), CorrectnessError> {
+    check_featured_blurb_with(condition, CheckerOptions::default())
+}
+
+fn check_featured_blurb_with(
+    condition: &[&str],
+    options: CheckerOptions,
+) -> Result<(), CorrectnessError> {
     let fixture = catalog();
     let plan = root_then_entities(
         &fixture,
@@ -254,7 +338,14 @@ fn check_featured_blurb(condition: &[&str]) -> Result<(), CorrectnessError> {
         &["Book", "Film"],
         "blurb",
     );
-    fixture.check(&plan, FEATURED_BLURB)
+    crate::correctness::check_plan_with_options(
+        &fixture.api_schema,
+        &fixture.supergraph_schema,
+        &fixture.subgraphs,
+        &fixture.operation(FEATURED_BLURB),
+        &plan,
+        options,
+    )
 }
 
 /// Every item's `blurb`, fetched at `path` below `items`.
@@ -352,6 +443,29 @@ fn fetch_under_a_key_condition_before_an_index_is_rejected() {
     );
     expect_rejected(
         check_items_key_blurb(&["Book", "Film"], CheckerOptions::default()),
+        "does not select `blurb`",
+    );
+}
+
+// Upstream's `a_fetch_at_an_empty_condition_ending_its_path_is_rejected`.
+// An empty condition ending the path, `featured|[]` or `items.@|[]`, names no object, so the fetch
+// below it runs nowhere and the plan never fetches the `blurb`s. With the FED-516 report off, it is
+// the end of the path, not that report, that rejects it.
+#[test]
+fn fetch_at_an_empty_condition_ending_its_path_is_rejected() {
+    let without_empty_check = || CheckerOptions {
+        check_empty_flatten_path_type_condition: false,
+        ..Default::default()
+    };
+    expect_rejected(
+        check_featured_blurb_with(&[], without_empty_check()),
+        "does not select `blurb`",
+    );
+    expect_rejected(
+        check_items_blurb_with(
+            &[key("items", None), index(Some(&[]))],
+            without_empty_check(),
+        ),
         "does not select `blurb`",
     );
 }

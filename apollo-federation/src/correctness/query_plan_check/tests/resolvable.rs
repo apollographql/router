@@ -7,6 +7,7 @@
 use apollo_compiler::ExecutableDocument;
 use apollo_compiler::Name;
 use apollo_compiler::executable::Selection;
+use apollo_compiler::name;
 
 use super::super::super::CorrectnessError;
 use super::super::context::context_uses;
@@ -17,6 +18,8 @@ use super::Fixture;
 use crate::query_plan::QueryPlan;
 use crate::query_plan::TopLevelPlanNode;
 use crate::schema::ValidFederationSchema;
+use crate::schema::position::FieldDefinitionPosition;
+use crate::schema::position::ObjectFieldDefinitionPosition;
 
 /// `shop`, which marks `Vendor.name`, `Vendor.code` and `Gizmo.label` external and opens windows
 /// under `topProducts`, `featured` and `Product.vendor`; `catalog`, the same schema with nothing
@@ -57,7 +60,7 @@ fn check_root_fetch(
 }
 
 /// `catalog` fetches each entity's key at `path`, then `subgraph` is asked, under `_entities`,
-/// for what `selections` selects of each `entity_type`.
+/// for what `selections` selects of each `entity_type`. An `@` in `path` is a list's index.
 fn entity_plan(
     fixture: &Fixture,
     path: &[&str],
@@ -68,12 +71,16 @@ fn entity_plan(
     let keys = path
         .iter()
         .rev()
+        .filter(|name| **name != "@")
         .fold("__typename id".to_string(), |inner, name| {
             format!("{name} {{ {inner} }}")
         });
     let flatten_path = path
         .iter()
-        .map(|name| format!(r#"{{ "Key": ["{name}", null] }}"#))
+        .map(|name| match *name {
+            "@" => r#"{ "AnyIndex": null }"#.to_string(),
+            name => format!(r#"{{ "Key": ["{name}", null] }}"#),
+        })
         .collect::<Vec<_>>()
         .join(", ");
     let catalog_fetch = root_fetch("catalog", &format!("{{ {keys} }}"));
@@ -339,6 +346,61 @@ fn an_external_key_selected_under_entities_is_rejected() {
         fixture.check(&plan, VENDOR_ID),
         "`Vendor.id` is `@external` there",
     );
+}
+
+/// `shop`, whose `Vendor` is a type extension with its key field `id` marked external, a fake
+/// external, and whose `Brand` is marked external as a type; `catalog` resolves both.
+fn resolution() -> Fixture {
+    Fixture::new(include_str!("../testdata/subgraph_resolution.graphql"))
+}
+
+// Upstream's `a_key_selected_under_entities_is_accepted`, which is on a fake external.
+// `shop` marks `Vendor.id` external on the extension its key is on, which the metadata reads as a
+// field it resolves; a reading of `@external` that missed the fake would reject this.
+#[test]
+fn fake_external_key_selected_under_entities_is_accepted() {
+    let fixture = resolution();
+    let plan = entity_plan(
+        &fixture,
+        &["products", "@", "vendor"],
+        "Vendor",
+        "shop",
+        "id",
+    );
+    fixture.check(&plan, VENDOR_ID).unwrap();
+}
+
+// Upstream's `an_external_key_selected_under_entities_is_rejected`.
+// `shop` marks `Brand` external as a type, its key `id` included, so selecting a brand's key asks
+// `shop` for a field it cannot resolve.
+#[test]
+fn key_of_a_type_marked_external_selected_under_entities_is_rejected() {
+    let fixture = resolution();
+    let plan = entity_plan(&fixture, &["products", "@", "brand"], "Brand", "shop", "id");
+    assert_rejected(
+        fixture.check(&plan, "{ products { brand { id } } }"),
+        "`Brand.id` is `@external` there",
+    );
+}
+
+// Upstream's `the_extracted_shop_reads_its_externals_as_written`.
+// The `shop` extracted from the supergraph keeps the fake external on `Vendor.id`, which it
+// resolves; `Brand.id` is external through its type, and `Vendor.name` external.
+#[test]
+fn extracted_subgraph_reads_its_externals_as_written() {
+    let fixture = resolution();
+    let shop = Subgraph::new(&fixture.subgraphs["shop"]).expect("a federation subgraph");
+    let metadata = fixture.subgraphs["shop"]
+        .subgraph_metadata()
+        .expect("subgraph metadata");
+    let vendor_id = FieldDefinitionPosition::Object(ObjectFieldDefinitionPosition {
+        type_name: name!("Vendor"),
+        field_name: name!("id"),
+    });
+    assert!(metadata.is_field_fake_external(&vendor_id));
+    assert!(!shop.is_external(&name!("Vendor"), &name!("id")));
+    assert!(shop.is_external(&name!("Brand"), &name!("id")));
+    assert!(shop.is_external(&name!("Vendor"), &name!("name")));
 }
 
 fn top_vendor_plan(fixture: &Fixture, leaf: &str) -> QueryPlan {

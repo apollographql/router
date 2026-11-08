@@ -887,3 +887,57 @@ fn value_narrowed_below_the_shared_levels_is_rejected() {
 fn value_unnarrowed_below_the_shared_levels_is_accepted() {
     summary_checked("info { note }").unwrap();
 }
+
+/// `catalog` fetches each product's `title` at `item` and no `info`, then `details` is asked at
+/// `item` under the key condition `condition` for the product's `summary`, reading `info { note }`;
+/// the client asks only for the `title`. Checked with the FED-516 report off.
+fn summary_under_checked(condition: Value) -> Result<(), CorrectnessError> {
+    let fixture = own_position();
+    let summary = entity_fetch(
+        "details",
+        &["Product"],
+        "... on Product { details { summary(note: $ctx) } }",
+        &["ctx"],
+        vec![rewrite(
+            vec![
+                json!({ "Key": ["info", null] }),
+                json!({ "Key": ["note", null] }),
+            ],
+            "ctx",
+        )],
+    );
+    let plan = sequence(vec![
+        root_fetch(
+            "catalog",
+            &format!("{{ item {{ __typename {} }} }}", member("Product", "title")),
+            Vec::new(),
+        ),
+        json!({ "Flatten": { "path": [{ "Key": ["item", condition] }], "node": summary } }),
+    ]);
+    crate::correctness::check_plan_with_options(
+        &fixture.api_schema,
+        &fixture.supergraph_schema,
+        &fixture.subgraphs,
+        &fixture.operation("{ item { ... on Product { title } } }"),
+        &fixture.written_plan(&plan.to_string()),
+        crate::correctness::CheckerOptions {
+            check_empty_flatten_path_type_condition: false,
+            ..Default::default()
+        },
+    )
+}
+
+// Upstream's `a_fetch_reaching_no_object_owes_no_contextual_value`.
+// The fetch at `item|[]` runs on no object, so it owes no contextual value, though the
+// `info { note }` its rewrite reads was never fetched.
+#[test]
+fn fetch_reaching_no_object_owes_no_context_value() {
+    summary_under_checked(json!([])).unwrap();
+}
+
+// Upstream's `the_same_fetch_on_a_live_path_owes_its_contextual_value`.
+// The same fetch at `item` runs on the product, where the value was never fetched.
+#[test]
+fn same_fetch_on_a_live_path_owes_its_context_value() {
+    assert_rejected(summary_under_checked(Value::Null), NOT_FETCHED);
+}

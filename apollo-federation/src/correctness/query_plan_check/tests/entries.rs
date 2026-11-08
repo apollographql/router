@@ -224,6 +224,13 @@ fn entry_wider_than_a_narrowed_demand_covers_it() {
     check_media_count("photoCount", &[field("id")]).unwrap();
 }
 
+// Upstream's `a_demand_naming_the_position_itself_is_covered`. A demand written under a fragment
+// on `Media`, the position's own type, narrows nothing, so `media { id }` covers it.
+#[test]
+fn demand_naming_the_position_itself_is_covered() {
+    check_media_count("typedMediaCount", &[field("id")]).unwrap();
+}
+
 // `gallery` asks for every medium's `id`, and the entry sends it only for a photo: a video is sent
 // without its `id`.
 #[test]
@@ -343,6 +350,56 @@ fn renamer_the_entry_does_not_read_is_accepted() {
         &[rename_isbn_back()],
     )
     .unwrap();
+}
+
+// Upstream's `an_alias_no_rewrite_names_back_is_rejected`. Nothing names the alias back, so the
+// subgraph would be sent `__require_0_isbn` for `isbn`.
+#[test]
+fn alias_no_renamer_names_back_is_rejected() {
+    assert_rejected(
+        check_book_blurbs(
+            "__require_0_isbn: isbn",
+            entry_on("Book", aliased("__require_0_isbn", "isbn")),
+            &[],
+        ),
+        "does not agree with the fetch's input rewrites",
+    );
+}
+
+// Upstream's `an_alias_holding_another_field_is_rejected`. The plan fetched `id` under the alias,
+// so what the entry reads there is not `isbn`.
+#[test]
+fn alias_holding_another_field_is_rejected() {
+    assert_rejected(
+        check_book_blurbs(
+            "__require_0_isbn: id",
+            entry_on("Book", aliased("__require_0_isbn", "isbn")),
+            &[rename_isbn_back()],
+        ),
+        "`__require_0_isbn` resolves a different field",
+    );
+}
+
+// Upstream's `two_fields_sent_under_one_key_are_rejected`. The entry reads `isbn` both under its
+// own name and under the alias the renamer names back, so a `Book` is sent two values as `isbn`.
+#[test]
+fn plain_field_and_alias_sent_under_one_key_are_rejected() {
+    assert_rejected(
+        check_book_blurbs(
+            "isbn __require_0_isbn: isbn",
+            on(
+                "Book",
+                &[
+                    field("__typename"),
+                    field("id"),
+                    field("isbn"),
+                    aliased("__require_0_isbn", "isbn"),
+                ],
+            ),
+            &[rename_isbn_back()],
+        ),
+        "does not agree with the fetch's input rewrites",
+    );
 }
 
 /// A fetch to `reviews` sent `entries`, with only `rename_isbn_back` as its input rewrites.

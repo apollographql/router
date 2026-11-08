@@ -449,6 +449,40 @@ fn renamed_onto_another_key_cannot_borrow_is_rejected() {
     );
 }
 
+/// `first` fetches the child under `t1` and renames it twice, `from → to` for each pair in order.
+fn check_renamed_twice(renames: [(&str, &str); 2]) -> Result<(), CorrectnessError> {
+    let fixture = response_copies();
+    let mut renamed = fetch("first", "{ parent { t1: child { value } } }");
+    renamed["Fetch"]["output_rewrites"] = renames
+        .iter()
+        .map(|(from, to)| {
+            json!({ "KeyRenamer": {
+                "path": [{ "Key": ["parent", null] }, { "Key": [from, null] }],
+                "rename_key_to": to,
+            } })
+        })
+        .collect();
+    check(&fixture, renamed, CHILD_VALUE)
+}
+
+// Each rename is written against the key the one before it left: `t1` becomes `t2`, then `child`.
+// Upstream's `renames_apply_in_order`.
+#[test]
+fn renames_applied_in_order_are_accepted() {
+    check_renamed_twice([("t1", "t2"), ("t2", "child")]).unwrap();
+}
+
+// The same renames the other way round: when `t2 → child` runs there is no `t2` yet, so the child
+// ends under `t2`.
+#[test]
+fn renames_applied_out_of_order_are_rejected() {
+    expect_rejected(
+        check_renamed_twice([("t2", "child"), ("t1", "t2")]),
+        INCOMPLETE,
+        "does not select `child` on Parent",
+    );
+}
+
 /// A fetch under `@include(if: $take)` adds the child's `value`; the client asks for it under the
 /// same condition, or always.
 fn check_guarded(guard_demand: bool) -> Result<(), CorrectnessError> {
@@ -693,6 +727,33 @@ fn narrower_contribution_leaves_the_context_value_is_rejected() {
     );
 }
 
+// `catalog` serves `Book` and `Disc` items; `pricing` declares `Item` with `Book` alone and
+// contributes its `price`, `stock` a `Disc`'s `units`. A narrower contribution restricts what it
+// adds, not the rows `catalog` mounted. Upstream's
+// `the_planners_plans_over_contributed_rows_are_accepted`.
+#[test]
+fn planner_plans_over_narrower_contributions_are_accepted() {
+    let fixture = Fixture::new(include_str!("../testdata/enrichment_keeps_rows.graphql"));
+    for (plan, operation) in [
+        (
+            include_str!("../testdata/plans/items_both_kinds.json"),
+            "query BothKinds { items { id name ... on Book { price } ... on Disc { units } } }",
+        ),
+        (
+            include_str!("../testdata/plans/items_book_price.json"),
+            "query BookEnrichment { items { id name ... on Book { price } } }",
+        ),
+        (
+            include_str!("../testdata/plans/items_disc_units.json"),
+            "query DiscEnrichment { items { id name ... on Disc { units } } }",
+        ),
+    ] {
+        fixture
+            .check(&fixture.written_plan(plan), operation)
+            .unwrap();
+    }
+}
+
 /// A store's `owner` is a `Person` or a `Company`, and `profiles` resolves an owner's `Profile`
 /// and serves its `locale`.
 fn owner_profile() -> Fixture {
@@ -859,6 +920,202 @@ fn interface_field_missing_on_a_returned_type_is_rejected() {
         INCOMPLETE,
         "does not select `name` on Promo",
     );
+}
+
+/// `a` serves `thing`, a `Named` it declares with no implementation; `b` declares its one
+/// implementation, `Item`.
+fn no_object_result_types() -> Fixture {
+    Fixture::new(include_str!("../testdata/no_object_result_types.graphql"))
+}
+
+// Upstream's `the_planners_plan_for_the_fields_name_is_accepted`.
+#[test]
+fn planner_plan_for_a_field_with_no_object_result_types_is_accepted() {
+    let fixture = no_object_result_types();
+    let plan = fixture.written_plan(include_str!("../testdata/plans/thing_name.json"));
+    fixture.check(&plan, "{ thing { name } }").unwrap();
+}
+
+// The planner asks `a` for `thing`'s `__typename` alone, since `a` never returns an `Item`.
+// Upstream's `the_planners_plan_for_a_member_the_producer_cannot_return_is_accepted`.
+#[test]
+fn planner_plan_for_a_member_the_producer_cannot_return_is_accepted() {
+    let fixture = no_object_result_types();
+    let plan = fixture.written_plan(include_str!("../testdata/plans/thing_item_id.json"));
+    fixture
+        .check(&plan, "{ thing { ... on Item { id } } }")
+        .unwrap();
+}
+
+// `catalog` and `promos` each declare `Section` with their own member alone, and serve `sections`
+// and `promos`. Upstream's `the_planners_plans_over_producers_of_fewer_members_are_accepted`.
+#[test]
+fn planner_plans_over_producers_of_fewer_members_are_accepted() {
+    let fixture = Fixture::new(include_str!("../testdata/producer_fewer_members.graphql"));
+    for (plan, operation) in [
+        (
+            include_str!("../testdata/plans/catalog_sections.json"),
+            "query CatalogSections { sections { id ... on Hero { title } ... on Promo { blurb } } }",
+        ),
+        (
+            include_str!("../testdata/plans/promos_sections.json"),
+            "query PromosSections { promos { id ... on Hero { title } ... on Promo { blurb } } }",
+        ),
+    ] {
+        fixture
+            .check(&fixture.written_plan(plan), operation)
+            .unwrap();
+    }
+}
+
+const SECTIONS: &str =
+    "query Sections { sections { id ... on Hero { title } ... on Promo { blurb } } }";
+
+/// `sections` from `promos`, with each `Hero`'s `title` from `catalog` and each `Promo`'s `blurb`
+/// when `with_blurb`.
+fn sections_from_promos(with_blurb: bool) -> Value {
+    let blurb = if with_blurb {
+        " ... on Promo { blurb }"
+    } else {
+        ""
+    };
+    sequence(vec![
+        fetch(
+            "promos",
+            &format!("{{ sections {{ __typename id{blurb} }} }}"),
+        ),
+        flatten(
+            "sections.@",
+            entity_fetch(
+                "catalog",
+                vec![entry("Hero", "__typename id")],
+                "... on Hero { title }",
+            ),
+        ),
+    ])
+}
+
+// `promos` overrides `catalog`'s `sections`, so its elements can be a `Promo`, which owes its
+// `blurb`. Upstream's `a_wider_list_producer_resolving_the_field_alone_owes_every_member`.
+#[test]
+fn overriding_list_producer_owes_every_member_it_returns_is_rejected() {
+    let fixture = Fixture::new(include_str!("../testdata/shared_field_overridden.graphql"));
+    expect_rejected(
+        check(&fixture, sections_from_promos(false), SECTIONS),
+        INCOMPLETE,
+        "does not select `blurb` on Promo",
+    );
+}
+
+// Under a progressive override both subgraphs keep resolving `sections`; asked of `promos`, an
+// element can be a `Promo`, served only when its `blurb` is fetched. Upstream's
+// `a_progressive_overrides_two_declarations_do_not_constrain_each_other`.
+#[test]
+fn progressive_override_producer_owes_every_member_it_returns() {
+    let fixture = Fixture::new(include_str!(
+        "../testdata/shared_field_progressive_override.graphql"
+    ));
+    expect_rejected(
+        check(&fixture, sections_from_promos(false), SECTIONS),
+        INCOMPLETE,
+        "does not select `blurb` on Promo",
+    );
+    check(&fixture, sections_from_promos(true), SECTIONS).unwrap();
+}
+
+//==================================================================================================
+// A requirement selecting into a union of the supplier's
+
+const PRODUCT_ESTIMATE: &str = "{ product { estimate } }";
+
+/// `product` from `sup`, its `price` from `oth` with `FixedPrice`'s `value` alone, then `estimate`
+/// from `req`, sent `price` under both members.
+fn estimate_from_oth(fixture: &Fixture) -> Result<(), CorrectnessError> {
+    let plan = sequence(vec![
+        fetch("sup", "{ product { __typename id } }"),
+        flatten(
+            "product",
+            entity_fetch(
+                "oth",
+                vec![entry("Product", "__typename id")],
+                "... on Product { price { __typename ... on FixedPrice { value } } }",
+            ),
+        ),
+        flatten(
+            "product",
+            entity_fetch(
+                "req",
+                vec![entry(
+                    "Product",
+                    "__typename id price { ... on FixedPrice { value } \
+                     ... on RangePrice { minValue } }",
+                )],
+                "... on Product { estimate }",
+            ),
+        ),
+    ]);
+    check(fixture, plan, PRODUCT_ESTIMATE)
+}
+
+// `sup` declares `price` a `FixedPrice` alone only as `@external`, and `oth`'s `price` can be a
+// `RangePrice`, whose `minValue` was never fetched. Upstream's
+// `an_external_declaration_constrains_nothing`.
+#[test]
+fn external_narrower_declaration_leaves_the_member_owed_is_rejected() {
+    let fixture = Fixture::new(include_str!(
+        "../testdata/nested_requirement_external.graphql"
+    ));
+    expect_rejected(
+        estimate_from_oth(&fixture),
+        UNFETCHED_KEY,
+        "`minValue` is not read on RangePrice",
+    );
+}
+
+// `sup`'s narrower `price` is on `Offer`, not `Product`. Upstream's
+// `a_field_of_the_same_name_at_another_parent_constrains_nothing`.
+#[test]
+fn same_name_field_at_another_parent_leaves_the_member_owed_is_rejected() {
+    let fixture = Fixture::new(include_str!(
+        "../testdata/nested_requirement_unrelated.graphql"
+    ));
+    expect_rejected(
+        estimate_from_oth(&fixture),
+        UNFETCHED_KEY,
+        "`minValue` is not read on RangePrice",
+    );
+}
+
+// A subgraph that could serve `price` supplies none it is not asked for: not when asked for the
+// product's `id` alone, nor for `id` aliased as `price`, nor for `price` without its `__typename`.
+// Upstream's `a_provider_not_asked_supplies_no_field`.
+#[test]
+fn field_the_fetch_does_not_ask_is_rejected() {
+    let fixture = Fixture::new(include_str!("../testdata/nested_requirement.graphql"));
+    let price_value = "{ product { price { ... on FixedPrice { value } } } }";
+    for (fetched, operation, detail) in [
+        (
+            "{ product { id } }",
+            price_value,
+            "does not select `price` on Product",
+        ),
+        (
+            "{ product { price: id } }",
+            price_value,
+            "`price` resolves a different field",
+        ),
+        (
+            "{ product { price { ... on FixedPrice { value } } } }",
+            "{ product { price { __typename } } }",
+            "does not select `__typename` on FixedPrice",
+        ),
+    ] {
+        expect_rejected(
+            check(&fixture, fetch("sup", fetched), operation),
+            INCOMPLETE,
+            detail,
+        );
+    }
 }
 
 //==================================================================================================
@@ -1065,4 +1322,60 @@ fn paired_case_cannot_borrow_is_rejected() {
         INCOMPLETE,
         "does not select `value` on Y",
     );
+}
+
+//==================================================================================================
+// A query fetch below a field
+
+/// `orders` serves a query's `lastOrder` and a mutation's `placeOrder`, each a payload whose
+/// `query` returns `Query`, where `promos` serves `promotions`.
+fn root_reentry() -> Fixture {
+    Fixture::new(include_str!("../testdata/root_reentry.graphql"))
+}
+
+/// `orders` asked for `field` under an operation of `kind`, then `promos` for `selection` at the
+/// payload's `query`; the client asks the `promotions` there.
+fn check_reentered_query(kind: &str, field: &str, selection: &str) -> Result<(), CorrectnessError> {
+    let fixture = root_reentry();
+    let keyword = if kind == "mutation" { "mutation " } else { "" };
+    let mut payload = fetch(
+        "orders",
+        &format!("{keyword}{{ {field} {{ id query {{ __typename }} }} }}"),
+    );
+    payload["Fetch"]["operation_kind"] = json!(kind);
+    let plan = sequence(vec![
+        payload,
+        flatten(
+            &format!("{field}.query"),
+            fetch("promos", &format!("{{ {selection} }}")),
+        ),
+    ]);
+    check(
+        &fixture,
+        plan,
+        &format!("{keyword}{{ {field} {{ id query {{ promotions }} }} }}"),
+    )
+}
+
+// A fetch with no `requires` flattened at a payload's `query` runs on the `Query` there, under a
+// mutation as under a query, and supplies what it selects at that position. Upstream's
+// `a_query_fetch_reentering_the_query_root_supplies_it`.
+#[test]
+fn query_fetch_reentering_the_query_root_is_accepted() {
+    for (kind, field) in [("query", "lastOrder"), ("mutation", "placeOrder")] {
+        check_reentered_query(kind, field, "promotions").unwrap();
+    }
+}
+
+// The same plan without `promotions` leaves it owed at the payload's `query`. Upstream's
+// `a_query_fetch_reentering_the_query_root_supplies_it`.
+#[test]
+fn query_fetch_reentering_the_query_root_without_the_field_is_rejected() {
+    for (kind, field) in [("query", "lastOrder"), ("mutation", "placeOrder")] {
+        expect_rejected(
+            check_reentered_query(kind, field, "__typename"),
+            INCOMPLETE,
+            "does not select `promotions` on Query",
+        );
+    }
 }
