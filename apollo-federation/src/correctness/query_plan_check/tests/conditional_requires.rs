@@ -565,6 +565,45 @@ fn copied_inactive_demand_renamed_away_is_rejected() {
 }
 
 //==================================================================================================
+// A renamer's last path element
+
+/// `one` fetches the key, then `two` is sent it under `input_rewrites` and asked for `c`.
+fn renamed_key_checked(input_rewrites: &str) -> Result<(), CorrectnessError> {
+    let fixture = fixture();
+    let plan = plan(
+        &fixture,
+        KEY,
+        "two",
+        &[on_t(key_and(vec![]))],
+        input_rewrites,
+        "... on T { c }",
+    );
+    fixture.check(&plan, "{ t { c } }")
+}
+
+// Upstream's `a_renamer_ending_at_an_index_renames_nothing`. The router's `rename_key_at` renames
+// only where a path ends at a key, so a path ending at an index below `id` leaves `id` as it is.
+#[test]
+fn a_renamer_ending_at_an_index_renames_nothing() {
+    renamed_key_checked(
+        r#"{ "KeyRenamer": {
+            "path": [{ "Key": ["id", null] }, { "AnyIndex": null }],
+            "rename_key_to": "other"
+        } }"#,
+    )
+    .unwrap();
+}
+
+// Upstream's `a_renamer_ending_at_the_key_sends_it_away`.
+#[test]
+fn a_renamer_ending_at_the_key_sends_it_away() {
+    assert_rejected(
+        renamed_key_checked(&key_renamer(&["id"], "other")),
+        "does not agree with the fetch's input rewrites",
+    );
+}
+
+//==================================================================================================
 // A key per configuration
 
 fn opposite_inputs() -> Vec<Input> {
@@ -628,6 +667,36 @@ fn configuration_without_a_key_is_rejected() {
         ),
         "is not met for `T` when ¬$x",
     );
+}
+
+// Upstream's `every_keys_failure_is_explained_where_no_key_covers`. `id` is sent where `x` and
+// `y` both fail and `id2` where `x` holds or `y` fails, so neither is sent where `x` fails and `y`
+// holds: the case fails there alone, with both keys' failures explained.
+#[test]
+fn every_keys_failure_is_explained_where_no_key_covers() {
+    let error = checked_by(
+        "twokeys",
+        "__typename id id2",
+        &[
+            on_t(vec![input("__typename")]),
+            on_t_when(vec![skip("x"), skip("y")], vec![input("id")]),
+            on_t_when(vec![include("x")], vec![input("id2")]),
+            on_t_when(vec![skip("y")], vec![input("id2")]),
+        ],
+        "c",
+        None,
+    )
+    .expect_err("neither key is sent where `x` fails and `y` holds")
+    .to_string();
+    assert!(
+        error.contains("is not met for `T` when ¬$x and $y"),
+        "{error}"
+    );
+    assert!(
+        error.contains("@key(id):") && error.contains("@key(id2):"),
+        "{error}"
+    );
+    assert!(!error.contains("when $x"), "{error}");
 }
 
 //==================================================================================================
@@ -758,6 +827,61 @@ fn same_type_fragment_demand_missing_is_rejected() {
     );
 }
 
+// Upstream's `a_representation_of_an_object_the_subgraph_resolves_no_entity_of_is_rejected`. An
+// entry on `U` sends each `t.u` a representation, but `two` resolves no `U` entity, so no key can
+// be chosen for it.
+#[test]
+fn an_entry_on_an_object_the_subgraph_resolves_no_entity_of_is_rejected() {
+    let fixture = fixture();
+    let entities = "query($representations: [_Any!]!) \
+                    { _entities(representations: $representations) { ... on T { c } } }";
+    let entries = [fragment(Some("U"), Vec::new(), vec![input("left")])];
+    let plan = fixture.written_plan(&format!(
+        r#"{{ "Sequence": {{ "nodes": [
+            {},
+            {{ "Flatten": {{
+                "path": [{{ "Key": ["t", null] }}, {{ "Key": ["u", null] }}],
+                "node": {}
+            }} }}
+        ] }} }}"#,
+        fetch_t("__typename id u { left }"),
+        fetch(
+            "two",
+            &serde_json::to_string(&entries).unwrap(),
+            "",
+            entities
+        ),
+    ));
+    assert_rejected(
+        fixture.check(&plan, "{ t { u { left } } }"),
+        "`requires` entries send `U`, which no entity case resolves",
+    );
+}
+
+// Upstream's `an_untyped_entities_fragment_is_refused_as_syntax`. A `requires` entry is checked
+// separately; here the `_entities` fragment itself has no type condition, which an entity fetch's
+// operation may not do. The typed fragment it wraps, written on its own, is accepted.
+#[test]
+fn an_untyped_entities_fragment_is_rejected() {
+    let entries = [on_t(key_and(vec![]))];
+    assert_rejected(
+        checked(
+            KEY,
+            &entries,
+            "c @include(if: $x)",
+            Some("... @include(if: $x) { ... on T { c } }"),
+        ),
+        "an `_entities` selection must carry a type condition",
+    );
+    checked(
+        KEY,
+        &entries,
+        "c @include(if: $x)",
+        Some("... on T @include(if: $x) { c }"),
+    )
+    .unwrap();
+}
+
 //==================================================================================================
 // Sibling entries on two variables
 
@@ -867,4 +991,142 @@ fn scalar_overwritten_after_a_conditioned_fragment_is_rejected() {
         ),
         "overwrites `a`",
     );
+}
+
+//==================================================================================================
+// Composite keys, and a variable of another type
+
+/// Upstream's conditional world: `Subgraph1` serves `t(s: String)` and `w`, and `Subgraph2`
+/// resolves a `T` by `id` and a `W` by `org { id }`, `team { id }` or `id2`.
+fn world() -> Fixture {
+    Fixture::new(include_str!("../testdata/conditional_world.graphql"))
+}
+
+/// `Subgraph1` runs `root_operation`, then `Subgraph2` is sent `entries` at `parent` and asked for
+/// `cases`.
+fn world_plan(
+    fixture: &Fixture,
+    root_operation: &str,
+    parent: &str,
+    entries: &[Input],
+    cases: &str,
+) -> QueryPlan {
+    let entities = format!(
+        "query($representations: [_Any!]!) \
+         {{ _entities(representations: $representations) {{ {cases} }} }}"
+    );
+    fixture.written_plan(&format!(
+        r#"{{ "Sequence": {{ "nodes": [
+            {},
+            {{ "Flatten": {{ "path": [{{ "Key": ["{parent}", null] }}], "node": {} }} }}
+        ] }} }}"#,
+        fetch("Subgraph1", "[]", "", root_operation),
+        fetch(
+            "Subgraph2",
+            &serde_json::to_string(entries).unwrap(),
+            "",
+            &entities
+        ),
+    ))
+}
+
+/// Every key field of `w` fetched, then `Subgraph2` sent `entries` and asked for `c`. The client
+/// declares the entries' `x` and `y`, reading them on the root's `__typename`, which no fetch
+/// answers.
+fn w_checked(entries: &[Input]) -> Result<(), CorrectnessError> {
+    let fixture = world();
+    let plan = world_plan(
+        &fixture,
+        "{ w { __typename org { id } team { id } id2 } }",
+        "w",
+        entries,
+        "... on W { c }",
+    );
+    fixture.check(
+        &plan,
+        "query($x: Boolean!, $y: Boolean!) \
+         { __typename @include(if: $x) __typename @include(if: $y) w { c } }",
+    )
+}
+
+/// An entry on `W`.
+fn on_w(conditions: Vec<Condition>, selections: Vec<Input>) -> Input {
+    fragment(Some("W"), conditions, selections)
+}
+
+/// `container` sent always, its `id` only where `condition` holds.
+fn retained(container: &str, condition: Condition) -> Input {
+    object(
+        container,
+        vec![fragment(None, vec![condition], vec![input("id")])],
+    )
+}
+
+// Upstream's `a_composite_key_failing_below_the_fetch_is_covered_by_another_key`. `org` is sent
+// always and its `id` only where `x` holds, so `org { id }` fails below `w` where `x` fails, and
+// `id2`, sent there, covers it.
+#[test]
+fn a_composite_key_failing_below_the_fetch_is_covered_by_another_key() {
+    w_checked(&[
+        on_w(
+            Vec::new(),
+            vec![input("__typename"), retained("org", include("x"))],
+        ),
+        on_w(vec![skip("x")], vec![input("id2")]),
+    ])
+    .unwrap();
+}
+
+// Upstream's `two_composite_keys_failing_on_different_branches_are_accepted`. `org.id` is sent
+// where `x` holds and `team.id` where it fails, so `org { id }` and `team { id }` cover the two
+// configurations in turn.
+#[test]
+fn two_composite_keys_failing_on_different_branches_are_accepted() {
+    w_checked(&[on_w(
+        Vec::new(),
+        vec![
+            input("__typename"),
+            retained("org", include("x")),
+            retained("team", skip("x")),
+        ],
+    )])
+    .unwrap();
+}
+
+// Upstream's `two_composite_keys_failing_together_on_different_branches_are_rejected`. With
+// `team.id` under `y` instead, neither composite key nor `id2` is sent where `x` and `y` both fail.
+#[test]
+fn two_composite_keys_failing_together_on_different_branches_are_rejected() {
+    let error = w_checked(&[on_w(
+        Vec::new(),
+        vec![
+            input("__typename"),
+            retained("org", include("x")),
+            retained("team", include("y")),
+        ],
+    )])
+    .expect_err("no key is sent where `x` and `y` both fail")
+    .to_string();
+    assert!(
+        error.contains("is not met for `W` when ¬$x and ¬$y"),
+        "{error}"
+    );
+    assert!(!error.contains("when $x"), "{error}");
+}
+
+// Upstream's `the_same_entry_unconditioned_beside_a_string_variable_is_accepted`: a variable that
+// is no `Boolean`, read by the operation alone, leaves an unconditioned entry as it is.
+#[test]
+fn an_unconditioned_entry_beside_a_string_variable_is_accepted() {
+    let fixture = world();
+    let plan = world_plan(
+        &fixture,
+        "query($s: String) { t(s: $s) { __typename id } }",
+        "t",
+        &[on_t(key_and(vec![]))],
+        "... on T { c }",
+    );
+    fixture
+        .check(&plan, "query($s: String) { t(s: $s) { c } }")
+        .unwrap();
 }

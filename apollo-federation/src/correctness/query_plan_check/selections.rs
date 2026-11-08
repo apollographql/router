@@ -7,7 +7,7 @@
 //!
 //! A fetch data path names **response keys, not fields**, so the field a path element stands for
 //! can only be recovered by following the path through what has already been fetched. A key may
-//! also be reached by more than one field, so following it reproduces *every* copy.
+//! also be reached by more than one field, so following it reproduces *every* distinct copy.
 //!
 //! A path element's type condition names **object types, compared literally** with each object's
 //! `__typename`, along the path and where it ends, as the router's `iterate_path` compares them: an
@@ -55,6 +55,7 @@ use std::sync::Arc;
 use apollo_compiler::Name;
 use apollo_compiler::Node;
 use apollo_compiler::ast;
+use apollo_compiler::collections::IndexSet;
 use apollo_compiler::executable::FragmentMap;
 use apollo_compiler::executable::InlineFragment;
 use apollo_compiler::executable::Selection;
@@ -614,13 +615,19 @@ pub(super) fn selections_at(
     }
 }
 
-/// Every copy of a response key reachable in `available`, carrying the rest of the path.
+/// Every distinct copy of a response key reachable in `available`, carrying the rest of the path.
 ///
 /// Inline fragments admitted by `pending` are descended into and reproduced, so a reached field
 /// keeps the type condition that guarded it, and `pending` also guards a field written without
 /// one. Inside a fragment what is carried is what the path and the fragment leave between them
 /// ([`pending_inside`]), so a field found below fragments that state the narrowing is reproduced
 /// under them alone.
+///
+/// A reproduced copy repeating one already reproduced at this level, source locations aside, is
+/// kept once, where it first occurs. Every fetch mounted at a key leaves its own copy of the path
+/// to it, and a later fetch mounted there reproduces each as the same selection; inclusion reads
+/// equal selections as one, so kept, the copies would only double with every fetch along a chain
+/// at one site. Copies differing in anything else, a guard included, are all kept, in order.
 #[allow(clippy::too_many_arguments)]
 fn selections_under_key(
     schema: &ValidFederationSchema,
@@ -631,7 +638,7 @@ fn selections_under_key(
     path: &[FetchDataPathElement],
     mounted: &[Selection],
 ) -> Vec<Selection> {
-    let mut out = Vec::new();
+    let mut out = IndexSet::default();
     for selection in available {
         match selection {
             Selection::Field(field) => {
@@ -686,7 +693,7 @@ fn selections_under_key(
             Selection::FragmentSpread(_) => {}
         }
     }
-    out
+    out.into_iter().collect()
 }
 
 //==================================================================================================

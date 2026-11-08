@@ -1,0 +1,13 @@
+{
+  "Fetch": {
+    "subgraph_name": "promos",
+    "id": null,
+    "variable_usages": [],
+    "operation_document": "query PromosSections__promos__0 { promos { __typename id ... on Promo { blurb } } }",
+    "operation_name": "PromosSections__promos__0",
+    "operation_kind": "query",
+    "input_rewrites": [],
+    "output_rewrites": [],
+    "context_rewrites": []
+  }
+}

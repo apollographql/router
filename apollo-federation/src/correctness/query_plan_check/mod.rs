@@ -64,6 +64,10 @@
 //!   already returns for it, so it is recorded under the fetch's id as the walk passes, as
 //!   `FetchNode::deferred_fetches` sends it, guarded only by the condition branches inside the
 //!   primary block.
+//! - **Each distinct copy of a key, once.** A reproduced copy repeating one already reproduced
+//!   at its level exactly, source locations aside, is kept once, in first-occurrence order
+//!   ([`selections::selections_at`]). The model's `selectionsUnderKey` keeps every copy, and
+//!   inclusion reads equal ones as one; kept, they double along a chain of fetches at one site.
 //! - **`@context` data availability.** Every contextual value a fetch reads must already be
 //!   fetched wherever the fetch runs. The legacy checker does not check this at all: at run time
 //!   a rewrite path that reaches nothing simply drops the argument, so nothing notices.
