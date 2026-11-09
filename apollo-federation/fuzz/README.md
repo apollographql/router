@@ -31,8 +31,8 @@ the grammar exist twice and can drift apart. That is what the `schema` request g
 renders its own copy of the schema tables and every run refuses to proceed unless it matches
 [`model::schema_digest`].
 
-See [prior-art.md](docs/prior-art.md) for what this took from an earlier prototype of the same work,
-including the reason to distrust a green campaign from the byte grammar alone.
+See "What the differential lane is worth" in `apollo-graphql-lean`'s `docs/porting-guide.md` for what this took from an earlier
+prototype of the same work, including the reason to distrust a green campaign from the byte grammar alone.
 
 ## Lanes
 
@@ -166,7 +166,7 @@ covariant type-case shape.
 
 The lane's structural limit is that it cannot reach the Lean oracle — a rewritten document is not
 expressible as a byte string the Lean decoder would produce. Closing that needs a serialized-IR
-protocol; see [prior-art.md](docs/prior-art.md).
+protocol; see "Still open in the lane" in `apollo-graphql-lean`'s `docs/porting-guide.md`.
 
 ## Benchmark
 
