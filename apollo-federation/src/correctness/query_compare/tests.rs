@@ -380,7 +380,7 @@ fn custom_directives_are_compared() {
       over runtime types: {R, S}
       --> `id` resolves `id` with different directives
         left:  (none)
-        right: @mod
+        right: @mod(arg: 1)
     "###);
 }
 

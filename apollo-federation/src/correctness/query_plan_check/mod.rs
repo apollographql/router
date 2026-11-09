@@ -68,6 +68,11 @@
 //!   at its level exactly, source locations aside, is kept once, in first-occurrence order
 //!   ([`selections::selections_at`]). The model's `selectionsUnderKey` keeps every copy, and
 //!   inclusion reads equal ones as one; kept, they double along a chain of fetches at one site.
+//! - **Literals are compared as coerced.** The model compares argument values as written and
+//!   does not model input coercion. Before comparing, the client operation, every fetch's
+//!   operation and every field set are coerced the way the planner coerces its fetch operations,
+//!   and their `Float` and `ID` literals are spelled alike, so `1` and `1.0` of a `Float` are one
+//!   value ([`coerced_for_comparison`]). Defaults are not filled in: a subgraph applies its own.
 //! - **`@context` data availability.** Every contextual value a fetch reads must already be
 //!   fetched wherever the fetch runs. The legacy checker does not check this at all: at run time
 //!   a rewrite path that reaches nothing simply drops the argument, so nothing notices.
@@ -185,6 +190,7 @@ use self::subgraph::Subgraph;
 use super::query_compare;
 use super::query_compare::conditions::BooleanLiteral;
 use super::response_shape_compare::ComparisonError;
+use crate::compat::coerce_executable_values_for_comparison;
 use crate::correctness::CheckerOptions;
 use crate::query_plan::DeferredDependency;
 use crate::query_plan::FetchDataPathElement;
@@ -785,18 +791,34 @@ impl<'a> Checker<'a> {
     }
 }
 
+/// `document` with its literals spelled as input coercion reads them
+/// ([`coerce_executable_values_for_comparison`]), so that literals of one value compare equal:
+/// `1` and `1.0` of a `Float`, `4` and `"4"` of an `ID`, `"a"` and `["a"]` of a list. The client
+/// operation, every fetch's operation and every field set are read this way before they are
+/// compared. Coercing changes no field or argument a document selects, only how a literal is
+/// written, so it stays valid.
+fn coerced_for_comparison(
+    schema: &ValidFederationSchema,
+    document: &Valid<ExecutableDocument>,
+) -> Valid<ExecutableDocument> {
+    let mut document = document.clone().into_inner();
+    coerce_executable_values_for_comparison(schema.schema(), &mut document);
+    Valid::assume_valid(document)
+}
+
 /// A fetch's own operation, its fragment spreads inlined, and its root type in the subgraph's
 /// schema.
 fn fetch_operation(
     fetch: &FetchNode,
     subgraph_schema: &ValidFederationSchema,
 ) -> Result<(Name, Vec<Selection>), ComparisonError> {
-    let document = fetch.operation_document.as_parsed().map_err(|e| {
+    let parsed = fetch.operation_document.as_parsed().map_err(|e| {
         ComparisonError::new(format!(
             "fetch to {}: operation document is not parsed: {e}",
             fetch.subgraph_name
         ))
     })?;
+    let document = coerced_for_comparison(subgraph_schema, parsed);
     let operation = document.operations.get(None).map_err(|_| {
         ComparisonError::new(format!(
             "fetch to {}: expected exactly one operation",
@@ -1749,6 +1771,7 @@ pub fn check_plan_with_options(
     plan: &QueryPlan,
     options: CheckerOptions,
 ) -> Result<(), ComparisonError> {
+    let operation_doc = &coerced_for_comparison(supergraph_schema, operation_doc);
     let operation = operation_doc.operations.get(None).map_err(|_| {
         ComparisonError::new("expected exactly one operation in the input document".to_string())
     })?;

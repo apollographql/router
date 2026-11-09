@@ -705,6 +705,34 @@ fn a_member_the_subgraph_returns_there_is_still_owed() {
 }
 
 //==================================================================================================
+// A directive's arguments
+
+// `@tint(x: 1)` and `@tint(x: 1.0)` are one `Float!` value once coerced, so one
+// `title @tint(x: 1)` fetched for every node serves both fragments. The model compares argument
+// values as written; the checker coerces literals before comparing (`coerced_for_comparison`).
+#[test]
+fn directive_arguments_equal_after_coercion_are_one_call() {
+    let fixture = Fixture::new(include_str!("testdata/directive_literals.graphql"));
+    let plan = fixture.written_plan(
+        r#"{ "Fetch": {
+            "subgraph_name": "shelf",
+            "variable_usages": [],
+            "operation_document": "{ nodes { __typename title @tint(x: 1) } }",
+            "operation_kind": "query",
+            "input_rewrites": [],
+            "output_rewrites": [],
+            "context_rewrites": []
+        } }"#,
+    );
+    fixture
+        .check(
+            &plan,
+            "{ nodes { ... on Book { title @tint(x: 1) } ... on Film { title @tint(x: 1.0) } } }",
+        )
+        .unwrap();
+}
+
+//==================================================================================================
 // Ports of the model's tests, by what they cover
 
 mod conditional_requires;

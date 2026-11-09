@@ -1447,7 +1447,7 @@ fn render_directives(directives: &[&Node<ast::Directive>]) -> String {
     }
     directives
         .iter()
-        .map(|directive| format!("@{}", directive.name))
+        .map(|directive| directive.to_string())
         .collect::<Vec<_>>()
         .join(" ")
 }
