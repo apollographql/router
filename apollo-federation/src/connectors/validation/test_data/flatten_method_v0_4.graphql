@@ -1,0 +1,39 @@
+extend schema
+@link(
+    url: "https://specs.apollo.dev/connect/v0.4"
+    import: ["@connect", "@source"]
+)
+@source(name: "api", http: { baseURL: "http://127.0.0.1" })
+
+# `->flatten` flattens the list of lists that `->map` produces over a nested
+# response, so that one GraphQL list field can hold the items of every section.
+# It is accepted in a scalar projection (`tags`), after a depth argument
+# (`moreTags`), and before a group selection (`items { id name }`). All three
+# validate cleanly: no `InvalidSelection`, no unresolved field.
+#
+# What this does not check is the nesting depth: the validator accepts a
+# scalar projection without comparing list depths, so the exact flattening
+# depth is pinned by the shape tests in `methods/public/flatten.rs`.
+type Query {
+    catalogue: Catalogue
+    @connect(
+        source: "api"
+        http: { GET: "/catalogue" }
+        selection: """
+        tags: sections->map(@.tags)->flatten
+        moreTags: sections->map(@.groups->map(@.tags))->flatten(2)
+        items: sections->map(@.items)->flatten { id name }
+        """
+    )
+}
+
+type Catalogue {
+    tags: [String]
+    moreTags: [String]
+    items: [Item]
+}
+
+type Item {
+    id: ID!
+    name: String
+}

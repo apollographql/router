@@ -8,6 +8,8 @@ mod find;
 pub(crate) use find::FindMethod;
 mod first;
 pub(crate) use first::FirstMethod;
+mod flatten;
+pub(crate) use flatten::FlattenMethod;
 mod gte;
 pub(crate) use gte::GteMethod;
 mod lte;
