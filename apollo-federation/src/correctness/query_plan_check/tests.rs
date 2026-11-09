@@ -712,6 +712,7 @@ mod context_arguments;
 mod context_reads;
 mod entries;
 mod input_rewrites;
+mod output_renames;
 mod path_conditions;
 mod resolvable;
 mod returned_types;

@@ -168,12 +168,12 @@ use self::requires::same_keys;
 use self::resolvable::check_fetch_selects_resolvable;
 use self::returned::ReturnedTypes;
 use self::selections::apply_key_renamers;
+use self::selections::apply_output_renamers;
 use self::selections::collapse_fragments;
 use self::selections::inline_fragment_spreads;
 use self::selections::invert_key_renamers;
 use self::selections::narrow_type_conditions;
 use self::selections::selections_at;
-use self::selections::type_filter_admits;
 use self::selections::type_filter_covers;
 use self::selections::type_filter_meets;
 use self::selections::under_condition;
@@ -728,9 +728,19 @@ impl<'a> Checker<'a> {
         // is that selection set under the key renames its output rewrites apply and without the
         // synthetic arguments its context rewrites bind. `interpret_fetch_node` applies the two
         // in this order.
-        let contributed = apply_key_renamers(
+        // The renames start at the operation's root type for a root fetch; an entity fetch's
+        // types come from its entries' fragments.
+        let root_type = if fetch.requires.is_empty() {
+            self.supergraph_schema
+                .schema()
+                .root_operation(fetch.operation_kind)
+                .cloned()
+        } else {
+            None
+        };
+        let contributed = apply_output_renamers(
             self.supergraph_schema,
-            type_filter_admits,
+            root_type.as_ref(),
             &fetch.output_rewrites,
             selected,
         );

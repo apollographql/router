@@ -110,6 +110,8 @@ use super::super::query_compare::conditions::canonical_boolean_condition;
 use super::super::query_compare::conditions::literals_for_directives;
 use super::ComparisonError;
 use super::selections::TypeCondition;
+use super::selections::does_fragment_type_apply;
+use super::selections::field_output_type;
 use super::selections::possible_types;
 use super::selections::type_includes_object;
 use super::subgraph::ContextArgument;
@@ -604,20 +606,6 @@ fn reached_under_key(
     out
 }
 
-/// The named type a field returns, as the supergraph declares it.
-fn field_output_type(
-    schema: &ValidFederationSchema,
-    parent_type: &Name,
-    field_name: &Name,
-) -> Option<Name> {
-    let field = match schema.schema().types.get(parent_type)? {
-        ExtendedType::Object(ty) => ty.fields.get(field_name),
-        ExtendedType::Interface(ty) => ty.fields.get(field_name),
-        _ => None,
-    }?;
-    Some(field.ty.inner_named_type().clone())
-}
-
 /// Do a copy's levels admit one runtime configuration?
 ///
 /// At every level the two paths share they must admit the type the data has there, and past those
@@ -921,15 +909,6 @@ fn collect_context_uses(
         }
     }
     Ok(())
-}
-
-/// Spec `DoesFragmentTypeApply` at a runtime object type.
-fn does_fragment_type_apply(
-    schema: &ValidFederationSchema,
-    object_type: &Name,
-    type_condition: Option<&Name>,
-) -> bool {
-    type_condition.is_none_or(|condition| possible_types(schema, condition).contains(object_type))
 }
 
 /// A fetch with no `requires` passes no contextual argument (`RootFetchesUseNoContext`): the router
