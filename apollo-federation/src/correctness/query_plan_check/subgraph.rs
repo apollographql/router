@@ -16,6 +16,7 @@ use apollo_compiler::schema::ExtendedType;
 
 use super::ComparisonError;
 use super::selections::type_includes_object;
+use crate::compat::coerce_selection_set_values_for_comparison;
 use crate::link::federation_spec_definition::FederationSpecDefinition;
 use crate::link::federation_spec_definition::get_federation_spec_definition_from_subgraph;
 use crate::schema::ValidFederationSchema;
@@ -274,7 +275,12 @@ pub(super) fn parse_field_set(
         field_set,
         "field_set.graphql",
     )
-    .map(|parsed| parsed.into_inner().selection_set.selections)
+    .map(|parsed| {
+        // Read as the operations it is compared with are; see `coerced_for_comparison`.
+        let mut selection_set = parsed.into_inner().selection_set;
+        coerce_selection_set_values_for_comparison(supergraph_schema.schema(), &mut selection_set);
+        selection_set.selections
+    })
     .map_err(|e| {
         ComparisonError::new(format!(
             "field set `{field_set}` is not valid on {parent_type}:\n{e}"
