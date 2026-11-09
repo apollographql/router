@@ -23,7 +23,7 @@
 //!   passes over every fetch of the plan (`fetchSubgraphsKnownBool`, `fetchesSelectResolvableBool`)
 //!   are made at each fetch instead.
 //!
-//! Every comparison is made modulo what the plan's fetches return ([`returned`]): below each field,
+//! Every comparison is made modulo what the plan's fetches return (`returned`): below each field,
 //! nothing is owed at an object type no fetch selecting that field can return.
 //!
 //! # What a fetch must already have found
@@ -38,7 +38,7 @@
 //! conditions. An input value setter may set nothing but that `__typename`; the planner writes one
 //! to send an interface's or interface object's implementations under the interface's name. What
 //! is fetched and sent is read off the demand by what the entry reads and sends
-//! ([`representation`]); the entry adds nothing. A planner may fetch a `@requires` input under
+//! (`representation`); the entry adds nothing. A planner may fetch a `@requires` input under
 //! an alias and name it back with an input key renamer, which is what the router's
 //! `execute_selection_set` and `apply_rewrites` do between them.
 //!
@@ -54,10 +54,10 @@
 //!   fragments on one type, which the inclusion decider pays for. A directive-free fragment on the
 //!   type of the fragment enclosing it is spliced into it, and adjacent sibling fragments on one
 //!   type under the same directives are merged, which changes nothing inclusion reads
-//!   ([`selections::collapse_fragments`]). Coverage is then shortcut where what is sent equals the
+//!   (`selections::collapse_fragments`). Coverage is then shortcut where what is sent equals the
 //!   narrowed demand.
 //! - **The key comparison and what a fetch can read are built once per buffer**, and shared by
-//!   every entry and every fetch reading that buffer ([`representation::ReadableKeyIndex`]).
+//!   every entry and every fetch reading that buffer (`representation::ReadableKeyIndex`).
 //! - **What a deferred block's dependencies sent is recorded, not recomputed.** The model walks
 //!   the primary block a second time, in `PrimaryDeferBlock.dependencySelections`, to find what
 //!   the fetches a deferred block `depends` on sent it. Each fetch's response is what the walk
@@ -66,13 +66,13 @@
 //!   primary block.
 //! - **Each distinct copy of a key, once.** A reproduced copy repeating one already reproduced
 //!   at its level exactly, source locations aside, is kept once, in first-occurrence order
-//!   ([`selections::selections_at`]). The model's `selectionsUnderKey` keeps every copy, and
+//!   (`selections::selections_at`). The model's `selectionsUnderKey` keeps every copy, and
 //!   inclusion reads equal ones as one; kept, they double along a chain of fetches at one site.
 //! - **Literals are compared as coerced.** The model compares argument values as written and
 //!   does not model input coercion. Before comparing, the client operation, every fetch's
 //!   operation and every field set are coerced the way the planner coerces its fetch operations,
 //!   and their `Float` and `ID` literals are spelled alike, so `1` and `1.0` of a `Float` are one
-//!   value ([`coerced_for_comparison`]). Defaults are not filled in: a subgraph applies its own.
+//!   value (`coerced_for_comparison`). Defaults are not filled in: a subgraph applies its own.
 //! - **`@context` data availability.** Every contextual value a fetch reads must already be
 //!   fetched wherever the fetch runs. The legacy checker does not check this at all: at run time
 //!   a rewrite path that reaches nothing simply drops the argument, so nothing notices.
