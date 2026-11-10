@@ -1155,7 +1155,7 @@ async fn test_subgraph_error_counting() {
         });
 
         let mut service = ServiceBuilder::new()
-            .layer(test_harness.instrument_subgraph_layer())
+            .option_layer(test_harness.instrument_subgraph_layer())
             .service(mock);
 
         let context = Context::new();
@@ -1273,7 +1273,7 @@ async fn test_execution_error_counting() {
         });
 
         let mut service = ServiceBuilder::new()
-            .layer(test_harness.instrument_execution_layer())
+            .option_layer(test_harness.instrument_execution_layer())
             .service(mock);
 
         let context = Context::new();

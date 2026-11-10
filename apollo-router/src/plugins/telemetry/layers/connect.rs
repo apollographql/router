@@ -66,15 +66,19 @@ where
 }
 
 impl Telemetry {
-    /// Returns a layer that records the response cache instruments for a connector.
-    pub(crate) fn instrument_connector_cache_layer(&self) -> InstrumentConnectorCacheLayer {
-        InstrumentConnectorCacheLayer {
+    /// Returns a layer that records the response cache instruments for a connector, where a
+    /// reader reads the metrics.
+    pub(crate) fn instrument_connector_cache_layer(&self) -> Option<InstrumentConnectorCacheLayer> {
+        if !self.readers().metrics {
+            return None;
+        }
+        Some(InstrumentConnectorCacheLayer {
             config: self.config.clone(),
             static_cache_instruments: self
                 .builtin_instruments
                 .read()
                 .cache_custom_instruments
                 .clone(),
-        }
+        })
     }
 }

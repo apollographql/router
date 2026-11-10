@@ -142,7 +142,7 @@ mod test {
             });
 
             let mut service = ServiceBuilder::new()
-                .layer(test_harness.instrument_subgraph_layer())
+                .option_layer(test_harness.instrument_subgraph_layer())
                 // the spawned driver doesn't actually run _inside_ the subgraph span. it's a
                 // tower-test thing. map_response is one way to test what regular inner services do
                 .map_response(|resp: subgraph::Response| {

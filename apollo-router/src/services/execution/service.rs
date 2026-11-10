@@ -37,7 +37,6 @@ use crate::json_ext::PathElement;
 use crate::json_ext::ValueExt;
 use crate::plugins::authentication::APOLLO_AUTHENTICATION_JWT_CLAIMS;
 use crate::plugins::subscription::SubscriptionConfig;
-use crate::plugins::telemetry::config::ApolloMetricsReferenceMode;
 use crate::query_planner::SubgraphSchemas;
 use crate::query_planner::subscription::SubscriptionHandle;
 use crate::services::ExecutionRequest;
@@ -57,7 +56,9 @@ pub(crate) struct ExecutionService {
     pub(crate) configuration: Arc<Configuration>,
     /// Subscription config if enabled
     pub(crate) subscription_config: Option<SubscriptionConfig>,
-    pub(crate) metrics_reference_mode: ApolloMetricsReferenceMode,
+    /// Whether usage reporting reads the enum values the responses carry
+    /// ([`Telemetry::reports_extended_references`](crate::plugins::telemetry::Telemetry::reports_extended_references)).
+    pub(crate) reports_response_enums: bool,
 }
 
 type CloseSignal = broadcast::Sender<()>;
@@ -179,7 +180,7 @@ impl ExecutionService {
         let schema = self.schema.clone();
         let mut nullified_paths: Vec<Path> = vec![];
 
-        let metrics_ref_mode = self.metrics_reference_mode;
+        let reports_response_enums = self.reports_response_enums;
 
         let execution_span = Span::current();
         let insert_result_coercion_errors =
@@ -233,7 +234,7 @@ impl ExecutionService {
                         is_deferred,
                         &schema,
                         &mut nullified_paths,
-                        metrics_ref_mode,
+                        reports_response_enums,
                         &context,
                         insert_result_coercion_errors,
                         response,
@@ -252,7 +253,7 @@ impl ExecutionService {
         is_deferred: bool,
         schema: &Arc<Schema>,
         nullified_paths: &mut Vec<Path>,
-        metrics_ref_mode: ApolloMetricsReferenceMode,
+        reports_response_enums: bool,
         context: &crate::Context,
         insert_result_coercion_errors: bool,
         mut response: Response,
@@ -321,24 +322,21 @@ impl ExecutionService {
 
             nullified_paths.extend(paths);
 
-            let mut referenced_enums = context
-                .extensions()
-                .with_lock(|lock| lock.get::<ReferencedEnums>().cloned())
-                .unwrap_or_default();
-            if let (ApolloMetricsReferenceMode::Extended, Some(Value::Object(response_body))) =
-                (metrics_ref_mode, &response.data)
-            {
+            if reports_response_enums && let Some(Value::Object(response_body)) = &response.data {
+                let mut referenced_enums = context
+                    .extensions()
+                    .with_lock(|lock| lock.get::<ReferencedEnums>().cloned())
+                    .unwrap_or_default();
                 extract_enums_from_response(
                     query.clone(),
                     schema.api_schema(),
                     response_body,
                     &mut referenced_enums,
-                )
-            };
-
-            context
-                .extensions()
-                .with_lock(|lock| lock.insert::<ReferencedEnums>(referenced_enums));
+                );
+                context
+                    .extensions()
+                    .with_lock(|lock| lock.insert::<ReferencedEnums>(referenced_enums));
+            }
         });
 
         match (response.path.as_ref(), response.data.as_ref()) {

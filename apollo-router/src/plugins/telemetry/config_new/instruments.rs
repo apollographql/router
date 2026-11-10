@@ -1426,6 +1426,50 @@ pub(crate) trait Instrumented {
     fn on_error(&self, error: &BoxError, ctx: &Context);
 }
 
+/// Instruments a layer started, or none where nothing reads them (`layers::Readers`), which
+/// evaluate and record nothing.
+impl<T: Instrumented> Instrumented for Option<T> {
+    type Request = T::Request;
+    type Response = T::Response;
+    type EventResponse = T::EventResponse;
+
+    fn on_request(&self, request: &Self::Request) {
+        if let Some(instruments) = self {
+            instruments.on_request(request);
+        }
+    }
+
+    fn on_response(&self, response: &Self::Response) {
+        if let Some(instruments) = self {
+            instruments.on_response(response);
+        }
+    }
+
+    fn on_response_event(&self, response: &Self::EventResponse, ctx: &Context) {
+        if let Some(instruments) = self {
+            instruments.on_response_event(response, ctx);
+        }
+    }
+
+    fn on_response_field(
+        &self,
+        ty: &apollo_compiler::executable::NamedType,
+        field: &apollo_compiler::executable::Field,
+        value: &Value,
+        ctx: &Context,
+    ) {
+        if let Some(instruments) = self {
+            instruments.on_response_field(ty, field, value, ctx);
+        }
+    }
+
+    fn on_error(&self, error: &BoxError, ctx: &Context) {
+        if let Some(instruments) = self {
+            instruments.on_error(error, ctx);
+        }
+    }
+}
+
 impl<A, B, E, Request, Response, EventResponse, SelectorValue> Instrumented
     for Extendable<A, Instrument<B, E, SelectorValue>>
 where

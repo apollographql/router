@@ -77,8 +77,11 @@ where
 }
 
 impl Telemetry {
-    /// Returns a layer that instruments query plan execution with a span and error metrics.
-    pub(crate) fn instrument_execution_layer(&self) -> InstrumentExecutionLayer {
-        InstrumentExecutionLayer::new(self.config.clone())
+    /// Returns a layer that instruments query plan execution with a span and error metrics, where
+    /// the error counts are read, which they are wherever spans are built.
+    pub(crate) fn instrument_execution_layer(&self) -> Option<InstrumentExecutionLayer> {
+        self.readers()
+            .errors()
+            .then(|| InstrumentExecutionLayer::new(self.config.clone()))
     }
 }

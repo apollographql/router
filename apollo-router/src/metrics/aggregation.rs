@@ -148,6 +148,17 @@ struct MeterId {
 }
 
 impl AggregateMeterProvider {
+    /// Whether any of its meter providers has a reader, so that a measurement recorded through it
+    /// reaches one: an exporter's, Apollo's, or a test's. None has after shutdown.
+    pub(crate) fn has_reader(&self) -> bool {
+        self.inner.lock().as_ref().is_some_and(|inner| {
+            inner
+                .providers
+                .iter()
+                .any(|(provider, _)| provider.has_reader())
+        })
+    }
+
     /// The behaviour of this function is that if None is passed in, the meter will be left as is.
     /// To disable meter_providers use a noop meter provider.
     /// The old meter_provider if any is returned, and it is up to the caller to clean up.

@@ -143,7 +143,7 @@ mod test {
             });
 
             let mut service = ServiceBuilder::new()
-                .layer(test_harness.instrument_subgraph_layer())
+                .option_layer(test_harness.instrument_subgraph_layer())
                 .service(mock_service);
 
             let _response = service
@@ -199,7 +199,7 @@ mod test {
             });
 
             let mut service = ServiceBuilder::new()
-                .layer(test_harness.instrument_subgraph_layer())
+                .option_layer(test_harness.instrument_subgraph_layer())
                 .service(mock_service);
 
             let _response = service

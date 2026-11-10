@@ -47,8 +47,6 @@ use crate::plugins::subscription::SubscriptionConfig;
 use crate::plugins::subscription::SubscriptionExecutionLayer;
 use crate::plugins::subscription::subgraph::SubscriptionSubgraphLayer;
 use crate::plugins::telemetry::Telemetry;
-use crate::plugins::telemetry::config::ApolloMetricsReferenceMode;
-use crate::plugins::telemetry::config::Conf as TelemetryConfig;
 use crate::plugins::traffic_shaping::ShapingTarget;
 use crate::plugins::traffic_shaping::TrafficShaping;
 use crate::query_planner::CachingQueryPlanner;
@@ -188,9 +186,9 @@ fn http_client_service(
     ServiceBuilder::new()
         .option_layer(join_batches)
         .option_layer(response_size_limit)
-        .apply_plugin_layer(&plugins, Telemetry::overhead_subgraph_request_timing_layer)
-        .apply_plugin_layer(&plugins, Telemetry::instrument_http_client_layer)
-        .apply_plugin_layer(&plugins, Telemetry::custom_instrument_http_client_layer)
+        .apply_optional_plugin_layer(&plugins, Telemetry::overhead_subgraph_request_timing_layer)
+        .apply_optional_plugin_layer(&plugins, Telemetry::instrument_http_client_layer)
+        .apply_optional_plugin_layer(&plugins, Telemetry::custom_instrument_http_client_layer)
         .rust_plugins(plugins, |plugin, service| {
             plugin.http_client_service(name, service)
         })
@@ -329,7 +327,7 @@ where
             p.tag_errors_with_subgraph_name_layer(Arc::from(name))
         })
         .apply_required_plugin_layer(plugins, |h: &Headers| h.subgraph_headers_layer(name))
-        .apply_plugin_layer(plugins, Telemetry::instrument_subgraph_layer)
+        .apply_optional_plugin_layer(plugins, Telemetry::instrument_subgraph_layer)
         .apply_plugin_layer(plugins, Telemetry::subgraph_ftv1_layer)
         .service(service)
 }
@@ -414,7 +412,7 @@ pub(crate) fn build_connector_request_services(
                 .apply_required_plugin_layer(plugins, |h: &Headers| {
                     h.connector_headers_layer(&source)
                 })
-                .apply_plugin_layer(plugins, Telemetry::instrument_connector_layer)
+                .apply_optional_plugin_layer(plugins, Telemetry::instrument_connector_layer)
                 .buffered()
                 .layer(box_layer())
                 .apply_required_plugin_layer(plugins, |t: &TrafficShaping| {
@@ -552,7 +550,7 @@ fn build_connector_services(
             connector_request_service,
         };
         let service = ServiceBuilder::new()
-            .apply_plugin_layer(plugins, Telemetry::instrument_connector_cache_layer)
+            .apply_optional_plugin_layer(plugins, Telemetry::instrument_connector_cache_layer)
             .rust_plugins(plugins.clone(), |plugin, service| {
                 plugin.connector_service(service)
             })
@@ -668,19 +666,18 @@ fn build_execution_service(
         Arc::new(configuration.experimental_hoist_orphan_errors.clone()),
     );
 
-    let metrics_reference_mode = plugins
-        .iter()
-        .find(|i| i.0.as_str() == "apollo.telemetry")
-        .and_then(|plugin| (*plugin.1).as_any().downcast_ref::<Telemetry>())
-        .map(|t| t.config.apollo.metrics_reference_mode)
-        .unwrap_or_default();
+    // the enum values the responses carry, extracted where usage reporting reads them
+    let reports_response_enums = plugins
+        .values()
+        .find_map(|plugin| plugin.as_any().downcast_ref::<Telemetry>())
+        .is_some_and(Telemetry::reports_extended_references);
 
     ServiceBuilder::new()
         .layer(BatchQueryPlanAnalysisLayer::new())
         .layer(SubscriptionExecutionLayer::new(
             configuration.notify.clone(),
         ))
-        .apply_plugin_layer(&plugins, Telemetry::instrument_execution_layer)
+        .apply_optional_plugin_layer(&plugins, Telemetry::instrument_execution_layer)
         .rust_plugins(plugins.clone(), |plugin, service| {
             plugin.execution_service(service)
         })
@@ -690,7 +687,7 @@ fn build_execution_service(
                 fetch_service,
                 subscription_config: subscription_plugin_conf,
                 subgraph_schemas,
-                metrics_reference_mode,
+                reports_response_enums,
                 configuration,
             }
             .boxed_clone(),
@@ -748,15 +745,15 @@ pub(crate) fn build_router_service(
 ) -> router::BoxCloneService {
     let enable_authorization_directives =
         AuthorizationPlugin::enable_directives(configuration, &schema);
-    let extended_references = matches!(
-        TelemetryConfig::metrics_reference_mode(configuration),
-        ApolloMetricsReferenceMode::Extended
-    );
+    let extended_references = plugins
+        .values()
+        .find_map(|plugin| plugin.as_any().downcast_ref::<Telemetry>())
+        .is_some_and(Telemetry::reports_extended_references);
 
     ServiceBuilder::new()
         .layer(StaticPageLayer::new(configuration))
         .apply_required_plugin_layer(&plugins, Headers::router_masking_layer)
-        .apply_plugin_layer(&plugins, Telemetry::allocation_metrics_layer)
+        .apply_optional_plugin_layer(&plugins, Telemetry::allocation_metrics_layer)
         .apply_plugin_layer(&plugins, Telemetry::instrument_router_layer)
         .rust_plugins(plugins, |plugin, service| plugin.router_service(service))
         .layer(content_negotiation::RouterContentNegotiationLayer::default())

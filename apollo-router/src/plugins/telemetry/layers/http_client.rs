@@ -157,17 +157,30 @@ impl Telemetry {
     /// Returns a layer that holds a router overhead subrequest guard while its inner service is in
     /// progress, so that time spent waiting for subgraph or connector responses is not included in
     /// the router overhead metrics.
-    pub(crate) fn overhead_subgraph_request_timing_layer(&self) -> router_overhead::OverheadLayer {
-        router_overhead::OverheadLayer::new()
+    ///
+    /// Placed where the router overhead is read: by the overhead histogram, or by a router
+    /// selector of the overhead in an instrument, an event or a span attribute.
+    pub(crate) fn overhead_subgraph_request_timing_layer(
+        &self,
+    ) -> Option<router_overhead::OverheadLayer> {
+        self.readers()
+            .router_overhead()
+            .then(router_overhead::OverheadLayer::new)
     }
 
-    /// Returns a layer that instruments an HTTP client service with an `http_request` span.
-    pub(crate) fn instrument_http_client_layer(&self) -> InstrumentHttpClientLayer {
-        InstrumentHttpClientLayer::new()
+    /// Returns a layer that instruments an HTTP client service with an `http_request` span, where
+    /// spans are built.
+    pub(crate) fn instrument_http_client_layer(&self) -> Option<InstrumentHttpClientLayer> {
+        self.readers().spans.then(InstrumentHttpClientLayer::new)
     }
 
-    /// Returns a layer that applies user-configured custom attributes to the active span.
-    pub(crate) fn custom_instrument_http_client_layer(&self) -> CustomInstrumentHttpClientLayer {
-        CustomInstrumentHttpClientLayer::new(self.config.clone())
+    /// Returns a layer that applies user-configured custom attributes to the active span, where
+    /// spans are built.
+    pub(crate) fn custom_instrument_http_client_layer(
+        &self,
+    ) -> Option<CustomInstrumentHttpClientLayer> {
+        self.readers()
+            .spans
+            .then(|| CustomInstrumentHttpClientLayer::new(self.config.clone()))
     }
 }

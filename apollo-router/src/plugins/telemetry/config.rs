@@ -943,14 +943,6 @@ impl Conf {
         configuration.typed_plugin_config("apollo.telemetry")
     }
 
-    pub(crate) fn metrics_reference_mode(
-        configuration: &Configuration,
-    ) -> ApolloMetricsReferenceMode {
-        Self::configured(configuration)
-            .map(|conf| conf.apollo.metrics_reference_mode)
-            .unwrap_or_default()
-    }
-
     pub(crate) fn signature_normalization_algorithm(
         configuration: &Configuration,
     ) -> ApolloSignatureNormalizationAlgorithm {

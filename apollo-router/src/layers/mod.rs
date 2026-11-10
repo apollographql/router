@@ -487,6 +487,17 @@ pub(crate) trait InternalServiceBuilderExt<L>: Sized {
     ) -> ServiceBuilder<Stack<OutLayer, L>>
     where
         P: PluginPrivate;
+
+    /// Apply a plugin layer the plugin may leave out of the stack, its getter answering `None`
+    /// where the plugin has no work for it: the layer is applied where the plugin is in the
+    /// `plugins` registry and its getter answers one, as one optional layer.
+    fn apply_optional_plugin_layer<P, OutLayer>(
+        self,
+        plugins: &Plugins,
+        get_layer: impl FnOnce(&P) -> Option<OutLayer>,
+    ) -> ServiceBuilder<Stack<OptionLayer<OutLayer>, L>>
+    where
+        P: PluginPrivate;
 }
 
 /// Find the single instance of plugin type `P` in the registry, if it was built.
@@ -538,6 +549,17 @@ impl<L> InternalServiceBuilderExt<L> for ServiceBuilder<L> {
             )
         });
         self.layer(get_layer(plugin))
+    }
+
+    fn apply_optional_plugin_layer<P, OutLayer>(
+        self,
+        plugins: &Plugins,
+        get_layer: impl FnOnce(&P) -> Option<OutLayer>,
+    ) -> ServiceBuilder<Stack<OptionLayer<OutLayer>, L>>
+    where
+        P: PluginPrivate,
+    {
+        self.option_layer(find_plugin::<P>(plugins).and_then(get_layer))
     }
 }
 

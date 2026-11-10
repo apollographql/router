@@ -49,6 +49,12 @@ pub(crate) struct FilterMeterProvider {
 
 #[buildstructor]
 impl FilterMeterProvider {
+    /// Whether a measurement recorded through it can reach a reader: a noop provider, the one a
+    /// provider type gets where no exporter configures a reader for it, reaches none.
+    pub(crate) fn has_reader(&self) -> bool {
+        matches!(self.delegate, MeterProviderInner::Sdk(_))
+    }
+
     #[builder]
     fn new(delegate: MeterProviderInner, deny: Option<Regex>, allow: Option<Regex>) -> Self {
         FilterMeterProvider {

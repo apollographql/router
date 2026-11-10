@@ -242,7 +242,7 @@ mod tests {
             });
 
             let mut service = ServiceBuilder::new()
-                .layer(test_harness.instrument_connector_layer())
+                .option_layer(test_harness.instrument_connector_layer())
                 .service(mock_service);
 
             service
@@ -348,7 +348,7 @@ mod tests {
             });
 
             let mut service = ServiceBuilder::new()
-                .layer(test_harness.instrument_connector_layer())
+                .option_layer(test_harness.instrument_connector_layer())
                 .service(mock_service);
 
             service

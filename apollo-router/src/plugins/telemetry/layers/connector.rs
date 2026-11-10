@@ -19,6 +19,7 @@ use crate::plugins::telemetry::config_new::instruments::Instrumented;
 use crate::plugins::telemetry::config_new::instruments::StaticInstrument;
 use crate::plugins::telemetry::dynamic_attribute::SpanDynAttribute;
 use crate::plugins::telemetry::error_counter::count_connector_errors;
+use crate::plugins::telemetry::layers::Readers;
 use crate::plugins::telemetry::span_factory;
 use crate::services::connector;
 
@@ -26,6 +27,7 @@ use crate::services::connector;
 #[derive(Clone)]
 pub(crate) struct InstrumentConnectorLayer {
     config: Arc<config::Conf>,
+    readers: Readers,
     static_connector_instruments: Arc<HashMap<String, StaticInstrument>>,
     static_apollo_connector_instruments: Arc<HashMap<String, StaticInstrument>>,
 }
@@ -33,11 +35,13 @@ pub(crate) struct InstrumentConnectorLayer {
 impl InstrumentConnectorLayer {
     fn new(
         config: Arc<config::Conf>,
+        readers: Readers,
         static_connector_instruments: Arc<HashMap<String, StaticInstrument>>,
         static_apollo_connector_instruments: Arc<HashMap<String, StaticInstrument>>,
     ) -> Self {
         Self {
             config,
+            readers,
             static_connector_instruments,
             static_apollo_connector_instruments,
         }
@@ -60,25 +64,32 @@ where
     fn layer(&self, service: S) -> Self::Service {
         let req_fn_config = self.config.clone();
         let res_fn_config = self.config.clone();
-        // the instrument sets, built once for the source's stack and started per request
+        let readers = self.readers;
+        // the instrument sets, built once for the source's stack and started per request, where a
+        // reader reads the metrics
         let instruments = &self.config.instrumentation.instruments;
-        let sets = Arc::new((
-            instruments.connector_instrument_set(&self.static_connector_instruments),
-            instruments.apollo_connector_instrument_set(
-                &self.static_apollo_connector_instruments,
-                self.config.apollo.subgraph_metrics,
-            ),
-        ));
+        let sets = readers.metrics.then(|| {
+            Arc::new((
+                instruments.connector_instrument_set(&self.static_connector_instruments),
+                instruments.apollo_connector_instrument_set(
+                    &self.static_apollo_connector_instruments,
+                    self.config.apollo.subgraph_metrics,
+                ),
+            ))
+        });
         ServiceBuilder::new()
             .instrument(move |req: &connector::request_service::Request| {
                 span_factory::create_connector(req.connector.source_config_key().as_str())
             })
             .map_future_with_request_data(
                 move |request: &connector::request_service::Request| {
-                    let (connector_instrument_set, apollo_instrument_set) = &*sets;
-                    let custom_instruments = connector_instrument_set.start();
+                    let (custom_instruments, apollo_instruments) = match sets.as_deref() {
+                        Some((connector, apollo)) => {
+                            (Some(connector.start()), Some(apollo.start()))
+                        }
+                        None => (None, None),
+                    };
                     custom_instruments.on_request(request);
-                    let apollo_instruments = apollo_instrument_set.start();
                     apollo_instruments.on_request(request);
                     let mut custom_events =
                         req_fn_config.instrumentation.events.new_connector_events();
@@ -112,8 +123,8 @@ where
                     custom_span_attributes,
                 ): (
                     Context,
-                    ConnectorInstruments,
-                    ApolloConnectorInstruments,
+                    Option<ConnectorInstruments>,
+                    Option<ApolloConnectorInstruments>,
                     ConnectorEvents,
                     Vec<KeyValue>,
                 ),
@@ -143,7 +154,9 @@ where
                                 // metric — the same reason subgraph errors are
                                 // counted at the subgraph layer. The connector
                                 // span is current, so any error event lands on it.
-                                count_connector_errors(response, &conf.apollo.errors);
+                                if readers.errors() {
+                                    count_connector_errors(response, &conf.apollo.errors);
+                                }
                             }
                             Err(err) => {
                                 span.set_span_dyn_attributes_from(|| {
@@ -168,9 +181,14 @@ where
 }
 
 impl Telemetry {
-    /// Returns a layer that instruments a connector request service with both Apollo and custom
-    /// instrumentation.
-    pub(crate) fn instrument_connector_layer(&self) -> InstrumentConnectorLayer {
+    /// Returns a layer that instruments a connector request service with its span, Apollo's and
+    /// the custom instruments, its events and its error counts, each where something reads it, or
+    /// none where nothing reads any of them.
+    pub(crate) fn instrument_connector_layer(&self) -> Option<InstrumentConnectorLayer> {
+        let readers = self.readers();
+        if !readers.any() {
+            return None;
+        }
         let static_connector_instruments = self
             .builtin_instruments
             .read()
@@ -181,11 +199,12 @@ impl Telemetry {
             .read()
             .apollo_connector_instruments
             .clone();
-        InstrumentConnectorLayer::new(
+        Some(InstrumentConnectorLayer::new(
             self.config.clone(),
+            readers,
             static_connector_instruments,
             static_apollo_connector_instruments,
-        )
+        ))
     }
 }
 
@@ -211,52 +230,9 @@ mod tests {
     use crate::services::connector::request_service::Response;
     use crate::services::connector::request_service::TransportOutcome;
 
-    /// A connector request to `subgraph_name`'s `Query.hello`.
-    fn request(connector: &Arc<Connector>) -> Request {
-        Request {
-            context: Context::new(),
-            connector: connector.clone(),
-            transport_request: HttpRequest {
-                inner: http::Request::builder().body("{}".to_string()).unwrap(),
-                debug: Default::default(),
-            }
-            .into(),
-            key: ResponseKey::RootField {
-                name: "hello".to_string(),
-                inputs: Default::default(),
-                selection: Arc::new(JSONSelection::parse("$.data").unwrap()),
-            },
-            mapping_problems: Default::default(),
-            supergraph_request: Arc::new(
-                http::Request::builder()
-                    .body(crate::graphql::Request::builder().build())
-                    .expect("valid request"),
-            ),
-            operation: Default::default(),
-        }
-    }
-
-    /// A connector request through the connector instrument layer builds no instrument set: the
-    /// layer builds the connector's instruments and Apollo's fetch duration, their conditions and
-    /// their selectors once for its source's stack, and a request starts the state its
-    /// measurements record into. Read as the bytes the layer allocates per request under a custom
-    /// histogram whose value is a request header named at a width of 8 and of 2,056 bytes: a
-    /// request that builds the custom instruments copies the selector, and the header's name with
-    /// it, and one that starts them shares it.
-    #[test]
-    fn a_connector_request_builds_no_instrument_set() {
-        const REQUESTS: usize = 16;
-        const NARROW: usize = 8;
-        const WIDE: usize = 2056;
-
-        // the plugin's construction blocks in place, which a multi-threaded runtime allows
-        let runtime = tokio::runtime::Builder::new_multi_thread()
-            .worker_threads(1)
-            .enable_all()
-            .build()
-            .expect("a runtime");
-        let _entered = runtime.enter();
-        let connector = Arc::new(Connector {
+    /// A connector to `subgraph_name`'s `Query.hello`.
+    fn connector() -> Arc<Connector> {
+        Arc::new(Connector {
             spec: ConnectSpec::V0_1,
             schema_subtypes_map: Default::default(),
             id: ConnectId::new(
@@ -284,7 +260,75 @@ mod tests {
             error_settings: Default::default(),
             output_type: None,
             label: "test label".into(),
-        });
+        })
+    }
+
+    /// A connector request to `connector`, its `x-probe` header `probe`.
+    fn request(connector: &Arc<Connector>, probe: &str) -> Request {
+        Request {
+            context: Context::new(),
+            connector: connector.clone(),
+            transport_request: HttpRequest {
+                inner: http::Request::builder()
+                    .header("x-probe", probe)
+                    .body("{}".to_string())
+                    .unwrap(),
+                debug: Default::default(),
+            }
+            .into(),
+            key: ResponseKey::RootField {
+                name: "hello".to_string(),
+                inputs: Default::default(),
+                selection: Arc::new(JSONSelection::parse("$.data").unwrap()),
+            },
+            mapping_problems: Default::default(),
+            supergraph_request: Arc::new(
+                http::Request::builder()
+                    .body(crate::graphql::Request::builder().build())
+                    .expect("valid request"),
+            ),
+            operation: Default::default(),
+        }
+    }
+
+    /// The source's answer to `request`, its mapped data null.
+    fn respond(request: Request) -> std::future::Ready<Result<Response, BoxError>> {
+        let (parts, _) = http::Response::builder().body(()).unwrap().into_parts();
+        std::future::ready(Ok(Response {
+            context: request.context,
+            subgraph_name: request.connector.id.subgraph_name.to_string(),
+            transport_outcome: TransportOutcome::Response(HttpResponse { inner: parts }),
+            mapped_response: MappedResponse::Data {
+                data: serde_json_bytes::Value::Null,
+                key: request.key,
+                problems: vec![],
+                declared_errors: vec![],
+            },
+            answered_by_router: false,
+        }))
+    }
+
+    /// A connector request through the connector instrument layer builds no instrument set: the
+    /// layer builds the connector's instruments and Apollo's fetch duration, their conditions and
+    /// their selectors once for its source's stack, and a request starts the state its
+    /// measurements record into. Read as the bytes the layer allocates per request under a custom
+    /// histogram whose value is a request header named at a width of 8 and of 2,056 bytes: a
+    /// request that builds the custom instruments copies the selector, and the header's name with
+    /// it, and one that starts them shares it.
+    #[test]
+    fn a_connector_request_builds_no_instrument_set() {
+        const REQUESTS: usize = 16;
+        const NARROW: usize = 8;
+        const WIDE: usize = 2056;
+
+        // the plugin's construction blocks in place, which a multi-threaded runtime allows
+        let runtime = tokio::runtime::Builder::new_multi_thread()
+            .worker_threads(1)
+            .enable_all()
+            .build()
+            .expect("a runtime");
+        let _entered = runtime.enter();
+        let connector = connector();
         let bytes = |width: usize| {
             let config = serde_json::json!({"telemetry": {"instrumentation": {"instruments": {
                 "connector": {
@@ -304,25 +348,11 @@ mod tests {
                 )
                 .expect("test harness");
             let layered = ServiceBuilder::new()
-                .layer(test_harness.instrument_connector_layer())
-                .service(tower::service_fn(|request: Request| {
-                    let (parts, _) = http::Response::builder().body(()).unwrap().into_parts();
-                    std::future::ready(Ok::<_, BoxError>(Response {
-                        context: request.context,
-                        subgraph_name: request.connector.id.subgraph_name.to_string(),
-                        transport_outcome: TransportOutcome::Response(HttpResponse {
-                            inner: parts,
-                        }),
-                        mapped_response: MappedResponse::Data {
-                            data: serde_json_bytes::Value::Null,
-                            key: request.key,
-                            problems: vec![],
-                            declared_errors: vec![],
-                        },
-                        answered_by_router: false,
-                    }))
-                }));
-            crate::allocator::bytes_per_call(layered, || request(&connector), drop, REQUESTS)
+                .option_layer(crate::plugins::telemetry::layers::where_metrics_are_read(
+                    || test_harness.instrument_connector_layer(),
+                ))
+                .service(tower::service_fn(respond));
+            crate::allocator::bytes_per_call(layered, || request(&connector, ""), drop, REQUESTS)
         };
 
         let narrow = bytes(NARROW);
@@ -334,6 +364,68 @@ mod tests {
             wide.saturating_sub(narrow) < WIDE - NARROW,
             "a connector request allocates {wide} bytes at a header name of {WIDE} bytes and \
              {narrow} at {NARROW}: a request builds the custom instruments"
+        );
+    }
+
+    /// Where nothing reads the telemetry layers' work, a connector request through the connector
+    /// instrument layer evaluates no instrument, Apollo's fetch duration among them, and allocates
+    /// nothing: the layer is left out of the stack, since its instruments, its span and its events
+    /// are all it does. Read as the bytes the layer allocates per request beyond the source
+    /// beneath it, under a custom counter whose attribute is a connector request header's value,
+    /// at that value's width of 8 and of 2,056 bytes.
+    #[test]
+    fn a_connector_request_nothing_reads_evaluates_no_instrument() {
+        const REQUESTS: usize = 16;
+        const NARROW: usize = 8;
+        const WIDE: usize = 2056;
+
+        let runtime = tokio::runtime::Builder::new_multi_thread()
+            .worker_threads(1)
+            .enable_all()
+            .build()
+            .expect("a runtime");
+        let _entered = runtime.enter();
+        let plugin = crate::plugins::telemetry::layers::activated_under_the_routers_subscriber(
+            &runtime,
+            &crate::plugins::telemetry::layers::nothing_reads(serde_json::json!({"connector": {
+                "acme.probe": {
+                    "description": "connector requests",
+                    "type": "counter",
+                    "unit": "request",
+                    "value": "unit",
+                    "attributes": {"probe": {"connector_http_request_header": "x-probe"}}
+                }
+            }})),
+        );
+        let connector = connector();
+        let bytes = |width: usize| {
+            let probe = "p".repeat(width);
+            let request = || request(&connector, &probe);
+            let beneath = crate::allocator::bytes_per_call(
+                tower::service_fn(respond),
+                request,
+                drop,
+                REQUESTS,
+            );
+            let through = crate::allocator::bytes_per_call(
+                ServiceBuilder::new()
+                    .option_layer(plugin.instrument_connector_layer())
+                    .service(tower::service_fn(respond)),
+                request,
+                drop,
+                REQUESTS,
+            );
+            through.saturating_sub(beneath)
+        };
+
+        let (narrow, wide) = (bytes(NARROW), bytes(WIDE));
+        eprintln!(
+            "the layer allocates {narrow} bytes per connector request beyond its source at a header value of {NARROW} bytes and {wide} at {WIDE}"
+        );
+        assert!(
+            narrow == 0 && wide == 0,
+            "the layer allocates {narrow} bytes per connector request beyond its source at a \
+             header value of {NARROW} bytes and {wide} at {WIDE}: a request does work nothing reads"
         );
     }
 }

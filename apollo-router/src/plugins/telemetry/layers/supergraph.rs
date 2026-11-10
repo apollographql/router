@@ -47,6 +47,7 @@ use crate::plugins::telemetry::config_new::supergraph::events::SupergraphEvents;
 use crate::plugins::telemetry::config_new::trace_id;
 use crate::plugins::telemetry::dynamic_attribute::SpanDynAttribute;
 use crate::plugins::telemetry::error_counter::count_supergraph_errors;
+use crate::plugins::telemetry::layers::Readers;
 use crate::plugins::telemetry::metrics::local_type_stats::LocalTypeStatRecorder;
 use crate::plugins::telemetry::reload::otel::spans_built;
 use crate::plugins::telemetry::span_factory;
@@ -108,9 +109,9 @@ async fn update_otel_metrics(
     config: Arc<Conf>,
     context: Context,
     result: Result<SupergraphResponse, BoxError>,
-    custom_instruments: SupergraphInstruments,
+    custom_instruments: Option<SupergraphInstruments>,
     custom_events: SupergraphEvents,
-    custom_graphql_instruments: GraphQLInstruments,
+    custom_graphql_instruments: Option<GraphQLInstruments>,
 ) -> Result<SupergraphResponse, BoxError> {
     let response = result?;
     let ctx = context.clone();
@@ -315,6 +316,7 @@ pub(crate) struct InstrumentSupergraphLayer {
     field_level_instrumentation_ratio: f64,
     static_supergraph_instruments: Arc<HashMap<String, StaticInstrument>>,
     static_graphql_instruments: Arc<HashMap<String, StaticInstrument>>,
+    readers: Readers,
 }
 
 impl InstrumentSupergraphLayer {
@@ -325,9 +327,11 @@ impl InstrumentSupergraphLayer {
         field_level_instrumentation_ratio: f64,
         static_supergraph_instruments: Arc<HashMap<String, StaticInstrument>>,
         static_graphql_instruments: Arc<HashMap<String, StaticInstrument>>,
+        readers: Readers,
     ) -> Self {
         Self {
             config,
+            readers,
             metrics_sender,
             enabled_features,
             field_level_instrumentation_ratio,
@@ -347,21 +351,38 @@ where
 {
     type Service = supergraph::BoxCloneService;
 
+    /// The field-level instrumentation draw, always; the supergraph span and the response's trace
+    /// id header where spans are built; and the request's instruments, events, span attributes,
+    /// error counts and usage reporting, each where it is read. Where none of them is read the
+    /// stack is the draw alone.
     fn layer(&self, service: S) -> Self::Service {
+        let readers = self.readers;
+        let field_level_instrumentation_ratio = self.field_level_instrumentation_ratio;
+        let sampling_ratio = self.config.exporters.tracing.common.sampling_ratio();
+        if !readers.any() {
+            return ServiceBuilder::new()
+                .map_request(move |req: SupergraphRequest| {
+                    draw_subgraph_ftv1(field_level_instrumentation_ratio, sampling_ratio, &req);
+                    req
+                })
+                .service(service)
+                .boxed_clone();
+        }
         let metrics_sender = self.metrics_sender.clone();
         let config = self.config.clone();
         let config_instrument = self.config.clone();
         let config_map_res_first = config.clone();
         let config_map_res = config.clone();
         let enabled_features = self.enabled_features.clone();
-        let field_level_instrumentation_ratio = self.field_level_instrumentation_ratio;
-        let sampling_ratio = self.config.exporters.tracing.common.sampling_ratio();
-        // the instrument sets, built once for the pipeline and started per request
+        // the instrument sets, built once for the pipeline and started per request, where a reader
+        // reads the metrics
         let instruments = &self.config.instrumentation.instruments;
-        let sets = Arc::new((
-            instruments.supergraph_instrument_set(&self.static_supergraph_instruments),
-            instruments.graphql_instrument_set(&self.static_graphql_instruments),
-        ));
+        let sets = readers.metrics.then(|| {
+            Arc::new((
+                instruments.supergraph_instrument_set(&self.static_supergraph_instruments),
+                instruments.graphql_instrument_set(&self.static_graphql_instruments),
+            ))
+        });
         ServiceBuilder::new()
             .instrument(move |supergraph_req: &SupergraphRequest| {
                 span_factory::create_supergraph(
@@ -435,11 +456,13 @@ where
                             .on_request(req)
                     };
                     draw_subgraph_ftv1(field_level_instrumentation_ratio, sampling_ratio, req);
-                    let (supergraph_instrument_set, graphql_instrument_set) = &*sets;
-                    let custom_instruments = supergraph_instrument_set.start();
+                    let (custom_instruments, custom_graphql_instruments) = match sets.as_deref() {
+                        Some((supergraph, graphql)) => {
+                            (Some(supergraph.start()), Some(graphql.start()))
+                        }
+                        None => (None, None),
+                    };
                     custom_instruments.on_request(req);
-                    let custom_graphql_instruments: GraphQLInstruments =
-                        graphql_instrument_set.start();
                     custom_graphql_instruments.on_request(req);
 
                     let mut supergraph_events =
@@ -462,10 +485,10 @@ where
                     custom_graphql_instruments,
                 ): (
                     Context,
-                    SupergraphInstruments,
+                    Option<SupergraphInstruments>,
                     Vec<KeyValue>,
                     SupergraphEvents,
-                    GraphQLInstruments,
+                    Option<GraphQLInstruments>,
                 ),
                       fut| {
                     let config = config_map_res.clone();
@@ -511,7 +534,9 @@ where
                             }
                         }
 
-                        if let Ok(resp) = result {
+                        if readers.errors()
+                            && let Ok(resp) = result
+                        {
                             result = Ok(count_supergraph_errors(resp, &config.apollo.errors).await);
                         }
 
@@ -524,15 +549,19 @@ where
                             custom_graphql_instruments,
                         )
                         .await;
-                        update_metrics_on_response_events(
-                            &ctx,
-                            config,
-                            field_level_instrumentation_ratio,
-                            sender,
-                            start,
-                            result,
-                            enabled_features,
-                        )
+                        if readers.reporting {
+                            update_metrics_on_response_events(
+                                &ctx,
+                                config,
+                                field_level_instrumentation_ratio,
+                                sender,
+                                start,
+                                result,
+                                enabled_features,
+                            )
+                        } else {
+                            result
+                        }
                     }
                 },
             )
@@ -562,6 +591,7 @@ impl Telemetry {
             self.field_level_instrumentation_ratio,
             static_supergraph_instruments,
             static_graphql_instruments,
+            self.readers(),
         )
     }
 }
@@ -627,7 +657,9 @@ mod tests {
                 )
                 .expect("test harness");
             let layered = ServiceBuilder::new()
-                .layer(test_harness.instrument_supergraph_layer())
+                .layer(crate::plugins::telemetry::layers::where_metrics_are_read(
+                    || test_harness.instrument_supergraph_layer(),
+                ))
                 .service(tower::service_fn(|request: SupergraphRequest| {
                     std::future::ready(
                         SupergraphResponse::fake_builder()
@@ -662,6 +694,104 @@ mod tests {
             wide.saturating_sub(narrow) < WIDE - NARROW,
             "a request allocates {wide} bytes at a header name and a static string of {WIDE} \
              bytes and {narrow} at {NARROW}: a request builds the custom instruments"
+        );
+    }
+
+    /// Where nothing reads the telemetry layers' work, a request through the supergraph
+    /// instrument layer evaluates no instrument and allocates no attribute: the layer does only
+    /// what its instruments, spans and events do not read, its draw of field-level
+    /// instrumentation, here off so that no request is drawn. Read as the bytes the layer
+    /// allocates per request beyond the source beneath it, under a custom supergraph counter
+    /// whose attribute is a request header's value and a custom GraphQL counter, at that value's
+    /// width of 8 and of 2,056 bytes: an evaluated instrument makes the value, 2,048 bytes more
+    /// at the longer; and at the shorter against an allowance for the request's boxed future.
+    #[cfg(all(feature = "global-allocator", not(feature = "dhat-heap"), unix))]
+    #[test]
+    fn a_request_nothing_reads_evaluates_no_instrument() {
+        const REQUESTS: usize = 16;
+        const NARROW: usize = 8;
+        const WIDE: usize = 2056;
+        const ALLOWANCE: usize = 1024;
+
+        let runtime = tokio::runtime::Builder::new_multi_thread()
+            .worker_threads(1)
+            .enable_all()
+            .build()
+            .expect("a runtime");
+        let _entered = runtime.enter();
+        let mut configuration =
+            crate::plugins::telemetry::layers::nothing_reads(serde_json::json!({
+                "supergraph": {
+                    "acme.probe": {
+                        "description": "requests",
+                        "type": "counter",
+                        "unit": "request",
+                        "value": "unit",
+                        "attributes": {"probe": {"request_header": "x-probe"}}
+                    }
+                },
+                "graphql": {
+                    "acme.field.probe": {
+                        "description": "fields",
+                        "type": "counter",
+                        "unit": "field",
+                        "value": {"static": "field"}
+                    }
+                }
+            }));
+        configuration["telemetry"]["apollo"] =
+            serde_json::json!({"field_level_instrumentation_sampler": "always_off"});
+        let plugin = crate::plugins::telemetry::layers::activated_under_the_routers_subscriber(
+            &runtime,
+            &configuration,
+        );
+        let source = tower::service_fn(|request: SupergraphRequest| {
+            std::future::ready(
+                SupergraphResponse::fake_builder()
+                    .context(request.context)
+                    .data(json!({"me": {"name": "Ada"}}))
+                    .build(),
+            )
+        });
+        let request = |width: usize| {
+            move || {
+                SupergraphRequest::fake_builder()
+                    .query("{ me { name } }")
+                    .header("x-probe", "p".repeat(width))
+                    .build()
+                    .expect("a request")
+            }
+        };
+        let finish = |mut response: SupergraphResponse| {
+            futures::executor::block_on(async { while response.next_response().await.is_some() {} })
+        };
+        let bytes = |width: usize| {
+            let beneath =
+                crate::allocator::bytes_per_call(source, request(width), finish, REQUESTS);
+            let through = crate::allocator::bytes_per_call(
+                ServiceBuilder::new()
+                    .layer(plugin.instrument_supergraph_layer())
+                    .service(source),
+                request(width),
+                finish,
+                REQUESTS,
+            );
+            through.saturating_sub(beneath)
+        };
+
+        let (narrow, wide) = (bytes(NARROW), bytes(WIDE));
+        eprintln!(
+            "the layer allocates {narrow} bytes per request beyond its source at a header value of {NARROW} bytes and {wide} at {WIDE}"
+        );
+        assert!(
+            wide.saturating_sub(narrow) < WIDE - NARROW,
+            "the layer allocates {wide} bytes per request at a header value of {WIDE} bytes and \
+             {narrow} at {NARROW}: a request evaluates an instrument nothing reads"
+        );
+        assert!(
+            narrow <= ALLOWANCE,
+            "the layer allocates {narrow} bytes per request beyond its source, more than the \
+             allowance of {ALLOWANCE}: a request does work nothing reads"
         );
     }
 

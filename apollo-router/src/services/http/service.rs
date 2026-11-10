@@ -913,9 +913,9 @@ mod tests {
         );
 
         ServiceBuilder::new()
-            .layer(telemetry.overhead_subgraph_request_timing_layer())
-            .layer(telemetry.instrument_http_client_layer())
-            .layer(telemetry.custom_instrument_http_client_layer())
+            .option_layer(telemetry.overhead_subgraph_request_timing_layer())
+            .option_layer(telemetry.instrument_http_client_layer())
+            .option_layer(telemetry.custom_instrument_http_client_layer())
             .service(http_client_service)
             .boxed_clone()
     }
@@ -1054,9 +1054,9 @@ telemetry:
 
         // Wrap with telemetry plugin's layers
         let mut telemetry_wrapped_service = ServiceBuilder::new()
-            .layer(telemetry.overhead_subgraph_request_timing_layer())
-            .layer(telemetry.instrument_http_client_layer())
-            .layer(telemetry.custom_instrument_http_client_layer())
+            .option_layer(telemetry.overhead_subgraph_request_timing_layer())
+            .option_layer(telemetry.instrument_http_client_layer())
+            .option_layer(telemetry.custom_instrument_http_client_layer())
             .service(http_client_service)
             .boxed_clone();
 

@@ -32,6 +32,7 @@ use crate::plugins::telemetry::consts::OTEL_STATUS_CODE_ERROR;
 use crate::plugins::telemetry::consts::OTEL_STATUS_CODE_OK;
 use crate::plugins::telemetry::dynamic_attribute::SpanDynAttribute;
 use crate::plugins::telemetry::error_counter::count_subgraph_errors;
+use crate::plugins::telemetry::layers::Readers;
 use crate::plugins::telemetry::otel::OpenTelemetrySpanExt;
 use crate::plugins::telemetry::span_factory;
 use crate::services::SubgraphRequest;
@@ -125,6 +126,7 @@ where
 #[derive(Clone)]
 pub(crate) struct InstrumentSubgraphLayer {
     config: Arc<config::Conf>,
+    readers: Readers,
     static_subgraph_instruments: Arc<HashMap<String, StaticInstrument>>,
     static_apollo_subgraph_instruments: Arc<HashMap<String, StaticInstrument>>,
     static_cache_instruments: Arc<HashMap<String, StaticInstrument>>,
@@ -133,12 +135,14 @@ pub(crate) struct InstrumentSubgraphLayer {
 impl InstrumentSubgraphLayer {
     fn new(
         config: Arc<config::Conf>,
+        readers: Readers,
         static_subgraph_instruments: Arc<HashMap<String, StaticInstrument>>,
         static_apollo_subgraph_instruments: Arc<HashMap<String, StaticInstrument>>,
         static_cache_instruments: Arc<HashMap<String, StaticInstrument>>,
     ) -> Self {
         Self {
             config,
+            readers,
             static_subgraph_instruments,
             static_apollo_subgraph_instruments,
             static_cache_instruments,
@@ -159,16 +163,20 @@ where
     fn layer(&self, inner: S) -> Self::Service {
         let req_fn_config = self.config.clone();
         let res_fn_config = self.config.clone();
-        // the instrument sets, built once for the subgraph's stack and started per request
+        let readers = self.readers;
+        // the instrument sets, built once for the subgraph's stack and started per request, where
+        // a reader reads the metrics
         let instruments = &self.config.instrumentation.instruments;
-        let sets = Arc::new((
-            instruments.subgraph_instrument_set(&self.static_subgraph_instruments),
-            instruments.apollo_subgraph_instrument_set(
-                &self.static_apollo_subgraph_instruments,
-                self.config.apollo.subgraph_metrics,
-            ),
-            instruments.cache_instrument_set(&self.static_cache_instruments),
-        ));
+        let sets = readers.metrics.then(|| {
+            Arc::new((
+                instruments.subgraph_instrument_set(&self.static_subgraph_instruments),
+                instruments.apollo_subgraph_instrument_set(
+                    &self.static_apollo_subgraph_instruments,
+                    self.config.apollo.subgraph_metrics,
+                ),
+                instruments.cache_instrument_set(&self.static_cache_instruments),
+            ))
+        });
 
         ServiceBuilder::new()
             .instrument(move |req: &SubgraphRequest| {
@@ -187,18 +195,22 @@ where
                             .attributes
                             .on_request(sub_request)
                     };
-                    let (subgraph_instrument_set, apollo_instrument_set, cache_instrument_set) =
-                        &*sets;
-                    let custom_instruments = subgraph_instrument_set.start();
+                    let started = sets.as_deref().map(|(subgraph, apollo, cache)| {
+                        (subgraph.start(), apollo.start(), cache.start())
+                    });
+                    let (custom_instruments, apollo_instruments, custom_cache_instruments) =
+                        match started {
+                            Some((subgraph, apollo, cache)) => {
+                                (Some(subgraph), Some(apollo), Some(cache))
+                            }
+                            None => (None, None, None),
+                        };
                     custom_instruments.on_request(sub_request);
                     let mut custom_events =
                         req_fn_config.instrumentation.events.new_subgraph_events();
                     custom_events.on_request(sub_request);
 
-                    let apollo_instruments = apollo_instrument_set.start();
                     apollo_instruments.on_request(sub_request);
-
-                    let custom_cache_instruments: CacheInstruments = cache_instrument_set.start();
                     custom_cache_instruments.on_request(sub_request);
 
                     (
@@ -219,11 +231,11 @@ where
                     custom_cache_instruments,
                 ): (
                     Context,
-                    SubgraphInstruments,
+                    Option<SubgraphInstruments>,
                     Vec<KeyValue>,
                     SubgraphEvents,
-                    ApolloSubgraphInstruments,
-                    CacheInstruments,
+                    Option<ApolloSubgraphInstruments>,
+                    Option<CacheInstruments>,
                 ),
                       f| {
                     let conf = res_fn_config.clone();
@@ -267,10 +279,11 @@ where
                             }
                         }
 
-                        if let Ok(resp) = result {
-                            Ok(count_subgraph_errors(resp, &conf.apollo.errors).await)
-                        } else {
-                            result
+                        match result {
+                            Ok(resp) if readers.errors() => {
+                                Ok(count_subgraph_errors(resp, &conf.apollo.errors).await)
+                            }
+                            result => result,
                         }
                     }
                 },
@@ -281,9 +294,14 @@ where
 }
 
 impl Telemetry {
-    /// Returns a layer that instruments a subgraph service with both Apollo and custom
-    /// instrumentation.
-    pub(crate) fn instrument_subgraph_layer(&self) -> InstrumentSubgraphLayer {
+    /// Returns a layer that instruments a subgraph service with its span, Apollo's and the custom
+    /// instruments, its events and its error counts, each where something reads it, or none
+    /// where nothing reads any of them.
+    pub(crate) fn instrument_subgraph_layer(&self) -> Option<InstrumentSubgraphLayer> {
+        let readers = self.readers();
+        if !readers.any() {
+            return None;
+        }
         let static_subgraph_instruments = self
             .builtin_instruments
             .read()
@@ -299,12 +317,13 @@ impl Telemetry {
             .read()
             .cache_custom_instruments
             .clone();
-        InstrumentSubgraphLayer::new(
+        Some(InstrumentSubgraphLayer::new(
             self.config.clone(),
+            readers,
             static_subgraph_instruments,
             static_apollo_subgraph_instruments,
             static_cache_instruments,
-        )
+        ))
     }
 
     /// Returns a layer that propagates FTV1 tracing headers to subgraph requests and stashes the
@@ -368,7 +387,7 @@ mod tests {
                 }
             });
             let mut bad_request_subgraph_service = ServiceBuilder::new()
-                .layer(test_harness.instrument_subgraph_layer())
+                .option_layer(test_harness.instrument_subgraph_layer())
                 .service(mock_bad_request_service);
             let sub_req = http::Request::builder()
                 .method("POST")
@@ -478,7 +497,7 @@ mod tests {
                 }
             });
             let mut bad_request_subgraph_service = ServiceBuilder::new()
-                .layer(test_harness.instrument_subgraph_layer())
+                .option_layer(test_harness.instrument_subgraph_layer())
                 .service(mock_bad_request_service);
             let sub_req = http::Request::builder()
                 .method("POST")
@@ -589,7 +608,7 @@ mod tests {
             });
 
             let mut subgraph_service = ServiceBuilder::new()
-                .layer(test_harness.instrument_subgraph_layer())
+                .option_layer(test_harness.instrument_subgraph_layer())
                 .service(mock_subgraph_service);
             let subgraph_req = SubgraphRequest::fake_builder()
                 .subgraph_request(
@@ -650,7 +669,7 @@ mod tests {
             });
 
             let mut subgraph_service = ServiceBuilder::new()
-                .layer(test_harness.instrument_subgraph_layer())
+                .option_layer(test_harness.instrument_subgraph_layer())
                 .service(mock_subgraph_service_in_error);
 
             let subgraph_req = SubgraphRequest::fake_builder()
@@ -727,7 +746,9 @@ mod tests {
                 )
                 .expect("test harness");
             let layered = ServiceBuilder::new()
-                .layer(test_harness.instrument_subgraph_layer())
+                .option_layer(crate::plugins::telemetry::layers::where_metrics_are_read(
+                    || test_harness.instrument_subgraph_layer(),
+                ))
                 .service(tower::service_fn(|request: SubgraphRequest| {
                     std::future::ready(Ok::<_, BoxError>(
                         SubgraphResponse::fake_builder()
@@ -814,7 +835,9 @@ mod tests {
                 )
                 .expect("test harness");
             let layered = ServiceBuilder::new()
-                .layer(test_harness.instrument_subgraph_layer())
+                .option_layer(crate::plugins::telemetry::layers::where_metrics_are_read(
+                    || test_harness.instrument_subgraph_layer(),
+                ))
                 .service(tower::service_fn(|request: SubgraphRequest| {
                     std::future::ready(Ok::<_, BoxError>(
                         SubgraphResponse::fake_builder()
@@ -844,6 +867,84 @@ mod tests {
             wide.saturating_sub(narrow) < WIDE - NARROW,
             "a subgraph request allocates {wide} bytes at keys of {WIDE} bytes and {narrow} at \
              keys of {NARROW}: a request copies its attributes' keys"
+        );
+    }
+
+    /// Where nothing reads the telemetry layers' work, a subgraph request through the subgraph
+    /// instrument layer evaluates no instrument, Apollo's fetch duration among them, and
+    /// allocates nothing: the layer is left out of the stack, since its instruments, its span,
+    /// its events and its error counts are all it does. Read as the bytes the layer allocates per
+    /// request beyond the source beneath it, under a custom counter whose attribute is a subgraph
+    /// request header's value, at that value's width of 8 and of 2,056 bytes.
+    #[cfg(all(feature = "global-allocator", not(feature = "dhat-heap"), unix))]
+    #[test]
+    fn a_subgraph_request_nothing_reads_evaluates_no_instrument() {
+        const REQUESTS: usize = 16;
+        const NARROW: usize = 8;
+        const WIDE: usize = 2056;
+
+        let runtime = tokio::runtime::Builder::new_multi_thread()
+            .worker_threads(1)
+            .enable_all()
+            .build()
+            .expect("a runtime");
+        let _entered = runtime.enter();
+        let plugin = crate::plugins::telemetry::layers::activated_under_the_routers_subscriber(
+            &runtime,
+            &crate::plugins::telemetry::layers::nothing_reads(serde_json::json!({"subgraph": {
+                "acme.probe": {
+                    "description": "subgraph requests",
+                    "type": "counter",
+                    "unit": "request",
+                    "value": "unit",
+                    "attributes": {"probe": {"subgraph_request_header": "x-probe"}}
+                }
+            }})),
+        );
+        let source = tower::service_fn(|request: SubgraphRequest| {
+            std::future::ready(Ok::<_, BoxError>(
+                SubgraphResponse::fake_builder()
+                    .context(request.context)
+                    .subgraph_name("products")
+                    .data(json!({"products": []}))
+                    .build(),
+            ))
+        });
+        let request = |width: usize| {
+            move || {
+                SubgraphRequest::fake_builder()
+                    .subgraph_name("products")
+                    .subgraph_request(
+                        ::http::Request::builder()
+                            .uri("http://products/graphql")
+                            .header("x-probe", "p".repeat(width))
+                            .body(Request::fake_builder().query("{ products { id } }").build())
+                            .expect("a subgraph request"),
+                    )
+                    .build()
+            }
+        };
+        let bytes = |width: usize| {
+            let beneath = crate::allocator::bytes_per_call(source, request(width), drop, REQUESTS);
+            let through = crate::allocator::bytes_per_call(
+                ServiceBuilder::new()
+                    .option_layer(plugin.instrument_subgraph_layer())
+                    .service(source),
+                request(width),
+                drop,
+                REQUESTS,
+            );
+            through.saturating_sub(beneath)
+        };
+
+        let (narrow, wide) = (bytes(NARROW), bytes(WIDE));
+        eprintln!(
+            "the layer allocates {narrow} bytes per subgraph request beyond its source at a header value of {NARROW} bytes and {wide} at {WIDE}"
+        );
+        assert!(
+            narrow == 0 && wide == 0,
+            "the layer allocates {narrow} bytes per subgraph request beyond its source at a \
+             header value of {NARROW} bytes and {wide} at {WIDE}: a request does work nothing reads"
         );
     }
 
@@ -889,9 +990,10 @@ mod tests {
             })
         };
         let subgraph = ServiceBuilder::new()
-            .layer(test_harness.instrument_subgraph_layer())
+            .option_layer(test_harness.instrument_subgraph_layer())
             .layer(test_harness.subgraph_ftv1_layer())
-            .service(source);
+            .service(source)
+            .boxed_clone();
         let supergraph = ServiceBuilder::new()
             .layer(test_harness.instrument_supergraph_layer())
             .service_fn(move |request: SupergraphRequest| {
