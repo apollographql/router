@@ -466,7 +466,7 @@ the binary and `PLAN_MODEL_COMMIT` in `src/plan_oracle.rs` must match, unless
 
 ## Status
 
-The lane is green against `dd306b8`: 98,215 sampled cases with **zero divergences** between the
+The lane is green against `3f27cc6`: 98,215 sampled cases with **zero divergences** between the
 model and the port, and `plan_differential` reports how many cases of each perturbation the model
 accepts, so a perturbation reaching only one outcome shows. Disabling the port's entry conditions,
 typename check, resolvability check, returned-type narrowing, `@provides` windows, sent

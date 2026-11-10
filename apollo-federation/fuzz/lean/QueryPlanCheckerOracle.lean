@@ -923,7 +923,7 @@ partial def loop : IO Unit := do
                 let entityFetch := entityFetchFor testCase (entityCaseTypes testCase)
                 let required :=
                   requiredAt schema (flattenPath testCase (entityCaseTypes testCase)) guarded available
-                    (entityFetch.requiredSelections schema firstEntry computed)
+                    (entityFetch.requiredSelections firstEntry computed)
                 IO.println s!"ok={renderSelections available} ||| {renderSelections required}"
         | _, _ => IO.println "ok=nocase"
     (<- IO.getStdout).flush
