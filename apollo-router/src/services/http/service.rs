@@ -660,10 +660,15 @@ impl tower::Service<HttpRequest> for HttpClientService {
 
         Box::pin(async move {
             get_text_map_propagator(|propagator| {
-                propagator.inject_context(
-                    &prepare_context(Span::current().context()),
-                    &mut opentelemetry_http::HeaderInjector(http_request.headers_mut()),
-                );
+                // A propagator injects the fields it names and no other (OpenTelemetry's
+                // `TextMapPropagator::fields`), so one naming none, as the set telemetry installs
+                // with no propagation configured, has nothing to inject and no context is made.
+                if propagator.fields().next().is_some() {
+                    propagator.inject_context(
+                        &prepare_context(Span::current().context()),
+                        &mut opentelemetry_http::HeaderInjector(http_request.headers_mut()),
+                    );
+                }
             });
 
             let (parts, body) = http_request.into_parts();

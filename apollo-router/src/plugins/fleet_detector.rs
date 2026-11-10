@@ -23,6 +23,7 @@ use crate::plugin::PluginPrivate;
 use crate::services::http::HttpRequest;
 use crate::services::http::HttpResponse;
 use crate::services::router;
+use crate::services::router::body::RouterBody;
 
 const REFRESH_INTERVAL: Duration = Duration::from_secs(60);
 const COMPUTE_DETECTOR_THRESHOLD: u16 = 24576;
@@ -338,15 +339,17 @@ impl PluginPrivate for FleetDetector {
         subgraph_name: &str,
         service: BoxCloneService<HttpRequest, HttpResponse, BoxError>,
     ) -> BoxCloneService<HttpRequest, HttpResponse, BoxError> {
-        let sn_req = Arc::new(subgraph_name.to_string());
-        let sn_res = sn_req.clone();
+        // the subgraph's name as each count's attribute, made once: a clone of it is a reference
+        // count
+        let subgraph = opentelemetry::Value::from(Arc::<str>::from(subgraph_name));
+        let sn_req = subgraph.clone();
+        let sn_res = subgraph;
         service
             // Count the number of bytes per subgraph fetch request
             .map_request(move |req: HttpRequest| {
                 let sn = sn_req.clone();
                 HttpRequest {
                     http_request: req.http_request.map(move |body| {
-                        let sn = sn.clone();
                         let size_hint = body.size_hint();
 
                         // Short-circuit for complete bodies
@@ -354,13 +357,12 @@ impl PluginPrivate for FleetDetector {
                         // If the `SizeHint` gives us an exact value, we can use this for the
                         // metric and return without wrapping the request Body into a stream.
                         if let Some(size) = size_hint.exact() {
-                            let sn = sn.clone();
                             u64_counter_with_unit!(
                                 "apollo.router.operations.fetch.request_size",
                                 "Total number of request bytes for subgraph fetches",
                                 "By",
                                 size,
-                                subgraph.name = sn.to_string()
+                                subgraph.name = sn
                             );
                             return body;
                         }
@@ -369,13 +371,12 @@ impl PluginPrivate for FleetDetector {
                         router::body::from_result_stream(body.into_data_stream().inspect(
                             move |res| {
                                 if let Ok(bytes) = res {
-                                    let sn = sn.clone();
                                     u64_counter_with_unit!(
                                         "apollo.router.operations.fetch.request_size",
                                         "Total number of request bytes for subgraph fetches",
                                         "By",
                                         bytes.len() as u64,
-                                        subgraph.name = sn.to_string()
+                                        subgraph.name = sn.clone()
                                     );
                                 }
                             },
@@ -393,28 +394,17 @@ impl PluginPrivate for FleetDetector {
                             "apollo.router.operations.fetch",
                             "Number of subgraph fetches",
                             1u64,
-                            subgraph.name = sn.to_string(),
+                            subgraph.name = sn.clone(),
                             client_error = false,
                             http.response.status_code = res.http_response.status().as_u16() as i64
                         );
-                        let sn = sn_res.clone();
                         Ok(HttpResponse {
                             http_response: res.http_response.map(move |body| {
-                                let sn = sn.clone();
-                                router::body::from_result_stream(body.into_data_stream().inspect(
-                                    move |res| {
-                                        if let Ok(bytes) = res {
-                                            let sn = sn.clone();
-                                            u64_counter_with_unit!(
-                                            "apollo.router.operations.fetch.response_size",
-                                            "Total number of response bytes for subgraph fetches",
-                                            "By",
-                                            bytes.len() as u64,
-                                            subgraph.name = sn.to_string()
-                                        );
-                                        }
-                                    },
-                                ))
+                                RouterBody::new(CountedResponseBody {
+                                    inner: body,
+                                    bytes: None,
+                                    subgraph: sn,
+                                })
                             }),
                             context: res.context,
                         })
@@ -424,7 +414,7 @@ impl PluginPrivate for FleetDetector {
                             "apollo.router.operations.fetch",
                             "Number of subgraph fetches",
                             1u64,
-                            subgraph.name = sn.to_string(),
+                            subgraph.name = sn,
                             client_error = true
                         );
                         Err(err)
@@ -432,6 +422,57 @@ impl PluginPrivate for FleetDetector {
                 }
             })
             .boxed_clone()
+    }
+}
+
+/// A subgraph fetch's response body, counting the bytes of its data frames as they pass and
+/// adding them to `apollo.router.operations.fetch.response_size` once, when the body is dropped:
+/// the sum a count per frame made, a body with no data frame counting nothing.
+struct CountedResponseBody {
+    inner: RouterBody,
+    /// The bytes of the data frames that have passed, none before the first.
+    bytes: Option<u64>,
+    /// The subgraph's name, the count's attribute.
+    subgraph: opentelemetry::Value,
+}
+
+impl http_body::Body for CountedResponseBody {
+    type Data = bytes::Bytes;
+    type Error = axum::Error;
+
+    fn poll_frame(
+        mut self: std::pin::Pin<&mut Self>,
+        cx: &mut std::task::Context<'_>,
+    ) -> std::task::Poll<Option<Result<http_body::Frame<Self::Data>, Self::Error>>> {
+        let polled = std::pin::Pin::new(&mut self.inner).poll_frame(cx);
+        if let std::task::Poll::Ready(Some(Ok(frame))) = &polled
+            && let Some(data) = frame.data_ref()
+        {
+            *self.bytes.get_or_insert(0) += data.len() as u64;
+        }
+        polled
+    }
+
+    fn is_end_stream(&self) -> bool {
+        self.inner.is_end_stream()
+    }
+
+    fn size_hint(&self) -> http_body::SizeHint {
+        self.inner.size_hint()
+    }
+}
+
+impl Drop for CountedResponseBody {
+    fn drop(&mut self) {
+        if let Some(bytes) = self.bytes {
+            u64_counter_with_unit!(
+                "apollo.router.operations.fetch.response_size",
+                "Total number of response bytes for subgraph fetches",
+                "By",
+                bytes,
+                subgraph.name = self.subgraph.clone()
+            );
+        }
     }
 }
 
@@ -733,11 +774,15 @@ mod tests {
             let data = router::body::into_bytes(req.http_request.into_body())
                 .await
                 .unwrap();
+            // the reply in three frames, counted as their sum
+            let frames = [data.slice(..3), data.slice(3..5), data.slice(5..)];
             responder.send_response(HttpResponse {
                 http_response: http::Response::builder()
                     .status(StatusCode::BAD_REQUEST)
                     .header("content-type", "application/json")
-                    .body(router::body::from_bytes(data))
+                    .body(router::body::from_result_stream(futures::stream::iter(
+                        frames.map(Ok::<_, Infallible>),
+                    )))
                     .unwrap(),
                 context: Default::default(),
             });

@@ -8655,6 +8655,7 @@ checksum = "7cc1186384beb7dd8eedea376413fd654937285ea6c9cfbb928dc3043ea4b606"
 dependencies = [
  "getrandom 0.4.2",
  "js-sys",
+ "rand 0.10.3",
  "serde_core",
  "wasm-bindgen",
 ]
