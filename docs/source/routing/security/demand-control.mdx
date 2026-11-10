@@ -344,13 +344,13 @@ type ResultContainer {
 
 ### Argument costs
 
-The cost of a field includes the cost of its arguments. By default, arguments of scalar and enum types cost 0 and input objects cost 1. You can override these defaults with the `@cost` directive on an argument or input field definition.
+Use `@cost` on arguments and input fields to set the cost of argument values, which are a part of the field cost. When argument values contain lists, the router applies the argument's weight once for the list and again for each item in it, because the work a resolver does usually grows with the number of values it receives (and similarly for input fields).
 
-For a list-type argument, the router applies the argument's weight once for the list and again for each item in it, because the work a resolver does usually grows with the number of values it receives. For an input object, the router adds the argument's weight for the object and then adds the cost of each input field it contains.
+When `@cost` is not specified for an argument or input field, the router applies a default weight of zero to lists and items, with the exception of objects whose default cost is 1.
 
 <Note>
 
-This differs from the IBM specification, which counts an argument's weight once regardless of how many values are passed.
+This differs from the IBM specification, which only applies argument and input field weights once for each time they appear in the field.
 
 </Note>
 
