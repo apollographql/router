@@ -4,13 +4,14 @@
 //! `Apollo/Definitions/QueryPlanSoundness.lean`.
 //!
 //! What the fetch can read and what the subgraph demands are the authorities, linked by the input
-//! rewrites; a `requires` entry only filters them ([`selected_by_one_pass`]). An object's
-//! representation is every entry whose type condition admits it, deep-merged, so the entries are
-//! checked together, one entity case at a time.
+//! rewrites; a `requires` entry only filters them ([`selected_by_one_pass`], [`invert_through`]).
+//! An object's representation is every entry whose type condition admits it, deep-merged, so the
+//! entries are checked together, one entity case at a time.
 //!
 //! - What an entry must already have fetched of a demand is the demand narrowed by the entry's
-//!   conditions, taken back through the input rewrites that can rename what the entry reads, and
-//!   selected by what the entry reads ([`required_selections`]).
+//!   conditions and taken back through the input rewrites as the entry reads it
+//!   ([`required_selections`]): an alias is taken back only where the entry reads it, so per
+//!   runtime type, as the router builds a representation through the fragments that apply to it.
 //! - What an entry sends of a demand is the demand narrowed by its conditions and selected by what
 //!   it sends ([`sent_selections`]). The router renames what the entry read instead, which comes to
 //!   the same where the rewrites are well formed, idempotent on the demand, and agree with the
@@ -38,13 +39,12 @@ use super::super::query_compare::conditions::literals_for_directives;
 use super::context::display_path;
 use super::requires::same_keys;
 use super::returned::ReturnedTypes;
+use super::selections::admitted_types;
 use super::selections::apply_key_renamers;
 use super::selections::condition_directives;
 use super::selections::inline_fragment_under;
-use super::selections::invert_key_renamers;
 use super::selections::possible_types;
 use super::selections::selection_set;
-use super::selections::type_filter_covers;
 use super::selections::type_filter_meets;
 use super::selections::type_includes_object;
 use super::selections::wrap_non_empty;
@@ -300,23 +300,19 @@ pub(super) fn selected_by_one_pass(source: &[Selection], entry: &[Selection]) ->
 }
 
 /// What an entry must already have fetched to send `demand`: the demand where the entry writes a
-/// key, taken back through the input rewrites that can rename what the entry reads
-/// ([`input_rewrites_for`]), and selected by what the entry reads (`as_read`).
+/// key, taken back through the input rewrites as the entry reads it (`as_read`, [`invert_through`]).
 pub(super) fn required_selections(
-    schema: &ValidFederationSchema,
     fetch: &FetchNode,
     entry: &requires_selection::Selection,
     as_read: &Selection,
     parent_type: &Name,
     demand: &[Selection],
 ) -> Vec<Selection> {
-    let inverted = invert_key_renamers(
-        schema,
-        type_filter_covers,
-        &input_rewrites_for(fetch, entry),
-        narrowed_by_entry_condition(entry, parent_type, demand.to_vec()),
-    );
-    selected_by_one_pass(&inverted, std::slice::from_ref(as_read))
+    invert_through(
+        &key_renamings(fetch),
+        &narrowed_by_entry_condition(entry, parent_type, demand.to_vec()),
+        std::slice::from_ref(as_read),
+    )
 }
 
 /// What an entry sends of `demand`: the demand where the entry writes a key, selected by what the
@@ -334,82 +330,287 @@ pub(super) fn sent_selections(
 }
 
 //==================================================================================================
-// Key paths an entry reads
+// Where the input rewrites rename
 //==================================================================================================
 
 /// A path of response keys into a representation: a fetch data path without its type tests and
 /// list indices.
 type KeyPath = Vec<Name>;
 
-/// The response keys a path follows, indices passed over.
-fn key_path(path: &[FetchDataPathElement]) -> KeyPath {
-    path.iter()
-        .filter_map(|element| match element {
-            FetchDataPathElement::Key(name, _) => Some(name.clone()),
-            _ => None,
-        })
-        .collect()
+/// Where a key renamer renames: the key path above the key it renames, that key, and the key it
+/// renames it to.
+#[derive(Clone, PartialEq)]
+struct KeyRenaming {
+    above: KeyPath,
+    old: Name,
+    new: Name,
 }
 
-/// Whether an entry reads the key path `path`: lists it directly, or, if `allow_copy`, any path
-/// under a field it copies whole.
-fn reads_path(allow_copy: bool, entry: &requires_selection::Selection, path: &[Name]) -> bool {
-    match entry {
-        requires_selection::Selection::Field(field) => {
-            let Some((key, rest)) = path.split_first() else {
-                return false;
-            };
-            field.alias.as_ref().unwrap_or(&field.name) == key
-                && (rest.is_empty()
-                    || (allow_copy && field.selections.is_empty())
-                    || field
-                        .selections
-                        .iter()
-                        .any(|selection| reads_path(allow_copy, selection, rest)))
-        }
-        requires_selection::Selection::InlineFragment(fragment) => fragment
-            .selections
-            .iter()
-            .any(|selection| reads_path(allow_copy, selection, path)),
+impl KeyRenaming {
+    /// The key path it renames from.
+    fn old_path(&self) -> KeyPath {
+        let mut path = self.above.clone();
+        path.push(self.old.clone());
+        path
+    }
+
+    /// The key path it renames to.
+    fn new_path(&self) -> KeyPath {
+        let mut path = self.above.clone();
+        path.push(self.new.clone());
+        path
     }
 }
 
-/// The fetch's input rewrites that apply to what `entry` reads: the value setters, and each key
-/// renamer from a key path it reads, listed or copied.
-pub(super) fn input_rewrites_for(
-    fetch: &FetchNode,
-    entry: &requires_selection::Selection,
-) -> Vec<Arc<FetchDataRewrite>> {
+/// Where a key renamer at `path` renames to `new_key`, as `rename_key_at` renames: its keys
+/// followed, `AnyIndex` elements passed over. A path ending at no key or climbing with `Parent`
+/// renames nothing; nor, here, does one testing a `__typename`, which well formed input rewrites
+/// never do.
+fn key_renaming(path: &[FetchDataPathElement], new_key: &Name) -> Option<KeyRenaming> {
+    let (FetchDataPathElement::Key(old, _), leading) = path.split_last()? else {
+        return None;
+    };
+    let mut above = Vec::new();
+    for element in leading {
+        match element {
+            FetchDataPathElement::Key(name, _) => above.push(name.clone()),
+            FetchDataPathElement::AnyIndex(_) => {}
+            FetchDataPathElement::TypenameEquals(_) | FetchDataPathElement::Parent => return None,
+        }
+    }
+    Some(KeyRenaming {
+        above,
+        old: old.clone(),
+        new: new_key.clone(),
+    })
+}
+
+/// Where the fetch's input rewrites rename, in the order `apply_rewrites` applies them; a value
+/// setter renames nothing.
+fn key_renamings(fetch: &FetchNode) -> Vec<KeyRenaming> {
     fetch
         .input_rewrites
         .iter()
-        .filter(|rewrite| match rewrite.as_ref() {
+        .filter_map(|rewrite| match rewrite.as_ref() {
             FetchDataRewrite::KeyRenamer(renamer) => {
-                reads_path(true, entry, &key_path(&renamer.path))
+                key_renaming(&renamer.path, &renamer.rename_key_to)
             }
-            FetchDataRewrite::ValueSetter(_) => true,
+            FetchDataRewrite::ValueSetter(_) => None,
         })
-        .cloned()
         .collect()
+}
+
+/// The key a value read under `key` is sent under: each renaming of one key applied in order, as
+/// `apply_rewrites` moves the value.
+fn sent_key(renamings: &[KeyRenaming], key: &Name) -> Name {
+    renamings
+        .iter()
+        .filter(|step| step.above.is_empty())
+        .fold(key.clone(), |key, step| {
+            if step.old == key {
+                step.new.clone()
+            } else {
+                key
+            }
+        })
+}
+
+/// The key a value sent under `key` was read under: each renaming of one key taken back, the last
+/// first, so that of a key read under its own name and an alias renamed onto it, the alias is
+/// chosen.
+fn read_key(renamings: &[KeyRenaming], key: &Name) -> Name {
+    renamings
+        .iter()
+        .rev()
+        .filter(|step| step.above.is_empty())
+        .fold(key.clone(), |key, step| {
+            if step.new == key {
+                step.old.clone()
+            } else {
+                key
+            }
+        })
+}
+
+/// The renamings reaching below the value read under `key`, their paths taken from below it, each
+/// as the value's key stood when it ran ([`sent_key`]).
+fn renamings_below(renamings: &[KeyRenaming], key: &Name) -> Vec<KeyRenaming> {
+    let mut key = key.clone();
+    let mut out = Vec::new();
+    for step in renamings {
+        match step.above.split_first() {
+            None => {
+                if step.old == key {
+                    key = step.new.clone();
+                }
+            }
+            Some((name, above)) => {
+                if *name == key {
+                    out.push(KeyRenaming {
+                        above: above.to_vec(),
+                        old: step.old.clone(),
+                        new: step.new.clone(),
+                    });
+                }
+            }
+        }
+    }
+    out
+}
+
+/// `field` under response key `key`, `selections` below it.
+fn field_under_key(
+    field: &apollo_compiler::executable::Field,
+    key: &Name,
+    selections: Vec<Selection>,
+) -> Selection {
+    let mut copy = field.clone();
+    copy.alias = (*key != copy.name).then(|| key.clone());
+    copy.selection_set.selections = selections;
+    Selection::Field(Node::new(copy))
+}
+
+/// A selection set taken back through the renamings by spelling: each field put back under the key
+/// it was read under ([`read_key`]), and what is below it likewise. This is all that can be said
+/// below a field an entry copies whole, which says nothing of what it holds.
+fn invert_selections(renamings: &[KeyRenaming], source: &[Selection]) -> Vec<Selection> {
+    source
+        .iter()
+        .filter_map(|selection| match selection {
+            Selection::Field(field) => {
+                let key = read_key(renamings, field.response_name());
+                let below = invert_selections(
+                    &renamings_below(renamings, &key),
+                    &field.selection_set.selections,
+                );
+                Some(field_under_key(field, &key, below))
+            }
+            Selection::InlineFragment(fragment) => {
+                let mut copy = (**fragment).clone();
+                copy.selection_set.selections =
+                    invert_selections(renamings, &fragment.selection_set.selections);
+                Some(Selection::InlineFragment(Node::new(copy)))
+            }
+            Selection::FragmentSpread(_) => None,
+        })
+        .collect()
+}
+
+/// One field of an entry as [`invert_through`] reads it: the key it is read under, the key the
+/// renamings send it under ([`sent_key`]), and the renamings reaching below it.
+struct ReadField<'a> {
+    field: &'a apollo_compiler::executable::Field,
+    sent: Name,
+    below: Vec<KeyRenaming>,
+}
+
+/// `source` taken back for a run of an entry's fields, in one pass: each source field one of
+/// `fields` is sent under, put under the key that field reads, what is below taken back likewise
+/// ([`invert_selections`] below a field the entry copies whole), and each source fragment kept once
+/// around them.
+fn taken_back_by(fields: &[ReadField<'_>], source: &[Selection]) -> Vec<Selection> {
+    let mut out = Vec::new();
+    for selection in source {
+        match selection {
+            Selection::Field(source_field) => {
+                for read in fields
+                    .iter()
+                    .filter(|read| read.sent == *source_field.response_name())
+                {
+                    let source_below = &source_field.selection_set.selections;
+                    let entry_below = &read.field.selection_set.selections;
+                    let below = if entry_below.is_empty() {
+                        invert_selections(&read.below, source_below)
+                    } else {
+                        invert_through(&read.below, source_below, entry_below)
+                    };
+                    out.push(field_under_key(
+                        source_field,
+                        read.field.response_name(),
+                        below,
+                    ));
+                }
+            }
+            Selection::InlineFragment(fragment) => out.extend(wrap_non_empty(
+                |selections| {
+                    let mut copy = (**fragment).clone();
+                    copy.selection_set.selections = selections;
+                    Selection::InlineFragment(Node::new(copy))
+                },
+                taken_back_by(fields, &fragment.selection_set.selections),
+            )),
+            Selection::FragmentSpread(_) => {}
+        }
+    }
+    out
+}
+
+/// `source` taken back through the renamings as an entry reads it: for each key the entry reads,
+/// what `source` selects under the key it is sent under ([`sent_key`]), put under the key read,
+/// inside the entry's fragments. Which keys an object holds follows its type, as the router builds
+/// a representation through the fragments that apply to it, so a key is taken back only where the
+/// entry reads it. Below a field the entry copies whole, `source` is taken back by spelling
+/// ([`invert_selections`]).
+///
+/// The model's `KeyRenamings.invertThrough`, run once per run of the entry's fields
+/// ([`taken_back_by`]) rather than once per field, as [`selected_by_one_pass`] runs `selectedBy`:
+/// one key's occurrences keep their source order, and only different keys may interleave
+/// differently.
+fn invert_through(
+    renamings: &[KeyRenaming],
+    source: &[Selection],
+    entry: &[Selection],
+) -> Vec<Selection> {
+    let mut out = Vec::new();
+    let mut rest = entry;
+    while let Some((first, tail)) = rest.split_first() {
+        match first {
+            Selection::Field(_) => {
+                let run = rest
+                    .iter()
+                    .take_while(|selection| matches!(selection, Selection::Field(_)))
+                    .count();
+                let fields: Vec<ReadField<'_>> = rest[..run]
+                    .iter()
+                    .filter_map(|selection| match selection {
+                        Selection::Field(field) => Some(ReadField {
+                            field,
+                            sent: sent_key(renamings, field.response_name()),
+                            below: renamings_below(renamings, field.response_name()),
+                        }),
+                        _ => None,
+                    })
+                    .collect();
+                out.extend(taken_back_by(&fields, source));
+                rest = &rest[run..];
+            }
+            Selection::InlineFragment(fragment) => {
+                out.extend(wrap_non_empty(
+                    |selections| {
+                        Selection::InlineFragment(Node::new(
+                            apollo_compiler::executable::InlineFragment {
+                                type_condition: fragment.type_condition.clone(),
+                                directives: fragment.directives.clone(),
+                                selection_set: selection_set(
+                                    fragment.selection_set.ty.clone(),
+                                    selections,
+                                ),
+                            },
+                        ))
+                    },
+                    invert_through(renamings, source, &fragment.selection_set.selections),
+                ));
+                rest = tail;
+            }
+            Selection::FragmentSpread(_) => rest = tail,
+        }
+    }
+    out
 }
 
 //==================================================================================================
 // The input rewrites
 //==================================================================================================
-
-/// The key path a key renamer renames from, and the one it renames to.
-fn renaming(rewrite: &FetchDataRewrite) -> Option<(KeyPath, KeyPath)> {
-    match rewrite {
-        FetchDataRewrite::KeyRenamer(renamer) => {
-            let from = key_path(&renamer.path);
-            let mut to = from.clone();
-            to.pop();
-            to.push(renamer.rename_key_to.clone());
-            Some((from, to))
-        }
-        FetchDataRewrite::ValueSetter(_) => None,
-    }
-}
 
 /// Whether a key renamer tests the type of an object it reaches, with a `TypenameEquals` or a
 /// type condition on a key or index, renaming for some types and not others. A value setter may:
@@ -470,14 +671,6 @@ pub(super) fn sent_typename(
     Some(typename)
 }
 
-fn renamings(fetch: &FetchNode) -> Vec<(KeyPath, KeyPath)> {
-    fetch
-        .input_rewrites
-        .iter()
-        .filter_map(|rewrite| renaming(rewrite))
-        .collect()
-}
-
 fn display_key_path(path: &[Name]) -> String {
     path.iter().map(Name::as_str).collect::<Vec<_>>().join(".")
 }
@@ -530,20 +723,20 @@ pub(super) fn input_rewrites_well_formed(fetch: &FetchNode) -> Result<(), String
     {
         return Err("an input key renamer tests the type of what it renames".to_string());
     }
-    let renamings = renamings(fetch);
+    let renamings = key_renamings(fetch);
     for one in &renamings {
         for other in &renamings {
-            if other.0.starts_with(&one.0) && one != other {
+            if other.old_path().starts_with(&one.old_path()) && one != other {
                 return Err(format!(
                     "input key renamers rename `{}` and `{}` below it two ways",
-                    display_key_path(&one.0),
-                    display_key_path(&other.0)
+                    display_key_path(&one.old_path()),
+                    display_key_path(&other.old_path())
                 ));
             }
-            if one.0 == other.1 {
+            if one.old_path() == other.new_path() {
                 return Err(format!(
                     "an input key renamer renames `{}`, which another renames to",
-                    display_key_path(&one.0)
+                    display_key_path(&one.old_path())
                 ));
             }
         }
@@ -551,29 +744,99 @@ pub(super) fn input_rewrites_well_formed(fetch: &FetchNode) -> Result<(), String
     Ok(())
 }
 
-/// The object types whose representations may hold the key path `path`: those of each entry that
-/// reads it, listed or, where `allow_copy`, copied.
-fn types_reading(
+/// The object types the fragments around each key of a key path admit at that key's level
+/// ([`admitted_types`]), `None` where none narrows it.
+type KeyPathTypeCondition = Vec<Option<Vec<Name>>>;
+
+/// The type condition of each place an entry selection reads the key path `path`, `guards` the
+/// fragments in force at its first key. Where `allow_copy`, a field copied whole on the way reads
+/// every key path below it, at any type.
+fn entry_key_path_type_conditions(
+    schema: &ValidFederationSchema,
+    allow_copy: bool,
+    guards: &[Name],
+    selection: &requires_selection::Selection,
+    path: &[Name],
+) -> Vec<KeyPathTypeCondition> {
+    match selection {
+        requires_selection::Selection::Field(field) => {
+            let Some((key, rest)) = path.split_first() else {
+                return Vec::new();
+            };
+            if field.alias.as_ref().unwrap_or(&field.name) != key {
+                return Vec::new();
+            }
+            let here = admitted_types(schema, guards);
+            if rest.is_empty() {
+                vec![vec![here]]
+            } else if allow_copy && field.selections.is_empty() {
+                let mut condition = vec![here];
+                condition.extend(rest.iter().map(|_| None));
+                vec![condition]
+            } else {
+                field
+                    .selections
+                    .iter()
+                    .flat_map(|selection| {
+                        entry_key_path_type_conditions(schema, allow_copy, &[], selection, rest)
+                    })
+                    .map(|below| {
+                        let mut condition = vec![here.clone()];
+                        condition.extend(below);
+                        condition
+                    })
+                    .collect()
+            }
+        }
+        requires_selection::Selection::InlineFragment(fragment) => {
+            let mut inner_guards = guards.to_vec();
+            inner_guards.extend(fragment.type_condition.iter().cloned());
+            fragment
+                .selections
+                .iter()
+                .flat_map(|selection| {
+                    entry_key_path_type_conditions(
+                        schema,
+                        allow_copy,
+                        &inner_guards,
+                        selection,
+                        path,
+                    )
+                })
+                .collect()
+        }
+    }
+}
+
+/// The type condition of each place the fetch's entries read the key path `path`
+/// ([`entry_key_path_type_conditions`]): the representations that may hold it.
+fn key_path_type_conditions(
     schema: &ValidFederationSchema,
     fetch: &FetchNode,
     allow_copy: bool,
     path: &[Name],
-) -> Vec<Name> {
+) -> Vec<KeyPathTypeCondition> {
     fetch
         .requires
         .iter()
         .flat_map(|entry| match entry {
-            requires_selection::Selection::InlineFragment(fragment) => {
-                match &fragment.type_condition {
-                    Some(require_type) if reads_path(allow_copy, entry, path) => {
-                        possible_types(schema, require_type)
-                    }
-                    _ => Vec::new(),
-                }
+            requires_selection::Selection::InlineFragment(fragment)
+                if fragment.type_condition.is_some() =>
+            {
+                entry_key_path_type_conditions(schema, allow_copy, &[], entry, path)
             }
-            requires_selection::Selection::Field(_) => Vec::new(),
+            _ => Vec::new(),
         })
         .collect()
+}
+
+/// Whether two key paths through the same objects can be held by one object: whether their type
+/// conditions admit a common object type at every level, `None` admitting every one.
+fn key_path_type_conditions_meet(one: &KeyPathTypeCondition, other: &KeyPathTypeCondition) -> bool {
+    std::iter::zip(one, other).all(|(here, other_here)| match (here, other_here) {
+        (Some(types), Some(other_types)) => types.iter().any(|ty| other_types.contains(ty)),
+        _ => true,
+    })
 }
 
 /// The key paths the input rewrites send under the key path `key`, each with whether it counts as
@@ -583,37 +846,42 @@ fn types_reading(
 fn sent_under(fetch: &FetchNode, key: &[Name]) -> Vec<(KeyPath, bool)> {
     let mut out = vec![(key.to_vec(), false)];
     out.extend(
-        renamings(fetch)
+        key_renamings(fetch)
             .into_iter()
-            .filter(|renamed| renamed.1 == key)
-            .map(|renamed| (renamed.0, true)),
+            .filter(|renamed| renamed.new_path() == key)
+            .map(|renamed| (renamed.old_path(), true)),
     );
     out
 }
 
-/// No object type's representations hold two key paths the input rewrites send under one key, as
-/// fields under one response key must merge. `Err` names the key.
+/// No representation holds two key paths the input rewrites send under one key, as fields under
+/// one response key must merge: no type conditions of the places they are read meet
+/// ([`key_path_type_conditions_meet`]). `Err` names the key.
 pub(super) fn input_rewrites_separated(
     schema: &ValidFederationSchema,
     fetch: &FetchNode,
 ) -> Result<(), String> {
-    for renamed in renamings(fetch) {
-        let sent = sent_under(fetch, &renamed.1);
+    for renamed in key_renamings(fetch) {
+        let sent = sent_under(fetch, &renamed.new_path());
         for one in &sent {
             for other in &sent {
                 if one.0 == other.0 {
                     continue;
                 }
-                let other_types = types_reading(schema, fetch, other.1, &other.0);
-                if let Some(shared) = types_reading(schema, fetch, one.1, &one.0)
-                    .into_iter()
-                    .find(|ty| other_types.contains(ty))
-                {
+                let other_conditions = key_path_type_conditions(schema, fetch, other.1, &other.0);
+                let held_together = key_path_type_conditions(schema, fetch, one.1, &one.0)
+                    .iter()
+                    .any(|condition| {
+                        other_conditions.iter().any(|other_condition| {
+                            key_path_type_conditions_meet(condition, other_condition)
+                        })
+                    });
+                if held_together {
                     return Err(format!(
-                        "input key renamers send `{}` and `{}` under one key `{}` for `{shared}`",
+                        "input key renamers send `{}` and `{}` under one key `{}` in one representation",
                         display_key_path(&one.0),
                         display_key_path(&other.0),
-                        display_key_path(&renamed.1)
+                        display_key_path(&renamed.new_path())
                     ));
                 }
             }
