@@ -166,14 +166,9 @@ async fn call_http(
         );
     }
 
-    // By this point, the selectors for on_request have already run, so we store
-    // the request body size in the context extensions so that any on_response selectors
-    // can access it.
-    if let Some(body_len) = request.size_hint().exact() {
-        context.extensions().with_lock(|lock| {
-            lock.insert::<SubgraphRequestBodySize>(SubgraphRequestBodySize(body_len));
-        });
-    }
+    // By this point, the selectors for on_request have already run, so the request body size
+    // is placed on this request's own response, where the on_response selectors read it.
+    let request_body_size = request.size_hint().exact();
 
     // Perform the actual fetch. If this fails then we didn't manage to make the call at all, so we can't do anything with it.
     let fetch_result: Result<_, FetchError> = async {
@@ -222,19 +217,45 @@ async fn call_http(
     .instrument(subgraph_req_span)
     .await;
 
-    let (parts, body) = match fetch_result {
+    let (mut parts, body) = match fetch_result {
         Ok(resp) => resp,
         Err(err) => {
-            return Ok(SubgraphResponse::builder()
+            let mut response = SubgraphResponse::builder()
                 .subgraph_name(service_name.to_string())
                 .error(err.to_graphql_error(None))
                 .status_code(StatusCode::INTERNAL_SERVER_ERROR)
                 .context(context)
                 .extensions(Object::default())
                 .id(subgraph_request_id)
-                .build());
+                .build();
+            if let Some(size) = request_body_size {
+                response
+                    .response
+                    .extensions_mut()
+                    .insert(SubgraphRequestBodySize(size));
+            }
+            return Ok(response);
         }
     };
+
+    // This request's own body sizes, on its response, where telemetry's on_response selectors
+    // read them. Another subgraph request of the same client request carries its own.
+    let response_body_size = match &body {
+        Ok(_) => parts
+            .extensions
+            .get::<WireByteCount>()
+            .map(|c| c.0.load(Relaxed)),
+        Err(_) => None,
+    };
+    let place_body_sizes = |extensions: &mut http::Extensions| {
+        if let Some(size) = request_body_size {
+            extensions.insert(SubgraphRequestBodySize(size));
+        }
+        if let Some(size) = response_body_size {
+            extensions.insert(SubgraphResponseBodySize(size));
+        }
+    };
+    place_body_sizes(&mut parts.extensions);
 
     let subgraph_response_event = context
         .extensions()
@@ -247,6 +268,9 @@ async fn call_http(
             .version(parts.version);
         if let Some(headers) = resp_builder.headers_mut() {
             *headers = parts.headers.clone();
+        }
+        if let Some(extensions) = resp_builder.extensions_mut() {
+            place_body_sizes(extensions);
         }
         let subgraph_response = SubgraphResponse::new_from_response(
             resp_builder
@@ -297,17 +321,6 @@ async fn call_http(
                 &format!("Raw response from subgraph {service_name:?} received"),
             );
         }
-    }
-
-    if body.is_ok()
-        && let Some(wire_size) = parts
-            .extensions
-            .get::<WireByteCount>()
-            .map(|c| c.0.load(Relaxed))
-    {
-        context.extensions().with_lock(|lock| {
-            lock.insert::<SubgraphResponseBodySize>(SubgraphResponseBodySize(wire_size));
-        });
     }
 
     let graphql_response = http_response_to_graphql_response(service_name, body, &parts);
@@ -385,7 +398,7 @@ mod tests {
     use crate::graphql::Request;
     use crate::graphql::Response;
     use crate::metrics::FutureMetricsExt;
-    use crate::plugins::limits::response_size_limit::SubgraphResponseSizeLimit;
+    use crate::plugins::limits::response_size_limit::SubgraphResponseSizeLimitLayer;
     use crate::plugins::subscription::CallbackMode;
     use crate::plugins::subscription::HeartbeatInterval;
     use crate::plugins::subscription::SUBSCRIPTION_CALLBACK_HMAC_KEY;
@@ -1060,13 +1073,13 @@ mod tests {
         tokio::task::spawn(emulate_subgraph_large_response(listener));
         let subgraph_service = with_content_negotiation_layer(SubgraphService::new(
             "test",
-            test_http_client_service("test"),
+            ServiceBuilder::new()
+                .layer(SubgraphResponseSizeLimitLayer::new("test", 10))
+                .service(test_http_client_service("test"))
+                .boxed_clone(),
         ));
 
         let context = Context::new();
-        context
-            .extensions()
-            .with_lock(|e| e.insert(SubgraphResponseSizeLimit(10)));
 
         let url = Uri::from_str(&format!("http://{socket_addr}")).unwrap();
         let response = subgraph_service
@@ -1154,14 +1167,14 @@ mod tests {
         tokio::task::spawn(emulate_subgraph_application_json_response(listener));
         let subgraph_service = with_content_negotiation_layer(SubgraphService::new(
             "test",
-            test_http_client_service("test"),
+            ServiceBuilder::new()
+                // Limit of 1000 bytes — well above {"data": null} (14 bytes)
+                .layer(SubgraphResponseSizeLimitLayer::new("test", 1000))
+                .service(test_http_client_service("test"))
+                .boxed_clone(),
         ));
 
         let context = Context::new();
-        // Limit of 1000 bytes — well above {"data": null} (14 bytes)
-        context
-            .extensions()
-            .with_lock(|e| e.insert(SubgraphResponseSizeLimit(1000)));
 
         let url = Uri::from_str(&format!("http://{socket_addr}")).unwrap();
         let response = subgraph_service

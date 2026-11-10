@@ -29,10 +29,9 @@ use crate::plugin::PluginPrivate;
 use crate::plugins::limits::layer::RequestBodyLimitLayer;
 use crate::plugins::limits::layer::RequestSizeLimitError;
 use crate::plugins::limits::response_size_limit::SubgraphResponseSizeLimit;
-use crate::services::SubgraphRequest;
+use crate::plugins::limits::response_size_limit::SubgraphResponseSizeLimitLayer;
 use crate::services::connector;
 use crate::services::router;
-use crate::services::subgraph;
 
 /// Configuration for operation limits, parser limits, HTTP limits, etc.
 #[apollo_configuration::configuration]
@@ -233,8 +232,24 @@ impl Config {
     }
 }
 
-struct LimitsPlugin {
+pub(crate) struct LimitsPlugin {
     config: Config,
+}
+
+impl LimitsPlugin {
+    /// The layer that reads subgraph `name`'s responses under its response size limit, its own
+    /// `http_max_response_size` or else `all`'s, where one is configured. The subgraph stage
+    /// places it on the subgraph's HTTP client stack.
+    pub(crate) fn subgraph_response_size_limit_layer(
+        &self,
+        name: &str,
+    ) -> Option<SubgraphResponseSizeLimitLayer> {
+        self.config
+            .subgraph_response_size_limit(name)
+            .map(|SubgraphResponseSizeLimit(limit)| {
+                SubgraphResponseSizeLimitLayer::new(name, limit)
+            })
+    }
 }
 
 #[async_trait]
@@ -266,23 +281,6 @@ impl PluginPrivate for LimitsPlugin {
             .map_response(Into::into)
             .service(service)
             .boxed_clone()
-    }
-
-    fn subgraph_service(
-        &self,
-        name: &str,
-        service: subgraph::BoxCloneService,
-    ) -> subgraph::BoxCloneService {
-        match self.config.subgraph_response_size_limit(name) {
-            None => service,
-            Some(limit) => ServiceBuilder::new()
-                .map_request(move |req: SubgraphRequest| {
-                    req.context.extensions().with_lock(|e| e.insert(limit));
-                    req
-                })
-                .service(service)
-                .boxed_clone(),
-        }
     }
 
     fn connector_request_service(
@@ -401,7 +399,6 @@ mod test {
     use crate::plugin::PluginPrivate;
     use crate::plugins::limits::LimitsPlugin;
     use crate::plugins::limits::layer::BodyLimitControl;
-    use crate::plugins::limits::response_size_limit::SubgraphResponseSizeLimit;
     use crate::plugins::test::PluginTestHarness;
     use crate::services::connector;
     use crate::services::connector::request_service::TransportOutcome;
@@ -1029,67 +1026,5 @@ mod test {
 
         assert!(result.is_ok());
         crate::plugin::test::await_mock_driver(driver).await;
-    }
-
-    // --- LimitsPlugin::subgraph_service ---
-
-    #[tokio::test]
-    async fn subgraph_service_sets_limit_on_context() {
-        let plugin: PluginTestHarness<LimitsPlugin> = PluginTestHarness::builder()
-            .config("limits:\n  subgraph:\n    all:\n      http_max_response_size: 1024b")
-            .build()
-            .await
-            .expect("test harness");
-
-        let result = plugin
-            .subgraph_service(
-                "products",
-                |req: crate::services::SubgraphRequest| async move {
-                    let limit = req
-                        .context
-                        .extensions()
-                        .with_lock(|e| e.get::<SubgraphResponseSizeLimit>().copied());
-                    assert_eq!(
-                        limit.map(|l| l.0),
-                        Some(1024),
-                        "limit should be set on context"
-                    );
-                    Ok(crate::services::SubgraphResponse::fake_builder()
-                        .context(req.context)
-                        .build())
-                },
-            )
-            .call_default()
-            .await;
-
-        assert!(result.is_ok());
-    }
-
-    #[tokio::test]
-    async fn subgraph_service_no_limit_does_not_set_extension() {
-        let plugin: PluginTestHarness<LimitsPlugin> = PluginTestHarness::builder()
-            .config(include_str!("fixtures/content_length_limit.router.yaml"))
-            .build()
-            .await
-            .expect("test harness");
-
-        let result = plugin
-            .subgraph_service(
-                "products",
-                |req: crate::services::SubgraphRequest| async move {
-                    let limit = req
-                        .context
-                        .extensions()
-                        .with_lock(|e| e.get::<SubgraphResponseSizeLimit>().copied());
-                    assert!(limit.is_none(), "no limit should be set on context");
-                    Ok(crate::services::SubgraphResponse::fake_builder()
-                        .context(req.context)
-                        .build())
-                },
-            )
-            .call_default()
-            .await;
-
-        assert!(result.is_ok());
     }
 }

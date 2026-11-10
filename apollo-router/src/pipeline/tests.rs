@@ -15,6 +15,7 @@ use crate::uplink::license_enforcement::LicenseState;
 mod plugin_instantiation;
 pub(crate) mod stage_stack;
 mod subgraph_apq;
+mod subgraph_stack;
 mod traffic_shaping;
 
 /// Subgraph names in `testdata/supergraph.graphql`, sorted.

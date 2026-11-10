@@ -28,7 +28,7 @@ use crate::services::subgraph;
 
 /// The plugins both stages require, in the order the router registers them, then each of
 /// `plugins`, built from its config and keyed by full name such as `apollo.traffic_shaping`.
-async fn stage_plugins(plugins: &[(&str, serde_json::Value)]) -> Plugins {
+pub(crate) async fn stage_plugins(plugins: &[(&str, serde_json::Value)]) -> Plugins {
     let required = [
         ("apollo.include_subgraph_errors", serde_json::json!({})),
         ("apollo.headers", serde_json::json!({})),

@@ -3081,6 +3081,7 @@ mod tests {
                         let mut router_instruments = None;
                         let mut supergraph_instruments = None;
                         let mut subgraph_instruments = None;
+                        let mut subgraph_request_body_size = None;
                         let mut connector_instruments = None;
                         let mut apollo_subgraph_instruments = None;
                         let mut apollo_connector_instruments = None;
@@ -3231,10 +3232,10 @@ mod tests {
                                     let body =
                                         serde_json::to_string(request.subgraph_request.body())
                                             .expect("failed to serialize subgraph request body");
-                                    let body_size = body.len();
-                                    request.context.extensions().with_lock(|lock| {
-                                        lock.insert(SubgraphRequestBodySize(body_size as u64));
-                                    });
+                                    // The subgraph service places the request's body size on
+                                    // its response.
+                                    subgraph_request_body_size =
+                                        Some(SubgraphRequestBodySize(body.len() as u64));
 
                                     subgraph_instruments.as_mut().unwrap().on_request(&request);
                                     apollo_subgraph_instruments
@@ -3251,7 +3252,7 @@ mod tests {
                                     errors,
                                     headers,
                                 } => {
-                                    let response =
+                                    let mut response =
                                         crate::services::subgraph::Response::fake2_builder()
                                             .context(context.clone())
                                             .and_subgraph_name(subgraph_name)
@@ -3267,10 +3268,11 @@ mod tests {
 
                                     let body = serde_json::to_string(response.response.body())
                                         .expect("failed to serialize subgraph response body");
-                                    let body_size = body.len();
-                                    response.context.extensions().with_lock(|lock| {
-                                        lock.insert(SubgraphResponseBodySize(body_size as u64));
-                                    });
+                                    let extensions = response.response.extensions_mut();
+                                    extensions.insert(SubgraphResponseBodySize(body.len() as u64));
+                                    if let Some(size) = subgraph_request_body_size.take() {
+                                        extensions.insert(size);
+                                    }
 
                                     subgraph_instruments
                                         .take()

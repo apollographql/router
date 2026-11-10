@@ -35,6 +35,7 @@ use crate::plugins::connectors::request_limit::RequestLimitLayer;
 use crate::plugins::connectors::tracing::connect_spec_version_instrument;
 use crate::plugins::headers::Headers;
 use crate::plugins::include_subgraph_errors::IncludeSubgraphErrors;
+use crate::plugins::limits::LimitsPlugin;
 use crate::plugins::limits::operation_limits_layer::EnforceOperationLimitsLayer;
 use crate::plugins::limits::response_size_limit::SubgraphResponseSizeLimitLayer;
 use crate::plugins::subscription::APOLLO_SUBSCRIPTION_PLUGIN;
@@ -144,19 +145,36 @@ pub(crate) fn build_query_planner_service(
     .boxed_clone()
 }
 
-/// Builds the HTTP client service stack for one target around the [`HttpClientService`]
-/// built from `inputs`.
-///
-/// `name` is the subgraph name — for a connector source's client, the name of the
-/// subgraph that owns the source — and is what the plugin hook receives.
+/// Builds the HTTP client service stack for one subgraph around the [`HttpClientService`]
+/// built from `inputs`, its responses read under the subgraph's response size limit where the
+/// limits plugin configures one.
 pub(crate) fn build_http_client_service(
     name: &str,
     inputs: HttpClientInputs,
     plugins: Arc<Plugins>,
 ) -> http::BoxCloneService {
+    let response_size_limit = plugins
+        .values()
+        .find_map(|plugin| plugin.as_any().downcast_ref::<LimitsPlugin>())
+        .and_then(|limits| limits.subgraph_response_size_limit_layer(name));
+    http_client_service(name, inputs, plugins, response_size_limit)
+}
+
+/// The HTTP client service stack around the [`HttpClientService`] built from `inputs`, with the
+/// subgraph response size layer where one is given. A connector source's client takes none: the
+/// limits plugin carries a connector source's own limit on its request.
+///
+/// `name` is the subgraph name — for a connector source's client, the name of the
+/// subgraph that owns the source — and is what the plugin hook receives.
+fn http_client_service(
+    name: &str,
+    inputs: HttpClientInputs,
+    plugins: Arc<Plugins>,
+    response_size_limit: Option<SubgraphResponseSizeLimitLayer>,
+) -> http::BoxCloneService {
     ServiceBuilder::new()
         .layer(JoinBatchRequestsLayer::new(name))
-        .layer(SubgraphResponseSizeLimitLayer::new(name))
+        .option_layer(response_size_limit)
         .apply_plugin_layer(&plugins, Telemetry::overhead_subgraph_request_timing_layer)
         .apply_plugin_layer(&plugins, Telemetry::instrument_http_client_layer)
         .apply_plugin_layer(&plugins, Telemetry::custom_instrument_http_client_layer)
@@ -193,7 +211,7 @@ pub(crate) fn build_http_services(
             // source_config_key() format is "{subgraph_name}.{source_or_synthetic}"; the
             // http_client_service plugin hook receives the subgraph name, not the source key.
             let subgraph_name = source.split('.').next().unwrap_or(&source);
-            let service = build_http_client_service(subgraph_name, inputs, plugins.clone());
+            let service = http_client_service(subgraph_name, inputs, plugins.clone(), None);
             (source, service)
         })
         .collect();

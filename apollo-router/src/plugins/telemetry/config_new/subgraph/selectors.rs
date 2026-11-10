@@ -51,7 +51,13 @@ pub(crate) enum SubgraphQuery {
     String,
 }
 
+/// The size of a subgraph request's body, which the subgraph service places in the HTTP
+/// extensions of that request's response.
+#[derive(Clone, Copy)]
 pub(crate) struct SubgraphRequestBodySize(pub u64);
+/// The size of a subgraph response's body as it arrived, before decompression, which the subgraph
+/// service places in the response's HTTP extensions.
+#[derive(Clone, Copy)]
 pub(crate) struct SubgraphResponseBodySize(pub u64);
 
 #[apollo_configuration::configuration]
@@ -487,10 +493,10 @@ impl Selector for SubgraphSelector {
                 subgraph_request_body_size,
                 ..
             } if *subgraph_request_body_size => response
-                .context
+                .response
                 .extensions()
-                .with_lock(|lock| lock.get::<SubgraphRequestBodySize>().map(|bs| bs.0))
-                .map(|size| opentelemetry::Value::I64(size as i64)),
+                .get::<SubgraphRequestBodySize>()
+                .map(|size| opentelemetry::Value::I64(size.0 as i64)),
             SubgraphSelector::SubgraphResponseHeader {
                 subgraph_response_header,
                 default,
@@ -531,10 +537,10 @@ impl Selector for SubgraphSelector {
                 subgraph_response_body_size,
                 ..
             } if *subgraph_response_body_size => response
-                .context
+                .response
                 .extensions()
-                .with_lock(|lock| lock.get::<SubgraphResponseBodySize>().map(|bs| bs.0))
-                .map(|size| opentelemetry::Value::I64(size as i64)),
+                .get::<SubgraphResponseBodySize>()
+                .map(|size| opentelemetry::Value::I64(size.0 as i64)),
             SubgraphSelector::SubgraphOperationKind { .. } => response
                 .context
                 .get::<_, String>(OPERATION_KIND)
@@ -1009,20 +1015,16 @@ mod test {
             subgraph_request_body_size: true,
         };
 
-        let context = crate::context::Context::new();
-        context
-            .extensions()
-            .with_lock(|l| l.insert(SubgraphRequestBodySize(100)));
+        let mut response = crate::services::SubgraphResponse::fake2_builder()
+            .build()
+            .unwrap();
+        response
+            .response
+            .extensions_mut()
+            .insert(SubgraphRequestBodySize(100));
 
         assert_eq!(
-            selector
-                .on_response(
-                    &crate::services::SubgraphResponse::fake2_builder()
-                        .context(context)
-                        .build()
-                        .unwrap()
-                )
-                .unwrap(),
+            selector.on_response(&response).unwrap(),
             opentelemetry::Value::I64(100)
         );
     }
