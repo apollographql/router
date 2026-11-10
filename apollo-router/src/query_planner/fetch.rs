@@ -35,7 +35,7 @@ use crate::query_planner::HashedSubgraphSchemas;
 use crate::query_planner::SubgraphSchemas;
 use crate::services::SubgraphRequest;
 use crate::services::fetch::ErrorMapping;
-use crate::services::subgraph::BoxCloneService;
+use crate::services::subgraph::service::PooledSubgraphService;
 use crate::spec::Query;
 use crate::spec::QueryHash;
 use crate::spec::Schema;
@@ -258,7 +258,7 @@ impl FetchNode {
     #[allow(clippy::too_many_arguments)]
     pub(crate) async fn subgraph_fetch(
         &self,
-        service: BoxCloneService,
+        service: PooledSubgraphService,
         subgraph_request: SubgraphRequest,
         current_dir: &Path,
         schema: &Schema,

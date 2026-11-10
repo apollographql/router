@@ -26,7 +26,7 @@ use crate::services::connector::request_service;
 use crate::services::http::HttpRequest;
 use crate::services::http::HttpResponse;
 use crate::services::router;
-use crate::services::subgraph;
+use crate::services::subgraph::service::PooledSubgraphService;
 
 const SUBGRAPH: &str = "test";
 /// A connector source key, `<subgraph name>.<source name>`, matching
@@ -40,9 +40,7 @@ async fn subgraph_services(traffic_shaping: serde_json::Value) -> (SubgraphServi
 }
 
 /// Like [`subgraph_services`], for one clone of the test subgraph's service.
-async fn subgraph_service(
-    traffic_shaping: serde_json::Value,
-) -> (subgraph::BoxCloneService, Handle) {
+async fn subgraph_service(traffic_shaping: serde_json::Value) -> (PooledSubgraphService, Handle) {
     let (services, handle) = subgraph_services(traffic_shaping).await;
     (
         services.get(SUBGRAPH).expect("the subgraph has a service"),
@@ -70,7 +68,7 @@ fn rate_limit_of_one_per_100ms() -> serde_json::Value {
     } })
 }
 
-async fn send(service: &mut subgraph::BoxCloneService) -> SubgraphResponse {
+async fn send(service: &mut PooledSubgraphService) -> SubgraphResponse {
     service
         .ready()
         .await

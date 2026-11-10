@@ -27,6 +27,7 @@ use crate::introspection::IntrospectionService;
 use crate::layers::DEFAULT_BUFFER_SIZE;
 use crate::layers::InternalServiceBuilderExt as _;
 use crate::layers::ServiceBuilderExt as _;
+use crate::layers::pool::Pooled;
 use crate::layers::unconstrained_buffer::UnconstrainedBuffer;
 use crate::plugins::authorization::AuthorizationPlugin;
 use crate::plugins::authorization::extract_authorization_checks_layer::ExtractAuthorizationChecksLayer;
@@ -84,7 +85,7 @@ use crate::services::router::parse_query::ParseQueryLayer;
 use crate::services::router::service::DisplayRouterRequestLayer;
 use crate::services::router::service::RouterToSupergraphRequestLayer;
 use crate::services::router::tower_compat::APQCachingLayer;
-use crate::services::subgraph::service::BufferedSubgraphService;
+use crate::services::subgraph::service::PooledSubgraphService;
 use crate::services::supergraph;
 use crate::services::supergraph::service::SupergraphService;
 use crate::spec::Schema;
@@ -224,15 +225,15 @@ pub(crate) fn build_subgraph_service(
     http_service: http::BoxCloneService,
     plugins: &Arc<Plugins>,
     configuration: &Configuration,
-) -> BufferedSubgraphService {
+) -> PooledSubgraphService {
     let subscription_config = subscription_plugin_config(plugins).map(Arc::new);
     let apq_enabled = configuration.apq.subgraph.get(name).enabled;
 
     // The stack is boxed at three points, so no layer wraps a type that names the whole stack
     // beneath it; [`box_layer`] explains why that matters. The trade-off is one boxed future
-    // per box on every fetch. The outermost box sits *inside* the per-subgraph buffer, as in
-    // [`build_connector_request_services`], so [`SubgraphServices::get`], which runs once per
-    // fetch node per request, only adds the box that erases that buffer.
+    // per box on every fetch. The outermost box is what the pool holds copies of, so
+    // [`SubgraphServices::get`], which runs once per fetch node per request, hands out the pool's
+    // handle as it is.
     let service = ServiceBuilder::new()
         .layer(box_clone_layer())
         .apply_required_plugin_layer(plugins, |p: &IncludeSubgraphErrors| {
@@ -290,9 +291,10 @@ pub(crate) fn build_subgraph_service(
         .layer(content_negotiation::SubgraphContentNegotiationLayer::default())
         .service(SubgraphService::new(name, http_service));
 
-    // We apply the buffered() here separately so it works on an inner BoxCloneService, which makes
-    // the type easier to name
-    ServiceBuilder::new().buffered().service(service)
+    // Every subgraph request takes a copy of the stack from the pool, readies and calls it on its
+    // own task, and returns it; the bound is the one the buffer this pool replaced held over the
+    // requests queued for its worker.
+    Pooled::bounded(service, DEFAULT_BUFFER_SIZE)
 }
 
 /// Builds the full service stack for every subgraph, keyed by subgraph name.

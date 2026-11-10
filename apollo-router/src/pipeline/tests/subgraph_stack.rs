@@ -1,11 +1,17 @@
-//! A subgraph's service stack as the subgraph stage builds it, over a real HTTP client and a local
-//! server: what each subgraph request reads of its own subgraph's configuration.
+//! A subgraph's service stack as the subgraph stage builds it: the tasks and copies a subgraph
+//! request meets, and, over a real HTTP client and a local server, what each subgraph request reads
+//! of its own subgraph's configuration.
 
 use std::sync::Arc;
+use std::sync::atomic::AtomicUsize;
+use std::sync::atomic::Ordering;
+use std::task::Poll;
 
 use http::header::CONTENT_TYPE;
 use opentelemetry::Value;
 use serde_json::json;
+use tower::BoxError;
+use tower::Service;
 use tower::ServiceExt;
 
 use crate::Configuration;
@@ -20,9 +26,74 @@ use crate::plugins::traffic_shaping::APOLLO_TRAFFIC_SHAPING;
 use crate::services::Plugins;
 use crate::services::SubgraphRequest;
 use crate::services::SubgraphResponse;
+use crate::services::http::HttpRequest;
+use crate::services::http::HttpResponse;
 use crate::services::http::service::DnsResolverCache;
 use crate::services::http::service::HttpClientInputs;
-use crate::services::subgraph::service::BufferedSubgraphService;
+use crate::services::subgraph::service::PooledSubgraphService;
+
+/// An HTTP client standing in for a subgraph: it answers every request with an empty GraphQL
+/// response, and counts the clones made of it.
+#[derive(Default)]
+struct CountedClient {
+    clones: Arc<AtomicUsize>,
+}
+
+impl Clone for CountedClient {
+    fn clone(&self) -> Self {
+        self.clones.fetch_add(1, Ordering::Relaxed);
+        Self {
+            clones: self.clones.clone(),
+        }
+    }
+}
+
+impl Service<HttpRequest> for CountedClient {
+    type Response = HttpResponse;
+    type Error = BoxError;
+    type Future = std::future::Ready<Result<HttpResponse, BoxError>>;
+
+    fn poll_ready(&mut self, _: &mut std::task::Context<'_>) -> Poll<Result<(), Self::Error>> {
+        Poll::Ready(Ok(()))
+    }
+
+    fn call(&mut self, request: HttpRequest) -> Self::Future {
+        std::future::ready(Ok(HttpResponse {
+            http_response: http::Response::builder()
+                .header(CONTENT_TYPE, "application/json")
+                .body(crate::services::router::body::from_bytes(r#"{"data":{}}"#))
+                .expect("a response"),
+            context: request.context,
+        }))
+    }
+}
+
+/// The worker tasks building subgraph `name`'s stack over `client` spawns.
+fn workers_spawned_building(name: &str, client: CountedClient, plugins: &Arc<Plugins>) -> usize {
+    let metrics = tokio::runtime::Handle::current().metrics();
+    let tasks = metrics.num_alive_tasks();
+    let _stack = build_subgraph_service(
+        name,
+        client.boxed_clone(),
+        plugins,
+        &Configuration::default(),
+    );
+    metrics.num_alive_tasks() - tasks
+}
+
+/// A subgraph's stack runs no worker task of its own: every subgraph request readies and calls it
+/// on the request's own task. With traffic shaping configured, building the stack spawns only the
+/// two buffers traffic shaping places beneath it, for its admission and its backpressure.
+#[tokio::test]
+async fn a_subgraph_stack_runs_no_worker_task_of_its_own() {
+    let plugins = Arc::new(stage_plugins(&[(APOLLO_TRAFFIC_SHAPING, json!({ "all": {} }))]).await);
+
+    assert_eq!(
+        workers_spawned_building("s", CountedClient::default(), &plugins),
+        2,
+        "the worker tasks of a shaped subgraph's stack"
+    );
+}
 
 /// Serves `routes`, each a path answered with a fixed `application/json` body, on a local port, and
 /// returns the server's address.
@@ -46,7 +117,7 @@ async fn serve(routes: &[(&str, String)]) -> std::net::SocketAddr {
 }
 
 /// The stack the subgraph stage builds for subgraph `name` over a real HTTP client.
-fn subgraph_stack(name: &str, plugins: &Arc<Plugins>) -> BufferedSubgraphService {
+fn subgraph_stack(name: &str, plugins: &Arc<Plugins>) -> PooledSubgraphService {
     let configuration = Configuration::default();
     let inputs = HttpClientInputs::for_subgraph(
         name,

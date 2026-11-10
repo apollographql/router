@@ -29,7 +29,7 @@ use crate::configuration::subgraph::SubgraphConfiguration;
 use crate::graphql;
 use crate::json_ext::Path;
 use crate::json_ext::PathElement;
-use crate::layers::unconstrained_buffer::UnconstrainedBuffer;
+use crate::layers::pool::Pooled;
 use crate::plugin::test::MockSubgraph;
 use crate::query_planner;
 use crate::query_planner::fetch::FetchNode;
@@ -163,7 +163,7 @@ fn assert_response_diagnostics(
     );
 }
 
-/// Bare mock services keyed by subgraph name, buffered like the production stack but
+/// Bare mock services keyed by subgraph name, pooled like the production stack but
 /// without its layers.
 fn subgraph_services(graphs: Vec<(String, subgraph::BoxCloneService)>) -> SubgraphServices {
     SubgraphServices {
@@ -173,7 +173,7 @@ fn subgraph_services(graphs: Vec<(String, subgraph::BoxCloneService)>) -> Subgra
                 .map(|(name, service)| {
                     (
                         name,
-                        UnconstrainedBuffer::new(service, crate::layers::DEFAULT_BUFFER_SIZE),
+                        Pooled::bounded(service, crate::layers::DEFAULT_BUFFER_SIZE),
                     )
                 })
                 .collect(),

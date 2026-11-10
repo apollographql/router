@@ -123,6 +123,7 @@ async fn subgraph_stack(
     services
         .get("products")
         .expect("the subgraph has a service")
+        .boxed_clone()
 }
 
 /// The connector counterpart of [`subgraph_stack`], for source `products.api`. The mock is the
