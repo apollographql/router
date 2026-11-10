@@ -1,0 +1,8 @@
+{
+  companies {
+    name
+    employees {
+      salary
+    }
+  }
+}

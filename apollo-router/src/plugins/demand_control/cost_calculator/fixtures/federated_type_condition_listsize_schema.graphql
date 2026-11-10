@@ -1,0 +1,62 @@
+schema
+  @link(url: "https://specs.apollo.dev/link/v1.0")
+  @link(url: "https://specs.apollo.dev/join/v0.3", for: EXECUTION)
+  @link(url: "https://specs.apollo.dev/cost/v0.1", import: ["@listSize"])
+{
+  query: Query
+}
+
+directive @join__enumValue(graph: join__Graph!) repeatable on ENUM_VALUE
+directive @join__field(graph: join__Graph, requires: join__FieldSet, provides: join__FieldSet, type: String, external: Boolean, override: String, usedOverridden: Boolean) repeatable on FIELD_DEFINITION | INPUT_FIELD_DEFINITION
+directive @join__graph(name: String!, url: String!) on ENUM_VALUE
+directive @join__implements(graph: join__Graph!, interface: String!) repeatable on OBJECT | INTERFACE
+directive @join__type(graph: join__Graph!, key: join__FieldSet, extension: Boolean! = false, resolvable: Boolean! = true, isInterfaceObject: Boolean! = false) repeatable on OBJECT | INTERFACE | UNION | ENUM | INPUT_OBJECT | SCALAR
+directive @join__unionMember(graph: join__Graph!, member: String!) repeatable on UNION
+directive @link(url: String, as: String, for: link__Purpose, import: [link__Import]) repeatable on SCHEMA
+directive @listSize(assumedSize: Int, slicingArguments: [String!], sizedFields: [String!], requireOneSlicingArgument: Boolean = true) on FIELD_DEFINITION
+
+scalar join__FieldSet
+scalar link__Import
+
+enum link__Purpose {
+  SECURITY
+  EXECUTION
+}
+
+enum join__Graph {
+  ANIMALS @join__graph(name: "animals", url: "http://localhost:4001")
+}
+
+type Query
+  @join__type(graph: ANIMALS)
+{
+  animal: Animal @join__field(graph: ANIMALS)
+}
+
+interface Animal
+  @join__type(graph: ANIMALS)
+{
+  id: ID!
+}
+
+type Cat implements Animal
+  @join__type(graph: ANIMALS)
+  @join__implements(graph: ANIMALS, interface: "Animal")
+{
+  id: ID!
+  toys: [Toy] @join__field(graph: ANIMALS) @listSize(assumedSize: 3)
+}
+
+type Dog implements Animal
+  @join__type(graph: ANIMALS)
+  @join__implements(graph: ANIMALS, interface: "Animal")
+{
+  id: ID!
+  toys: [Toy] @join__field(graph: ANIMALS) @listSize(assumedSize: 7)
+}
+
+type Toy
+  @join__type(graph: ANIMALS)
+{
+  id: ID!
+}
