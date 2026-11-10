@@ -21,6 +21,7 @@ use crate::plugins::telemetry::config_new::instruments::CustomHistogram;
 use crate::plugins::telemetry::config_new::instruments::CustomHistogramInner;
 use crate::plugins::telemetry::config_new::instruments::CustomInstruments;
 use crate::plugins::telemetry::config_new::instruments::DefaultedStandardInstrument;
+use crate::plugins::telemetry::config_new::instruments::DurationUnit;
 use crate::plugins::telemetry::config_new::instruments::HTTP_CLIENT_REQUEST_BODY_SIZE_METRIC;
 use crate::plugins::telemetry::config_new::instruments::HTTP_CLIENT_REQUEST_DURATION_METRIC;
 use crate::plugins::telemetry::config_new::instruments::HTTP_CLIENT_RESPONSE_BODY_SIZE_METRIC;
@@ -120,7 +121,7 @@ impl ConnectorInstruments {
                     };
                     CustomHistogram {
                         inner: Mutex::new(CustomHistogramInner {
-                            increment: Increment::Duration(Instant::now(), "s".to_string()),
+                            increment: Increment::Duration(Instant::now(), DurationUnit::Seconds),
                             condition: Condition::True,
                             histogram: Some(static_instruments
                                 .get(HTTP_CLIENT_REQUEST_DURATION_METRIC)

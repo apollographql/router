@@ -309,6 +309,36 @@ where
     with_explicit_memory_tracking(stats, f)
 }
 
+/// The bytes `service` allocates per call over `calls` calls, each a request `request` makes,
+/// its response handed to `finish` before the next call, after one call that allocates what is
+/// built on first use. The requests are made before the calls are counted.
+#[cfg(all(feature = "global-allocator", not(feature = "dhat-heap"), unix, test))]
+pub(crate) fn bytes_per_call<S, Request>(
+    mut service: S,
+    request: impl Fn() -> Request,
+    finish: impl Fn(S::Response),
+    calls: usize,
+) -> usize
+where
+    S: tower::Service<Request>,
+    S::Error: std::fmt::Debug,
+{
+    use tower::ServiceExt as _;
+
+    let mut call = |request| {
+        futures::executor::block_on(async { service.ready().await?.call(request).await })
+            .expect("a response")
+    };
+    finish(call(request()));
+    let requests: Vec<Request> = (0..calls).map(|_| request()).collect();
+    with_memory_tracking("calls", || {
+        for request in requests {
+            finish(call(request));
+        }
+        current().expect("a tracked context").bytes_allocated()
+    }) / calls
+}
+
 /// Run a synchronous closure with memory tracking using an explicit parent.
 /// Creates a child context with the given name that tracks to the provided parent.
 pub(crate) fn with_parented_memory_tracking<F, R>(

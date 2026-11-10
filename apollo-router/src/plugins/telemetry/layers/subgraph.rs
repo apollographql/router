@@ -153,9 +153,16 @@ where
     fn layer(&self, inner: S) -> Self::Service {
         let req_fn_config = self.config.clone();
         let res_fn_config = self.config.clone();
-        let static_subgraph_instruments = self.static_subgraph_instruments.clone();
-        let static_apollo_subgraph_instruments = self.static_apollo_subgraph_instruments.clone();
-        let static_cache_instruments = self.static_cache_instruments.clone();
+        // the instrument sets, built once for the subgraph's stack and started per request
+        let instruments = &self.config.instrumentation.instruments;
+        let sets = Arc::new((
+            instruments.subgraph_instrument_set(&self.static_subgraph_instruments),
+            instruments.apollo_subgraph_instrument_set(
+                &self.static_apollo_subgraph_instruments,
+                self.config.apollo.subgraph_metrics,
+            ),
+            instruments.cache_instrument_set(&self.static_cache_instruments),
+        ));
 
         ServiceBuilder::new()
             .instrument(move |req: &SubgraphRequest| {
@@ -169,28 +176,18 @@ where
                         .subgraph
                         .attributes
                         .on_request(sub_request);
-                    let custom_instruments = req_fn_config
-                        .instrumentation
-                        .instruments
-                        .new_subgraph_instruments(static_subgraph_instruments.clone());
+                    let (subgraph_instrument_set, apollo_instrument_set, cache_instrument_set) =
+                        &*sets;
+                    let custom_instruments = subgraph_instrument_set.start();
                     custom_instruments.on_request(sub_request);
                     let mut custom_events =
                         req_fn_config.instrumentation.events.new_subgraph_events();
                     custom_events.on_request(sub_request);
 
-                    let apollo_instruments: ApolloSubgraphInstruments = req_fn_config
-                        .instrumentation
-                        .instruments
-                        .new_apollo_subgraph_instruments(
-                            static_apollo_subgraph_instruments.clone(),
-                            req_fn_config.apollo.subgraph_metrics,
-                        );
+                    let apollo_instruments = apollo_instrument_set.start();
                     apollo_instruments.on_request(sub_request);
 
-                    let custom_cache_instruments: CacheInstruments = req_fn_config
-                        .instrumentation
-                        .instruments
-                        .new_cache_instruments(static_cache_instruments.clone());
+                    let custom_cache_instruments: CacheInstruments = cache_instrument_set.start();
                     custom_cache_instruments.on_request(sub_request);
 
                     (
@@ -678,6 +675,78 @@ mod tests {
         }
         .with_metrics()
         .await;
+    }
+
+    /// A subgraph request through the subgraph instrument layer builds no instrument set: the layer
+    /// builds the instruments, their conditions and their selectors once for its stack, and a
+    /// request starts the state its measurements record into. Read as the bytes the layer
+    /// allocates per request under a custom histogram whose value is a request header named at a
+    /// width of 8 and of 2,056 bytes: a request that builds the custom instruments copies the
+    /// selector, and the header's name with it, and one that starts them shares it.
+    #[cfg(all(feature = "global-allocator", not(feature = "dhat-heap"), unix))]
+    #[test]
+    fn a_subgraph_request_builds_no_instrument_set() {
+        const REQUESTS: usize = 16;
+        const NARROW: usize = 8;
+        const WIDE: usize = 2056;
+
+        // the plugin's construction blocks in place, which a multi-threaded runtime allows
+        let runtime = tokio::runtime::Builder::new_multi_thread()
+            .worker_threads(1)
+            .enable_all()
+            .build()
+            .expect("a runtime");
+        let _entered = runtime.enter();
+        let bytes = |width: usize| {
+            let config = serde_json::json!({"telemetry": {"instrumentation": {"instruments": {
+                "subgraph": {
+                    "acme.subgraph.request.header": {
+                        "description": "a subgraph request header's value",
+                        "type": "histogram",
+                        "unit": "unit",
+                        "value": {"subgraph_request_header": "h".repeat(width)}
+                    }
+                }
+            }}}});
+            let test_harness: PluginTestHarness<Telemetry> = runtime
+                .block_on(
+                    PluginTestHarness::builder()
+                        .config(&config.to_string())
+                        .build(),
+                )
+                .expect("test harness");
+            let layered = ServiceBuilder::new()
+                .layer(test_harness.instrument_subgraph_layer())
+                .service(tower::service_fn(|request: SubgraphRequest| {
+                    std::future::ready(Ok::<_, BoxError>(
+                        SubgraphResponse::fake_builder()
+                            .context(request.context)
+                            .subgraph_name("products")
+                            .build(),
+                    ))
+                }));
+            crate::allocator::bytes_per_call(
+                layered,
+                || {
+                    SubgraphRequest::fake_builder()
+                        .subgraph_name("products")
+                        .build()
+                },
+                drop,
+                REQUESTS,
+            )
+        };
+
+        let narrow = bytes(NARROW);
+        let wide = bytes(WIDE);
+        eprintln!(
+            "a subgraph request allocates {narrow} bytes at a header name of {NARROW} bytes and {wide} at {WIDE}"
+        );
+        assert!(
+            wide.saturating_sub(narrow) < WIDE - NARROW,
+            "a subgraph request allocates {wide} bytes at a header name of {WIDE} bytes and \
+             {narrow} at {NARROW}: a request builds the custom instruments"
+        );
     }
 
     mod subgraph_ftv1_layer {

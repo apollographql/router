@@ -9,8 +9,10 @@ use crate::plugins::telemetry::config_new::Selectors;
 use crate::plugins::telemetry::config_new::attributes::DefaultAttributeRequirementLevel;
 use crate::plugins::telemetry::config_new::extendable::Extendable;
 use crate::plugins::telemetry::config_new::instruments::CustomHistogram;
+use crate::plugins::telemetry::config_new::instruments::CustomInstrumentSet;
 use crate::plugins::telemetry::config_new::instruments::CustomInstruments;
 use crate::plugins::telemetry::config_new::instruments::DefaultedStandardInstrument;
+use crate::plugins::telemetry::config_new::instruments::HistogramInstrument;
 use crate::plugins::telemetry::config_new::subgraph::attributes::SubgraphAttributes;
 use crate::plugins::telemetry::otlp::TelemetryDataKind;
 use crate::services::subgraph;
@@ -71,6 +73,39 @@ impl Selectors<subgraph::Request, subgraph::Response, ()> for SubgraphInstrument
         attrs.extend(self.http_client_response_body_size.on_error(error, ctx));
 
         attrs
+    }
+}
+
+/// The subgraph instruments a configuration configures, built once for a pipeline
+/// (`InstrumentsConfig::subgraph_instrument_set`).
+pub(crate) struct SubgraphInstrumentSet {
+    pub(crate) http_client_request_duration:
+        Option<HistogramInstrument<SubgraphAttributes, SubgraphSelector>>,
+    pub(crate) http_client_request_body_size:
+        Option<HistogramInstrument<SubgraphAttributes, SubgraphSelector>>,
+    pub(crate) http_client_response_body_size:
+        Option<HistogramInstrument<SubgraphAttributes, SubgraphSelector>>,
+    pub(crate) custom: CustomInstrumentSet<SubgraphAttributes, SubgraphSelector, SubgraphValue>,
+}
+
+impl SubgraphInstrumentSet {
+    /// The instruments one subgraph request records into.
+    pub(crate) fn start(&self) -> SubgraphInstruments {
+        SubgraphInstruments {
+            http_client_request_duration: self
+                .http_client_request_duration
+                .as_ref()
+                .map(HistogramInstrument::start),
+            http_client_request_body_size: self
+                .http_client_request_body_size
+                .as_ref()
+                .map(HistogramInstrument::start),
+            http_client_response_body_size: self
+                .http_client_response_body_size
+                .as_ref()
+                .map(HistogramInstrument::start),
+            custom: self.custom.start(),
+        }
     }
 }
 

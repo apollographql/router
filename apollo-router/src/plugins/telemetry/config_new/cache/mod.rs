@@ -6,6 +6,7 @@ use opentelemetry::KeyValue;
 use opentelemetry::metrics::Counter;
 use tower::BoxError;
 
+use super::instruments::CounterInstrument;
 use super::instruments::CustomCounter;
 use super::subgraph::selectors::SubgraphSelector;
 use crate::plugins::response_cache::metrics::CacheMetricContextKey as ResponseCacheMetricContextKey;
@@ -48,6 +49,25 @@ impl DefaultForLevel for CacheInstrumentsConfig {
         if self.response_cache.is_enabled() {
             self.response_cache
                 .defaults_for_level(requirement_level, kind);
+        }
+    }
+}
+
+/// The cache instruments a configuration configures, built once for a subgraph's stack
+/// (`InstrumentsConfig::cache_instrument_set`).
+pub(crate) struct CacheInstrumentSet {
+    pub(crate) cache_hit_response_cache:
+        Option<CounterInstrument<CacheAttributes, SubgraphSelector>>,
+}
+
+impl CacheInstrumentSet {
+    /// The instruments one subgraph request records into.
+    pub(crate) fn start(&self) -> CacheInstruments {
+        CacheInstruments {
+            cache_hit_response_cache: self
+                .cache_hit_response_cache
+                .as_ref()
+                .map(CounterInstrument::start),
         }
     }
 }

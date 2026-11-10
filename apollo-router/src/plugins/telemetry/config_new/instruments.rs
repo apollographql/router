@@ -22,7 +22,7 @@ use tower::BoxError;
 
 use super::DefaultForLevel;
 use super::Selector;
-use super::cache::CacheInstruments;
+use super::cache::CacheInstrumentSet;
 use super::cache::CacheInstrumentsConfig;
 use super::cache::ConnectorCacheInstruments;
 use super::cache::attributes::CacheAttributes;
@@ -35,7 +35,7 @@ use super::router::instruments::RouterInstruments;
 use super::router::instruments::RouterInstrumentsConfig;
 use super::router_overhead;
 use super::selectors::CacheKind;
-use super::subgraph::instruments::SubgraphInstruments;
+use super::subgraph::instruments::SubgraphInstrumentSet;
 use super::subgraph::instruments::SubgraphInstrumentsConfig;
 use super::supergraph::instruments::SupergraphCustomInstruments;
 use super::supergraph::instruments::SupergraphInstrumentsConfig;
@@ -45,6 +45,7 @@ use crate::plugins::subscription::SUBSCRIPTION_SUBGRAPH_NAME_CONTEXT_KEY;
 use crate::plugins::telemetry::CLIENT_NAME;
 use crate::plugins::telemetry::config_new::Selectors;
 use crate::plugins::telemetry::config_new::apollo::instruments::ApolloConnectorInstruments;
+use crate::plugins::telemetry::config_new::apollo::instruments::ApolloSubgraphInstrumentSet;
 use crate::plugins::telemetry::config_new::apollo::instruments::ApolloSubgraphInstruments;
 use crate::plugins::telemetry::config_new::attributes::DefaultAttributeRequirementLevel;
 use crate::plugins::telemetry::config_new::cache::RESPONSE_CACHE_METRIC;
@@ -316,7 +317,7 @@ impl InstrumentsConfig {
             .is_enabled()
             .then(|| CustomHistogram {
                 inner: Mutex::new(CustomHistogramInner {
-                    increment: Increment::Duration(Instant::now(), "s".to_string()),
+                    increment: Increment::Duration(Instant::now(), DurationUnit::Seconds),
                     condition: Condition::True,
                     histogram: Some(
                         static_instruments
@@ -642,133 +643,67 @@ impl InstrumentsConfig {
         static_instruments
     }
 
-    pub(crate) fn new_subgraph_instruments(
+    /// The subgraph instruments this configuration configures, built once for a pipeline over
+    /// its `static_instruments`; [`SubgraphInstrumentSet::start`] makes those one subgraph request
+    /// records into.
+    pub(crate) fn subgraph_instrument_set(
         &self,
-        static_instruments: Arc<HashMap<String, StaticInstrument>>,
-    ) -> SubgraphInstruments {
-        let http_client_request_duration =
-            self.subgraph
-                .attributes
-                .http_client_request_duration
-                .is_enabled()
-                .then(|| {
-                    let mut nb_attributes = 0;
-                    let selectors = match &self.subgraph.attributes.http_client_request_duration {
-                        DefaultedStandardInstrument::Bool(_)
-                        | DefaultedStandardInstrument::Unset => None,
+        static_instruments: &HashMap<String, StaticInstrument>,
+    ) -> SubgraphInstrumentSet {
+        let attributes = &self.subgraph.attributes;
+        let standard = |instrument: &DefaultedStandardInstrument<
+            Extendable<SubgraphAttributes, SubgraphSelector>,
+        >,
+                        name: &str,
+                        increment: IncrementKind,
+                        selector: Option<SubgraphSelector>| {
+            instrument.is_enabled().then(|| {
+                HistogramInstrument::new(
+                    increment,
+                    static_instruments
+                        .get(name)
+                        .expect("cannot get static instrument for subgraph; this should not happen")
+                        .as_histogram()
+                        .cloned()
+                        .expect(
+                            "cannot convert instrument to histogram for subgraph; this should not happen",
+                        ),
+                    selector.map(Arc::new),
+                    match instrument {
+                        DefaultedStandardInstrument::Bool(_) | DefaultedStandardInstrument::Unset => {
+                            None
+                        }
                         DefaultedStandardInstrument::Extendable { attributes } => {
-                            nb_attributes = attributes.custom.len();
                             Some(attributes.clone())
                         }
-                    };
-                    CustomHistogram {
-                        inner: Mutex::new(CustomHistogramInner {
-                            increment: Increment::Duration(Instant::now(), "s".to_string()),
-                            condition: Condition::True,
-                            histogram: Some(static_instruments
-                                .get(HTTP_CLIENT_REQUEST_DURATION_METRIC)
-                                .expect(
-                                    "cannot get static instrument for subgraph; this should not happen",
-                                )
-                                .as_histogram()
-                                .cloned()
-                                .expect(
-                                    "cannot convert instrument to histogram for subgraph; this should not happen",
-                                )
-                            ),
-                            attributes: Vec::with_capacity(nb_attributes),
-                            selector: None,
-                            selectors,
-                            updated: false,
-                            _phantom: PhantomData,
-                        }),
-                    }
-                });
-        let http_client_request_body_size =
-            self.subgraph
-                .attributes
-                .http_client_request_body_size
-                .is_enabled()
-                .then(|| {
-                    let mut nb_attributes = 0;
-                    let selectors = match &self.subgraph.attributes.http_client_request_body_size {
-                        DefaultedStandardInstrument::Bool(_)
-                        | DefaultedStandardInstrument::Unset => None,
-                        DefaultedStandardInstrument::Extendable { attributes } => {
-                            nb_attributes = attributes.custom.len();
-                            Some(attributes.clone())
-                        }
-                    };
-                    CustomHistogram {
-                        inner: Mutex::new(CustomHistogramInner {
-                            increment: Increment::Custom(None),
-                            condition: Condition::True,
-                            histogram: Some(static_instruments
-                                .get(HTTP_CLIENT_REQUEST_BODY_SIZE_METRIC)
-                                .expect(
-                                    "cannot get static instrument for subgraph; this should not happen",
-                                )
-                                .as_histogram()
-                                .cloned()
-                                .expect(
-                                    "cannot convert instrument to histogram for subgraph; this should not happen",
-                                )
-                            ),
-                            attributes: Vec::with_capacity(nb_attributes),
-                            selector: Some(Arc::new(SubgraphSelector::SubgraphRequestBodySize {
-                                subgraph_request_body_size: true,
-                            })),
-                            selectors,
-                            updated: false,
-                            _phantom: PhantomData,
-                        }),
-                    }
-                });
-        let http_client_response_body_size =
-            self.subgraph
-                .attributes
-                .http_client_response_body_size
-                .is_enabled()
-                .then(|| {
-                    let mut nb_attributes = 0;
-                    let selectors = match &self.subgraph.attributes.http_client_response_body_size {
-                        DefaultedStandardInstrument::Bool(_)
-                        | DefaultedStandardInstrument::Unset => None,
-                        DefaultedStandardInstrument::Extendable { attributes } => {
-                            nb_attributes = attributes.custom.len();
-                            Some(attributes.clone())
-                        }
-                    };
-                    CustomHistogram {
-                        inner: Mutex::new(CustomHistogramInner {
-                            increment: Increment::Custom(None),
-                            condition: Condition::True,
-                            histogram: Some(static_instruments
-                                .get(HTTP_CLIENT_RESPONSE_BODY_SIZE_METRIC)
-                                .expect(
-                                    "cannot get static instrument for subgraph; this should not happen",
-                                )
-                                .as_histogram()
-                                .cloned()
-                                .expect(
-                                    "cannot convert instrument to histogram for subgraph; this should not happen",
-                                )
-                            ),
-                            attributes: Vec::with_capacity(nb_attributes),
-                            selector: Some(Arc::new(SubgraphSelector::SubgraphResponseBodySize {
-                                subgraph_response_body_size: true,
-                            })),
-                            selectors,
-                            updated: false,
-                            _phantom: PhantomData,
-                        }),
-                    }
-                });
-        SubgraphInstruments {
-            http_client_request_duration,
-            http_client_request_body_size,
-            http_client_response_body_size,
-            custom: CustomInstruments::new(&self.subgraph.custom, static_instruments),
+                    },
+                )
+            })
+        };
+        SubgraphInstrumentSet {
+            http_client_request_duration: standard(
+                &attributes.http_client_request_duration,
+                HTTP_CLIENT_REQUEST_DURATION_METRIC,
+                IncrementKind::Duration(DurationUnit::Seconds),
+                None,
+            ),
+            http_client_request_body_size: standard(
+                &attributes.http_client_request_body_size,
+                HTTP_CLIENT_REQUEST_BODY_SIZE_METRIC,
+                IncrementKind::Custom,
+                Some(SubgraphSelector::SubgraphRequestBodySize {
+                    subgraph_request_body_size: true,
+                }),
+            ),
+            http_client_response_body_size: standard(
+                &attributes.http_client_response_body_size,
+                HTTP_CLIENT_RESPONSE_BODY_SIZE_METRIC,
+                IncrementKind::Custom,
+                Some(SubgraphSelector::SubgraphResponseBodySize {
+                    subgraph_response_body_size: true,
+                }),
+            ),
+            custom: CustomInstrumentSet::new(&self.subgraph.custom, static_instruments),
         }
     }
 
@@ -778,12 +713,15 @@ impl InstrumentsConfig {
         ApolloSubgraphInstruments::new_builtin()
     }
 
-    pub(crate) fn new_apollo_subgraph_instruments(
+    /// Apollo's subgraph instruments, built once for a pipeline over its `static_instruments`,
+    /// where `subgraph_metrics`; [`ApolloSubgraphInstrumentSet::start`] makes those one subgraph request
+    /// records into.
+    pub(crate) fn apollo_subgraph_instrument_set(
         &self,
-        static_instruments: Arc<HashMap<String, StaticInstrument>>,
+        static_instruments: &HashMap<String, StaticInstrument>,
         subgraph_metrics: bool,
-    ) -> ApolloSubgraphInstruments {
-        ApolloSubgraphInstruments::new(static_instruments, subgraph_metrics)
+    ) -> ApolloSubgraphInstrumentSet {
+        ApolloSubgraphInstrumentSet::new(static_instruments, subgraph_metrics)
     }
 
     pub(crate) fn new_connector_instruments(
@@ -1006,47 +944,39 @@ impl InstrumentsConfig {
         static_instruments
     }
 
-    pub(crate) fn new_cache_instruments(
+    /// The cache instruments this configuration configures, built once for a pipeline over its
+    /// `static_instruments`; [`CacheInstrumentSet::start`] makes those one subgraph request
+    /// records into.
+    pub(crate) fn cache_instrument_set(
         &self,
-        static_instruments: Arc<HashMap<String, StaticInstrument>>,
-    ) -> CacheInstruments {
-        CacheInstruments {
-            cache_hit_response_cache: self.cache.attributes.response_cache.is_enabled().then(|| {
-                let mut nb_attributes = 0;
-                let selectors = match &self.cache.attributes.response_cache {
-                    DefaultedStandardInstrument::Bool(_) | DefaultedStandardInstrument::Unset => {
-                        None
-                    }
-                    DefaultedStandardInstrument::Extendable { attributes } => {
-                        nb_attributes = attributes.custom.len();
-                        Some(attributes.clone())
-                    }
-                };
-                CustomCounter {
-                    inner: Mutex::new(CustomCounterInner {
-                        increment: Increment::Custom(None),
-                        condition: Condition::True,
-                        counter: Some(static_instruments
-                            .get(RESPONSE_CACHE_METRIC)
-                            .expect(
-                                "cannot get static instrument for cache; this should not happen",
-                            )
-                            .as_counter_f64()
-                            .cloned()
-                            .expect(
-                                "cannot convert instrument to counter for cache; this should not happen",
-                            )
+        static_instruments: &HashMap<String, StaticInstrument>,
+    ) -> CacheInstrumentSet {
+        let response_cache = &self.cache.attributes.response_cache;
+        CacheInstrumentSet {
+            cache_hit_response_cache: response_cache.is_enabled().then(|| {
+                CounterInstrument::new(
+                    IncrementKind::Custom,
+                    static_instruments
+                        .get(RESPONSE_CACHE_METRIC)
+                        .expect("cannot get static instrument for cache; this should not happen")
+                        .as_counter_f64()
+                        .cloned()
+                        .expect(
+                            "cannot convert instrument to counter for cache; this should not happen",
                         ),
-                        attributes: Vec::with_capacity(nb_attributes),
-                        selector: Some(Arc::new(SubgraphSelector::ResponseCache {
-                            response_cache: CacheKind::Hit,
-                            entity_type: None,
-                        })),
-                        selectors,
-                        incremented: false,
-                        _phantom: PhantomData,
-                    }),
-                }
+                    Some(Arc::new(SubgraphSelector::ResponseCache {
+                        response_cache: CacheKind::Hit,
+                        entity_type: None,
+                    })),
+                    match response_cache {
+                        DefaultedStandardInstrument::Bool(_) | DefaultedStandardInstrument::Unset => {
+                            None
+                        }
+                        DefaultedStandardInstrument::Extendable { attributes } => {
+                            Some(attributes.clone())
+                        }
+                    },
+                )
             }),
         }
     }
@@ -1661,135 +1591,227 @@ impl<Request, Response, EventResponse, Attributes, Select, SelectorValue>
     CustomInstruments<Request, Response, EventResponse, Attributes, Select, SelectorValue>
 where
     Attributes: Selectors<Request, Response, EventResponse> + Default + Debug + Clone,
-    Select: Selector<Request = Request, Response = Response> + Debug + Clone,
+    Select: Selector<Request = Request, Response = Response, EventResponse = EventResponse>
+        + Debug
+        + Clone,
+    for<'a> &'a SelectorValue: Into<InstrumentValue<Select>>,
+{
+    /// The custom instruments `config` configures, built for one request or subgraph request.
+    pub(crate) fn new(
+        config: &HashMap<String, Instrument<Attributes, Select, SelectorValue>>,
+        static_instruments: Arc<HashMap<String, StaticInstrument>>,
+    ) -> Self {
+        CustomInstrumentSet::new(config, &static_instruments).start()
+    }
+}
+
+/// The custom instruments a configuration configures, built once for a pipeline:
+/// [`Self::start`] makes the instruments one request or subgraph request records into.
+pub(crate) struct CustomInstrumentSet<Attributes, Select, SelectorValue>
+where
+    Attributes: Default,
+{
+    counters: Vec<CounterInstrument<Attributes, Select>>,
+    histograms: Vec<HistogramInstrument<Attributes, Select>>,
+    _phantom: PhantomData<fn() -> SelectorValue>,
+}
+
+impl<Attributes, Select, SelectorValue> CustomInstrumentSet<Attributes, Select, SelectorValue>
+where
+    Attributes: Selectors<Select::Request, Select::Response, Select::EventResponse>
+        + Default
+        + Debug
+        + Clone,
+    Select: Selector + Debug + Clone,
     for<'a> &'a SelectorValue: Into<InstrumentValue<Select>>,
 {
     pub(crate) fn new(
         config: &HashMap<String, Instrument<Attributes, Select, SelectorValue>>,
-        static_instruments: Arc<HashMap<String, StaticInstrument>>,
+        static_instruments: &HashMap<String, StaticInstrument>,
     ) -> Self {
         let mut counters = Vec::new();
         let mut histograms = Vec::new();
 
         for (instrument_name, instrument) in config {
+            let (selector, increment) = match (&instrument.value).into() {
+                InstrumentValue::Standard(Standard::Duration) => (
+                    None,
+                    IncrementKind::Duration(DurationUnit::named(&instrument.unit)),
+                ),
+                InstrumentValue::Standard(Standard::Unit) => (None, IncrementKind::Unit),
+                InstrumentValue::Custom(selector) => {
+                    (Some(Arc::new(selector)), IncrementKind::Custom)
+                }
+                InstrumentValue::Chunked(Event::Duration) => (
+                    None,
+                    IncrementKind::EventDuration(DurationUnit::named(&instrument.unit)),
+                ),
+                InstrumentValue::Chunked(Event::Unit) => (None, IncrementKind::EventUnit),
+                InstrumentValue::Chunked(Event::Custom(selector)) => {
+                    (Some(Arc::new(selector)), IncrementKind::EventCustom)
+                }
+                InstrumentValue::Field(Field::Unit) => (None, IncrementKind::FieldUnit),
+                InstrumentValue::Field(Field::Custom(selector)) => {
+                    (Some(Arc::new(selector)), IncrementKind::FieldCustom)
+                }
+            };
+            let static_instrument = static_instruments
+                .get(instrument_name)
+                .expect("cannot get static instrument for supergraph; this should not happen");
             match instrument.ty {
-                InstrumentType::Counter => {
-                    let (selector, increment) = match (&instrument.value).into() {
-                        InstrumentValue::Standard(incr) => {
-                            let incr = match incr {
-                                Standard::Duration => {
-                                    Increment::Duration(Instant::now(), instrument.unit.clone())
-                                }
-                                Standard::Unit => Increment::Unit,
-                            };
-                            (None, incr)
-                        }
-                        InstrumentValue::Custom(selector) => {
-                            (Some(Arc::new(selector)), Increment::Custom(None))
-                        }
-                        InstrumentValue::Chunked(incr) => match incr {
-                            Event::Duration => (
-                                None,
-                                Increment::EventDuration(Instant::now(), instrument.unit.clone()),
-                            ),
-                            Event::Unit => (None, Increment::EventUnit),
-                            Event::Custom(selector) => {
-                                (Some(Arc::new(selector)), Increment::EventCustom(None))
-                            }
-                        },
-                        InstrumentValue::Field(incr) => match incr {
-                            Field::Unit => (None, Increment::FieldUnit),
-                            Field::Custom(selector) => {
-                                (Some(Arc::new(selector)), Increment::FieldCustom(None))
-                            }
-                        },
-                    };
-                    let counter = static_instruments
-                        .get(instrument_name)
-                        .expect(
-                            "cannot get static instrument for supergraph; this should not happen",
-                        )
+                InstrumentType::Counter => counters.push(CounterInstrument {
+                    increment,
+                    condition: instrument.condition.clone(),
+                    counter: static_instrument
                         .as_counter_f64()
                         .cloned()
-                        .expect("cannot convert static instrument into a counter, this is a bug");
-
-                    let counter = CustomCounterInner {
-                        increment,
-                        condition: instrument.condition.clone(),
-                        counter: Some(counter),
-                        attributes: Vec::new(),
-                        selector,
-                        selectors: Some(instrument.attributes.clone()),
-                        incremented: false,
-                        _phantom: PhantomData,
-                    };
-                    counters.push(CustomCounter {
-                        inner: Mutex::new(counter),
-                    })
-                }
-                InstrumentType::Histogram => {
-                    let (selector, increment) = match (&instrument.value).into() {
-                        InstrumentValue::Standard(incr) => {
-                            let incr = match incr {
-                                Standard::Duration => {
-                                    Increment::Duration(Instant::now(), instrument.unit.clone())
-                                }
-                                Standard::Unit => Increment::Unit,
-                            };
-                            (None, incr)
-                        }
-                        InstrumentValue::Custom(selector) => {
-                            (Some(Arc::new(selector)), Increment::Custom(None))
-                        }
-                        InstrumentValue::Chunked(incr) => match incr {
-                            Event::Duration => (
-                                None,
-                                Increment::EventDuration(Instant::now(), instrument.unit.clone()),
-                            ),
-                            Event::Unit => (None, Increment::EventUnit),
-                            Event::Custom(selector) => {
-                                (Some(Arc::new(selector)), Increment::EventCustom(None))
-                            }
-                        },
-                        InstrumentValue::Field(incr) => match incr {
-                            Field::Unit => (None, Increment::FieldUnit),
-                            Field::Custom(selector) => {
-                                (Some(Arc::new(selector)), Increment::FieldCustom(None))
-                            }
-                        },
-                    };
-
-                    let histogram = static_instruments
-                        .get(instrument_name)
-                        .expect(
-                            "cannot get static instrument for supergraph; this should not happen",
-                        )
+                        .expect("cannot convert static instrument into a counter, this is a bug"),
+                    selector,
+                    selectors: Some(instrument.attributes.clone()),
+                }),
+                InstrumentType::Histogram => histograms.push(HistogramInstrument {
+                    increment,
+                    condition: instrument.condition.clone(),
+                    histogram: static_instrument
                         .as_histogram()
                         .cloned()
-                        .expect("cannot convert static instrument into a histogram, this is a bug");
-
-                    let histogram = CustomHistogramInner {
-                        increment,
-                        condition: instrument.condition.clone(),
-                        histogram: Some(histogram),
-                        attributes: Vec::new(),
-                        selector,
-                        selectors: Some(instrument.attributes.clone()),
-                        updated: false,
-                        _phantom: PhantomData,
-                    };
-
-                    histograms.push(CustomHistogram {
-                        inner: Mutex::new(histogram),
-                    });
-                }
+                        .expect("cannot convert static instrument into a histogram, this is a bug"),
+                    selector,
+                    selectors: Some(instrument.attributes.clone()),
+                }),
             }
         }
 
         Self {
-            _phantom: Default::default(),
             counters,
             histograms,
+            _phantom: PhantomData,
+        }
+    }
+
+    /// The instruments one request or subgraph request records into.
+    pub(crate) fn start(
+        &self,
+    ) -> CustomInstruments<
+        Select::Request,
+        Select::Response,
+        Select::EventResponse,
+        Attributes,
+        Select,
+        SelectorValue,
+    > {
+        CustomInstruments {
+            _phantom: PhantomData,
+            counters: self.counters.iter().map(CounterInstrument::start).collect(),
+            histograms: self
+                .histograms
+                .iter()
+                .map(HistogramInstrument::start)
+                .collect(),
+        }
+    }
+}
+
+/// A counter of an instrument set, built once for its pipeline: the instrument, how its value
+/// grows, its condition and its selectors. [`Self::start`] makes the counter one request or
+/// subgraph request records into.
+pub(crate) struct CounterInstrument<A, T>
+where
+    A: Default,
+{
+    increment: IncrementKind,
+    condition: Condition<T>,
+    counter: Counter<f64>,
+    selector: Option<Arc<T>>,
+    selectors: Option<Arc<Extendable<A, T>>>,
+}
+
+impl<A, T> CounterInstrument<A, T>
+where
+    A: Selectors<T::Request, T::Response, T::EventResponse> + Default,
+    T: Selector + Debug + Clone,
+{
+    /// A counter whose value grows by `increment`, counted with `selectors`' attributes, its
+    /// value `selector`'s where it has one, and always counted.
+    pub(crate) fn new(
+        increment: IncrementKind,
+        counter: Counter<f64>,
+        selector: Option<Arc<T>>,
+        selectors: Option<Arc<Extendable<A, T>>>,
+    ) -> Self {
+        Self {
+            increment,
+            condition: Condition::True,
+            counter,
+            selector,
+            selectors,
+        }
+    }
+
+    pub(crate) fn start(&self) -> CustomCounter<T::Request, T::Response, T::EventResponse, A, T> {
+        CustomCounter {
+            inner: Mutex::new(CustomCounterInner {
+                increment: self.increment.start(),
+                condition: self.condition.clone(),
+                counter: Some(self.counter.clone()),
+                attributes: Vec::new(),
+                selector: self.selector.clone(),
+                selectors: self.selectors.clone(),
+                incremented: false,
+                _phantom: PhantomData,
+            }),
+        }
+    }
+}
+
+/// A histogram of an instrument set, built once for its pipeline: the instrument, how its value
+/// grows, its condition and its selectors. [`Self::start`] makes the histogram one request or
+/// subgraph request records into.
+pub(crate) struct HistogramInstrument<A, T>
+where
+    A: Default,
+{
+    increment: IncrementKind,
+    condition: Condition<T>,
+    histogram: Histogram<f64>,
+    selector: Option<Arc<T>>,
+    selectors: Option<Arc<Extendable<A, T>>>,
+}
+
+impl<A, T> HistogramInstrument<A, T>
+where
+    A: Selectors<T::Request, T::Response, T::EventResponse> + Default,
+    T: Selector + Clone,
+{
+    /// A histogram whose value grows by `increment`, recorded with `selectors`' attributes, its
+    /// value `selector`'s where it has one, and always recorded.
+    pub(crate) fn new(
+        increment: IncrementKind,
+        histogram: Histogram<f64>,
+        selector: Option<Arc<T>>,
+        selectors: Option<Arc<Extendable<A, T>>>,
+    ) -> Self {
+        Self {
+            increment,
+            condition: Condition::True,
+            histogram,
+            selector,
+            selectors,
+        }
+    }
+
+    pub(crate) fn start(&self) -> CustomHistogram<T::Request, T::Response, T::EventResponse, A, T> {
+        CustomHistogram {
+            inner: Mutex::new(CustomHistogramInner {
+                increment: self.increment.start(),
+                condition: self.condition.clone(),
+                histogram: Some(self.histogram.clone()),
+                attributes: Vec::new(),
+                selector: self.selector.clone(),
+                selectors: self.selectors.clone(),
+                updated: false,
+                _phantom: PhantomData,
+            }),
         }
     }
 }
@@ -1893,8 +1915,8 @@ pub(crate) enum Increment {
     Unit,
     EventUnit,
     FieldUnit,
-    Duration(Instant, String),
-    EventDuration(Instant, String),
+    Duration(Instant, DurationUnit),
+    EventDuration(Instant, DurationUnit),
     Custom(Option<opentelemetry::Value>),
     EventCustom(Option<opentelemetry::Value>),
     FieldCustom(Option<opentelemetry::Value>),
@@ -1911,20 +1933,70 @@ fn value_to_f64(value: &opentelemetry::Value) -> Option<f64> {
     }
 }
 
-/// Convert a duration to f64 based on the specified unit.
-/// Supported units: "s" (seconds), "ms" (milliseconds), "us" (microseconds), "ns" (nanoseconds)
-/// Defaults to seconds for any other unit string.
-fn duration_to_f64(duration: std::time::Duration, unit: &str) -> f64 {
-    match unit {
-        "ms" => duration.as_secs_f64() * 1000.0,
-        "us" => duration.as_micros() as f64,
-        "ns" => duration.as_nanos() as f64,
-        _ => duration.as_secs_f64(), // Default to seconds for "s" or any other unit
+/// The unit an instrument records a duration in.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub(crate) enum DurationUnit {
+    Seconds,
+    Milliseconds,
+    Microseconds,
+    Nanoseconds,
+}
+
+impl DurationUnit {
+    /// The unit an instrument's configured `unit` names: "ms", "us" and "ns", and seconds for
+    /// "s" and any other.
+    pub(crate) fn named(unit: &str) -> Self {
+        match unit {
+            "ms" => Self::Milliseconds,
+            "us" => Self::Microseconds,
+            "ns" => Self::Nanoseconds,
+            _ => Self::Seconds,
+        }
     }
 }
 
-fn duration_to_value(duration: std::time::Duration, unit: &str) -> opentelemetry::Value {
+/// `duration` in `unit`.
+fn duration_to_f64(duration: std::time::Duration, unit: &DurationUnit) -> f64 {
+    match unit {
+        DurationUnit::Milliseconds => duration.as_secs_f64() * 1000.0,
+        DurationUnit::Microseconds => duration.as_micros() as f64,
+        DurationUnit::Nanoseconds => duration.as_nanos() as f64,
+        DurationUnit::Seconds => duration.as_secs_f64(),
+    }
+}
+
+fn duration_to_value(duration: std::time::Duration, unit: &DurationUnit) -> opentelemetry::Value {
     opentelemetry::Value::F64(duration_to_f64(duration, unit))
+}
+
+/// How an instrument's value grows, as its configuration fixes it for its pipeline;
+/// [`Self::start`] is the increment a request or a subgraph request records from.
+#[derive(Clone, Copy, Debug)]
+pub(crate) enum IncrementKind {
+    Unit,
+    EventUnit,
+    FieldUnit,
+    Duration(DurationUnit),
+    EventDuration(DurationUnit),
+    Custom,
+    EventCustom,
+    FieldCustom,
+}
+
+impl IncrementKind {
+    /// The increment one request or subgraph request starts from, a duration measured from now.
+    pub(crate) fn start(self) -> Increment {
+        match self {
+            Self::Unit => Increment::Unit,
+            Self::EventUnit => Increment::EventUnit,
+            Self::FieldUnit => Increment::FieldUnit,
+            Self::Duration(unit) => Increment::Duration(Instant::now(), unit),
+            Self::EventDuration(unit) => Increment::EventDuration(Instant::now(), unit),
+            Self::Custom => Increment::Custom(None),
+            Self::EventCustom => Increment::EventCustom(None),
+            Self::FieldCustom => Increment::FieldCustom(None),
+        }
+    }
 }
 
 pub(crate) struct CustomCounter<Request, Response, EventResponse, A, T>
@@ -3046,6 +3118,81 @@ mod tests {
     }
 
     const DEFAULT_CONNECT_SPEC: ConnectSpec = ConnectSpec::V0_2;
+    /// The measurements one subgraph instrument set starts, as the subgraph layer starts one per
+    /// subgraph request from the set it built for its stack, are each their own request's. Two
+    /// requests started from one set and run interleaved each record their own attributes, and a
+    /// condition one request meets holds for it alone.
+    #[tokio::test]
+    async fn subgraph_requests_started_from_one_instrument_set_record_apart() {
+        async {
+            let mut config = load_config(
+                br#"
+telemetry:
+  instrumentation:
+    instruments:
+      default_requirement_level: none
+      subgraph:
+        http.client.request.duration:
+          attributes:
+            subgraph.name: true
+        custom_counter:
+          description: "count of requests"
+          type: counter
+          unit: "unit"
+          value: unit
+          attributes:
+            "custom_attribute":
+              subgraph_request_header: "custom_header"
+          condition:
+            eq:
+              - subgraph_request_header: "custom_header"
+              - "allowed"
+"#,
+            );
+            config.update_defaults();
+            let set = config.subgraph_instrument_set(&config.new_builtin_subgraph_instruments());
+            let request = |subgraph: &str, header: &'static str| {
+                let mut http_request =
+                    http::Request::new(graphql::Request::fake_builder().query("{ me }").build());
+                http_request
+                    .headers_mut()
+                    .insert("custom_header", http::HeaderValue::from_static(header));
+                crate::services::subgraph::Request::fake_builder()
+                    .subgraph_name(subgraph)
+                    .subgraph_request(http_request)
+                    .build()
+            };
+            let response = |subgraph: &str| {
+                crate::services::subgraph::Response::fake_builder()
+                    .subgraph_name(subgraph)
+                    .build()
+            };
+
+            let allowed = set.start();
+            let refused = set.start();
+            allowed.on_request(&request("products", "allowed"));
+            refused.on_request(&request("reviews", "refused"));
+            refused.on_response(&response("reviews"));
+            allowed.on_response(&response("products"));
+            drop((allowed, refused));
+
+            assert_counter!("custom_counter", 1.0, "custom_attribute" = "allowed");
+            assert_counter_not_exists!("custom_counter", f64, "custom_attribute" = "refused");
+            assert_histogram_count!(
+                "http.client.request.duration",
+                1,
+                "subgraph.name" = "products"
+            );
+            assert_histogram_count!(
+                "http.client.request.duration",
+                1,
+                "subgraph.name" = "reviews"
+            );
+        }
+        .with_metrics()
+        .await;
+    }
+
     #[tokio::test]
     async fn test_instruments() {
         // This test is data driven.
@@ -3199,19 +3346,28 @@ mod tests {
                                     extensions,
                                     headers,
                                 } => {
-                                    subgraph_instruments = Some(config.new_subgraph_instruments(
-                                        Arc::new(config.new_builtin_subgraph_instruments()),
-                                    ));
-                                    apollo_subgraph_instruments =
-                                        Some(config.new_apollo_subgraph_instruments(
-                                            Arc::new(
-                                                config.new_builtin_apollo_subgraph_instruments(),
-                                            ),
-                                            apollo_config.subgraph_metrics,
-                                        ));
-                                    cache_instruments = Some(config.new_cache_instruments(
-                                        Arc::new(config.new_builtin_cache_instruments()),
-                                    ));
+                                    subgraph_instruments = Some(
+                                        config
+                                            .subgraph_instrument_set(
+                                                &config.new_builtin_subgraph_instruments(),
+                                            )
+                                            .start(),
+                                    );
+                                    apollo_subgraph_instruments = Some(
+                                        config
+                                            .apollo_subgraph_instrument_set(
+                                                &config.new_builtin_apollo_subgraph_instruments(),
+                                                apollo_config.subgraph_metrics,
+                                            )
+                                            .start(),
+                                    );
+                                    cache_instruments = Some(
+                                        config
+                                            .cache_instrument_set(
+                                                &config.new_builtin_cache_instruments(),
+                                            )
+                                            .start(),
+                                    );
                                     let graphql_request = graphql::Request::fake_builder()
                                         .query(query)
                                         .and_operation_name(operation_name)
@@ -4122,41 +4278,50 @@ mod tests {
     #[test]
     fn test_duration_to_f64_seconds() {
         let duration = std::time::Duration::from_secs(2);
-        assert_eq!(duration_to_f64(duration, "s"), 2.0);
-        assert_eq!(duration_to_f64(duration, ""), 2.0); // empty unit defaults to seconds
-        assert_eq!(duration_to_f64(duration, "unknown"), 2.0); // unknown unit defaults to seconds
+        assert_eq!(duration_to_f64(duration, &DurationUnit::named("s")), 2.0);
+        assert_eq!(duration_to_f64(duration, &DurationUnit::named("")), 2.0); // empty unit defaults to seconds
+        assert_eq!(
+            duration_to_f64(duration, &DurationUnit::named("unknown")),
+            2.0
+        ); // unknown unit defaults to seconds
     }
 
     #[test]
     fn test_duration_to_f64_milliseconds() {
         let duration = std::time::Duration::from_millis(1500);
-        assert_eq!(duration_to_f64(duration, "ms"), 1500.0);
+        assert_eq!(
+            duration_to_f64(duration, &DurationUnit::named("ms")),
+            1500.0
+        );
     }
 
     #[test]
     fn test_duration_to_f64_microseconds() {
         let duration = std::time::Duration::from_micros(500);
-        assert_eq!(duration_to_f64(duration, "us"), 500.0);
+        assert_eq!(duration_to_f64(duration, &DurationUnit::named("us")), 500.0);
     }
 
     #[test]
     fn test_duration_to_f64_nanoseconds() {
         let duration = std::time::Duration::from_nanos(1234567);
-        assert_eq!(duration_to_f64(duration, "ns"), 1234567.0);
+        assert_eq!(
+            duration_to_f64(duration, &DurationUnit::named("ns")),
+            1234567.0
+        );
     }
 
     #[test]
     fn test_duration_to_f64_fractional_seconds() {
         let duration = std::time::Duration::from_millis(1500);
         // When unit is "s", 1500ms should be 1.5 seconds
-        assert_eq!(duration_to_f64(duration, "s"), 1.5);
+        assert_eq!(duration_to_f64(duration, &DurationUnit::named("s")), 1.5);
     }
 
     #[test]
     fn test_duration_to_f64_fractional_milliseconds() {
         let duration = std::time::Duration::from_micros(1500);
         // When unit is "ms", 1500us should be 1.5 milliseconds
-        assert_eq!(duration_to_f64(duration, "ms"), 1.5);
+        assert_eq!(duration_to_f64(duration, &DurationUnit::named("ms")), 1.5);
     }
 
     /// Verify that the `RouterInstruments::on_response` dispatch to `subscriptions_terminated`
