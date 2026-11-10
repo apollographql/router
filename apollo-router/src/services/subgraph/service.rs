@@ -21,6 +21,7 @@ use crate::error::FetchError;
 use crate::graphql;
 use crate::json_ext::Object;
 use crate::layers::pool::Pooled;
+use crate::layers::release_readied;
 use crate::plugins::limits::response_size_limit::ResponseSizeLimitError;
 use crate::plugins::telemetry::config_new::events::log_event;
 use crate::plugins::telemetry::config_new::events::log_subgraph_request_event;
@@ -67,21 +68,18 @@ impl tower::Service<SubgraphRequest> for SubgraphService {
     }
 
     fn call(&mut self, request: SubgraphRequest) -> Self::Future {
-        let service_name = self.service.clone();
-
-        let fresh_client = self.inner.clone();
-        let inner = std::mem::replace(&mut self.inner, fresh_client);
-
-        Box::pin(async move { call_http(request, inner, &service_name).await })
+        call_http(request, &mut self.inner, &self.service)
     }
 }
 
-/// call_http makes http calls with modified graphql::Request (body)
-async fn call_http(
+/// call_http makes http calls with modified graphql::Request (body): it serializes the request and
+/// calls the readied HTTP client stack in place, inside the subgraph request's span, and returns
+/// the future that reads its response.
+fn call_http(
     request: SubgraphRequest,
-    mut client: crate::services::http::BoxCloneService,
+    client: &mut crate::services::http::BoxCloneService,
     service_name: &str,
-) -> Result<SubgraphResponse, BoxError> {
+) -> BoxFuture<'static, Result<SubgraphResponse, BoxError>> {
     let subgraph_request_event = request
         .context
         .extensions()
@@ -115,7 +113,14 @@ async fn call_http(
         .as_deref()
         .unwrap_or_default()
         .to_owned();
-    let body = serde_json::to_string(&body)?;
+    let body = match serde_json::to_string(&body) {
+        Ok(body) => body,
+        Err(error) => {
+            // answered without the client beneath, which may hold what its readiness reserved
+            release_readied(client);
+            return Box::pin(std::future::ready(Err(error.into())));
+        }
+    };
     tracing::debug!("our JSON body: {body:?}");
     let request = http::Request::from_parts(parts, router::body::from_bytes(body));
 
@@ -169,15 +174,22 @@ async fn call_http(
     // is placed on this request's own response, where the on_response selectors read it.
     let request_body_size = request.size_hint().exact();
 
-    // Perform the actual fetch. If this fails then we didn't manage to make the call at all, so we can't do anything with it.
-    let fetch_result: Result<_, FetchError> = async {
-        let response = client
-            .call(HttpRequest {
-                http_request: request,
-                context: context.clone(),
-            })
-            .await
-            .map_err(|err| {
+    // The HTTP client stack, readied for this request, called in place, inside the span its
+    // response is read in, as its call ran in that span's future before.
+    let response = {
+        let _entered = subgraph_req_span.enter();
+        client.call(HttpRequest {
+            http_request: request,
+            context: context.clone(),
+        })
+    };
+    let service_name = service_name.to_owned();
+    Box::pin(async move {
+        let service_name = service_name.as_str();
+
+        // Perform the actual fetch. If this fails then we didn't manage to make the call at all, so we can't do anything with it.
+        let fetch_result: Result<_, FetchError> = async {
+            let response = response.await.map_err(|err| {
                 tracing::error!(fetch_error = ?err);
                 FetchError::SubrequestHttpError {
                     status_code: None,
@@ -186,151 +198,152 @@ async fn call_http(
                 }
             })?;
 
-        let (mut parts, response_body) = response.http_response.into_parts();
-        let body = router::body::into_bytes(response_body)
-            .instrument(tracing::debug_span!("aggregate_response_data"))
-            .await
-            .map_err(|err| {
-                tracing::error!(fetch_error = ?err);
-                // HACK(@goto-bus-stop): the error ends up double-boxed because we mix `axum::Error` and
-                // `tower::BoxError` types, so we have to look into the source error here.
-                if err
-                    .source()
-                    .and_then(|source| source.downcast_ref::<ResponseSizeLimitError>())
-                    .is_some()
-                {
-                    tracing::Span::current()
-                        .record("apollo.subgraph.response.aborted", "response_size_limit");
-                } else {
-                    parts.extensions.insert(IncompleteResponseBody);
-                }
-                FetchError::SubrequestHttpError {
-                    status_code: Some(parts.status.as_u16()),
-                    service: service_name.to_string(),
-                    reason: err.to_string(),
-                }
-            });
+            let (mut parts, response_body) = response.http_response.into_parts();
+            let body = router::body::into_bytes(response_body)
+                .instrument(tracing::debug_span!("aggregate_response_data"))
+                .await
+                .map_err(|err| {
+                    tracing::error!(fetch_error = ?err);
+                    // HACK(@goto-bus-stop): the error ends up double-boxed because we mix `axum::Error` and
+                    // `tower::BoxError` types, so we have to look into the source error here.
+                    if err
+                        .source()
+                        .and_then(|source| source.downcast_ref::<ResponseSizeLimitError>())
+                        .is_some()
+                    {
+                        tracing::Span::current()
+                            .record("apollo.subgraph.response.aborted", "response_size_limit");
+                    } else {
+                        parts.extensions.insert(IncompleteResponseBody);
+                    }
+                    FetchError::SubrequestHttpError {
+                        status_code: Some(parts.status.as_u16()),
+                        service: service_name.to_string(),
+                        reason: err.to_string(),
+                    }
+                });
 
-        Ok((parts, body))
-    }
-    .instrument(subgraph_req_span)
-    .await;
+            Ok((parts, body))
+        }
+        .instrument(subgraph_req_span)
+        .await;
 
-    let (mut parts, body) = match fetch_result {
-        Ok(resp) => resp,
-        Err(err) => {
-            let mut response = SubgraphResponse::builder()
-                .subgraph_name(service_name.to_string())
-                .error(err.to_graphql_error(None))
-                .status_code(StatusCode::INTERNAL_SERVER_ERROR)
-                .context(context)
-                .extensions(Object::default())
-                .id(subgraph_request_id)
-                .build();
+        let (mut parts, body) = match fetch_result {
+            Ok(resp) => resp,
+            Err(err) => {
+                let mut response = SubgraphResponse::builder()
+                    .subgraph_name(service_name.to_string())
+                    .error(err.to_graphql_error(None))
+                    .status_code(StatusCode::INTERNAL_SERVER_ERROR)
+                    .context(context)
+                    .extensions(Object::default())
+                    .id(subgraph_request_id)
+                    .build();
+                if let Some(size) = request_body_size {
+                    response
+                        .response
+                        .extensions_mut()
+                        .insert(SubgraphRequestBodySize(size));
+                }
+                return Ok(response);
+            }
+        };
+
+        // This request's own body sizes, on its response, where telemetry's on_response selectors
+        // read them. Another subgraph request of the same client request carries its own.
+        let response_body_size = match &body {
+            Ok(_) => parts
+                .extensions
+                .get::<WireByteCount>()
+                .map(|c| c.0.load(Relaxed)),
+            Err(_) => None,
+        };
+        let place_body_sizes = |extensions: &mut http::Extensions| {
             if let Some(size) = request_body_size {
-                response
-                    .response
-                    .extensions_mut()
-                    .insert(SubgraphRequestBodySize(size));
+                extensions.insert(SubgraphRequestBodySize(size));
             }
-            return Ok(response);
-        }
-    };
+            if let Some(size) = response_body_size {
+                extensions.insert(SubgraphResponseBodySize(size));
+            }
+        };
+        place_body_sizes(&mut parts.extensions);
 
-    // This request's own body sizes, on its response, where telemetry's on_response selectors
-    // read them. Another subgraph request of the same client request carries its own.
-    let response_body_size = match &body {
-        Ok(_) => parts
-            .extensions
-            .get::<WireByteCount>()
-            .map(|c| c.0.load(Relaxed)),
-        Err(_) => None,
-    };
-    let place_body_sizes = |extensions: &mut http::Extensions| {
-        if let Some(size) = request_body_size {
-            extensions.insert(SubgraphRequestBodySize(size));
-        }
-        if let Some(size) = response_body_size {
-            extensions.insert(SubgraphResponseBodySize(size));
-        }
-    };
-    place_body_sizes(&mut parts.extensions);
+        let subgraph_response_event = context
+            .extensions()
+            .with_lock(|lock| lock.get::<SubgraphEventResponse>().cloned());
 
-    let subgraph_response_event = context
-        .extensions()
-        .with_lock(|lock| lock.get::<SubgraphEventResponse>().cloned());
-
-    if let Some(subgraph_response_event) = subgraph_response_event {
-        // We have to do this in order to use selectors
-        let mut resp_builder = http::Response::builder()
-            .status(parts.status)
-            .version(parts.version);
-        if let Some(headers) = resp_builder.headers_mut() {
-            *headers = parts.headers.clone();
-        }
-        if let Some(extensions) = resp_builder.extensions_mut() {
-            place_body_sizes(extensions);
-        }
-        let subgraph_response = SubgraphResponse::new_from_response(
-            resp_builder
-                .body(graphql::Response::default())
-                .expect("it won't fail everything is coming from an existing response"),
-            context.clone(),
-            service_name.to_owned(),
-            subgraph_request_id.clone(),
-        );
-
-        let should_log = subgraph_response_event
-            .condition
-            .evaluate_response(&subgraph_response);
-        if should_log {
-            let mut attrs = Vec::with_capacity(5);
-            let headers_str = crate::services::header_masking::masked_headers_for_log(
-                &context,
-                crate::services::header_masking::Direction::Response,
-                Some(service_name),
-                &parts.headers,
+        if let Some(subgraph_response_event) = subgraph_response_event {
+            // We have to do this in order to use selectors
+            let mut resp_builder = http::Response::builder()
+                .status(parts.status)
+                .version(parts.version);
+            if let Some(headers) = resp_builder.headers_mut() {
+                *headers = parts.headers.clone();
+            }
+            if let Some(extensions) = resp_builder.extensions_mut() {
+                place_body_sizes(extensions);
+            }
+            let subgraph_response = SubgraphResponse::new_from_response(
+                resp_builder
+                    .body(graphql::Response::default())
+                    .expect("it won't fail everything is coming from an existing response"),
+                context.clone(),
+                service_name.to_owned(),
+                subgraph_request_id.clone(),
             );
-            attrs.push(KeyValue::new(
-                Key::from_static_str("http.response.headers"),
-                opentelemetry::Value::String(headers_str.into()),
-            ));
-            attrs.push(KeyValue::new(
-                Key::from_static_str("http.response.status"),
-                opentelemetry::Value::String(format!("{}", parts.status).into()),
-            ));
-            attrs.push(KeyValue::new(
-                Key::from_static_str("http.response.version"),
-                opentelemetry::Value::String(format!("{:?}", parts.version).into()),
-            ));
-            if let Ok(b) = &body {
+
+            let should_log = subgraph_response_event
+                .condition
+                .evaluate_response(&subgraph_response);
+            if should_log {
+                let mut attrs = Vec::with_capacity(5);
+                let headers_str = crate::services::header_masking::masked_headers_for_log(
+                    &context,
+                    crate::services::header_masking::Direction::Response,
+                    Some(service_name),
+                    &parts.headers,
+                );
                 attrs.push(KeyValue::new(
-                    Key::from_static_str("http.response.body"),
-                    opentelemetry::Value::String(String::from_utf8_lossy(b).to_string().into()),
+                    Key::from_static_str("http.response.headers"),
+                    opentelemetry::Value::String(headers_str.into()),
                 ));
+                attrs.push(KeyValue::new(
+                    Key::from_static_str("http.response.status"),
+                    opentelemetry::Value::String(format!("{}", parts.status).into()),
+                ));
+                attrs.push(KeyValue::new(
+                    Key::from_static_str("http.response.version"),
+                    opentelemetry::Value::String(format!("{:?}", parts.version).into()),
+                ));
+                if let Ok(b) = &body {
+                    attrs.push(KeyValue::new(
+                        Key::from_static_str("http.response.body"),
+                        opentelemetry::Value::String(String::from_utf8_lossy(b).to_string().into()),
+                    ));
+                }
+                attrs.push(KeyValue::new(
+                    Key::from_static_str("subgraph.name"),
+                    opentelemetry::Value::String(service_name.to_string().into()),
+                ));
+                log_event(
+                    subgraph_response_event.level,
+                    "subgraph.response",
+                    attrs,
+                    &format!("Raw response from subgraph {service_name:?} received"),
+                );
             }
-            attrs.push(KeyValue::new(
-                Key::from_static_str("subgraph.name"),
-                opentelemetry::Value::String(service_name.to_string().into()),
-            ));
-            log_event(
-                subgraph_response_event.level,
-                "subgraph.response",
-                attrs,
-                &format!("Raw response from subgraph {service_name:?} received"),
-            );
         }
-    }
 
-    let graphql_response = http_response_to_graphql_response(service_name, body, &parts);
+        let graphql_response = http_response_to_graphql_response(service_name, body, &parts);
 
-    let resp = http::Response::from_parts(parts, graphql_response);
-    Ok(SubgraphResponse::new_from_response(
-        resp,
-        context,
-        service_name.to_owned(),
-        subgraph_request_id,
-    ))
+        let resp = http::Response::from_parts(parts, graphql_response);
+        Ok(SubgraphResponse::new_from_response(
+            resp,
+            context,
+            service_name.to_owned(),
+            subgraph_request_id,
+        ))
+    })
 }
 
 /// The full service stack for one subgraph, shared by every subgraph request as a pool of copies

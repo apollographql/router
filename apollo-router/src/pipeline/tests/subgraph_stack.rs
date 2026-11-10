@@ -105,8 +105,9 @@ async fn a_subgraph_stack_runs_no_worker_task_of_its_own() {
 
 /// A subgraph request with nothing configured for its subgraph meets only the layers that serve it:
 /// no worker task, where traffic shaping's admission buffer ran one for a rate limit nobody
-/// configured, and one copy of the HTTP client's stack, the subgraph service's, where the
-/// subscription and APQ layers each copied the stack beneath them too.
+/// configured, and no copy of the HTTP client's stack, which the subgraph service calls in place,
+/// where it copied the stack per request and the subscription and APQ layers each copied the stack
+/// beneath them too.
 #[tokio::test]
 async fn an_unconfigured_subgraph_request_meets_only_the_layers_that_serve_it() {
     let plugins = required_stage_plugins().await;
@@ -141,7 +142,7 @@ async fn an_unconfigured_subgraph_request_meets_only_the_layers_that_serve_it() 
     assert_eq!(response.response.status(), http::StatusCode::OK);
     assert_eq!(
         (workers, clones.load(Ordering::Relaxed) - clones_before),
-        (0, 1),
+        (0, 0),
         "the stack's worker tasks, and the copies of its HTTP client's stack one request made"
     );
 }
