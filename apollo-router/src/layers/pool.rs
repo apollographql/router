@@ -340,6 +340,47 @@ mod tests {
         );
     }
 
+    /// A call is never refused or failed for want of its task's cooperative budget, the ingress's
+    /// handle or a subgraph stack's bounded one: with a tower buffer beneath the pool, far from full,
+    /// and the task's budget spent before the call readies its copy, the buffer's channel answers
+    /// `Pending`, which the call waits out like any other, and the call answers. A pool reads
+    /// readiness to wait on it, never to refuse.
+    #[tokio::test]
+    async fn a_call_waits_out_its_tasks_spent_budget() {
+        use tokio::task::coop::poll_proceed;
+
+        let buffered = || {
+            tower::ServiceBuilder::new()
+                .buffer(1000)
+                .service_fn(|request: u32| async move { Ok::<_, BoxError>(request) })
+        };
+        for (handle, mut pooled) in [
+            ("unbounded", Pooled::new(buffered())),
+            ("bounded", Pooled::bounded(buffered(), 10)),
+        ] {
+            // a fresh budget, then the call readied with that budget spent
+            tokio::task::yield_now().await;
+            let mut future = std::pin::pin!(pooled.call(7));
+            let first = std::future::poll_fn(|cx| {
+                while let Poll::Ready(restore) = poll_proceed(cx) {
+                    restore.made_progress();
+                }
+                Poll::Ready(future.as_mut().poll(cx).is_pending())
+            })
+            .await;
+            assert!(
+                first,
+                "the {handle} call's copy readied at once with its task's budget spent"
+            );
+
+            assert_eq!(
+                future.await.expect("an answer"),
+                7,
+                "the {handle} call's answer, once its task runs again"
+            );
+        }
+    }
+
     #[tokio::test]
     async fn a_readiness_error_fails_its_own_call_alone() {
         let gate = Gate::new(true);
