@@ -1,16 +1,11 @@
 //! The layers that decide whether a request to a subgraph or connector source goes ahead.
 //!
-//! Admission has four parts, from the outside in: a buffer, the error responses, load shedding
-//! and the rate limit. Their order matters:
-//!
-//! - Load shedding must sit directly above the rate limit, with no buffer between them, so it
-//!   rejects a request as soon as the limit is reached instead of queueing it.
-//! - The buffer above load shedding polls readiness unconstrained, so Tokio's cooperative
-//!   scheduling is not mistaken for overload. It also lets the layers above clone the service
-//!   while every clone shares one rate limit.
-//! - The error responses must sit above load shedding: they turn its [`Overloaded`] error into
-//!   a GraphQL response. This can't move into the rate limit, which only waits; it is load
-//!   shedding that turns the wait into an error.
+//! Admission has two parts, from the outside in: the error responses and the rate limit. The rate
+//! limit is charged where a request is called and refuses a request it does not admit with
+//! [`Overloaded`], its counter shared by every clone of the built service (`rate_limit`); the
+//! error responses, above it, turn that error into a GraphQL response. No buffer stands between
+//! them or above them: the stack's pool, above the plugin hooks' layers, readies and calls it on
+//! the request's task.
 //!
 //! The subgraph and connector request stages place each part separately. Their timeouts answer
 //! their own errors.
@@ -23,7 +18,7 @@ use tower::Service;
 use tower::ServiceBuilder;
 use tower::ServiceExt as _;
 use tower::load_shed::error::Overloaded;
-use tower::util::BoxService;
+use tower::util::BoxCloneService;
 
 use super::rate_limit_error;
 use crate::layers::ServiceBuilderExt as _;
@@ -36,10 +31,13 @@ pub(crate) struct SubgraphErrorResponseLayer;
 
 impl<S> Layer<S> for SubgraphErrorResponseLayer
 where
-    S: Service<subgraph::Request, Response = subgraph::Response, Error = BoxError> + Send + 'static,
+    S: Service<subgraph::Request, Response = subgraph::Response, Error = BoxError>
+        + Clone
+        + Send
+        + 'static,
     S::Future: Send + 'static,
 {
-    type Service = BoxService<subgraph::Request, subgraph::Response, BoxError>;
+    type Service = BoxCloneService<subgraph::Request, subgraph::Response, BoxError>;
 
     fn layer(&self, inner: S) -> Self::Service {
         ServiceBuilder::new()
@@ -62,7 +60,7 @@ where
                 },
             )
             .service(inner)
-            .boxed()
+            .boxed_clone()
     }
 }
 
@@ -72,11 +70,12 @@ pub(crate) struct ConnectorSourceErrorResponseLayer;
 impl<S> Layer<S> for ConnectorSourceErrorResponseLayer
 where
     S: Service<request_service::Request, Response = request_service::Response, Error = BoxError>
+        + Clone
         + Send
         + 'static,
     S::Future: Send + 'static,
 {
-    type Service = BoxService<request_service::Request, request_service::Response, BoxError>;
+    type Service = BoxCloneService<request_service::Request, request_service::Response, BoxError>;
 
     fn layer(&self, inner: S) -> Self::Service {
         ServiceBuilder::new()
@@ -105,7 +104,7 @@ where
                 },
             )
             .service(inner)
-            .boxed()
+            .boxed_clone()
     }
 }
 
@@ -128,9 +127,10 @@ mod tests {
 
     /// The response the error-response layer gives when the service beneath it fails with `error`.
     async fn respond_to(error: BoxError) -> Result<SubgraphResponse, BoxError> {
-        let mut error = Some(error);
+        // shared, so the service is cloneable as the layer requires
+        let error = std::sync::Arc::new(parking_lot::Mutex::new(Some(error)));
         let failing = tower::service_fn(move |_: SubgraphRequest| {
-            let error = error.take().expect("called once");
+            let error = error.lock().take().expect("called once");
             async move { Err::<SubgraphResponse, _>(error) }
         });
         SubgraphErrorResponseLayer
@@ -169,9 +169,10 @@ mod tests {
     /// The response the connector source error-response layer gives when the service beneath it
     /// fails with `error`.
     async fn source_responds_to(error: BoxError) -> Result<request_service::Response, BoxError> {
-        let mut error = Some(error);
+        // shared, so the service is cloneable as the layer requires
+        let error = std::sync::Arc::new(parking_lot::Mutex::new(Some(error)));
         let failing = tower::service_fn(move |_: request_service::Request| {
-            let error = error.take().expect("called once");
+            let error = error.lock().take().expect("called once");
             async move { Err::<request_service::Response, _>(error) }
         });
         ConnectorSourceErrorResponseLayer

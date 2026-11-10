@@ -6,6 +6,7 @@
 
 use std::future::Future;
 use std::pin::Pin;
+use std::sync::Arc;
 use std::task::Poll;
 use std::task::ready;
 use std::time::Duration;
@@ -13,16 +14,23 @@ use std::time::Duration;
 use apollo_federation::connectors::runtime::errors::Error;
 use http::StatusCode;
 use pin_project_lite::pin_project;
+use tokio::sync::OwnedSemaphorePermit;
+use tokio::sync::Semaphore;
 use tower::BoxError;
 use tower::Layer;
 use tower::Service;
 use tower::ServiceBuilder;
 use tower::ServiceExt as _;
+use tower::limit::RateLimitLayer;
 use tower::load_shed::error::Overloaded;
 use tower::timeout::TimeoutLayer;
 use tower::timeout::error::Elapsed;
 
+use super::concurrency_limit_error;
 use super::gateway_timeout_error;
+use super::rate_limit::Limiter;
+use super::rate_limit::admits;
+use super::rate_limit::limiter;
 use super::rate_limit_error;
 use crate::layers::ServiceBuilderExt as _;
 use crate::layers::release_readied;
@@ -222,68 +230,91 @@ mod tests {
     }
 }
 
-/// The router stage's shaping where no router limit is configured: the timeout every request runs
-/// under, answered with a gateway timeout, and the shedding of a request whose service beneath is
-/// not ready, answered as the buffered stage's innermost shedding answers it; an overload or a
-/// timeout the service beneath answers with is answered as the buffered stage's mappings answer
-/// them, the rate-limit 503 and the 504. Its readiness is read and its timeout armed on the
-/// request's own task: the buffer the buffered stage puts in front of the shedding serves a limiter
-/// every clone of the stage must share, and there is none.
-pub(crate) struct RouterTimeoutLayer {
+/// The router stage's shaping under every configuration, on the request's own task: the timeout
+/// every request runs under, answered with a gateway timeout; the router's concurrency limit, a
+/// request past it refused with the concurrency 503; the router's rate limit, a request it does
+/// not admit refused with the rate-limit 503 (`rate_limit::admits`); and the shedding of a request
+/// whose service beneath is not ready, answered with that 503 as the buffered stage's innermost
+/// shedding answered it. An overload or a timeout the service beneath answers with is answered as
+/// the buffered stage's mappings answered them, the rate-limit 503 and the 504.
+///
+/// The limiters are shared by every clone of the stage, as the buffer the stage stood behind
+/// shared one stage among every request: a request takes a permit of the concurrency limit without
+/// waiting and holds it until its response, and charges the rate limit's window where it is
+/// called.
+pub(crate) struct RouterShapingLayer {
     timeout: Duration,
+    concurrency: Option<Arc<Semaphore>>,
+    rate: Option<Limiter>,
 }
 
-impl RouterTimeoutLayer {
-    pub(super) fn new(timeout: Duration) -> Self {
-        Self { timeout }
+impl RouterShapingLayer {
+    pub(super) fn new(
+        timeout: Duration,
+        concurrency_limit: Option<usize>,
+        rate: Option<&RateLimitLayer>,
+    ) -> Self {
+        Self {
+            timeout,
+            concurrency: concurrency_limit.map(|limit| Arc::new(Semaphore::new(limit))),
+            rate: rate.map(limiter),
+        }
     }
 }
 
-impl<S> Layer<S> for RouterTimeoutLayer {
-    type Service = RouterTimeout<S>;
+impl<S> Layer<S> for RouterShapingLayer {
+    type Service = RouterShaping<S>;
 
     fn layer(&self, inner: S) -> Self::Service {
-        RouterTimeout {
+        RouterShaping {
             inner,
             timeout: self.timeout,
+            concurrency: self.concurrency.clone(),
+            rate: self.rate.clone(),
             ready: false,
         }
     }
 }
 
-/// See [`RouterTimeoutLayer`].
-pub(crate) struct RouterTimeout<S> {
+/// See [`RouterShapingLayer`].
+pub(crate) struct RouterShaping<S> {
     inner: S,
     timeout: Duration,
+    concurrency: Option<Arc<Semaphore>>,
+    rate: Option<Limiter>,
     /// Whether the service beneath was ready when last polled, as load shedding records it.
     ready: bool,
 }
 
-impl<S: Clone> Clone for RouterTimeout<S> {
-    /// A clone not yet polled, as the clone of its service beneath is not readied.
+impl<S: Clone> Clone for RouterShaping<S> {
+    /// A clone not yet polled, as the clone of its service beneath is not readied, sharing the
+    /// stage's limiters.
     fn clone(&self) -> Self {
         Self {
             inner: self.inner.clone(),
             timeout: self.timeout,
+            concurrency: self.concurrency.clone(),
+            rate: self.rate.clone(),
             ready: false,
         }
     }
 }
 
-impl<S> Service<router::Request> for RouterTimeout<S>
+impl<S> Service<router::Request> for RouterShaping<S>
 where
     S: Service<router::Request, Response = router::Response, Error = BoxError> + Clone,
 {
     type Response = router::Response;
     type Error = BoxError;
-    type Future = RouterTimeoutFuture<S::Future>;
+    type Future = RouterShapingFuture<S::Future>;
 
     fn poll_ready(&mut self, cx: &mut std::task::Context<'_>) -> Poll<Result<(), BoxError>> {
         // load shedding's readiness: never pending, a request called unready is shed. The service
         // beneath is polled outside Tokio's cooperative budget, as `UnconstrainedBuffer` polls the
         // buffer behind the buffered stage's shedding: a budget-aware primitive beneath, such as a
-        // plugin's concurrency limit, answers `Pending` once the request's task has spent its
-        // budget, and that `Pending` would be taken for a service not ready and shed with a 503
+        // tower buffer a plugin places in its router hook, answers `Pending` once the request's
+        // task has spent its budget, and that `Pending` would be taken for a service not ready and
+        // shed with a 503
         let polled = std::pin::pin!(tokio::task::unconstrained(std::future::poll_fn(|cx| {
             self.inner.poll_ready(cx)
         })))
@@ -296,37 +327,57 @@ where
     }
 
     fn call(&mut self, request: router::Request) -> Self::Future {
-        if !std::mem::take(&mut self.ready) {
+        let ready = std::mem::take(&mut self.ready);
+        // the concurrency limit, the rate limit and the readiness beneath, in the buffered stage's
+        // order of its three shedding layers
+        let permit = match &self.concurrency {
+            Some(semaphore) => match Arc::clone(semaphore).try_acquire_owned() {
+                Ok(permit) => Some(permit),
+                Err(_) => {
+                    release_readied(&mut self.inner);
+                    return RouterShapingFuture::Shed {
+                        error: Some(concurrency_limit_error()),
+                        context: Some(request.context),
+                    };
+                }
+            },
+            None => None,
+        };
+        if !ready || self.rate.as_ref().is_some_and(|rate| !admits(rate)) {
             // the service beneath, polled and not ready, may hold a reservation it waits on
             release_readied(&mut self.inner);
-            return RouterTimeoutFuture::Shed {
+            return RouterShapingFuture::Shed {
+                error: Some(rate_limit_error()),
                 context: Some(request.context),
             };
         }
         let context = request.context.clone();
-        RouterTimeoutFuture::Called {
+        RouterShapingFuture::Called {
             inner: tokio::time::timeout(self.timeout, self.inner.call(request)),
             context: Some(context),
+            _permit: permit,
         }
     }
 }
 
 pin_project! {
-    /// The future of a request through [`RouterTimeout`].
-    #[project = RouterTimeoutProjection]
-    pub(crate) enum RouterTimeoutFuture<F> {
+    /// The future of a request through [`RouterShaping`].
+    #[project = RouterShapingProjection]
+    pub(crate) enum RouterShapingFuture<F> {
         Called {
             #[pin]
             inner: tokio::time::Timeout<F>,
             context: Option<crate::Context>,
+            _permit: Option<OwnedSemaphorePermit>,
         },
         Shed {
+            error: Option<crate::graphql::Error>,
             context: Option<crate::Context>,
         },
     }
 }
 
-impl<F> Future for RouterTimeoutFuture<F>
+impl<F> Future for RouterShapingFuture<F>
 where
     F: Future<Output = Result<router::Response, BoxError>>,
 {
@@ -334,7 +385,7 @@ where
 
     fn poll(self: Pin<&mut Self>, cx: &mut std::task::Context<'_>) -> Poll<Self::Output> {
         match self.project() {
-            RouterTimeoutProjection::Called { inner, context } => {
+            RouterShapingProjection::Called { inner, context, .. } => {
                 let mut context = || context.take().expect("a future polled after completion");
                 Poll::Ready(match ready!(inner.poll(cx)) {
                     Ok(Ok(response)) => Ok(response),
@@ -357,10 +408,10 @@ where
                         .expect("gateway timeout response should build")),
                 })
             }
-            RouterTimeoutProjection::Shed { context } => {
+            RouterShapingProjection::Shed { error, context } => {
                 Poll::Ready(Ok(router::Response::error_builder()
                     .status_code(StatusCode::SERVICE_UNAVAILABLE)
-                    .error(rate_limit_error())
+                    .error(error.take().expect("a future polled after completion"))
                     .context(context.take().expect("a future polled after completion"))
                     .build()
                     .expect("overloaded response should build")))

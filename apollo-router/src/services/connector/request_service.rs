@@ -30,7 +30,7 @@ use crate::Context;
 use crate::batching::BatchQuery;
 use crate::error::FetchError;
 use crate::graphql;
-use crate::layers::unconstrained_buffer::UnconstrainedBuffer;
+use crate::layers::pool::Pooled;
 use crate::plugins::connectors::handle_responses::process_response;
 use crate::plugins::connectors::tracing::CONNECTOR_TYPE_HTTP;
 use crate::plugins::telemetry::config_new::attributes::HTTP_REQUEST_BODY;
@@ -418,8 +418,7 @@ impl Response {
 /// `source_config_key()`. Stacks are built once; [`Self::get`] hands out cheap clones.
 #[derive(Clone)]
 pub(crate) struct ConnectorRequestServices {
-    pub(crate) services:
-        Arc<HashMap<String, UnconstrainedBuffer<Request, BoxFuture<'static, ServiceResult>>>>,
+    pub(crate) services: Arc<HashMap<String, Pooled<BoxCloneService>>>,
 }
 
 impl ConnectorRequestServices {
@@ -429,7 +428,7 @@ impl ConnectorRequestServices {
     /// # Panics
     /// Panics if no service exists for `source_name`.
     pub(crate) fn get(&self, source_name: String) -> BoxCloneService {
-        // Note: We have to box our cloned service to erase the type of the Buffer.
+        // Note: We have to box our cloned service to erase the type of the pool's handle.
         self.services
             .get(&source_name)
             .map(|svc| svc.clone().boxed_clone())

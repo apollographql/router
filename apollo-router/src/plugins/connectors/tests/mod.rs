@@ -483,6 +483,21 @@ async fn basic_errors() {
     )
     .await;
 
+    // the errors of the parallel fetches arrive in the order the fetches complete, which the
+    // test does not fix: they are sorted by path for the snapshot
+    let mut response = response;
+    if let Some(errors) = response
+        .get_mut("errors")
+        .and_then(serde_json::Value::as_array_mut)
+    {
+        errors.sort_by_key(|error| {
+            error["path"]
+                .as_array()
+                .map(|path| path.iter().map(ToString::to_string).collect::<Vec<_>>())
+                .unwrap_or_default()
+        });
+    }
+
     insta::assert_json_snapshot!(response, @r#"
     {
       "data": {
@@ -498,22 +513,6 @@ async fn basic_errors() {
         ]
       },
       "errors": [
-        {
-          "message": "Request failed",
-          "path": [
-            "users"
-          ],
-          "extensions": {
-            "code": "CONNECTOR_FETCH",
-            "service": "connectors",
-            "connector": {
-              "coordinate": "connectors:Query.users[0]"
-            },
-            "http": {
-              "status": 404
-            }
-          }
-        },
         {
           "message": "Request failed",
           "path": [
@@ -548,6 +547,22 @@ async fn basic_errors() {
             },
             "http": {
               "status": 400
+            }
+          }
+        },
+        {
+          "message": "Request failed",
+          "path": [
+            "users"
+          ],
+          "extensions": {
+            "code": "CONNECTOR_FETCH",
+            "service": "connectors",
+            "connector": {
+              "coordinate": "connectors:Query.users[0]"
+            },
+            "http": {
+              "status": 404
             }
           }
         }

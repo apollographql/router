@@ -8,6 +8,7 @@
 //!
 mod admission;
 mod deduplication;
+mod rate_limit;
 mod timeout;
 
 use std::collections::HashMap;
@@ -16,43 +17,33 @@ use std::time::Duration;
 
 use apollo_federation::connectors::runtime::http_json_transport::TransportRequest;
 use http::HeaderValue;
-use http::StatusCode;
 use http::header::CONTENT_ENCODING;
 use parking_lot::Mutex;
 use tower::BoxError;
 use tower::ServiceBuilder;
 use tower::ServiceExt;
-use tower::limit::ConcurrencyLimitLayer;
 use tower::limit::RateLimitLayer;
-use tower::load_shed::LoadShedLayer;
-use tower::load_shed::error::Overloaded;
-use tower::timeout::TimeoutLayer;
-use tower::timeout::error::Elapsed;
 use tower::util::MapRequestLayer;
 use tower::util::option_layer;
 
 use self::admission::ConnectorSourceErrorResponseLayer;
 use self::admission::SubgraphErrorResponseLayer;
 use self::deduplication::QueryDeduplicationLayer;
+use self::rate_limit::SharedRateLimitLayer;
 use self::timeout::ConnectorSourceTimeoutLayer;
-use self::timeout::RouterTimeoutLayer;
+use self::timeout::RouterShapingLayer;
 use self::timeout::SubgraphTimeoutLayer;
 use crate::configuration::shared::DnsResolutionStrategy;
 use crate::configuration::shared::default_pool_idle_timeout;
 use crate::configuration::shared::without_default;
 use crate::graphql;
-use crate::layers::DEFAULT_BUFFER_SIZE;
 use crate::layers::OptionLayer;
-use crate::layers::ServiceBuilderExt;
-use crate::layers::unconstrained_buffer::UnconstrainedBufferLayer;
 use crate::plugin::PluginInit;
 use crate::plugin::PluginPrivate;
-use crate::services::RouterResponse;
 use crate::services::SubgraphRequest;
 use crate::services::connector;
 use crate::services::http::service::Compression;
 use crate::services::router;
-use crate::services::subgraph;
 
 const DEFAULT_TIMEOUT: Duration = Duration::from_secs(30);
 pub(crate) const APOLLO_TRAFFIC_SHAPING: &str = "apollo.traffic_shaping";
@@ -340,90 +331,21 @@ impl PluginPrivate for TrafficShaping {
     }
 
     fn router_service(&self, service: router::BoxCloneService) -> router::BoxCloneService {
+        // the stage on the request's own task under every configuration: its limiters are shared
+        // by every clone of the stage, where a buffer once shared one stage among every request
         let router = self.config.router.as_ref();
         let timeout = router
             .and_then(|r| r.timeout.as_deref().copied())
             .unwrap_or(DEFAULT_TIMEOUT);
-        if router.is_none_or(|r| r.concurrency_limit.is_none() && r.global_rate_limit.is_none()) {
-            // with no router limit, the timeout alone, on the request's own task
-            return ServiceBuilder::new()
-                .layer(RouterTimeoutLayer::new(timeout))
-                .service(service)
-                .boxed_clone();
-        }
-
-        // NB: consider each triplet (map_future_with_request_data, load_shed, layer) as a unit of
-        //  behavior.
-        // The stage is cloned per request, and a limiter keeps its state per instance: the outer
-        // buffer gives every request the one limiter. It is also required for correct
-        // cooperative-scheduling behaviour: without it, Tokio's budget can cause poll_ready to
-        // return Pending spuriously and the load_shed would emit false Overloaded errors.
+        let rate = router
+            .and_then(|r| r.global_rate_limit.as_ref())
+            .map(|limit| RateLimitLayer::new(limit.capacity.into(), *limit.interval));
         ServiceBuilder::new()
-            .buffered()
-            .map_future_with_request_data(
-                |req: &router::Request| req.context.clone(),
-                move |ctx, future| async {
-                    let response: Result<RouterResponse, BoxError> = future.await;
-                    if matches!(response, Err(ref err) if err.is::<Elapsed>()) {
-                        Ok(RouterResponse::error_builder()
-                            .status_code(StatusCode::GATEWAY_TIMEOUT)
-                            .error(gateway_timeout_error())
-                            .context(ctx)
-                            .build()
-                            .expect("should build overloaded response"))
-                    } else {
-                        response
-                    }
-                },
-            )
-            .load_shed()
-            .layer(TimeoutLayer::new(timeout))
-            .map_future_with_request_data(
-                |req: &router::Request| req.context.clone(),
-                move |ctx, future| async {
-                    let response: Result<RouterResponse, BoxError> = future.await;
-                    if matches!(response, Err(ref err) if err.is::<Overloaded>()) {
-                        Ok(RouterResponse::error_builder()
-                            .status_code(StatusCode::SERVICE_UNAVAILABLE)
-                            .error(concurrency_limit_error())
-                            .context(ctx)
-                            .build()
-                            .expect("should build overloaded response"))
-                    } else {
-                        response
-                    }
-                },
-            )
-            .load_shed()
-            .option_layer(self.config.router.as_ref().and_then(|router| {
-                router
-                    .concurrency_limit
-                    .as_ref()
-                    .map(|limit| ConcurrencyLimitLayer::new(*limit))
-            }))
-            .map_future_with_request_data(
-                |req: &router::Request| req.context.clone(),
-                move |ctx, future| async {
-                    let response: Result<RouterResponse, BoxError> = future.await;
-                    if matches!(response, Err(ref err) if err.is::<Overloaded>()) {
-                        Ok(RouterResponse::error_builder()
-                            .status_code(StatusCode::SERVICE_UNAVAILABLE)
-                            .error(rate_limit_error())
-                            .context(ctx)
-                            .build()
-                            .expect("should build overloaded response"))
-                    } else {
-                        response
-                    }
-                },
-            )
-            .load_shed()
-            .option_layer(self.config.router.as_ref().and_then(|router| {
-                router
-                    .global_rate_limit
-                    .as_ref()
-                    .map(|limit| RateLimitLayer::new(limit.capacity.into(), *limit.interval))
-            }))
+            .layer(RouterShapingLayer::new(
+                timeout,
+                router.and_then(|r| r.concurrency_limit),
+                rate.as_ref(),
+            ))
             .service(service)
             .boxed_clone()
     }
@@ -507,26 +429,15 @@ impl TrafficShaping {
         )
     }
 
-    /// Returns a layer that rejects a request to `target` when the rate limit beneath it is not
-    /// ready, instead of waiting.
-    pub(crate) fn load_shed_layer(&self, target: ShapingTarget<'_>) -> OptionLayer<LoadShedLayer> {
-        let shaped = match target {
-            ShapingTarget::Subgraph(name) => self.subgraph_shaping(name).is_some(),
-            ShapingTarget::ConnectorSource(source) => {
-                self.connector_source_shaping(source).is_some()
-            }
-        };
-        option_layer(shaped.then(LoadShedLayer::new))
-    }
-
-    /// Returns the rate limit for `target`, when `global_rate_limit` is configured for it.
+    /// Returns the rate limit for `target`, when `global_rate_limit` is configured for it: charged
+    /// where a request is called, a request it does not admit refused at once (`rate_limit`).
     ///
     /// The rate configuration is cached per target for the plugin's lifetime. Each service built
-    /// from the layer has an independent counter.
+    /// from the layer has an independent counter, which every clone of that service shares.
     pub(crate) fn rate_limit_layer(
         &self,
         target: ShapingTarget<'_>,
-    ) -> OptionLayer<RateLimitLayer> {
+    ) -> OptionLayer<SharedRateLimitLayer> {
         let (rate_limits, key, conf) = match target {
             ShapingTarget::Subgraph(name) => (
                 &self.rate_limit_subgraphs,
@@ -542,11 +453,13 @@ impl TrafficShaping {
             ),
         };
         option_layer(conf.map(|conf| {
-            rate_limits
-                .lock()
-                .entry(key.to_string())
-                .or_insert_with(|| RateLimitLayer::new(conf.capacity.into(), *conf.interval))
-                .clone()
+            SharedRateLimitLayer::new(
+                rate_limits
+                    .lock()
+                    .entry(key.to_string())
+                    .or_insert_with(|| RateLimitLayer::new(conf.capacity.into(), *conf.interval))
+                    .clone(),
+            )
         }))
     }
 
@@ -612,18 +525,6 @@ impl TrafficShaping {
         )
     }
 
-    /// Returns the buffer beneath this subgraph's shaping layers, which gives the rate limit
-    /// and load shedding above it a backpressure surface.
-    pub(crate) fn subgraph_backpressure_buffer_layer(
-        &self,
-        name: &str,
-    ) -> OptionLayer<UnconstrainedBufferLayer<subgraph::Request>> {
-        option_layer(
-            self.subgraph_shaping(name)
-                .map(|_| UnconstrainedBufferLayer::new(DEFAULT_BUFFER_SIZE)),
-        )
-    }
-
     /// Returns a layer that answers a request to this connector source, keyed by
     /// `<subgraph name>.<source name>`, that load shedding rejected with a rate-limited error.
     pub(crate) fn connector_source_error_response_layer(
@@ -681,18 +582,6 @@ impl TrafficShaping {
                         req
                     })
                 }),
-        )
-    }
-
-    /// Returns the buffer beneath this connector source's shaping layers, which gives the rate
-    /// limit and load shedding above it a backpressure surface.
-    pub(crate) fn connector_source_backpressure_buffer_layer(
-        &self,
-        source: &str,
-    ) -> OptionLayer<UnconstrainedBufferLayer<connector::request_service::Request>> {
-        option_layer(
-            self.connector_source_shaping(source)
-                .map(|_| UnconstrainedBufferLayer::new(DEFAULT_BUFFER_SIZE)),
         )
     }
 }
@@ -767,6 +656,7 @@ mod test {
     use std::sync::Arc;
 
     use bytes::Bytes;
+    use http::StatusCode;
     use maplit::hashmap;
     use once_cell::sync::Lazy;
     use serde_json_bytes::ByteString;
@@ -775,6 +665,8 @@ mod test {
     use tokio::task::JoinSet;
     use tokio::time::sleep;
     use tower::Service;
+    use tower::load_shed::error::Overloaded;
+    use tower::timeout::error::Elapsed;
 
     use super::*;
     use crate::Configuration;
@@ -1181,22 +1073,21 @@ mod test {
         crate::plugin::test::await_mock_driver(driver).await;
     }
 
-    /// The router stage's shaping calls the service beneath it on the request's own task where no
-    /// router limit is configured, its timeout alone in force, and from the one worker task every
-    /// request shares where a concurrency or rate limit is, whose limiter every clone of the stage
-    /// must share.
+    /// The router stage's shaping calls the service beneath it on the request's own task under
+    /// every configuration: its timeout alone, or a concurrency or rate limit, whose limiter every
+    /// clone of the stage shares, where a buffer's one worker task called it for every request.
     #[tokio::test(flavor = "multi_thread")]
-    async fn the_router_stage_meets_a_worker_where_a_router_limit_is_configured() {
+    async fn the_router_stage_calls_the_service_beneath_on_the_requests_task() {
         for (config, on_the_request_task) in [
             (serde_json::json!({}), true),
             (serde_json::json!({"router": {"timeout": "10s"}}), true),
             (
                 serde_json::json!({"router": {"concurrency_limit": 10}}),
-                false,
+                true,
             ),
             (
                 serde_json::json!({"router": {"global_rate_limit": {"capacity": 10, "interval": "1s"}}}),
-                false,
+                true,
             ),
         ] {
             let plugin = get_traffic_shaping_plugin(&config).await;

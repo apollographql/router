@@ -22,7 +22,7 @@ use tower::ServiceExt;
 use tracing_futures::Instrument;
 
 use super::connect::BoxCloneService;
-use crate::layers::unconstrained_buffer::UnconstrainedBuffer;
+use crate::layers::pool::Pooled;
 use crate::plugins::connectors::handle_responses::aggregate_responses;
 use crate::plugins::connectors::make_requests::make_requests;
 use crate::plugins::connectors::tracing::CONNECTOR_TYPE_HTTP;
@@ -33,7 +33,6 @@ use crate::plugins::telemetry::consts::CONNECT_SPAN_NAME;
 use crate::query_planner::SubgraphSchemas;
 use crate::services::ConnectRequest;
 use crate::services::ConnectResponse;
-use crate::services::connect::ServiceResult;
 use crate::services::connector::request_service::BoxCloneService as ConnectorRequestBoxService;
 use crate::spec::Schema;
 
@@ -239,9 +238,7 @@ pub(crate) struct ConnectorServices {
     pub(crate) connectors_by_service_name: Arc<IndexMap<Arc<str>, Connector>>,
     pub(crate) _connect_spec_version_instrument: Option<ObservableGauge<u64>>,
     /// Pre-built services for each connector.
-    pub(crate) services: Arc<
-        HashMap<String, UnconstrainedBuffer<ConnectRequest, BoxFuture<'static, ServiceResult>>>,
-    >,
+    pub(crate) services: Arc<HashMap<String, Pooled<BoxCloneService>>>,
 }
 
 impl ConnectorServices {

@@ -21,6 +21,7 @@ use tower::BoxError;
 use tower::Layer;
 use tower::Service;
 
+use crate::layers::release_readied;
 use crate::plugins::connectors::handle_responses::process_response;
 use crate::services::connector::request_service::Request;
 use crate::services::connector::request_service::Response;
@@ -154,7 +155,7 @@ pub(crate) struct RequestLimitService<S> {
 
 impl<S> Service<Request> for RequestLimitService<S>
 where
-    S: Service<Request, Response = Response, Error = BoxError>,
+    S: Service<Request, Response = Response, Error = BoxError> + Clone,
 {
     type Response = Response;
     type Error = BoxError;
@@ -181,6 +182,9 @@ where
         if limit.is_none_or(|limit| limit.allow()) {
             return Either::Left(self.inner.call(request));
         }
+
+        // answered without the service beneath, which may hold what its readiness reserved
+        release_readied(&mut self.inner);
 
         // Recorded for connector debugging like any other request, with no request sent.
         let debug = request

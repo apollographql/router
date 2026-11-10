@@ -5,7 +5,6 @@ use std::collections::HashMap;
 use std::sync::Arc;
 
 use apollo_federation::query_plan::query_planner::QueryPlanner;
-use futures::future::BoxFuture;
 use indexmap::IndexMap;
 use tower::BoxError;
 use tower::Service;
@@ -14,7 +13,6 @@ use tower::ServiceExt;
 use tower::layer::LayerFn;
 use tower::layer::layer_fn;
 use tower::util::BoxCloneService;
-use tower::util::BoxService;
 
 use super::acquire::HttpClientInputsMaps;
 use crate::Configuration;
@@ -28,9 +26,7 @@ use crate::introspection;
 use crate::introspection::IntrospectionService;
 use crate::layers::DEFAULT_BUFFER_SIZE;
 use crate::layers::InternalServiceBuilderExt as _;
-use crate::layers::ServiceBuilderExt as _;
 use crate::layers::pool::Pooled;
-use crate::layers::unconstrained_buffer::UnconstrainedBuffer;
 use crate::plugins::authorization::AuthorizationPlugin;
 use crate::plugins::authorization::extract_authorization_checks_layer::ExtractAuthorizationChecksLayer;
 use crate::plugins::circuit_breaker::CircuitBreaker;
@@ -336,28 +332,23 @@ where
 /// for the subgraph.
 ///
 /// Traffic shaping runs outside every plugin hook and inside telemetry, which records what it
-/// rejects. The `admission` module in traffic shaping explains the order of the buffer and the
-/// three layers after it. The rate limit can't be cloned, so neither box beneath the buffer needs
-/// `Clone`; the buffer is what makes the stack cloneable again for the layers above it. The
-/// timeout answers its own errors, so it doesn't depend on the layers above it.
+/// rejects. The `admission` module in traffic shaping explains its two parts; the rate limit is
+/// charged where a request is called, its counter shared by every copy the stack's pool makes.
+/// The timeout answers its own errors, so it doesn't depend on the layers above it.
 fn shaped_subgraph_service(
     name: &str,
     plugins: &Plugins,
     hooked: subgraph::BoxCloneService,
-) -> UnconstrainedBuffer<SubgraphRequest, BoxFuture<'static, subgraph::ServiceResult>> {
+) -> subgraph::BoxCloneService {
     ServiceBuilder::new()
-        .buffered()
-        .layer(box_layer())
+        .layer(box_clone_layer())
         .apply_required_plugin_layer(plugins, |t: &TrafficShaping| {
             t.subgraph_error_response_layer(name)
         })
         .apply_required_plugin_layer(plugins, |t: &TrafficShaping| {
-            t.load_shed_layer(ShapingTarget::Subgraph(name))
-        })
-        .apply_required_plugin_layer(plugins, |t: &TrafficShaping| {
             t.rate_limit_layer(ShapingTarget::Subgraph(name))
         })
-        .layer(box_layer())
+        .layer(box_clone_layer())
         .apply_required_plugin_layer(plugins, |t: &TrafficShaping| {
             t.subgraph_deduplication_layer(name)
         })
@@ -371,9 +362,6 @@ fn shaped_subgraph_service(
         .apply_required_plugin_layer(plugins, |t: &TrafficShaping| t.subgraph_timeout_layer(name))
         .apply_required_plugin_layer(plugins, |t: &TrafficShaping| {
             t.subgraph_compression_layer(name)
-        })
-        .apply_required_plugin_layer(plugins, |t: &TrafficShaping| {
-            t.subgraph_backpressure_buffer_layer(name)
         })
         .service(hooked)
 }
@@ -402,24 +390,21 @@ pub(crate) fn build_connector_request_services(
 ) -> ConnectorRequestServices {
     let mut map = HashMap::with_capacity(connector_http_services.len());
     for (source, http_client) in connector_http_services.into_iter() {
-        // One buffer per connector source provides per-source backpressure and lets
-        // every clone from [`ConnectorRequestServices::get`] share this stack. It mirrors
-        // the per-subgraph buffer in [`build_subgraph_service`], whose comment explains the
-        // boxes.
-        let service = UnconstrainedBuffer::new(
+        // Every request to the source takes a copy of its stack from a pool, readies and calls it
+        // on its own task, and returns it; at most `DEFAULT_BUFFER_SIZE` requests wait for a
+        // copy's readiness at once, the next waiting, as they waited for the buffer this pool
+        // replaced. The rate limit is charged where a request is called, its counter shared by
+        // every copy.
+        let service = Pooled::bounded(
             ServiceBuilder::new()
                 .layer(box_clone_layer())
                 .apply_required_plugin_layer(plugins, |h: &Headers| {
                     h.connector_headers_layer(&source)
                 })
                 .apply_optional_plugin_layer(plugins, Telemetry::instrument_connector_layer)
-                .buffered()
-                .layer(box_layer())
+                .layer(box_clone_layer())
                 .apply_required_plugin_layer(plugins, |t: &TrafficShaping| {
                     t.connector_source_error_response_layer(&source)
-                })
-                .apply_required_plugin_layer(plugins, |t: &TrafficShaping| {
-                    t.load_shed_layer(ShapingTarget::ConnectorSource(&source))
                 })
                 .apply_required_plugin_layer(plugins, |t: &TrafficShaping| {
                     t.rate_limit_layer(ShapingTarget::ConnectorSource(&source))
@@ -427,7 +412,7 @@ pub(crate) fn build_connector_request_services(
                 // The operation's `max_requests` is admission too: a request over it is never sent,
                 // so no plugin hook sees it.
                 .layer(RequestLimitLayer)
-                .layer(box_layer())
+                .layer(box_clone_layer())
                 .apply_plugin_layer(plugins, |c: &CircuitBreaker| {
                     c.connector_source_circuit_layer(&source)
                 })
@@ -437,13 +422,11 @@ pub(crate) fn build_connector_request_services(
                 .apply_required_plugin_layer(plugins, |t: &TrafficShaping| {
                     t.connector_source_compression_layer(&source)
                 })
-                .apply_required_plugin_layer(plugins, |t: &TrafficShaping| {
-                    t.connector_source_backpressure_buffer_layer(&source)
-                })
                 .rust_plugins(plugins.clone(), |plugin, service| {
                     plugin.connector_request_service(service, source.clone())
                 })
-                .service(ConnectorRequestService { http_client }.boxed_clone()),
+                .service(ConnectorRequestService { http_client }.boxed_clone())
+                .boxed_clone(),
             DEFAULT_BUFFER_SIZE,
         );
         map.insert(source, service);
@@ -460,28 +443,6 @@ const MAX_BOXED_TYPE_NAME_LEN: usize = 20_000;
 
 /// A layer that boxes a service `S` into `Boxed`.
 type BoxingLayer<S, Boxed> = LayerFn<fn(S) -> Boxed>;
-
-/// A layer that boxes the service beneath it into a [`BoxService`], so the layers above wrap a
-/// short, fixed type.
-///
-/// Each optional layer is an `Either` that names the service beneath it twice, so an unboxed
-/// stack's type name grows exponentially with its layers, and with it the crate's debug info
-/// and the compiler's and linker's memory.
-///
-/// # Panics
-///
-/// In debug builds, when the stack is built, if the boxed service's type name is longer than
-/// [`MAX_BOXED_TYPE_NAME_LEN`], or if it wraps one optional layer's `Either` directly in another.
-fn box_layer<S, Req>() -> BoxingLayer<S, BoxService<Req, S::Response, S::Error>>
-where
-    S: Service<Req> + Send + 'static,
-    S::Future: Send + 'static,
-{
-    layer_fn(|service| {
-        debug_assert_boxed_type_name_bounded::<S>();
-        BoxService::new(service)
-    })
-}
 
 /// Like [`box_layer`], into a [`BoxCloneService`] for a service that can be cloned.
 ///
@@ -556,9 +517,11 @@ fn build_connector_services(
             })
             .service(service.boxed_clone())
             .boxed_clone();
+        // a pool of copies with the bound the buffer it replaced held over the calls waiting
+        // for its worker, each call readied and called on its own task
         services.insert(
             service_name.to_string(),
-            UnconstrainedBuffer::new(service, DEFAULT_BUFFER_SIZE),
+            Pooled::bounded(service, DEFAULT_BUFFER_SIZE),
         );
     }
 

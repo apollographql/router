@@ -82,16 +82,23 @@ fn workers_spawned_building(name: &str, client: CountedClient, plugins: &Arc<Plu
     metrics.num_alive_tasks() - tasks
 }
 
-/// A subgraph's stack runs no worker task of its own: every subgraph request readies and calls it
-/// on the request's own task. With traffic shaping configured, building the stack spawns only the
-/// two buffers traffic shaping places beneath it, for its admission and its backpressure.
+/// A subgraph's stack runs no worker task: every subgraph request readies and calls it on the
+/// request's own task, traffic shaping configured or not. With shaping configured, its rate limit
+/// is charged where a request is called, where its admission and backpressure buffers each ran a
+/// worker.
 #[tokio::test]
 async fn a_subgraph_stack_runs_no_worker_task_of_its_own() {
-    let plugins = Arc::new(stage_plugins(&[(APOLLO_TRAFFIC_SHAPING, json!({ "all": {} }))]).await);
+    let plugins = Arc::new(
+        stage_plugins(&[(
+            APOLLO_TRAFFIC_SHAPING,
+            json!({ "all": {"global_rate_limit": {"capacity": 10, "interval": "1s"}} }),
+        )])
+        .await,
+    );
 
     assert_eq!(
         workers_spawned_building("s", CountedClient::default(), &plugins),
-        2,
+        0,
         "the worker tasks of a shaped subgraph's stack"
     );
 }
