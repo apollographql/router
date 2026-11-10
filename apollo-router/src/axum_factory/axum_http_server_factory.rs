@@ -316,9 +316,6 @@ fn main_endpoint(
 
     let mut main_route = main_router(configuration).layer(
         ServiceBuilder::new()
-            // Telemetry layers MUST be first. This means that they will be hit first during execution of the pipeline
-            // Adding layers before telemetry will cause us to lose metrics and spans.
-            .layer(middleware::from_fn(metrics_handler))
             .layer(
                 TraceLayer::new_for_http().make_span_with(PropagatingMakeSpan {
                     license: license.clone(),
@@ -330,6 +327,14 @@ fn main_endpoint(
             .layer(LicenseLayer::new(license))
             .layer(decompression),
     );
+    // Telemetry layers MUST be first. This means that they will be hit first during execution of
+    // the pipeline. Adding layers before telemetry will cause us to lose metrics and spans. The
+    // operations count is placed outermost, and only where a reader admits it: the server's
+    // router is built after its pipeline's telemetry set the meter providers, and again on every
+    // reload.
+    if crate::metrics::meter_provider_internal().reads(OPERATIONS) {
+        main_route = main_route.layer(middleware::from_fn(metrics_handler));
+    }
 
     if let Some(main_endpoint_layer) = ENDPOINT_CALLBACK.get() {
         main_route = main_endpoint_layer(main_route);
@@ -349,6 +354,9 @@ fn main_endpoint(
     let listener = configuration.supergraph.listen.clone();
     Ok(ListenAddrAndRouter(listener, route))
 }
+
+/// The count `metrics_handler` makes per response.
+const OPERATIONS: &str = "apollo.router.operations";
 
 async fn metrics_handler(request: Request<axum::body::Body>, next: Next) -> Response {
     let resp = next.run(request).await;

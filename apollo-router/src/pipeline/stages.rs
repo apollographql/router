@@ -713,6 +713,18 @@ fn build_supergraph_service(
         .strict_variable_validation(configuration.supergraph.strict_variable_validation)
         .build();
 
+    // an operation's limits measured where one is configured or something reads the measures
+    let operation_limits = Some(EnforceOperationLimitsLayer::new(
+        &configuration.limits.router,
+    ))
+    .filter(|layer| {
+        layer.limits_configured()
+            || plugins
+                .values()
+                .find_map(|plugin| plugin.as_any().downcast_ref::<Telemetry>())
+                .is_some_and(Telemetry::reads_operation_limits)
+    });
+
     ServiceBuilder::new()
         .layer(content_negotiation::SupergraphContentNegotiationLayer::default())
         .layer(crate::compute_job::ComputeJobMetricsLayer::new())
@@ -725,9 +737,7 @@ fn build_supergraph_service(
             plugin.supergraph_service(service)
         })
         .layer(AllowOnlyHttpPostMutationsLayer::default())
-        .layer(EnforceOperationLimitsLayer::new(
-            &configuration.limits.router,
-        ))
+        .option_layer(operation_limits)
         .service(supergraph_service)
 }
 
@@ -745,22 +755,30 @@ pub(crate) fn build_router_service(
 ) -> router::BoxCloneService {
     let enable_authorization_directives =
         AuthorizationPlugin::enable_directives(configuration, &schema);
-    let extended_references = plugins
+    let telemetry = plugins
         .values()
-        .find_map(|plugin| plugin.as_any().downcast_ref::<Telemetry>())
-        .is_some_and(Telemetry::reports_extended_references);
+        .find_map(|plugin| plugin.as_any().downcast_ref::<Telemetry>());
+    // an operation's extended references, where usage reporting reads them
+    let extended_references = telemetry.is_some_and(Telemetry::reports_extended_references);
+    // the client's request displayed where the router's request event may ask for it
+    let display = telemetry.is_some_and(Telemetry::displays_router_request);
+    // a batch split where batching is enabled; where it is not, the router-to-supergraph layer,
+    // which reads the body, refuses one
+    let batching = configuration.batching.enabled;
+    // persisted queries' expansion and safelist where a manifest is configured
+    let persisted = persisted_queries.manifest_poller.is_some();
 
     ServiceBuilder::new()
-        .layer(StaticPageLayer::new(configuration))
+        .option_layer(StaticPageLayer::new(configuration))
         .apply_required_plugin_layer(&plugins, Headers::router_masking_layer)
         .apply_optional_plugin_layer(&plugins, Telemetry::allocation_metrics_layer)
         .apply_plugin_layer(&plugins, Telemetry::instrument_router_layer)
         .rust_plugins(plugins, |plugin, service| plugin.router_service(service))
         .layer(content_negotiation::RouterContentNegotiationLayer::default())
-        .layer(DisplayRouterRequestLayer)
-        .layer(SplitBatchRequestLayer::new(configuration.batching.clone()))
+        .option_layer(display.then_some(DisplayRouterRequestLayer))
+        .option_layer(batching.then(|| SplitBatchRequestLayer::new(configuration.batching.clone())))
         .layer(RouterToSupergraphRequestLayer)
-        .layer(ExpandIdsLayer::new(persisted_queries.clone()))
+        .option_layer(persisted.then(|| ExpandIdsLayer::new(persisted_queries.clone())))
         .layer(APQCachingLayer::new(Arc::new(apq_expander)))
         .layer(ParseQueryLayer::new(
             query_parsing_service,
@@ -771,7 +789,7 @@ pub(crate) fn build_router_service(
                 .then(|| ExtractAuthorizationChecksLayer::new(schema.clone())),
         )
         .option_layer(extended_references.then(|| ExtendedReferencesLayer::new(schema)))
-        .layer(EnforceSafelistLayer::new(persisted_queries))
+        .option_layer(persisted.then(|| EnforceSafelistLayer::new(persisted_queries)))
         .service(supergraph_service)
         .boxed_clone()
 }

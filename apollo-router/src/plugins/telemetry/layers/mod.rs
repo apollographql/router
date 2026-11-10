@@ -71,6 +71,20 @@ impl Telemetry {
             )
     }
 
+    /// Whether anything reads an operation's measured limits, its depth, height, aliases and
+    /// root fields, which the supergraph stage's operation limits layer places in the request's
+    /// extensions: usage reporting's limit statistics, the supergraph span's attributes, and the
+    /// `query` selectors of a configured instrument, event or span.
+    pub(crate) fn reads_operation_limits(&self) -> bool {
+        self.readers().any()
+    }
+
+    /// Whether the router stage displays a client's request, its body read whole, where the
+    /// router's request event asks for it: where that event is logged.
+    pub(crate) fn displays_router_request(&self) -> bool {
+        self.config.instrumentation.events.logs_router_request()
+    }
+
     /// What reads the telemetry layers' work in the pipeline being assembled.
     pub(crate) fn readers(&self) -> Readers {
         Readers {

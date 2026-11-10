@@ -46,15 +46,24 @@ pub(crate) struct Events {
     connector: Extendable<ConnectorEventsConfig, Event<ConnectorAttributes, ConnectorSelector>>,
 }
 
+/// Whether a standard event is logged, at a level other than `off`.
+fn logged<T>(event: &StandardEventConfig<T>) -> bool {
+    let (StandardEventConfig::Level(level) | StandardEventConfig::Conditional { level, .. }) =
+        event;
+    EventLevel::from_config(level).is_some()
+}
+
 impl Events {
+    /// Whether the router's standard request event is logged, at a level other than `off`: its
+    /// condition may then ask for the client's request to be displayed, body and all
+    /// (`DisplayRouterRequest`).
+    pub(crate) fn logs_router_request(&self) -> bool {
+        logged(&self.router.attributes.request)
+    }
+
     /// Whether any event is logged: a standard event at a level other than `off`, or a custom
     /// event at one.
     pub(crate) fn any_logged(&self) -> bool {
-        fn logged<T>(event: &StandardEventConfig<T>) -> bool {
-            let (StandardEventConfig::Level(level)
-            | StandardEventConfig::Conditional { level, .. }) = event;
-            EventLevel::from_config(level).is_some()
-        }
         fn any_custom<A: Default + Debug, E: Debug>(
             events: &std::collections::HashMap<std::sync::Arc<str>, Event<A, E>>,
         ) -> bool {

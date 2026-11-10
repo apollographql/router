@@ -28,22 +28,22 @@ use crate::services::router;
 /// (typically a user navigating to a page in the browser).
 #[derive(Clone)]
 pub(crate) struct StaticPageLayer {
-    static_page: Option<Bytes>,
+    static_page: Bytes,
 }
 
 impl StaticPageLayer {
-    /// Create a static page based on configuration: either an Apollo Sandbox, or a simple home
-    /// page.
-    pub(crate) fn new(configuration: &Configuration) -> Self {
+    /// The static page the configuration serves, an Apollo Sandbox or a simple home page, or
+    /// none, where the router places no layer.
+    pub(crate) fn new(configuration: &Configuration) -> Option<Self> {
         let static_page = if configuration.sandbox.enabled {
-            Some(Bytes::from(sandbox_page_content()))
+            Bytes::from(sandbox_page_content())
         } else if configuration.homepage.enabled {
-            Some(Bytes::from(home_page_content(&configuration.homepage)))
+            Bytes::from(home_page_content(&configuration.homepage))
         } else {
-            None
+            return None;
         };
 
-        Self { static_page }
+        Some(Self { static_page })
     }
 }
 
@@ -62,49 +62,41 @@ where
     >;
 
     fn layer(&self, service: S) -> Self::Service {
-        if let Some(static_page) = &self.static_page {
-            let page = static_page.clone();
+        let page = self.static_page.clone();
 
-            ServiceBuilder::new()
-                .checkpoint_async(move |req: router::Request| {
-                    let page = page.clone();
-                    async move {
-                        let res = if req.router_request.method() == Method::GET
-                            && accepts_html(req.router_request.headers())
-                        {
-                            ControlFlow::Break(
-                                router::Response::http_response_builder()
-                                    .response(
-                                        http::Response::builder()
-                                            .header(
-                                                CONTENT_TYPE,
-                                                HeaderValue::from_static(
-                                                    mime::TEXT_HTML_UTF_8.as_ref(),
-                                                ),
-                                            )
-                                            .body(router::body::from_bytes(page))
-                                            .unwrap(),
-                                    )
-                                    .context(req.context)
-                                    .build()
-                                    .unwrap(),
-                            )
-                        } else {
-                            ControlFlow::Continue(req)
-                        };
+        ServiceBuilder::new()
+            .checkpoint_async(move |req: router::Request| {
+                let page = page.clone();
+                async move {
+                    let res = if req.router_request.method() == Method::GET
+                        && accepts_html(req.router_request.headers())
+                    {
+                        ControlFlow::Break(
+                            router::Response::http_response_builder()
+                                .response(
+                                    http::Response::builder()
+                                        .header(
+                                            CONTENT_TYPE,
+                                            HeaderValue::from_static(
+                                                mime::TEXT_HTML_UTF_8.as_ref(),
+                                            ),
+                                        )
+                                        .body(router::body::from_bytes(page))
+                                        .unwrap(),
+                                )
+                                .context(req.context)
+                                .build()
+                                .unwrap(),
+                        )
+                    } else {
+                        ControlFlow::Continue(req)
+                    };
 
-                        Ok(res)
-                    }
-                    .boxed()
-                })
-                .service(service)
-        } else {
-            ServiceBuilder::new()
-                .checkpoint_async(move |req: router::Request| {
-                    async move { Ok(ControlFlow::Continue(req)) }.boxed()
-                })
-                .service(service)
-        }
+                    Ok(res)
+                }
+                .boxed()
+            })
+            .service(service)
     }
 }
 

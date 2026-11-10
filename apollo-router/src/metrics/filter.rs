@@ -55,6 +55,14 @@ impl FilterMeterProvider {
         matches!(self.delegate, MeterProviderInner::Sdk(_))
     }
 
+    /// Whether a measurement of the instrument `name` recorded through it can reach a reader: it
+    /// has one, and its filter admits the instrument, as it admits an instrument it builds.
+    pub(crate) fn reads(&self, name: &str) -> bool {
+        self.has_reader()
+            && !self.deny.as_ref().is_some_and(|deny| deny.is_match(name))
+            && self.allow.as_ref().is_none_or(|allow| allow.is_match(name))
+    }
+
     #[builder]
     fn new(delegate: MeterProviderInner, deny: Option<Regex>, allow: Option<Regex>) -> Self {
         FilterMeterProvider {

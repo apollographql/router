@@ -170,6 +170,48 @@ async fn it_fails_on_empty_query() {
     assert_no_mock_calls(handle).await;
 }
 
+/// A client's batch, where batching is not enabled, is refused before the supergraph stage.
+#[tokio::test]
+async fn it_refuses_a_batch_where_batching_is_disabled() {
+    let (mock, handle) = tower_test::mock::pair::<supergraph::Request, supergraph::Response>();
+    let router_service = from_supergraph_mock(mock).await;
+
+    let response = router_service
+        .oneshot(
+            router::Request::fake_builder()
+                .method(Method::POST)
+                .header(CONTENT_TYPE, APPLICATION_JSON.essence_str())
+                .body(router::body::from_bytes(
+                    r#" [{"query":"{ a }"},{"query":"{ b }"}]"#,
+                ))
+                .build()
+                .expect("a request"),
+        )
+        .await
+        .expect("an answer");
+
+    assert_eq!(response.response.status(), http::StatusCode::BAD_REQUEST);
+    let response: graphql::Response = serde_json::from_slice(
+        &router::body::into_bytes(response.response.into_body())
+            .await
+            .expect("the body"),
+    )
+    .expect("a GraphQL response");
+    assert_eq!(
+        (
+            response.errors[0].message.as_str(),
+            response.errors[0].extensions.get("code"),
+            response.errors[0].extensions.get("details"),
+        ),
+        (
+            "Invalid GraphQL request",
+            Some(&json!("BATCHING_NOT_ENABLED")),
+            Some(&json!("batching not enabled")),
+        )
+    );
+    assert_no_mock_calls(handle).await;
+}
+
 #[tokio::test]
 async fn it_fails_on_no_query() {
     let expected_error = "Must provide query string.";

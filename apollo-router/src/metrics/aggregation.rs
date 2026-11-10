@@ -159,6 +159,19 @@ impl AggregateMeterProvider {
         })
     }
 
+    /// Whether a measurement of the instrument `name` reaches a reader through any of its meter
+    /// providers, one with a reader whose filter admits it. Read where a pipeline or the server's
+    /// router is assembled, after telemetry's activation set the providers, by work done only to
+    /// be measured.
+    pub(crate) fn reads(&self, name: &str) -> bool {
+        self.inner.lock().as_ref().is_some_and(|inner| {
+            inner
+                .providers
+                .iter()
+                .any(|(provider, _)| provider.reads(name))
+        })
+    }
+
     /// The behaviour of this function is that if None is passed in, the meter will be left as is.
     /// To disable meter_providers use a noop meter provider.
     /// The old meter_provider if any is returned, and it is up to the caller to clean up.

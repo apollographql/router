@@ -28,6 +28,14 @@ use crate::services::router::body::RouterBody;
 const REFRESH_INTERVAL: Duration = Duration::from_secs(60);
 const COMPUTE_DETECTOR_THRESHOLD: u16 = 24576;
 const OFFICIAL_HELM_CHART_VAR: &str = "APOLLO_ROUTER_OFFICIAL_HELM_CHART";
+
+// The counts the router and HTTP client hooks make, which Apollo's meter provider admits: the
+// public provider's filter denies them
+const REQUEST_SIZE: &str = "apollo.router.operations.request_size";
+const RESPONSE_SIZE: &str = "apollo.router.operations.response_size";
+const FETCH: &str = "apollo.router.operations.fetch";
+const FETCH_REQUEST_SIZE: &str = "apollo.router.operations.fetch.request_size";
+const FETCH_RESPONSE_SIZE: &str = "apollo.router.operations.fetch.response_size";
 const DEPLOYMENT_TYPE_VAR: &str = "APOLLO_ROUTER_DEPLOYMENT_TYPE";
 
 // Valid deployment type values
@@ -259,6 +267,14 @@ impl PluginPrivate for FleetDetector {
     }
 
     fn router_service(&self, service: router::BoxCloneService) -> router::BoxCloneService {
+        // its counts are made only to be read: nothing is placed where no reader admits them
+        let meter_provider = crate::metrics::meter_provider_internal();
+        if ![REQUEST_SIZE, RESPONSE_SIZE]
+            .into_iter()
+            .any(|name| meter_provider.reads(name))
+        {
+            return service;
+        }
         service
             // Count the number of request bytes from clients to the router
             .map_request(move |req: router::Request| router::Request {
@@ -339,6 +355,13 @@ impl PluginPrivate for FleetDetector {
         subgraph_name: &str,
         service: BoxCloneService<HttpRequest, HttpResponse, BoxError>,
     ) -> BoxCloneService<HttpRequest, HttpResponse, BoxError> {
+        let meter_provider = crate::metrics::meter_provider_internal();
+        if ![FETCH, FETCH_REQUEST_SIZE, FETCH_RESPONSE_SIZE]
+            .into_iter()
+            .any(|name| meter_provider.reads(name))
+        {
+            return service;
+        }
         // the subgraph's name as each count's attribute, made once: a clone of it is a reference
         // count
         let subgraph = opentelemetry::Value::from(Arc::<str>::from(subgraph_name));
@@ -677,6 +700,72 @@ mod tests {
         }
         .with_metrics()
         .await;
+    }
+
+    /// With no reader admitting its counts, the fleet detector places nothing on the request
+    /// path: a request through its router hook and an exchange through its HTTP client hook
+    /// allocate no byte beyond the service beneath each. Its counts where a reader reads them are
+    /// the tests beside this one. Async, since the test meter provider holds no reader outside
+    /// a `with_metrics` scope on a runtime.
+    #[cfg(all(feature = "global-allocator", not(feature = "dhat-heap"), unix))]
+    #[tokio::test]
+    async fn with_no_reader_its_hooks_place_nothing() {
+        use crate::allocator::bytes_per_call;
+
+        const CALLS: usize = 16;
+        let plugin = FleetDetector::default();
+        let router_source = tower::service_fn(|request: router::Request| {
+            std::future::ready(
+                router::Response::fake_builder()
+                    .context(request.context)
+                    .build(),
+            )
+        });
+        let router_request = || {
+            router::Request::fake_builder()
+                .body(router::body::from_bytes("request"))
+                .build()
+                .expect("a request")
+        };
+        let http_source = tower::service_fn(|request: HttpRequest| {
+            std::future::ready(Ok::<_, BoxError>(HttpResponse {
+                http_response: http::Response::builder()
+                    .body(router::body::from_bytes("reply"))
+                    .expect("a reply"),
+                context: request.context,
+            }))
+        });
+        let http_request = || HttpRequest {
+            http_request: http::Request::builder()
+                .body(router::body::from_bytes("request"))
+                .expect("a request"),
+            context: Default::default(),
+        };
+
+        let beneath = (
+            bytes_per_call(router_source.boxed_clone(), router_request, drop, CALLS),
+            bytes_per_call(http_source.boxed_clone(), http_request, drop, CALLS),
+        );
+        let through = (
+            bytes_per_call(
+                plugin.router_service(router_source.boxed_clone()),
+                router_request,
+                drop,
+                CALLS,
+            ),
+            bytes_per_call(
+                plugin.http_client_service("subgraph", http_source.boxed_clone()),
+                http_request,
+                drop,
+                CALLS,
+            ),
+        );
+
+        assert_eq!(
+            through, beneath,
+            "the bytes a request allocates through the router hook and an exchange through the \
+             HTTP client hook with no reader, against the bytes each allocates beneath them"
+        );
     }
 
     #[tokio::test]

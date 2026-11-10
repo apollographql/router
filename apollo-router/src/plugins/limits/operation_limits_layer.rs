@@ -30,6 +30,21 @@ impl EnforceOperationLimitsLayer {
             config: Arc::new(config.clone()),
         }
     }
+
+    /// Whether any operation limit is configured, which the layer enforces.
+    pub(crate) fn limits_configured(&self) -> bool {
+        let RouterLimitsConfig {
+            max_depth,
+            max_height,
+            max_root_fields,
+            max_aliases,
+            ..
+        } = &*self.config;
+        max_depth.is_some()
+            || max_height.is_some()
+            || max_root_fields.is_some()
+            || max_aliases.is_some()
+    }
 }
 
 impl<S> tower::Layer<S> for EnforceOperationLimitsLayer {

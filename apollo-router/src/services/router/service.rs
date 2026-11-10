@@ -426,6 +426,15 @@ where
     }
 
     fn translate_bytes_request(bytes: &Bytes) -> Result<graphql::Request, TranslateError> {
+        // a client's batch, a JSON array, reaches this layer only where batching is disabled: the
+        // stage splits one where it is enabled (`SplitBatchRequestLayer`)
+        if bytes.iter().find(|byte| !byte.is_ascii_whitespace()) == Some(&b'[') {
+            return Err(TranslateError {
+                status: StatusCode::BAD_REQUEST,
+                extension_code: "BATCHING_NOT_ENABLED".to_string(),
+                extension_details: "batching not enabled".to_string(),
+            });
+        }
         graphql::Request::deserialize_from_bytes(bytes).map_err(|err| TranslateError {
             status: StatusCode::BAD_REQUEST,
             extension_code: "INVALID_GRAPHQL_REQUEST".to_string(),
