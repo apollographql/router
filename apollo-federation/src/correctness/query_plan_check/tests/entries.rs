@@ -380,8 +380,10 @@ fn alias_holding_another_field_is_rejected() {
     );
 }
 
-// Upstream's `two_fields_sent_under_one_key_are_rejected`. The entry reads `isbn` both under its
-// own name and under the alias the renamer names back, so a `Book` is sent two values as `isbn`.
+// Upstream's `two_fields_sent_under_one_key_are_rejected`, the model's
+// `twoFieldsSentUnderOneKeyAreNotReadable`. The entry reads `isbn` both under its own name and
+// under the alias the renamer names back, so a `Book` is sent two values as `isbn`. Renamed
+// forwards the entry agrees; the two are not separated, and the plain `isbn` was never fetched.
 #[test]
 fn plain_field_and_alias_sent_under_one_key_are_rejected() {
     assert_rejected(
@@ -398,7 +400,7 @@ fn plain_field_and_alias_sent_under_one_key_are_rejected() {
             ),
             &[rename_isbn_back()],
         ),
-        "does not agree with the fetch's input rewrites",
+        "input key renamers send `isbn` and `__require_0_isbn` under one key `isbn`",
     );
 }
 

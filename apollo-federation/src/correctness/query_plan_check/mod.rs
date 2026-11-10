@@ -157,7 +157,6 @@ use self::context::remove_context_arguments;
 use self::representation::ReadableKeyIndex;
 use self::representation::SchemaTypeLookup;
 use self::representation::entry_configurations;
-use self::representation::input_rewrites_for;
 use self::representation::input_rewrites_idempotent;
 use self::representation::input_rewrites_separated;
 use self::representation::input_rewrites_well_formed;
@@ -180,10 +179,8 @@ use self::selections::apply_key_renamers;
 use self::selections::apply_output_renamers;
 use self::selections::collapse_fragments;
 use self::selections::inline_fragment_spreads;
-use self::selections::invert_key_renamers;
 use self::selections::narrow_type_conditions;
 use self::selections::selections_at;
-use self::selections::type_filter_covers;
 use self::selections::type_filter_meets;
 use self::selections::under_condition;
 use self::subgraph::Subgraph;
@@ -1225,7 +1222,6 @@ impl Checker<'_> {
                             .iter()
                             .map(|entry| {
                                 collapse_fragments(required_selections(
-                                    self.supergraph_schema,
                                     fetch,
                                     entry.item,
                                     &entry.as_read,
@@ -1389,41 +1385,26 @@ impl Checker<'_> {
         .into())
     }
 
-    /// A `requires` entry agrees with the input rewrites that can rename what it reads
-    /// ([`input_rewrites_for`]), which link each alias it reads under to the field it names.
+    /// A `requires` entry agrees with the input rewrites: the entry as read (`AsRead`, each field
+    /// under the key it is read from), renamed forwards as `apply_rewrites` renames a
+    /// representation, has the keys it is sent under (`AsSent`, each under its own name), compared
+    /// key for key. No alias is left unnamed, and no demanded field is renamed away.
     ///
-    /// The entry is read two ways — `AsRead`, each field under the key it is read from, and
-    /// `AsSent`, each under its own name — and the rewrites must carry one to the other in both
-    /// directions, compared key for key.
-    /// - Forwards, the entry as read, renamed as `apply_rewrites` renames a representation, has
-    ///   the keys it is sent under: no alias left unnamed, and no demanded field renamed away.
-    /// - Inverted, the entry as sent, taken back through the rewrites, has the keys it reads from.
-    ///   This rules out two fields sent under one key, and a rewrite reaching a key the entry sends
-    ///   under its own name.
-    ///
-    /// A renamer that reaches nothing the entry reads is not one of its rewrites, so a renamer for
-    /// another entry's alias leaves this one alone.
+    /// Two fields sent under one key are left to [`input_rewrites_separated`], and what must be
+    /// fetched is taken back through the rewrites as the entry reads it ([`required_selections`]).
     fn check_entry_agrees_with_rewrites(
         &self,
         fetch: &FetchNode,
         entry: &Entry<'_>,
     ) -> Result<(), ComparisonError> {
-        let rewrites = input_rewrites_for(fetch, entry.item);
-        let as_read = std::slice::from_ref(&entry.as_read);
         let as_sent = std::slice::from_ref(&entry.as_sent);
         let renamed = apply_key_renamers(
             self.supergraph_schema,
             type_filter_meets,
-            &rewrites,
-            as_read.to_vec(),
+            &fetch.input_rewrites,
+            vec![entry.as_read.clone()],
         );
-        let inverted = invert_key_renamers(
-            self.supergraph_schema,
-            type_filter_covers,
-            &rewrites,
-            as_sent.to_vec(),
-        );
-        if same_keys(&renamed, as_sent) && same_keys(&inverted, as_read) {
+        if same_keys(&renamed, as_sent) {
             return Ok(());
         }
         Err(ComparisonError::new(format!(

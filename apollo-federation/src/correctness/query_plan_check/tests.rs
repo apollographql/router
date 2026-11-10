@@ -741,6 +741,7 @@ mod context_reads;
 mod deferred_reads;
 mod entries;
 mod growing_families;
+mod input_renamers;
 mod input_rewrites;
 mod output_renames;
 mod path_conditions;

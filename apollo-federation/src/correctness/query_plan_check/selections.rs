@@ -36,11 +36,10 @@
 //! names, when the planner had to alias it — two entity types requiring the same field at
 //! different types cannot both select it unaliased.
 //!
-//! Input rewrites rename the other way: the representation a fetch sends. Soundness reads them in
-//! both directions — forwards to check an entry against them, inverted to turn a subgraph's demand
-//! into what must already have been fetched — so the walk is shared and parameterized by which
-//! positions a `TypenameEquals` filter applies at: [`type_filter_meets`] forwards and
-//! [`type_filter_covers`] inverted.
+//! Input rewrites rename the other way: the representation a fetch sends. Soundness applies them
+//! forwards here, to check an entry and a demand against them, and a `TypenameEquals` filter
+//! renames at a position it meets ([`type_filter_meets`]). Taking a demand back through them is
+//! done as each entry reads it (`representation::invert_through`).
 //!
 //! An output rename filtered by type is walked apart ([`apply_output_renamers`]): it divides the
 //! position it reaches by runtime type. The router tests the filter with `is_object_of_type`, which
@@ -697,7 +696,7 @@ fn selections_under_key(
 }
 
 //==================================================================================================
-// Output rewrites
+// Key renamers
 //==================================================================================================
 
 /// Which positions a `TypenameEquals` filter applies at: the filter's own object types and the
@@ -729,38 +728,6 @@ pub(super) fn apply_key_renamers(
             &renamer.rename_key_to,
             selections,
         );
-    }
-    selections
-}
-
-/// The inverse of [`apply_key_renamers`]: every key renamer inverted, the last first, so that each
-/// path is followed through the keys it was written against.
-///
-/// One renamer inverted names the key it renames *to* back to the key it renames, at the same
-/// position. A path that does not end at a key renames nothing, as `split_path_last_element` finds
-/// no key there.
-pub(super) fn invert_key_renamers(
-    schema: &ValidFederationSchema,
-    applies: TypeFilterTest,
-    rewrites: &[Arc<FetchDataRewrite>],
-    selections: Vec<Selection>,
-) -> Vec<Selection> {
-    let mut selections = selections;
-    for rewrite in rewrites.iter().rev() {
-        let FetchDataRewrite::KeyRenamer(renamer) = rewrite.as_ref() else {
-            continue;
-        };
-        let Some((FetchDataPathElement::Key(renamed_key, type_condition), leading)) =
-            renamer.path.split_last()
-        else {
-            continue;
-        };
-        let mut path = leading.to_vec();
-        path.push(FetchDataPathElement::Key(
-            renamer.rename_key_to.clone(),
-            type_condition.clone(),
-        ));
-        selections = rename_key_at(schema, applies, &[], &[], &path, renamed_key, selections);
     }
     selections
 }
@@ -1256,26 +1223,6 @@ pub(super) fn type_filter_meets(
     guard_types
         .iter()
         .any(|type_name| filter_types.contains(type_name))
-}
-
-/// Does an input rewrite's filter admit *every* object type the position can hold, so that the
-/// router renames there whatever the runtime type? This is how a renamer is read inverted, where
-/// only a rename that certainly happens may be undone. A position nothing is known about is
-/// covered only by a filterless rewrite.
-pub(super) fn type_filter_covers(
-    schema: &ValidFederationSchema,
-    type_filter: &[Name],
-    guards: &[Name],
-) -> bool {
-    let Some(filter_types) = admitted_types(schema, type_filter) else {
-        return true;
-    };
-    let Some(guard_types) = admitted_types(schema, guards) else {
-        return false;
-    };
-    guard_types
-        .iter()
-        .all(|type_name| filter_types.contains(type_name))
 }
 
 #[cfg(test)]
