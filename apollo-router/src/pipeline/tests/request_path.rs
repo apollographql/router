@@ -176,7 +176,8 @@ async fn a_request_at_the_defaults_is_readied_and_called_on_its_own_task() {
 /// stage, each such request answered through one copy and then a GraphQL request through another
 /// both answer as they would alone. Where the layer answered with the stack beneath it readied,
 /// the first copy went back to the pool holding the limit's permit and the second was shed. The
-/// answers: the client library check's 400 and the request body limit's 413.
+/// answers: the static page's synchronous checkpoint, the client library check's 400 and the
+/// request body limit's 413.
 // the telemetry plugin's construction blocks in place, which a multi-threaded runtime allows
 #[tokio::test(flavor = "multi_thread")]
 async fn a_short_circuit_leaves_no_reservation_in_its_copy() {
@@ -237,6 +238,15 @@ async fn a_short_circuit_leaves_no_reservation_in_its_copy() {
     };
     let short_circuits = [
         (
+            "the static page",
+            router::Request::fake_builder()
+                .method(http::Method::GET)
+                .header(ACCEPT, "text/html")
+                .build()
+                .expect("a page request"),
+            http::StatusCode::OK,
+        ),
+        (
             "the client library check",
             operation()
                 .header("apollographql-library-name", "!")
@@ -270,4 +280,95 @@ async fn a_short_circuit_leaves_no_reservation_in_its_copy() {
              the second copy after it"
         );
     }
+}
+
+/// A layer's synchronous work in `call` runs inside the span of the stage it belongs to: a probe
+/// at the router stage's plugin hook, beneath the router span, and one at the supergraph stage's,
+/// beneath the supergraph span, each called on the request's task, see that span as the current
+/// one where they are called, as the checkpoints beneath them, the POST-only mutation check and
+/// the operation limits among them, do.
+// the telemetry plugin's construction blocks in place, which a multi-threaded runtime allows; the
+// request is sent on the test's own thread, where the subscriber is the default
+#[tokio::test(flavor = "multi_thread")]
+async fn a_layers_call_runs_inside_its_stages_span() {
+    #[derive(Clone)]
+    struct SpanProbe<S> {
+        inner: S,
+        seen: Arc<Mutex<Vec<Option<&'static str>>>>,
+    }
+    impl<S: Service<Request>, Request> Service<Request> for SpanProbe<S> {
+        type Response = S::Response;
+        type Error = S::Error;
+        type Future = S::Future;
+
+        fn poll_ready(&mut self, cx: &mut std::task::Context<'_>) -> Poll<Result<(), Self::Error>> {
+            self.inner.poll_ready(cx)
+        }
+
+        fn call(&mut self, request: Request) -> Self::Future {
+            self.seen
+                .lock()
+                .push(tracing::Span::current().metadata().map(|m| m.name()));
+            self.inner.call(request)
+        }
+    }
+
+    let _subscriber = tracing::subscriber::set_default(tracing_subscriber::registry());
+    let [router, supergraph] = std::array::from_fn::<_, 2, _>(|_| Arc::new(Mutex::new(Vec::new())));
+    let service = crate::TestHarness::builder()
+        .extra_private_plugin(telemetry().await)
+        .router_hook({
+            let seen = router.clone();
+            move |service| {
+                SpanProbe {
+                    inner: service,
+                    seen: seen.clone(),
+                }
+                .boxed_clone()
+            }
+        })
+        .supergraph_hook({
+            let seen = supergraph.clone();
+            move |service| {
+                SpanProbe {
+                    inner: service,
+                    seen: seen.clone(),
+                }
+                .boxed_clone()
+            }
+        })
+        .build_http_service()
+        .await
+        .expect("the router");
+
+    let mut service = service;
+    let response = service
+        .ready()
+        .await
+        .expect("the router is ready")
+        .call(
+            http::Request::builder()
+                .method(http::Method::POST)
+                .uri("http://router/")
+                .header(CONTENT_TYPE, "application/json")
+                .header(ACCEPT, "application/json")
+                .body(router::body::from_bytes(
+                    serde_json::json!({"query": "{ topProducts { upc } }"}).to_string(),
+                ))
+                .expect("a request"),
+        )
+        .await
+        .expect("an answer");
+
+    assert_eq!(response.status(), http::StatusCode::OK);
+    assert_eq!(
+        (router.lock().clone(), supergraph.lock().clone()),
+        (
+            vec![Some(crate::plugins::telemetry::consts::ROUTER_SPAN_NAME)],
+            vec![Some(
+                crate::plugins::telemetry::consts::SUPERGRAPH_SPAN_NAME
+            )]
+        ),
+        "the current span where the router and supergraph stages' hooks were called"
+    );
 }

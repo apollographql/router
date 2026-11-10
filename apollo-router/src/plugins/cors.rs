@@ -35,7 +35,7 @@ const PRIVATE_NETWORK_ACCESS_ID: HeaderName = HeaderName::from_static("private-n
 /// Our custom CORS layer that supports per-origin configuration
 #[derive(Clone, Debug)]
 pub(crate) struct CorsLayer {
-    config: Cors,
+    config: Arc<Cors>,
 }
 
 impl CorsLayer {
@@ -87,7 +87,9 @@ impl CorsLayer {
             }
         }
 
-        Ok(Self { config })
+        Ok(Self {
+            config: Arc::new(config),
+        })
     }
 }
 
@@ -106,7 +108,8 @@ impl<S> Layer<S> for CorsLayer {
 #[derive(Clone, Debug)]
 pub(crate) struct CorsService<S> {
     inner: S,
-    config: Cors,
+    // shared by every request: a request reads it, and its clone is a reference count's
+    config: Arc<Cors>,
 }
 
 impl<S, ReqBody, ResBody> Service<Request<ReqBody>> for CorsService<S>

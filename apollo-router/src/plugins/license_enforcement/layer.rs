@@ -9,7 +9,11 @@ use axum::body::Body;
 use axum::body::Bytes;
 use axum::response::IntoResponse;
 use axum::response::Response;
-use futures::future::BoxFuture;
+use futures::TryFutureExt as _;
+use futures::future::Either;
+use futures::future::MapOk;
+use futures::future::Ready;
+use futures::future::ready;
 use http::Request;
 use http::StatusCode;
 use tokio::time::Instant;
@@ -17,6 +21,7 @@ use tower::BoxError;
 use tower::Layer;
 use tower::Service;
 
+use crate::layers::release_readied;
 use crate::uplink::license_enforcement::APOLLO_ROUTER_LICENSE_EXPIRED;
 use crate::uplink::license_enforcement::LICENSE_EXPIRED_SHORT_MESSAGE;
 use crate::uplink::license_enforcement::LicenseState;
@@ -84,41 +89,38 @@ pub(crate) struct LicenseService<S> {
 
 impl<S, ReqBody, ResBody> Service<Request<ReqBody>> for LicenseService<S>
 where
-    S: Service<Request<ReqBody>, Response = http::Response<ResBody>> + Clone + Send + 'static,
-    S::Future: Send + 'static,
-    ReqBody: Send + 'static,
+    S: Service<Request<ReqBody>, Response = http::Response<ResBody>> + Clone,
     ResBody: http_body::Body<Data = Bytes> + Send + 'static,
     ResBody::Error: Into<BoxError>,
 {
     type Response = Response;
     type Error = S::Error;
-    type Future = BoxFuture<'static, Result<Response, S::Error>>;
+    // the license's state is read where the request is called, and the readied service beneath
+    // called in place
+    type Future = Either<
+        Ready<Result<Response, S::Error>>,
+        MapOk<S::Future, fn(http::Response<ResBody>) -> Response>,
+    >;
 
     fn poll_ready(&mut self, cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
         self.inner.poll_ready(cx)
     }
 
     fn call(&mut self, request: Request<ReqBody>) -> Self::Future {
-        let license = self.license.clone();
-        let start = self.start;
-        let delta = self.delta.clone();
-        let service = self.inner.clone();
-        let mut inner = std::mem::replace(&mut self.inner, service);
+        log_license_expired_rate_limited(&self.license, self.start, &self.delta);
 
-        Box::pin(async move {
-            log_license_expired_rate_limited(&license, start, &delta);
+        if matches!(&*self.license, LicenseState::LicensedHalt { limits: _ }) {
+            // answered without the readied service beneath
+            release_readied(&mut self.inner);
+            return Either::Left(ready(Ok(http::Response::builder()
+                .status(StatusCode::INTERNAL_SERVER_ERROR)
+                .body(Body::default())
+                .expect("canned response must be valid")
+                .into_response())));
+        }
 
-            if matches!(&*license, LicenseState::LicensedHalt { limits: _ }) {
-                return Ok(http::Response::builder()
-                    .status(StatusCode::INTERNAL_SERVER_ERROR)
-                    .body(Body::default())
-                    .expect("canned response must be valid")
-                    .into_response());
-            }
-
-            let response = inner.call(request).await?;
-            Ok(response.map(Body::new))
-        })
+        let into_body: fn(http::Response<ResBody>) -> Response = |response| response.map(Body::new);
+        Either::Right(self.inner.call(request).map_ok(into_body))
     }
 }
 

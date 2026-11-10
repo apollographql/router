@@ -3,8 +3,6 @@
 use std::ops::ControlFlow;
 
 use bytes::Bytes;
-use futures::FutureExt;
-use futures::future::BoxFuture;
 use http::HeaderMap;
 use http::HeaderValue;
 use http::Method;
@@ -16,12 +14,11 @@ use mediatype::names::TEXT;
 use tower::BoxError;
 use tower::Layer;
 use tower::Service;
-use tower::ServiceBuilder;
 
 use crate::Configuration;
 use crate::configuration::Homepage;
-use crate::layers::ServiceBuilderExt;
-use crate::layers::async_checkpoint::AsyncCheckpointService;
+use crate::layers::sync_checkpoint::SyncCheckpointLayer;
+use crate::layers::sync_checkpoint::SyncCheckpointService;
 use crate::services::router;
 
 /// A layer that serves a static page for all requests that accept a `text/html` response
@@ -49,54 +46,37 @@ impl StaticPageLayer {
 
 impl<S> Layer<S> for StaticPageLayer
 where
-    S: Service<router::Request, Response = router::Response, Error = BoxError>
-        + Send
-        + Clone
-        + 'static,
-    <S as Service<router::Request>>::Future: Send + 'static,
+    S: Service<router::Request, Response = router::Response, Error = BoxError>,
 {
-    type Service = AsyncCheckpointService<
-        S,
-        BoxFuture<'static, Result<ControlFlow<router::Response, router::Request>, BoxError>>,
-        router::Request,
-    >;
+    type Service = SyncCheckpointService<S, router::Request>;
 
     fn layer(&self, service: S) -> Self::Service {
         let page = self.static_page.clone();
 
-        ServiceBuilder::new()
-            .checkpoint_async(move |req: router::Request| {
-                let page = page.clone();
-                async move {
-                    let res = if req.router_request.method() == Method::GET
-                        && accepts_html(req.router_request.headers())
-                    {
-                        ControlFlow::Break(
-                            router::Response::http_response_builder()
-                                .response(
-                                    http::Response::builder()
-                                        .header(
-                                            CONTENT_TYPE,
-                                            HeaderValue::from_static(
-                                                mime::TEXT_HTML_UTF_8.as_ref(),
-                                            ),
-                                        )
-                                        .body(router::body::from_bytes(page))
-                                        .unwrap(),
+        SyncCheckpointLayer::new(move |req: router::Request| {
+            if req.router_request.method() == Method::GET
+                && accepts_html(req.router_request.headers())
+            {
+                Ok(ControlFlow::Break(
+                    router::Response::http_response_builder()
+                        .response(
+                            http::Response::builder()
+                                .header(
+                                    CONTENT_TYPE,
+                                    HeaderValue::from_static(mime::TEXT_HTML_UTF_8.as_ref()),
                                 )
-                                .context(req.context)
-                                .build()
+                                .body(router::body::from_bytes(page.clone()))
                                 .unwrap(),
                         )
-                    } else {
-                        ControlFlow::Continue(req)
-                    };
-
-                    Ok(res)
-                }
-                .boxed()
-            })
-            .service(service)
+                        .context(req.context)
+                        .build()
+                        .unwrap(),
+                ))
+            } else {
+                Ok(ControlFlow::Continue(req))
+            }
+        })
+        .layer(service)
     }
 }
 
