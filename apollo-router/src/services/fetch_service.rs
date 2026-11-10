@@ -33,6 +33,10 @@ use crate::services::fetch::ErrorMapping;
 use crate::services::fetch::Request;
 use crate::spec::Schema;
 
+/// The target of the spans this module makes, which the field-level instrumentation draw asks
+/// the log level about (`layers::supergraph`).
+pub(crate) const SPAN_TARGET: &str = module_path!();
+
 /// The fetch service delegates to either the subgraph service or connector service depending
 /// on whether connectors are present in the subgraph.
 #[derive(Clone)]

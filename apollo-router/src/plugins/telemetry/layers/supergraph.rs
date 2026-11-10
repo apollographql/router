@@ -18,7 +18,6 @@ use uuid::Uuid;
 use crate::Context;
 use crate::apollo_studio_interop::UsageReporting;
 use crate::context::OPERATION_KIND;
-use crate::context::OPERATION_NAME;
 use crate::graphql::ResponseVisitor;
 use crate::layers::ServiceBuilderExt;
 use crate::plugins::limits::operation_limits::OperationLimits;
@@ -49,6 +48,7 @@ use crate::plugins::telemetry::config_new::trace_id;
 use crate::plugins::telemetry::dynamic_attribute::SpanDynAttribute;
 use crate::plugins::telemetry::error_counter::count_supergraph_errors;
 use crate::plugins::telemetry::metrics::local_type_stats::LocalTypeStatRecorder;
+use crate::plugins::telemetry::reload::otel::spans_built;
 use crate::plugins::telemetry::span_factory;
 use crate::plugins::telemetry::tracing::apollo_telemetry::APOLLO_PRIVATE_OPERATION_SIGNATURE;
 use crate::query_planner::OperationKind;
@@ -56,23 +56,52 @@ use crate::services::SupergraphRequest;
 use crate::services::SupergraphResponse;
 use crate::services::supergraph;
 
-fn populate_context(field_level_instrumentation_ratio: f64, req: &SupergraphRequest) {
-    let context = &req.context;
-
-    // List of custom attributes for metrics
-    let mut attributes: HashMap<String, AttributeValue> = HashMap::new();
-    if let Some(operation_name) = &req.supergraph_request.body().operation_name {
-        attributes.insert(
-            OPERATION_NAME.to_string(),
-            AttributeValue::String(operation_name.clone()),
-        );
+/// Draws whether the request's subgraphs are asked for field-level traces: at field-level
+/// instrumentation's ratio and, where the router builds spans, for each subgraph request whose
+/// current span is sampled. Where it builds none, the sampling that span would carry is drawn
+/// here instead, at the sampler's ratio, for a request where the log level enables a span a
+/// subgraph request is made in ([`a_subgraph_request_span_enabled`]), so that subgraphs are
+/// asked as often as where spans are built.
+fn draw_subgraph_ftv1(
+    field_level_instrumentation_ratio: f64,
+    sampling_ratio: f64,
+    req: &SupergraphRequest,
+) {
+    let mut rng = rand::rng();
+    if !rng.random_bool(field_level_instrumentation_ratio) {
+        return;
     }
+    let enabled = if spans_built() {
+        EnableSubgraphFtv1::WhereSpanSampled
+    } else if rng.random_bool(sampling_ratio) && a_subgraph_request_span_enabled() {
+        EnableSubgraphFtv1::Sampled
+    } else {
+        return;
+    };
+    req.context
+        .extensions()
+        .with_lock(|lock| lock.insert(enabled));
+}
 
-    if rand::rng().random_bool(field_level_instrumentation_ratio) {
-        context
-            .extensions()
-            .with_lock(|lock| lock.insert(EnableSubgraphFtv1));
-    }
+/// Whether the log level enables a span a subgraph request is made in, each made at `INFO`: the
+/// router's, the supergraph's and the subgraph's (`span_factory`), the execution span
+/// (`layers::execution`), the query plan's node spans (`query_planner::execution`) and the
+/// `fetch` and `subscribe` spans (`services::fetch_service`, `plugins::subscription::fetch`).
+/// Where spans are built, the innermost of these the level enables is the current span
+/// `request_ftv1` reads a subgraph request's sampling from.
+fn a_subgraph_request_span_enabled() -> bool {
+    use ::tracing::Level;
+    ::tracing::enabled!(target: span_factory::TARGET, Level::INFO)
+        || ::tracing::enabled!(
+            target: crate::plugins::telemetry::layers::execution::SPAN_TARGET,
+            Level::INFO
+        )
+        || ::tracing::enabled!(target: crate::query_planner::execution::SPAN_TARGET, Level::INFO)
+        || ::tracing::enabled!(target: crate::services::fetch_service::SPAN_TARGET, Level::INFO)
+        || ::tracing::enabled!(
+            target: crate::plugins::subscription::fetch::SPAN_TARGET,
+            Level::INFO
+        )
 }
 
 async fn update_otel_metrics(
@@ -89,15 +118,14 @@ async fn update_otel_metrics(
     let (parts, stream) = response.response.into_parts();
     let config_cloned = config.clone();
     let stream = stream.inspect(move |resp| {
-        let span = Span::current();
-        span.set_span_dyn_attributes(
+        Span::current().set_span_dyn_attributes_from(|| {
             config_cloned
                 .instrumentation
                 .spans
                 .supergraph
                 .attributes
-                .on_response_event(resp, &ctx),
-        );
+                .on_response_event(resp, &ctx)
+        });
         custom_instruments.on_response_event(resp, &ctx);
         custom_events.on_response_event(resp, &ctx);
         custom_graphql_instruments.on_response_event(resp, &ctx);
@@ -327,6 +355,7 @@ where
         let config_map_res = config.clone();
         let enabled_features = self.enabled_features.clone();
         let field_level_instrumentation_ratio = self.field_level_instrumentation_ratio;
+        let sampling_ratio = self.config.exporters.tracing.common.sampling_ratio();
         // the instrument sets, built once for the pipeline and started per request
         let instruments = &self.config.instrumentation.instruments;
         let sets = Arc::new((
@@ -343,13 +372,15 @@ where
             })
             .map_response(move |mut resp: SupergraphResponse| {
                 let config = config_map_res_first.clone();
-                if let Some(usage_reporting) = resp
-                    .context
-                    .extensions()
-                    .with_lock(|lock| lock.get::<Arc<UsageReporting>>().cloned())
+                let span = Span::current();
+                if !span.is_disabled()
+                    && let Some(usage_reporting) = resp
+                        .context
+                        .extensions()
+                        .with_lock(|lock| lock.get::<Arc<UsageReporting>>().cloned())
                 {
                     // Record the operation signature on the router span
-                    Span::current().record(
+                    span.record(
                         APOLLO_PRIVATE_OPERATION_SIGNATURE.as_str(),
                         usage_reporting.get_stats_report_key().as_str(),
                     );
@@ -392,13 +423,18 @@ where
             })
             .map_future_with_request_data(
                 move |req: &SupergraphRequest| {
-                    let custom_attributes = config
-                        .instrumentation
-                        .spans
-                        .supergraph
-                        .attributes
-                        .on_request(req);
-                    populate_context(field_level_instrumentation_ratio, req);
+                    // the supergraph span's attributes, made only where the span is built
+                    let custom_attributes = if Span::current().is_disabled() {
+                        Vec::new()
+                    } else {
+                        config
+                            .instrumentation
+                            .spans
+                            .supergraph
+                            .attributes
+                            .on_request(req)
+                    };
+                    draw_subgraph_ftv1(field_level_instrumentation_ratio, sampling_ratio, req);
                     let (supergraph_instrument_set, graphql_instrument_set) = &*sets;
                     let custom_instruments = supergraph_instrument_set.start();
                     custom_instruments.on_request(req);
@@ -441,32 +477,34 @@ where
                         let span = Span::current();
                         let mut result: Result<SupergraphResponse, BoxError> = fut.await;
 
-                        add_query_attributes(&ctx, &mut custom_attributes);
-                        add_cost_attributes(&ctx, &mut custom_attributes);
-                        span.set_span_dyn_attributes(custom_attributes);
+                        if !span.is_disabled() {
+                            add_query_attributes(&ctx, &mut custom_attributes);
+                            add_cost_attributes(&ctx, &mut custom_attributes);
+                            span.set_span_dyn_attributes(custom_attributes);
+                        }
                         match &result {
                             Ok(resp) => {
-                                span.set_span_dyn_attributes(
+                                span.set_span_dyn_attributes_from(|| {
                                     config
                                         .instrumentation
                                         .spans
                                         .supergraph
                                         .attributes
-                                        .on_response(resp),
-                                );
+                                        .on_response(resp)
+                                });
                                 custom_instruments.on_response(resp);
                                 supergraph_events.on_response(resp);
                                 custom_graphql_instruments.on_response(resp);
                             }
                             Err(err) => {
-                                span.set_span_dyn_attributes(
+                                span.set_span_dyn_attributes_from(|| {
                                     config
                                         .instrumentation
                                         .spans
                                         .supergraph
                                         .attributes
-                                        .on_error(err, &ctx),
-                                );
+                                        .on_error(err, &ctx)
+                                });
                                 custom_instruments.on_error(err, &ctx);
                                 supergraph_events.on_error(err, &ctx);
                                 custom_graphql_instruments.on_error(err, &ctx);

@@ -47,6 +47,43 @@ pub(crate) struct Events {
 }
 
 impl Events {
+    /// Whether any event is logged: a standard event at a level other than `off`, or a custom
+    /// event at one.
+    pub(crate) fn any_logged(&self) -> bool {
+        fn logged<T>(event: &StandardEventConfig<T>) -> bool {
+            let (StandardEventConfig::Level(level)
+            | StandardEventConfig::Conditional { level, .. }) = event;
+            EventLevel::from_config(level).is_some()
+        }
+        fn any_custom<A: Default + Debug, E: Debug>(
+            events: &std::collections::HashMap<std::sync::Arc<str>, Event<A, E>>,
+        ) -> bool {
+            events
+                .values()
+                .any(|event| EventLevel::from_config(&event.level).is_some())
+        }
+        let router = &self.router.attributes;
+        let supergraph = &self.supergraph.attributes;
+        let subgraph = &self.subgraph.attributes;
+        let connector = &self.connector.attributes;
+        [&router.request, &router.response, &router.error]
+            .into_iter()
+            .any(logged)
+            || [&supergraph.request, &supergraph.response, &supergraph.error]
+                .into_iter()
+                .any(logged)
+            || [&subgraph.request, &subgraph.response, &subgraph.error]
+                .into_iter()
+                .any(logged)
+            || [&connector.request, &connector.response, &connector.error]
+                .into_iter()
+                .any(logged)
+            || any_custom(&self.router.custom)
+            || any_custom(&self.supergraph.custom)
+            || any_custom(&self.subgraph.custom)
+            || any_custom(&self.connector.custom)
+    }
+
     pub(crate) fn new_router_events(&self) -> RouterEvents {
         let custom_events = self
             .router

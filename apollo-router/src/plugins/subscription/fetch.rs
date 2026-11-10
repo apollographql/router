@@ -28,6 +28,10 @@ use crate::services::fetch::SubscriptionRequest;
 use crate::services::subgraph::BoxGqlStream;
 use crate::spec::Schema;
 
+/// The target of the spans this module makes, which the field-level instrumentation draw asks
+/// the log level about (`layers::supergraph`).
+pub(crate) const SPAN_TARGET: &str = module_path!();
+
 /// Execute the fetches required to fulfill a subscription query plan node.
 ///
 /// Calls into the relevant subgraph service to run the actual requests. The subgraph stage places

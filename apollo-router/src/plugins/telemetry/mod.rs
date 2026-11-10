@@ -275,8 +275,14 @@ impl PluginPrivate for Telemetry {
         let field_level_instrumentation_ratio =
             config.calculate_field_level_instrumentation_ratio()?;
 
-        let (activation, custom_endpoints, apollo_metrics_sender) =
+        let (mut activation, custom_endpoints, apollo_metrics_sender) =
             reload::prepare(&init.previous_config, &config)?;
+        activation.with_spans_read(reload::span_gate::spans_are_read(
+            &config,
+            full_config
+                .get("telemetry")
+                .and_then(|telemetry| telemetry.get("instrumentation")),
+        ));
 
         let enabled_features = Self::extract_enabled_features(full_config);
         ::tracing::debug!("Enabled scale features: {:?}", enabled_features);
@@ -756,7 +762,17 @@ impl TextMapPropagator for CustomTraceIdPropagator {
     }
 }
 
-struct EnableSubgraphFtv1;
+/// A request whose subgraphs are asked for field-level traces, drawn at field-level
+/// instrumentation's ratio (`layers/supergraph.rs`, `draw_subgraph_ftv1`).
+#[derive(Clone, Copy)]
+enum EnableSubgraphFtv1 {
+    /// Each subgraph request whose span is sampled, as the trace the field-level traces belong
+    /// to is.
+    WhereSpanSampled,
+    /// Every subgraph request: the request's trace sampling was drawn with this marker, the
+    /// router building no span to carry it.
+    Sampled,
+}
 
 //
 // Please ensure that any tests added to the tests module use the tokio multi-threaded test executor.

@@ -29,7 +29,7 @@ use crate::services::SubgraphResponse;
 
 mod callback;
 mod execution;
-mod fetch;
+pub(crate) mod fetch;
 pub(crate) mod notification;
 // Only pub(crate) for tests: tests that rely on subscription internals should probably
 // be moved into the plugin.

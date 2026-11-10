@@ -229,6 +229,49 @@ impl<'de> Deserialize<'de> for Format {
     }
 }
 
+impl StdOut {
+    /// The format stdout logging writes in, where it is on: the `tty_format` on an interactive
+    /// terminal where one is configured, else the `format`.
+    pub(crate) fn format_in_use(&self) -> Option<&Format> {
+        self.enabled.then(|| match &self.tty_format {
+            Some(tty) if std::io::stdout().is_terminal() => tty,
+            _ => &self.format,
+        })
+    }
+}
+
+impl Format {
+    /// Whether a log line in this format prints span data: the span list, the current span, the
+    /// trace id, the span id or span attributes. The defaults print some: the JSON format its
+    /// span list, trace id and span id, the text format its span list and current span.
+    pub(crate) fn prints_span_data(&self) -> bool {
+        self.prints_span_fields()
+            || match self {
+                Format::Json(format) => {
+                    format.display_trace_id != DisplayTraceIdFormat::Bool(false)
+                        || format.display_span_id
+                }
+                Format::Text(format) => {
+                    format.display_trace_id != DisplayTraceIdFormat::Bool(false)
+                        || format.display_span_id
+                }
+            }
+    }
+
+    /// Whether a log line in this format prints the fields recorded on spans: the span list, the
+    /// current span or span attributes.
+    pub(crate) fn prints_span_fields(&self) -> bool {
+        match self {
+            Format::Json(format) => {
+                format.display_span_list
+                    || format.display_current_span
+                    || !format.span_attributes.is_empty()
+            }
+            Format::Text(format) => format.display_span_list || format.display_current_span,
+        }
+    }
+}
+
 impl Default for Format {
     fn default() -> Self {
         if std::io::stdout().is_terminal() {

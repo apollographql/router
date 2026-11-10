@@ -36,6 +36,7 @@ use crate::metrics::aggregation::MeterProviderType;
 use crate::plugins::telemetry::apollo;
 use crate::plugins::telemetry::apollo_exporter::Sender;
 use crate::plugins::telemetry::config::Conf;
+use crate::plugins::telemetry::config_new::logging::Format;
 use crate::plugins::telemetry::fmt_layer::create_fmt_layer;
 use crate::plugins::telemetry::metrics;
 use crate::plugins::telemetry::metrics::prometheus::PrometheusService;
@@ -197,7 +198,15 @@ impl<'a> Builder<'a> {
 
     fn setup_logging(&mut self) {
         ::tracing::debug!("configuring logging");
-        self.activation.with_logging(create_fmt_layer(self.config));
+        let prints_span_fields = self
+            .config
+            .exporters
+            .logging
+            .stdout
+            .format_in_use()
+            .is_some_and(Format::prints_span_fields);
+        self.activation
+            .with_logging(create_fmt_layer(self.config), prints_span_fields);
     }
 
     /// Returns true every 20 calls when Prometheus is enabled.

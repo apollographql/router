@@ -92,6 +92,11 @@ impl LogFilter {
             tracks_spans: directives.contains('['),
         })
     }
+
+    /// Whether a directive could need span callbacks, so that spans have to be built.
+    pub(crate) fn tracks_spans(&self) -> bool {
+        self.tracks_spans
+    }
 }
 
 impl<S: Subscriber> Layer<S> for LogFilter {

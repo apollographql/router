@@ -43,12 +43,16 @@ use crate::plugins::telemetry::reload::otel::LayeredTracer;
 use crate::plugins::telemetry::reload::otel::OPENTELEMETRY_TRACER_HANDLE;
 use crate::plugins::telemetry::reload::otel::reload_fmt;
 use crate::plugins::telemetry::reload::otel::set_installed_tracer_provider;
+use crate::plugins::telemetry::reload::otel::set_spans_read;
 use crate::plugins::telemetry::reload::otel::shutdown_tracer_provider;
 
 /// State container for telemetry components to be activated.
 ///
 /// Collects new telemetry providers and configuration during the preparation phase,
 /// then atomically applies them during the activation phase via [`Activation::commit()`].
+/// A log format layer of the router's subscriber.
+type FmtLayer = Box<dyn Layer<LayeredTracer> + Send + Sync>;
+
 pub(crate) struct Activation {
     /// The new tracer provider. None means leave the existing one
     new_trace_provider: Option<opentelemetry_sdk::trace::SdkTracerProvider>,
@@ -69,7 +73,12 @@ pub(crate) struct Activation {
 
     /// The new format layer. None means leave the existing one, and `Some(None)` turns stdout
     /// logging off
-    new_logging_fmt_layer: Option<Option<Box<dyn Layer<LayeredTracer> + Send + Sync>>>,
+    /// The log format layer, `None` for stdout logging off, and whether it prints span fields.
+    new_logging_fmt_layer: Option<(Option<FmtLayer>, bool)>,
+
+    /// Whether anything the configuration configures reads spans
+    /// ([`spans_are_read`](crate::plugins::telemetry::reload::span_gate::spans_are_read)).
+    spans_read: Option<bool>,
 
     /// Test instrumentation to track what components were set
     #[cfg(test)]
@@ -99,6 +108,7 @@ impl Activation {
             // We can remove this is we allow state to be maintained across plugin reloads
             prometheus_registry: REGISTRY.lock().clone(),
             new_logging_fmt_layer: None,
+            spans_read: None,
             #[cfg(test)]
             test_instrumentation: TestInstrumentation::default(),
         }
@@ -106,13 +116,18 @@ impl Activation {
 
     pub(crate) fn with_logging(
         &mut self,
-        logging_layer: Option<Box<dyn Layer<LayeredTracer> + Send + Sync>>,
+        logging_layer: Option<FmtLayer>,
+        prints_span_fields: bool,
     ) {
-        self.new_logging_fmt_layer = Some(logging_layer);
+        self.new_logging_fmt_layer = Some((logging_layer, prints_span_fields));
         #[cfg(test)]
         {
             self.test_instrumentation.logging_layer_set = true;
         }
+    }
+
+    pub(crate) fn with_spans_read(&mut self, read: bool) {
+        self.spans_read = Some(read);
     }
 
     pub(crate) fn with_tracer_propagator(&mut self, tracer_propagator: TextMapCompositePropagator) {
@@ -189,6 +204,7 @@ impl Activation {
         self.reload_tracing();
         self.reload_trace_propagation();
         self.reload_metrics();
+        self.reload_span_gate();
         self.reload_logging();
         *REGISTRY.lock() = self.prometheus_registry.clone();
     }
@@ -246,8 +262,14 @@ impl Activation {
     }
 
     fn reload_logging(&mut self) {
-        if let Some(fmt_layer) = self.new_logging_fmt_layer.take() {
-            reload_fmt(fmt_layer);
+        if let Some((fmt_layer, prints_span_fields)) = self.new_logging_fmt_layer.take() {
+            reload_fmt(fmt_layer, prints_span_fields);
+        }
+    }
+
+    fn reload_span_gate(&mut self) {
+        if let Some(read) = self.spans_read.take() {
+            set_spans_read(read);
         }
     }
 

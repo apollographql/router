@@ -8,6 +8,9 @@ use crate::plugins::telemetry::consts::SUPERGRAPH_SPAN_NAME;
 use crate::services::SubgraphRequest;
 use crate::services::SupergraphRequest;
 
+/// The target of the spans made here, the router's request spans.
+pub(crate) const TARGET: &str = module_path!();
+
 pub(crate) fn create_router<B>(_request: &http::Request<B>) -> ::tracing::span::Span {
     info_span!(
         ROUTER_SPAN_NAME,

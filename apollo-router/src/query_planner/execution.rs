@@ -48,6 +48,10 @@ use crate::services::fetch_service::FetchService;
 use crate::spec::Query;
 use crate::spec::Schema;
 
+/// The target of the spans this module makes, which the field-level instrumentation draw asks
+/// the log level about (`layers::supergraph`).
+pub(crate) const SPAN_TARGET: &str = module_path!();
+
 impl QueryPlan {
     #[allow(clippy::too_many_arguments)]
     /// Execute the plan and return a [`Response`].

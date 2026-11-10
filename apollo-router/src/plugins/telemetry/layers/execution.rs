@@ -16,6 +16,10 @@ use crate::services::ExecutionRequest;
 use crate::services::ExecutionResponse;
 use crate::services::execution;
 
+/// The target of the spans this module makes, which the field-level instrumentation draw asks
+/// the log level about (`layers::supergraph`).
+pub(crate) const SPAN_TARGET: &str = module_path!();
+
 /// Layer type for [Telemetry::instrument_execution_layer].
 #[derive(Clone)]
 pub(crate) struct InstrumentExecutionLayer {

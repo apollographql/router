@@ -21,6 +21,7 @@
 //! - Span fields layer, which records the span fields the format layer shows
 //! - Rate limiting layer for OpenTelemetry internal log messages
 //! - Environment filter for log level control, which tracks spans only for span-scoped directives
+//! - Span gate, which disables every span while nothing configured reads spans
 //!
 //! ## Reloading
 //!
@@ -68,6 +69,8 @@ use crate::plugins::telemetry::otel::OtelData;
 use crate::plugins::telemetry::reload::log_layers::EventsOnly;
 use crate::plugins::telemetry::reload::log_layers::LogFilter;
 use crate::plugins::telemetry::reload::rate_limit::RateLimitLayer;
+use crate::plugins::telemetry::reload::span_gate::SpanGate;
+use crate::plugins::telemetry::reload::span_gate::SpanGateHandle;
 use crate::plugins::telemetry::tracing::reload::ReloadTracer;
 use crate::tracer::TraceId;
 
@@ -89,7 +92,10 @@ pub(in crate::plugins::telemetry) static OPENTELEMETRY_TRACER_HANDLE: OnceCell<
 /// without rebuilding the entire tracing subscriber stack.
 static FMT_LAYER_HANDLE: OnceCell<LogFormatHandle<LayeredTracer>> = OnceCell::new();
 
-/// Swaps the reloadable log format layer, and records span fields only while there is one.
+/// Global handle for opening and closing the span gate as configurations are activated.
+static SPAN_GATE_HANDLE: OnceCell<SpanGateHandle> = OnceCell::new();
+
+/// Swaps the reloadable log format layer, and records span fields only while it prints them.
 struct LogFormatHandle<S> {
     layer: Handle<Box<dyn Layer<S> + Send + Sync>, S>,
     /// [`SpanFieldsLayer::enabled`]
@@ -97,14 +103,15 @@ struct LogFormatHandle<S> {
 }
 
 impl<S: Subscriber> LogFormatHandle<S> {
-    /// Installs `layer` as the log format layer, or a layer that logs nothing when it is `None`.
+    /// Installs `layer` as the log format layer, or a layer that logs nothing when it is `None`,
+    /// recording span fields where `span_fields`, the layer printing them.
     ///
-    /// Without a format layer nothing reads span fields, so they aren't recorded. Logs from a
-    /// request in flight when logging is turned back on therefore lack the fields of spans the
-    /// request created before then.
-    fn reload(&self, layer: Option<Box<dyn Layer<S> + Send + Sync>>) {
+    /// Where nothing prints span fields, they aren't recorded. Logs from a request in flight
+    /// when they are printed again therefore lack the fields of spans the request created before
+    /// then.
+    fn reload(&self, layer: Option<Box<dyn Layer<S> + Send + Sync>>, span_fields: bool) {
         self.span_fields_enabled
-            .store(layer.is_some(), Ordering::Relaxed);
+            .store(layer.is_some() && span_fields, Ordering::Relaxed);
         self.layer
             .reload(layer.unwrap_or_else(|| NoOpLayer.boxed()))
             .expect("fmt layer reload must succeed");
@@ -153,6 +160,8 @@ pub(crate) fn init_telemetry(log_level: &str) -> anyhow::Result<()> {
             // filter opentelemetry internal logs to warn level (OTel 0.31 emits INFO logs for provider setup)
             let log_level = format!("{log_level},opentelemetry=warn");
             tracing::debug!("Running the router with log level set to {log_level}");
+            let log_filter = LogFilter::try_new(&log_level)?;
+            let (span_gate, span_gate_handle) = SpanGate::new(log_filter.tracks_spans());
             // Env filter is separate because of https://github.com/tokio-rs/tracing/issues/1629
             // the tracing registry is only created once
             tracing_subscriber::registry()
@@ -167,8 +176,11 @@ pub(crate) fn init_telemetry(log_level: &str) -> anyhow::Result<()> {
                     "opentelemetry",
                     Duration::from_secs(10),
                 ))
-                .with(LogFilter::try_new(&log_level)?)
+                .with(log_filter)
+                // Outermost, so that a closed gate stops a span before any layer sees it.
+                .with(span_gate)
                 .try_init()?;
+            let _ = SPAN_GATE_HANDLE.set(span_gate_handle);
 
             Ok(hot_tracer)
         })
@@ -183,13 +195,29 @@ pub(crate) fn init_telemetry(log_level: &str) -> anyhow::Result<()> {
     Ok(())
 }
 
-/// Installs `layer` as the log format layer; `None` turns stdout logging off.
+/// Installs `layer` as the log format layer, recording span fields where `span_fields`; `None`
+/// turns stdout logging off.
 pub(in crate::plugins::telemetry) fn reload_fmt(
     layer: Option<Box<dyn Layer<LayeredTracer> + Send + Sync>>,
+    span_fields: bool,
 ) {
     if let Some(handle) = FMT_LAYER_HANDLE.get() {
-        handle.reload(layer);
+        handle.reload(layer, span_fields);
     }
+}
+
+/// Builds the router's spans from now on where `read`, something configured reading them, and
+/// disables every span otherwise ([`SpanGate`]).
+pub(in crate::plugins::telemetry) fn set_spans_read(read: bool) {
+    if let Some(handle) = SPAN_GATE_HANDLE.get() {
+        handle.set_read(read);
+    }
+}
+
+/// Whether the router builds spans: where its subscriber has no span gate, as under a
+/// subscriber of a test's or an embedding application's, whatever subscriber is current decides.
+pub(crate) fn spans_built() -> bool {
+    SPAN_GATE_HANDLE.get().is_none_or(SpanGateHandle::is_open)
 }
 
 pub(crate) fn apollo_opentelemetry_initialized() -> bool {
@@ -319,7 +347,7 @@ mod tests {
     }
 
     #[test]
-    fn span_fields_are_recorded_only_while_stdout_logging_is_on() {
+    fn span_fields_are_recorded_only_while_the_log_format_prints_them() {
         let span_fields = SpanFieldsLayer::default();
         let (fmt_layer, layer) = tracing_subscriber::reload::Layer::new(NoOpLayer.boxed());
         let handle = LogFormatHandle {
@@ -332,12 +360,24 @@ mod tests {
             .with(span_fields);
 
         tracing::subscriber::with_default(subscriber, || {
-            handle.reload(None);
+            handle.reload(None, true);
             let off = tracing::info_span!("off", field = "value", late = tracing::field::Empty);
             off.record("late", "value");
             assert!(log_attribute_names(&off).is_empty());
 
-            handle.reload(Some(FmtLayer::new(Text::default(), std::io::sink).boxed()));
+            handle.reload(
+                Some(FmtLayer::new(Text::default(), std::io::sink).boxed()),
+                false,
+            );
+            let unprinted =
+                tracing::info_span!("unprinted", field = "value", late = tracing::field::Empty);
+            unprinted.record("late", "value");
+            assert!(log_attribute_names(&unprinted).is_empty());
+
+            handle.reload(
+                Some(FmtLayer::new(Text::default(), std::io::sink).boxed()),
+                true,
+            );
             let on = tracing::info_span!("on", field = "value", late = tracing::field::Empty);
             on.record("late", "value");
             let mut names = log_attribute_names(&on);
@@ -394,5 +434,278 @@ mod tests {
         // And the no-provider-installed case, which is what a second
         // `shutdown_installed_tracer_provider` call sees.
         shutdown_tracer_provider(None);
+    }
+
+    /// A router configuration's `telemetry` section: no exporter, no sampling, no field-level
+    /// instrumentation and stdout logging off, so nothing it configures reads a span.
+    fn unread() -> serde_json::Value {
+        serde_json::json!({"telemetry": {
+            "exporters": {
+                "tracing": {"common": {"sampler": "always_off"}},
+                "logging": {"stdout": {"enabled": false}},
+            },
+            "apollo": {"field_level_instrumentation_sampler": "always_off"},
+        }})
+    }
+
+    /// `configuration` with `value` at the JSON pointer `at`, the objects on the way made.
+    fn with(
+        mut configuration: serde_json::Value,
+        at: &str,
+        value: serde_json::Value,
+    ) -> serde_json::Value {
+        let mut place = &mut configuration;
+        for key in at.trim_start_matches('/').split('/') {
+            place = place
+                .as_object_mut()
+                .expect("an object on the way")
+                .entry(key)
+                .or_insert_with(|| serde_json::json!({}));
+        }
+        *place = value;
+        configuration
+    }
+
+    /// Whether the router span is built under the subscriber [`init_telemetry`] installed, once
+    /// the telemetry plugin `configuration` makes is activated.
+    async fn router_span_is_built(configuration: &serde_json::Value) -> bool {
+        use crate::plugin::PluginPrivate;
+        let plugin = crate::plugins::test::PluginTestHarness::<
+            crate::plugins::telemetry::Telemetry,
+        >::builder()
+        .config(&configuration.to_string())
+        .build()
+        .await
+        .unwrap_or_else(|error| panic!("{configuration}: {error}"));
+        plugin.activate();
+        let span = crate::plugins::telemetry::span_factory::create_router(&http::Request::new(()));
+        !span.is_disabled()
+    }
+
+    /// Under the router's own subscriber, a request's spans are disabled at their callsites where
+    /// nothing configured reads spans, and stay built wherever something does: an exporter, a
+    /// propagator, the response trace id, a selector reading the trace id or baggage, a logged
+    /// event or a stdout format printing span data, the default formats among them. With stdout
+    /// logging on, the JSON format's span list, trace id and span id off, or the text format's
+    /// span list and current span off, and nothing else reading spans, no span is built. A sampler
+    /// and field-level instrumentation read no span with nothing exporting. Each reader's row is
+    /// followed by a configuration nothing reads spans under, so spans stop being built again
+    /// when a reload takes the reader away.
+    #[tokio::test(flavor = "multi_thread")]
+    async fn the_router_builds_spans_only_where_something_reads_them() {
+        init_telemetry("info").expect("the router's subscriber");
+        let stdout = |format: serde_json::Value| {
+            with(
+                unread(),
+                "/telemetry/exporters/logging/stdout",
+                serde_json::json!({"enabled": true, "format": format}),
+            )
+        };
+        let printing = |format: &str, fields: &[&str]| {
+            let mut printed = serde_json::json!({});
+            printed[format] = serde_json::json!({
+                "display_span_list": false,
+                "display_current_span": false,
+                "display_trace_id": false,
+                "display_span_id": false,
+            });
+            for field in fields {
+                printed[format][field] = true.into();
+            }
+            stdout(printed)
+        };
+        let sampling = with(
+            unread(),
+            "/telemetry/exporters/tracing/common/sampler",
+            "always_on".into(),
+        );
+        let unread_configurations = [
+            ("stdout logging off", unread()),
+            (
+                "the JSON format with its span list, trace id and span id off",
+                stdout(serde_json::json!({"json": {
+                    "display_span_list": false,
+                    "display_trace_id": false,
+                    "display_span_id": false,
+                }})),
+            ),
+            (
+                "the text format with its span list and current span off",
+                stdout(serde_json::json!({"text": {
+                    "display_span_list": false,
+                    "display_current_span": false,
+                }})),
+            ),
+            (
+                "a sampler that samples, with nothing exporting",
+                sampling.clone(),
+            ),
+            (
+                "field-level instrumentation, with nothing exporting",
+                with(
+                    sampling,
+                    "/telemetry/apollo/field_level_instrumentation_sampler",
+                    "always_on".into(),
+                ),
+            ),
+        ];
+        let instrument_attribute = |selector: serde_json::Value| {
+            with(
+                unread(),
+                "/telemetry/instrumentation/instruments/router/acme.requests",
+                serde_json::json!({
+                    "type": "counter",
+                    "value": "unit",
+                    "unit": "request",
+                    "description": "requests",
+                    "attributes": {"read": selector},
+                }),
+            )
+        };
+        let readers = [
+            (
+                "the router's defaults, whose stdout format prints span data",
+                serde_json::json!({}),
+            ),
+            (
+                "the JSON format at its defaults: the span list, the trace id and the span id",
+                stdout("json".into()),
+            ),
+            (
+                "the text format at its defaults: the span list and the current span",
+                stdout("text".into()),
+            ),
+            (
+                "the JSON format's span list",
+                printing("json", &["display_span_list"]),
+            ),
+            (
+                "the JSON format's current span",
+                printing("json", &["display_current_span"]),
+            ),
+            (
+                "the JSON format's trace id",
+                printing("json", &["display_trace_id"]),
+            ),
+            (
+                "the JSON format's span id",
+                printing("json", &["display_span_id"]),
+            ),
+            (
+                "the JSON format's span attributes",
+                with(
+                    printing("json", &[]),
+                    "/telemetry/exporters/logging/stdout/format/json/span_attributes",
+                    serde_json::json!(["subgraph.name"]),
+                ),
+            ),
+            (
+                "the text format's span list",
+                printing("text", &["display_span_list"]),
+            ),
+            (
+                "the text format's current span",
+                printing("text", &["display_current_span"]),
+            ),
+            (
+                "the text format's trace id",
+                printing("text", &["display_trace_id"]),
+            ),
+            (
+                "the text format's span id",
+                printing("text", &["display_span_id"]),
+            ),
+            (
+                "a logged event, whose attributes travel through its span",
+                with(
+                    printing("json", &[]),
+                    "/telemetry/instrumentation/events/router/request",
+                    "info".into(),
+                ),
+            ),
+            (
+                "an OTLP exporter",
+                with(
+                    unread(),
+                    "/telemetry/exporters/tracing/otlp",
+                    serde_json::json!({"enabled": true, "endpoint": "http://127.0.0.1:4317"}),
+                ),
+            ),
+            (
+                "a Datadog exporter",
+                with(
+                    unread(),
+                    "/telemetry/exporters/tracing/datadog",
+                    serde_json::json!({"enabled": true}),
+                ),
+            ),
+            (
+                "trace context propagation",
+                with(
+                    unread(),
+                    "/telemetry/exporters/tracing/propagation/trace_context",
+                    true.into(),
+                ),
+            ),
+            (
+                "a trace id read from a request header",
+                with(
+                    unread(),
+                    "/telemetry/exporters/tracing/propagation/request/header_name",
+                    "x-trace-id".into(),
+                ),
+            ),
+            (
+                "the response trace id",
+                with(
+                    unread(),
+                    "/telemetry/exporters/tracing/response_trace_id/enabled",
+                    true.into(),
+                ),
+            ),
+            (
+                "a trace id selector",
+                instrument_attribute(serde_json::json!({"trace_id": "open_telemetry"})),
+            ),
+            (
+                "a baggage selector",
+                instrument_attribute(serde_json::json!({"baggage": "tenant"})),
+            ),
+            (
+                "the Datadog trace id on the router span",
+                with(
+                    unread(),
+                    "/telemetry/instrumentation/spans/router/attributes/dd.trace_id",
+                    true.into(),
+                ),
+            ),
+        ];
+
+        for (configuration, unread) in &unread_configurations {
+            assert!(
+                !router_span_is_built(unread).await,
+                "nothing reads spans under {configuration}, yet they are built"
+            );
+        }
+        for (index, (reader, configuration)) in readers.iter().enumerate() {
+            assert!(
+                router_span_is_built(configuration).await,
+                "spans are read by {reader}, yet not built"
+            );
+            let (configuration, unread) =
+                &unread_configurations[index % unread_configurations.len()];
+            assert!(
+                !router_span_is_built(unread).await,
+                "nothing reads spans under {configuration}, yet they are built after {reader}"
+            );
+        }
+    }
+
+    /// A span-scoped log directive, which enables events only inside a matching span, keeps the
+    /// router building spans where its configuration has no other reader.
+    #[tokio::test(flavor = "multi_thread")]
+    async fn a_span_scoped_log_directive_keeps_spans_built() {
+        init_telemetry("info,[router]=debug").expect("the router's subscriber");
+        assert!(router_span_is_built(&unread()).await);
     }
 }

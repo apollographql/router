@@ -42,12 +42,18 @@ static FTV1_HEADER_NAME: HeaderName = HeaderName::from_static("apollo-federation
 static FTV1_HEADER_VALUE: HeaderValue = HeaderValue::from_static("ftv1");
 
 fn request_ftv1(mut req: SubgraphRequest) -> SubgraphRequest {
-    if req
+    let enabled = req
         .context
         .extensions()
-        .with_lock(|lock| lock.contains_key::<EnableSubgraphFtv1>())
-        && Span::current().context().span().span_context().is_sampled()
-    {
+        .with_lock(|lock| lock.get::<EnableSubgraphFtv1>().copied());
+    let requested = match enabled {
+        Some(EnableSubgraphFtv1::WhereSpanSampled) => {
+            Span::current().context().span().span_context().is_sampled()
+        }
+        Some(EnableSubgraphFtv1::Sampled) => true,
+        None => false,
+    };
+    if requested {
         req.subgraph_request
             .headers_mut()
             .insert(FTV1_HEADER_NAME.clone(), FTV1_HEADER_VALUE.clone());
@@ -170,12 +176,17 @@ where
             })
             .map_future_with_request_data(
                 move |sub_request: &SubgraphRequest| {
-                    let custom_attributes = req_fn_config
-                        .instrumentation
-                        .spans
-                        .subgraph
-                        .attributes
-                        .on_request(sub_request);
+                    // the subgraph span's attributes, made only where the span is built
+                    let custom_attributes = if Span::current().is_disabled() {
+                        Vec::new()
+                    } else {
+                        req_fn_config
+                            .instrumentation
+                            .spans
+                            .subgraph
+                            .attributes
+                            .on_request(sub_request)
+                    };
                     let (subgraph_instrument_set, apollo_instrument_set, cache_instrument_set) =
                         &*sets;
                     let custom_instruments = subgraph_instrument_set.start();
@@ -228,13 +239,13 @@ where
                                 } else {
                                     span.record(OTEL_STATUS_CODE, OTEL_STATUS_CODE_OK);
                                 }
-                                span.set_span_dyn_attributes(
+                                span.set_span_dyn_attributes_from(|| {
                                     conf.instrumentation
                                         .spans
                                         .subgraph
                                         .attributes
-                                        .on_response(resp),
-                                );
+                                        .on_response(resp)
+                                });
                                 apollo_instruments.on_response(resp);
                                 custom_cache_instruments.on_response(resp);
                                 custom_instruments.on_response(resp);
@@ -242,13 +253,13 @@ where
                             }
                             Err(err) => {
                                 span.record(OTEL_STATUS_CODE, OTEL_STATUS_CODE_ERROR);
-                                span.set_span_dyn_attributes(
+                                span.set_span_dyn_attributes_from(|| {
                                     conf.instrumentation
                                         .spans
                                         .subgraph
                                         .attributes
-                                        .on_error(err, &context),
-                                );
+                                        .on_error(err, &context)
+                                });
                                 apollo_instruments.on_error(err, &context);
                                 custom_cache_instruments.on_error(err, &context);
                                 custom_instruments.on_error(err, &context);
@@ -836,6 +847,144 @@ mod tests {
         );
     }
 
+    /// Whether a subgraph request made inside a supergraph request carries the FTV1 header, under
+    /// the subscriber [`init_telemetry`] installed and the telemetry plugin `configuration` makes,
+    /// activated; where `in_fetch_span`, the request is made inside a span at the fetch service's
+    /// target, as its `fetch` span encloses every subgraph request.
+    ///
+    /// [`init_telemetry`]: crate::plugins::telemetry::reload::otel::init_telemetry
+    async fn ftv1_requested(configuration: &str, in_fetch_span: bool) -> bool {
+        use std::sync::atomic::AtomicBool;
+        use std::sync::atomic::Ordering;
+
+        use ::tracing::Instrument as _;
+
+        use crate::plugin::PluginPrivate;
+        use crate::services::SupergraphRequest;
+        use crate::services::SupergraphResponse;
+
+        let test_harness: PluginTestHarness<Telemetry> = PluginTestHarness::builder()
+            .config(configuration)
+            .build()
+            .await
+            .expect("test harness");
+        test_harness.activate();
+        let requested = Arc::new(AtomicBool::new(false));
+        let source = {
+            let requested = requested.clone();
+            tower::service_fn(move |request: SubgraphRequest| {
+                requested.store(
+                    request
+                        .subgraph_request
+                        .headers()
+                        .contains_key(&FTV1_HEADER_NAME),
+                    Ordering::Relaxed,
+                );
+                std::future::ready(Ok::<_, BoxError>(
+                    SubgraphResponse::fake_builder()
+                        .context(request.context)
+                        .subgraph_name("products")
+                        .build(),
+                ))
+            })
+        };
+        let subgraph = ServiceBuilder::new()
+            .layer(test_harness.instrument_subgraph_layer())
+            .layer(test_harness.subgraph_ftv1_layer())
+            .service(source);
+        let supergraph = ServiceBuilder::new()
+            .layer(test_harness.instrument_supergraph_layer())
+            .service_fn(move |request: SupergraphRequest| {
+                let subgraph = subgraph.clone();
+                async move {
+                    let fetch = if in_fetch_span {
+                        ::tracing::info_span!(
+                            target: crate::services::fetch_service::SPAN_TARGET,
+                            "fetch"
+                        )
+                    } else {
+                        Span::none()
+                    };
+                    subgraph
+                        .oneshot(
+                            SubgraphRequest::fake_builder()
+                                .context(request.context.clone())
+                                .subgraph_name("products")
+                                .build(),
+                        )
+                        .instrument(fetch)
+                        .await?;
+                    SupergraphResponse::fake_builder()
+                        .context(request.context)
+                        .build()
+                }
+            });
+        supergraph
+            .oneshot(
+                SupergraphRequest::fake_builder()
+                    .query("{ products { sku } }")
+                    .build()
+                    .expect("a request"),
+            )
+            .await
+            .expect("a response");
+        requested.load(Ordering::Relaxed)
+    }
+
+    /// Field-level instrumentation always on, the sampler always on and no exporter, with stdout
+    /// logging off, where nothing reads spans and none is built, and at its defaults, where the
+    /// format reads them.
+    const EVERY_REQUEST: [&str; 2] = [
+        "telemetry:\n  apollo:\n    field_level_instrumentation_sampler: always_on\n  exporters:\n    tracing:\n      common:\n        sampler: always_on\n    logging:\n      stdout:\n        enabled: false\n",
+        "telemetry:\n  apollo:\n    field_level_instrumentation_sampler: always_on\n  exporters:\n    tracing:\n      common:\n        sampler: always_on\n",
+    ];
+
+    /// Subgraphs receive the FTV1 header at field-level instrumentation's rate whether or not the
+    /// router builds spans: with no Apollo key and no exporter, every request's subgraphs are
+    /// asked for a field-level trace at `always_on`, and none at `always_off`.
+    #[tokio::test(flavor = "multi_thread")]
+    async fn subgraphs_receive_the_ftv1_header_at_field_level_instrumentations_rate() {
+        crate::plugins::telemetry::reload::otel::init_telemetry("info")
+            .expect("the router's subscriber");
+        for every_request in EVERY_REQUEST {
+            assert!(
+                ftv1_requested(every_request, false).await,
+                "{every_request}"
+            );
+        }
+        let no_request = "telemetry:\n  apollo:\n    field_level_instrumentation_sampler: always_off\n  exporters:\n    logging:\n      stdout:\n        enabled: false\n";
+        assert!(!ftv1_requested(no_request, false).await);
+    }
+
+    /// No subgraph is asked for a field-level trace where the log level leaves the router's spans
+    /// off, whether or not the router builds spans.
+    #[tokio::test(flavor = "multi_thread")]
+    async fn subgraphs_receive_no_ftv1_header_where_the_log_level_leaves_spans_off() {
+        crate::plugins::telemetry::reload::otel::init_telemetry("error")
+            .expect("the router's subscriber");
+        for every_request in EVERY_REQUEST {
+            assert!(
+                !ftv1_requested(every_request, false).await,
+                "{every_request}"
+            );
+        }
+    }
+
+    /// Every request's subgraphs are asked for a field-level trace where the log level leaves the
+    /// router's own spans off and enables the fetch service's: there the `fetch` span is the
+    /// current span a subgraph request reads its sampling from, and where no span is built the
+    /// draw asks the level about that span too.
+    #[tokio::test(flavor = "multi_thread")]
+    async fn subgraphs_receive_the_ftv1_header_where_the_level_enables_the_fetch_spans() {
+        crate::plugins::telemetry::reload::otel::init_telemetry(
+            "error,apollo_router::services::fetch_service=info",
+        )
+        .expect("the router's subscriber");
+        for every_request in EVERY_REQUEST {
+            assert!(ftv1_requested(every_request, true).await, "{every_request}");
+        }
+    }
+
     mod subgraph_ftv1_layer {
         use opentelemetry::Context as OtelContext;
         use opentelemetry::trace::SpanContext;
@@ -885,7 +1034,7 @@ mod tests {
             let context = Context::new();
             context
                 .extensions()
-                .with_lock(|lock| lock.insert(EnableSubgraphFtv1));
+                .with_lock(|lock| lock.insert(EnableSubgraphFtv1::WhereSpanSampled));
             context
         }
 

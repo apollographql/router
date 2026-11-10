@@ -18,7 +18,7 @@ use crate::spec::SchemaHash;
 
 mod caching_query_planner;
 mod convert;
-mod execution;
+pub(crate) mod execution;
 pub(crate) mod fetch;
 mod labeler;
 mod plan;

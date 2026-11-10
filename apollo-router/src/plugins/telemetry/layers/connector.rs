@@ -84,12 +84,17 @@ where
                         req_fn_config.instrumentation.events.new_connector_events();
                     custom_events.on_request(request);
 
-                    let custom_span_attributes = req_fn_config
-                        .instrumentation
-                        .spans
-                        .connector
-                        .attributes
-                        .on_request(request);
+                    // the connector span's attributes, made only where the span is built
+                    let custom_span_attributes = if Span::current().is_disabled() {
+                        Vec::new()
+                    } else {
+                        req_fn_config
+                            .instrumentation
+                            .spans
+                            .connector
+                            .attributes
+                            .on_request(request)
+                    };
 
                     (
                         request.context.clone(),
@@ -121,13 +126,13 @@ where
                         let result = f.await;
                         match &result {
                             Ok(response) => {
-                                span.set_span_dyn_attributes(
+                                span.set_span_dyn_attributes_from(|| {
                                     conf.instrumentation
                                         .spans
                                         .connector
                                         .attributes
-                                        .on_response(response),
-                                );
+                                        .on_response(response)
+                                });
                                 custom_instruments.on_response(response);
                                 apollo_connector_instruments.on_response(response);
                                 custom_events.on_response(response);
@@ -141,13 +146,13 @@ where
                                 count_connector_errors(response, &conf.apollo.errors);
                             }
                             Err(err) => {
-                                span.set_span_dyn_attributes(
+                                span.set_span_dyn_attributes_from(|| {
                                     conf.instrumentation
                                         .spans
                                         .connector
                                         .attributes
-                                        .on_error(err, &context),
-                                );
+                                        .on_error(err, &context)
+                                });
                                 custom_instruments.on_error(err, &context);
                                 apollo_connector_instruments.on_error(err, &context);
                                 custom_events.on_error(err, &context);

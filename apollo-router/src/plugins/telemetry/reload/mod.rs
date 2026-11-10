@@ -35,6 +35,7 @@
 //! * [`log_layers`] - Logging layers that keep locks off span callbacks
 //! * [`metrics`] - Building meter providers from configuration
 //! * [`tracing`] - Building trace providers from configuration
+//! * [`span_gate`] - Spans built only while something configured reads them
 use multimap::MultiMap;
 use tower::BoxError;
 
@@ -51,6 +52,7 @@ pub(crate) mod log_layers;
 pub(crate) mod metrics;
 pub(crate) mod otel;
 pub(crate) mod rate_limit;
+pub(crate) mod span_gate;
 #[cfg(test)]
 mod testing;
 pub(crate) mod tracing;

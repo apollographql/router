@@ -103,12 +103,17 @@ where
         ServiceBuilder::new()
             .map_future_with_request_data(
                 move |request: &crate::services::http::HttpRequest| {
-                    let custom_span_attributes = req_fn_config
-                        .instrumentation
-                        .spans
-                        .http_client
-                        .attributes
-                        .on_request(request);
+                    // the HTTP request span's attributes, made only where the span is built
+                    let custom_span_attributes = if Span::current().is_disabled() {
+                        Vec::new()
+                    } else {
+                        req_fn_config
+                            .instrumentation
+                            .spans
+                            .http_client
+                            .attributes
+                            .on_request(request)
+                    };
 
                     (request.context.clone(), custom_span_attributes)
                 },
@@ -121,22 +126,22 @@ where
                         let result: Result<crate::services::http::HttpResponse, BoxError> = f.await;
                         match &result {
                             Ok(response) => {
-                                span.set_span_dyn_attributes(
+                                span.set_span_dyn_attributes_from(|| {
                                     conf.instrumentation
                                         .spans
                                         .http_client
                                         .attributes
-                                        .on_response(response),
-                                );
+                                        .on_response(response)
+                                });
                             }
                             Err(err) => {
-                                span.set_span_dyn_attributes(
+                                span.set_span_dyn_attributes_from(|| {
                                     conf.instrumentation
                                         .spans
                                         .http_client
                                         .attributes
-                                        .on_error(err, &context),
-                                );
+                                        .on_error(err, &context)
+                                });
                             }
                         }
                         result

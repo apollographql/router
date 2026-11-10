@@ -336,21 +336,26 @@ where
                             .insert(CLIENT_LIBRARY_VERSION, version.to_owned());
                     }
 
-                    let mut custom_attributes = config_request
-                        .instrumentation
-                        .spans
-                        .router
-                        .attributes
-                        .on_request(request);
-
-                    custom_attributes.push(KeyValue::new(
-                        Key::from_static_str("apollo_private.http.request_headers"),
-                        filter_headers(
-                            request.router_request.headers(),
-                            &config_request.apollo.send_headers,
-                            &request.context,
-                        ),
-                    ));
+                    // the router span's attributes, made only where the span is built
+                    let custom_attributes = if Span::current().is_disabled() {
+                        Vec::new()
+                    } else {
+                        let mut custom_attributes = config_request
+                            .instrumentation
+                            .spans
+                            .router
+                            .attributes
+                            .on_request(request);
+                        custom_attributes.push(KeyValue::new(
+                            Key::from_static_str("apollo_private.http.request_headers"),
+                            filter_headers(
+                                request.router_request.headers(),
+                                &config_request.apollo.send_headers,
+                                &request.context,
+                            ),
+                        ));
+                        custom_attributes
+                    };
 
                     // Create and store router overhead tracker in context
                     request.context.extensions().with_lock(|lock| {
@@ -417,27 +422,29 @@ where
                         // (e.g. rhai) may modify these values in the shared context
                         // during request processing. With buffered service layers,
                         // that processing is deferred until the future is polled.
-                        let get_from_context =
-                            |ctx: &Context, key| ctx.get::<&str, String>(key).ok().flatten();
-                        let client_name = get_from_context(&ctx, CLIENT_NAME);
-                        let client_version = get_from_context(&ctx, CLIENT_VERSION);
-
-                        if let Some(key) = client_name_key {
-                            span.set_span_dyn_attribute(
-                                key,
-                                opentelemetry::Value::String(
-                                    client_name.unwrap_or_default().into(),
-                                ),
-                            );
-                        }
-
-                        if let Some(key) = client_version_key {
-                            span.set_span_dyn_attribute(
-                                key,
-                                opentelemetry::Value::String(
-                                    client_version.unwrap_or_default().into(),
-                                ),
-                            );
+                        if !span.is_disabled() {
+                            let get_from_context =
+                                |ctx: &Context, key| ctx.get::<&str, String>(key).ok().flatten();
+                            if let Some(key) = client_name_key {
+                                span.set_span_dyn_attribute(
+                                    key,
+                                    opentelemetry::Value::String(
+                                        get_from_context(&ctx, CLIENT_NAME)
+                                            .unwrap_or_default()
+                                            .into(),
+                                    ),
+                                );
+                            }
+                            if let Some(key) = client_version_key {
+                                span.set_span_dyn_attribute(
+                                    key,
+                                    opentelemetry::Value::String(
+                                        get_from_context(&ctx, CLIENT_VERSION)
+                                            .unwrap_or_default()
+                                            .into(),
+                                    ),
+                                );
+                            }
                         }
 
                         span.record(
@@ -447,45 +454,52 @@ where
 
                         let expose_trace_id = &config.exporters.tracing.response_trace_id;
                         if let Ok(response) = &response {
-                            span.set_span_dyn_attributes(
+                            span.set_span_dyn_attributes_from(|| {
                                 config
                                     .instrumentation
                                     .spans
                                     .router
                                     .attributes
-                                    .on_response(response),
-                            );
+                                    .on_response(response)
+                            });
                             custom_instruments.on_response(response);
                             custom_events.on_response(response);
 
-                            let mut headers: HashMap<String, Vec<String>> =
-                                HashMap::with_capacity(2);
-                            if expose_trace_id.enabled {
-                                let header_name = expose_trace_id
-                                    .header_name
-                                    .as_deref()
-                                    .unwrap_or(&DEFAULT_EXPOSE_TRACE_ID_HEADER_NAME);
+                            // the router span's response headers, recorded only where the span is
+                            // built
+                            if !span.is_disabled() {
+                                let mut headers: HashMap<String, Vec<String>> =
+                                    HashMap::with_capacity(2);
+                                if expose_trace_id.enabled {
+                                    let header_name = expose_trace_id
+                                        .header_name
+                                        .as_deref()
+                                        .unwrap_or(&DEFAULT_EXPOSE_TRACE_ID_HEADER_NAME);
 
-                                if let Some(value) = response.response.headers().get(header_name) {
+                                    if let Some(value) =
+                                        response.response.headers().get(header_name)
+                                    {
+                                        headers.insert(
+                                            header_name.to_string(),
+                                            vec![value.to_str().unwrap_or_default().to_string()],
+                                        );
+                                    }
+                                }
+                                if let Some(value) = response.response.headers().get(&CACHE_CONTROL)
+                                {
                                     headers.insert(
-                                        header_name.to_string(),
+                                        CACHE_CONTROL.to_string(),
                                         vec![value.to_str().unwrap_or_default().to_string()],
                                     );
                                 }
-                            }
-                            if let Some(value) = response.response.headers().get(&CACHE_CONTROL) {
-                                headers.insert(
-                                    CACHE_CONTROL.to_string(),
-                                    vec![value.to_str().unwrap_or_default().to_string()],
-                                );
-                            }
-                            if !headers.is_empty() {
-                                let response_headers =
-                                    serde_json::to_string(&headers).unwrap_or_default();
-                                span.record(
-                                    "apollo_private.http.response_headers",
-                                    &response_headers,
-                                );
+                                if !headers.is_empty() {
+                                    let response_headers =
+                                        serde_json::to_string(&headers).unwrap_or_default();
+                                    span.record(
+                                        "apollo_private.http.response_headers",
+                                        &response_headers,
+                                    );
+                                }
                             }
 
                             if response.context.extensions().with_lock(|lock| {
@@ -514,14 +528,14 @@ where
                             }
                         } else if let Err(err) = &response {
                             span.record(OTEL_STATUS_CODE, OTEL_STATUS_CODE_ERROR);
-                            span.set_span_dyn_attributes(
+                            span.set_span_dyn_attributes_from(|| {
                                 config
                                     .instrumentation
                                     .spans
                                     .router
                                     .attributes
-                                    .on_error(err, &ctx),
-                            );
+                                    .on_error(err, &ctx)
+                            });
                             custom_instruments.on_error(err, &ctx);
                             custom_events.on_error(err, &ctx);
                         }

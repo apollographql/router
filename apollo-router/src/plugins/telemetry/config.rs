@@ -355,6 +355,16 @@ impl Tracing {
     pub(crate) fn is_aws_xray_propagation_enabled(&self) -> bool {
         self.propagation.aws_xray
     }
+
+    /// Whether any propagator is configured: one of the four above, or a trace id read from a
+    /// request header. `create_propagator` installs one for each.
+    pub(crate) fn propagates(&self) -> bool {
+        self.is_baggage_propagation_enabled()
+            || self.is_trace_context_propagation_enabled()
+            || self.is_datadog_propagation_enabled()
+            || self.is_aws_xray_propagation_enabled()
+            || self.propagation.request.header_name.is_some()
+    }
 }
 
 #[apollo_configuration::configuration]
@@ -764,6 +774,11 @@ impl From<SamplerOption> for opentelemetry_sdk::trace::Sampler {
 }
 
 impl TracingCommon {
+    /// The share of traces the sampler samples, the root's where a parent decides.
+    pub(crate) fn sampling_ratio(&self) -> f64 {
+        sampler_option_to_ratio(&self.sampler)
+    }
+
     /// Configures a TracerProviderBuilder with sampler, span limits, and resource settings.
     pub(crate) fn configure_tracer_provider_builder(
         &self,

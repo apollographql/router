@@ -83,9 +83,25 @@ impl DynAttributeLayer {
 pub(crate) trait SpanDynAttribute {
     fn set_span_dyn_attribute(&self, key: Key, value: opentelemetry::Value);
     fn set_span_dyn_attributes(&self, attributes: impl IntoIterator<Item = KeyValue>);
+
+    /// Sets the attributes `attributes` makes, made only where the span is built: a disabled
+    /// span records nothing, so nothing is computed for it.
+    fn set_span_dyn_attributes_from<I: IntoIterator<Item = KeyValue>>(
+        &self,
+        attributes: impl FnOnce() -> I,
+    );
 }
 
 impl SpanDynAttribute for ::tracing::Span {
+    fn set_span_dyn_attributes_from<I: IntoIterator<Item = KeyValue>>(
+        &self,
+        attributes: impl FnOnce() -> I,
+    ) {
+        if !self.is_disabled() {
+            self.set_span_dyn_attributes(attributes());
+        }
+    }
+
     fn set_span_dyn_attribute(&self, key: Key, value: opentelemetry::Value) {
         self.with_subscriber(move |(id, dispatch)| {
             if let Some(reg) = dispatch.downcast_ref::<Registry>() {
