@@ -76,20 +76,28 @@ impl<S: Clone> Pool<S> {
 /// readies it on the caller's task, calls it and returns it to the pool before awaiting the
 /// response, so the handle is always ready. Cloning the handle clones no copy.
 ///
-/// At most `bound` calls wait for a copy's readiness at once, and the next waits for one of them
-/// to be called, holding no copy meanwhile, never shed: the bound a buffer's queue holds over the
-/// calls waiting for its worker.
+/// A bounded handle lets at most `bound` calls wait for a copy's readiness at once, and the next
+/// waits for one of them to be called, holding no copy meanwhile, never shed: the bound a buffer's
+/// queue holds over the calls waiting for its worker.
 pub(crate) struct Pooled<S> {
     pool: Arc<Pool<S>>,
-    waiting: Arc<Semaphore>,
+    waiting: Option<Arc<Semaphore>>,
 }
 
 impl<S: Clone> Pooled<S> {
+    /// A handle with no bound of its own, for a caller that bounds its calls itself.
+    pub(crate) fn new(service: S) -> Self {
+        Self {
+            pool: Arc::new(Pool::new(service)),
+            waiting: None,
+        }
+    }
+
     /// A handle letting at most `bound` calls wait for a copy's readiness at once.
     pub(crate) fn bounded(service: S, bound: usize) -> Self {
         Self {
             pool: Arc::new(Pool::new(service)),
-            waiting: Arc::new(Semaphore::new(bound)),
+            waiting: Some(Arc::new(Semaphore::new(bound))),
         }
     }
 }
@@ -98,7 +106,7 @@ impl<S> Clone for Pooled<S> {
     fn clone(&self) -> Self {
         Self {
             pool: Arc::clone(&self.pool),
-            waiting: Arc::clone(&self.waiting),
+            waiting: self.waiting.clone(),
         }
     }
 }
@@ -117,19 +125,25 @@ where
 
     fn call(&mut self, request: Request) -> Self::Future {
         // `try_acquire` first, so a call with room under the bound costs no future
-        match Arc::clone(&self.waiting).try_acquire_owned() {
-            Ok(permit) => PooledFuture::Readying {
-                copy: Some(self.pool.take()),
-                request: Some(request),
-                pool: Arc::clone(&self.pool),
-                permit: Some(permit),
+        let permit = match &self.waiting {
+            None => None,
+            Some(waiting) => match Arc::clone(waiting).try_acquire_owned() {
+                Ok(permit) => Some(permit),
+                Err(_) => {
+                    return PooledFuture::Admitting {
+                        waiting: Arc::clone(waiting),
+                        acquiring: None,
+                        request: Some(request),
+                        pool: Arc::clone(&self.pool),
+                    };
+                }
             },
-            Err(_) => PooledFuture::Admitting {
-                waiting: Arc::clone(&self.waiting),
-                acquiring: None,
-                request: Some(request),
-                pool: Arc::clone(&self.pool),
-            },
+        };
+        PooledFuture::Readying {
+            copy: Some(self.pool.take()),
+            request: Some(request),
+            pool: Arc::clone(&self.pool),
+            permit,
         }
     }
 }

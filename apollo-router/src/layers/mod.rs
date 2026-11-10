@@ -43,6 +43,16 @@ pub mod unconstrained_buffer;
 // value higher or lower or expose it as a configurable.
 pub(crate) const DEFAULT_BUFFER_SIZE: usize = 50_000;
 
+/// Drops the readied `service` beneath a layer that answers a request without calling it, a fresh
+/// clone in its place. A service readied is called or dropped, never kept readied (tower's
+/// `Service::poll_ready`): its readiness may hold what it reserved, such as a concurrency limit's
+/// permit, which a copy of a stage returned to its pool would otherwise keep from every other
+/// copy. Only a request answered without the service beneath pays the clone.
+pub(crate) fn release_readied<S: Clone>(service: &mut S) {
+    let fresh = service.clone();
+    drop(std::mem::replace(service, fresh));
+}
+
 /// Extension to the [`ServiceBuilder`] trait to make it easy to add router specific capabilities
 /// (e.g.: checkpoints) to a [`Service`].
 #[allow(clippy::type_complexity)]

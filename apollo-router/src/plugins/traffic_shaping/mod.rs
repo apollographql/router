@@ -35,6 +35,7 @@ use self::admission::ConnectorSourceErrorResponseLayer;
 use self::admission::SubgraphErrorResponseLayer;
 use self::deduplication::QueryDeduplicationLayer;
 use self::timeout::ConnectorSourceTimeoutLayer;
+use self::timeout::RouterTimeoutLayer;
 use self::timeout::SubgraphTimeoutLayer;
 use crate::configuration::shared::DnsResolutionStrategy;
 use crate::configuration::shared::default_pool_idle_timeout;
@@ -339,11 +340,24 @@ impl PluginPrivate for TrafficShaping {
     }
 
     fn router_service(&self, service: router::BoxCloneService) -> router::BoxCloneService {
+        let router = self.config.router.as_ref();
+        let timeout = router
+            .and_then(|r| r.timeout.as_deref().copied())
+            .unwrap_or(DEFAULT_TIMEOUT);
+        if router.is_none_or(|r| r.concurrency_limit.is_none() && r.global_rate_limit.is_none()) {
+            // with no router limit, the timeout alone, on the request's own task
+            return ServiceBuilder::new()
+                .layer(RouterTimeoutLayer::new(timeout))
+                .service(service)
+                .boxed_clone();
+        }
+
         // NB: consider each triplet (map_future_with_request_data, load_shed, layer) as a unit of
         //  behavior.
-        // The outer buffer before the first load_shed() is required for correct cooperative-
-        // scheduling behaviour: without it, Tokio's budget can cause poll_ready to return
-        // Pending spuriously and the load_shed would emit false Overloaded errors.
+        // The stage is cloned per request, and a limiter keeps its state per instance: the outer
+        // buffer gives every request the one limiter. It is also required for correct
+        // cooperative-scheduling behaviour: without it, Tokio's budget can cause poll_ready to
+        // return Pending spuriously and the load_shed would emit false Overloaded errors.
         ServiceBuilder::new()
             .buffered()
             .map_future_with_request_data(
@@ -363,13 +377,7 @@ impl PluginPrivate for TrafficShaping {
                 },
             )
             .load_shed()
-            .layer(TimeoutLayer::new(
-                self.config
-                    .router
-                    .as_ref()
-                    .and_then(|r| r.timeout.as_deref().copied())
-                    .unwrap_or(DEFAULT_TIMEOUT),
-            ))
+            .layer(TimeoutLayer::new(timeout))
             .map_future_with_request_data(
                 |req: &router::Request| req.context.clone(),
                 move |ctx, future| async {
@@ -1171,6 +1179,147 @@ mod test {
             .unwrap();
         assert_eq!(StatusCode::OK, response.response.status());
         crate::plugin::test::await_mock_driver(driver).await;
+    }
+
+    /// The router stage's shaping calls the service beneath it on the request's own task where no
+    /// router limit is configured, its timeout alone in force, and from the one worker task every
+    /// request shares where a concurrency or rate limit is, whose limiter every clone of the stage
+    /// must share.
+    #[tokio::test(flavor = "multi_thread")]
+    async fn the_router_stage_meets_a_worker_where_a_router_limit_is_configured() {
+        for (config, on_the_request_task) in [
+            (serde_json::json!({}), true),
+            (serde_json::json!({"router": {"timeout": "10s"}}), true),
+            (
+                serde_json::json!({"router": {"concurrency_limit": 10}}),
+                false,
+            ),
+            (
+                serde_json::json!({"router": {"global_rate_limit": {"capacity": 10, "interval": "1s"}}}),
+                false,
+            ),
+        ] {
+            let plugin = get_traffic_shaping_plugin(&config).await;
+            let called_on = Arc::new(parking_lot::Mutex::new(None));
+            let inner = ServiceBuilder::new()
+                .service_fn({
+                    let called_on = called_on.clone();
+                    move |_request: router::Request| {
+                        *called_on.lock() = tokio::task::try_id();
+                        async { RouterResponse::fake_builder().build() }
+                    }
+                })
+                .boxed_clone();
+            let service = plugin.router_service(inner);
+
+            let request_task = tokio::spawn(async move {
+                let response = service
+                    .oneshot(RouterRequest::fake_builder().build().unwrap())
+                    .await
+                    .unwrap();
+                assert_eq!(response.response.status(), StatusCode::OK);
+                tokio::task::id()
+            })
+            .await
+            .unwrap();
+
+            assert_eq!(
+                *called_on.lock() == Some(request_task),
+                on_the_request_task,
+                "whether the stage beneath was called on the request's own task under {config}"
+            );
+        }
+    }
+
+    /// With no router limit, a request is not shed for want of its task's cooperative budget: with a
+    /// plugin's tower buffer beneath the stage, far from full, and the task's budget spent before
+    /// the stage reads the readiness beneath it, the request is called and answers 200. The
+    /// buffer's channel answers `Pending` without budget whatever its capacity; read as load
+    /// shedding reads readiness, that `Pending` was a 503. (A concurrency limit with a permit free
+    /// takes it without the budget.)
+    #[tokio::test]
+    async fn the_router_stage_sheds_nothing_for_want_of_the_tasks_budget() {
+        use std::task::Poll;
+
+        use tokio::task::coop::poll_proceed;
+
+        let plugin = get_traffic_shaping_plugin(&serde_json::json!({})).await;
+        let inner = ServiceBuilder::new()
+            .buffer(1000)
+            .service_fn(|_request: router::Request| async {
+                RouterResponse::fake_builder().build()
+            })
+            .boxed_clone();
+        let mut stage = plugin.router_service(inner);
+
+        // a fresh budget, then the readiness read and the call with that budget spent
+        tokio::task::yield_now().await;
+        let future = std::future::poll_fn(|cx| {
+            let mut spent = 0;
+            while let Poll::Ready(restore) = poll_proceed(cx) {
+                restore.made_progress();
+                spent += 1;
+            }
+            assert_ne!(spent, 0, "the task had a budget to spend");
+            assert!(
+                matches!(stage.poll_ready(cx), Poll::Ready(Ok(()))),
+                "the stage is always ready"
+            );
+            Poll::Ready(stage.call(RouterRequest::fake_builder().build().unwrap()))
+        })
+        .await;
+        let response = future.await.expect("an answer");
+
+        assert_eq!(
+            response.response.status(),
+            StatusCode::OK,
+            "the status of a request whose readiness was read with its task's budget spent"
+        );
+    }
+
+    /// With no router limit, an overload or a timeout the service beneath the stage answers with is
+    /// the stage's 503 and 504, as the buffered stage's mappings answered them, and never an error a
+    /// client meets as a 500.
+    #[tokio::test]
+    async fn the_router_stage_answers_an_overload_or_a_timeout_beneath_it() {
+        let plugin = get_traffic_shaping_plugin(&serde_json::json!({})).await;
+        for (beneath, status, message) in [
+            (
+                BoxError::from(Overloaded::new()),
+                StatusCode::SERVICE_UNAVAILABLE,
+                "Your request has been rate limited",
+            ),
+            (
+                BoxError::from(Elapsed::new()),
+                StatusCode::GATEWAY_TIMEOUT,
+                "Your request has been timed out",
+            ),
+        ] {
+            let description = beneath.to_string();
+            let error = Arc::new(parking_lot::Mutex::new(Some(beneath)));
+            let inner = ServiceBuilder::new()
+                .service_fn(move |_request: router::Request| {
+                    let error = error.lock().take().expect("one call");
+                    async move { Err::<RouterResponse, BoxError>(error) }
+                })
+                .boxed_clone();
+            let response = plugin
+                .router_service(inner)
+                .oneshot(RouterRequest::fake_builder().build().unwrap())
+                .await;
+
+            let response = response.unwrap_or_else(|error| {
+                panic!("the stage answered {description} beneath it with the error {error}")
+            });
+            assert_eq!(response.response.status(), status, "{description}");
+            let body: serde_json::Value = serde_json::from_slice(
+                &router::body::into_bytes(response.response)
+                    .await
+                    .expect("a body"),
+            )
+            .expect("a JSON body");
+            assert_eq!(body["errors"][0]["message"], message, "{description}");
+        }
     }
 
     #[tokio::test(flavor = "multi_thread")]

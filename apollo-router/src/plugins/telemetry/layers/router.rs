@@ -24,6 +24,7 @@ use crate::context::OPERATION_KIND;
 use crate::context::OPERATION_NAME;
 use crate::layers::ServiceBuilderExt;
 use crate::layers::instrument::InstrumentLayer;
+use crate::layers::release_readied;
 use crate::plugins::telemetry::CLIENT_LIBRARY_NAME;
 use crate::plugins::telemetry::CLIENT_LIBRARY_VERSION;
 use crate::plugins::telemetry::CLIENT_NAME;
@@ -147,7 +148,7 @@ struct ClientEntries<S> {
 
 impl<S> tower::Service<router::Request> for ClientEntries<S>
 where
-    S: tower::Service<router::Request, Response = router::Response, Error = BoxError>,
+    S: tower::Service<router::Request, Response = router::Response, Error = BoxError> + Clone,
 {
     type Response = router::Response;
     type Error = BoxError;
@@ -171,6 +172,8 @@ where
         let library_name_valid = valid(&apollo.library_name_header);
         let library_version_valid = valid(&apollo.library_version_header);
         if !library_name_valid || !library_version_valid {
+            // answered without the service beneath, which may hold what its readiness reserved
+            release_readied(&mut self.inner);
             if !library_name_valid {
                 ::tracing::warn!("Rejecting request: invalid client library name header value");
             }

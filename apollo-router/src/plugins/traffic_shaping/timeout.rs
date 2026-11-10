@@ -1,25 +1,34 @@
-//! The subgraph and connector source timeouts, which answer a request that runs too long
-//! themselves.
+//! The router stage's, the subgraph and the connector source timeouts, which answer a request that
+//! runs too long themselves.
 //!
 //! Each timeout turns its own [`Elapsed`] error into a gateway-timeout response, so it can be
 //! placed anywhere in the stack: no layer above it needs to know about the error.
 
+use std::future::Future;
+use std::pin::Pin;
+use std::task::Poll;
+use std::task::ready;
 use std::time::Duration;
 
 use apollo_federation::connectors::runtime::errors::Error;
 use http::StatusCode;
+use pin_project_lite::pin_project;
 use tower::BoxError;
 use tower::Layer;
 use tower::Service;
 use tower::ServiceBuilder;
 use tower::ServiceExt as _;
+use tower::load_shed::error::Overloaded;
 use tower::timeout::TimeoutLayer;
 use tower::timeout::error::Elapsed;
 
 use super::gateway_timeout_error;
+use super::rate_limit_error;
 use crate::layers::ServiceBuilderExt as _;
+use crate::layers::release_readied;
 use crate::services::SubgraphResponse;
 use crate::services::connector::request_service;
+use crate::services::router;
 use crate::services::subgraph;
 
 /// Layer type for [`TrafficShaping::subgraph_timeout_layer`](super::TrafficShaping::subgraph_timeout_layer).
@@ -210,5 +219,152 @@ mod tests {
             response.transport_outcome,
             TransportOutcome::Error(_)
         ));
+    }
+}
+
+/// The router stage's shaping where no router limit is configured: the timeout every request runs
+/// under, answered with a gateway timeout, and the shedding of a request whose service beneath is
+/// not ready, answered as the buffered stage's innermost shedding answers it; an overload or a
+/// timeout the service beneath answers with is answered as the buffered stage's mappings answer
+/// them, the rate-limit 503 and the 504. Its readiness is read and its timeout armed on the
+/// request's own task: the buffer the buffered stage puts in front of the shedding serves a limiter
+/// every clone of the stage must share, and there is none.
+pub(crate) struct RouterTimeoutLayer {
+    timeout: Duration,
+}
+
+impl RouterTimeoutLayer {
+    pub(super) fn new(timeout: Duration) -> Self {
+        Self { timeout }
+    }
+}
+
+impl<S> Layer<S> for RouterTimeoutLayer {
+    type Service = RouterTimeout<S>;
+
+    fn layer(&self, inner: S) -> Self::Service {
+        RouterTimeout {
+            inner,
+            timeout: self.timeout,
+            ready: false,
+        }
+    }
+}
+
+/// See [`RouterTimeoutLayer`].
+pub(crate) struct RouterTimeout<S> {
+    inner: S,
+    timeout: Duration,
+    /// Whether the service beneath was ready when last polled, as load shedding records it.
+    ready: bool,
+}
+
+impl<S: Clone> Clone for RouterTimeout<S> {
+    /// A clone not yet polled, as the clone of its service beneath is not readied.
+    fn clone(&self) -> Self {
+        Self {
+            inner: self.inner.clone(),
+            timeout: self.timeout,
+            ready: false,
+        }
+    }
+}
+
+impl<S> Service<router::Request> for RouterTimeout<S>
+where
+    S: Service<router::Request, Response = router::Response, Error = BoxError> + Clone,
+{
+    type Response = router::Response;
+    type Error = BoxError;
+    type Future = RouterTimeoutFuture<S::Future>;
+
+    fn poll_ready(&mut self, cx: &mut std::task::Context<'_>) -> Poll<Result<(), BoxError>> {
+        // load shedding's readiness: never pending, a request called unready is shed. The service
+        // beneath is polled outside Tokio's cooperative budget, as `UnconstrainedBuffer` polls the
+        // buffer behind the buffered stage's shedding: a budget-aware primitive beneath, such as a
+        // plugin's concurrency limit, answers `Pending` once the request's task has spent its
+        // budget, and that `Pending` would be taken for a service not ready and shed with a 503
+        let polled = std::pin::pin!(tokio::task::unconstrained(std::future::poll_fn(|cx| {
+            self.inner.poll_ready(cx)
+        })))
+        .poll(cx);
+        self.ready = match polled {
+            Poll::Ready(Err(error)) => return Poll::Ready(Err(error)),
+            polled => polled.is_ready(),
+        };
+        Poll::Ready(Ok(()))
+    }
+
+    fn call(&mut self, request: router::Request) -> Self::Future {
+        if !std::mem::take(&mut self.ready) {
+            // the service beneath, polled and not ready, may hold a reservation it waits on
+            release_readied(&mut self.inner);
+            return RouterTimeoutFuture::Shed {
+                context: Some(request.context),
+            };
+        }
+        let context = request.context.clone();
+        RouterTimeoutFuture::Called {
+            inner: tokio::time::timeout(self.timeout, self.inner.call(request)),
+            context: Some(context),
+        }
+    }
+}
+
+pin_project! {
+    /// The future of a request through [`RouterTimeout`].
+    #[project = RouterTimeoutProjection]
+    pub(crate) enum RouterTimeoutFuture<F> {
+        Called {
+            #[pin]
+            inner: tokio::time::Timeout<F>,
+            context: Option<crate::Context>,
+        },
+        Shed {
+            context: Option<crate::Context>,
+        },
+    }
+}
+
+impl<F> Future for RouterTimeoutFuture<F>
+where
+    F: Future<Output = Result<router::Response, BoxError>>,
+{
+    type Output = Result<router::Response, BoxError>;
+
+    fn poll(self: Pin<&mut Self>, cx: &mut std::task::Context<'_>) -> Poll<Self::Output> {
+        match self.project() {
+            RouterTimeoutProjection::Called { inner, context } => {
+                let mut context = || context.take().expect("a future polled after completion");
+                Poll::Ready(match ready!(inner.poll(cx)) {
+                    Ok(Ok(response)) => Ok(response),
+                    // an overload beneath, as the buffered stage's innermost mapping answers it
+                    Ok(Err(error)) if error.is::<Overloaded>() => {
+                        Ok(router::Response::error_builder()
+                            .status_code(StatusCode::SERVICE_UNAVAILABLE)
+                            .error(rate_limit_error())
+                            .context(context())
+                            .build()
+                            .expect("overloaded response should build"))
+                    }
+                    Ok(Err(error)) if !error.is::<Elapsed>() => Err(error),
+                    // this timer's expiry, or a timeout beneath, as the outermost mapping answers it
+                    Ok(Err(_)) | Err(_) => Ok(router::Response::error_builder()
+                        .status_code(StatusCode::GATEWAY_TIMEOUT)
+                        .error(gateway_timeout_error())
+                        .context(context())
+                        .build()
+                        .expect("gateway timeout response should build")),
+                })
+            }
+            RouterTimeoutProjection::Shed { context } => {
+                Poll::Ready(Ok(router::Response::error_builder()
+                    .status_code(StatusCode::SERVICE_UNAVAILABLE)
+                    .error(rate_limit_error())
+                    .context(context.take().expect("a future polled after completion"))
+                    .build()
+                    .expect("overloaded response should build")))
+            }
+        }
     }
 }

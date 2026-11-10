@@ -12,6 +12,8 @@ use tokio::sync::OwnedSemaphorePermit;
 use tower::Layer;
 use tower_service::Service;
 
+use crate::layers::release_readied;
+
 #[derive(thiserror::Error, Debug, Clone, Copy, Display)]
 pub(super) enum RequestSizeLimitError {
     /// Request body payload too large
@@ -142,7 +144,7 @@ where
     S: Service<
             http::Request<super::limited::Limited<ReqBody>>,
             Response = http::Response<RespBody>,
-        >,
+        > + Clone,
     ReqBody: http_body::Body,
     RespBody: http_body::Body,
     S::Error: From<RequestSizeLimitError>,
@@ -169,6 +171,8 @@ where
         if req.method() == http::Method::GET {
             let query_len = req.uri().query().map(str::len).unwrap_or(0);
             if query_len > control.limit() {
+                // answered without the service beneath, which may hold what its readiness reserved
+                release_readied(&mut self.inner);
                 return ResponseFuture::Reject {
                     error: RequestSizeLimitError::QueryTooLarge,
                 };
@@ -182,6 +186,7 @@ where
 
         let _body_limit = match content_length {
             Some(len) if len > control.limit() => {
+                release_readied(&mut self.inner);
                 return ResponseFuture::Reject {
                     error: RequestSizeLimitError::BodyTooLarge,
                 };
@@ -287,7 +292,7 @@ mod test {
         inner: F,
     ) -> impl Service<http::Request<String>, Response = http::Response<String>, Error = BoxError>
     where
-        F: FnMut(http::Request<Limited<String>>) -> Fut,
+        F: FnMut(http::Request<Limited<String>>) -> Fut + Clone,
         Fut: Future<Output = Result<http::Response<String>, BoxError>>,
     {
         ServiceBuilder::new()

@@ -1,0 +1,7 @@
+### Ready and call the router pipeline on each request's own task
+
+Every request on every connection was readied and called through one buffer, whose single worker task ran the pipeline's synchronous work for all of them one after another, and traffic shaping's router stage put a second buffer in front of every request whatever was configured. The ingress now shares the pipeline as a pool of copies that each request readies and calls on its own task, and traffic shaping's router stage with no router concurrency or rate limit is its timeout alone, also on the request's task. Under a router concurrency or rate limit the router stage keeps its buffer, whose one limiter every request must share.
+
+One behaviour changes: the ingress's 503 (`REQUEST_CONCURRENCY_LIMITED`) is now answered once 50,000 requests are in progress on the listen address, where it was answered once 50,000 requests were queued for the buffer's worker. A deployment with 50,000 slow requests in flight on one address now answers the next one with that 503. With no router limit, the router stage answers as before: its timeout with a 504, a service beneath that is not ready with the rate-limit 503, and an overload or a timeout from beneath with that 503 and the 504. A readiness error beneath the ingress or the router stage now fails only the request that met it, where the buffer failed every later request until the next reload.
+
+By [@martijnwalraven](https://github.com/martijnwalraven)

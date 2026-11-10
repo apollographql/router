@@ -1,19 +1,30 @@
 //! Utilities used for [`super::AxumHttpServerFactory`]
 
+use std::future::Future;
 use std::net::SocketAddr;
+use std::pin::Pin;
 use std::sync::Arc;
+use std::task::Poll;
 
+use futures::future::Either;
+use futures::future::Ready;
+use futures::future::ready;
 use http::StatusCode;
 use opentelemetry::global;
 use opentelemetry::trace::TraceContextExt;
-use tower::ServiceBuilder;
-use tower::load_shed::error::Overloaded;
+use pin_project_lite::pin_project;
+use tokio::sync::OwnedSemaphorePermit;
+use tokio::sync::Semaphore;
+use tower::BoxError;
+use tower::Service;
 use tower_http::trace::MakeSpan;
 use tracing::Span;
 
 use crate::Context;
 use crate::graphql;
-use crate::layers::ServiceBuilderExt;
+use crate::layers::DEFAULT_BUFFER_SIZE;
+use crate::layers::pool::Pooled;
+use crate::layers::pool::PooledFuture;
 use crate::plugins::telemetry::consts::OTEL_STATUS_CODE;
 use crate::plugins::telemetry::consts::OTEL_STATUS_CODE_ERROR;
 use crate::plugins::telemetry::pipeline_bypass::record_bypassed_request;
@@ -66,72 +77,106 @@ pub(crate) struct ConnectionInfo {
     pub(crate) server_address: Option<SocketAddr>,
 }
 
-pub(crate) type ConnectionRouterService =
-    tower::util::BoxCloneSyncService<router::Request, router::Response, tower::BoxError>;
-
-/// Wraps a router service so every connection can share one instance, cloning it per request.
+/// Every connection's share of one router pipeline. A request takes a copy of the pipeline from
+/// a pool (`layers::pool`), readies and calls it on its own task and returns it, so the
+/// pipeline's synchronous work runs on every request's own task at once; a request past
+/// [`DEFAULT_BUFFER_SIZE`] in progress on the listen address is answered a 503 at once. Its
+/// clone, made per connection and per request, is two reference counts'.
 ///
-/// Requests queue while the pipeline is busy and answer with a 503 once the queue is full,
-/// rather than waiting without bound.
+/// Where a buffer stood here, its one worker task readied and called the pipeline for every
+/// request on every connection, a channel's hop and a wake per request, and its queue bounded the
+/// requests waiting for that worker; the bound now holds the requests in progress, readied or
+/// awaiting their response, against the same number.
+#[derive(Clone)]
+pub(crate) struct ConnectionRouterService {
+    pipeline: Pooled<router::BoxCloneService>,
+    in_progress: Arc<Semaphore>,
+}
+
+/// Wraps a router service so every connection can share one instance.
 pub(crate) fn connection_router_service(
     service: router::BoxCloneService,
 ) -> ConnectionRouterService {
-    ConnectionRouterService::new(
-        ServiceBuilder::new()
-            .map_future_with_request_data(|req: &router::Request| req.context.clone(), shed_as_503)
-            // hyper awaits `poll_ready` inside each request's future, so a layer reporting
-            // `Pending` there stalls that request instead of applying backpressure to the
-            // connection. `load_shed` always reports `Ready`, so it has to sit above the queue
-            // for the shed decision to be immediate.
-            .load_shed()
-            // Unconstrained, so tokio's cooperative budget cannot report a spurious `Pending`
-            // and shed a request the queue had room for.
-            .buffered()
-            .service(service),
-    )
-}
-
-/// Answers a shed request with a 503 so callers never handle [`Overloaded`] themselves.
-///
-/// Belongs directly outside the `load_shed` whose errors it renders.
-async fn shed_as_503(
-    context: Context,
-    future: impl Future<Output = Result<router::Response, tower::BoxError>>,
-) -> Result<router::Response, tower::BoxError> {
-    match future.await {
-        Err(err) if err.is::<Overloaded>() => {
-            // Shedding happens before the router pipeline, and its `http.server.*` instruments
-            // with it, so record the duration here to keep shed requests visible.
-            record_bypassed_request(
-                StatusCode::SERVICE_UNAVAILABLE.as_u16(),
-                context.created_at.elapsed(),
-            );
-
-            // Debug rather than warn: shedding is per-request, so a sustained overload would
-            // otherwise emit a line per rejected request while the router is already struggling.
-            tracing::debug!(
-                code = "REQUEST_CONCURRENCY_LIMITED",
-                "the connection queue is full, shedding request",
-            );
-
-            Ok(router::Response::error_builder()
-                .status_code(StatusCode::SERVICE_UNAVAILABLE)
-                .error(
-                    graphql::Error::builder()
-                        .message("Your request has been concurrency limited waiting for the router")
-                        .extension_code("REQUEST_CONCURRENCY_LIMITED")
-                        .build(),
-                )
-                .context(context)
-                .build()
-                .expect("overloaded response should build"))
-        }
-        other => other,
+    ConnectionRouterService {
+        pipeline: Pooled::new(service),
+        in_progress: Arc::new(Semaphore::new(DEFAULT_BUFFER_SIZE)),
     }
 }
 
-/// Stands in for a saturated pipeline: `poll_ready` never resolves, so `load_shed` should
-/// short-circuit before `call` is reached.
+impl Service<router::Request> for ConnectionRouterService {
+    type Response = router::Response;
+    type Error = BoxError;
+    type Future = Either<
+        Ready<Result<router::Response, BoxError>>,
+        InProgress<PooledFuture<router::BoxCloneService, router::Request>>,
+    >;
+
+    fn poll_ready(&mut self, _cx: &mut std::task::Context<'_>) -> Poll<Result<(), BoxError>> {
+        // hyper awaits `poll_ready` inside each request's future, so `Pending` here would stall the
+        // request rather than push back on its connection: `call` decides whether to shed
+        Poll::Ready(Ok(()))
+    }
+
+    fn call(&mut self, request: router::Request) -> Self::Future {
+        // `try_acquire` never waits, so tokio's cooperative budget cannot shed a request the
+        // bound had room for
+        match Arc::clone(&self.in_progress).try_acquire_owned() {
+            Ok(permit) => Either::Right(InProgress {
+                inner: self.pipeline.call(request),
+                _permit: permit,
+            }),
+            Err(_) => Either::Left(ready(Ok(shed(request.context)))),
+        }
+    }
+}
+
+pin_project! {
+    /// A request's future, holding its place under the bound until it completes.
+    pub(crate) struct InProgress<F> {
+        #[pin]
+        inner: F,
+        _permit: OwnedSemaphorePermit,
+    }
+}
+
+impl<F: Future> Future for InProgress<F> {
+    type Output = F::Output;
+
+    fn poll(self: Pin<&mut Self>, cx: &mut std::task::Context<'_>) -> Poll<Self::Output> {
+        self.project().inner.poll(cx)
+    }
+}
+
+/// The answer to a request shed past the bound, a 503 its caller returns as any other.
+fn shed(context: Context) -> router::Response {
+    // Shedding happens before the router pipeline, and its `http.server.*` instruments with it,
+    // so record the duration here to keep shed requests visible.
+    record_bypassed_request(
+        StatusCode::SERVICE_UNAVAILABLE.as_u16(),
+        context.created_at.elapsed(),
+    );
+
+    // Debug rather than warn: shedding is per-request, so a sustained overload would otherwise
+    // emit a line per rejected request while the router is already struggling.
+    tracing::debug!(
+        code = "REQUEST_CONCURRENCY_LIMITED",
+        "the router is at its bound of requests in progress, shedding request",
+    );
+
+    router::Response::error_builder()
+        .status_code(StatusCode::SERVICE_UNAVAILABLE)
+        .error(
+            graphql::Error::builder()
+                .message("Your request has been concurrency limited waiting for the router")
+                .extension_code("REQUEST_CONCURRENCY_LIMITED")
+                .build(),
+        )
+        .context(context)
+        .build()
+        .expect("overloaded response should build")
+}
+
+/// Stands in for a saturated pipeline: `poll_ready` never resolves, so `call` is never reached.
 #[cfg(test)]
 #[derive(Clone)]
 pub(crate) struct NeverReady;
@@ -150,7 +195,7 @@ impl tower::Service<router::Request> for NeverReady {
     }
 
     fn call(&mut self, _req: router::Request) -> Self::Future {
-        unreachable!("load_shed should short-circuit calls to a never-ready service")
+        unreachable!("a never-ready service is never called")
     }
 }
 
@@ -162,11 +207,7 @@ mod tests {
     use crate::metrics::FutureMetricsExt;
 
     /// An unready pipeline must not stall readiness, because hyper awaits `poll_ready` inside
-    /// each request's future. Shedding once the queue fills is covered by
-    /// `unconstrained_buffer::tests::full_buffer_should_still_cause_load_shedding`, which
-    /// exercises the same `LoadShed` over `UnconstrainedBuffer` pairing with a capacity it can
-    /// actually exhaust.
-    // `Buffer` spawns its worker, so this needs a runtime even though nothing is awaited.
+    /// each request's future.
     #[tokio::test]
     async fn connection_router_service_always_reports_ready() {
         let mut connection_service =
@@ -183,16 +224,112 @@ mod tests {
         );
     }
 
-    /// A shed request has to come back as a response rather than an error, so callers can return
-    /// it without knowing that `load_shed` exists.
+    /// The tasks a pipeline's `poll_ready` and `call` ran on.
+    #[derive(Clone, Default)]
+    struct TaskRecorder {
+        readied_on: Arc<parking_lot::Mutex<Vec<Option<tokio::task::Id>>>>,
+        called_on: Arc<parking_lot::Mutex<Vec<Option<tokio::task::Id>>>>,
+    }
+
+    impl tower::Service<router::Request> for TaskRecorder {
+        type Response = router::Response;
+        type Error = tower::BoxError;
+        type Future = std::future::Ready<Result<router::Response, tower::BoxError>>;
+
+        fn poll_ready(
+            &mut self,
+            _cx: &mut std::task::Context<'_>,
+        ) -> std::task::Poll<Result<(), Self::Error>> {
+            self.readied_on.lock().push(tokio::task::try_id());
+            std::task::Poll::Ready(Ok(()))
+        }
+
+        fn call(&mut self, request: router::Request) -> Self::Future {
+            self.called_on.lock().push(tokio::task::try_id());
+            std::future::ready(
+                router::Response::fake_builder()
+                    .context(request.context)
+                    .build(),
+            )
+        }
+    }
+
+    /// A request readies and calls the pipeline on its own task: where a buffer stood, its one
+    /// worker task readied and called the pipeline for every request on every connection.
+    #[tokio::test(flavor = "multi_thread")]
+    async fn a_request_readies_and_calls_the_pipeline_on_its_own_task() {
+        use tower::ServiceExt as _;
+
+        let recorder = TaskRecorder::default();
+        let service = connection_router_service(router::BoxCloneService::new(recorder.clone()));
+
+        let request_task = tokio::spawn(async move {
+            service
+                .oneshot(router::Request::fake_builder().build().expect("a request"))
+                .await
+                .expect("an answer");
+            tokio::task::id()
+        })
+        .await
+        .expect("the request's task");
+
+        assert_eq!(
+            (
+                recorder.readied_on.lock().clone(),
+                recorder.called_on.lock().clone()
+            ),
+            (vec![Some(request_task)], vec![Some(request_task)]),
+            "the tasks the pipeline was readied and called on, against the request's own"
+        );
+    }
+
+    /// A request past the router's bound answers a 503 at once, while the requests within the
+    /// bound wait on a pipeline that is never ready: every connection shares the one bound.
+    #[tokio::test]
+    async fn a_request_past_the_bound_answers_a_503_at_once() {
+        use tower::ServiceExt as _;
+
+        use crate::layers::DEFAULT_BUFFER_SIZE;
+
+        let service = connection_router_service(router::BoxCloneService::new(NeverReady));
+        let context = Context::new();
+        let request = || {
+            service.clone().oneshot(
+                router::Request::fake_builder()
+                    .context(context.clone())
+                    .build()
+                    .expect("a request"),
+            )
+        };
+        let mut within = Vec::with_capacity(DEFAULT_BUFFER_SIZE);
+        for _ in 0..DEFAULT_BUFFER_SIZE {
+            let mut future = Box::pin(request());
+            assert!(
+                futures::poll!(future.as_mut()).is_pending(),
+                "a request within the bound waits on the pipeline"
+            );
+            within.push(future);
+        }
+        // the request at the bound: a buffer's worker held one more request beside its queue
+        let mut at_the_bound = Box::pin(request());
+        let _ = futures::poll!(at_the_bound.as_mut());
+
+        let past = request().await.expect("a shed request answers");
+
+        assert_eq!(past.response.status(), StatusCode::SERVICE_UNAVAILABLE);
+        for mut future in within {
+            assert!(
+                futures::poll!(future.as_mut()).is_pending(),
+                "a request within the bound still waits"
+            );
+        }
+    }
+
+    /// A shed request comes back as a response rather than an error, so callers can return it
+    /// without knowing about the bound.
     #[tokio::test]
     async fn shed_requests_answer_with_a_503_graphql_error() {
-        let response = shed_as_503(
-            Context::new(),
-            std::future::ready(Err(Overloaded::new().into())),
-        )
-        .await
-        .expect("a shed request should answer, not error");
+        let response = shed(Context::new());
 
         assert_eq!(response.response.status(), StatusCode::SERVICE_UNAVAILABLE);
 
@@ -218,11 +355,7 @@ mod tests {
     #[tokio::test]
     async fn shed_requests_record_a_request_duration() {
         async {
-            let _ = shed_as_503(
-                Context::new(),
-                std::future::ready(Err(Overloaded::new().into())),
-            )
-            .await;
+            let _ = shed(Context::new());
 
             assert_histogram_count!(
                 "http.server.request.duration",
@@ -232,18 +365,5 @@ mod tests {
         }
         .with_metrics()
         .await;
-    }
-
-    /// Anything other than an `Overloaded` has to pass through untouched.
-    #[tokio::test]
-    async fn other_errors_pass_through() {
-        let err = shed_as_503(
-            Context::new(),
-            std::future::ready(Err("something else".into())),
-        )
-        .await
-        .expect_err("a non-overload error should stay an error");
-
-        assert_eq!(err.to_string(), "something else");
     }
 }
