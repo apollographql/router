@@ -195,6 +195,19 @@ pub(crate) fn init_telemetry(log_level: &str) -> anyhow::Result<()> {
     Ok(())
 }
 
+/// Installs the router's own subscriber, as [`init_telemetry`] does at the router's start, for a
+/// test that reads what the router builds under it: its span gate, its log format.
+///
+/// The subscriber is the process's global default and its handles are set once, so a second
+/// call in one process fails. Such a test relies on its runner giving it a process of its own,
+/// as nextest does for every test (`cargo xtask test`, Router's CI); under `cargo test`, which
+/// runs a binary's tests in one process, every such test after the first fails here.
+#[cfg(test)]
+pub(crate) fn install_the_routers_subscriber(log_level: &str) {
+    init_telemetry(log_level)
+        .expect("the router's subscriber, installed once per process: run the tests under nextest");
+}
+
 /// Installs `layer` as the log format layer, recording span fields where `span_fields`; `None`
 /// turns stdout logging off.
 pub(in crate::plugins::telemetry) fn reload_fmt(
@@ -493,7 +506,7 @@ mod tests {
     /// when a reload takes the reader away.
     #[tokio::test(flavor = "multi_thread")]
     async fn the_router_builds_spans_only_where_something_reads_them() {
-        init_telemetry("info").expect("the router's subscriber");
+        install_the_routers_subscriber("info");
         let stdout = |format: serde_json::Value| {
             with(
                 unread(),
@@ -705,7 +718,7 @@ mod tests {
     /// router building spans where its configuration has no other reader.
     #[tokio::test(flavor = "multi_thread")]
     async fn a_span_scoped_log_directive_keeps_spans_built() {
-        init_telemetry("info,[router]=debug").expect("the router's subscriber");
+        install_the_routers_subscriber("info,[router]=debug");
         assert!(router_span_is_built(&unread()).await);
     }
 }

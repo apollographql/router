@@ -1046,8 +1046,7 @@ mod tests {
     /// asked for a field-level trace at `always_on`, and none at `always_off`.
     #[tokio::test(flavor = "multi_thread")]
     async fn subgraphs_receive_the_ftv1_header_at_field_level_instrumentations_rate() {
-        crate::plugins::telemetry::reload::otel::init_telemetry("info")
-            .expect("the router's subscriber");
+        crate::plugins::telemetry::reload::otel::install_the_routers_subscriber("info");
         for every_request in EVERY_REQUEST {
             assert!(
                 ftv1_requested(every_request, false).await,
@@ -1062,8 +1061,7 @@ mod tests {
     /// off, whether or not the router builds spans.
     #[tokio::test(flavor = "multi_thread")]
     async fn subgraphs_receive_no_ftv1_header_where_the_log_level_leaves_spans_off() {
-        crate::plugins::telemetry::reload::otel::init_telemetry("error")
-            .expect("the router's subscriber");
+        crate::plugins::telemetry::reload::otel::install_the_routers_subscriber("error");
         for every_request in EVERY_REQUEST {
             assert!(
                 !ftv1_requested(every_request, false).await,
@@ -1078,10 +1076,9 @@ mod tests {
     /// draw asks the level about that span too.
     #[tokio::test(flavor = "multi_thread")]
     async fn subgraphs_receive_the_ftv1_header_where_the_level_enables_the_fetch_spans() {
-        crate::plugins::telemetry::reload::otel::init_telemetry(
+        crate::plugins::telemetry::reload::otel::install_the_routers_subscriber(
             "error,apollo_router::services::fetch_service=info",
-        )
-        .expect("the router's subscriber");
+        );
         for every_request in EVERY_REQUEST {
             assert!(ftv1_requested(every_request, true).await, "{every_request}");
         }

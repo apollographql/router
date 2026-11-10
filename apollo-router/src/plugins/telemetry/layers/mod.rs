@@ -95,7 +95,8 @@ pub(crate) fn where_metrics_are_read<T>(make: impl FnOnce() -> T) -> T {
 
 /// The telemetry plugin `configuration` makes, activated under the router's own subscriber as
 /// the router activates it at its start, on `runtime`, whose threads the plugin's construction
-/// blocks in place on.
+/// blocks in place on. The subscriber is installed once per process
+/// ([`install_the_routers_subscriber`](super::reload::otel::install_the_routers_subscriber)).
 #[cfg(all(test, feature = "global-allocator", not(feature = "dhat-heap"), unix))]
 pub(crate) fn activated_under_the_routers_subscriber(
     runtime: &tokio::runtime::Runtime,
@@ -103,7 +104,7 @@ pub(crate) fn activated_under_the_routers_subscriber(
 ) -> crate::plugins::test::PluginTestHarness<Telemetry> {
     use crate::plugin::PluginPrivate as _;
 
-    super::reload::otel::init_telemetry("info").expect("the router's subscriber");
+    super::reload::otel::install_the_routers_subscriber("info");
     runtime.block_on(async {
         let plugin = crate::plugins::test::PluginTestHarness::<Telemetry>::builder()
             .config(&configuration.to_string())
