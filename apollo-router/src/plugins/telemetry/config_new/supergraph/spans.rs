@@ -108,7 +108,7 @@ mod test {
     fn test_supergraph_request_custom_attribute() {
         let mut spans = SupergraphSpans::default();
         spans.attributes.custom.insert(
-            "test".to_string(),
+            "test".into(),
             Conditional {
                 selector: SupergraphSelector::RequestHeader {
                     request_header: "my-header".to_string(),
@@ -137,7 +137,7 @@ mod test {
     fn test_supergraph_standard_attribute_aliased() {
         let mut spans = SupergraphSpans::default();
         spans.attributes.attributes.graphql_operation_type = Some(StandardAttribute::Aliased {
-            alias: String::from("my_op"),
+            alias: "my_op".into(),
         });
         let context = Context::new();
         context.insert(OPERATION_KIND, "Query".to_string()).unwrap();
@@ -161,7 +161,7 @@ mod test {
     fn test_supergraph_response_event_custom_attribute() {
         let mut spans = SupergraphSpans::default();
         spans.attributes.custom.insert(
-            "otel.status_code".to_string(),
+            "otel.status_code".into(),
             Conditional {
                 selector: SupergraphSelector::StaticField {
                     r#static: String::from("error").into(),
@@ -196,7 +196,7 @@ mod test {
     fn test_supergraph_response_custom_attribute() {
         let mut spans = SupergraphSpans::default();
         spans.attributes.custom.insert(
-            "test".to_string(),
+            "test".into(),
             Conditional {
                 selector: SupergraphSelector::ResponseHeader {
                     response_header: "my-header".to_string(),

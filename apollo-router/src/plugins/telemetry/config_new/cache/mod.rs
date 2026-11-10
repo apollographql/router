@@ -275,9 +275,11 @@ mod tests {
                 ResponseCacheMetricContextKey::new(source_name.clone()),
                 ResponseCacheSubgraph(hit_miss),
             );
-            config
-                .new_connector_cache_instruments(static_instruments.clone(), source_name.clone())
-                .on_response(&context);
+            ConnectorCacheInstruments::new(
+                config.connector_cache_counter(&static_instruments),
+                source_name.clone(),
+            )
+            .on_response(&context);
 
             assert_counter!(
                 "apollo.router.response.cache",
@@ -298,9 +300,11 @@ mod tests {
                 ResponseCacheMetricContextKey::new(source_name.clone()),
                 ResponseCacheSubgraph(hit_miss),
             );
-            config
-                .new_connector_cache_instruments(static_instruments.clone(), source_name.clone())
-                .on_response(&context);
+            ConnectorCacheInstruments::new(
+                config.connector_cache_counter(&static_instruments),
+                source_name.clone(),
+            )
+            .on_response(&context);
 
             assert_counter!(
                 "apollo.router.response.cache",
@@ -333,9 +337,11 @@ mod tests {
                 ResponseCacheMetricContextKey::new(source_name.clone()),
                 ResponseCacheSubgraph(hit_miss),
             );
-            config
-                .new_connector_cache_instruments(static_instruments.clone(), source_name)
-                .on_response(&context);
+            ConnectorCacheInstruments::new(
+                config.connector_cache_counter(&static_instruments),
+                source_name,
+            )
+            .on_response(&context);
 
             assert_counter!(
                 "apollo.router.response.cache",
@@ -373,9 +379,11 @@ mod tests {
                 ResponseCacheMetricContextKey::new("connectors.api".to_string()),
                 ResponseCacheSubgraph(hit_miss),
             );
-            config
-                .new_connector_cache_instruments(static_instruments, "connectors.api".to_string())
-                .on_response(&context);
+            ConnectorCacheInstruments::new(
+                config.connector_cache_counter(&static_instruments),
+                "connectors.api".to_string(),
+            )
+            .on_response(&context);
 
             assert!(
                 crate::metrics::collect_metrics()

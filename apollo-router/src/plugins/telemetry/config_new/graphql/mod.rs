@@ -4,8 +4,11 @@ use apollo_compiler::executable::Field;
 use serde_json_bytes::Value;
 use tower::BoxError;
 
+use super::instruments::CounterInstrument;
 use super::instruments::CustomCounter;
+use super::instruments::CustomInstrumentSet;
 use super::instruments::CustomInstruments;
+use super::instruments::HistogramInstrument;
 use crate::Context;
 use crate::graphql::ResponseVisitor;
 use crate::json_ext::Object;
@@ -64,6 +67,25 @@ pub(crate) type GraphQLCustomInstruments = CustomInstruments<
     GraphQLSelector,
     GraphQLValue,
 >;
+
+/// The GraphQL instruments a configuration configures, built once for a pipeline
+/// (`InstrumentsConfig::graphql_instrument_set`).
+pub(crate) struct GraphQLInstrumentSet {
+    pub(crate) list_length: Option<HistogramInstrument<GraphQLAttributes, GraphQLSelector>>,
+    pub(crate) field_execution: Option<CounterInstrument<GraphQLAttributes, GraphQLSelector>>,
+    pub(crate) custom: CustomInstrumentSet<GraphQLAttributes, GraphQLSelector, GraphQLValue>,
+}
+
+impl GraphQLInstrumentSet {
+    /// The instruments one request records into.
+    pub(crate) fn start(&self) -> GraphQLInstruments {
+        GraphQLInstruments {
+            list_length: self.list_length.as_ref().map(HistogramInstrument::start),
+            field_execution: self.field_execution.as_ref().map(CounterInstrument::start),
+            custom: self.custom.start(),
+        }
+    }
+}
 
 pub(crate) struct GraphQLInstruments {
     pub(crate) list_length: Option<

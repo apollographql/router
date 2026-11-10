@@ -490,7 +490,7 @@ mod test {
     fn test_http_common_request_method_aliased() {
         let common = HttpCommonAttributes {
             http_request_method: Some(StandardAttribute::Aliased {
-                alias: "my_method".to_string(),
+                alias: "my_method".into(),
             }),
             ..Default::default()
         };

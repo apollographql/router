@@ -1,32 +1,26 @@
 use std::collections::HashMap;
-use std::marker::PhantomData;
 use std::sync::Arc;
 
 use opentelemetry::Key;
 use opentelemetry::KeyValue;
 use opentelemetry::metrics::MeterProvider;
-use parking_lot::Mutex;
 use tower::BoxError;
 
 use super::attributes::StandardAttribute;
-use super::instruments::Increment;
 use super::instruments::StaticInstrument;
 use crate::Context;
-use crate::graphql;
 use crate::metrics;
 use crate::plugins::telemetry::config::AttributeValue;
 use crate::plugins::telemetry::config_new::Selectors;
-use crate::plugins::telemetry::config_new::conditions::Condition;
 use crate::plugins::telemetry::config_new::extendable::Extendable;
 use crate::plugins::telemetry::config_new::instruments::CustomHistogram;
-use crate::plugins::telemetry::config_new::instruments::CustomHistogramInner;
 use crate::plugins::telemetry::config_new::instruments::DefaultedStandardInstrument;
+use crate::plugins::telemetry::config_new::instruments::HistogramInstrument;
+use crate::plugins::telemetry::config_new::instruments::IncrementKind;
 use crate::plugins::telemetry::config_new::instruments::Instrumented;
 use crate::plugins::telemetry::config_new::supergraph::attributes::SupergraphAttributes;
 use crate::plugins::telemetry::config_new::supergraph::selectors::SupergraphSelector;
 use crate::services::supergraph;
-use crate::services::supergraph::Request;
-use crate::services::supergraph::Response;
 
 pub(crate) const APOLLO_PRIVATE_COST_ESTIMATED: Key =
     Key::from_static_str("apollo_private.cost.estimated");
@@ -170,87 +164,67 @@ impl CostInstrumentsConfig {
         .collect()
     }
 
-    pub(crate) fn to_instruments(
+    /// The cost instruments this configuration configures, built once for a pipeline over its
+    /// `static_instruments`; [`CostInstrumentSet::start`] makes those one request records into.
+    pub(crate) fn instrument_set(
         &self,
-        static_instruments: Arc<HashMap<String, StaticInstrument>>,
-    ) -> CostInstruments {
-        let cost_estimated = self.cost_estimated.is_enabled().then(|| {
-            Self::histogram(
-                COST_ESTIMATED_KEY,
-                &self.cost_estimated,
-                SupergraphSelector::Cost {
-                    cost: CostValue::Estimated,
-                },
-                &static_instruments,
-            )
-        });
-
-        let cost_actual = self.cost_actual.is_enabled().then(|| {
-            Self::histogram(
-                COST_ACTUAL_KEY,
-                &self.cost_actual,
-                SupergraphSelector::Cost {
-                    cost: CostValue::Actual,
-                },
-                &static_instruments,
-            )
-        });
-
-        let cost_delta = self.cost_delta.is_enabled().then(|| {
-            Self::histogram(
-                COST_DELTA_KEY,
-                &self.cost_delta,
-                SupergraphSelector::Cost {
-                    cost: CostValue::Delta,
-                },
-                &static_instruments,
-            )
-        });
-        CostInstruments {
-            cost_estimated,
-            cost_actual,
-            cost_delta,
-        }
-    }
-
-    fn histogram(
-        name: &'static str,
-        config: &DefaultedStandardInstrument<Extendable<SupergraphAttributes, SupergraphSelector>>,
-        selector: SupergraphSelector,
-        static_instruments: &Arc<HashMap<String, StaticInstrument>>,
-    ) -> CustomHistogram<
-        Request,
-        Response,
-        graphql::Response,
-        SupergraphAttributes,
-        SupergraphSelector,
-    > {
-        let mut nb_attributes = 0;
-        let selectors = match config {
-            DefaultedStandardInstrument::Bool(_) | DefaultedStandardInstrument::Unset => None,
-            DefaultedStandardInstrument::Extendable { attributes } => {
-                nb_attributes = attributes.custom.len();
-                Some(attributes.clone())
-            }
-        };
-
-        CustomHistogram {
-            inner: Mutex::new(CustomHistogramInner {
-                increment: Increment::EventCustom(None),
-                condition: Condition::True,
-                histogram: Some(
+        static_instruments: &HashMap<String, StaticInstrument>,
+    ) -> CostInstrumentSet {
+        let histogram = |name: &'static str,
+                         config: &DefaultedStandardInstrument<
+            Extendable<SupergraphAttributes, SupergraphSelector>,
+        >,
+                         cost: CostValue| {
+            config.is_enabled().then(|| {
+                HistogramInstrument::new(
+                    IncrementKind::EventCustom,
                     static_instruments
                         .get(name)
                         .expect("cannot get static instrument for cost; this should not happen")
                         .as_histogram()
-                        .expect("cannot convert instrument to histogram for cost; this should not happen").clone(),
-                ),
-                attributes: Vec::with_capacity(nb_attributes),
-                selector: Some(Arc::new(selector)),
-                selectors,
-                updated: false,
-                _phantom: PhantomData,
-            }),
+                        .cloned()
+                        .expect(
+                            "cannot convert instrument to histogram for cost; this should not happen",
+                        ),
+                    Some(Arc::new(SupergraphSelector::Cost { cost })),
+                    match config {
+                        DefaultedStandardInstrument::Bool(_) | DefaultedStandardInstrument::Unset => {
+                            None
+                        }
+                        DefaultedStandardInstrument::Extendable { attributes } => {
+                            Some(attributes.clone())
+                        }
+                    },
+                )
+            })
+        };
+        CostInstrumentSet {
+            cost_estimated: histogram(
+                COST_ESTIMATED_KEY,
+                &self.cost_estimated,
+                CostValue::Estimated,
+            ),
+            cost_actual: histogram(COST_ACTUAL_KEY, &self.cost_actual, CostValue::Actual),
+            cost_delta: histogram(COST_DELTA_KEY, &self.cost_delta, CostValue::Delta),
+        }
+    }
+}
+
+/// The cost instruments a configuration configures, built once for a pipeline
+/// ([`CostInstrumentsConfig::instrument_set`]).
+pub(crate) struct CostInstrumentSet {
+    cost_estimated: Option<HistogramInstrument<SupergraphAttributes, SupergraphSelector>>,
+    cost_actual: Option<HistogramInstrument<SupergraphAttributes, SupergraphSelector>>,
+    cost_delta: Option<HistogramInstrument<SupergraphAttributes, SupergraphSelector>>,
+}
+
+impl CostInstrumentSet {
+    /// The instruments one request records into.
+    pub(crate) fn start(&self) -> CostInstruments {
+        CostInstruments {
+            cost_estimated: self.cost_estimated.as_ref().map(HistogramInstrument::start),
+            cost_actual: self.cost_actual.as_ref().map(HistogramInstrument::start),
+            cost_delta: self.cost_delta.as_ref().map(HistogramInstrument::start),
         }
     }
 }
@@ -387,8 +361,6 @@ pub(crate) fn add_cost_attributes(context: &Context, custom_attributes: &mut Vec
 
 #[cfg(test)]
 mod test {
-    use std::sync::Arc;
-
     use crate::Context;
     use crate::context::OPERATION_NAME;
     use crate::plugins::telemetry::config_new::cost::CostInstruments;
@@ -399,7 +371,9 @@ mod test {
     #[test]
     fn test_default_estimated() {
         let config = config(include_str!("fixtures/cost_estimated.router.yaml"));
-        let instruments = config.to_instruments(Arc::new(config.new_static_instruments()));
+        let instruments = config
+            .instrument_set(&config.new_static_instruments())
+            .start();
         make_request(&instruments);
 
         assert_histogram_sum!("cost.estimated", 100.0);
@@ -411,7 +385,9 @@ mod test {
     #[test]
     fn test_default_actual() {
         let config = config(include_str!("fixtures/cost_actual.router.yaml"));
-        let instruments = config.to_instruments(Arc::new(config.new_static_instruments()));
+        let instruments = config
+            .instrument_set(&config.new_static_instruments())
+            .start();
         make_request(&instruments);
 
         assert_histogram_sum!("cost.actual", 10.0);
@@ -423,7 +399,9 @@ mod test {
     #[test]
     fn test_default_delta() {
         let config = config(include_str!("fixtures/cost_delta.router.yaml"));
-        let instruments = config.to_instruments(Arc::new(config.new_static_instruments()));
+        let instruments = config
+            .instrument_set(&config.new_static_instruments())
+            .start();
         make_request(&instruments);
 
         assert_histogram_sum!("cost.delta", 90.0);
@@ -437,7 +415,9 @@ mod test {
         let config = config(include_str!(
             "fixtures/cost_estimated_with_attributes.router.yaml"
         ));
-        let instruments = config.to_instruments(Arc::new(config.new_static_instruments()));
+        let instruments = config
+            .instrument_set(&config.new_static_instruments())
+            .start();
         make_request(&instruments);
 
         assert_histogram_sum!("cost.estimated", 100.0, cost.result = "COST_TOO_EXPENSIVE");
@@ -451,7 +431,9 @@ mod test {
         let config = config(include_str!(
             "fixtures/cost_actual_with_attributes.router.yaml"
         ));
-        let instruments = config.to_instruments(Arc::new(config.new_static_instruments()));
+        let instruments = config
+            .instrument_set(&config.new_static_instruments())
+            .start();
         make_request(&instruments);
 
         assert_histogram_sum!("cost.actual", 10.0, cost.result = "COST_TOO_EXPENSIVE");
@@ -465,7 +447,9 @@ mod test {
         let config = config(include_str!(
             "fixtures/cost_delta_with_attributes.router.yaml"
         ));
-        let instruments = config.to_instruments(Arc::new(config.new_static_instruments()));
+        let instruments = config
+            .instrument_set(&config.new_static_instruments())
+            .start();
         make_request(&instruments);
 
         assert_histogram_sum!(

@@ -31,7 +31,9 @@ where
     Att: Default,
 {
     pub(crate) attributes: Att,
-    pub(crate) custom: HashMap<String, Ext>,
+    /// The custom entries by their names. A custom attribute's name is the key it is recorded
+    /// under, shared by every attribute made from the entry, so making one copies no string.
+    pub(crate) custom: HashMap<Arc<str>, Ext>,
 }
 
 impl<Att, Ext> DefaultForLevel for Extendable<Att, Ext>
@@ -84,12 +86,12 @@ where
                 A: MapAccess<'de>,
             {
                 let mut attributes = Map::new();
-                let mut custom: HashMap<String, Ext> = HashMap::new();
-                while let Some(key) = map.next_key()? {
+                let mut custom: HashMap<Arc<str>, Ext> = HashMap::new();
+                while let Some(key) = map.next_key::<String>()? {
                     let value: Value = map.next_value()?;
                     match Ext::deserialize(value.clone()) {
                         Ok(value) => {
-                            custom.insert(key, value);
+                            custom.insert(key.into(), value);
                         }
                         Err(_err) => {
                             // We didn't manage to deserialize as a custom attribute, so stash the value and we'll try again later
@@ -199,7 +201,11 @@ where
     fn validate(&self, mut errors: apollo_configuration::ErrorCollector<'_>) {
         let Self { attributes, custom } = self;
         attributes.validate(errors.inner());
-        custom.validate(errors.inner());
+        // each custom entry at its name's path, as a map's values are validated
+        let mut custom_errors = errors.inner();
+        for (name, entry) in custom {
+            entry.validate(custom_errors.nest(&**name));
+        }
     }
 }
 

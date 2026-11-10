@@ -31,8 +31,12 @@ where
     type Service = connect::BoxCloneService;
 
     fn layer(&self, service: S) -> Self::Service {
-        let config = self.config.clone();
-        let static_cache_instruments = self.static_cache_instruments.clone();
+        // the counter, resolved once for the pipeline; a request records into it
+        let counter = self
+            .config
+            .instrumentation
+            .instruments
+            .connector_cache_counter(&self.static_cache_instruments);
         ServiceBuilder::new()
             .map_future_with_request_data(
                 move |request: &connect::Request| {
@@ -43,13 +47,8 @@ where
                         .and_then(|c| c.get(&request.service_name))
                         .map(|c| c.source_config_key())
                         .unwrap_or_default();
-                    let cache_instruments = config
-                        .instrumentation
-                        .instruments
-                        .new_connector_cache_instruments(
-                            static_cache_instruments.clone(),
-                            source_name,
-                        );
+                    let cache_instruments =
+                        ConnectorCacheInstruments::new(counter.clone(), source_name);
                     (request.context.clone(), cache_instruments)
                 },
                 move |(context, cache_instruments): (Context, ConnectorCacheInstruments),

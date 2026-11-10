@@ -749,6 +749,93 @@ mod tests {
         );
     }
 
+    /// A subgraph request records its attributes under keys made once from the configuration, not
+    /// copied per request. Read as the bytes the layer allocates per request under a custom
+    /// counter with four custom attributes keyed by names of a width, their values the response's
+    /// status, and the request duration's `subgraph.name` aliased to a name of that width, at
+    /// widths of 8 and 1,000 bytes: a request that copies a key allocates a key's growth more at
+    /// the wider.
+    #[cfg(all(feature = "global-allocator", not(feature = "dhat-heap"), unix))]
+    #[test]
+    fn a_subgraph_request_copies_no_attribute_key() {
+        const REQUESTS: usize = 16;
+        const CUSTOM: usize = 4;
+        const NARROW: usize = 8;
+        const WIDE: usize = 1000;
+
+        // the plugin's construction blocks in place, which a multi-threaded runtime allows
+        let runtime = tokio::runtime::Builder::new_multi_thread()
+            .worker_threads(1)
+            .enable_all()
+            .build()
+            .expect("a runtime");
+        let _entered = runtime.enter();
+        let bytes = |width: usize| {
+            // each key `width` bytes long, the four custom attributes' values the response's status
+            let key = |name: &str| format!("{name}{}", "k".repeat(width - name.len()));
+            let attributes: serde_json::Map<String, serde_json::Value> = (0..CUSTOM)
+                .map(|i| {
+                    (
+                        key(&format!("custom{i}.")),
+                        serde_json::json!({"subgraph_response_status": "code"}),
+                    )
+                })
+                .collect();
+            let config = serde_json::json!({"telemetry": {"instrumentation": {"instruments": {
+                "subgraph": {
+                    "http.client.request.duration": {
+                        "attributes": {"subgraph.name": {"alias": key("alias.")}}
+                    },
+                    "attribute_keys": {
+                        "description": "subgraph requests",
+                        "type": "counter",
+                        "unit": "request",
+                        "value": "unit",
+                        "attributes": attributes
+                    }
+                }
+            }}}});
+            let test_harness: PluginTestHarness<Telemetry> = runtime
+                .block_on(
+                    PluginTestHarness::builder()
+                        .config(&config.to_string())
+                        .build(),
+                )
+                .expect("test harness");
+            let layered = ServiceBuilder::new()
+                .layer(test_harness.instrument_subgraph_layer())
+                .service(tower::service_fn(|request: SubgraphRequest| {
+                    std::future::ready(Ok::<_, BoxError>(
+                        SubgraphResponse::fake_builder()
+                            .context(request.context)
+                            .subgraph_name("products")
+                            .build(),
+                    ))
+                }));
+            crate::allocator::bytes_per_call(
+                layered,
+                || {
+                    SubgraphRequest::fake_builder()
+                        .subgraph_name("products")
+                        .build()
+                },
+                drop,
+                REQUESTS,
+            )
+        };
+
+        let narrow = bytes(NARROW);
+        let wide = bytes(WIDE);
+        eprintln!(
+            "a subgraph request allocates {narrow} bytes at keys of {NARROW} bytes and {wide} at keys of {WIDE}"
+        );
+        assert!(
+            wide.saturating_sub(narrow) < WIDE - NARROW,
+            "a subgraph request allocates {wide} bytes at keys of {WIDE} bytes and {narrow} at \
+             keys of {NARROW}: a request copies its attributes' keys"
+        );
+    }
+
     mod subgraph_ftv1_layer {
         use opentelemetry::Context as OtelContext;
         use opentelemetry::trace::SpanContext;

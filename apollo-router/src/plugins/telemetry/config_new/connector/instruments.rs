@@ -2,15 +2,12 @@ use std::collections::HashMap;
 use std::sync::Arc;
 
 use opentelemetry::metrics::MeterProvider;
-use parking_lot::Mutex;
-use tokio::time::Instant;
 use tower::BoxError;
 
 use crate::Context;
 use crate::metrics;
 use crate::plugins::telemetry::config_new::DefaultForLevel;
 use crate::plugins::telemetry::config_new::attributes::DefaultAttributeRequirementLevel;
-use crate::plugins::telemetry::config_new::conditions::Condition;
 use crate::plugins::telemetry::config_new::connector::ConnectorRequest;
 use crate::plugins::telemetry::config_new::connector::ConnectorResponse;
 use crate::plugins::telemetry::config_new::connector::attributes::ConnectorAttributes;
@@ -18,14 +15,15 @@ use crate::plugins::telemetry::config_new::connector::selectors::ConnectorSelect
 use crate::plugins::telemetry::config_new::connector::selectors::ConnectorValue;
 use crate::plugins::telemetry::config_new::extendable::Extendable;
 use crate::plugins::telemetry::config_new::instruments::CustomHistogram;
-use crate::plugins::telemetry::config_new::instruments::CustomHistogramInner;
+use crate::plugins::telemetry::config_new::instruments::CustomInstrumentSet;
 use crate::plugins::telemetry::config_new::instruments::CustomInstruments;
 use crate::plugins::telemetry::config_new::instruments::DefaultedStandardInstrument;
 use crate::plugins::telemetry::config_new::instruments::DurationUnit;
 use crate::plugins::telemetry::config_new::instruments::HTTP_CLIENT_REQUEST_BODY_SIZE_METRIC;
 use crate::plugins::telemetry::config_new::instruments::HTTP_CLIENT_REQUEST_DURATION_METRIC;
 use crate::plugins::telemetry::config_new::instruments::HTTP_CLIENT_RESPONSE_BODY_SIZE_METRIC;
-use crate::plugins::telemetry::config_new::instruments::Increment;
+use crate::plugins::telemetry::config_new::instruments::HistogramInstrument;
+use crate::plugins::telemetry::config_new::instruments::IncrementKind;
 use crate::plugins::telemetry::config_new::instruments::Instrument;
 use crate::plugins::telemetry::config_new::instruments::Instrumented;
 use crate::plugins::telemetry::config_new::instruments::METER_NAME;
@@ -96,142 +94,107 @@ pub(crate) struct ConnectorInstruments {
     custom: ConnectorCustomInstruments,
 }
 
-impl ConnectorInstruments {
+/// The connector instruments a configuration configures, built once for a pipeline
+/// (`InstrumentsConfig::connector_instrument_set`).
+pub(crate) struct ConnectorInstrumentSet {
+    http_client_request_duration:
+        Option<HistogramInstrument<ConnectorAttributes, ConnectorSelector>>,
+    http_client_request_body_size:
+        Option<HistogramInstrument<ConnectorAttributes, ConnectorSelector>>,
+    http_client_response_body_size:
+        Option<HistogramInstrument<ConnectorAttributes, ConnectorSelector>>,
+    custom: CustomInstrumentSet<ConnectorAttributes, ConnectorSelector, ConnectorValue>,
+}
+
+impl ConnectorInstrumentSet {
+    /// The instruments `config` configures over `static_instruments`.
     pub(crate) fn new(
         config: &Extendable<
             ConnectorInstrumentsConfig,
             Instrument<ConnectorAttributes, ConnectorSelector, ConnectorValue>,
         >,
-        static_instruments: Arc<HashMap<String, StaticInstrument>>,
+        static_instruments: &HashMap<String, StaticInstrument>,
     ) -> Self {
-        let http_client_request_duration =
-            config
-                .attributes
-                .http_client_request_duration
-                .is_enabled()
-                .then(|| {
-                    let mut nb_attributes = 0;
-                    let selectors = match &config.attributes.http_client_request_duration {
-                        DefaultedStandardInstrument::Bool(_)
-                        | DefaultedStandardInstrument::Unset => None,
+        let standard = |instrument: &DefaultedStandardInstrument<
+            Extendable<ConnectorAttributes, ConnectorSelector>,
+        >,
+                        name: &str,
+                        increment: IncrementKind,
+                        selector: Option<ConnectorSelector>| {
+            instrument.is_enabled().then(|| {
+                HistogramInstrument::new(
+                    increment,
+                    static_instruments
+                        .get(name)
+                        .expect("cannot get static instrument for connector; this should not happen")
+                        .as_histogram()
+                        .cloned()
+                        .expect(
+                            "cannot convert instrument to histogram for connector; this should not happen",
+                        ),
+                    selector.map(Arc::new),
+                    match instrument {
+                        DefaultedStandardInstrument::Bool(_) | DefaultedStandardInstrument::Unset => {
+                            None
+                        }
                         DefaultedStandardInstrument::Extendable { attributes } => {
-                            nb_attributes = attributes.custom.len();
                             Some(attributes.clone())
                         }
-                    };
-                    CustomHistogram {
-                        inner: Mutex::new(CustomHistogramInner {
-                            increment: Increment::Duration(Instant::now(), DurationUnit::Seconds),
-                            condition: Condition::True,
-                            histogram: Some(static_instruments
-                                .get(HTTP_CLIENT_REQUEST_DURATION_METRIC)
-                                .expect(
-                                    "cannot get static instrument for connector; this should not happen",
-                                )
-                                .as_histogram()
-                                .cloned()
-                                .expect(
-                                    "cannot convert instrument to histogram for connector; this should not happen",
-                                )
-                            ),
-                            attributes: Vec::with_capacity(nb_attributes),
-                            selector: None,
-                            selectors,
-                            updated: false,
-                            _phantom: Default::default()
-                        }),
-                    }
-                });
-        let http_client_request_body_size =
-            config
-                .attributes
-                .http_client_request_body_size
-                .is_enabled()
-                .then(|| {
-                    let mut nb_attributes = 0;
-                    let selectors = match &config.attributes.http_client_request_body_size {
-                        DefaultedStandardInstrument::Bool(_)
-                        | DefaultedStandardInstrument::Unset => None,
-                        DefaultedStandardInstrument::Extendable { attributes } => {
-                            nb_attributes = attributes.custom.len();
-                            Some(attributes.clone())
-                        }
-                    };
-                    CustomHistogram {
-                        inner: Mutex::new(CustomHistogramInner {
-                            increment: Increment::Custom(None),
-                            condition: Condition::True,
-                            histogram: Some(static_instruments
-                                .get(HTTP_CLIENT_REQUEST_BODY_SIZE_METRIC)
-                                .expect(
-                                    "cannot get static instrument for connector; this should not happen",
-                                )
-                                .as_histogram()
-                                .cloned()
-                                .expect(
-                                    "cannot convert instrument to histogram for connector; this should not happen",
-                                )
-                            ),
-                            attributes: Vec::with_capacity(nb_attributes),
-                            selector: Some(Arc::new(ConnectorSelector::HttpRequestHeader {
-                                connector_http_request_header: "content-length".to_string(),
-                                redact: None,
-                                default: None,
-                            })),
-                            selectors,
-                            updated: false,
-                            _phantom: Default::default()
-                        }),
-                    }
-                });
-        let http_client_response_body_size =
-            config
-                .attributes
-                .http_client_response_body_size
-                .is_enabled()
-                .then(|| {
-                    let mut nb_attributes = 0;
-                    let selectors = match &config.attributes.http_client_response_body_size {
-                        DefaultedStandardInstrument::Bool(_)
-                        | DefaultedStandardInstrument::Unset => None,
-                        DefaultedStandardInstrument::Extendable { attributes } => {
-                            nb_attributes = attributes.custom.len();
-                            Some(attributes.clone())
-                        }
-                    };
-                    CustomHistogram {
-                        inner: Mutex::new(CustomHistogramInner {
-                            increment: Increment::Custom(None),
-                            condition: Condition::True,
-                            histogram: Some(static_instruments
-                                .get(HTTP_CLIENT_RESPONSE_BODY_SIZE_METRIC)
-                                .expect(
-                                    "cannot get static instrument for connector; this should not happen",
-                                )
-                                .as_histogram()
-                                .cloned()
-                                .expect(
-                                    "cannot convert instrument to histogram for connector; this should not happen",
-                                )
-                            ),
-                            attributes: Vec::with_capacity(nb_attributes),
-                            selector: Some(Arc::new(ConnectorSelector::ConnectorResponseBodySize {
-                                connector_http_response_body_size: true,
-                            })),
-                            selectors,
-                            updated: false,
-                            _phantom: Default::default()
-                        }),
-                    }
-                });
-        ConnectorInstruments {
-            http_client_request_duration,
-            http_client_request_body_size,
-            http_client_response_body_size,
-            custom: CustomInstruments::new(&config.custom, static_instruments),
+                    },
+                )
+            })
+        };
+        let attributes = &config.attributes;
+        Self {
+            http_client_request_duration: standard(
+                &attributes.http_client_request_duration,
+                HTTP_CLIENT_REQUEST_DURATION_METRIC,
+                IncrementKind::Duration(DurationUnit::Seconds),
+                None,
+            ),
+            http_client_request_body_size: standard(
+                &attributes.http_client_request_body_size,
+                HTTP_CLIENT_REQUEST_BODY_SIZE_METRIC,
+                IncrementKind::Custom,
+                Some(ConnectorSelector::HttpRequestHeader {
+                    connector_http_request_header: "content-length".to_string(),
+                    redact: None,
+                    default: None,
+                }),
+            ),
+            http_client_response_body_size: standard(
+                &attributes.http_client_response_body_size,
+                HTTP_CLIENT_RESPONSE_BODY_SIZE_METRIC,
+                IncrementKind::Custom,
+                Some(ConnectorSelector::ConnectorResponseBodySize {
+                    connector_http_response_body_size: true,
+                }),
+            ),
+            custom: CustomInstrumentSet::new(&config.custom, static_instruments),
         }
     }
 
+    /// The instruments one connector request records into.
+    pub(crate) fn start(&self) -> ConnectorInstruments {
+        ConnectorInstruments {
+            http_client_request_duration: self
+                .http_client_request_duration
+                .as_ref()
+                .map(HistogramInstrument::start),
+            http_client_request_body_size: self
+                .http_client_request_body_size
+                .as_ref()
+                .map(HistogramInstrument::start),
+            http_client_response_body_size: self
+                .http_client_response_body_size
+                .as_ref()
+                .map(HistogramInstrument::start),
+            custom: self.custom.start(),
+        }
+    }
+}
+
+impl ConnectorInstruments {
     pub(crate) fn new_builtin(
         config: &Extendable<
             ConnectorInstrumentsConfig,

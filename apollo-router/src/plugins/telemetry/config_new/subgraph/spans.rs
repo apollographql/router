@@ -132,7 +132,7 @@ mod test {
     fn test_subgraph_request_custom_attribute() {
         let mut spans = SubgraphSpans::default();
         spans.attributes.custom.insert(
-            "test".to_string(),
+            "test".into(),
             Conditional {
                 selector: SubgraphSelector::SubgraphRequestHeader {
                     subgraph_request_header: "my-header".to_string(),
@@ -169,7 +169,7 @@ mod test {
     fn test_subgraph_response_custom_attribute() {
         let mut spans = SubgraphSpans::default();
         spans.attributes.custom.insert(
-            "test".to_string(),
+            "test".into(),
             Conditional {
                 selector: SubgraphSelector::SubgraphResponseHeader {
                     subgraph_response_header: "my-header".to_string(),
@@ -198,7 +198,7 @@ mod test {
     fn test_subgraph_response_custom_attribute_good_condition() {
         let mut spans = SubgraphSpans::default();
         spans.attributes.custom.insert(
-            "test".to_string(),
+            "test".into(),
             Conditional {
                 selector: SubgraphSelector::SubgraphResponseHeader {
                     subgraph_response_header: "my-header".to_string(),
@@ -233,7 +233,7 @@ mod test {
     fn test_subgraph_response_custom_attribute_bad_condition() {
         let mut spans = SubgraphSpans::default();
         spans.attributes.custom.insert(
-            "test".to_string(),
+            "test".into(),
             Conditional {
                 selector: SubgraphSelector::SubgraphResponseHeader {
                     subgraph_response_header: "my-header".to_string(),

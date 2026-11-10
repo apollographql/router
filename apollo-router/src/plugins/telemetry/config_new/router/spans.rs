@@ -173,7 +173,7 @@ mod test {
     fn test_router_request_static_custom_attribute_on_graphql_error() {
         let mut spans = RouterSpans::default();
         spans.attributes.custom.insert(
-            "test".to_string(),
+            "test".into(),
             Conditional {
                 selector: RouterSelector::StaticField {
                     r#static: "my-static-value".to_string().into(),
@@ -206,7 +206,7 @@ mod test {
     fn test_router_request_custom_attribute_on_graphql_error() {
         let mut spans = RouterSpans::default();
         spans.attributes.custom.insert(
-            "test".to_string(),
+            "test".into(),
             Conditional {
                 selector: RouterSelector::ResponseHeader {
                     response_header: "my-header".to_string(),
@@ -242,7 +242,7 @@ mod test {
     fn test_router_request_custom_attribute_not_on_graphql_error_context_false() {
         let mut spans = RouterSpans::default();
         spans.attributes.custom.insert(
-            "test".to_string(),
+            "test".into(),
             Conditional {
                 selector: RouterSelector::ResponseHeader {
                     response_header: "my-header".to_string(),
@@ -277,7 +277,7 @@ mod test {
     fn test_router_request_custom_attribute_not_on_graphql_error_context_missing() {
         let mut spans = RouterSpans::default();
         spans.attributes.custom.insert(
-            "test".to_string(),
+            "test".into(),
             Conditional {
                 selector: RouterSelector::ResponseHeader {
                     response_header: "my-header".to_string(),
@@ -317,7 +317,7 @@ mod test {
             default: None,
         };
         spans.attributes.custom.insert(
-            "test".to_string(),
+            "test".into(),
             Conditional {
                 selector: selector.clone(),
                 condition: Some(Arc::new(Mutex::new(Condition::Eq([
@@ -350,7 +350,7 @@ mod test {
             default: None,
         };
         spans.attributes.custom.insert(
-            "test".to_string(),
+            "test".into(),
             Conditional {
                 selector: selector.clone(),
                 condition: Some(Arc::new(Mutex::new(Condition::Eq([
@@ -378,7 +378,7 @@ mod test {
     fn test_router_request_custom_attribute() {
         let mut spans = RouterSpans::default();
         spans.attributes.custom.insert(
-            "test".to_string(),
+            "test".into(),
             Conditional {
                 selector: RouterSelector::RequestHeader {
                     request_header: "my-header".to_string(),
@@ -407,7 +407,7 @@ mod test {
     fn test_router_request_standard_attribute_aliased() {
         let mut spans = RouterSpans::default();
         spans.attributes.attributes.common.http_request_method = Some(StandardAttribute::Aliased {
-            alias: String::from("my.method"),
+            alias: "my.method".into(),
         });
         let values = spans.attributes.on_request(
             &router::Request::fake_builder()
@@ -427,7 +427,7 @@ mod test {
     fn test_router_response_custom_attribute() {
         let mut spans = RouterSpans::default();
         spans.attributes.custom.insert(
-            "test".to_string(),
+            "test".into(),
             Conditional {
                 selector: RouterSelector::ResponseHeader {
                     response_header: "my-header".to_string(),
@@ -439,7 +439,7 @@ mod test {
             },
         );
         spans.attributes.custom.insert(
-            OTEL_NAME.to_string(),
+            OTEL_NAME.into(),
             Conditional {
                 selector: RouterSelector::StaticField {
                     r#static: String::from("new_name").into(),

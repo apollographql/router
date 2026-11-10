@@ -209,10 +209,10 @@ mod test {
 
             let attributes = RouterAttributes {
                 datadog_trace_id: Some(StandardAttribute::Aliased {
-                    alias: "datatoutou_id".to_string(),
+                    alias: "datatoutou_id".into(),
                 }),
                 trace_id: Some(StandardAttribute::Aliased {
-                    alias: "my_trace_id".to_string(),
+                    alias: "my_trace_id".into(),
                 }),
                 baggage: Some(false),
                 client_name: None,
@@ -270,7 +270,7 @@ mod test {
         let mut attrs = RouterAttributes {
             client_name: Some(StandardAttribute::Bool(false)),
             client_version: Some(StandardAttribute::Aliased {
-                alias: "my_version".to_string(),
+                alias: "my_version".into(),
             }),
             ..Default::default()
         };
@@ -287,7 +287,7 @@ mod test {
         assert_eq!(
             attrs.client_version,
             Some(StandardAttribute::Aliased {
-                alias: "my_version".to_string()
+                alias: "my_version".into()
             }),
             "explicit alias should not be overwritten by defaults"
         );

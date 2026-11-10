@@ -592,7 +592,7 @@ mod test {
     fn test_http_server_http_route_aliased() {
         let server = HttpServerAttributes {
             http_route: Some(StandardAttribute::Aliased {
-                alias: "my_route".to_string(),
+                alias: "my_route".into(),
             }),
             ..Default::default()
         };

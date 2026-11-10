@@ -183,7 +183,13 @@ where
         let enabled_features = self.enabled_features.clone();
         let field_level_instrumentation_ratio = self.field_level_instrumentation_ratio;
         let metrics_sender = self.metrics_sender.clone();
-        let static_router_instruments = self.static_router_instruments.clone();
+        // the instrument set, built once for the pipeline and started per request
+        let instrument_set = Arc::new(
+            self.config
+                .instrumentation
+                .instruments
+                .router_instrument_set(&self.static_router_instruments),
+        );
 
         let spans = &self.config.instrumentation.spans;
         let router_attributes = &spans.router.attributes.attributes;
@@ -351,10 +357,7 @@ where
                         lock.insert(router_overhead::RouterOverheadTracker::new());
                     });
 
-                    let custom_instruments: RouterInstruments = config_request
-                        .instrumentation
-                        .instruments
-                        .new_router_instruments(static_router_instruments.clone());
+                    let custom_instruments: RouterInstruments = instrument_set.start();
                     custom_instruments.on_request(request);
 
                     let mut custom_events: RouterEvents =
@@ -573,6 +576,74 @@ mod tests {
     use crate::plugins::test::PluginTestHarness;
     use crate::services::RouterRequest;
     use crate::services::RouterResponse;
+
+    /// A request through the router instrument layer builds no instrument set: the layer builds
+    /// the router's instruments, their conditions and their selectors once for its pipeline, and
+    /// a request starts the state its measurements record into. Read as the bytes the layer
+    /// allocates per request under a custom histogram whose value is a request header named at a
+    /// width of 8 and of 2,056 bytes: a request that builds the custom instruments copies the
+    /// selector, and the header's name with it, and one that starts them shares it.
+    #[cfg(all(feature = "global-allocator", not(feature = "dhat-heap"), unix))]
+    #[test]
+    fn a_request_builds_no_router_instrument_set() {
+        const REQUESTS: usize = 16;
+        const NARROW: usize = 8;
+        const WIDE: usize = 2056;
+
+        // the plugin's construction blocks in place, which a multi-threaded runtime allows
+        let runtime = tokio::runtime::Builder::new_multi_thread()
+            .worker_threads(1)
+            .enable_all()
+            .build()
+            .expect("a runtime");
+        let _entered = runtime.enter();
+        let bytes = |width: usize| {
+            let config = serde_json::json!({"telemetry": {"instrumentation": {"instruments": {
+                "router": {
+                    "acme.request.header": {
+                        "description": "a request header's value",
+                        "type": "histogram",
+                        "unit": "unit",
+                        "value": {"request_header": "h".repeat(width)}
+                    }
+                }
+            }}}});
+            let test_harness: PluginTestHarness<Telemetry> = runtime
+                .block_on(
+                    PluginTestHarness::builder()
+                        .config(&config.to_string())
+                        .build(),
+                )
+                .expect("test harness");
+            let layered = ServiceBuilder::new()
+                .layer(test_harness.instrument_router_layer())
+                .service(tower::service_fn(|request: router::Request| {
+                    std::future::ready(
+                        router::Response::fake_builder()
+                            .context(request.context)
+                            .data(json!({"data": {}}))
+                            .build(),
+                    )
+                }));
+            crate::allocator::bytes_per_call(
+                layered,
+                || router::Request::fake_builder().build().expect("a request"),
+                drop,
+                REQUESTS,
+            )
+        };
+
+        let narrow = bytes(NARROW);
+        let wide = bytes(WIDE);
+        eprintln!(
+            "a request allocates {narrow} bytes at a header name of {NARROW} bytes and {wide} at {WIDE}"
+        );
+        assert!(
+            wide.saturating_sub(narrow) < WIDE - NARROW,
+            "a request allocates {wide} bytes at a header name of {WIDE} bytes and {narrow} at \
+             {NARROW}: a request builds the custom instruments"
+        );
+    }
 
     #[test]
     fn it_test_send_headers_to_studio() {

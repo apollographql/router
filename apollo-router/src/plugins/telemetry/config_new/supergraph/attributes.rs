@@ -192,7 +192,7 @@ mod test {
         );
         let attributes = SupergraphAttributes {
             graphql_operation_name: Some(StandardAttribute::Aliased {
-                alias: String::from("graphql_query"),
+                alias: "graphql_query".into(),
             }),
             ..Default::default()
         };

@@ -18,11 +18,15 @@ use crate::plugins::telemetry::config_new::attributes::DefaultAttributeRequireme
 use crate::plugins::telemetry::config_new::extendable::Extendable;
 use crate::plugins::telemetry::config_new::instruments::ActiveRequestsAttributes;
 use crate::plugins::telemetry::config_new::instruments::ActiveRequestsCounter;
+use crate::plugins::telemetry::config_new::instruments::ActiveRequestsInstrument;
 use crate::plugins::telemetry::config_new::instruments::CustomHistogram;
+use crate::plugins::telemetry::config_new::instruments::CustomInstrumentSet;
 use crate::plugins::telemetry::config_new::instruments::CustomInstruments;
 use crate::plugins::telemetry::config_new::instruments::DefaultedStandardInstrument;
+use crate::plugins::telemetry::config_new::instruments::HistogramInstrument;
 use crate::plugins::telemetry::config_new::instruments::SubscriptionsTerminatedAttributes;
 use crate::plugins::telemetry::config_new::instruments::SubscriptionsTerminatedCounter;
+use crate::plugins::telemetry::config_new::instruments::SubscriptionsTerminatedInstrument;
 use crate::plugins::telemetry::config_new::router::attributes::RouterAttributes;
 use crate::plugins::telemetry::config_new::router_overhead::RouterOverheadAttributes;
 use crate::plugins::telemetry::otlp::TelemetryDataKind;
@@ -79,6 +83,55 @@ impl DefaultForLevel for RouterInstrumentsConfig {
             .defaults_for_levels(requirement_level, kind);
         self.subscriptions_terminated
             .defaults_for_levels(requirement_level, kind);
+    }
+}
+
+/// The router instruments a configuration configures, built once for a pipeline
+/// (`InstrumentsConfig::router_instrument_set`).
+pub(crate) struct RouterInstrumentSet {
+    pub(crate) http_server_request_duration:
+        Option<HistogramInstrument<RouterAttributes, RouterSelector>>,
+    pub(crate) http_server_active_requests: Option<ActiveRequestsInstrument>,
+    pub(crate) http_server_request_body_size:
+        Option<HistogramInstrument<RouterAttributes, RouterSelector>>,
+    pub(crate) http_server_response_body_size:
+        Option<HistogramInstrument<RouterAttributes, RouterSelector>>,
+    pub(crate) router_overhead:
+        Option<HistogramInstrument<RouterOverheadAttributes, RouterSelector>>,
+    pub(crate) subscriptions_terminated: Option<SubscriptionsTerminatedInstrument>,
+    pub(crate) custom: CustomInstrumentSet<RouterAttributes, RouterSelector, RouterValue>,
+}
+
+impl RouterInstrumentSet {
+    /// The instruments one request records into.
+    pub(crate) fn start(&self) -> RouterInstruments {
+        RouterInstruments {
+            http_server_request_duration: self
+                .http_server_request_duration
+                .as_ref()
+                .map(HistogramInstrument::start),
+            http_server_active_requests: self
+                .http_server_active_requests
+                .as_ref()
+                .map(ActiveRequestsInstrument::start),
+            http_server_request_body_size: self
+                .http_server_request_body_size
+                .as_ref()
+                .map(HistogramInstrument::start),
+            http_server_response_body_size: self
+                .http_server_response_body_size
+                .as_ref()
+                .map(HistogramInstrument::start),
+            router_overhead: self
+                .router_overhead
+                .as_ref()
+                .map(HistogramInstrument::start),
+            subscriptions_terminated: self
+                .subscriptions_terminated
+                .as_ref()
+                .map(SubscriptionsTerminatedInstrument::start),
+            custom: self.custom.start(),
+        }
     }
 }
 

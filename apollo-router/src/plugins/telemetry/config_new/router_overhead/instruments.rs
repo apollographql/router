@@ -1,22 +1,17 @@
 use std::collections::HashMap;
-use std::marker::PhantomData;
 use std::sync::Arc;
 
 use opentelemetry::metrics::MeterProvider;
-use parking_lot::Mutex;
 
 use super::RouterOverheadAttributes;
 use crate::metrics;
-use crate::plugins::telemetry::config_new::conditions::Condition;
 use crate::plugins::telemetry::config_new::extendable::Extendable;
-use crate::plugins::telemetry::config_new::instruments::CustomHistogram;
-use crate::plugins::telemetry::config_new::instruments::CustomHistogramInner;
 use crate::plugins::telemetry::config_new::instruments::DefaultedStandardInstrument;
-use crate::plugins::telemetry::config_new::instruments::Increment;
+use crate::plugins::telemetry::config_new::instruments::HistogramInstrument;
+use crate::plugins::telemetry::config_new::instruments::IncrementKind;
 use crate::plugins::telemetry::config_new::instruments::METER_NAME;
 use crate::plugins::telemetry::config_new::instruments::StaticInstrument;
 use crate::plugins::telemetry::config_new::router::selectors::RouterSelector;
-use crate::services::router;
 
 pub(crate) const ROUTER_OVERHEAD_METRIC: &str = "apollo.router.overhead";
 
@@ -41,55 +36,34 @@ pub(crate) fn create_static_instrument(enabled: bool) -> Option<(String, StaticI
     ))
 }
 
-/// Initialize the router overhead custom histogram from config
-pub(crate) fn initialize_custom_histogram(
+/// The router overhead histogram `config` configures, built once for a pipeline over its
+/// `static_instruments`: its value the overhead its selector reads, where it is enabled.
+pub(crate) fn router_overhead_instrument(
     config: &DefaultedStandardInstrument<Extendable<RouterOverheadAttributes, RouterSelector>>,
     static_instruments: &HashMap<String, StaticInstrument>,
-) -> Option<
-    CustomHistogram<
-        router::Request,
-        router::Response,
-        (),
-        RouterOverheadAttributes,
-        RouterSelector,
-    >,
-> {
+) -> Option<HistogramInstrument<RouterOverheadAttributes, RouterSelector>> {
     if !config.is_enabled() {
         return None;
     }
 
-    let mut nb_attributes = 0;
     let selectors = match config {
         DefaultedStandardInstrument::Bool(_) | DefaultedStandardInstrument::Unset => None,
-        DefaultedStandardInstrument::Extendable { attributes } => {
-            nb_attributes = attributes.custom.len();
-            Some(attributes.clone())
-        }
+        DefaultedStandardInstrument::Extendable { attributes } => Some(attributes.clone()),
     };
 
-    Some(CustomHistogram {
-        inner: Mutex::new(CustomHistogramInner {
-            increment: Increment::Custom(None),
-            condition: Condition::True,
-            histogram: Some(
-                static_instruments
-                    .get(ROUTER_OVERHEAD_METRIC)
-                    .expect(
-                        "cannot get static instrument for router overhead; this should not happen",
-                    )
-                    .as_histogram()
-                    .cloned()
-                    .expect("cannot convert instrument to histogram for router overhead; this should not happen"),
+    Some(HistogramInstrument::new(
+        IncrementKind::Custom,
+        static_instruments
+            .get(ROUTER_OVERHEAD_METRIC)
+            .expect("cannot get static instrument for router overhead; this should not happen")
+            .as_histogram()
+            .cloned()
+            .expect(
+                "cannot convert instrument to histogram for router overhead; this should not happen",
             ),
-            attributes: Vec::with_capacity(nb_attributes),
-            selector: Some(Arc::new(
-                RouterSelector::RouterOverhead {
-                    router_overhead: true,
-                },
-            )),
-            selectors,
-            updated: false,
-            _phantom: PhantomData,
-        }),
-    })
+        Some(Arc::new(RouterSelector::RouterOverhead {
+            router_overhead: true,
+        })),
+        selectors,
+    ))
 }

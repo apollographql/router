@@ -327,8 +327,12 @@ where
         let config_map_res = config.clone();
         let enabled_features = self.enabled_features.clone();
         let field_level_instrumentation_ratio = self.field_level_instrumentation_ratio;
-        let static_supergraph_instruments = self.static_supergraph_instruments.clone();
-        let static_graphql_instruments = self.static_graphql_instruments.clone();
+        // the instrument sets, built once for the pipeline and started per request
+        let instruments = &self.config.instrumentation.instruments;
+        let sets = Arc::new((
+            instruments.supergraph_instrument_set(&self.static_supergraph_instruments),
+            instruments.graphql_instrument_set(&self.static_graphql_instruments),
+        ));
         ServiceBuilder::new()
             .instrument(move |supergraph_req: &SupergraphRequest| {
                 span_factory::create_supergraph(
@@ -395,15 +399,11 @@ where
                         .attributes
                         .on_request(req);
                     populate_context(field_level_instrumentation_ratio, req);
-                    let custom_instruments = config
-                        .instrumentation
-                        .instruments
-                        .new_supergraph_instruments(static_supergraph_instruments.clone());
+                    let (supergraph_instrument_set, graphql_instrument_set) = &*sets;
+                    let custom_instruments = supergraph_instrument_set.start();
                     custom_instruments.on_request(req);
-                    let custom_graphql_instruments: GraphQLInstruments = config
-                        .instrumentation
-                        .instruments
-                        .new_graphql_instruments(static_graphql_instruments.clone());
+                    let custom_graphql_instruments: GraphQLInstruments =
+                        graphql_instrument_set.start();
                     custom_graphql_instruments.on_request(req);
 
                     let mut supergraph_events =
@@ -540,6 +540,92 @@ mod tests {
     use super::*;
     use crate::metrics::FutureMetricsExt;
     use crate::plugins::test::PluginTestHarness;
+
+    /// A request through the supergraph instrument layer builds no instrument set: the layer
+    /// builds the supergraph's and the GraphQL instruments, their conditions and their selectors
+    /// once for its pipeline, and a request starts the state its measurements record into. Read
+    /// as the bytes the layer allocates per request under a custom supergraph histogram whose
+    /// value is a request header's and a custom GraphQL counter whose value is a static string,
+    /// the header's name and the string at a width of 8 and of 2,056 bytes: a request that builds
+    /// the custom instruments copies both selectors, and one that starts them shares them.
+    #[cfg(all(feature = "global-allocator", not(feature = "dhat-heap"), unix))]
+    #[test]
+    fn a_request_builds_no_supergraph_instrument_set() {
+        const REQUESTS: usize = 16;
+        const NARROW: usize = 8;
+        const WIDE: usize = 2056;
+
+        // the plugin's construction blocks in place, which a multi-threaded runtime allows
+        let runtime = tokio::runtime::Builder::new_multi_thread()
+            .worker_threads(1)
+            .enable_all()
+            .build()
+            .expect("a runtime");
+        let _entered = runtime.enter();
+        let bytes = |width: usize| {
+            let config = serde_json::json!({"telemetry": {"instrumentation": {"instruments": {
+                "supergraph": {
+                    "acme.request.header": {
+                        "description": "a request header's value",
+                        "type": "histogram",
+                        "unit": "unit",
+                        "value": {"request_header": "h".repeat(width)}
+                    }
+                },
+                "graphql": {
+                    "acme.field.static": {
+                        "description": "fields",
+                        "type": "counter",
+                        "unit": "field",
+                        "value": {"static": "s".repeat(width)}
+                    }
+                }
+            }}}});
+            let test_harness: PluginTestHarness<Telemetry> = runtime
+                .block_on(
+                    PluginTestHarness::builder()
+                        .config(&config.to_string())
+                        .build(),
+                )
+                .expect("test harness");
+            let layered = ServiceBuilder::new()
+                .layer(test_harness.instrument_supergraph_layer())
+                .service(tower::service_fn(|request: SupergraphRequest| {
+                    std::future::ready(
+                        SupergraphResponse::fake_builder()
+                            .context(request.context)
+                            .data(json!({"me": {"name": "Ada"}}))
+                            .build(),
+                    )
+                }));
+            crate::allocator::bytes_per_call(
+                layered,
+                || {
+                    SupergraphRequest::fake_builder()
+                        .query("{ me { name } }")
+                        .build()
+                        .expect("a request")
+                },
+                |mut response: SupergraphResponse| {
+                    futures::executor::block_on(async {
+                        while response.next_response().await.is_some() {}
+                    })
+                },
+                REQUESTS,
+            )
+        };
+
+        let narrow = bytes(NARROW);
+        let wide = bytes(WIDE);
+        eprintln!(
+            "a request allocates {narrow} bytes at a header name and a static string of {NARROW} bytes and {wide} at {WIDE}"
+        );
+        assert!(
+            wide.saturating_sub(narrow) < WIDE - NARROW,
+            "a request allocates {wide} bytes at a header name and a static string of {WIDE} \
+             bytes and {narrow} at {NARROW}: a request builds the custom instruments"
+        );
+    }
 
     #[tokio::test(flavor = "multi_thread")]
     async fn test_custom_supergraph_instruments() {
