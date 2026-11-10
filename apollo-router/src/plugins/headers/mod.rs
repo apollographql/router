@@ -522,11 +522,19 @@ where
 
 pub(crate) struct HeadersLayer {
     operations: Arc<Vec<Operation>>,
+    /// Whether a rule reads the client's request, which a request then serializes for it.
+    reads_body: bool,
 }
 
 impl HeadersLayer {
     fn new(operations: Arc<Vec<Operation>>) -> Self {
-        Self { operations }
+        let reads_body = operations
+            .iter()
+            .any(|operation| matches!(operation, Operation::Insert(Insert::FromBody(_))));
+        Self {
+            operations,
+            reads_body,
+        }
     }
 }
 
@@ -537,6 +545,7 @@ impl<S> Layer<S> for HeadersLayer {
         HeadersService {
             inner,
             operations: self.operations.clone(),
+            reads_body: self.reads_body,
         }
     }
 }
@@ -545,6 +554,7 @@ impl<S> Layer<S> for HeadersLayer {
 pub(crate) struct HeadersService<S> {
     inner: S,
     operations: Arc<Vec<Operation>>,
+    reads_body: bool,
 }
 
 // Headers from https://datatracker.ietf.org/doc/html/rfc2616#section-13.5.1
@@ -584,7 +594,9 @@ where
     }
 
     fn call(&mut self, mut req: SubgraphRequest) -> Self::Future {
-        Self::modify_subgraph_request(&self.operations, &mut req);
+        if !self.operations.is_empty() {
+            Self::modify_subgraph_request(&self.operations, self.reads_body, &mut req);
+        }
         self.inner.call(req)
     }
 }
@@ -606,19 +618,29 @@ where
         let inner = self.inner.clone();
         let mut inner = std::mem::replace(&mut self.inner, inner);
         let operations = self.operations.clone();
+        let reads_body = self.reads_body;
 
         Box::pin(async move {
-            Self::modify_connector_request(&operations, &mut req);
+            if !operations.is_empty() {
+                Self::modify_connector_request(&operations, reads_body, &mut req);
+            }
             inner.call(req).await
         })
     }
 }
 
 impl<S> HeadersService<S> {
-    fn modify_subgraph_request(operations: &Arc<Vec<Operation>>, req: &mut SubgraphRequest) {
+    fn modify_subgraph_request(
+        operations: &Arc<Vec<Operation>>,
+        reads_body: bool,
+        req: &mut SubgraphRequest,
+    ) {
         let mut already_propagated: HashSet<String> = HashSet::new();
 
-        let body_to_value = serde_json_bytes::value::to_value(req.supergraph_request.body()).ok();
+        // the client's request as a value, made where a rule reads it
+        let body_to_value = reads_body
+            .then(|| serde_json_bytes::value::to_value(req.supergraph_request.body()).ok())
+            .flatten();
         let supergraph_headers = req.supergraph_request.headers();
         let context = &req.context;
         let headers_mut = req.subgraph_request.headers_mut();
@@ -637,6 +659,7 @@ impl<S> HeadersService<S> {
 
     fn modify_connector_request(
         operations: &Arc<Vec<Operation>>,
+        reads_body: bool,
         req: &mut connector::request_service::Request,
     ) {
         let mut already_propagated: HashSet<String> = HashSet::new();
@@ -644,7 +667,9 @@ impl<S> HeadersService<S> {
         let TransportRequest::Http(ref mut http_request) = req.transport_request else {
             return;
         };
-        let body_to_value = serde_json::from_str(http_request.inner.body()).ok();
+        let body_to_value = reads_body
+            .then(|| serde_json::from_str(http_request.inner.body()).ok())
+            .flatten();
         let supergraph_headers = req.supergraph_request.headers();
         let context = &req.context;
         // We need to know what headers were added prior to this processing to that we can properly override as needed
@@ -1245,6 +1270,32 @@ mod test {
             .and_then(|r| r.masking.as_ref());
         assert!(masking.is_some());
         assert!(!masking.unwrap().enabled);
+    }
+
+    /// A request to a subgraph with no header rule configured costs the headers layer nothing: it
+    /// allocates no byte beyond the service beneath it, where it serialized the client's whole
+    /// request before an empty list of rules. A rule that reads the client's request still reads
+    /// it (`test_insert_from_body` and its neighbours).
+    #[cfg(all(feature = "global-allocator", not(feature = "dhat-heap"), unix))]
+    #[test]
+    fn with_no_rule_a_request_allocates_nothing_beyond_its_source() {
+        const REQUESTS: usize = 16;
+        let source = tower::service_fn(|request: SubgraphRequest| {
+            std::future::ready(example_response(request))
+        });
+        let beneath = crate::allocator::bytes_per_call(source, example_request, drop, REQUESTS);
+        let through = crate::allocator::bytes_per_call(
+            HeadersLayer::new(Arc::new(Vec::new())).layer(source),
+            example_request,
+            drop,
+            REQUESTS,
+        );
+
+        assert_eq!(
+            through, beneath,
+            "the bytes a request allocates through the headers layer with no rule, against the \
+             bytes it allocates beneath it"
+        );
     }
 
     #[tokio::test]
@@ -1897,6 +1948,7 @@ mod test {
             operations: Arc::new(vec![Operation::Propagate(Propagate::Matching {
                 matching: Regex::from_str(".*")?,
             })]),
+            reads_body: false,
         };
 
         let mut request = SubgraphRequest {
@@ -1940,7 +1992,7 @@ mod test {
             id: SubgraphRequestId(String::new()),
             is_deferred_fetch: false,
         };
-        HeadersService::<tower_test::mock::Mock<SubgraphRequest, SubgraphResponse>>::modify_subgraph_request(&service.operations, &mut request);
+        HeadersService::<tower_test::mock::Mock<SubgraphRequest, SubgraphResponse>>::modify_subgraph_request(&service.operations, service.reads_body, &mut request);
         let headers = request
             .subgraph_request
             .headers()
@@ -1980,6 +2032,7 @@ mod test {
                     matching: Regex::from_str("dc")?,
                 }),
             ]),
+            reads_body: false,
         };
 
         let mut request = SubgraphRequest {
@@ -2013,7 +2066,7 @@ mod test {
             id: SubgraphRequestId(String::new()),
             is_deferred_fetch: false,
         };
-        HeadersService::<tower_test::mock::Mock<SubgraphRequest, SubgraphResponse>>::modify_subgraph_request(&service.operations, &mut request);
+        HeadersService::<tower_test::mock::Mock<SubgraphRequest, SubgraphResponse>>::modify_subgraph_request(&service.operations, service.reads_body, &mut request);
         let headers = request
             .subgraph_request
             .headers()

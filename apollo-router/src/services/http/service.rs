@@ -7,7 +7,9 @@ use std::sync::atomic::Ordering;
 use std::task::Poll;
 
 use bytes::Buf;
+use futures::TryFutureExt as _;
 use futures::future::BoxFuture;
+use futures::future::MapOk;
 use http::HeaderValue;
 use http::Request;
 use http::header::ACCEPT_ENCODING;
@@ -130,27 +132,27 @@ where
 {
     type Response = http::Response<ByteCountingBody<ResBody>>;
     type Error = S::Error;
-    type Future = BoxFuture<'static, Result<Self::Response, Self::Error>>;
+    type Future = MapOk<S::Future, fn(http::Response<ResBody>) -> Self::Response>;
 
     fn poll_ready(&mut self, cx: &mut std::task::Context<'_>) -> Poll<Result<(), Self::Error>> {
         self.inner.poll_ready(cx)
     }
 
     fn call(&mut self, req: http::Request<ReqBody>) -> Self::Future {
-        let fut = self.inner.call(req);
-        Box::pin(async move {
-            let response = fut.await?;
+        // the count's body in place of the reply's, by a function, so no future is boxed
+        let counted: fn(http::Response<ResBody>) -> Self::Response = |response| {
             let (mut parts, body) = response.into_parts();
             let counter = Arc::new(AtomicU64::new(0));
             parts.extensions.insert(WireByteCount(counter.clone()));
-            Ok(http::Response::from_parts(
+            http::Response::from_parts(
                 parts,
                 ByteCountingBody {
                     inner: body,
                     counter,
                 },
-            ))
-        })
+            )
+        };
+        self.inner.call(req).map_ok(counted)
     }
 }
 
