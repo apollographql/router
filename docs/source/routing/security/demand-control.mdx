@@ -342,6 +342,41 @@ type ResultContainer {
 }
 ```
 
+### Argument costs
+
+The cost of a field includes the cost of its arguments. By default, arguments of scalar and enum types cost 0 and input objects cost 1. You can override these defaults with the `@cost` directive on an argument or input field definition.
+
+For a list-type argument, the router applies the argument's weight once for the list and again for each item in it, because the work a resolver does usually grows with the number of values it receives. For an input object, the router adds the argument's weight for the object and then adds the cost of each input field it contains.
+
+<Note>
+
+This differs from the IBM specification, which counts an argument's weight once regardless of how many values are passed.
+
+</Note>
+
+```graphql
+type Query {
+  booksByIds(ids: [ID!]! @cost(weight: 2)): [Book] #highlight-line
+    @listSize(slicingArguments: ["ids"])
+}
+```
+
+```graphql
+query BooksByIds {
+  booksByIds(ids: ["abc", "def", "ghi"]) {
+    title
+  }
+}
+```
+
+<ExpansionPanel title="Cost of booksByIds query">
+
+```text disableCopy=true showLineNumbers=false
+1 Query (0) + ids argument (1 list (2) + 3 items (3 * 2)) + 3 book objects (3 * 1) = 11 total cost
+```
+
+</ExpansionPanel>
+
 ## Subgraph-level demand control
 
 <MinVersionBadge version="Router v2.12.0" />
