@@ -19,6 +19,7 @@ use crate::Context;
 use crate::graphql;
 use crate::pipeline::build_http_client_service;
 use crate::pipeline::stages::build_subgraph_service;
+use crate::pipeline::tests::stage_stack::required_stage_plugins;
 use crate::pipeline::tests::stage_stack::stage_plugins;
 use crate::plugins::telemetry::config_new::Selector as _;
 use crate::plugins::telemetry::config_new::subgraph::selectors::SubgraphSelector;
@@ -95,6 +96,49 @@ async fn a_subgraph_stack_runs_no_worker_task_of_its_own() {
     );
 }
 
+/// A subgraph request with nothing configured for its subgraph meets only the layers that serve it:
+/// no worker task, where traffic shaping's admission buffer ran one for a rate limit nobody
+/// configured, and one copy of the HTTP client's stack, the subgraph service's, where the
+/// subscription and APQ layers each copied the stack beneath them too.
+#[tokio::test]
+async fn an_unconfigured_subgraph_request_meets_only_the_layers_that_serve_it() {
+    let plugins = required_stage_plugins().await;
+    let client = CountedClient::default();
+    let clones = client.clones.clone();
+    let metrics = tokio::runtime::Handle::current().metrics();
+    let tasks = metrics.num_alive_tasks();
+    let stack = build_subgraph_service(
+        "s",
+        client.boxed_clone(),
+        &plugins,
+        &Configuration::default(),
+    );
+    let workers = metrics.num_alive_tasks() - tasks;
+    let request = || {
+        SubgraphRequest::fake_builder()
+            .subgraph_request(
+                http::Request::builder()
+                    .method(http::Method::POST)
+                    .uri("http://s/")
+                    .body(graphql::Request::fake_builder().query("{ a }").build())
+                    .expect("a request"),
+            )
+            .build()
+    };
+
+    // the first request makes the copy of the stack the second one reuses
+    stack.clone().oneshot(request()).await.expect("an answer");
+    let clones_before = clones.load(Ordering::Relaxed);
+    let response = stack.clone().oneshot(request()).await.expect("an answer");
+
+    assert_eq!(response.response.status(), http::StatusCode::OK);
+    assert_eq!(
+        (workers, clones.load(Ordering::Relaxed) - clones_before),
+        (0, 1),
+        "the stack's worker tasks, and the copies of its HTTP client's stack one request made"
+    );
+}
+
 /// Serves `routes`, each a path answered with a fixed `application/json` body, on a local port, and
 /// returns the server's address.
 async fn serve(routes: &[(&str, String)]) -> std::net::SocketAddr {
@@ -129,7 +173,7 @@ fn subgraph_stack(name: &str, plugins: &Arc<Plugins>) -> PooledSubgraphService {
     .expect("the client's inputs");
     build_subgraph_service(
         name,
-        build_http_client_service(name, inputs, plugins.clone()),
+        build_http_client_service(name, inputs, plugins.clone(), &configuration),
         plugins,
         &configuration,
     )

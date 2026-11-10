@@ -51,21 +51,14 @@ fn get_apq_error(gql_response: &graphql::Response) -> ApqError {
     ApqError::Other
 }
 
-/// Tower [`Layer`] that adds APQ retry logic for subgraph calls.
+/// Tower [`Layer`] that adds APQ retry logic for subgraph calls. The subgraph stage places it
+/// where APQ is enabled for the subgraph.
 ///
 /// On the first request it sends only the query hash. If the subgraph
 /// returns `PERSISTED_QUERY_NOT_FOUND`, it retries with the full query and hash.
 /// If it returns `PERSISTED_QUERY_NOT_SUPPORTED`, APQ is disabled for this instance
 /// and the retry is sent as a plain request without the `persistedQuery` extension.
-pub(crate) struct SubgraphApqLayer {
-    enabled: bool,
-}
-
-impl SubgraphApqLayer {
-    pub(crate) fn new(enabled: bool) -> Self {
-        Self { enabled }
-    }
-}
+pub(crate) struct SubgraphApqLayer;
 
 impl<S> Layer<S> for SubgraphApqLayer {
     type Service = SubgraphApqService<S>;
@@ -73,7 +66,7 @@ impl<S> Layer<S> for SubgraphApqLayer {
     fn layer(&self, inner: S) -> Self::Service {
         SubgraphApqService {
             inner,
-            enabled: Arc::new(AtomicBool::new(self.enabled)),
+            enabled: Arc::new(AtomicBool::new(true)),
         }
     }
 }
@@ -234,34 +227,6 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_apq_disabled_passes_query_through_unchanged() {
-        let (mock, mut handle) = tower_test::mock::pair::<SubgraphRequest, SubgraphResponse>();
-        let driver = tokio::spawn(async move {
-            let (req, responder) = handle.next_request().await.unwrap();
-            assert!(
-                req.subgraph_request.body().query.is_some(),
-                "query should be present when APQ is disabled"
-            );
-            assert!(
-                !req.subgraph_request
-                    .body()
-                    .extensions
-                    .contains_key(PERSISTED_QUERY_KEY),
-                "no persistedQuery extension expected when APQ is disabled"
-            );
-            responder.send_response(success_response(req.context));
-        });
-
-        let svc = SubgraphApqLayer::new(false).layer(mock);
-        let resp = svc.oneshot(make_request()).await.unwrap();
-        crate::plugin::test::await_mock_driver(driver).await;
-        assert_eq!(
-            resp.response.body().data,
-            Some(Value::String(ByteString::from("test")))
-        );
-    }
-
-    #[tokio::test]
     async fn test_apq_enabled_sends_hash_only_on_first_attempt() {
         let (mock, mut handle) = tower_test::mock::pair::<SubgraphRequest, SubgraphResponse>();
         let driver = tokio::spawn(async move {
@@ -280,7 +245,7 @@ mod tests {
             responder.send_response(success_response(req.context));
         });
 
-        let svc = SubgraphApqLayer::new(true).layer(mock);
+        let svc = SubgraphApqLayer.layer(mock);
         let resp = svc.oneshot(make_request()).await.unwrap();
         crate::plugin::test::await_mock_driver(driver).await;
         assert_eq!(
@@ -311,7 +276,7 @@ mod tests {
             responder.send_response(success_response(req.context));
         });
 
-        let svc = SubgraphApqLayer::new(true).layer(mock);
+        let svc = SubgraphApqLayer.layer(mock);
         let resp = svc.oneshot(make_request()).await.unwrap();
         crate::plugin::test::await_mock_driver(driver).await;
         assert_eq!(
@@ -332,7 +297,7 @@ mod tests {
             responder.send_response(success_response(req.context));
         });
 
-        let svc = SubgraphApqLayer::new(true).layer(mock);
+        let svc = SubgraphApqLayer.layer(mock);
         let resp = svc.oneshot(make_request()).await.unwrap();
         crate::plugin::test::await_mock_driver(driver).await;
         assert_eq!(
@@ -363,7 +328,7 @@ mod tests {
             responder.send_response(success_response(req.context));
         });
 
-        let layer = SubgraphApqLayer::new(true);
+        let layer = SubgraphApqLayer;
         let svc = layer.layer(mock);
         assert!(svc.enabled.load(Relaxed), "APQ should start enabled");
 
@@ -397,7 +362,7 @@ mod tests {
             responder.send_response(success_response(req.context));
         });
 
-        let layer = SubgraphApqLayer::new(true);
+        let layer = SubgraphApqLayer;
         let svc = layer.layer(mock);
         assert!(svc.enabled.load(Relaxed));
 
@@ -453,7 +418,7 @@ mod tests {
             .context(Context::new())
             .build();
 
-        let svc = SubgraphApqLayer::new(true).layer(mock);
+        let svc = SubgraphApqLayer.layer(mock);
         let resp = svc.oneshot(request).await.unwrap();
         crate::plugin::test::await_mock_driver(driver).await;
         assert!(resp.response.body().errors.is_empty());
@@ -515,7 +480,7 @@ mod tests {
             .context(Context::new())
             .build();
 
-        let svc = SubgraphApqLayer::new(true).layer(mock);
+        let svc = SubgraphApqLayer.layer(mock);
         let resp = svc.oneshot(request).await.unwrap();
         crate::plugin::test::await_mock_driver(driver).await;
         assert!(resp.response.body().errors.is_empty());
@@ -564,7 +529,7 @@ mod tests {
             .context(Context::new())
             .build();
 
-        let svc = SubgraphApqLayer::new(true).layer(mock);
+        let svc = SubgraphApqLayer.layer(mock);
         let resp = svc.oneshot(request).await.unwrap();
         crate::plugin::test::await_mock_driver(driver).await;
         assert!(resp.response.body().errors.is_empty());
@@ -664,12 +629,8 @@ mod tests {
                 .build()
         }
 
-        fn layered_subgraph_service(
-            name: &str,
-            enable_apq: bool,
-        ) -> SubgraphApqService<SubgraphService> {
-            SubgraphApqLayer::new(enable_apq)
-                .layer(SubgraphService::new(name, test_http_client_service(name)))
+        fn layered_subgraph_service(name: &str) -> SubgraphApqService<SubgraphService> {
+            SubgraphApqLayer.layer(SubgraphService::new(name, test_http_client_service(name)))
         }
 
         #[tokio::test(flavor = "multi_thread")]
@@ -694,40 +655,7 @@ mod tests {
             });
 
             let url = Uri::from_str(&format!("http://{socket_addr}")).unwrap();
-            let resp = layered_subgraph_service("test", true)
-                .oneshot(subgraph_request(url, "query"))
-                .await
-                .unwrap();
-
-            assert_eq!(
-                resp.response.body().data,
-                Some(Value::String(ByteString::from("test")))
-            );
-        }
-
-        #[tokio::test(flavor = "multi_thread")]
-        async fn apq_disabled_sends_full_query_over_http() {
-            let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
-            let socket_addr = listener.local_addr().unwrap();
-            tokio::task::spawn(async move {
-                serve(listener, |request| async move {
-                    let graphql_request = parse_graphql_request(request.into_body()).await;
-                    assert!(
-                        !graphql_request.extensions.contains_key(PERSISTED_QUERY_KEY),
-                        "persistedQuery not expected when APQ is disabled"
-                    );
-                    assert!(
-                        graphql_request.query.is_some(),
-                        "query should be present when APQ is disabled"
-                    );
-                    Ok(success_response())
-                })
-                .await
-                .unwrap();
-            });
-
-            let url = Uri::from_str(&format!("http://{socket_addr}")).unwrap();
-            let resp = layered_subgraph_service("test", false)
+            let resp = layered_subgraph_service("test")
                 .oneshot(subgraph_request(url, "query"))
                 .await
                 .unwrap();
@@ -781,7 +709,7 @@ mod tests {
             });
 
             let url = Uri::from_str(&format!("http://{socket_addr}")).unwrap();
-            let resp = layered_subgraph_service("test", true)
+            let resp = layered_subgraph_service("test")
                 .oneshot(subgraph_request(url, "query"))
                 .await
                 .unwrap();

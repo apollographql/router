@@ -208,7 +208,7 @@ fn assemble(
 
     let supergraph_service = tracing::info_span!("supergraph_creation").in_scope(|| {
         let (subgraph_http_services, connector_http_services) =
-            build_http_services(http_client_inputs, &plugins);
+            build_http_services(http_client_inputs, &plugins, &configuration);
         let subgraph_services =
             build_subgraph_services(subgraph_http_services, &plugins, &configuration);
         build_supergraph_pipeline(
@@ -295,7 +295,7 @@ pub(crate) async fn build_supergraph_for_test_harness(
         query_plan_cache,
     );
     let (subgraph_http_services, connector_http_services) =
-        build_http_services(http_client_inputs, &plugins);
+        build_http_services(http_client_inputs, &plugins, &configuration);
     let subgraph_services =
         build_subgraph_services(subgraph_http_services, &plugins, &configuration);
     let supergraph_service = build_supergraph_pipeline(

@@ -9,6 +9,7 @@ use std::time::Duration;
 use futures::SinkExt;
 use futures::StreamExt;
 use futures::future::BoxFuture;
+use futures::future::Either;
 use http::HeaderValue;
 use serde::Serialize;
 use tokio::select;
@@ -51,16 +52,19 @@ use crate::services::SubgraphResponse;
 static CALLBACK_PROTOCOL_ACCEPT: HeaderValue =
     HeaderValue::from_static("application/json;callbackSpec=1.0");
 
+/// Opens a subscription to one subgraph by the subgraph's subscription mode. The subgraph stage
+/// places it where the subscription plugin is enabled and configures a mode for the subgraph; the
+/// fetch of a subscription refuses to open one anywhere else before it reaches the subgraph.
 pub(crate) struct SubscriptionSubgraphLayer {
     notify: Notify<String, graphql::Response>,
-    subscription_config: Option<Arc<SubscriptionConfig>>,
+    subscription_config: Arc<SubscriptionConfig>,
     service_name: Arc<str>,
 }
 
 impl SubscriptionSubgraphLayer {
     pub(crate) fn new(
         notify: Notify<String, graphql::Response>,
-        subscription_config: Option<Arc<SubscriptionConfig>>,
+        subscription_config: Arc<SubscriptionConfig>,
         service_name: Arc<str>,
     ) -> Self {
         Self {
@@ -87,7 +91,7 @@ impl<S> tower::Layer<S> for SubscriptionSubgraphLayer {
 #[derive(Clone)]
 pub(crate) struct SubscriptionSubgraphService<S> {
     notify: Notify<String, graphql::Response>,
-    subscription_config: Option<Arc<SubscriptionConfig>>,
+    subscription_config: Arc<SubscriptionConfig>,
     service_name: Arc<str>,
     inner: S,
 }
@@ -102,7 +106,7 @@ where
 {
     type Response = SubgraphResponse;
     type Error = BoxError;
-    type Future = BoxFuture<'static, Result<Self::Response, Self::Error>>;
+    type Future = Either<S::Future, BoxFuture<'static, Result<Self::Response, Self::Error>>>;
 
     fn poll_ready(
         &mut self,
@@ -112,6 +116,12 @@ where
     }
 
     fn call(&mut self, req: SubgraphRequest) -> Self::Future {
+        // Only a subscription's opening carries the stream its events go to. Any other request
+        // goes on to the readied inner service as it came, without cloning it.
+        if req.operation_kind != OperationKind::Subscription || req.subscription_stream.is_none() {
+            return Either::Left(self.inner.call(req));
+        }
+
         let inner = self.inner.clone();
         let mut inner = std::mem::replace(&mut self.inner, inner);
 
@@ -119,12 +129,12 @@ where
         let subscription_config = self.subscription_config.clone();
         let service_name = self.service_name.clone();
 
-        Box::pin(async move {
-            match subgraph_request(notify, req, subscription_config, &service_name).await? {
+        Either::Right(Box::pin(async move {
+            match subgraph_request(notify, req, &subscription_config, &service_name).await? {
                 ControlFlow::Continue(request) => inner.call(request).await,
                 ControlFlow::Break(response) => Ok(response),
             }
-        })
+        }))
     }
 }
 
@@ -739,74 +749,65 @@ async fn setup_callback(
     Ok(ControlFlow::Continue(()))
 }
 
+/// Opens the subscription `request` asks for by its subgraph's subscription mode: over a
+/// WebSocket in passthrough mode, or sent on with the callback protocol's extension in callback
+/// mode.
 async fn subgraph_request(
     notify: Notify<String, graphql::Response>,
     mut request: SubgraphRequest,
-    subscription_config: Option<Arc<SubscriptionConfig>>,
+    subscription_config: &SubscriptionConfig,
     service_name: &str,
 ) -> Result<ControlFlow<SubgraphResponse, SubgraphRequest>, BoxError> {
-    if request.operation_kind == OperationKind::Subscription
-        && request.subscription_stream.is_some()
-    {
-        let subscription_config =
-            subscription_config.ok_or_else(|| FetchError::SubrequestHttpError {
-                service: service_name.to_string(),
-                reason: "subscription is not enabled".to_string(),
-                status_code: None,
-            })?;
-        let mode = subscription_config.mode.get_subgraph_config(service_name);
-        let context = request.context.clone();
+    let mode = subscription_config.mode.get_subgraph_config(service_name);
+    let context = request.context.clone();
 
-        let dedup = subscription_config.deduplication.get(service_name);
-        let hashed_request = if dedup.enabled {
-            request.to_sha256(&dedup.ignored_headers, dedup.ignore_auth_context)
-        } else {
-            Uuid::new_v4().to_string()
-        };
+    let dedup = subscription_config.deduplication.get(service_name);
+    let hashed_request = if dedup.enabled {
+        request.to_sha256(&dedup.ignored_headers, dedup.ignore_auth_context)
+    } else {
+        Uuid::new_v4().to_string()
+    };
 
-        match &mode {
-            Some(SubscriptionMode::Passthrough(ws_conf)) => {
-                // call_websocket for passthrough mode
-                return call_websocket(
-                    notify,
-                    request,
-                    context,
-                    service_name,
-                    ws_conf,
-                    hashed_request,
-                )
-                .await
-                .map(ControlFlow::Break);
-            }
-            Some(SubscriptionMode::Callback(callback_conf)) => {
-                // This will modify the body to add `extensions` for the callback
-                // subscription protocol.
-                let control = setup_callback(
-                    notify,
-                    &mut request,
-                    context.clone(),
-                    service_name,
-                    callback_conf,
-                    hashed_request,
-                )
-                .await?;
+    match &mode {
+        Some(SubscriptionMode::Passthrough(ws_conf)) => {
+            // call_websocket for passthrough mode
+            return call_websocket(
+                notify,
+                request,
+                context,
+                service_name,
+                ws_conf,
+                hashed_request,
+            )
+            .await
+            .map(ControlFlow::Break);
+        }
+        Some(SubscriptionMode::Callback(callback_conf)) => {
+            // This will modify the body to add `extensions` for the callback
+            // subscription protocol.
+            let control = setup_callback(
+                notify,
+                &mut request,
+                context.clone(),
+                service_name,
+                callback_conf,
+                hashed_request,
+            )
+            .await?;
 
-                if let ControlFlow::Break(response) = control {
-                    return Ok(ControlFlow::Break(response));
-                }
-            }
-            _ => {
-                return Err(Box::new(FetchError::SubrequestWsError {
-                    service: service_name.to_string(),
-                    reason: "subscription mode is not enabled".to_string(),
-                }));
+            if let ControlFlow::Break(response) = control {
+                return Ok(ControlFlow::Break(response));
             }
         }
-
-        Ok(ControlFlow::Continue(request))
-    } else {
-        Ok(ControlFlow::Continue(request))
+        None => {
+            return Err(Box::new(FetchError::SubrequestWsError {
+                service: service_name.to_string(),
+                reason: "subscription mode is not enabled".to_string(),
+            }));
+        }
     }
+
+    Ok(ControlFlow::Continue(request))
 }
 
 /// Open a WebSocket subscription stream to a subgraph. Shared by the initial

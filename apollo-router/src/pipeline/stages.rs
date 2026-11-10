@@ -5,7 +5,9 @@ use std::collections::HashMap;
 use std::sync::Arc;
 
 use apollo_federation::query_plan::query_planner::QueryPlanner;
+use futures::future::BoxFuture;
 use indexmap::IndexMap;
+use tower::BoxError;
 use tower::Service;
 use tower::ServiceBuilder;
 use tower::ServiceExt;
@@ -55,6 +57,8 @@ use crate::query_planner::QueryPlannerService;
 use crate::query_planner::SubgraphSchemas;
 use crate::query_planner::warmup;
 use crate::services::Plugins;
+use crate::services::SubgraphRequest;
+use crate::services::SubgraphResponse;
 use crate::services::SubgraphService;
 use crate::services::SubgraphServices;
 use crate::services::connector::request_service::ConnectorRequestService;
@@ -85,6 +89,7 @@ use crate::services::router::parse_query::ParseQueryLayer;
 use crate::services::router::service::DisplayRouterRequestLayer;
 use crate::services::router::service::RouterToSupergraphRequestLayer;
 use crate::services::router::tower_compat::APQCachingLayer;
+use crate::services::subgraph;
 use crate::services::subgraph::service::PooledSubgraphService;
 use crate::services::supergraph;
 use crate::services::supergraph::service::SupergraphService;
@@ -153,12 +158,13 @@ pub(crate) fn build_http_client_service(
     name: &str,
     inputs: HttpClientInputs,
     plugins: Arc<Plugins>,
+    configuration: &Configuration,
 ) -> http::BoxCloneService {
     let response_size_limit = plugins
         .values()
         .find_map(|plugin| plugin.as_any().downcast_ref::<LimitsPlugin>())
         .and_then(|limits| limits.subgraph_response_size_limit_layer(name));
-    http_client_service(name, inputs, plugins, response_size_limit)
+    http_client_service(name, inputs, plugins, configuration, response_size_limit)
 }
 
 /// The HTTP client service stack around the [`HttpClientService`] built from `inputs`, with the
@@ -171,10 +177,16 @@ fn http_client_service(
     name: &str,
     inputs: HttpClientInputs,
     plugins: Arc<Plugins>,
+    configuration: &Configuration,
     response_size_limit: Option<SubgraphResponseSizeLimitLayer>,
 ) -> http::BoxCloneService {
+    // Subgraph batching joins a request into its batch only where batching is enabled and
+    // includes this subgraph, the conditions `BatchQuery::joined_by` reads on every request.
+    let batching = &configuration.batching;
+    let join_batches = (batching.enabled && batching.batch_include(name))
+        .then(|| JoinBatchRequestsLayer::new(name));
     ServiceBuilder::new()
-        .layer(JoinBatchRequestsLayer::new(name))
+        .option_layer(join_batches)
         .option_layer(response_size_limit)
         .apply_plugin_layer(&plugins, Telemetry::overhead_subgraph_request_timing_layer)
         .apply_plugin_layer(&plugins, Telemetry::instrument_http_client_layer)
@@ -191,6 +203,7 @@ fn http_client_service(
 pub(crate) fn build_http_services(
     client_inputs: HttpClientInputsMaps,
     plugins: &Arc<Plugins>,
+    configuration: &Configuration,
 ) -> (
     IndexMap<String, http::BoxCloneService>,
     IndexMap<String, http::BoxCloneService>,
@@ -202,7 +215,7 @@ pub(crate) fn build_http_services(
     let subgraph_services = subgraph_inputs
         .into_iter()
         .map(|(name, inputs)| {
-            let service = build_http_client_service(&name, inputs, plugins.clone());
+            let service = build_http_client_service(&name, inputs, plugins.clone(), configuration);
             (name, service)
         })
         .collect();
@@ -212,29 +225,105 @@ pub(crate) fn build_http_services(
             // source_config_key() format is "{subgraph_name}.{source_or_synthetic}"; the
             // http_client_service plugin hook receives the subgraph name, not the source key.
             let subgraph_name = source.split('.').next().unwrap_or(&source);
-            let service = http_client_service(subgraph_name, inputs, plugins.clone(), None);
+            let service =
+                http_client_service(subgraph_name, inputs, plugins.clone(), configuration, None);
             (source, service)
         })
         .collect();
     (subgraph_services, connector_services)
 }
 
-/// Builds the full service stack for one subgraph around its HTTP client.
+/// Builds the full service stack for one subgraph around its HTTP client: the layers whose
+/// configuration applies to the subgraph, and no others, shared by every subgraph request as a
+/// pool of copies that each request readies and calls on its own task.
 pub(crate) fn build_subgraph_service(
     name: &str,
     http_service: http::BoxCloneService,
     plugins: &Arc<Plugins>,
     configuration: &Configuration,
 ) -> PooledSubgraphService {
-    let subscription_config = subscription_plugin_config(plugins).map(Arc::new);
-    let apq_enabled = configuration.apq.subgraph.get(name).enabled;
+    // A subscription is opened through this layer where the subscription plugin is enabled and
+    // configures a mode for the subgraph. The fetch of a subscription refuses to open one anywhere
+    // else before it reaches a subgraph's stack.
+    let subscription = subscription_plugin_config(plugins)
+        .filter(|config| config.enabled && config.mode.get_subgraph_config(name).is_some())
+        .map(|config| {
+            SubscriptionSubgraphLayer::new(
+                configuration.notify.clone(),
+                Arc::new(config),
+                Arc::from(name),
+            )
+        });
+    let apq = configuration
+        .apq
+        .subgraph
+        .get(name)
+        .enabled
+        .then_some(SubgraphApqLayer);
+    let hooked = ServiceBuilder::new()
+        .rust_plugins(plugins.clone(), |plugin, service| {
+            plugin.subgraph_service(name, service)
+        })
+        .option_layer(subscription)
+        .option_layer(apq)
+        .layer(content_negotiation::SubgraphContentNegotiationLayer::default())
+        .service(SubgraphService::new(name, http_service));
 
-    // The stack is boxed at three points, so no layer wraps a type that names the whole stack
-    // beneath it; [`box_layer`] explains why that matters. The trade-off is one boxed future
-    // per box on every fetch. The outermost box is what the pool holds copies of, so
-    // [`SubgraphServices::get`], which runs once per fetch node per request, hands out the pool's
-    // handle as it is.
-    let service = ServiceBuilder::new()
+    let shaping = plugins
+        .values()
+        .find_map(|plugin| plugin.as_any().downcast_ref::<TrafficShaping>())
+        .expect(
+            "mandatory plugin traffic_shaping is missing from the plugin registry; this is a router \
+             bug",
+        );
+    let service = if shaping.subgraph_shaped(name) {
+        subgraph_plugin_layers(
+            name,
+            plugins,
+            shaped_subgraph_service(name, plugins, hooked),
+        )
+    } else {
+        // With no traffic shaping configured every shaping layer would be an identity, and the
+        // admission buffer would have no rate limit to make cloneable: the circuit, where
+        // configured, sits straight above the plugin hooks, as it sits beneath the timeout where
+        // shaping is configured.
+        subgraph_plugin_layers(
+            name,
+            plugins,
+            ServiceBuilder::new()
+                .apply_plugin_layer(plugins, |c: &CircuitBreaker| c.subgraph_circuit_layer(name))
+                .service(hooked),
+        )
+    };
+
+    // Every subgraph request takes a copy of the stack from the pool, readies and calls it on its
+    // own task, and returns it; the bound is the one the buffer this pool replaced held over the
+    // requests queued for its worker.
+    Pooled::bounded(service, DEFAULT_BUFFER_SIZE)
+}
+
+/// The layers above traffic shaping on a subgraph's stack, over `service`: subgraph error tagging,
+/// the header rules, telemetry's instruments and its FTV1 header.
+///
+/// The stack is boxed here, at its top, where the plugin hooks take it, and twice beneath traffic
+/// shaping's admission buffer where shaping is configured, so no layer wraps a type that names the
+/// whole stack beneath it; [`box_layer`] explains why that matters. The trade-off is one boxed
+/// future per box on every fetch. The top box is what the pool holds copies of, so
+/// [`SubgraphServices::get`], which runs once per fetch node per request, hands out the pool's
+/// handle as it is.
+fn subgraph_plugin_layers<S>(
+    name: &str,
+    plugins: &Plugins,
+    service: S,
+) -> BoxCloneService<SubgraphRequest, SubgraphResponse, BoxError>
+where
+    S: Service<SubgraphRequest, Response = SubgraphResponse, Error = BoxError>
+        + Clone
+        + Send
+        + 'static,
+    S::Future: Send + 'static,
+{
+    ServiceBuilder::new()
         .layer(box_clone_layer())
         .apply_required_plugin_layer(plugins, |p: &IncludeSubgraphErrors| {
             p.tag_errors_with_subgraph_name_layer(Arc::from(name))
@@ -242,15 +331,24 @@ pub(crate) fn build_subgraph_service(
         .apply_required_plugin_layer(plugins, |h: &Headers| h.subgraph_headers_layer(name))
         .apply_plugin_layer(plugins, Telemetry::instrument_subgraph_layer)
         .apply_plugin_layer(plugins, Telemetry::subgraph_ftv1_layer)
-        // Traffic shaping runs outside every plugin hook and inside telemetry, which records
-        // what it rejects. The `admission` module in traffic shaping explains the order of this
-        // buffer and the three layers after it. The buffer is placed even without shaping
-        // configuration: the rate limit can't be cloned, and the telemetry layers need a
-        // service they can clone. The timeout answers its own errors, so it doesn't depend on
-        // the layers above it.
+        .service(service)
+}
+
+/// Traffic shaping's layers over a subgraph's plugin hooks, `hooked`, where shaping is configured
+/// for the subgraph.
+///
+/// Traffic shaping runs outside every plugin hook and inside telemetry, which records what it
+/// rejects. The `admission` module in traffic shaping explains the order of the buffer and the
+/// three layers after it. The rate limit can't be cloned, so neither box beneath the buffer needs
+/// `Clone`; the buffer is what makes the stack cloneable again for the layers above it. The
+/// timeout answers its own errors, so it doesn't depend on the layers above it.
+fn shaped_subgraph_service(
+    name: &str,
+    plugins: &Plugins,
+    hooked: subgraph::BoxCloneService,
+) -> UnconstrainedBuffer<SubgraphRequest, BoxFuture<'static, subgraph::ServiceResult>> {
+    ServiceBuilder::new()
         .buffered()
-        // The rate limit can't be cloned, so neither box beneath this buffer needs `Clone`; the
-        // buffer is what makes the stack cloneable again.
         .layer(box_layer())
         .apply_required_plugin_layer(plugins, |t: &TrafficShaping| {
             t.subgraph_error_response_layer(name)
@@ -279,22 +377,7 @@ pub(crate) fn build_subgraph_service(
         .apply_required_plugin_layer(plugins, |t: &TrafficShaping| {
             t.subgraph_backpressure_buffer_layer(name)
         })
-        .rust_plugins(plugins.clone(), |plugin, service| {
-            plugin.subgraph_service(name, service)
-        })
-        .layer(SubscriptionSubgraphLayer::new(
-            configuration.notify.clone(),
-            subscription_config,
-            Arc::from(name),
-        ))
-        .layer(SubgraphApqLayer::new(apq_enabled))
-        .layer(content_negotiation::SubgraphContentNegotiationLayer::default())
-        .service(SubgraphService::new(name, http_service));
-
-    // Every subgraph request takes a copy of the stack from the pool, readies and calls it on its
-    // own task, and returns it; the bound is the one the buffer this pool replaced held over the
-    // requests queued for its worker.
-    Pooled::bounded(service, DEFAULT_BUFFER_SIZE)
+        .service(hooked)
 }
 
 /// Builds the full service stack for every subgraph, keyed by subgraph name.

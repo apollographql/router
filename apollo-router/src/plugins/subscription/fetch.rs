@@ -30,9 +30,9 @@ use crate::spec::Schema;
 
 /// Execute the fetches required to fulfill a subscription query plan node.
 ///
-/// Calls into the relevant subgraph service to run the actual requests. This means the
-/// [SubgraphServices] must produce services that have the [SubscriptionSubgraphLayer][]
-/// applied!
+/// Calls into the relevant subgraph service to run the actual requests. The subgraph stage places
+/// the [SubscriptionSubgraphLayer][] on every subgraph the subscription plugin configures a mode
+/// for, and this refuses to open a subscription to any other subgraph before calling its service.
 ///
 /// [SubscriptionSubgraphLayer]: super::subgraph::SubscriptionSubgraphLayer
 pub(crate) fn fetch_service_handle_subscription(

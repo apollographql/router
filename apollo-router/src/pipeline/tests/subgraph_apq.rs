@@ -163,12 +163,18 @@ async fn respects_all_disabled_config() {
 
     let services = build_subgraph_services(http_services, &required_stage_plugins().await, &config);
     let url = Uri::from_str(&format!("http://{socket_addr}")).unwrap();
-    services
+    let resp = services
         .get("test")
         .unwrap()
         .oneshot(subgraph_request(url, "test", "query"))
         .await
         .unwrap();
+
+    // The server's assertions fail its connection, not this test: its answer shows they held.
+    assert_eq!(
+        resp.response.body().data,
+        Some(serde_json_bytes::Value::String(ByteString::from("test")))
+    );
 }
 
 #[tokio::test(flavor = "multi_thread")]
@@ -272,16 +278,21 @@ async fn per_subgraph_override_takes_precedence_over_all() {
         .context(Context::new())
         .build();
 
-    services
+    let enabled = services
         .get("enabled_subgraph")
         .unwrap()
         .oneshot(enabled_request)
         .await
         .unwrap();
-    services
+    let disabled = services
         .get("disabled_subgraph")
         .unwrap()
         .oneshot(disabled_request)
         .await
         .unwrap();
+
+    // The server's assertions fail its connection, not this test: its answers show they held.
+    let answered = Some(serde_json_bytes::Value::String(ByteString::from("test")));
+    assert_eq!(enabled.response.body().data, answered);
+    assert_eq!(disabled.response.body().data, answered);
 }

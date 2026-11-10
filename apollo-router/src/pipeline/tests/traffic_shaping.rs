@@ -95,6 +95,33 @@ async fn timeout_is_answered_with_gateway_timeout() {
     assert!(handle.next_request().await.is_some());
 }
 
+/// An empty shaping block, `all`'s or the subgraph's own, still shapes the subgraph: its stack keeps
+/// the timeout, at its 30 second default.
+#[tokio::test(start_paused = true)]
+async fn an_empty_shaping_block_keeps_the_default_timeout() {
+    for traffic_shaping in [
+        serde_json::json!({ "all": {} }),
+        serde_json::json!({ "subgraphs": { SUBGRAPH: {} } }),
+    ] {
+        let (mut service, mut handle) = subgraph_service(traffic_shaping.clone()).await;
+        let start = tokio::time::Instant::now();
+
+        // The subgraph never answers.
+        let response = send(&mut service).await;
+        assert_eq!(
+            response.response.status(),
+            StatusCode::GATEWAY_TIMEOUT,
+            "{traffic_shaping}"
+        );
+        let waited = start.elapsed();
+        assert!(
+            waited >= Duration::from_secs(30) && waited < Duration::from_secs(31),
+            "{traffic_shaping}: timed out after {waited:?}"
+        );
+        assert!(handle.next_request().await.is_some());
+    }
+}
+
 #[tokio::test(start_paused = true)]
 async fn subgraph_without_shaping_config_is_not_shaped() {
     let (mut service, mut handle) = subgraph_service(serde_json::json!({})).await;

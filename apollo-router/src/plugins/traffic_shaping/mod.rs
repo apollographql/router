@@ -465,7 +465,8 @@ pub(crate) enum ShapingTarget<'a> {
 /// The layers traffic shaping applies to each subgraph and connector source.
 ///
 /// A target with no traffic shaping configuration, neither its own block nor `all`, gets an
-/// identity layer from every constructor. The layers go in this order, from the outside in:
+/// identity layer from every constructor, and the subgraph stage places none of them for such a
+/// subgraph ([`Self::subgraph_shaped`]). The layers go in this order, from the outside in:
 ///
 /// 1. admission: a buffer, error responses, load shedding and rate limit (the stage places the
 ///    buffer itself)
@@ -482,6 +483,12 @@ impl TrafficShaping {
     fn subgraph_shaping(&self, name: &str) -> Option<Shaping> {
         Self::merge_config(self.config.all.as_ref(), self.config.subgraphs.get(name))
             .map(|config| config.shaping)
+    }
+
+    /// Whether this subgraph has traffic shaping configuration, its own block or `all`, an empty
+    /// one included. Where it has none, every layer below is an identity for it.
+    pub(crate) fn subgraph_shaped(&self, name: &str) -> bool {
+        self.subgraph_shaping(name).is_some()
     }
 
     /// This connector source's shaping: its own block merged over `all`, or `all` alone.

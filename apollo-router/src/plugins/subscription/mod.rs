@@ -297,9 +297,13 @@ impl Plugin for Subscription {
     ) -> crate::services::subgraph::BoxCloneService {
         let enabled = self.config.enabled
             && (self.config.mode.callback.is_some() || self.config.mode.passthrough.is_some());
+        // Enabled, the hook has nothing to turn away, so it places nothing.
+        if enabled {
+            return service;
+        }
         ServiceBuilder::new()
             .checkpoint_async(move |req: SubgraphRequest| async move {
-                if req.operation_kind == OperationKind::Subscription && !enabled {
+                if req.operation_kind == OperationKind::Subscription {
                     Ok(ControlFlow::Break(
                         SubgraphResponse::builder()
                             .context(req.context)

@@ -412,8 +412,6 @@ mod tests {
     use crate::protocols::websocket::WebSocketProtocol;
     use crate::query_planner::fetch::OperationKind;
     use crate::services::http::test_http_client_service;
-    use crate::services::layers::apq::subgraph::SubgraphApqLayer;
-    use crate::services::layers::apq::subgraph::SubgraphApqService;
     use crate::services::layers::content_negotiation::GRAPHQL_JSON_RESPONSE_HEADER_VALUE;
     use crate::services::layers::content_negotiation::SubgraphContentNegotiationLayer;
     use crate::services::layers::content_negotiation::SubgraphContentNegotiationService;
@@ -875,22 +873,19 @@ mod tests {
         SubgraphContentNegotiationLayer::default().layer(s)
     }
 
-    /// Manually rebuilds the production layer stack (Subscription -> APQ ->
+    /// Manually rebuilds the production layer stack with APQ off (Subscription ->
     /// ContentNegotiation -> SubgraphService) for subscriptions tests, which construct a
     /// `SubgraphService` directly instead of going through the `build_subgraph_service`
     /// pipeline function.
     fn with_subscription_layer(
         s: SubgraphService,
-    ) -> SubscriptionSubgraphService<
-        SubgraphApqService<SubgraphContentNegotiationService<SubgraphService>>,
-    > {
+    ) -> SubscriptionSubgraphService<SubgraphContentNegotiationService<SubgraphService>> {
         ServiceBuilder::new()
             .layer(SubscriptionSubgraphLayer::new(
                 Notify::builder().build(),
-                Some(Arc::new(subscription_config())),
+                Arc::new(subscription_config()),
                 Arc::from(s.service.to_string()),
             ))
-            .layer(SubgraphApqLayer::new(false))
             .layer(SubgraphContentNegotiationLayer::default())
             .service(s)
     }
@@ -1499,7 +1494,7 @@ mod tests {
             // call its own) so both requests below hit the same deduplication topic.
             let subgraph_service = SubscriptionSubgraphLayer::new(
                 Notify::builder().build(),
-                Some(Arc::new(subscription_config())),
+                Arc::new(subscription_config()),
                 Arc::from("test"),
             )
             .layer(SubgraphService::new(
@@ -2275,9 +2270,7 @@ mod tests {
     ) -> SubscriptionSubgraphService<SubgraphService> {
         SubscriptionSubgraphLayer::new(
             crate::plugins::subscription::notification::Notify::builder().build(),
-            Some(Arc::new(subscription_config_with_reconnect(
-                max_reconnect_attempts,
-            ))),
+            Arc::new(subscription_config_with_reconnect(max_reconnect_attempts)),
             Arc::from(s.service.to_string()),
         )
         .layer(s)
@@ -2303,10 +2296,10 @@ mod tests {
     ) -> SubscriptionSubgraphService<SubgraphService> {
         SubscriptionSubgraphLayer::new(
             crate::plugins::subscription::notification::Notify::builder().build(),
-            Some(Arc::new(subscription_config_with_reconnect_protocol(
+            Arc::new(subscription_config_with_reconnect_protocol(
                 max_reconnect_attempts,
                 protocol,
-            ))),
+            )),
             Arc::from(s.service.to_string()),
         )
         .layer(s)
@@ -3008,10 +3001,10 @@ mod tests {
             let reconnect_delay = std::time::Duration::from_millis(200);
             let subgraph_service = SubscriptionSubgraphLayer::new(
                 crate::plugins::subscription::notification::Notify::builder().build(),
-                Some(Arc::new(subscription_config_with_reconnect_delay(
+                Arc::new(subscription_config_with_reconnect_delay(
                     3,
                     reconnect_delay,
-                ))),
+                )),
                 Arc::from("test"),
             )
             .layer(
@@ -3118,10 +3111,10 @@ mod tests {
             // handshake is in progress.
             let subgraph_service = SubscriptionSubgraphLayer::new(
                 crate::plugins::subscription::notification::Notify::builder().build(),
-                Some(Arc::new(subscription_config_with_reconnect_delay(
+                Arc::new(subscription_config_with_reconnect_delay(
                     3,
                     std::time::Duration::from_millis(1),
-                ))),
+                )),
                 Arc::from("test"),
             )
             .layer(

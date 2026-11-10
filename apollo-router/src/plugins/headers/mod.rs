@@ -569,28 +569,23 @@ static RESERVED_HEADERS: [HeaderName; 14] = [
     HeaderName::from_static("keep-alive"),
 ];
 
+// The rules are applied as the request is called, and the readied inner service is called with
+// it: nothing here awaits, so the inner service is never cloned for a request.
 impl<S> Service<SubgraphRequest> for HeadersService<S>
 where
-    S: Service<SubgraphRequest> + Clone + Send + 'static,
-    S::Future: Send + 'static,
+    S: Service<SubgraphRequest>,
 {
     type Response = S::Response;
     type Error = S::Error;
-    type Future = BoxFuture<'static, Result<Self::Response, Self::Error>>;
+    type Future = S::Future;
 
     fn poll_ready(&mut self, cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
         self.inner.poll_ready(cx)
     }
 
     fn call(&mut self, mut req: SubgraphRequest) -> Self::Future {
-        let inner = self.inner.clone();
-        let mut inner = std::mem::replace(&mut self.inner, inner);
-        let operations = self.operations.clone();
-
-        Box::pin(async move {
-            Self::modify_subgraph_request(&operations, &mut req);
-            inner.call(req).await
-        })
+        Self::modify_subgraph_request(&self.operations, &mut req);
+        self.inner.call(req)
     }
 }
 
