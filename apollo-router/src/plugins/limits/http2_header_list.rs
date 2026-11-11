@@ -4,8 +4,8 @@
 //! the connection, and the request never reaches the Router's telemetry. So the Router advertises
 //! a larger header-list size to h2 (see [`advertised_size`]) and rejects requests over the
 //! configured limit itself, which records the 431 like any other response. Graph requests get the
-//! check from [`RouterHeaderListLimitLayer`] in the router service stack; plugin endpoints, which
-//! don't go through that stack, get it from [`EndpointHeaderListLimitLayer`].
+//! check from [`RouterHeaderListLimitLayer`] in the limits plugin's router service; plugin
+//! endpoints, which don't go through it, get it from [`EndpointHeaderListLimitLayer`].
 //! The check applies only to HTTP/2: HTTP/1.1 keeps hyper's count and buffer limits.
 
 use std::future::Ready;

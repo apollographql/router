@@ -117,9 +117,9 @@ pub(super) fn extra_endpoints(
 
 /// Builds a plugin endpoint's router, on any listener.
 ///
-/// Plugin endpoints don't go through the router service stack, where graph requests get the HTTP/2
-/// header-list check, so they get the limits plugin's endpoint layer instead. HTTP/1.1 header
-/// limits need none: hyper enforces them on the connection, before any route is chosen.
+/// Plugin endpoints don't go through the limits plugin's router service, where graph requests get
+/// the HTTP/2 header-list check, so they get its endpoint layer instead. HTTP/1.1 header limits
+/// need none: hyper enforces them on the connection, before any route is chosen.
 pub(super) fn endpoint_router(endpoint: Endpoint, plugins: &Plugins) -> Router {
     let mut router = endpoint.into_router().layer(
         ServiceBuilder::new()

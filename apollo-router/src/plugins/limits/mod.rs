@@ -265,18 +265,16 @@ pub(crate) struct LimitsPlugin {
 }
 
 impl LimitsPlugin {
-    /// The HTTP/2 header-list check for graph requests, applied in the router service stack ahead
-    /// of every plugin's [`PluginPrivate::router_service`].
-    pub(crate) fn router_header_list_limit_layer(
-        &self,
-    ) -> http2_header_list::RouterHeaderListLimitLayer {
+    /// The HTTP/2 header-list check for graph requests, the first layer of
+    /// [`PluginPrivate::router_service`].
+    fn router_header_list_limit_layer(&self) -> http2_header_list::RouterHeaderListLimitLayer {
         http2_header_list::RouterHeaderListLimitLayer::new(
             self.config.router.http2_header_list_limit(),
         )
     }
 
-    /// The HTTP/2 header-list check for plugin endpoints, which don't go through the router
-    /// service stack.
+    /// The HTTP/2 header-list check for plugin endpoints, which don't go through
+    /// [`PluginPrivate::router_service`].
     pub(crate) fn endpoint_header_list_limit_layer(
         &self,
     ) -> http2_header_list::EndpointHeaderListLimitLayer {
@@ -301,6 +299,11 @@ impl PluginPrivate for LimitsPlugin {
 
     fn router_service(&self, service: BoxService) -> BoxService {
         ServiceBuilder::new()
+            // Runs ahead of the body limit and of the plugins after this one (CSRF, authentication,
+            // Rhai, coprocessors), so none of them reads or forwards an oversized header list.
+            // Telemetry wraps this plugin, so it records the 431. Traffic shaping and license
+            // enforcement wrap it too, so under load they may answer 503 first.
+            .layer(self.router_header_list_limit_layer())
             .map_future_with_request_data(
                 |r: &router::Request| r.context.clone(),
                 |ctx, f| async { Self::map_error_to_graphql(f.await, ctx) },
@@ -443,7 +446,6 @@ impl From<ConnectorConfiguration<ConnectorLimits>> for Config {
 mod test {
     use http::StatusCode;
     use tower::BoxError;
-    use tower::ServiceBuilder;
     use tower::ServiceExt;
     use tower::service_fn;
 
@@ -531,18 +533,12 @@ mod test {
             .into()
     }
 
-    /// A router service that fails the test if a request reaches it.
-    fn unreachable_router_service() -> router::BoxService {
-        service_fn(|_| async { panic!("the request should have been rejected") }).boxed()
-    }
-
     #[tokio::test]
     async fn test_http2_header_list_limit_exceeded() {
         let plugin = plugin().await;
-        let resp = ServiceBuilder::new()
-            .layer(plugin.router_header_list_limit_layer())
-            .service(unreachable_router_service())
-            .oneshot(oversized_header_list_request(http::Version::HTTP_2))
+        let resp = plugin
+            .router_service(|_| async { panic!("the request should have been rejected") })
+            .call(oversized_header_list_request(http::Version::HTTP_2))
             .await;
         assert_rejected(
             resp,
@@ -555,12 +551,9 @@ mod test {
     #[tokio::test]
     async fn test_http2_header_list_limit_ignores_http1() {
         let plugin = plugin().await;
-        let resp = ServiceBuilder::new()
-            .layer(plugin.router_header_list_limit_layer())
-            .service_fn(|_: router::Request| async {
-                Ok::<_, BoxError>(router::Response::fake_builder().build().unwrap())
-            })
-            .oneshot(oversized_header_list_request(http::Version::HTTP_11))
+        let resp = plugin
+            .router_service(|_| async { Ok(router::Response::fake_builder().build().unwrap()) })
+            .call(oversized_header_list_request(http::Version::HTTP_11))
             .await;
         assert_ok(resp).await;
     }
@@ -585,13 +578,14 @@ mod test {
                 .build()
                 .await
                 .expect("test harness");
-            // Telemetry wraps the header-list check, as it does in the router pipeline.
+            // Telemetry wraps the limits plugin, as it does in the router pipeline.
             let service = PluginPrivate::router_service(
                 &*telemetry,
-                ServiceBuilder::new()
-                    .layer(limits.router_header_list_limit_layer())
-                    .service(unreachable_router_service())
-                    .boxed(),
+                PluginPrivate::router_service(
+                    &*limits,
+                    service_fn(|_| async { panic!("the request should have been rejected") })
+                        .boxed(),
+                ),
             );
 
             let resp = service

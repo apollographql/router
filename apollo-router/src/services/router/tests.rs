@@ -26,7 +26,6 @@ use crate::services::SupergraphResponse;
 use crate::services::router;
 use crate::services::router::body::RouterBody;
 use crate::services::router::service::from_supergraph_mock;
-use crate::services::router::service::plugin_router_service;
 use crate::services::router::service::process_vary_header;
 use crate::services::subgraph;
 use crate::services::supergraph;
@@ -1110,45 +1109,6 @@ async fn redacted_validation_errors() {
     "###);
 }
 
-/// Stands in for traffic shaping while it sheds load: answers every request with a 503.
-struct SheddingPlugin;
-
-#[async_trait::async_trait]
-impl crate::plugin::Plugin for SheddingPlugin {
-    type Config = ();
-
-    async fn new(_init: crate::plugin::PluginInit<Self::Config>) -> Result<Self, BoxError> {
-        Ok(Self)
-    }
-
-    fn router_service(&self, _service: router::BoxService) -> router::BoxService {
-        tower::service_fn(|request: router::Request| async move {
-            router::Response::error_builder()
-                .status_code(http::StatusCode::SERVICE_UNAVAILABLE)
-                .error(graphql::Error::builder().message("shedding load").build())
-                .context(request.context)
-                .build()
-        })
-        .boxed()
-    }
-}
-
-/// Creates the `apollo.<name>` plugin as the Router would, from its config section.
-async fn create_plugin(name: &str, config: serde_json::Value) -> Box<dyn crate::plugin::DynPlugin> {
-    let init = crate::plugin::PluginInit::fake_builder()
-        .config(config.clone())
-        .full_config(serde_json::json!({ name: config }))
-        .build()
-        .with_deserialized_config()
-        .unwrap();
-    crate::plugin::plugins()
-        .find(|factory| factory.name == format!("apollo.{name}"))
-        .unwrap()
-        .create_instance(init)
-        .await
-        .unwrap()
-}
-
 /// An HTTP/2 request whose header list is just over the default 16 KiB limit.
 fn oversized_http2_header_list_request() -> router::Request {
     Request::builder()
@@ -1160,74 +1120,38 @@ fn oversized_http2_header_list_request() -> router::Request {
         .into()
 }
 
-fn unreachable_router_service() -> router::BoxService {
-    tower::service_fn(|_| async { panic!("the request should have been rejected") }).boxed()
-}
-
-#[tokio::test(flavor = "multi_thread")]
-async fn http2_header_list_check_runs_inside_telemetry_and_before_other_plugins() {
-    async {
-        let telemetry = create_plugin(
-            "telemetry",
-            serde_json::json!({
-                "instrumentation": {
-                    "instruments": {
-                        "router": { "http.server.request.duration": true }
-                    }
-                }
-            }),
-        )
-        .await;
-        let limits = create_plugin("limits", serde_json::json!({})).await;
-        // Registry order as in the Router: telemetry, then traffic shaping, then limits.
-        let plugins = crate::services::Plugins::from_iter([
-            ("apollo.telemetry".to_string(), telemetry),
-            (
-                "apollo.traffic_shaping".to_string(),
-                Box::new(SheddingPlugin) as Box<dyn crate::plugin::DynPlugin>,
-            ),
-            ("apollo.limits".to_string(), limits),
-        ]);
-
-        let response = plugin_router_service(&plugins, unreachable_router_service())
-            .oneshot(oversized_http2_header_list_request())
-            .await
-            .unwrap();
-
-        assert_eq!(
-            response.response.status(),
-            http::StatusCode::REQUEST_HEADER_FIELDS_TOO_LARGE
-        );
-        assert_histogram_count!(
-            "http.server.request.duration",
-            1,
-            "error.type" = "Request Header Fields Too Large",
-            "http.request.method" = "GET",
-            "http.response.status_code" = 431
-        );
-    }
-    .with_metrics()
-    .await;
-}
-
 #[tokio::test]
-async fn http2_header_list_check_is_outermost_without_telemetry() {
-    let limits = create_plugin("limits", serde_json::json!({})).await;
-    let plugins = crate::services::Plugins::from_iter([
-        (
-            "apollo.traffic_shaping".to_string(),
-            Box::new(SheddingPlugin) as Box<dyn crate::plugin::DynPlugin>,
-        ),
-        ("apollo.limits".to_string(), limits),
-    ]);
-
-    let response = plugin_router_service(&plugins, unreachable_router_service())
-        .oneshot(oversized_http2_header_list_request())
+async fn http2_header_list_check_runs_after_traffic_shaping() {
+    // One request per 10 minutes: the second request finds traffic shaping shedding load.
+    let router = crate::TestHarness::builder()
+        .configuration_json(serde_json::json!({
+            "traffic_shaping": {
+                "router": {
+                    "global_rate_limit": { "capacity": 1, "interval": "10min" }
+                }
+            }
+        }))
+        .unwrap()
+        .build_router()
         .await
         .unwrap();
 
+    let response = router
+        .clone()
+        .oneshot(oversized_http2_header_list_request())
+        .await
+        .unwrap();
     assert_eq!(
         response.response.status(),
         http::StatusCode::REQUEST_HEADER_FIELDS_TOO_LARGE
+    );
+
+    let response = router
+        .oneshot(oversized_http2_header_list_request())
+        .await
+        .unwrap();
+    assert_eq!(
+        response.response.status(),
+        http::StatusCode::SERVICE_UNAVAILABLE
     );
 }
