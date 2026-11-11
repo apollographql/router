@@ -5,7 +5,7 @@
 //! a larger header-list size to h2 (see [`advertised_size`]) and rejects requests over the
 //! configured limit itself (see [`exceeds_limit`]), which records the 431 like any other response.
 //! Plugin endpoints, which don't go through the limits plugin, get the same check from
-//! [`Http2HeaderListLimitLayer`].
+//! [`EndpointHeaderListLimitLayer`].
 //! The check applies only to HTTP/2: HTTP/1.1 keeps hyper's count and buffer limits.
 
 use std::future::Ready;
@@ -44,35 +44,35 @@ pub(crate) fn exceeds_limit<B>(request: &http::Request<B>, limit: ByteSize) -> b
 /// endpoints. Without it, they would accept header lists up to the advertised size instead of the
 /// configured limit.
 #[derive(Clone)]
-pub(crate) struct Http2HeaderListLimitLayer {
+pub(crate) struct EndpointHeaderListLimitLayer {
     limit: ByteSize,
 }
 
-impl Http2HeaderListLimitLayer {
+impl EndpointHeaderListLimitLayer {
     pub(crate) fn new(limit: ByteSize) -> Self {
         Self { limit }
     }
 }
 
-impl<S> Layer<S> for Http2HeaderListLimitLayer {
-    type Service = Http2HeaderListLimit<S>;
+impl<S> Layer<S> for EndpointHeaderListLimitLayer {
+    type Service = EndpointHeaderListLimit<S>;
 
     fn layer(&self, inner: S) -> Self::Service {
-        Http2HeaderListLimit {
+        EndpointHeaderListLimit {
             inner,
             limit: self.limit,
         }
     }
 }
 
-/// The service [`Http2HeaderListLimitLayer`] wraps around an endpoint.
+/// The service [`EndpointHeaderListLimitLayer`] wraps around an endpoint.
 #[derive(Clone)]
-pub(crate) struct Http2HeaderListLimit<S> {
+pub(crate) struct EndpointHeaderListLimit<S> {
     inner: S,
     limit: ByteSize,
 }
 
-impl<S, ReqBody, ResBody> Service<http::Request<ReqBody>> for Http2HeaderListLimit<S>
+impl<S, ReqBody, ResBody> Service<http::Request<ReqBody>> for EndpointHeaderListLimit<S>
 where
     S: Service<http::Request<ReqBody>, Response = http::Response<ResBody>>,
     ResBody: Default,
@@ -204,7 +204,7 @@ mod tests {
                     async { Ok::<_, std::convert::Infallible>(http::Response::new("ok".into())) }
                 }
             });
-            let response = Http2HeaderListLimitLayer::new(LIMIT)
+            let response = EndpointHeaderListLimitLayer::new(LIMIT)
                 .layer(endpoint)
                 .oneshot(request)
                 .await
