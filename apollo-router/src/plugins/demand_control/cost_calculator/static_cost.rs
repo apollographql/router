@@ -798,6 +798,17 @@ mod tests {
     use crate::spec;
     use crate::spec::Query;
 
+    impl StaticCostCalculator {
+        fn rust_planned(
+            &self,
+            query_plan: &apollo_federation::query_plan::QueryPlan,
+            variables: &Object,
+        ) -> Result<f64, DemandControlError> {
+            let js_planner_node: PlanNode = query_plan.node.as_ref().unwrap().into();
+            Ok(self.score_plan_node(&js_planner_node, variables)?.total())
+        }
+    }
+
     fn parse_schema_and_operation(
         schema_str: &str,
         query_str: &str,
@@ -923,17 +934,6 @@ mod tests {
     }
 
     fn planned_cost_rust(schema_str: &str, query_str: &str, variables_str: &str) -> f64 {
-        planned_cost_by_subgraph_rust(schema_str, query_str, variables_str, 100).total()
-    }
-
-    /// Estimate the cost of an operation against its (Rust) query plan, broken down by
-    /// subgraph, using `list_size` as the configured default list size.
-    fn planned_cost_by_subgraph_rust(
-        schema_str: &str,
-        query_str: &str,
-        variables_str: &str,
-        list_size: u32,
-    ) -> CostBySubgraph {
         let config: Arc<Configuration> = Arc::new(Default::default());
         let (schema, query) = parse_schema_and_operation(schema_str, query_str, &config);
         let variables = serde_json::from_str::<Value>(variables_str)
@@ -963,11 +963,10 @@ mod tests {
             Arc::new(schema),
             Arc::new(demand_controlled_subgraph_schemas),
             Default::default(),
-            list_size,
+            100,
         );
 
-        let plan_node: PlanNode = query_plan.node.as_ref().unwrap().into();
-        calculator.score_plan_node(&plan_node, &variables).unwrap()
+        calculator.rust_planned(&query_plan, &variables).unwrap()
     }
 
     fn actual_cost(
