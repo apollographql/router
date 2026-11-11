@@ -281,9 +281,9 @@ query BooksByIds($ids: [ID!]!) {
 
 <MinVersionBadge version="Router v2.12.0" />
 
-When the list size comes from an argument nested in an input object, use a dot-separated path in `slicingArguments`. The router resolves the path against the query arguments and variable values to determine the size.
+When the list size comes from an input field nested in an argument, use a dot-separated path in `slicingArguments`. The router resolves the path against the query arguments and variable values to determine the size.
 
-Each path must name an argument of the field, followed by fields of the input object types it leads through. If a path doesn't resolve against the schema, the router logs a warning when it loads the schema and ignores that entry.
+If a path doesn't resolve against the schema, the router logs a warning when it loads the schema and ignores that entry. Federation v2.12 and above reject paths that don't resolve.
 
 ```graphql
 input PaginationInput {
