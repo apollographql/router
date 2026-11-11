@@ -374,7 +374,7 @@ Limit the maximum buffer size for the HTTP1 connection. Default is ~400KiB.
 Limits the total size of the header list for your incoming HTTP/2 requests.
 The default value is 16KiB.
 
-The size of a header list is the sum, over every header field, of the name length, the value length and 32 bytes. Pseudo-headers such as `:method` and `:path` count too. Each `cookie` field counts separately, so a browser that splits its cookies into many fields adds 32 bytes per cookie.
+The size of a header list is the sum, over every header field, of the name length, the value length and 32 bytes. Pseudo-headers such as `:method` and `:path` count too.
 
 The router tells HTTP/2 clients that it accepts header lists somewhat larger than this limit, so that it can reject requests over the limit itself and record them. The advertised size (the HTTP/2 `SETTINGS_MAX_HEADER_LIST_SIZE` setting) is the limit plus three times the limit, with at most 256KiB added. With the default limit, the router advertises 64KiB.
 
