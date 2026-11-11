@@ -733,10 +733,13 @@ impl RouterCreator {
         let sb = UnconstrainedBuffer::new(
             ServiceBuilder::new()
                 .layer(static_page.clone())
-                .service(plugin_router_service(
-                    &supergraph_creator.plugins(),
-                    router_service.boxed(),
-                ))
+                .service(
+                    supergraph_creator
+                        .plugins()
+                        .iter()
+                        .rev()
+                        .fold(router_service.boxed(), |acc, (_, e)| e.router_service(acc)),
+                )
                 .boxed(),
             DEFAULT_BUFFER_SIZE,
         );
@@ -761,14 +764,6 @@ impl RouterCreator {
         // Note: We have to box our cloned service to erase the type of the Buffer.
         self.sb.clone().boxed()
     }
-}
-
-/// Wraps `service` in every plugin's router service, the first registered plugin outermost.
-fn plugin_router_service(plugins: &Plugins, service: router::BoxService) -> router::BoxService {
-    plugins
-        .iter()
-        .rev()
-        .fold(service, |acc, (_, plugin)| plugin.router_service(acc))
 }
 
 impl RouterCreator {
