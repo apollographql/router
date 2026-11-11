@@ -3,7 +3,6 @@ mod layer;
 mod limited;
 
 use std::error::Error;
-use std::ops::ControlFlow;
 
 use async_trait::async_trait;
 use bytesize::ByteSize;
@@ -296,22 +295,14 @@ impl PluginPrivate for LimitsPlugin {
     }
 
     fn router_service(&self, service: BoxService) -> BoxService {
-        let http2_header_list_limit = self.config.router.http2_header_list_limit();
         ServiceBuilder::new()
             // Runs ahead of the body limit and of the plugins after this one (CSRF, authentication,
             // Rhai, coprocessors), so none of them reads or forwards an oversized header list.
-            .checkpoint(move |request: router::Request| {
-                if http2_header_list::exceeds_limit(
-                    &request.router_request,
-                    http2_header_list_limit,
-                ) {
-                    Ok(ControlFlow::Break(
-                        RequestSizeLimitError::OversizedHeaderList.into_response(request.context),
-                    ))
-                } else {
-                    Ok(ControlFlow::Continue(request))
-                }
-            })
+            // Traffic shaping and the license enforcement plugin's request-rate limit run before
+            // this plugin, so while either is rejecting requests its 503 comes first.
+            .layer(http2_header_list::RouterHeaderListLimitLayer::new(
+                self.config.router.http2_header_list_limit(),
+            ))
             .map_future_with_request_data(
                 |r: &router::Request| r.context.clone(),
                 |ctx, f| async { Self::map_error_to_graphql(f.await, ctx) },
