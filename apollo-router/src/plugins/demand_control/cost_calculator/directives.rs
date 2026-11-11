@@ -159,6 +159,9 @@ impl SlicingArgument {
             .filter_map(|path| {
                 let resolved = Self::resolve(schema, field_definition, path);
                 if resolved.is_none() {
+                    // Supergraphs produced by composition versions before v2.11.4 were not
+                    // validated for this, so an unresolvable path is possible here. Once we drop
+                    // support for those versions, this can become an error instead of a warning.
                     tracing::warn!(
                         "Slicing argument `{path}` of @listSize on `{parent_type_name}.{field_name}` does not resolve to an argument or input field in the schema; it will be ignored",
                         field_name = field_definition.name,
