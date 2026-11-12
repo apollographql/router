@@ -161,7 +161,7 @@ resourceSpans:
                   doubleValue: 18
               - key: apollo_private.cost.estimated
                 value:
-                  doubleValue: 230
+                  doubleValue: 320
               - key: apollo_private.cost.result
                 value:
                   stringValue: COST_OK
