@@ -1,11 +1,13 @@
 use std::pin::Pin;
 use std::task::Poll;
 use std::time::Duration;
+use std::time::Instant;
 
 use bytes::Bytes;
 use futures::Stream;
 use futures::stream::StreamExt;
 use futures::stream::select;
+use opentelemetry::KeyValue;
 use serde::Serialize;
 use serde_json_bytes::Value;
 use tokio_stream::once;
@@ -15,10 +17,12 @@ use tracing::Span;
 use crate::graphql;
 use crate::plugins::subscription::SUBSCRIPTION_CONFIG_RELOAD_EXTENSION_CODE;
 use crate::plugins::subscription::SUBSCRIPTION_ERROR_EXTENSION_KEY;
+use crate::plugins::subscription::SUBSCRIPTION_JWT_EXPIRED_EXTENSION_CODE;
 use crate::plugins::subscription::SUBSCRIPTION_MAX_LIFETIME_EXTENSION_CODE;
 use crate::plugins::subscription::SUBSCRIPTION_SCHEMA_RELOAD_EXTENSION_CODE;
 use crate::plugins::telemetry::config_new::instruments::SubscriptionsTerminatedCounter;
 use crate::plugins::telemetry::dynamic_attribute::SpanDynAttribute;
+use crate::plugins::telemetry::semconv_opt_in::graphql_semconv_mode;
 
 #[cfg(test)]
 const HEARTBEAT_INTERVAL: Duration = Duration::from_millis(10);
@@ -129,6 +133,28 @@ impl Multipart {
             }
         }
         None
+    }
+
+    /// Whether this error code marks the router ending a subscription on purpose, rather than
+    /// an event whose processing failed.
+    ///
+    /// These notices reach the client as real GraphQL errors, because that is the only way to
+    /// say "this subscription is over" on this transport. They are still subscription events and
+    /// are counted as such, but the draft OpenTelemetry convention sets `error.type` only when
+    /// processing ended with an error, and none of these did — the router delivered exactly what
+    /// it intended. Attributing them would make a schema reload across a fleet look like one
+    /// subgraph failure per open subscription. `terminated.client` reports them by `reason`.
+    ///
+    /// `SUBSCRIPTION_EXECUTION_ERROR` is deliberately absent: the router failed to execute that
+    /// event, so it carries an `error.type` like any other failure.
+    fn is_subscription_lifecycle_code(code: &str) -> bool {
+        matches!(
+            code,
+            SUBSCRIPTION_SCHEMA_RELOAD_EXTENSION_CODE
+                | SUBSCRIPTION_CONFIG_RELOAD_EXTENSION_CODE
+                | SUBSCRIPTION_MAX_LIFETIME_EXTENSION_CODE
+                | SUBSCRIPTION_JWT_EXPIRED_EXTENSION_CODE
+        )
     }
 
     /// Infer the end reason for a subscription that was not terminated properly.
@@ -258,6 +284,44 @@ impl Multipart {
             counter.record(reason.as_str());
         }
     }
+
+    /// Records the OpenTelemetry draft convention's `graphql.server.subscription.event_count`
+    /// and `.event.duration` metrics for one subscription event serialized onto the response
+    /// stream, when `OTEL_SEMCONV_STABILITY_OPT_IN` opts into them.
+    ///
+    /// `created_at` is the event's [`graphql::Response::created_at`], the instant the router
+    /// received it from the source; it is `None` on paths that never populate that field, in
+    /// which case the duration is skipped rather than measured from a guessed start.
+    /// `error_type` is the first `code` extension found on the event's GraphQL errors, when the
+    /// event carried any; it is `None` when the event had no errors, or had errors without a
+    /// `code` extension the router can use as a low-cardinality category.
+    fn record_conventional_subscription_event_metrics(
+        created_at: Option<Instant>,
+        error_type: Option<&str>,
+    ) {
+        if !graphql_semconv_mode().emits_conventional_graphql_metrics() {
+            return;
+        }
+        let attrs: Vec<KeyValue> = error_type
+            .map(|error_type| vec![KeyValue::new("error.type", error_type.to_string())])
+            .unwrap_or_default();
+        u64_counter_with_unit!(
+            "graphql.server.subscription.event_count",
+            "Number of GraphQL subscription events processed.",
+            "{event}",
+            1,
+            attrs
+        );
+        if let Some(created_at) = created_at {
+            f64_histogram_with_unit!(
+                "graphql.server.subscription.event.duration",
+                "Duration of processing a single subscription event.",
+                "s",
+                created_at.elapsed().as_secs_f64(),
+                attrs
+            );
+        }
+    }
 }
 
 impl Stream for Multipart {
@@ -294,6 +358,17 @@ impl Stream for Multipart {
                 Some(MessageKind::Message(mut response)) => {
                     // Clear heartbeat pending flag since we received a message poll
                     self.heartbeat_pending = false;
+
+                    // Read before `response.errors` is moved or taken below. `created_at` is
+                    // `Copy`, so reading it here doesn't disturb the response's later use.
+                    let created_at = response.created_at;
+                    let event_error_type = response
+                        .errors
+                        .first()
+                        .and_then(|error| error.extensions.get("code"))
+                        .and_then(|code| code.as_str())
+                        .filter(|code| !Self::is_subscription_lifecycle_code(code))
+                        .map(|code| code.to_string());
 
                     let is_still_open =
                         response.has_next.unwrap_or(false) || response.subscribed.unwrap_or(false);
@@ -357,6 +432,10 @@ impl Stream for Multipart {
                             };
 
                             serde_json::to_writer(&mut buf, &response)?;
+                            Self::record_conventional_subscription_event_metrics(
+                                created_at,
+                                event_error_type.as_deref(),
+                            );
                         }
                         ProtocolMode::Defer => {
                             has_subgraph_errors =
@@ -448,6 +527,8 @@ mod tests {
     use crate::plugins::telemetry::dynamic_attribute::DynAttributeLayer;
     use crate::plugins::telemetry::otel;
     use crate::plugins::telemetry::otel::OtelData;
+    use crate::plugins::telemetry::semconv_opt_in;
+    use crate::plugins::telemetry::semconv_opt_in::GraphqlSemconvMode;
 
     #[derive(Clone, Default)]
     struct EndReasonCapture {
@@ -1664,6 +1745,167 @@ mod tests {
                 "reason" = "client_disconnect",
                 "subgraph.name" = "",
                 "client.name" = ""
+            );
+        }
+        .with_metrics()
+        .await;
+    }
+
+    /// Reads the recorded sum across all of a histogram's data points, for asserting a bound
+    /// (for example "greater than zero") rather than an exact value a real clock can't produce
+    /// deterministically.
+    fn histogram_total_sum(name: &str) -> f64 {
+        use opentelemetry_sdk::metrics::data::AggregatedMetrics;
+        use opentelemetry_sdk::metrics::data::MetricData;
+
+        let metrics = crate::metrics::collect_metrics();
+        let metric = metrics
+            .find(name)
+            .unwrap_or_else(|| panic!("no data recorded for {name}"));
+        let AggregatedMetrics::F64(MetricData::Histogram(histogram)) = metric.data() else {
+            panic!("{name} is not an f64 histogram");
+        };
+        histogram.data_points().map(|dp| dp.sum()).sum()
+    }
+
+    /// `graphql.server.subscription.event_count` and `.event.duration` follow the draft
+    /// OpenTelemetry GraphQL semantic convention (open-telemetry/semantic-conventions#3515) and
+    /// are gated on `OTEL_SEMCONV_STABILITY_OPT_IN`. Absent the variable, an operator sees only
+    /// the router's existing vendor metrics.
+    #[tokio::test]
+    async fn test_conventional_subscription_metrics_absent_when_semconv_opt_in_unset() {
+        async {
+            let _semconv = semconv_opt_in::test_override::set(GraphqlSemconvMode::Unset);
+
+            let mut response = graphql::Response::builder()
+                .data(serde_json_bytes::Value::String(ByteString::from("data")))
+                .subscribed(false)
+                .build();
+            response.created_at = Some(std::time::Instant::now());
+            let gql_responses = stream::iter(vec![response]);
+            let mut protocol = Multipart::new(gql_responses, ProtocolMode::Subscription);
+
+            while protocol.next().await.is_some() {}
+            drop(protocol);
+
+            assert_counter_not_exists!("graphql.server.subscription.event_count", u64);
+            assert_histogram_not_exists!("graphql.server.subscription.event.duration", f64);
+        }
+        .with_metrics()
+        .await;
+    }
+
+    /// Drives one successful event and one event ending in error through the writer, with
+    /// `OTEL_SEMCONV_STABILITY_OPT_IN=graphql` so the conventional metrics are recorded: the
+    /// count carries `error.type` only for the event that had one, and the duration is measured
+    /// from each event's `created_at`.
+    /// `graphql/dup` emits the conventional metrics too. Without this, narrowing
+    /// `emits_conventional_graphql_metrics` to `Conventional` alone would pass every other test
+    /// while silently emitting nothing for operators who set the dup token.
+    #[tokio::test]
+    async fn test_conventional_subscription_metrics_recorded_under_dup_opt_in() {
+        async {
+            let _semconv = semconv_opt_in::test_override::set(GraphqlSemconvMode::Dup);
+
+            let mut response = graphql::Response::builder()
+                .data(serde_json_bytes::Value::String(ByteString::from("data")))
+                .subscribed(true)
+                .build();
+            response.created_at = Some(std::time::Instant::now());
+
+            let gql_responses = stream::iter(vec![response]);
+            let mut protocol = Multipart::new(gql_responses, ProtocolMode::Subscription);
+
+            while protocol.next().await.is_some() {}
+            drop(protocol);
+
+            assert_counter!("graphql.server.subscription.event_count", 1u64);
+            assert_histogram_count!("graphql.server.subscription.event.duration", 1u64);
+        }
+        .with_metrics()
+        .await;
+    }
+
+    /// A schema reload reaches the client as a GraphQL error, but the router ended the
+    /// subscription on purpose, so the event is counted without an `error.type`. It also
+    /// bypasses the dequeue that stamps `created_at`, so it has no duration.
+    #[tokio::test]
+    async fn test_lifecycle_notices_are_counted_without_an_error_type() {
+        async {
+            let _semconv = semconv_opt_in::test_override::set(GraphqlSemconvMode::Conventional);
+
+            let reload = graphql::Response::builder()
+                .subscribed(false)
+                .error(
+                    graphql::Error::builder()
+                        .message("subscription has been closed due to a schema reload")
+                        .extension_code(SUBSCRIPTION_SCHEMA_RELOAD_EXTENSION_CODE)
+                        .build(),
+                )
+                .build();
+
+            let gql_responses = stream::iter(vec![reload]);
+            let mut protocol = Multipart::new(gql_responses, ProtocolMode::Subscription);
+
+            while protocol.next().await.is_some() {}
+            drop(protocol);
+
+            assert_counter!("graphql.server.subscription.event_count", 1u64);
+            assert_counter_not_exists!(
+                "graphql.server.subscription.event_count",
+                u64,
+                "error.type" = SUBSCRIPTION_SCHEMA_RELOAD_EXTENSION_CODE
+            );
+            assert_histogram_not_exists!("graphql.server.subscription.event.duration", f64);
+        }
+        .with_metrics()
+        .await;
+    }
+
+    #[tokio::test]
+    async fn test_conventional_subscription_metrics_recorded_when_opted_in() {
+        async {
+            let _semconv = semconv_opt_in::test_override::set(GraphqlSemconvMode::Conventional);
+
+            let mut success = graphql::Response::builder()
+                .data(serde_json_bytes::Value::String(ByteString::from("data")))
+                .subscribed(true)
+                .build();
+            success.created_at = Some(std::time::Instant::now());
+
+            let mut failure = graphql::Response::builder()
+                .error(
+                    graphql::Error::builder()
+                        .message("cannot read message from websocket")
+                        .extension_code("WEBSOCKET_MESSAGE_ERROR")
+                        .build(),
+                )
+                .subscribed(false)
+                .build();
+            failure.created_at = Some(std::time::Instant::now());
+
+            let gql_responses = stream::iter(vec![success, failure]);
+            let mut protocol = Multipart::new(gql_responses, ProtocolMode::Subscription);
+
+            while protocol.next().await.is_some() {}
+            drop(protocol);
+
+            assert_counter!("graphql.server.subscription.event_count", 1u64);
+            assert_counter!(
+                "graphql.server.subscription.event_count",
+                1u64,
+                "error.type" = "WEBSOCKET_MESSAGE_ERROR"
+            );
+
+            assert_histogram_count!("graphql.server.subscription.event.duration", 1u64);
+            assert_histogram_count!(
+                "graphql.server.subscription.event.duration",
+                1u64,
+                "error.type" = "WEBSOCKET_MESSAGE_ERROR"
+            );
+            assert!(
+                histogram_total_sum("graphql.server.subscription.event.duration") > 0.0,
+                "duration should measure real elapsed time from created_at"
             );
         }
         .with_metrics()
