@@ -17,6 +17,7 @@ use crate::operation::SelectionMap;
 use crate::operation::SelectionMapperReturn;
 use crate::operation::SelectionSet;
 use crate::query_graph::graph_path::operation::OpPathElement;
+use crate::schema::position::CompositeTypeDefinitionPosition;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 pub(crate) enum ConditionKind {
@@ -280,6 +281,16 @@ pub(crate) fn remove_conditions_from_selection_set(
     selection_set: &SelectionSet,
     conditions: &Conditions,
 ) -> Result<SelectionSet, FederationError> {
+    // Top-level fragments are kept even when they become useless: fetch inputs, for instance,
+    // must start with a type-conditioned fragment for each entity type.
+    remove_conditions(selection_set, conditions, false)
+}
+
+fn remove_conditions(
+    selection_set: &SelectionSet,
+    conditions: &Conditions,
+    inline_useless_fragments: bool,
+) -> Result<SelectionSet, FederationError> {
     match conditions {
         Conditions::Boolean(_) => {
             // If the conditions are the constant false, this means we know the selection will not be included
@@ -290,14 +301,17 @@ pub(crate) fn remove_conditions_from_selection_set(
             Ok(selection_set.clone())
         }
         Conditions::Variables(variable_conditions) => {
-            selection_set.lazy_map(|selection| {
+            let mut stripped_fragment_on_parent = false;
+            let updated = selection_set.lazy_map(|selection| {
                 let element = selection.element();
                 // We remove any of the conditions on the element and recurse.
                 let updated_element =
                     remove_conditions_of_element(element.clone(), variable_conditions);
+                stripped_fragment_on_parent |= inline_useless_fragments
+                    && updated_element != element
+                    && is_unconditioned_fragment_on(&updated_element, &selection_set.type_position);
                 if let Some(selection_set) = selection.selection_set() {
-                    let updated_selection_set =
-                        remove_conditions_from_selection_set(selection_set, conditions)?;
+                    let updated_selection_set = remove_conditions(selection_set, conditions, true)?;
                     if updated_element == element {
                         if *selection_set == updated_selection_set {
                             Ok(SelectionMapperReturn::Selection(selection.clone()))
@@ -321,9 +335,48 @@ pub(crate) fn remove_conditions_from_selection_set(
                         None,
                     )?))
                 }
-            })
+            })?;
+            if !stripped_fragment_on_parent {
+                return Ok(updated);
+            }
+            // Removing the conditions of a fragment on the parent type (e.g. a
+            // `... on T @include(if: $v)` within `T`, as added for conditional `@requires` inputs)
+            // leaves a fragment that no longer restricts anything, so we inline its selections,
+            // merging them with their siblings.
+            let mut flattened =
+                SelectionSet::empty(updated.schema.clone(), updated.type_position.clone());
+            for selection in updated.selections.values() {
+                match selection {
+                    Selection::InlineFragment(fragment)
+                        if is_unconditioned_fragment_on(
+                            &selection.element(),
+                            &updated.type_position,
+                        ) =>
+                    {
+                        flattened.add_local_selection_set(&fragment.selection_set)?
+                    }
+                    _ => flattened.add_local_selection(selection)?,
+                }
+            }
+            Ok(flattened)
         }
     }
+}
+
+/// Whether the element is an inline fragment without directives whose type condition (if any) is
+/// the given parent type, i.e. a fragment that has no effect.
+fn is_unconditioned_fragment_on(
+    element: &OpPathElement,
+    parent_type: &CompositeTypeDefinitionPosition,
+) -> bool {
+    let OpPathElement::InlineFragment(fragment) = element else {
+        return false;
+    };
+    fragment.directives.is_empty()
+        && fragment
+            .type_condition_position
+            .as_ref()
+            .is_none_or(|type_condition| type_condition == parent_type)
 }
 
 /// Given a `selection_set` and given a set of directive applications that can be eliminated (`unneeded_directives`; in
