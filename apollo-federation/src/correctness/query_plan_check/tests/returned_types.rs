@@ -1,7 +1,7 @@
 //! What a plan returns, and the fetches writing one response value.
 //!
 //! Ports of the model's tests for `QueryPlan.returnedTypes`: below a field, the client is owed only
-//! the object types some fetch of the plan selecting that field can return, read in the fetch's
+//! the object types some fetch writing that field at that position can return, read in the fetch's
 //! subgraph. Then its `ResponseCopies` controls, on which fetches write one response value: fetches
 //! writing the same key under the same parent combine there, while another alias or another list
 //! is another value. Each plan is written inline as JSON.
@@ -158,10 +158,8 @@ fn returned_members() -> Fixture {
 
 const EVERY_VALUE: &str = "{ item { ... on I { value } } }";
 
-fn names(types: Option<&IndexSet<Name>>) -> Vec<&str> {
-    types
-        .map(|types| types.iter().map(Name::as_str).collect())
-        .unwrap_or_default()
+fn names(types: &IndexSet<Name>) -> Vec<&str> {
+    types.iter().map(Name::as_str).collect()
 }
 
 // `source` returns only an `A` for `item`, and `value` is a scalar, so it returns no object.
@@ -172,10 +170,25 @@ fn source_returns_a_alone() {
     let returned =
         ReturnedTypes::of_plan(&fixture.supergraph_schema, &fixture.subgraphs, &plan).unwrap();
     assert_eq!(
-        names(returned.children(&name!("Query"), &name!("item"))),
+        names(&returned.children(
+            &[(name!("item"), Some(vec![name!("Query")]))],
+            &name!("Query"),
+            &name!("item")
+        )),
         ["A"]
     );
-    assert!(returned.children(&name!("A"), &name!("value")).is_none());
+    assert!(
+        returned
+            .children(
+                &[
+                    (name!("item"), Some(vec![name!("Query")])),
+                    (name!("value"), Some(vec![name!("A")]))
+                ],
+                &name!("A"),
+                &name!("value")
+            )
+            .is_empty()
+    );
 }
 
 // The demand below `item` is narrowed to `A`, the one type returned there. The model writes the
@@ -288,6 +301,402 @@ fn requirement_met_at_every_returned_type_is_accepted() {
 #[test]
 fn requirement_met_at_the_one_returned_type_is_accepted() {
     check_summary("locations", "... on Photo { id }").unwrap();
+}
+
+//==================================================================================================
+// What a plan returns, per response position
+//
+// Ports of the model's `ReturnedPerPosition` tests. A type is owed below a field only where a fetch
+// writing that field at that position can return it, so two positions selecting one field can owe
+// different types.
+
+/// `one` implements `Thing` as `A` alone, `two` as `A` and `B`.
+fn positioned_holders() -> Fixture {
+    Fixture::new(include_str!("../testdata/positioned_holders.graphql"))
+}
+
+/// `positioned_holders`, with `one` implementing `Thing` as `B` too.
+fn positioned_holders_one_returns_b() -> Fixture {
+    Fixture::new(include_str!(
+        "../testdata/positioned_holders_one_returns_b.graphql"
+    ))
+}
+
+/// `item { ... }`, with a fragment per type in `types`, each selecting `id`.
+fn item_selection(types: &[&str]) -> String {
+    let fragments: Vec<String> = types
+        .iter()
+        .map(|type_name| format!("... on {type_name} {{ id }}"))
+        .collect();
+    format!("item {{ {} }}", fragments.join(" "))
+}
+
+/// `root { item { ... } }` ([`item_selection`]).
+fn item_ids(root: &str, types: &[&str]) -> String {
+    format!("{root} {{ {} }}", item_selection(types))
+}
+
+/// The client operation: every `item`'s `id` under each of `roots`, for `A` and `B`.
+fn both_ids(roots: &[&str]) -> String {
+    let selections: Vec<String> = roots
+        .iter()
+        .map(|root| item_ids(root, &["A", "B"]))
+        .collect();
+    format!("{{ {} }}", selections.join(" "))
+}
+
+/// `left` asked of `one` for `left_types`, and `right` of `two` for `right_types`, in parallel.
+fn split_checked(
+    fixture: &Fixture,
+    left_types: &[&str],
+    right_types: &[&str],
+) -> Result<(), CorrectnessError> {
+    check(
+        fixture,
+        parallel(vec![
+            fetch("one", &format!("{{ {} }}", item_ids("left", left_types))),
+            fetch("two", &format!("{{ {} }}", item_ids("right", right_types))),
+        ]),
+        &both_ids(&["left", "right"]),
+    )
+}
+
+// `one` cannot return a `B` for `left.item`, so none is owed there, though `two` returns one for
+// `item` under `right`. The model's `typeReturnedAtAnotherPositionIsExcused`.
+#[test]
+fn type_returned_at_another_position_is_excused() {
+    split_checked(&positioned_holders(), &["A"], &["A", "B"]).unwrap();
+}
+
+// Where `one` can return a `B` for `left.item`, its `id` is owed. The model's
+// `typeReturnedAtThePositionIsDemanded`.
+#[test]
+fn type_returned_at_the_position_is_demanded() {
+    expect_rejected(
+        split_checked(&positioned_holders_one_returns_b(), &["A"], &["A", "B"]),
+        INCOMPLETE,
+        "does not select `id` on B",
+    );
+}
+
+// `two` can return a `B` for `right.item`, so its `id` is owed there. The model's
+// `typeReturnedAtTheOtherPositionIsDemanded`.
+#[test]
+fn type_returned_at_the_other_position_is_demanded() {
+    expect_rejected(
+        split_checked(&positioned_holders(), &["A"], &["A"]),
+        INCOMPLETE,
+        "does not select `id` on B",
+    );
+}
+
+/// `left` asked of `one` for `A`'s `id`, and of `two` for `two_types`.
+fn shared_checked(two_types: &[&str]) -> Result<(), CorrectnessError> {
+    check(
+        &positioned_holders(),
+        parallel(vec![
+            fetch("one", &format!("{{ {} }}", item_ids("left", &["A"]))),
+            fetch("two", &format!("{{ {} }}", item_ids("left", two_types))),
+        ]),
+        &both_ids(&["left"]),
+    )
+}
+
+// A position two fetches write admits what either returns: `two` can return a `B` for
+// `left.item`, whose `id` neither fetched. The model's `sharedPositionAdmitsEitherFetchesTypes`.
+#[test]
+fn shared_position_admits_either_fetchs_types() {
+    expect_rejected(
+        shared_checked(&["A"]),
+        INCOMPLETE,
+        "does not select `id` on B",
+    );
+}
+
+// The model's `sharedPositionMetForEitherFetchesTypesIsAccepted`.
+#[test]
+fn shared_position_met_for_either_fetchs_types_is_accepted() {
+    shared_checked(&["A", "B"]).unwrap();
+}
+
+/// `one` serves `list`, holders with their keys alone; `two` resolves each holder's `item`.
+fn positioned_list() -> Fixture {
+    Fixture::new(include_str!("../testdata/positioned_list.graphql"))
+}
+
+/// `list`'s keys from `one`, then each holder's `item` from `two`, for `two_types`.
+fn list_checked(two_types: &[&str]) -> Result<(), CorrectnessError> {
+    check(
+        &positioned_list(),
+        sequence(vec![
+            fetch("one", "{ list { __typename id } }"),
+            flatten(
+                "list.@",
+                entity_fetch(
+                    "two",
+                    vec![entry("Holder", "__typename id")],
+                    &format!("... on Holder {{ {} }}", item_selection(two_types)),
+                ),
+            ),
+        ]),
+        &format!("{{ {} }}", item_ids("list", &["A", "B"])),
+    )
+}
+
+// An entity fetch returns at the positions its flatten path reaches: `two` can return a `B` for
+// `item` below `list`, through the list, whose `id` nothing fetched. The model's
+// `entityFetchTypeIsDemandedBelowItsPath`.
+#[test]
+fn entity_fetch_type_is_demanded_below_its_path() {
+    expect_rejected(
+        list_checked(&["A"]),
+        INCOMPLETE,
+        "does not select `id` on B",
+    );
+}
+
+// The model's `entityFetchTypeMetBelowItsPathIsAccepted`.
+#[test]
+fn entity_fetch_type_met_below_its_path_is_accepted() {
+    list_checked(&["A", "B"]).unwrap();
+}
+
+/// `right { item }` asked of `two` as `item__alias_0`, renamed back to `item`, for `types`.
+fn renamed_checked(types: &[&str]) -> Result<(), CorrectnessError> {
+    let mut plan = fetch(
+        "two",
+        &format!(
+            "{{ {} }}",
+            item_ids("right", types).replace("item {", "item__alias_0: item {")
+        ),
+    );
+    plan["Fetch"]["output_rewrites"] = json!([{ "KeyRenamer": {
+        "path": [{ "Key": ["right", null] }, { "Key": ["item__alias_0", null] }],
+        "rename_key_to": "item"
+    } }]);
+    check(&positioned_holders(), plan, &both_ids(&["right"]))
+}
+
+// A fetch writes the keys its output renames leave: `two` can return a `B` for `right.item`,
+// written there by the renamer, whose `id` it did not fetch. The model's
+// `renamedFieldOwesWhatItReturns`.
+#[test]
+fn renamed_field_owes_what_it_returns() {
+    expect_rejected(
+        renamed_checked(&["A"]),
+        INCOMPLETE,
+        "does not select `id` on B",
+    );
+}
+
+// The model's `renamedFieldMetForWhatItReturnsIsAccepted`.
+#[test]
+fn renamed_field_met_for_what_it_returns_is_accepted() {
+    renamed_checked(&["A", "B"]).unwrap();
+}
+
+/// `base` serves `items`, each an `A` or a `B`; `extra` declares `Thing` an interface object, with
+/// `related: Thing`.
+fn positioned_interface_object() -> Fixture {
+    Fixture::new(include_str!(
+        "../testdata/positioned_interface_object.graphql"
+    ))
+}
+
+/// The items' keys from `base`, then each item's `related { id }` from `extra`, each sent as
+/// `Thing`, judged for `operation`.
+fn related_checked(operation: &str) -> Result<(), CorrectnessError> {
+    let mut extra = entity_fetch(
+        "extra",
+        vec![entry("A", "__typename id"), entry("B", "__typename id")],
+        "... on Thing { related { id } }",
+    );
+    extra["Fetch"]["input_rewrites"] = json!(["A", "B"].map(|type_name| json!({ "ValueSetter": {
+        "path": [{ "TypenameEquals": type_name }, { "Key": ["__typename", null] }],
+        "set_value_to": "Thing"
+    } })));
+    check(
+        &positioned_interface_object(),
+        sequence(vec![
+            fetch("base", "{ items { __typename id } }"),
+            flatten("items.@", extra),
+        ]),
+        operation,
+    )
+}
+
+// An interface object stands for every implementation, and the fetch selects what the client asks.
+// The model's `interfaceObjectFetchServesWhatItSelects`.
+#[test]
+fn interface_object_fetch_serves_what_it_selects() {
+    related_checked("{ items { related { id } } }").unwrap();
+}
+
+// `extra` can return an `A` below `items.related`, whose `label` nothing fetched. The model's
+// `interfaceObjectFetchOwesEveryImplementation`.
+#[test]
+fn interface_object_fetch_owes_every_implementation() {
+    expect_rejected(
+        related_checked("{ items { related { ... on A { label } } } }"),
+        INCOMPLETE,
+        "does not select `label` on A",
+    );
+}
+
+//==================================================================================================
+// What a plan returns, per typed position
+//
+// Ports of the model's tests for typed key paths: a level above the field's parent tells positions
+// apart too. Two fetches writing `item` at one key path, under parents of one type, are told apart
+// by the types they write at further up.
+
+/// `card { item { ... } }`, with `__typename` and a fragment per type in `types`, each selecting
+/// `id`.
+fn card_item(types: &[&str]) -> String {
+    let fragments: Vec<String> = types
+        .iter()
+        .map(|type_name| format!("... on {type_name} {{ id }}"))
+        .collect();
+    format!("card {{ item {{ __typename {} }} }}", fragments.join(" "))
+}
+
+/// The sections, with a `SectionA`'s `card.item` for `one_types` from `one`; then a `SectionB`'s
+/// for `two_types` from `two`, flattened at `path`.
+fn sections_checked(
+    fixture: &Fixture,
+    one_types: &[&str],
+    two_types: &[&str],
+    path: &str,
+) -> Result<(), CorrectnessError> {
+    check(
+        fixture,
+        sequence(vec![
+            fetch(
+                "one",
+                &format!(
+                    "{{ sections {{ __typename ... on SectionA {{ {} }} \
+                     ... on SectionB {{ __typename id }} }} }}",
+                    card_item(one_types)
+                ),
+            ),
+            flatten(
+                path,
+                entity_fetch(
+                    "two",
+                    vec![entry("SectionB", "__typename id")],
+                    &format!("... on SectionB {{ {} }}", card_item(two_types)),
+                ),
+            ),
+        ]),
+        &format!(
+            "{{ sections {{ ... on SectionA {{ {both} }} ... on SectionB {{ {both} }} }} }}",
+            both = card_item(&["X", "Y"])
+        ),
+    )
+}
+
+fn positioned_sections() -> Fixture {
+    Fixture::new(include_str!("../testdata/positioned_sections.graphql"))
+}
+
+// `two` returns a `Y` for `item` only below a `SectionB`, the one type its entry sends, so none is
+// owed below a `SectionA`, though the two positions share their keys and the field's parent type.
+// The model's `typeReturnedBelowAnotherSectionIsExcused`.
+#[test]
+fn type_returned_below_another_section_is_excused() {
+    sections_checked(&positioned_sections(), &["X"], &["X", "Y"], "sections.@").unwrap();
+}
+
+// Where `one` can return a `Y` below a `SectionA`, its `id` is owed there. The model's
+// `typeReturnedBelowTheSectionIsDemanded`.
+#[test]
+fn type_returned_below_the_section_is_demanded() {
+    expect_rejected(
+        sections_checked(
+            &Fixture::new(include_str!(
+                "../testdata/positioned_sections_one_returns_y.graphql"
+            )),
+            &["X"],
+            &["X", "Y"],
+            "sections.@",
+        ),
+        INCOMPLETE,
+        "does not select `id` on Y",
+    );
+}
+
+// `two` can return a `Y` below a `SectionB`, so its `id` is owed there. The model's
+// `typeReturnedBelowTheOtherSectionIsDemanded`.
+#[test]
+fn type_returned_below_the_other_section_is_demanded() {
+    expect_rejected(
+        sections_checked(&positioned_sections(), &["X"], &["X"], "sections.@"),
+        INCOMPLETE,
+        "does not select `id` on Y",
+    );
+}
+
+// Flattened at `sections.@|[SectionB]`, the path narrows the level as well as the entry. The
+// model's `flattenPathConditionNarrowsTheLevel`.
+#[test]
+fn flatten_path_condition_narrows_the_level() {
+    sections_checked(
+        &positioned_sections(),
+        &["X"],
+        &["X", "Y"],
+        "sections.@|[SectionB]",
+    )
+    .unwrap();
+}
+
+/// The items' keys and a `HolderB`'s `card.item` for `X` from `base`, then a `HolderA`'s for
+/// `extra_types` from `extra`, sent as `Holder`.
+fn interface_object_entries_checked(extra_types: &[&str]) -> Result<(), CorrectnessError> {
+    let mut extra = entity_fetch(
+        "extra",
+        vec![entry("HolderA", "__typename id")],
+        &format!("... on Holder {{ {} }}", card_item(extra_types)),
+    );
+    extra["Fetch"]["input_rewrites"] = json!([{ "ValueSetter": {
+        "path": [{ "TypenameEquals": "HolderA" }, { "Key": ["__typename", null] }],
+        "set_value_to": "Holder"
+    } }]);
+    check(
+        &Fixture::new(include_str!(
+            "../testdata/positioned_interface_object_entries.graphql"
+        )),
+        sequence(vec![
+            fetch(
+                "base",
+                &format!(
+                    "{{ items {{ __typename id ... on HolderB {{ {} }} }} }}",
+                    card_item(&["X"])
+                ),
+            ),
+            flatten("items.@", extra),
+        ]),
+        &format!("{{ items {{ {} }} }}", card_item(&["X", "Y"])),
+    )
+}
+
+// An entity fetch's entries narrow its level where its subgraph cannot: `extra` declares `Holder`
+// an interface object, so to it every item is a `Holder`, but it is sent the `HolderA`s alone, so
+// the `Y` it can return is owed below a `HolderA` and not below a `HolderB`. The model's
+// `entriesNarrowAnInterfaceObjectsLevel`.
+#[test]
+fn entries_narrow_an_interface_objects_level() {
+    interface_object_entries_checked(&["X", "Y"]).unwrap();
+}
+
+// `extra` can return a `Y` below a `HolderA`, whose `id` nothing fetched. The model's
+// `typeAnInterfaceObjectReturnsIsDemandedBelowItsEntries`.
+#[test]
+fn type_an_interface_object_returns_is_demanded_below_its_entries() {
+    expect_rejected(
+        interface_object_entries_checked(&["X"]),
+        INCOMPLETE,
+        "does not select `id` on Y",
+    );
 }
 
 //==================================================================================================

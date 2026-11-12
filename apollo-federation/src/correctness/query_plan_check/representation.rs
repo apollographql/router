@@ -1295,6 +1295,7 @@ impl ReadableKeyIndex {
         self.included_at(
             type_lookup,
             returned,
+            &returned.root_written(),
             0,
             &self.root_types,
             &Vec::new(),
@@ -1302,12 +1303,15 @@ impl ReadableKeyIndex {
         )
     }
 
-    /// One level: `Err` names the first key `covered` selects that the position `node` does not,
-    /// at an object type and condition.
+    /// One level, below the written paths `written` meet (`ReturnedTypes::written_below`): `Err`
+    /// names the first key `covered` selects that the position `node` does not, at an object type
+    /// and condition.
+    #[allow(clippy::too_many_arguments)]
     fn included_at(
         &self,
         type_lookup: &SchemaTypeLookup<'_>,
         returned: &ReturnedTypes,
+        written: &[usize],
         node: usize,
         types: &[Name],
         condition: &BooleanCondition,
@@ -1338,18 +1342,25 @@ impl ReadableKeyIndex {
                         }
                     }
                     if !field.selection_set.selections.is_empty() {
+                        let written_below = returned.written_below(written, key, Some(types));
                         let returned_children: Vec<Name> = type_lookup
                             .child_types(types, &field.name)
                             .into_iter()
                             .filter(|child| {
                                 types.iter().any(|object_type| {
-                                    returned.returns(object_type, &field.name, child)
+                                    returned.returns_at(
+                                        &written_below,
+                                        object_type,
+                                        &field.name,
+                                        child,
+                                    )
                                 })
                             })
                             .collect();
                         self.included_at(
                             type_lookup,
                             returned,
+                            &written_below,
                             found.position_below,
                             &returned_children,
                             &extended,
@@ -1367,6 +1378,7 @@ impl ReadableKeyIndex {
                     self.included_at(
                         type_lookup,
                         returned,
+                        written,
                         node,
                         &type_lookup.narrow_types(types, fragment.type_condition.as_ref()),
                         &extended,

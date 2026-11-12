@@ -24,7 +24,7 @@
 //!   are made at each fetch instead.
 //!
 //! Every comparison is made modulo what the plan's fetches return (`returned`): below each field,
-//! nothing is owed at an object type no fetch selecting that field can return.
+//! nothing is owed at an object type no fetch writing that field at that position can return.
 //!
 //! # What a fetch must already have found
 //!
