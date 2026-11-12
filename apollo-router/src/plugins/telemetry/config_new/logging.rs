@@ -229,6 +229,23 @@ impl<'de> Deserialize<'de> for Format {
     }
 }
 
+impl Format {
+    /// Whether log lines in this format can include the fields of the spans an event is in.
+    ///
+    /// JSON's root-level `dd.trace_id` doesn't count: the router sets it as a dynamic attribute,
+    /// not a span field, and dynamic attributes are kept whatever the format.
+    pub(crate) fn shows_span_fields(&self) -> bool {
+        match self {
+            Format::Json(format) => {
+                format.display_current_span
+                    || format.display_span_list
+                    || !format.span_attributes.is_empty()
+            }
+            Format::Text(format) => format.display_current_span || format.display_span_list,
+        }
+    }
+}
+
 impl Default for Format {
     fn default() -> Self {
         if std::io::stdout().is_terminal() {
@@ -385,5 +402,29 @@ mod test {
         assert_eq!(format, Format::Text(Default::default()));
         let format = serde_json::from_value::<Format>(json!({"json":{}})).unwrap();
         assert_eq!(format, Format::Json(Default::default()));
+    }
+
+    #[test]
+    fn formats_show_span_fields_unless_every_span_display_is_off() {
+        let shows = |format| {
+            serde_json::from_value::<Format>(format)
+                .unwrap()
+                .shows_span_fields()
+        };
+
+        assert!(shows(json!("text")));
+        assert!(shows(json!("json")));
+        assert!(shows(
+            json!({"json": {"display_span_list": false, "display_current_span": true}})
+        ));
+        assert!(shows(json!({"text": {"display_span_list": false}})));
+        assert!(shows(
+            json!({"json": {"display_span_list": false, "span_attributes": ["a"]}})
+        ));
+
+        assert!(!shows(json!({"json": {"display_span_list": false}})));
+        assert!(!shows(
+            json!({"text": {"display_span_list": false, "display_current_span": false}})
+        ));
     }
 }

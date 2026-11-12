@@ -32,12 +32,12 @@ use parking_lot::Mutex;
 use tokio::task::block_in_place;
 #[cfg(not(test))]
 use tokio::task::spawn_blocking;
-use tracing_subscriber::Layer;
 
 use crate::metrics::aggregation::MeterProviderType;
 use crate::metrics::filter::FilterMeterProvider;
 use crate::metrics::meter_provider_internal;
 use crate::plugins::telemetry::GLOBAL_TRACER_NAME;
+use crate::plugins::telemetry::fmt_layer::LogFormatLayer;
 use crate::plugins::telemetry::metrics::prometheus::PrometheusEndpoint;
 use crate::plugins::telemetry::reload::otel::LayeredTracer;
 use crate::plugins::telemetry::reload::otel::OPENTELEMETRY_TRACER_HANDLE;
@@ -69,7 +69,7 @@ pub(crate) struct Activation {
 
     /// The new format layer. None means leave the existing one, and `Some(None)` turns stdout
     /// logging off
-    new_logging_fmt_layer: Option<Option<Box<dyn Layer<LayeredTracer> + Send + Sync>>>,
+    new_logging_fmt_layer: Option<Option<LogFormatLayer<LayeredTracer>>>,
 
     /// Test instrumentation to track what components were set
     #[cfg(test)]
@@ -104,10 +104,7 @@ impl Activation {
         }
     }
 
-    pub(crate) fn with_logging(
-        &mut self,
-        logging_layer: Option<Box<dyn Layer<LayeredTracer> + Send + Sync>>,
-    ) {
+    pub(crate) fn with_logging(&mut self, logging_layer: Option<LogFormatLayer<LayeredTracer>>) {
         self.new_logging_fmt_layer = Some(logging_layer);
         #[cfg(test)]
         {
