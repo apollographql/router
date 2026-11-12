@@ -29,6 +29,7 @@ use tracing_futures::WithSubscriber;
 use crate::axum_factory::AxumHttpServerFactory;
 use crate::configuration::ListenAddr;
 use crate::orbiter::OrbiterPipelineFactory;
+use crate::registry::OciConfig;
 use crate::router::event::reload::ReloadableEventStream;
 use crate::router_factory::PipelineFactory;
 use crate::state_machine::ListenAddresses;
@@ -101,6 +102,12 @@ impl RouterHttpServer {
     ///   Optional.
     ///   Specifies the Uplink configuration options.
     ///
+    /// * `.pq_oci(impl Into<OciConfig>)`
+    ///   Optional.
+    ///   Specifies the OCI persisted-queries artifact configuration, used to fetch the
+    ///   persisted query manifest from its standalone artifact when a persisted-queries
+    ///   artifact reference is configured. Independent of the schema source.
+    ///
     /// * `.shutdown(impl Into<`[`ShutdownSource`]`>)`
     ///   Optional.
     ///   Specifies when the server should gracefully shut down.
@@ -127,6 +134,7 @@ impl RouterHttpServer {
         license: Option<LicenseSource>,
         shutdown: Option<ShutdownSource>,
         uplink: Option<UplinkConfig>,
+        pq_oci: Option<OciConfig>,
         is_telemetry_disabled: Option<bool>,
     ) -> RouterHttpServer {
         let (shutdown_sender, shutdown_receiver) = oneshot::channel::<()>();
@@ -135,6 +143,7 @@ impl RouterHttpServer {
             configuration,
             schema,
             uplink,
+            pq_oci,
             license.unwrap_or_default(),
             shutdown_receiver,
         );
@@ -228,12 +237,13 @@ fn generate_event_stream(
     configuration: Option<ConfigurationSource>,
     schema: SchemaSource,
     uplink_config: Option<UplinkConfig>,
+    pq_oci_config: Option<OciConfig>,
     license: LicenseSource,
     shutdown_receiver: oneshot::Receiver<()>,
 ) -> impl Stream<Item = Event> {
     let configuration = match configuration {
-        Some(source) => source.into_stream(uplink_config).boxed(),
-        None => ConfigurationSource::empty_document_stream(uplink_config).boxed(),
+        Some(source) => source.into_stream(uplink_config, pq_oci_config).boxed(),
+        None => ConfigurationSource::empty_document_stream(uplink_config, pq_oci_config).boxed(),
     };
     stream::select_all(vec![
         shutdown.into_stream().boxed(),

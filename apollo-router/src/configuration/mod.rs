@@ -72,6 +72,7 @@ use crate::plugins::limits;
 use crate::plugins::subscription::APOLLO_SUBSCRIPTION_PLUGIN;
 use crate::plugins::subscription::SubscriptionConfig;
 use crate::plugins::subscription::notification::Notify;
+use crate::registry::OciConfig;
 use crate::uplink::UplinkConfig;
 
 mod apollo_configuration_parse;
@@ -240,6 +241,13 @@ pub struct Configuration {
     #[serde(skip)]
     pub uplink: Option<UplinkConfig>,
 
+    /// OCI persisted-queries artifact configuration: the standalone artifact the persisted
+    /// query manifest is fetched from, independent of the schema image. Like `uplink`, this is
+    /// not user configuration: it is injected from CLI options / environment variables onto
+    /// every configuration instance.
+    #[serde(skip)]
+    pub(crate) pq_oci: Option<OciConfig>,
+
     // FIXME(@goto-bus-stop): Sticking this on Configuration is a serious hack just to have
     // it available everywhere, it is actually not configuration at all
     #[serde(default, skip_serializing, skip_deserializing)]
@@ -303,6 +311,7 @@ impl Configuration {
         persisted_query: Option<PersistedQueries>,
         operation_limits: Option<limits::Config>,
         uplink: Option<UplinkConfig>,
+        pq_oci: Option<OciConfig>,
         experimental_type_conditioned_fetching: Option<bool>,
         experimental_hoist_orphan_errors: Option<SubgraphConfiguration<HoistOrphanErrors>>,
         batching: Option<Batching>,
@@ -328,6 +337,7 @@ impl Configuration {
             apollo_plugins,
             tls: tls.unwrap_or_default(),
             uplink,
+            pq_oci,
             batching: batching.unwrap_or_default(),
             experimental_type_conditioned_fetching: experimental_type_conditioned_fetching
                 .unwrap_or_default(),
@@ -381,6 +391,7 @@ impl Configuration {
             plugins: Default::default(),
             apollo_plugins: Default::default(),
             uplink: None,
+            pq_oci: None,
             // Replaced once the document's subscription section, if any, has been read.
             notify: Self::notify(&ApolloPlugins::default())
                 .expect("without a subscription section there is no config to read"),
@@ -567,6 +578,7 @@ impl Configuration {
         persisted_query: Option<PersistedQueries>,
         operation_limits: Option<limits::Config>,
         uplink: Option<UplinkConfig>,
+        pq_oci: Option<OciConfig>,
         batching: Option<Batching>,
         experimental_type_conditioned_fetching: Option<bool>,
         server: Option<Server>,
@@ -589,6 +601,7 @@ impl Configuration {
             apq: apq.unwrap_or_default(),
             persisted_queries: persisted_query.unwrap_or_default(),
             uplink,
+            pq_oci,
             experimental_type_conditioned_fetching: experimental_type_conditioned_fetching
                 .unwrap_or_default(),
             experimental_hoist_orphan_errors: Default::default(),
