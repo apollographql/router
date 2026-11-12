@@ -16,6 +16,7 @@ use apollo_federation::schema::ValidFederationSchema;
 use crate::plugins::demand_control::DemandControlError;
 use crate::plugins::demand_control::cost_calculator::directives::RequiresDirective;
 use crate::plugins::demand_control::cost_calculator::directives::SizedFields;
+use crate::plugins::demand_control::cost_calculator::directives::SlicingArgument;
 
 pub(in crate::plugins::demand_control) struct InputDefinition {
     name: Name,
@@ -64,10 +65,14 @@ impl InputDefinition {
     }
 }
 
-/// One `@listSize` directive and its pre-parsed sizedFields (for demand control cost calculation).
-/// `parsed_sized_fields` is `None` when the directive has no `sizedFields` argument.
+/// One `@listSize` directive with its slicingArguments and sizedFields pre-resolved against the
+/// schema (for demand control cost calculation).
 pub(in crate::plugins::demand_control) struct ListSizeDirectiveEntry {
     pub(in crate::plugins::demand_control) directive: ListSizeDirective,
+    /// `None` when the directive has no `slicingArguments` argument. Entries that did not
+    /// resolve against the schema have been dropped (with a warning) at schema load.
+    pub(in crate::plugins::demand_control) slicing_arguments: Option<Vec<SlicingArgument>>,
+    /// `None` when the directive has no `sizedFields` argument.
     pub(in crate::plugins::demand_control) parsed_sized_fields: Option<Arc<SizedFields>>,
 }
 
@@ -109,6 +114,14 @@ impl FieldDefinition {
         )?;
         let mut list_size_directive_entries = Vec::with_capacity(directives.len());
         for directive in directives {
+            let slicing_arguments = directive.slicing_argument_names.as_ref().map(|paths| {
+                SlicingArgument::from_strings(
+                    schema.schema(),
+                    parent_type_name,
+                    field_definition,
+                    paths,
+                )
+            });
             let parsed_sized_fields = match &directive.sized_fields {
                 Some(field_names) => Some(Arc::new(SizedFields::from_strings(
                     schema.schema(),
@@ -119,6 +132,7 @@ impl FieldDefinition {
             };
             list_size_directive_entries.push(ListSizeDirectiveEntry {
                 directive,
+                slicing_arguments,
                 parsed_sized_fields,
             });
         }
