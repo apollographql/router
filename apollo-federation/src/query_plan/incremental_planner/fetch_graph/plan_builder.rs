@@ -724,13 +724,13 @@ impl FetchGraph {
         let node_cost = FETCH_COST + selection_cost;
 
         // Group-level @skip/@include: when every selection is gated by the
-        // same variable conditions, hoist them out of the operation and
+        // shared variable conditions, hoist them out of the operation and
         // gate the fetch itself (ConditionNodes below). Execution can then
         // skip the fetch entirely. Unlike the reference planner, no
         // handled-conditions set is threaded through: descendants are
         // sequenced after their parent rather than nested inside its
         // ConditionNode, so every node self-gates.
-        let group_conditions = selection_set.conditions()?;
+        let group_conditions = common_selection_conditions(&selection_set)?;
         if let Conditions::Boolean(false) = group_conditions {
             return Ok(None);
         }
@@ -1069,6 +1069,26 @@ impl FetchGraph {
         variable_usages.sort();
         (variable_definitions, variable_usages)
     }
+}
+
+fn common_selection_conditions(
+    selection_set: &SelectionSet,
+) -> Result<Conditions, FederationError> {
+    let mut common = Conditions::never();
+    for selection in selection_set.selections.values() {
+        let conditions = match selection {
+            Selection::Field(field) => Conditions::from_directives(&field.field.directives)?,
+            Selection::InlineFragment(fragment) => {
+                Conditions::from_directives(&fragment.inline_fragment.directives)?
+                    .merge(common_selection_conditions(&fragment.selection_set)?)
+            }
+        };
+        common = common.common_factors_with(conditions);
+        if common == Conditions::always() {
+            break;
+        }
+    }
+    Ok(common)
 }
 
 /// `selection_set` without the condition-only fragments (no type condition,
