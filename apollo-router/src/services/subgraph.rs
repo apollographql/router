@@ -88,6 +88,13 @@ pub struct Request {
     /// plan execution walker; used by the `is_deferred` subgraph telemetry
     /// selector to split primary vs deferred fetch metrics.
     pub(crate) is_deferred_fetch: bool,
+
+    /// Whether the subgraph operation was rewritten into one aliased `_entities_<i>` copy per
+    /// entity, each with its own `$representations_<i>` variable, because the entities in this
+    /// fetch have different `@fromContext` values. Populated by the fetch service. Plugins that
+    /// rely on the plain `_entities` / `representations` request and response shape (such as
+    /// entity caching) must skip such requests.
+    pub(crate) is_aliased_entities_fetch: bool,
 }
 
 #[buildstructor::buildstructor]
@@ -122,6 +129,7 @@ impl Request {
             executable_document,
             id: SubgraphRequestId::new(),
             is_deferred_fetch: false,
+            is_aliased_entities_fetch: false,
         }
     }
 
@@ -231,6 +239,7 @@ impl Clone for Request {
             executable_document: self.executable_document.clone(),
             id: self.id.clone(),
             is_deferred_fetch: self.is_deferred_fetch,
+            is_aliased_entities_fetch: self.is_aliased_entities_fetch,
         }
     }
 }
