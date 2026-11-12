@@ -65,6 +65,7 @@ use crate::services::MULTIPART_DEFER_ACCEPT;
 use crate::services::MULTIPART_DEFER_CONTENT_TYPE;
 use crate::services::MULTIPART_SUBSCRIPTION_ACCEPT;
 use crate::services::MULTIPART_SUBSCRIPTION_CONTENT_TYPE;
+use crate::services::Plugins;
 use crate::services::RouterRequest;
 use crate::services::RouterResponse;
 use crate::services::SupergraphCreator;
@@ -701,6 +702,10 @@ impl RouterFactory for RouterCreator {
 
     fn pipeline_ref(&self) -> Arc<PipelineRef> {
         self.pipeline_handle.pipeline_ref.clone()
+    }
+
+    fn plugins(&self) -> Arc<Plugins> {
+        self.supergraph_creator.plugins()
     }
 }
 
