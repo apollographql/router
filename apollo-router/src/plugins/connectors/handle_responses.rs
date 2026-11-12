@@ -186,7 +186,11 @@ where
 
             let deserialized_body = body_result.and_then(|body| {
                 let body = body.to_bytes();
-                let raw = deserialize_response(&body, &parts.headers).map_err(|_| {
+                let stream = connector
+                    .transport
+                    .as_ref()
+                    .and_then(|transport| transport.stream);
+                let raw = deserialize_response(&body, &parts.headers, stream).map_err(|_| {
                     if let Some(debug_context) = debug_context {
                         debug_context.lock().push_invalid_response(
                             debug_request.0.clone(),

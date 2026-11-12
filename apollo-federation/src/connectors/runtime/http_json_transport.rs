@@ -3,6 +3,7 @@ use std::sync::Arc;
 use apollo_compiler::collections::IndexMap;
 use http::HeaderMap;
 use http::HeaderValue;
+use http::header::ACCEPT;
 use http::header::CONTENT_LENGTH;
 use http::header::CONTENT_TYPE;
 use parking_lot::Mutex;
@@ -26,6 +27,10 @@ use crate::connectors::runtime::debug::SelectionData;
 use crate::connectors::runtime::mapping::Problem;
 use crate::connectors::runtime::mapping::aggregate_apply_to_errors;
 use crate::connectors::runtime::mapping::aggregate_apply_to_errors_with_warning_locations;
+
+/// The default `Accept` header for a connector with an `http.stream` mode: plain JSON, or either
+/// of the streamed framings it understands.
+const STREAM_ACCEPT: &str = "application/json, text/event-stream, application/x-ndjson";
 
 /// Request to an HTTP transport
 #[derive(Debug)]
@@ -97,6 +102,16 @@ pub fn make_request(
     );
     let header_mapping_problems =
         aggregate_apply_to_errors_with_warning_locations(header_apply_to_errors);
+
+    // A connector that can fold a stream invites one, unless the author chose their own `Accept`.
+    // Servers that may answer either way (MCP, for one) require the client to accept both.
+    if transport.stream.is_some()
+        && !request
+            .headers_ref()
+            .is_some_and(|headers| headers.contains_key(ACCEPT))
+    {
+        request = request.header(ACCEPT, STREAM_ACCEPT);
+    }
 
     let (json_body, form_body, body, content_length, body_apply_to_errors) =
         if let Some(ref selection) = transport.body {
@@ -275,6 +290,7 @@ mod tests {
     use crate::connectors::HTTPMethod;
     use crate::connectors::HeaderSource;
     use crate::connectors::JSONSelection;
+    use crate::connectors::StreamMode;
     use crate::connectors::StringTemplate;
 
     #[test]
@@ -481,6 +497,86 @@ mod tests {
         let HttpRequest { inner: req, .. } = *http_request;
         let body = req.into_body();
         insta::assert_snapshot!(body, @r#"{"a":42}"#);
+    }
+
+    fn accept_header_of(transport: &HttpJsonTransport) -> Vec<String> {
+        accept_header_with_client_headers(transport, &Default::default())
+    }
+
+    fn accept_header_with_client_headers(
+        transport: &HttpJsonTransport,
+        client_headers: &HeaderMap<HeaderValue>,
+    ) -> Vec<String> {
+        let (TransportRequest::Http(request), _) =
+            super::make_request(transport, IndexMap::default(), client_headers, &None).unwrap()
+        else {
+            panic!("expected Http transport request");
+        };
+        request
+            .inner
+            .headers()
+            .get_all(ACCEPT)
+            .iter()
+            .map(|value| value.to_str().unwrap().to_string())
+            .collect()
+    }
+
+    #[test]
+    fn a_stream_mode_accepts_streams_by_default() {
+        let transport = HttpJsonTransport {
+            connect_template: StringTemplate::from_str("http://localhost:8080/").unwrap(),
+            stream: Some(StreamMode::Array),
+            ..Default::default()
+        };
+        assert_eq!(accept_header_of(&transport), vec![STREAM_ACCEPT]);
+    }
+
+    #[test]
+    fn a_stream_mode_keeps_the_authors_accept_header() {
+        let transport = HttpJsonTransport {
+            connect_template: StringTemplate::from_str("http://localhost:8080/").unwrap(),
+            headers: vec![Header::from_values(
+                "accept".parse().unwrap(),
+                HeaderSource::Value("text/event-stream".parse().unwrap()),
+                OriginatingDirective::Connect,
+            )],
+            stream: Some(StreamMode::Array),
+            ..Default::default()
+        };
+        assert_eq!(accept_header_of(&transport), vec!["text/event-stream"]);
+    }
+
+    #[test]
+    fn a_stream_mode_keeps_a_propagated_accept_header_and_defaults_without_one() {
+        let transport = HttpJsonTransport {
+            connect_template: StringTemplate::from_str("http://localhost:8080/").unwrap(),
+            headers: vec![Header::from_values(
+                "accept".parse().unwrap(),
+                HeaderSource::From("accept".parse().unwrap()),
+                OriginatingDirective::Connect,
+            )],
+            stream: Some(StreamMode::Array),
+            ..Default::default()
+        };
+
+        let mut client_headers = HeaderMap::new();
+        client_headers.insert(ACCEPT, HeaderValue::from_static("application/x-ndjson"));
+        assert_eq!(
+            accept_header_with_client_headers(&transport, &client_headers),
+            vec!["application/x-ndjson"]
+        );
+
+        // The client sent nothing to propagate, so the default applies
+        assert_eq!(accept_header_of(&transport), vec![STREAM_ACCEPT]);
+    }
+
+    #[test]
+    fn no_stream_mode_sends_no_accept_header() {
+        let transport = HttpJsonTransport {
+            connect_template: StringTemplate::from_str("http://localhost:8080/").unwrap(),
+            ..Default::default()
+        };
+        assert!(accept_header_of(&transport).is_empty());
     }
 
     #[test]

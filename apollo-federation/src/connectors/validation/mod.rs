@@ -174,6 +174,9 @@ pub enum Code {
     InvalidSelection,
     /// The `http.body` provided in `@connect` was not valid.
     InvalidBody,
+    /// The `http.stream` provided in `@connect` was not a known mode, or was combined with an
+    /// entity or batch connector.
+    InvalidStream,
     /// The `errors.message` provided in `@connect` or `@source` was not valid.
     InvalidErrorsMessage,
     /// The `isSuccess` mapping provided in `@connect` or `@source` was not valid.
