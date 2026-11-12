@@ -409,11 +409,13 @@ impl<'a> TestHarness<'a> {
         .await?;
 
         let web_endpoints = router_creator.web_endpoints();
+        let plugins = router_creator.plugins();
 
         let routers = make_axum_router(
             router_creator,
             &config,
             web_endpoints,
+            &plugins,
             Arc::new(LicenseState::Licensed {
                 limits: Default::default(),
             }),
