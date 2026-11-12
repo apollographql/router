@@ -74,6 +74,8 @@ fn it_preserves_one_of_on_input_objects() {
     let to_expand =
         read_to_string("src/connectors/expand/tests/schemas/expand/recursive_input.graphql")
             .expect("fixture should be readable")
+            // Windows checkouts have CRLF line endings; the replacement below matches LF.
+            .replace("\r\n", "\n")
             .replace(
                 "input AnInput\n  @join__type(graph: CONNECTORS)\n{",
                 "input AnInput\n  @join__type(graph: CONNECTORS)\n  @oneOf\n{",

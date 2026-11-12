@@ -4244,10 +4244,13 @@ fn connector_field_with_only_args_keys_on_typename() {
 /// references no `$this` is still entered through `__typename` alone.
 #[test]
 fn connector_field_without_this_beside_this_connector() {
-    let schema = include_str!("../fixtures/connector_field_without_this.graphql").replace(
-        "  name: String\n",
-        "  name: String\n  details: String @join__directive(graphs: [PRODUCTS], name: \"connect\", args: {source: \"api\", http: {GET: \"/products/{$this.id}\"}, selection: \"$.details\"})\n",
-    );
+    // Windows checkouts have CRLF line endings; the replacement below matches LF.
+    let schema = include_str!("../fixtures/connector_field_without_this.graphql")
+        .replace("\r\n", "\n")
+        .replace(
+            "  name: String\n",
+            "  name: String\n  details: String @join__directive(graphs: [PRODUCTS], name: \"connect\", args: {source: \"api\", http: {GET: \"/products/{$this.id}\"}, selection: \"$.details\"})\n",
+        );
     let plan_str = plan_query_with_router_specs(&schema, "{ products { banner details } }");
     insta::assert_snapshot!(plan_str, @r#"
     QueryPlan {

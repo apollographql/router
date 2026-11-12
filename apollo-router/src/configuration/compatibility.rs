@@ -726,10 +726,11 @@ fn file_expansion_removes_one_trailing_newline() {
     let mut file = tempfile::NamedTempFile::new().expect("can create a temp file");
     std::io::Write::write_all(&mut file, b"https://example.com/usage\n")
         .expect("can write the temp file");
-    let text = format!(
-        "telemetry:\n  apollo:\n    endpoint: \"${{file.{}}}\"\n",
-        file.path().to_string_lossy()
-    );
+    // JSON-quote the reference: a Windows path's backslashes are escapes in a YAML
+    // double-quoted string.
+    let reference =
+        serde_json::to_string(&format!("${{file.{}}}", file.path().to_string_lossy())).unwrap();
+    let text = format!("telemetry:\n  apollo:\n    endpoint: {reference}\n");
 
     let config = parse_configuration(
         &text,

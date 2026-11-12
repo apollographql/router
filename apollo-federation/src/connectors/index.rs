@@ -788,7 +788,8 @@ mod tests {
         // The avatar connector's $this.missing does not exist on User, so
         // its resolvable key cannot be built. The index must surface the
         // error instead of silently indexing the connector without a key.
-        let broken = ENTITY_RESOLVER_SCHEMA.replace(
+        // Windows checkouts have CRLF line endings; the replacement below matches LF.
+        let broken = ENTITY_RESOLVER_SCHEMA.replace("\r\n", "\n").replace(
             "  name: String @join__field(graph: CONNECTORS)\n",
             "  name: String @join__field(graph: CONNECTORS)\n  avatar: String @join__field(graph: CONNECTORS) @join__directive(graphs: [CONNECTORS], name: \"connect\", args: {source: \"api\", http: {GET: \"/avatars/{$this.missing}\"}, selection: \"$.url\"})\n",
         );
