@@ -296,6 +296,32 @@ impl ExecutionService {
         let has_next = response.has_next.unwrap_or(true);
         let variables_set = query.defer_variables_set(variables);
 
+        // Resolve the deferred response path to concrete paths now, because formatting below
+        // drops `__typename` unless the user query selects it, and a `PathElement::Fragment` needs
+        // it to only match objects of that type.
+        //
+        // The planner's path stops before the deferred fragment's own type condition, such as
+        // `... on Item @defer { title }`, so add it: objects of other types must not get an
+        // incremental entry.
+        let deferred_paths = match (response.path.as_ref(), response.data.as_ref()) {
+            (Some(response_path), Some(response_data)) => {
+                let mut response_path = response_path.clone();
+                if let Some(subselection) = query.deferred_subselection(
+                    &response.label,
+                    Some(&response_path),
+                    variables_set,
+                ) {
+                    response_path.push(PathElement::Fragment(subselection.type_name.clone()));
+                }
+                let mut paths = Vec::new();
+                response_data.select_values_and_paths(schema, &response_path, |path, _| {
+                    paths.push(path.clone())
+                });
+                paths
+            }
+            _ => Vec::new(),
+        };
+
         tracing::debug_span!("format_response").in_scope(|| {
             let mut paths = Vec::new();
             if !query.unauthorized.paths.is_empty() {
@@ -391,22 +417,13 @@ impl ExecutionService {
             // this, we extract the value at that path.
             // In particular, that means that a deferred fragment in an object
             // under an array would generate one response par array element
-            (Some(response_path), Some(response_data)) => {
+            (Some(_), Some(response_data)) => {
                 let mut sub_responses = Vec::new();
-                // TODO: this selection at `response_path` below is applied on the response data _after_
-                // is has been post-processed with the user query (in the "format_response" span above).
-                // It is not quite right however, because `response_path` (sent by the query planner)
-                // may contain `PathElement::Fragment`, whose goal is to filter out only those entities that
-                // match the fragment type. However, because the data is been filtered, `response_data` will
-                // not contain the `__typename` value for entities (even though those are in the unfiltered
-                // data), at least unless the user query selects them manually. The result being that those
-                // `PathElement::Fragment` in the path will be essentially ignored (we'll match any object
-                // for which we don't have a `__typename` as we would otherwise miss the data that we need
-                // to return). I believe this might make it possible to return some data that should not have
-                // been returned (at least not in that particular response). And while this is probably only
-                // true in fairly contrived examples, this is not working as intended by the query planner,
-                // so it is dodgy and could create bigger problems in the future.
-                response_data.select_values_and_paths(schema, response_path, |path, value| {
+                for path in &deferred_paths {
+                    let Ok(value) = response_data.get_path(schema, path) else {
+                        tracing::debug!(%path, "deferred response path not found after formatting");
+                        continue;
+                    };
                     // if the deferred path points to an array, split it into multiple subresponses
                     // because the root must be an object
                     if let Value::Array(array) = value {
@@ -419,7 +436,7 @@ impl ExecutionService {
                     } else {
                         sub_responses.push((path.clone(), value.clone()));
                     }
-                });
+                }
 
                 Self::split_incremental_response(
                     query,
