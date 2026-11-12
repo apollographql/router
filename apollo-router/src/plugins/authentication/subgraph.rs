@@ -1011,7 +1011,14 @@ mod test {
 
         assert_eq!(2, tcp.times_called.load(Ordering::SeqCst));
 
-        tokio::time::sleep(Duration::from_secs(1)).await;
+        // The background refresh fires ~1s from now.  Poll for it: a fixed 1s sleep races it.
+        tokio::time::timeout(Duration::from_secs(10), async {
+            while tcp.times_called.load(Ordering::SeqCst) < 3 {
+                tokio::time::sleep(Duration::from_millis(20)).await;
+            }
+        })
+        .await
+        .expect("credentials should be refreshed in the background before they go stale");
 
         assert_eq!(3, tcp.times_called.load(Ordering::SeqCst));
 
