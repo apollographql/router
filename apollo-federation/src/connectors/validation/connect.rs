@@ -163,6 +163,13 @@ impl<'schema> Connect<'schema> {
             .is_some_and(|mutation| **mutation == *type_ref.name())
         {
             ObjectCategory::Mutation
+        } else if schema
+            .schema_definition
+            .subscription
+            .as_ref()
+            .is_some_and(|subscription| **subscription == *type_ref.name())
+        {
+            ObjectCategory::Subscription
         } else {
             ObjectCategory::Other
         };

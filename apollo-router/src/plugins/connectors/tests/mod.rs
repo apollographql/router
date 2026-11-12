@@ -49,6 +49,7 @@ mod query_plan;
 mod quickstart;
 mod req_asserts;
 mod stream;
+mod subscription;
 mod url_properties;
 mod variables;
 

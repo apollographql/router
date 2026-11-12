@@ -148,16 +148,7 @@ pub fn handle_raw_response(
     context: impl ContextReader,
     client_headers: &HeaderMap<HeaderValue>,
 ) -> MappedResponse {
-    let inputs = key
-        .inputs()
-        .clone()
-        .merger(&connector.response_variable_keys)
-        .config(connector.config.as_ref())
-        .context(context)
-        .status(parts.status.as_u16())
-        .request(&connector.response_headers, client_headers)
-        .response(&connector.response_headers, Some(parts))
-        .merge();
+    let inputs = response_inputs(&key, parts, connector, context, client_headers);
     let warnings = Vec::new();
     let (success, warnings) = is_success(
         connector.error_settings.connect_is_success.as_ref(),
@@ -172,6 +163,58 @@ pub fn handle_raw_response(
     } else {
         map_error(connector, data, parts, key, inputs, warnings)
     }
+}
+
+/// Like [`handle_raw_response`], for one event of a subscription, or `None` when the event has
+/// nothing to deliver: its selection yielded no value (missing, which is not `null`) and declared
+/// no errors. That is how a selection filters events, for example `$.result { temp }` skipping
+/// the progress notifications that have no `result`. A failure is always delivered.
+pub fn handle_raw_event(
+    data: &Value,
+    parts: &Parts,
+    key: ResponseKey,
+    connector: &Connector,
+    context: impl ContextReader,
+    client_headers: &HeaderMap<HeaderValue>,
+) -> Option<MappedResponse> {
+    let inputs = response_inputs(&key, parts, connector, context, client_headers);
+    let warnings = Vec::new();
+    let (success, warnings) = is_success(
+        connector.error_settings.connect_is_success.as_ref(),
+        data,
+        parts,
+        &inputs,
+        warnings,
+    );
+    if !success {
+        return Some(map_error(connector, data, parts, key, inputs, warnings));
+    }
+    let (response, yielded_value) =
+        map_response_noting_missing(connector, data, key, inputs, warnings);
+    let declared_errors = matches!(
+        &response,
+        MappedResponse::Data { declared_errors, .. } if !declared_errors.is_empty()
+    );
+    (yielded_value || declared_errors).then(|| check_response_shape(connector, response))
+}
+
+/// The variables a response's selections can read
+fn response_inputs(
+    key: &ResponseKey,
+    parts: &Parts,
+    connector: &Connector,
+    context: impl ContextReader,
+    client_headers: &HeaderMap<HeaderValue>,
+) -> IndexMap<String, Value> {
+    key.inputs()
+        .clone()
+        .merger(&connector.response_variable_keys)
+        .config(connector.config.as_ref())
+        .context(context)
+        .status(parts.status.as_u16())
+        .request(&connector.response_headers, client_headers)
+        .response(&connector.response_headers, Some(parts))
+        .merge()
 }
 
 /// The error code used for [`check_response_shape`] errors, distinguishing a
@@ -566,9 +609,22 @@ pub(super) fn map_response(
     data: &Value,
     key: ResponseKey,
     inputs: IndexMap<String, Value>,
-    mut warnings: Vec<Problem>,
+    warnings: Vec<Problem>,
 ) -> MappedResponse {
+    map_response_noting_missing(connector, data, key, inputs, warnings).0
+}
+
+/// [`map_response`], and whether the selection yielded a value at all. A missing value is
+/// reported as `null` in the response, so this is the only place the two can be told apart.
+fn map_response_noting_missing(
+    connector: &Connector,
+    data: &Value,
+    key: ResponseKey,
+    inputs: IndexMap<String, Value>,
+    mut warnings: Vec<Problem>,
+) -> (MappedResponse, bool) {
     let (res, apply_to_errors) = key.selection().apply_with_vars(data, &inputs);
+    let yielded_value = res.is_some();
 
     // Declared errors are the author's, addressed to the client; diagnostics
     // are the language's, addressed to the author. The split decides what
@@ -610,12 +666,15 @@ pub(super) fn map_response(
         .map(|error| declared_error_to_runtime_error(error, &key, connector))
         .collect::<Vec<_>>();
 
-    MappedResponse::Data {
-        key,
-        data: res.unwrap_or_else(|| Value::Null),
-        problems: warnings,
-        declared_errors,
-    }
+    (
+        MappedResponse::Data {
+            key,
+            data: res.unwrap_or_else(|| Value::Null),
+            problems: warnings,
+            declared_errors,
+        },
+        yielded_value,
+    )
 }
 
 /// Returns a `MappedResponse` with a GraphQL error.
@@ -1407,6 +1466,67 @@ mod tests {
             inputs: RequestInputs::default(),
             selection: Arc::new(JSONSelection::parse(selection).unwrap()),
         }
+    }
+
+    /// A context with nothing in it
+    struct NoContext;
+
+    impl super::super::inputs::ContextReader for NoContext {
+        fn get_key(&self, _key: &str) -> Option<Value> {
+            None
+        }
+    }
+
+    /// Maps one subscription event with `selection` and an optional `isSuccess`.
+    fn map_event(selection: &str, is_success: Option<&str>, data: Value) -> Option<MappedResponse> {
+        let mut connector = make_connector(None, ConnectSpec::V0_5);
+        connector.error_settings.connect_is_success =
+            is_success.map(|is_success| JSONSelection::parse(is_success).unwrap());
+        let parts = http::Response::builder()
+            .status(200)
+            .body(())
+            .unwrap()
+            .into_parts()
+            .0;
+        super::handle_raw_event(
+            &data,
+            &parts,
+            root_field_key_with_selection("tick", selection),
+            &connector,
+            NoContext,
+            &Default::default(),
+        )
+    }
+
+    #[test]
+    fn an_event_whose_selection_yields_nothing_is_filtered_out() {
+        assert!(map_event("$.quote { amount }", None, json!({ "progress": 1 })).is_none());
+    }
+
+    #[test]
+    fn an_event_whose_selection_yields_null_is_delivered() {
+        let Some(MappedResponse::Data { data, .. }) =
+            map_event("$.quote", None, json!({ "quote": null }))
+        else {
+            panic!("expected the event to be delivered");
+        };
+        assert_eq!(data, Value::Null);
+    }
+
+    #[test]
+    fn an_event_that_declares_an_error_is_delivered_even_without_a_value() {
+        // `->withError` passes `{}` through, and `.quote` then reads nothing from it
+        let Some(mut mapped) = map_event(r#"$({})->withError("No quote").quote"#, None, json!({}))
+        else {
+            panic!("expected the event to be delivered");
+        };
+        assert_eq!(mapped.take_declared_errors().len(), 1);
+    }
+
+    #[test]
+    fn an_unsuccessful_event_is_delivered_as_an_error() {
+        let mapped = map_event("$.quote", Some("$.ok"), json!({ "ok": false }));
+        assert!(matches!(mapped, Some(MappedResponse::Error { .. })));
     }
 
     /// The whole point of `->withError`, asserted where it actually has to
