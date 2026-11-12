@@ -59,6 +59,13 @@ pub(crate) const FEDERATION_FROM_CONTEXT_DIRECTIVE_NAME_IN_SPEC: Name = name!("f
 pub(crate) const FEDERATION_TAG_DIRECTIVE_NAME_IN_SPEC: Name = name!("tag");
 pub(crate) const FEDERATION_COMPOSEDIRECTIVE_DIRECTIVE_NAME_IN_SPEC: Name =
     name!("composeDirective");
+// GraphQL Federation (composite schemas) source-schema directives, added in federation v3.0.
+pub(crate) const FEDERATION_LOOKUP_DIRECTIVE_NAME_IN_SPEC: Name = name!("lookup");
+pub(crate) const FEDERATION_INTERNAL_DIRECTIVE_NAME_IN_SPEC: Name = name!("internal");
+pub(crate) const FEDERATION_IS_DIRECTIVE_NAME_IN_SPEC: Name = name!("is");
+pub(crate) const FEDERATION_REQUIRE_DIRECTIVE_NAME_IN_SPEC: Name = name!("require");
+pub(crate) const FEDERATION_FIELD_SELECTION_MAP_TYPE_NAME_IN_SPEC: Name =
+    name!("FieldSelectionMap");
 
 pub(crate) const FEDERATION_FIELDSET_TYPE_NAME_IN_SPEC: Name = name!("FieldSet");
 pub(crate) const FEDERATION_FIELDS_ARGUMENT_NAME: Name = name!("fields");
@@ -938,6 +945,50 @@ impl FederationSpecDefinition {
         )
     }
 
+    /// `directive @lookup on FIELD_DEFINITION`
+    fn lookup_directive_specification() -> DirectiveSpecification {
+        DirectiveSpecification::new(
+            FEDERATION_LOOKUP_DIRECTIVE_NAME_IN_SPEC,
+            &[],
+            false,
+            &[DirectiveLocation::FieldDefinition],
+            None,
+        )
+    }
+
+    /// `directive @internal on OBJECT | FIELD_DEFINITION`
+    fn internal_directive_specification() -> DirectiveSpecification {
+        DirectiveSpecification::new(
+            FEDERATION_INTERNAL_DIRECTIVE_NAME_IN_SPEC,
+            &[],
+            false,
+            &[
+                DirectiveLocation::Object,
+                DirectiveLocation::FieldDefinition,
+            ],
+            None,
+        )
+    }
+
+    /// `directive @is(field: FieldSelectionMap!) on ARGUMENT_DEFINITION` and
+    /// `directive @require(field: FieldSelectionMap!) on ARGUMENT_DEFINITION`
+    fn field_selection_map_directive_specification(name: Name) -> DirectiveSpecification {
+        DirectiveSpecification::new(
+            name,
+            &[DirectiveArgumentSpecification {
+                base_spec: ArgumentSpecification {
+                    name: FEDERATION_FIELD_ARGUMENT_NAME,
+                    get_type: |schema, _| field_selection_map_type(schema),
+                    default_value: None,
+                },
+                composition_strategy: None,
+            }],
+            false,
+            &[DirectiveLocation::ArgumentDefinition],
+            None,
+        )
+    }
+
     fn cache_tag_directive_specification() -> DirectiveSpecification {
         DirectiveSpecification::new(
             FEDERATION_CACHE_TAG_DIRECTIVE_NAME_IN_SPEC,
@@ -971,6 +1022,12 @@ fn field_set_type(schema: &FederationSchema) -> Result<Type, FederationError> {
     schema
         .field_set_type()
         .map(|pos| Type::non_null(Type::Named(pos.type_name)))
+}
+
+fn field_selection_map_type(schema: &FederationSchema) -> Result<Type, FederationError> {
+    let name =
+        schema.federation_type_name_in_schema(FEDERATION_FIELD_SELECTION_MAP_TYPE_NAME_IN_SPEC)?;
+    Ok(Type::non_null(Type::Named(name)))
 }
 
 impl SpecDefinition for FederationSpecDefinition {
@@ -1060,6 +1117,17 @@ impl SpecDefinition for FederationSpecDefinition {
             specs.push(Box::new(Self::cache_tag_directive_specification()));
         }
 
+        if *self.version() >= (Version { major: 3, minor: 0 }) {
+            specs.push(Box::new(Self::lookup_directive_specification()));
+            specs.push(Box::new(Self::internal_directive_specification()));
+            specs.push(Box::new(Self::field_selection_map_directive_specification(
+                FEDERATION_IS_DIRECTIVE_NAME_IN_SPEC,
+            )));
+            specs.push(Box::new(Self::field_selection_map_directive_specification(
+                FEDERATION_REQUIRE_DIRECTIVE_NAME_IN_SPEC,
+            )));
+        }
+
         specs
     }
 
@@ -1087,6 +1155,12 @@ impl SpecDefinition for FederationSpecDefinition {
                 ContextSpecDefinition::new(self.version().clone(), Version { major: 2, minor: 8 })
                     .type_specs(),
             );
+        }
+
+        if *self.version() >= (Version { major: 3, minor: 0 }) {
+            type_specs.push(Box::new(ScalarTypeSpecification {
+                name: FEDERATION_FIELD_SELECTION_MAP_TYPE_NAME_IN_SPEC,
+            }));
         }
         type_specs
     }
