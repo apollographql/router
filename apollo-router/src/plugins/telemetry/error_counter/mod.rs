@@ -42,8 +42,13 @@ pub(crate) async fn count_subgraph_errors(
     let response_body = response.response.body();
     if !response_body.errors.is_empty() {
         count_operation_errors(response_body.errors.iter(), &context, &errors_config);
-        // Refresh context with the most up-to-date list of errors
-        let _ = context.insert(COUNTED_ERRORS, to_set(response_body.errors.iter()));
+        // Add to the counted errors rather than replacing them: the other subgraph fetches of
+        // this operation share the context, and the errors they already counted must stay in
+        // the set, or the execution layer counts them a second time.
+        let _ = context.upsert(COUNTED_ERRORS, |mut counted_errors: HashSet<Uuid>| {
+            counted_errors.extend(response_body.errors.iter().map(Error::apollo_id));
+            counted_errors
+        });
     }
     SubgraphResponse {
         context: response.context,
