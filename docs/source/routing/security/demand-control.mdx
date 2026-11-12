@@ -342,6 +342,41 @@ type ResultContainer {
 }
 ```
 
+### Argument costs
+
+Use `@cost` on arguments and input fields to set the cost of argument values, which are a part of the field cost. When argument values contain lists, the router applies the argument's weight once for the list and again for each item in it, because the work a resolver does usually grows with the number of values it receives (and similarly for input fields).
+
+When `@cost` is not specified for an argument or input field, the router applies a default weight of zero to lists and items, with the exception of objects whose default cost is 1.
+
+<Note>
+
+This differs from the IBM specification, which only applies argument and input field weights once for each time they appear in the field.
+
+</Note>
+
+```graphql
+type Query {
+  booksByIds(ids: [ID!]! @cost(weight: 2)): [Book] #highlight-line
+    @listSize(slicingArguments: ["ids"])
+}
+```
+
+```graphql
+query BooksByIds {
+  booksByIds(ids: ["abc", "def", "ghi"]) {
+    title
+  }
+}
+```
+
+<ExpansionPanel title="Cost of booksByIds query">
+
+```text disableCopy=true showLineNumbers=false
+1 Query (0) + ids argument (1 list (2) + 3 items (3 * 2)) + 3 book objects (3 * 1) = 11 total cost
+```
+
+</ExpansionPanel>
+
 ## Subgraph-level demand control
 
 <MinVersionBadge version="Router v2.12.0" />
