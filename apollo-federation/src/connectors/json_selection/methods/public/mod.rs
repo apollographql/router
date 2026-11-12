@@ -1,5 +1,9 @@
+mod decode;
+pub(crate) use decode::DecodeMethod;
 mod echo;
 pub(crate) use echo::EchoMethod;
+mod encode;
+pub(crate) use encode::EncodeMethod;
 mod entries;
 pub(crate) use entries::EntriesMethod;
 mod filter;
