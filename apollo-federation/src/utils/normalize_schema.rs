@@ -9,7 +9,6 @@ use apollo_compiler::schema::Component;
 use apollo_compiler::schema::ComponentName;
 use apollo_compiler::schema::ComponentOrigin;
 use apollo_compiler::validation::Valid;
-use itertools::Itertools;
 use itertools::kmerge_by;
 
 /// For any two [Schema]s that are considered "equal", normalizing them with this function will make
@@ -733,15 +732,20 @@ fn group_components_by_origin_and_sort<T>(
     mut sort: impl FnMut(&mut T),
     mut compare: impl FnMut(&T, &T) -> Ordering,
 ) -> IndexMap<ComponentOrigin, Vec<T>> {
-    iter.into_iter()
-        .chunk_by(|component| origin(component))
-        .into_iter()
-        .map(|(origin, chunk)| {
-            let mut chunk: Vec<T> = chunk.collect();
-            sort_slice(&mut chunk, &mut sort, &mut compare);
-            (origin, chunk)
-        })
-        .collect()
+    // Components with the same origin need not be adjacent (e.g. a previously normalized schema
+    // interleaves definition and extension components by content), so group by origin across the
+    // whole input rather than by consecutive runs.
+    let mut grouped: IndexMap<ComponentOrigin, Vec<T>> = IndexMap::default();
+    for component in iter {
+        grouped
+            .entry(origin(&component))
+            .or_default()
+            .push(component);
+    }
+    for components in grouped.values_mut() {
+        sort_slice(components, &mut sort, &mut compare);
+    }
+    grouped
 }
 
 fn sort_origins(
@@ -1383,5 +1387,56 @@ mod tests {
         let schema = Schema::parse_and_validate(sdl, "schema.graphql").expect("valid schema");
         let normalized = normalize_schema_types_and_descriptions(schema.into_inner());
         insta::assert_snapshot!(normalized.to_string());
+    }
+
+    fn query_type(schema: &Schema) -> &apollo_compiler::schema::ObjectType {
+        let ExtendedType::Object(query) = &schema.types["Query"] else {
+            panic!("expected Query to be an object type");
+        };
+        query
+    }
+
+    #[test]
+    fn normalizing_interleaved_definition_and_extension_fields_twice_preserves_all_fields() {
+        let schema = Schema::parse_and_validate(
+            "type Query { a: String z: String } extend type Query { m: String }",
+            "schema.graphql",
+        )
+        .expect("valid schema");
+        let once = normalize_valid_schema(schema);
+        let field_names = |schema: &Schema| {
+            query_type(schema)
+                .fields
+                .keys()
+                .map(|name| name.as_str().to_owned())
+                .collect::<Vec<_>>()
+        };
+        // Sorting by content interleaves the definition's and extension's fields.
+        assert_eq!(field_names(&once), ["a", "m", "z"]);
+
+        let twice = normalize_valid_schema(once.clone().into_inner());
+        assert_eq!(field_names(&twice), ["a", "m", "z"]);
+        assert_eq!(twice, once);
+        assert_eq!(twice.to_string(), once.to_string());
+    }
+
+    #[test]
+    fn normalizing_interleaved_directive_origins_twice_preserves_all_applications() {
+        let schema = Schema::parse_and_validate(
+            r#"
+            directive @mark(value: String!) repeatable on OBJECT
+            type Query @mark(value: "a") @mark(value: "z") { anchor: String }
+            extend type Query @mark(value: "m") { extra: String }
+            "#,
+            "schema.graphql",
+        )
+        .expect("valid schema");
+        let once = normalize_valid_schema(schema);
+        assert_eq!(query_type(&once).directives.len(), 3);
+
+        let twice = normalize_valid_schema(once.clone().into_inner());
+        assert_eq!(query_type(&twice).directives.len(), 3);
+        assert_eq!(twice, once);
+        assert_eq!(twice.to_string(), once.to_string());
     }
 }
