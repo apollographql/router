@@ -188,7 +188,7 @@ docker run -p 4000:4000 \
 ```
 
 When you set this option, the router uses the schema from the specified graph artifact instead of Apollo Uplink.
-The router also fetches its entitlement from the same registry when the graph artifact manifest carries an entitlement identifier; persisted queries still come from Uplink.
+The router also fetches its entitlement from the same registry when the graph artifact manifest carries an entitlement identifier. Persisted queries still come from Uplink unless the [`registry` section](/graphos/routing/configuration/yaml#registry) of `router.yaml` names the variant's persisted-queries artifact; that section can also declare the graph artifact itself, in place of the environment variable.
 
 For more information on graph artifacts, see the [Router CLI Configuration Reference](/graphos/routing/configuration/cli#--graph-artifact-reference).
 
