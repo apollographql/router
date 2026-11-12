@@ -554,13 +554,13 @@ fn a_type_condition_is_narrowed_to_its_subgraph() {
 //==================================================================================================
 // A mutation root
 
-/// `orders` serves the mutation `buy` and a `Sub`'s `vendor`, but marks `Vendor.orderId`
-/// `@external`; `vendors` resolves it.
+/// `one` serves the mutation `act` and a `Holder`'s `source`, but marks `Source.code` `@external`;
+/// `two` resolves it.
 fn external_mutation() -> Fixture {
     Fixture::new(include_str!("../testdata/external_mutation.graphql"))
 }
 
-const VENDOR_ORDER_ID: &str = "mutation { buy { sub { vendor { orderId } } } }";
+const SOURCE_CODE: &str = "mutation { act { holder { source { code } } } }";
 
 /// A fetch to `subgraph` running the mutation `operation`.
 fn mutation_fetch(subgraph: &str, operation: &str) -> String {
@@ -570,22 +570,22 @@ fn mutation_fetch(subgraph: &str, operation: &str) -> String {
     )
 }
 
-// The planner's plan for the corpus shape: `orders` is asked for `orderId`, which it only reads as
-// a `@requires` input. The resolvability check reads a mutation root as it reads a query root.
+// The plan the planner wrote for this shape: `one` is asked for `code`, which it only reads as a
+// `@requires` input. The resolvability check reads a mutation root as it reads a query root.
 #[test]
 fn an_external_field_under_a_mutation_root_is_rejected() {
     let fixture = external_mutation();
     assert_rejected(
         fixture.check(
-            &fixture.written_plan(&mutation_fetch("orders", VENDOR_ORDER_ID)),
-            VENDOR_ORDER_ID,
+            &fixture.written_plan(&mutation_fetch("one", SOURCE_CODE)),
+            SOURCE_CODE,
         ),
-        "`Vendor.orderId` is `@external` there",
+        "`Source.code` is `@external` there",
     );
 }
 
-// The plan the planner should write: `orders` runs the mutation for each `Sub`'s key, and
-// `vendors` resolves the `orderId`.
+// The plan the planner should write: `one` runs the mutation for each `Holder`'s key, and `two`
+// resolves the `code`.
 #[test]
 fn an_external_field_fetched_from_its_resolver_is_accepted() {
     let fixture = external_mutation();
@@ -593,15 +593,15 @@ fn an_external_field_fetched_from_its_resolver_is_accepted() {
         r#"{{ "Sequence": {{ "nodes": [
             {},
             {{ "Flatten": {{
-                "path": [{{ "Key": ["buy", null] }}, {{ "Key": ["sub", null] }}],
+                "path": [{{ "Key": ["act", null] }}, {{ "Key": ["holder", null] }}],
                 "node": {{ "Fetch": {{
-                    "subgraph_name": "vendors",
+                    "subgraph_name": "two",
                     "variable_usages": [],
-                    "requires": [{{ "kind": "InlineFragment", "typeCondition": "Sub", "selections": [
+                    "requires": [{{ "kind": "InlineFragment", "typeCondition": "Holder", "selections": [
                         {{ "kind": "Field", "name": "__typename" }},
                         {{ "kind": "Field", "name": "id" }}
                     ] }}],
-                    "operation_document": "query($representations: [_Any!]!) {{ _entities(representations: $representations) {{ ... on Sub {{ vendor {{ orderId }} }} }} }}",
+                    "operation_document": "query($representations: [_Any!]!) {{ _entities(representations: $representations) {{ ... on Holder {{ source {{ code }} }} }} }}",
                     "operation_kind": "query",
                     "input_rewrites": [],
                     "output_rewrites": [],
@@ -609,7 +609,7 @@ fn an_external_field_fetched_from_its_resolver_is_accepted() {
                 }} }}
             }} }}
         ] }} }}"#,
-        mutation_fetch("orders", "mutation { buy { sub { __typename id } } }"),
+        mutation_fetch("one", "mutation { act { holder { __typename id } } }"),
     ));
-    fixture.check(&plan, VENDOR_ORDER_ID).unwrap();
+    fixture.check(&plan, SOURCE_CODE).unwrap();
 }

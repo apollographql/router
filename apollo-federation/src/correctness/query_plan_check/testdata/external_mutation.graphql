@@ -1,47 +1,50 @@
-# The supergraph for the mutation-root resolvability tests in `tests/resolvable.rs`, composed with
-# `composition::compose` from the two subgraphs below, each of which also links federation v2.3
-# importing `@key`, `@shareable`, `@external`, `@requires` and `@provides`. Recompose it when they
-# change.
+# The supergraph for the mutation-root resolvability tests in `tests/resolvable.rs`.
 #
-# `orders` serves the mutation `buy` and resolves a `Sub`'s `vendor`, but marks `Vendor.orderId`
-# `@external`, reading it only as a `@requires` input; `vendors` resolves it. The shape of the
-# corpus plan that asked `orders` for `orderId`.
+# `one` serves the mutation `act` and resolves a `Holder`'s `source`, but marks `Source.code`
+# `@external`, reading it only as a `@requires` input; `two` resolves it.
 #
-# Subgraph `orders`:
+# Composed with `apollo_federation::composition::compose` from the two subgraphs below. Recompose it
+# when they change.
+#
+# Subgraph `one`:
+#
+#   extend schema @link(url: "https://specs.apollo.dev/federation/v2.3", import: ["@key", "@shareable", "@external", "@requires", "@provides"])
 #
 #   type Query {
 #     ping: String
 #   }
 #
 #   type Mutation {
-#     buy: Purchase
+#     act: Outcome
 #   }
 #
-#   type Purchase {
-#     sub: Sub
+#   type Outcome {
+#     holder: Holder
 #   }
 #
-#   type Sub @key(fields: "id") {
+#   type Holder @key(fields: "id") {
 #     id: ID!
-#     vendor: Vendor! @shareable
-#     orders: [Int] @requires(fields: "vendor { orderId }")
+#     source: Source! @shareable
+#     derived: [Int] @requires(fields: "source { code }")
 #   }
 #
-#   type Vendor @shareable {
+#   type Source @shareable {
 #     id: ID!
-#     orderId: ID @external
+#     code: ID @external
 #   }
 #
-# Subgraph `vendors`:
+# Subgraph `two`:
 #
-#   type Sub @key(fields: "id") {
+#   extend schema @link(url: "https://specs.apollo.dev/federation/v2.3", import: ["@key", "@shareable", "@external", "@requires", "@provides"])
+#
+#   type Holder @key(fields: "id") {
 #     id: ID!
-#     vendor: Vendor! @shareable
+#     source: Source! @shareable
 #   }
 #
-#   type Vendor @shareable {
+#   type Source @shareable {
 #     id: ID!
-#     orderId: ID
+#     code: ID
 #   }
 
 schema @link(url: "https://specs.apollo.dev/link/v1.0") @link(url: "https://specs.apollo.dev/join/v0.3", for: EXECUTION) {
@@ -77,31 +80,31 @@ enum link__Purpose {
 scalar link__Import
 
 enum join__Graph {
-  ORDERS @join__graph(name: "orders", url: "http://orders")
-  VENDORS @join__graph(name: "vendors", url: "http://vendors")
+  ONE @join__graph(name: "one", url: "http://one")
+  TWO @join__graph(name: "two", url: "http://two")
 }
 
 scalar join__FieldSet
 
-type Query @join__type(graph: ORDERS) @join__type(graph: VENDORS) {
-  ping: String @join__field(graph: ORDERS)
+type Query @join__type(graph: ONE) @join__type(graph: TWO) {
+  ping: String @join__field(graph: ONE)
 }
 
-type Mutation @join__type(graph: ORDERS) {
-  buy: Purchase
+type Mutation @join__type(graph: ONE) {
+  act: Outcome
 }
 
-type Purchase @join__type(graph: ORDERS) {
-  sub: Sub
+type Outcome @join__type(graph: ONE) {
+  holder: Holder
 }
 
-type Sub @join__type(graph: ORDERS, key: "id") @join__type(graph: VENDORS, key: "id") {
+type Holder @join__type(graph: ONE, key: "id") @join__type(graph: TWO, key: "id") {
   id: ID!
-  vendor: Vendor!
-  orders: [Int] @join__field(graph: ORDERS, requires: "vendor { orderId }")
+  source: Source!
+  derived: [Int] @join__field(graph: ONE, requires: "source { code }")
 }
 
-type Vendor @join__type(graph: ORDERS) @join__type(graph: VENDORS) {
+type Source @join__type(graph: ONE) @join__type(graph: TWO) {
   id: ID!
-  orderId: ID @join__field(graph: ORDERS, external: true) @join__field(graph: VENDORS)
+  code: ID @join__field(graph: ONE, external: true) @join__field(graph: TWO)
 }

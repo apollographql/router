@@ -670,8 +670,8 @@ fn check_book_and_item(
 }
 
 // The planner sends every `Book` as `Item`. `reviews` resolves it through `Item`'s reference
-// resolver, which returns the `Book`, so the `Book` case applies too. The corpus's
-// `kiva-marketplace` plans have this shape.
+// resolver, which returns the `Book`, so the `Book` case applies too. Router's planner writes this
+// shape for an entity interface.
 #[test]
 fn implementation_case_sent_as_its_entity_interface_is_accepted() {
     check_book_and_item("reviews", "blurb", &[send_as("Item")]).unwrap();
