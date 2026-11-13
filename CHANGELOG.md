@@ -2,6 +2,66 @@
 
 This project adheres to [Semantic Versioning v2.0.0](https://semver.org/spec/v2.0.0.html).
 
+# [2.16.6] - 2026-11-13
+
+## 🚀 Features
+
+### Add a metric to track non-local selection sets observed during query planning
+
+`apollo.router.query_planning.plan.non_local_selections` is a histogram of the
+number of non-local selections estimated during query planning traversal. An
+investigation into the complexity of operations is warranted should this metric
+return values close to the internal non-local selections limit of 100000. The
+histogram uses fixed bucket boundaries of 100, 1000, 25000, 50000, 100000, and
+150000.
+
+By [@lrlna](https://github.com/lrlna) in https://github.com/apollographql/router/pull/10349
+
+## 🐛 Fixes
+
+### Unresponsive replicas no longer break non-cluster Redis caching
+
+Since router 2.15.1, a non-cluster Redis deployment with replicas (for example, a primary with read replicas, or a managed high-availability instance with a standby) could lose its Redis cache entirely while the primary was healthy. This happened when a replica accepted connections but never answered, such as a paused replica or a standby that doesn't accept clients. The router repeatedly logged `redis client aborted; marking for recreation` and `client pool being recreated after connection interrupt`, and cache reads and writes to the primary failed.
+
+Redis Cluster deployments are unchanged. Other Redis deployments no longer open connections to replicas, which the router doesn't read from outside cluster mode, so an unresponsive replica no longer affects caching on the primary. This restores the behavior from before 2.15.1.
+
+By [@BrynCooke](https://github.com/BrynCooke) in https://github.com/apollographql/router/pull/10630
+
+### Fix quadratic API schema generation for contracts that hide most of a supergraph
+
+Generating an API schema removed `@inaccessible` elements one at a time, and each removal updated
+referencer sets spanning the whole schema. Contract variants that hide most of a large supergraph
+took quadratic time, reaching tens of seconds. API schema generation now removes `@inaccessible`
+and `@link`-imported elements in a single pass over the schema, producing the same API schema.
+
+By [@tninesling](https://github.com/tninesling) in https://github.com/apollographql/router/pull/10715
+
+### Keep literal `@skip`/`@include` in subgraph fetches under a variable condition ([PR #10708](https://github.com/apollographql/router/pull/10708))
+
+When a field had a variable `@skip` or `@include`, the query planner dropped `@include(if: false)` and `@skip(if: true)` from nested fields in the same subgraph fetch. Subgraphs then resolved fields the client excluded. The router still removed them from the response, so the cost was extra subgraph work. These directives are now sent to the subgraph.
+
+By [@tninesling](https://github.com/tninesling) in https://github.com/apollographql/router/pull/10708
+
+### Alias conflicting subgraph fields inside a conditional fragment ([PR #10377](https://github.com/apollographql/router/pull/10377))
+
+When a subgraph fetch selects two fields with the same response name but incompatible types (for example `f: Int!` on one type and `f: Int` on another, both needed as `@requires` inputs), the query planner aliases one of them and renames it back after the fetch. If those fields were inside an inline fragment that had no type condition, as happens when a `@skip`/`@include` fragment such as `... on Query @include(if: $a)` or `... @include(if: $a)` is turned into a condition in the query plan, the planner recorded the rename but never applied the alias. Query planning then failed with "Query planning produced an invalid subgraph operation ... must not select different types using the same name".
+
+The alias is now applied inside such fragments, so these operations plan normally.
+
+By [@inanna-apollo](https://github.com/inanna-apollo) in https://github.com/apollographql/router/pull/10377
+
+### Keep executable directives and their argument types through connector expansion
+
+Composing connector subgraphs alongside an executable directive whose argument references a custom type (for example `directive @ownership(owners: [Owner!]) on FIELD` with `enum Owner`) failed satisfiability validation with `INTERNAL_ERROR: Cannot wrap an undefined/null type` (Rust: `Directive argument's inner type does not refer to an existing input type`).
+
+Connector expansion builds one synthetic subgraph per connector, but it never copied executable directive definitions, or the types their arguments reference, into those subgraphs. When another subgraph defined the directive, it still reached the expanded supergraph, but the synthetic subgraphs were recorded as lacking its argument types, so extracting subgraphs from the expanded supergraph produced invalid schemas. When every subgraph used connectors, the directive was dropped from the expanded supergraph entirely.
+
+Each synthetic subgraph now carries the executable directive definitions from its source subgraph, along with their argument types (scalars, enums, and input objects, recursively).
+
+By [@benjamn](https://github.com/benjamn) in https://github.com/apollographql/router/pull/9635
+
+
+
 # [2.16.5] - 2026-10-23
 
 ## 🐛 Fixes
