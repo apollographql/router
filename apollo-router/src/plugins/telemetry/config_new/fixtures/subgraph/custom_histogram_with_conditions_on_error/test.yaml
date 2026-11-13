@@ -1,0 +1,20 @@
+description: Custom histogram conditions are evaluated when a coprocessor call fails at the subgraph stage
+events:
+  - - subgraph_request:
+        query: "query { hello }"
+        operation_name: "Products"
+        operation_kind: query
+        subgraph_name: "products"
+    - subgraph_response:
+        status: 200
+        data:
+          hello: "world"
+        headers:
+          x-outcome: match
+  - - subgraph_request:
+        query: "query { hello }"
+        operation_name: "Products"
+        operation_kind: query
+        subgraph_name: "products"
+    - subgraph_error:
+        error: "HTTP fetch failed: tcp connect error"

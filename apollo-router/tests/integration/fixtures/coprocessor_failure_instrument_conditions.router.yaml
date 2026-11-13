@@ -1,0 +1,40 @@
+# Nothing listens on this port, so every subgraph response coprocessor call fails.
+coprocessor:
+  url: "http://127.0.0.1:1"
+  subgraph:
+    all:
+      response:
+        headers: true
+telemetry:
+  exporters:
+    metrics:
+      prometheus:
+        enabled: true
+        listen: "127.0.0.1:0"
+        path: "/metrics"
+  instrumentation:
+    instruments:
+      subgraph:
+        # Conditioned on the response, so a failed coprocessor call must not count.
+        responses.with_outcome:
+          type: counter
+          value: unit
+          unit: response
+          description: subgraph responses with an x-outcome header
+          condition:
+            exists:
+              subgraph_response_header: x-outcome
+          attributes:
+            outcome:
+              subgraph_response_header: x-outcome
+        # Conditioned on the error, so a failed coprocessor call counts.
+        coprocessor.failures:
+          type: counter
+          value: unit
+          unit: request
+          description: subgraph requests whose coprocessor call failed
+          condition:
+            exists:
+              error: reason
+          attributes:
+            subgraph.name: true
