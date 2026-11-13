@@ -11,11 +11,11 @@ use tower::Service;
 
 use crate::graphql::Error;
 use crate::plugins::authorization::AUTHENTICATION_REQUIRED_KEY;
-use crate::plugins::authorization::AuthorizationPlugin;
 use crate::plugins::authorization::CacheKeyMetadata;
 use crate::plugins::authorization::REQUIRED_POLICIES_KEY;
 use crate::plugins::authorization::REQUIRED_SCOPES_KEY;
 use crate::services::query_parsing::ParsedDocument;
+use crate::services::query_parsing::authorization_requirements::operation_requirements;
 use crate::services::supergraph;
 use crate::spec::Schema;
 
@@ -107,19 +107,16 @@ where
                 }
             };
 
-            let operation_name = req.supergraph_request.body().operation_name.as_deref();
-
+            // The query parsing service stores the requirements on the document. A document
+            // built anywhere else has none, and must not be read as requiring nothing.
             let CacheKeyMetadata {
                 is_authenticated,
                 scopes,
                 policies,
-            } = AuthorizationPlugin::generate_cache_metadata(
-                &doc.executable,
-                operation_name,
-                schema.supergraph_schema(),
-                false,
-                &schema.authorization_directives,
-            );
+            } = match doc.authorization.get() {
+                Some(requirements) => requirements.clone(),
+                None => operation_requirements(&doc, &schema),
+            };
             if is_authenticated {
                 req.context
                     .insert(AUTHENTICATION_REQUIRED_KEY, true)
@@ -266,6 +263,11 @@ mod tests {
         let config = Configuration::default();
         let schema = Arc::new(Schema::parse(POLICY_SCHEMA, &config).unwrap());
         let doc = Query::parse_document(query, None, &schema, &config).unwrap();
+        assert_eq!(
+            doc.authorization.get(),
+            None,
+            "a document parsed outside the query parsing service has no stored requirements"
+        );
 
         let (mock, mut handle) =
             tower_test::mock::pair::<supergraph::Request, supergraph::Response>();
@@ -303,6 +305,88 @@ mod tests {
         );
 
         crate::plugin::test::await_mock_driver(driver).await;
+    }
+
+    /// Runs the layer for one request carrying `doc`, and returns the request's context.
+    async fn extract(schema: Arc<Schema>, doc: ParsedDocument) -> Context {
+        let (mock, mut handle) =
+            tower_test::mock::pair::<supergraph::Request, supergraph::Response>();
+        let driver = tokio::spawn(async move {
+            let (req, responder) = handle.next_request().await.unwrap();
+            responder.send_response(
+                supergraph::Response::fake_builder()
+                    .context(req.context)
+                    .build()
+                    .unwrap(),
+            );
+        });
+        let service = ServiceBuilder::new()
+            .layer(ExtractAuthorizationChecksLayer::new(schema))
+            .service(mock);
+
+        let context = Context::new();
+        context
+            .extensions()
+            .with_lock(|lock| lock.insert::<ParsedDocument>(doc));
+        let req = supergraph::Request::fake_builder()
+            .query("query { private { id } }")
+            .context(context)
+            .build()
+            .unwrap();
+
+        let context = service.oneshot(req).await.unwrap().context;
+        crate::plugin::test::await_mock_driver(driver).await;
+        context
+    }
+
+    #[tokio::test]
+    async fn uses_requirements_stored_on_the_document() {
+        let config = Configuration::default();
+        let schema = Arc::new(Schema::parse(POLICY_SCHEMA, &config).unwrap());
+        let doc =
+            Query::parse_document("query { private { id } }", None, &schema, &config).unwrap();
+        doc.authorization
+            .set(CacheKeyMetadata {
+                policies: vec!["stored".to_string()],
+                ..Default::default()
+            })
+            .unwrap();
+
+        let context = extract(schema, doc).await;
+
+        assert_eq!(
+            context.get_json_value(REQUIRED_POLICIES_KEY).unwrap(),
+            serde_json_bytes::json!({ "stored": null }),
+        );
+    }
+
+    #[tokio::test]
+    async fn requests_sharing_a_document_get_their_own_policy_results() {
+        let config = Configuration::default();
+        let schema = Arc::new(Schema::parse(POLICY_SCHEMA, &config).unwrap());
+        let doc =
+            Query::parse_document("query { private { id } }", None, &schema, &config).unwrap();
+        doc.authorization
+            .set(CacheKeyMetadata {
+                policies: vec!["admin".to_string()],
+                ..Default::default()
+            })
+            .unwrap();
+
+        let first = extract(schema.clone(), doc.clone()).await;
+        // What a coprocessor or Rhai script does once it has evaluated the policy.
+        first
+            .insert(
+                REQUIRED_POLICIES_KEY,
+                HashMap::from([("admin".to_string(), Some(true))]),
+            )
+            .unwrap();
+        let second = extract(schema, doc).await;
+
+        assert_eq!(
+            second.get_json_value(REQUIRED_POLICIES_KEY).unwrap(),
+            serde_json_bytes::json!({ "admin": null }),
+        );
     }
 
     #[tokio::test]
