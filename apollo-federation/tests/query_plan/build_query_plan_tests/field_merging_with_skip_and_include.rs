@@ -309,3 +309,96 @@ fn fields_are_not_overwritten_when_directives_are_removed() {
         "###
     );
 }
+
+#[test]
+fn literal_conditions_are_kept_when_hoisting_variable_conditions() {
+    let planner = planner!(
+        Upstream: r#"
+          type Query {
+              parent: Parent
+          }
+
+          type Parent {
+              child: Child
+          }
+
+          type Child @key(fields: "id") {
+              id: ID!
+          }
+        "#,
+        Downstream: r#"
+          type Child @key(fields: "id") {
+              id: ID!
+              nested: Nested
+          }
+
+          type Nested {
+              excluded: Leaf
+              included: Leaf
+          }
+
+          type Leaf {
+              value: Int
+          }
+        "#,
+    );
+    assert_plan!(
+        &planner,
+        r#"
+          query Test($skip: Boolean!) {
+            parent {
+              child @skip(if: $skip) {
+                nested {
+                  excluded @include(if: false) {
+                    value
+                  }
+                  included @skip(if: true) {
+                    value
+                  }
+                }
+              }
+            }
+          }
+        "#,
+        @r###"
+        QueryPlan {
+          Sequence {
+            Fetch(service: "Upstream") {
+              {
+                parent {
+                  child @skip(if: $skip) {
+                    __typename
+                    id
+                  }
+                }
+              }
+            },
+            Skip(if: $skip) {
+              Flatten(path: "parent.child") {
+                Fetch(service: "Downstream") {
+                  {
+                    ... on Child {
+                      __typename
+                      id
+                    }
+                  } =>
+                  {
+                    ... on Child {
+                      nested {
+                        excluded @include(if: false) {
+                          value
+                        }
+                        included @skip(if: true) {
+                          value
+                        }
+                      }
+                    }
+                  }
+                },
+              },
+            },
+          },
+        }
+        "###
+    );
+}
