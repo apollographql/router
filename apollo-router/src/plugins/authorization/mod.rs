@@ -238,18 +238,19 @@ pub(crate) struct AuthorizationPlugin {
 
 impl AuthorizationPlugin {
     pub(crate) fn enable_directives(configuration: &Configuration, schema: &Schema) -> bool {
-        let has_config = Self::configuration(configuration).directives.enabled;
+        Self::configuration(configuration).directives.enabled
+            && Self::links_authorization_directives(schema)
+    }
 
-        let has_authorization_directives = schema.has_spec(
+    /// Whether `schema` links `@authenticated`, `@requiresScopes` or `@policy`.
+    fn links_authorization_directives(schema: &Schema) -> bool {
+        schema.has_spec(
             &Identity::authenticated_identity(),
             AUTHENTICATED_SPEC_VERSION_RANGE,
         ) || schema.has_spec(
             &Identity::requires_scopes_identity(),
             REQUIRES_SCOPES_SPEC_VERSION_RANGE,
-        ) || schema
-            .has_spec(&Identity::policy_identity(), POLICY_SPEC_VERSION_RANGE);
-
-        has_config && has_authorization_directives
+        ) || schema.has_spec(&Identity::policy_identity(), POLICY_SPEC_VERSION_RANGE)
     }
 
     pub(crate) fn configuration(configuration: &Configuration) -> Conf {
