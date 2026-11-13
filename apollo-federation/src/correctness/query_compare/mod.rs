@@ -24,6 +24,12 @@
 //! than simplified away, since a divergence in either direction would be a divergence from the
 //! model. Each is a witness only: declining one costs nothing but the general search.
 //!
+//! The syntactic witness goes one step past the model's: a leaf field the left side selects under
+//! no directive also includes the same leaf inside a fragment both sides share at that level, since
+//! it is selected on every object there. This is the shape a client fragment owing the `__typename`
+//! the router formats it by takes against a plan, and without it the general search runs at every
+//! such fragment. It accepts nothing the general search rejects.
+//!
 //! Scope: the model gives semantics to `@skip` and `@include` only. Any other directive is carried
 //! as part of a field's resolver call and compared, but is otherwise uninterpreted, so two fields
 //! differing only by one are not treated as the same call. Named fragment spreads are resolved
@@ -999,6 +1005,7 @@ fn group_includes_for_regions<T: PathConstraint>(
                 task.left_scope,
                 &task.right_selections,
                 task.right_scope,
+                &[],
             ) {
                 continue;
             }
@@ -1171,6 +1178,7 @@ fn composite_field_includes_at_runtime_type(
         left.scope,
         &right_selections,
         right.scope,
+        &[],
     )
 }
 
@@ -1272,17 +1280,33 @@ fn holds_a_fragment(selections: &[&Selection]) -> bool {
 /// Selection order and extra left selections do not affect inclusion. This check stays
 /// syntax-only, apart from asking the schema which type conditions are vacuous where they sit:
 /// condition normalization and field merging remain the general search's job.
-fn selection_set_syntactically_includes(
+///
+/// `inherited` are the left side's leaf fields under no directive at the levels enclosing this one
+/// on the same object, outside any fragment there or inside fragments the right side shares. Such a
+/// field is selected on every object of the position, so it includes a right field inside a
+/// fragment as well as one beside it: a client fragment owing `__typename` is met by the
+/// `__typename` a plan selects beside its fragments.
+fn selection_set_syntactically_includes<'s>(
     schema: &SchemaView<'_>,
     position: &[Name],
-    left: &[&Selection],
-    left_scope: Scope<'_>,
+    left: &[&'s Selection],
+    left_scope: Scope<'s>,
     right: &[&Selection],
     right_scope: Scope<'_>,
+    inherited: &[&'s Selection],
 ) -> bool {
-    let matches = |left: &[&Selection], right: &[&Selection]| {
+    let matches = |left: &[&'s Selection], right: &[&Selection]| {
+        // What a fragment the two sides share inherits from here.
+        let leaves: Vec<&'s Selection> = inherited
+            .iter()
+            .copied()
+            .chain(left.iter().copied().filter(|selection| {
+                matches!(selection, Selection::Field(field)
+                    if field.selection_set.selections.is_empty() && field.directives.is_empty())
+            }))
+            .collect();
         right.iter().all(|right_selection| {
-            left.iter().any(|left_selection| {
+            left.iter().chain(inherited).any(|left_selection| {
                 selection_syntactically_includes(
                     schema,
                     position,
@@ -1290,6 +1314,7 @@ fn selection_set_syntactically_includes(
                     left_scope,
                     right_selection,
                     right_scope,
+                    &leaves,
                 )
             })
         })
@@ -1304,13 +1329,16 @@ fn selection_set_syntactically_includes(
     matches(&left_flat, &right_flat)
 }
 
-fn selection_syntactically_includes(
+/// `inherited` is what a fragment the two sides share inherits, as
+/// [`selection_set_syntactically_includes`] says.
+fn selection_syntactically_includes<'s>(
     schema: &SchemaView<'_>,
     position: &[Name],
-    left: &Selection,
-    left_scope: Scope<'_>,
+    left: &'s Selection,
+    left_scope: Scope<'s>,
     right: &Selection,
     right_scope: Scope<'_>,
+    inherited: &[&'s Selection],
 ) -> bool {
     // A spread and an inline fragment with the same condition, directives and selections are one
     // fragment written two ways, so each side resolves to a view before anything is compared.
@@ -1332,6 +1360,7 @@ fn selection_syntactically_includes(
                     left_scope,
                     &right_view.selections.iter().collect::<Vec<_>>(),
                     right_scope,
+                    inherited,
                 )
         }
         (None, None) => {
@@ -1359,6 +1388,8 @@ fn selection_syntactically_includes(
                         left_scope,
                         &right_sub,
                         right_scope,
+                        // A field's selections are read at another object.
+                        &[],
                     )
                 }
         }

@@ -53,8 +53,18 @@ fn check_root_fetch(
     subgraph: &str,
     operation: &str,
 ) -> Result<(), CorrectnessError> {
+    check_root_fetch_of(fixture, subgraph, operation, operation)
+}
+
+/// A plan of one root fetch selecting `fetched`, checked against the client operation `operation`.
+fn check_root_fetch_of(
+    fixture: &Fixture,
+    subgraph: &str,
+    fetched: &str,
+    operation: &str,
+) -> Result<(), CorrectnessError> {
     fixture.check(
-        &fixture.written_plan(&root_fetch(subgraph, operation)),
+        &fixture.written_plan(&root_fetch(subgraph, fetched)),
         operation,
     )
 }
@@ -202,9 +212,10 @@ fn a_nested_window_adding_to_the_outer_one_is_accepted() {
 #[test]
 fn a_conditioned_window_granting_its_type_is_accepted() {
     let fixture = windows();
-    check_root_fetch(
+    check_root_fetch_of(
         &fixture,
         "shop",
+        "{ featured { __typename ... on Gizmo { maker { name } } } }",
         "{ featured { ... on Gizmo { maker { name } } } }",
     )
     .unwrap();
@@ -251,7 +262,13 @@ fn an_interface_field_reaching_an_external_member_is_rejected() {
 #[test]
 fn a_member_resolving_the_field_is_accepted() {
     let fixture = windows();
-    check_root_fetch(&fixture, "shop", "{ items { ... on Widget { label } } }").unwrap();
+    check_root_fetch_of(
+        &fixture,
+        "shop",
+        "{ items { __typename ... on Widget { label } } }",
+        "{ items { ... on Widget { label } } }",
+    )
+    .unwrap();
 }
 
 // `... on Item` inside `... on Widget` still runs for widgets alone: a fragment applies to what
@@ -259,9 +276,10 @@ fn a_member_resolving_the_field_is_accepted() {
 #[test]
 fn an_interface_fragment_inside_a_member_is_accepted() {
     let fixture = windows();
-    check_root_fetch(
+    check_root_fetch_of(
         &fixture,
         "shop",
+        "{ items { __typename ... on Widget { ... on Item { label } } } }",
         "{ items { ... on Widget { ... on Item { label } } } }",
     )
     .unwrap();
@@ -498,12 +516,15 @@ fn a_deep_interface_chain_is_walked_once() {
 
 const EVERY_VALUE: &str = "{ item { ... on I { value } } }";
 
+/// [`EVERY_VALUE`] with the `__typename` the router applies its fragments by.
+const EVERY_VALUE_FETCHED: &str = "{ item { __typename ... on I { value } } }";
+
 // `source` returns a `B` for `item` without running `... on I`, so nothing supplies a `B`'s
 // `value`. Read in the supergraph, where `B` implements `I`, the fragment was credited with it.
 #[test]
 fn a_fragment_the_subgraph_does_not_apply_is_rejected() {
     let fixture = membership();
-    let plan = fixture.written_plan(&root_fetch("source", EVERY_VALUE));
+    let plan = fixture.written_plan(&root_fetch("source", EVERY_VALUE_FETCHED));
     assert_rejected(
         fixture.check(&plan, EVERY_VALUE),
         "does not select `value` on B",
@@ -516,7 +537,7 @@ fn a_fragment_per_member_is_accepted() {
     let fixture = membership();
     let plan = fixture.written_plan(&root_fetch(
         "source",
-        "{ item { ... on A { value } ... on B { value } } }",
+        "{ item { __typename ... on A { value } ... on B { value } } }",
     ));
     fixture.check(&plan, EVERY_VALUE).unwrap();
 }
@@ -525,7 +546,7 @@ fn a_fragment_per_member_is_accepted() {
 #[test]
 fn a_fragment_both_schemas_apply_alike_is_accepted() {
     let fixture = membership();
-    check_root_fetch(&fixture, "other", EVERY_VALUE).unwrap();
+    check_root_fetch_of(&fixture, "other", EVERY_VALUE_FETCHED, EVERY_VALUE).unwrap();
 }
 
 // `... on I` is narrowed to the object types `source` admits at `I`, and kept as written where

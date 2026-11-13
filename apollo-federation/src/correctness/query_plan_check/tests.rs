@@ -740,6 +740,7 @@ mod context_arguments;
 mod context_reads;
 mod deferred_reads;
 mod entries;
+mod formatting_typenames;
 mod growing_families;
 mod input_renamers;
 mod input_rewrites;

@@ -681,6 +681,46 @@ fn a_wrapper_carrying_a_directive_is_not_transparent() {
     );
 }
 
+// A leaf the left side selects beside its fragments is selected on every object there, so it
+// includes the same leaf inside a fragment both sides share, and the shortcut settles the pair as
+// it settles the pair written alike. This is the shape a client fragment owing the `__typename` the
+// router formats it by takes against a plan selecting `__typename` beside its fragments.
+#[test]
+fn a_leaf_beside_shared_fragments_includes_one_inside_them() {
+    let alike = groups_to_decide(
+        r#"{ test_i { __typename ... on R { r } } }"#,
+        r#"{ test_i { __typename ... on R { r } } }"#,
+    );
+    let inside = groups_to_decide(
+        r#"{ test_i { __typename ... on R { r } } }"#,
+        r#"{ test_i { ... on R { __typename r } } }"#,
+    );
+    assert_eq!(
+        inside, alike,
+        "the shortcut declined a leaf beside the fragment"
+    );
+}
+
+// A leaf under a directive is selected only where the directive lets it be, so it includes no
+// leaf inside a fragment that is selected regardless.
+#[test]
+fn a_conditional_leaf_does_not_include_one_inside_a_fragment() {
+    error(
+        r#"query($v: Boolean!) { test_i { __typename @include(if: $v) ... on R { r } } }"#,
+        r#"{ test_i { ... on R { __typename r } } }"#,
+    );
+}
+
+// A field's selections are read at another object, so a leaf beside the field includes nothing
+// inside them.
+#[test]
+fn a_leaf_includes_nothing_inside_a_fields_selections() {
+    error(
+        r#"{ test_entity { id next { ... on ObjectA { next { id } } } } }"#,
+        r#"{ test_entity { next { ... on ObjectA { id } } } }"#,
+    );
+}
+
 // A covariant return narrows what the child position holds, so a wrapper transparent at the
 // interface's position need not be transparent at the narrower one.
 #[test]

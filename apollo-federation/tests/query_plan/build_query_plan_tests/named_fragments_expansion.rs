@@ -94,7 +94,11 @@ fn handles_fragments_with_interface_field_subtyping() {
         "#,
     );
 
+    // validate_correctness = false: the router types `other` as written in `Fragment1`, an `I`, so
+    // with no `__typename` fetched it formats the object as an `I`, applies neither `... on T1` nor
+    // `... on T2`, and drops `id`. The checker requires the `__typename` the router formats by.
     assert_plan!(
+        validate_correctness = false,
         &planner,
         r#"
           {

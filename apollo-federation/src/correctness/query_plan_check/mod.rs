@@ -12,7 +12,9 @@
 //! ```
 //!
 //! - **Completeness** — walk the plan once accumulating what it fetches, mount each fetch's
-//!   selections at the path it runs at, then ask whether the result includes the client operation.
+//!   selections at the path it runs at, then ask whether the result includes the client operation,
+//!   with the `__typename` the router formats its response by (`withFormattingTypenames`): a
+//!   fragment on a type the field's type is no subtype of applies by the object's `__typename`.
 //!   That question is [`super::query_compare::includes`], itself a port of the model's
 //!   `includesBool`.
 //! - **Soundness** — every fetch is sent to a subgraph that is there and selects only what that
@@ -73,6 +75,10 @@
 //!   operation and every field set are coerced the way the planner coerces its fetch operations,
 //!   and their `Float` and `ID` literals are spelled alike, so `1` and `1.0` of a `Float` are one
 //!   value (`coerced_for_comparison`). Defaults are not filled in: a subgraph applies its own.
+//! - **Named fragment spreads in the client operation** stay spreads when the formatting
+//!   `__typename` is added, each pointed at a copy of its definition formatted for the type of the
+//!   field it is spread under, since what a fragment owes depends on that type. The model's
+//!   operations have no spreads.
 //! - **`@context` data availability.** Every contextual value a fetch reads must already be
 //!   fetched wherever the fetch runs. The legacy checker does not check this at all: at run time
 //!   a rewrite path that reaches nothing simply drops the argument, so nothing notices.
@@ -99,6 +105,11 @@
 //! The third is assembled out of `@key` and `@requires` field sets, which supergraph composition
 //! has already validated, so re-checking them here would only cost time, and the fourth is one
 //! field mounted where the plan already reaches.
+//!
+//! The model also assumes no client field but `__typename` takes the response name `__typename`
+//! (`TypenameUnaliased`), so the `__typename` added for formatting merges with the fields beside
+//! it. GraphQL allows such an alias, and the checker does not rule it out either; the comparison
+//! with such an operation is unspecified.
 //!
 //! # Unfetched introspection
 //!
@@ -142,6 +153,7 @@ use apollo_compiler::executable;
 use apollo_compiler::executable::FragmentMap;
 use apollo_compiler::executable::Selection;
 use apollo_compiler::name;
+use apollo_compiler::schema::ExtendedType;
 use apollo_compiler::validation::Valid;
 
 use self::context::ContextSite;
@@ -178,6 +190,7 @@ use self::returned::ReturnedTypes;
 use self::selections::apply_key_renamers;
 use self::selections::apply_output_renamers;
 use self::selections::collapse_fragments;
+use self::selections::field_output_type;
 use self::selections::inline_fragment_spreads;
 use self::selections::narrow_type_conditions;
 use self::selections::selections_at;
@@ -1545,6 +1558,33 @@ impl Checker<'_> {
         Valid::assume_valid(document)
     }
 
+    /// The client operation with the `__typename` the router formats it by; see
+    /// [`FormattingTypenames`].
+    fn with_formatting_typenames(
+        &self,
+        source: &Valid<ExecutableDocument>,
+    ) -> Valid<ExecutableDocument> {
+        let Ok(operation) = source.operations.get(None) else {
+            return source.clone();
+        };
+        let mut formatting = FormattingTypenames {
+            schema: self.supergraph_schema,
+            fragments: &source.fragments,
+            copies: IndexMap::default(),
+            defined: FragmentMap::default(),
+        };
+        let mut built = (**operation).clone();
+        built.selection_set.selections = formatting.selections(
+            &self.root_type,
+            &self.root_type,
+            &operation.selection_set.selections,
+        );
+        let mut document = ExecutableDocument::new();
+        document.fragments = formatting.defined;
+        document.operations.insert(Node::new(built));
+        Valid::assume_valid(document)
+    }
+
     /// The client operation's variable declarations as every operation the checker builds them,
     /// optionally narrowed to the ones a selection set uses.
     ///
@@ -1655,6 +1695,181 @@ fn without_unfetched_introspection(
             Selection::FragmentSpread(_) => Some(selection.clone()),
         })
         .collect()
+}
+
+/// Adds to the client operation the `__typename` selected in every fragment the router applies by
+/// the object's `__typename` (`withFormattingTypenames`).
+///
+/// The router formats a response object by its `__typename` where the field's type is abstract,
+/// and by that type where the object has none (`apply_selection_set`), dropping the fields of a
+/// fragment on a type the field's type is no subtype of; so a plan owes a `__typename` wherever
+/// such a fragment applies, at any depth of fragments.
+///
+/// What a named fragment owes depends on the type of the field it is spread under, so a spread is
+/// pointed at a copy of its definition formatted for that type, one per fragment and type, which
+/// keeps the operation's spreads shared rather than inlining each.
+struct FormattingTypenames<'a> {
+    schema: &'a ValidFederationSchema,
+    fragments: &'a FragmentMap,
+    /// The formatted copies made so far, by fragment and field type.
+    copies: IndexMap<(Name, Name), Name>,
+    defined: FragmentMap,
+}
+
+impl FormattingTypenames<'_> {
+    /// `selections`, read at `lookup_type` below a field of type `format_type`, formatted.
+    fn selections(
+        &mut self,
+        lookup_type: &Name,
+        format_type: &Name,
+        selections: &[Selection],
+    ) -> Vec<Selection> {
+        let mut out = Vec::with_capacity(selections.len());
+        for selection in selections {
+            out.push(match selection {
+                Selection::Field(field) => {
+                    let output_type = field_output_type(self.schema, lookup_type, &field.name)
+                        .unwrap_or_else(|| lookup_type.clone());
+                    let mut copy = (**field).clone();
+                    copy.selection_set.selections = self.selections(
+                        &output_type,
+                        &output_type,
+                        &field.selection_set.selections,
+                    );
+                    Selection::Field(Node::new(copy))
+                }
+                Selection::InlineFragment(fragment) => {
+                    let mut copy = (**fragment).clone();
+                    copy.selection_set.selections = self.under_condition(
+                        fragment.type_condition.as_ref(),
+                        lookup_type,
+                        format_type,
+                        &fragment.selection_set.selections,
+                    );
+                    Selection::InlineFragment(Node::new(copy))
+                }
+                Selection::FragmentSpread(spread) => {
+                    match self.copy_of(&spread.fragment_name, format_type) {
+                        // Undefined: leave it for the comparison to report.
+                        None => selection.clone(),
+                        Some(fragment_name) => {
+                            Selection::FragmentSpread(Node::new(executable::FragmentSpread {
+                                fragment_name,
+                                directives: spread.directives.clone(),
+                            }))
+                        }
+                    }
+                }
+            });
+        }
+        out
+    }
+
+    /// What a fragment on `type_condition` selects, formatted, with the `__typename` it owes first.
+    fn under_condition(
+        &mut self,
+        type_condition: Option<&Name>,
+        lookup_type: &Name,
+        format_type: &Name,
+        selections: &[Selection],
+    ) -> Vec<Selection> {
+        let mut below = self.selections(
+            type_condition.unwrap_or(lookup_type),
+            format_type,
+            selections,
+        );
+        if let Some(type_condition) = type_condition
+            && !applies_statically(self.schema, format_type, type_condition)
+            && let Ok(definition) = self
+                .schema
+                .schema()
+                .type_field(type_condition, &INTROSPECTION_TYPENAME_FIELD_NAME)
+        {
+            below.insert(
+                0,
+                executable::Field::new(
+                    INTROSPECTION_TYPENAME_FIELD_NAME.clone(),
+                    definition.clone(),
+                )
+                .into(),
+            );
+        }
+        below
+    }
+
+    /// The name of the copy of fragment `name` formatted below a field of type `format_type`,
+    /// defined on first use; `None` for a fragment the operation does not define.
+    fn copy_of(&mut self, name: &Name, format_type: &Name) -> Option<Name> {
+        let key = (name.clone(), format_type.clone());
+        if let Some(copy) = self.copies.get(&key) {
+            return Some(copy.clone());
+        }
+        let definition = self.fragments.get(name)?.clone();
+        let mut index = self.copies.len();
+        let copy_name = loop {
+            let candidate = Name::new(&format!("{name}__formatted_{index}")).ok()?;
+            if !self.fragments.contains_key(&candidate) && !self.defined.contains_key(&candidate) {
+                break candidate;
+            }
+            index += 1;
+        };
+        // Recorded before the body is formatted; a valid document has no fragment cycles anyway.
+        self.copies.insert(key, copy_name.clone());
+        let mut selection_set = executable::SelectionSet::new(definition.selection_set.ty.clone());
+        selection_set.selections = self.under_condition(
+            Some(definition.type_condition()),
+            definition.type_condition(),
+            format_type,
+            &definition.selection_set.selections,
+        );
+        self.defined.insert(
+            copy_name.clone(),
+            Node::new(executable::Fragment {
+                description: None,
+                name: copy_name.clone(),
+                directives: definition.directives.clone(),
+                selection_set,
+            }),
+        );
+        Some(copy_name)
+    }
+}
+
+/// Whether the router applies a fragment on `type_condition` to an object of a field of type
+/// `format_type` whatever the object's `__typename` (`appliesStatically`): the type is the
+/// condition, an object, or an interface implementing it, `apply_selection_set` reading the
+/// object's `__typename` instead only where the field's type is abstract.
+fn applies_statically(
+    schema: &ValidFederationSchema,
+    format_type: &Name,
+    type_condition: &Name,
+) -> bool {
+    let types = &schema.schema().types;
+    if format_type == type_condition
+        || !matches!(
+            types.get(format_type),
+            Some(ExtendedType::Interface(_) | ExtendedType::Union(_))
+        )
+    {
+        return true;
+    }
+    // Through the interfaces it implements, transitively.
+    let mut pending = vec![format_type];
+    let mut seen: IndexSet<&Name> = IndexSet::default();
+    while let Some(interface) = pending.pop() {
+        if !seen.insert(interface) {
+            continue;
+        }
+        if let Some(ExtendedType::Interface(definition)) = types.get(interface) {
+            for implemented in &definition.implements_interfaces {
+                if **implemented == *type_condition {
+                    return true;
+                }
+                pending.push(&**implemented);
+            }
+        }
+    }
+    false
 }
 
 fn is_introspection_field(name: &Name) -> bool {
@@ -1787,7 +2002,8 @@ pub fn check_plan_with_options(
     // Completeness: everything the plan fetches, read as one operation, must include the client
     // operation, narrowed to what the plan's fetches return.
     let plan_doc = checker.operation_with(walked.fetched);
-    let operation_doc = checker.without_introspection(operation_doc);
+    let operation_doc =
+        checker.with_formatting_typenames(&checker.without_introspection(operation_doc));
     checker
         .comparator
         .includes_with_constraint(&checker.returned.constraint(), &plan_doc, &operation_doc)

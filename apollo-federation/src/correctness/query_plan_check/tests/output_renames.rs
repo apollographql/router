@@ -36,7 +36,8 @@ fn c_to_child_under_a() -> Value {
     json!([{ "Key": ["parent", null] }, { "TypenameEquals": "A" }, { "Key": ["c", null] }])
 }
 
-const CHILD_VALUES: &str = "c: child { ... on X { value } ... on Y { value } }";
+/// Every parent's child as `c`, with the `__typename` the router applies the child's fragments by.
+const CHILD_VALUES: &str = "c: child { __typename ... on X { value } ... on Y { value } }";
 
 /// The plan, its fetch selecting the parent's `__typename` when `observed`.
 fn renamed(observed: bool) -> Value {
@@ -137,7 +138,7 @@ fn a_rename_with_typename_in_another_selection_credits_neither_key() {
 /// The plan renaming `w` back to `value` below the child, where the parent is an `A`.
 fn renamed_below() -> Value {
     renaming_fetch(
-        "{ parent { __typename c: child { ... on X { w: value } ... on Y { w: value } } } }",
+        "{ parent { __typename c: child { __typename ... on X { w: value } ... on Y { w: value } } } }",
         json!([
             { "Key": ["parent", null] },
             { "TypenameEquals": "A" },

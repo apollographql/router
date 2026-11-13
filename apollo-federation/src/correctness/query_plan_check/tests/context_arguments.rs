@@ -578,7 +578,7 @@ fn union_stores() -> Fixture {
 }
 
 /// The whole checker over the union, asking `subgraph` for `field` below the outlets after
-/// `directory` fetched `selected` and the offers' keys on each member.
+/// `directory` fetched their `__typename`, and `selected` and the offers' keys on each member.
 fn union_checked(
     selected: &str,
     subgraph: &str,
@@ -589,7 +589,7 @@ fn union_checked(
     let directory = root_fetch(
         "directory",
         &format!(
-            "{{ outlets {{ ... on Store {{ {selected} {OFFER_KEY} }} \
+            "{{ outlets {{ __typename ... on Store {{ {selected} {OFFER_KEY} }} \
              ... on Department {{ {selected} {OFFER_KEY} }} }} }}"
         ),
         Vec::new(),

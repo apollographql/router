@@ -184,12 +184,21 @@ fn independent_pairs() -> Fixture {
 }
 
 /// What is selected at `level` of `2 * pairs` and below: a pair's leaf field under `under(level)`,
-/// if any, then the next level, and the last level's `leaf`.
-fn pair_level(level: usize, pairs: usize, under: &dyn Fn(usize) -> Option<&'static str>) -> String {
+/// if any, then the next level, and the last level's `leaf`; every level's `__typename` first, if
+/// `typenames`.
+fn pair_level(
+    level: usize,
+    pairs: usize,
+    under: &dyn Fn(usize) -> Option<&'static str>,
+    typenames: bool,
+) -> String {
     if level == 2 * pairs {
         return "leaf { __typename }".to_string();
     }
     let mut selections = Vec::new();
+    if typenames {
+        selections.push("__typename".to_string());
+    }
     if let Some(type_name) = under(level) {
         let below = 2 * pairs - level;
         selections.push(format!(
@@ -201,13 +210,14 @@ fn pair_level(level: usize, pairs: usize, under: &dyn Fn(usize) -> Option<&'stat
     }
     selections.push(format!(
         "next {{ {} }}",
-        pair_level(level + 1, pairs, under)
+        pair_level(level + 1, pairs, under, typenames)
     ));
     selections.join(" ")
 }
 
 /// Each pair's leaf field asked under the pair's `A` and fetched under its `C`, or under its `D`
-/// for pair `changed`.
+/// for pair `changed`, the fetch selecting every level's `__typename`, which the router applies the
+/// fragments by.
 fn check_pairs(pairs: usize, changed: Option<usize>) -> Result<(), CorrectnessError> {
     let fetched = |level: usize| {
         (!level.is_multiple_of(2)).then(|| if Some(level / 2) == changed { "D" } else { "C" })
@@ -217,9 +227,9 @@ fn check_pairs(pairs: usize, changed: Option<usize>) -> Result<(), CorrectnessEr
         &independent_pairs(),
         fetch(
             "chain",
-            &format!("{{ root {{ {} }} }}", pair_level(0, pairs, &fetched)),
+            &format!("{{ root {{ {} }} }}", pair_level(0, pairs, &fetched, true)),
         ),
-        &format!("{{ root {{ {} }} }}", pair_level(0, pairs, &asked)),
+        &format!("{{ root {{ {} }} }}", pair_level(0, pairs, &asked, false)),
     )
 }
 
@@ -264,10 +274,14 @@ fn member_selections(members: usize, missing: Option<usize>) -> String {
     format!("{{ root {{ {} }} }}", selections.join(" "))
 }
 
+/// The fetch selects `root`'s `__typename` too, which the router applies the fragments by.
 fn check_member_fragments(members: usize, missing: Option<usize>) -> Result<(), CorrectnessError> {
     check(
         &member_fragments(),
-        fetch("chain", &member_selections(members, missing)),
+        fetch(
+            "chain",
+            &member_selections(members, missing).replacen("{ root { ", "{ root { __typename ", 1),
+        ),
         &member_selections(members, None),
     )
 }

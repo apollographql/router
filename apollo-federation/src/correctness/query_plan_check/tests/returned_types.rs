@@ -158,6 +158,9 @@ fn returned_members() -> Fixture {
 
 const EVERY_VALUE: &str = "{ item { ... on I { value } } }";
 
+/// [`EVERY_VALUE`] with the `__typename` the router applies its fragments by.
+const EVERY_VALUE_FETCHED: &str = "{ item { __typename ... on I { value } } }";
+
 fn names(types: &IndexSet<Name>) -> Vec<&str> {
     types.iter().map(Name::as_str).collect()
 }
@@ -222,7 +225,7 @@ fn demand_is_narrowed_to_a_alone() {
 #[test]
 fn member_no_fetch_returns_is_excused() {
     let fixture = returned_members();
-    check(&fixture, fetch("source", EVERY_VALUE), EVERY_VALUE).unwrap();
+    check(&fixture, fetch("source", EVERY_VALUE_FETCHED), EVERY_VALUE).unwrap();
 }
 
 // `other` selects `item` too and can return a `B` there, whose `value` nothing fetched: one fetch
@@ -231,8 +234,8 @@ fn member_no_fetch_returns_is_excused() {
 fn member_another_fetch_returns_is_demanded() {
     let fixture = returned_members();
     let plan = parallel(vec![
-        fetch("source", EVERY_VALUE),
-        fetch("other", "{ item { ... on A { value } } }"),
+        fetch("source", EVERY_VALUE_FETCHED),
+        fetch("other", "{ item { __typename ... on A { value } } }"),
     ]);
     expect_rejected(
         check(&fixture, plan, EVERY_VALUE),
@@ -322,13 +325,13 @@ fn positioned_holders_one_returns_b() -> Fixture {
     ))
 }
 
-/// `item { ... }`, with a fragment per type in `types`, each selecting `id`.
+/// `item { __typename ... }`, with a fragment per type in `types`, each selecting `id`.
 fn item_selection(types: &[&str]) -> String {
     let fragments: Vec<String> = types
         .iter()
         .map(|type_name| format!("... on {type_name} {{ id }}"))
         .collect();
-    format!("item {{ {} }}", fragments.join(" "))
+    format!("item {{ __typename {} }}", fragments.join(" "))
 }
 
 /// `root { item { ... } }` ([`item_selection`]).
@@ -509,7 +512,7 @@ fn related_checked(operation: &str) -> Result<(), CorrectnessError> {
     let mut extra = entity_fetch(
         "extra",
         vec![entry("A", "__typename id"), entry("B", "__typename id")],
-        "... on Thing { related { id } }",
+        "... on Thing { related { __typename id } }",
     );
     extra["Fetch"]["input_rewrites"] = json!(["A", "B"].map(|type_name| json!({ "ValueSetter": {
         "path": [{ "TypenameEquals": type_name }, { "Key": ["__typename", null] }],
@@ -1706,8 +1709,8 @@ fn check_correlated(complete: bool) -> Result<(), CorrectnessError> {
         fetch(
             "source",
             &format!(
-                "{{ parent {{ ... on A {{ child {{ value }} }} \
-                 ... on B {{ child {{ {b_child} }} }} }} }}"
+                "{{ parent {{ __typename ... on A {{ child {{ __typename value }} }} \
+                 ... on B {{ child {{ __typename {b_child} }} }} }} }}"
             ),
         ),
         "{ parent { \
