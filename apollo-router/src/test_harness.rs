@@ -410,7 +410,8 @@ impl<'a> TestHarness<'a> {
     /// Builds the router service
     pub async fn build_router(self) -> Result<router::BoxCloneService, BoxError> {
         let (config, schema, plugins, supergraph_service) = self.build_common().await?;
-        let query_parsing_service = build_query_parsing_service(schema.clone(), config.clone());
+        let query_parsing_service =
+            build_query_parsing_service(schema.clone(), config.clone(), &plugins);
 
         let apq_expander = build_apq_expander(&config, connect_apq_redis(&config).await?);
         let router_service = build_router_service(
@@ -443,7 +444,8 @@ impl<'a> TestHarness<'a> {
         use crate::axum_factory::utils::connection_router_service;
 
         let (config, schema, plugins, supergraph_service) = self.build_common().await?;
-        let query_parsing_service = build_query_parsing_service(schema.clone(), config.clone());
+        let query_parsing_service =
+            build_query_parsing_service(schema.clone(), config.clone(), &plugins);
 
         let apq_expander = build_apq_expander(&config, connect_apq_redis(&config).await?);
 

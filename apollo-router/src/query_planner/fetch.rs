@@ -30,6 +30,7 @@ use crate::json_ext::Object;
 use crate::json_ext::Path;
 use crate::json_ext::Value;
 use crate::json_ext::ValueExt;
+use crate::plugins::authorization::AuthorizationDirectives;
 use crate::plugins::authorization::AuthorizationPlugin;
 use crate::plugins::authorization::CacheKeyMetadata;
 use crate::query_planner::HashedSubgraphSchemas;
@@ -682,6 +683,7 @@ impl FetchNode {
     pub(crate) fn extract_authorization_metadata(
         &mut self,
         schema: &Valid<apollo_compiler::Schema>,
+        directives: &AuthorizationDirectives,
         global_authorisation_cache_key: &CacheKeyMetadata,
     ) {
         let doc = ExecutableDocument::parse(
@@ -696,6 +698,7 @@ impl FetchNode {
             self.operation_name.as_deref(),
             schema,
             !self.requires.is_empty(),
+            directives,
         );
 
         // we need to intersect the cache keys because the global key already takes into account

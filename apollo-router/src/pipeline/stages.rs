@@ -483,10 +483,13 @@ fn subscription_plugin_config(plugins: &Plugins) -> Option<SubscriptionConfig> {
 
 /// Build a query parsing service with in-memory caching.
 ///
-/// The cache size is the same as the query plan cache size.
+/// The cache size is the same as the query plan cache size. When the authorization plugin is
+/// installed with directives enabled and the schema links one of them, each parsed document also
+/// carries its operation's authorization requirements, worked out once on a cache miss.
 pub(crate) fn build_query_parsing_service(
     schema: Arc<Schema>,
     configuration: Arc<Configuration>,
+    plugins: &Plugins,
 ) -> query_parsing::BoxCloneService {
     let cache_limit = configuration
         .supergraph
@@ -503,6 +506,9 @@ pub(crate) fn build_query_parsing_service(
 
     ServiceBuilder::new()
         .layer(QueryParsingCacheLayer::new(cache_config))
+        .apply_plugin_layer(plugins, |authorization: &AuthorizationPlugin| {
+            authorization.authorization_requirements_layer(schema.clone())
+        })
         .layer(LimitRecursiveSelectionLayer::new(
             max_recursive_selections,
             warn_only,

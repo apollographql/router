@@ -16,6 +16,7 @@ use crate::error::ValidationErrors;
 use crate::json_ext::Object;
 use crate::json_ext::Path;
 use crate::json_ext::Value;
+use crate::plugins::authorization::AuthorizationDirectives;
 use crate::plugins::authorization::CacheKeyMetadata;
 use crate::query_planner::HashedSubgraphSchemas;
 use crate::query_planner::SubgraphSchemas;
@@ -438,39 +439,42 @@ impl PlanNode {
     pub(crate) fn extract_authorization_metadata(
         &mut self,
         schema: &Valid<apollo_compiler::Schema>,
+        directives: &AuthorizationDirectives,
         key: &CacheKeyMetadata,
     ) {
         match self {
             PlanNode::Fetch(fetch_node) => {
-                fetch_node.extract_authorization_metadata(schema, key);
+                fetch_node.extract_authorization_metadata(schema, directives, key);
             }
 
             PlanNode::Sequence { nodes } => {
                 for node in nodes {
-                    node.extract_authorization_metadata(schema, key);
+                    node.extract_authorization_metadata(schema, directives, key);
                 }
             }
             PlanNode::Parallel { nodes } => {
                 for node in nodes {
-                    node.extract_authorization_metadata(schema, key);
+                    node.extract_authorization_metadata(schema, directives, key);
                 }
             }
-            PlanNode::Flatten(flatten) => flatten.node.extract_authorization_metadata(schema, key),
+            PlanNode::Flatten(flatten) => flatten
+                .node
+                .extract_authorization_metadata(schema, directives, key),
             PlanNode::Defer { primary, deferred } => {
                 if let Some(node) = primary.node.as_mut() {
-                    node.extract_authorization_metadata(schema, key);
+                    node.extract_authorization_metadata(schema, directives, key);
                 }
                 for deferred_node in deferred {
                     if let Some(node) = deferred_node.node.take() {
                         let mut new_node = (*node).clone();
-                        new_node.extract_authorization_metadata(schema, key);
+                        new_node.extract_authorization_metadata(schema, directives, key);
                         deferred_node.node = Some(Arc::new(new_node));
                     }
                 }
             }
             PlanNode::Subscription { primary: _, rest } => {
                 if let Some(node) = rest.as_mut() {
-                    node.extract_authorization_metadata(schema, key);
+                    node.extract_authorization_metadata(schema, directives, key);
                 }
             }
             PlanNode::Condition {
@@ -479,10 +483,10 @@ impl PlanNode {
                 else_clause,
             } => {
                 if let Some(node) = if_clause.as_mut() {
-                    node.extract_authorization_metadata(schema, key);
+                    node.extract_authorization_metadata(schema, directives, key);
                 }
                 if let Some(node) = else_clause.as_mut() {
-                    node.extract_authorization_metadata(schema, key);
+                    node.extract_authorization_metadata(schema, directives, key);
                 }
             }
         }

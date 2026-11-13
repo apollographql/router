@@ -3929,6 +3929,7 @@ async fn test_cache_warmup() {
     let query_parsing_service = crate::pipeline::build_query_parsing_service(
         schema.clone(),
         Arc::new(configuration.clone()),
+        &Default::default(),
     );
     let pq_layer = PersistedQueryExpander::new(&configuration).await.unwrap();
 
