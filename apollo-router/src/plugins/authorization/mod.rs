@@ -2,6 +2,7 @@
 
 use std::collections::HashSet;
 use std::ops::ControlFlow;
+use std::sync::Arc;
 
 use apollo_compiler::ExecutableDocument;
 use apollo_compiler::ast;
@@ -32,12 +33,14 @@ use crate::Context;
 use crate::error::QueryPlannerError;
 use crate::graphql;
 use crate::json_ext::Path;
+use crate::layers::OptionLayer;
 use crate::layers::ServiceBuilderExt;
 use crate::plugin::Plugin;
 use crate::plugin::PluginInit;
 use crate::plugins::authentication;
 use crate::query_planner::QueryKey;
 use crate::services::execution;
+use crate::services::query_parsing::authorization_requirements::AuthorizationRequirementsLayer;
 use crate::services::supergraph;
 use crate::spec::Schema;
 use crate::spec::SpecError;
@@ -234,6 +237,7 @@ fn default_enable_directives() -> bool {
 pub(crate) struct AuthorizationPlugin {
     require_authentication: bool,
     reject_unauthorized: bool,
+    directives_enabled: bool,
 }
 
 impl AuthorizationPlugin {
@@ -251,6 +255,19 @@ impl AuthorizationPlugin {
             &Identity::requires_scopes_identity(),
             REQUIRES_SCOPES_SPEC_VERSION_RANGE,
         ) || schema.has_spec(&Identity::policy_identity(), POLICY_SPEC_VERSION_RANGE)
+    }
+
+    /// Returns a layer for the query parsing service that stores each parsed operation's
+    /// authorization requirements on its document, or an identity layer when authorization
+    /// directives are disabled or `schema` links none of them.
+    pub(crate) fn authorization_requirements_layer(
+        &self,
+        schema: Arc<Schema>,
+    ) -> OptionLayer<AuthorizationRequirementsLayer> {
+        tower::util::option_layer(
+            (self.directives_enabled && Self::links_authorization_directives(&schema))
+                .then(|| AuthorizationRequirementsLayer::new(schema)),
+        )
     }
 
     pub(crate) fn configuration(configuration: &Configuration) -> Conf {
@@ -604,6 +621,7 @@ impl Plugin for AuthorizationPlugin {
         Ok(AuthorizationPlugin {
             require_authentication: init.config.require_authentication,
             reject_unauthorized: init.config.directives.reject_unauthorized,
+            directives_enabled: init.config.directives.enabled,
         })
     }
 

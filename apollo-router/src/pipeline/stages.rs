@@ -76,7 +76,6 @@ use crate::services::layers::persisted_queries::ExpandIdsLayer;
 use crate::services::layers::persisted_queries::PersistedQueryExpander;
 use crate::services::layers::static_page::StaticPageLayer;
 use crate::services::query_parsing;
-use crate::services::query_parsing::authorization_requirements::AuthorizationRequirementsLayer;
 use crate::services::query_parsing::cache::QueryParsingCacheLayer;
 use crate::services::query_parsing::recursive_selections_limit::LimitRecursiveSelectionLayer;
 use crate::services::query_parsing::service::QueryParsingService;
@@ -484,13 +483,13 @@ fn subscription_plugin_config(plugins: &Plugins) -> Option<SubscriptionConfig> {
 
 /// Build a query parsing service with in-memory caching.
 ///
-/// The cache size is the same as the query plan cache size. When authorization directives are
-/// enabled and the schema links one of them, each parsed document also carries its operation's
-/// authorization requirements, worked out once on a cache miss.
+/// The cache size is the same as the query plan cache size. When the authorization plugin is
+/// installed with directives enabled and the schema links one of them, each parsed document also
+/// carries its operation's authorization requirements, worked out once on a cache miss.
 pub(crate) fn build_query_parsing_service(
     schema: Arc<Schema>,
     configuration: Arc<Configuration>,
-    _plugins: &Plugins,
+    plugins: &Plugins,
 ) -> query_parsing::BoxCloneService {
     let cache_limit = configuration
         .supergraph
@@ -500,8 +499,6 @@ pub(crate) fn build_query_parsing_service(
         .limit;
     let max_recursive_selections = configuration.limits.router.max_recursive_selections;
     let warn_only = configuration.limits.router.warn_only;
-    let enable_authorization_directives =
-        AuthorizationPlugin::enable_directives(&configuration, &schema);
 
     let cache_config = InMemoryConfig {
         limit: u64::try_from(cache_limit.get()).expect("usize should fit in u64"),
@@ -509,10 +506,9 @@ pub(crate) fn build_query_parsing_service(
 
     ServiceBuilder::new()
         .layer(QueryParsingCacheLayer::new(cache_config))
-        .option_layer(
-            enable_authorization_directives
-                .then(|| AuthorizationRequirementsLayer::new(schema.clone())),
-        )
+        .apply_plugin_layer(plugins, |authorization: &AuthorizationPlugin| {
+            authorization.authorization_requirements_layer(schema.clone())
+        })
         .layer(LimitRecursiveSelectionLayer::new(
             max_recursive_selections,
             warn_only,

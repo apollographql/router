@@ -99,7 +99,11 @@ mod tests {
     use super::*;
     use crate::Configuration;
     use crate::pipeline::build_query_parsing_service;
+    use crate::plugin::DynPlugin;
+    use crate::plugin::Plugin;
+    use crate::plugin::PluginInit;
     use crate::plugin::test::await_mock_driver;
+    use crate::services::Plugins;
     use crate::spec::Query;
     use crate::spec::SpecError;
 
@@ -195,11 +199,34 @@ mod tests {
             .unwrap()
     }
 
+    /// A plugin registry holding the authorization plugin, built from `configuration`'s
+    /// `authorization` section.
+    async fn authorization_plugins(configuration: &Configuration) -> Plugins {
+        let plugin = <AuthorizationPlugin as Plugin>::new(PluginInit::fake_new(
+            AuthorizationPlugin::configuration(configuration),
+            Default::default(),
+        ))
+        .await
+        .unwrap();
+        Plugins::from([(
+            "apollo.authorization".to_string(),
+            Box::new(plugin) as Box<dyn DynPlugin>,
+        )])
+    }
+
+    /// Builds the pipeline's query parsing service with the authorization plugin installed.
+    async fn query_parsing_service(
+        sdl: &str,
+        configuration: Configuration,
+    ) -> crate::services::query_parsing::BoxCloneService {
+        let schema = schema(sdl, &configuration);
+        let plugins = authorization_plugins(&configuration).await;
+        build_query_parsing_service(schema, Arc::new(configuration), &plugins)
+    }
+
     #[tokio::test]
     async fn cached_documents_keep_their_requirements() {
-        let configuration = Arc::new(Configuration::default());
-        let schema = schema(POLICY_SCHEMA, &configuration);
-        let service = build_query_parsing_service(schema, configuration, &Default::default());
+        let service = query_parsing_service(POLICY_SCHEMA, Configuration::default()).await;
 
         let first = parse(service.clone(), "{ private { id } }").await;
         let second = parse(service, "{ private { id } }").await;
@@ -212,16 +239,28 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn not_installed_without_the_authorization_plugin() {
+        let configuration = Arc::new(Configuration::default());
+        let schema = schema(POLICY_SCHEMA, &configuration);
+
+        let doc = parse(
+            build_query_parsing_service(schema, configuration, &Plugins::default()),
+            "{ private { id } }",
+        )
+        .await;
+
+        assert_eq!(doc.authorization.get(), None);
+    }
+
+    #[tokio::test]
     async fn not_installed_when_directives_are_disabled() {
         let configuration: Configuration = serde_json::from_value(serde_json::json!({
             "authorization": { "directives": { "enabled": false } }
         }))
         .unwrap();
-        let configuration = Arc::new(configuration);
-        let schema = schema(POLICY_SCHEMA, &configuration);
 
         let doc = parse(
-            build_query_parsing_service(schema, configuration, &Default::default()),
+            query_parsing_service(POLICY_SCHEMA, configuration).await,
             "{ private { id } }",
         )
         .await;
@@ -231,11 +270,8 @@ mod tests {
 
     #[tokio::test]
     async fn not_installed_when_the_schema_has_no_authorization_directives() {
-        let configuration = Arc::new(Configuration::default());
-        let schema = schema(NO_AUTHORIZATION_SCHEMA, &configuration);
-
         let doc = parse(
-            build_query_parsing_service(schema, configuration, &Default::default()),
+            query_parsing_service(NO_AUTHORIZATION_SCHEMA, Configuration::default()).await,
             "{ me { id } }",
         )
         .await;
