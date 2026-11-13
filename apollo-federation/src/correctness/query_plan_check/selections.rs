@@ -62,6 +62,7 @@ use apollo_compiler::executable::SelectionSet;
 
 use super::super::query_compare::conditions::BooleanLiteral;
 use super::ComparisonError;
+use super::representation::SchemaTypeLookup;
 use crate::query_plan::FetchDataPathElement;
 use crate::query_plan::FetchDataRewrite;
 use crate::schema::ValidFederationSchema;
@@ -141,22 +142,35 @@ pub(super) fn narrow_type_conditions(
     subgraph_schema: &ValidFederationSchema,
     selections: &[Selection],
 ) -> Vec<Selection> {
+    narrow_with(
+        &SchemaTypeLookup::new(schema),
+        &SchemaTypeLookup::new(subgraph_schema),
+        selections,
+    )
+}
+
+/// `narrow_type_conditions`, with each schema's possible types looked up once.
+fn narrow_with(
+    supergraph_types: &SchemaTypeLookup<'_>,
+    subgraph_types: &SchemaTypeLookup<'_>,
+    selections: &[Selection],
+) -> Vec<Selection> {
     let mut out = Vec::with_capacity(selections.len());
     for selection in selections {
         match selection {
             Selection::Field(field) => {
                 let mut copy = (**field).clone();
-                copy.selection_set.selections = narrow_type_conditions(
-                    schema,
-                    subgraph_schema,
+                copy.selection_set.selections = narrow_with(
+                    supergraph_types,
+                    subgraph_types,
                     &field.selection_set.selections,
                 );
                 out.push(Selection::Field(Node::new(copy)));
             }
             Selection::InlineFragment(fragment) => {
-                let below = narrow_type_conditions(
-                    schema,
-                    subgraph_schema,
+                let below = narrow_with(
+                    supergraph_types,
+                    subgraph_types,
                     &fragment.selection_set.selections,
                 );
                 let Some(type_condition) = &fragment.type_condition else {
@@ -165,8 +179,9 @@ pub(super) fn narrow_type_conditions(
                     out.push(Selection::InlineFragment(Node::new(copy)));
                     continue;
                 };
-                let applied = possible_types(subgraph_schema, type_condition);
-                if possible_types(schema, type_condition)
+                let applied = subgraph_types.possible_types(type_condition);
+                if supergraph_types
+                    .possible_types(type_condition)
                     .iter()
                     .all(|ty| applied.contains(ty))
                 {
@@ -174,7 +189,7 @@ pub(super) fn narrow_type_conditions(
                     copy.selection_set.selections = below;
                     out.push(Selection::InlineFragment(Node::new(copy)));
                 } else {
-                    out.extend(applied.into_iter().map(|object_type| {
+                    out.extend(applied.iter().cloned().map(|object_type| {
                         Selection::InlineFragment(Node::new(InlineFragment {
                             type_condition: Some(object_type.clone()),
                             directives: fragment.directives.clone(),

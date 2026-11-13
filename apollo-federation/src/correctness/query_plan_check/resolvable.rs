@@ -19,7 +19,10 @@
 //! `ExternalMetadata::provided_fields` is no substitute for the windows, being one set for the whole
 //! subgraph; a window is followed down the fetch's operation as the walk descends.
 
+use std::cell::RefCell;
+
 use apollo_compiler::Name;
+use apollo_compiler::collections::IndexMap;
 use apollo_compiler::collections::IndexSet;
 use apollo_compiler::executable::FieldSet;
 use apollo_compiler::executable::Selection;
@@ -134,6 +137,8 @@ struct Walk<'a> {
     schema: &'a ValidFederationSchema,
     /// The subgraph's possible types, looked up once per fetch.
     type_lookup: SchemaTypeLookup<'a>,
+    /// The window each field's own `@provides` opens below it, read once per fetch.
+    provided: RefCell<IndexMap<(Name, Name), ProvidesWindow>>,
 }
 
 impl Walk<'_> {
@@ -147,6 +152,21 @@ impl Walk<'_> {
     ) -> Result<ProvidesWindow, ComparisonError> {
         let mut below =
             grant(&self.type_lookup, object_type, field_name, window).unwrap_or_default();
+        below.extend(self.provided_below(object_type, field_name)?);
+        Ok(below)
+    }
+
+    /// The window a field's own `@provides` opens below it, empty without one.
+    fn provided_below(
+        &self,
+        object_type: &Name,
+        field_name: &Name,
+    ) -> Result<ProvidesWindow, ComparisonError> {
+        let key = (object_type.clone(), field_name.clone());
+        if let Some(window) = self.provided.borrow().get(&key) {
+            return Ok(window.clone());
+        }
+        let mut below = ProvidesWindow::new();
         if let Some(fields) = self.subgraph.provides(object_type, field_name)?
             && let Some(child_type) = field_type(self.schema, object_type, field_name)
         {
@@ -161,8 +181,9 @@ impl Walk<'_> {
                     "@provides on {object_type}.{field_name} is not a valid field set:\n{e}"
                 ))
             })?;
-            below.extend(window_of(&parsed.selection_set.selections));
+            below = window_of(&parsed.selection_set.selections);
         }
+        self.provided.borrow_mut().insert(key, below.clone());
         Ok(below)
     }
 
@@ -207,14 +228,16 @@ impl Walk<'_> {
                     self.selections_resolvable(&below, &field.selection_set.selections)?
                 }
                 Selection::InlineFragment(fragment) => {
+                    let admitted = fragment
+                        .type_condition
+                        .as_ref()
+                        .map(|condition| self.type_lookup.possible_types(condition));
                     let applying: Vec<ResolutionState> = states
                         .iter()
                         .filter(|(object_type, _)| {
-                            does_fragment_type_apply(
-                                &self.type_lookup,
-                                object_type,
-                                fragment.type_condition.as_ref(),
-                            )
+                            admitted
+                                .as_ref()
+                                .is_none_or(|admitted| admitted.contains(object_type))
                         })
                         .cloned()
                         .collect();
@@ -243,6 +266,7 @@ pub(super) fn check_fetch_selects_resolvable(
         subgraph: Subgraph::new(subgraph_schema)?,
         schema: subgraph_schema,
         type_lookup: SchemaTypeLookup::new(subgraph_schema),
+        provided: RefCell::default(),
     };
     match walk.selections_resolvable(&[(root_type.clone(), ProvidesWindow::new())], selections)? {
         None => Ok(()),

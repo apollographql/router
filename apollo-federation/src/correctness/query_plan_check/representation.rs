@@ -1105,27 +1105,24 @@ struct KeyOccurrence {
     fields: Vec<Node<apollo_compiler::executable::Field>>,
 }
 
-/// The fields under response key `key` that one level of `selections` selects, through its
-/// fragments, read at `types` under `condition`; a field whose directives never hold is left out.
+/// The fields one level of `selections` selects, by response key, through its fragments, read at
+/// `types` under `condition`; a field whose directives never hold is left out.
 fn occurrences_of(
     type_lookup: &SchemaTypeLookup<'_>,
-    key: &Name,
     types: &[Name],
     condition: &BooleanCondition,
     selections: &[Selection],
-    out: &mut Vec<KeyOccurrence>,
+    by_key: &mut IndexMap<Name, Vec<KeyOccurrence>>,
 ) {
     for selection in selections {
         match selection {
             Selection::Field(field) => {
-                if field.response_name() != key {
-                    continue;
-                }
                 let Some(literals) = literals_for_directives(&field.directives) else {
                     continue;
                 };
                 let mut condition = condition.clone();
                 condition.extend(literals);
+                let out = by_key.entry(field.response_name().clone()).or_default();
                 match out.iter_mut().find(|occurrence| {
                     occurrence.field_name == field.name
                         && occurrence.object_types == types
@@ -1148,22 +1145,20 @@ fn occurrences_of(
                 if literals.is_empty() {
                     occurrences_of(
                         type_lookup,
-                        key,
                         &narrowed,
                         condition,
                         &fragment.selection_set.selections,
-                        out,
+                        by_key,
                     );
                 } else {
                     let mut condition = condition.clone();
                     condition.extend(literals);
                     occurrences_of(
                         type_lookup,
-                        key,
                         &narrowed,
                         &condition,
                         &fragment.selection_set.selections,
-                        out,
+                        by_key,
                     );
                 }
             }
@@ -1186,10 +1181,11 @@ pub(super) struct ReadableKeyIndex {
     positions: std::cell::RefCell<Vec<IndexedPosition>>,
 }
 
-/// One position of the covering side: where its keys are found, and what each key asked for so
-/// far matched there.
+/// One position of the covering side: where its keys are found, the occurrences of each key not
+/// yet asked for, read in one pass at the first, and what each key asked for so far matched there.
 struct IndexedPosition {
     copies: Vec<MergedCopies>,
+    occurrences: Option<IndexMap<Name, Vec<KeyOccurrence>>>,
     matches_by_key: IndexMap<Name, std::rc::Rc<KeyMatch>>,
 }
 
@@ -1214,6 +1210,7 @@ impl ReadableKeyIndex {
                 condition: Vec::new(),
                 selection_sets: vec![HeldSelections::Buffer(covering)],
             }],
+            occurrences: None,
             matches_by_key: IndexMap::default(),
         };
         ReadableKeyIndex {
@@ -1232,22 +1229,26 @@ impl ReadableKeyIndex {
         if let Some(found) = self.positions.borrow()[node].matches_by_key.get(key) {
             return found.clone();
         }
-        let mut matching = Vec::new();
-        {
-            let positions = self.positions.borrow();
-            for merged in &positions[node].copies {
+        if self.positions.borrow()[node].occurrences.is_none() {
+            let mut by_key = IndexMap::default();
+            for merged in &self.positions.borrow()[node].copies {
                 for held in &merged.selection_sets {
                     occurrences_of(
                         type_lookup,
-                        key,
                         &merged.object_types,
                         &merged.condition,
                         held.selections(),
-                        &mut matching,
+                        &mut by_key,
                     );
                 }
             }
+            self.positions.borrow_mut()[node].occurrences = Some(by_key);
         }
+        let matching = self.positions.borrow_mut()[node]
+            .occurrences
+            .as_mut()
+            .and_then(|by_key| by_key.swap_remove(key))
+            .unwrap_or_default();
         let mut clauses: Vec<(Vec<Name>, BooleanCondition)> = Vec::new();
         let mut below = Vec::new();
         for occurrence in matching {
@@ -1272,6 +1273,7 @@ impl ReadableKeyIndex {
         let mut positions = self.positions.borrow_mut();
         positions.push(IndexedPosition {
             copies: below,
+            occurrences: None,
             matches_by_key: IndexMap::default(),
         });
         let found = std::rc::Rc::new(KeyMatch {

@@ -1136,6 +1136,10 @@ impl Checker<'_> {
             check_requires_conflict(self.supergraph_schema, &requires)
                 .map_err(|e| fail(format!("entity case `{entity_type}`: {}", e.description())))?;
         }
+        let entry_types: Vec<_> = entries
+            .iter()
+            .map(|entry| self.supergraph_types.possible_types(entry.require_type))
+            .collect();
         for object_type in object_types {
             let Some(sent) =
                 sent_typename(self.supergraph_schema, &fetch.input_rewrites, object_type)
@@ -1161,11 +1165,9 @@ impl Checker<'_> {
             }
             let for_type: Vec<&Entry<'_>> = entries
                 .iter()
-                .filter(|entry| {
-                    self.supergraph_types
-                        .possible_types(entry.require_type)
-                        .contains(object_type)
-                })
+                .zip(&entry_types)
+                .filter(|(_, types)| types.contains(object_type))
+                .map(|(entry, _)| entry)
                 .collect();
             let items: Vec<&requires_selection::Selection> =
                 for_type.iter().map(|entry| entry.item).collect();
