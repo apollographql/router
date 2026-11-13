@@ -1,9 +1,10 @@
 //! Contextual arguments: bound by an entity fetch, passed by no other, and read from their
 //! declaration; and a contextual value read off the object the fetch runs on.
 //!
-//! Ports of the model's `ContextArguments` and `OwnPosition` tests. Each plan is written inline:
-//! one fetch serving the hierarchy a context is read from, then one fetch passing a contextual
-//! argument, with the arguments and rewrites a case varies. Every verdict is the whole checker's.
+//! Ports of the model's `ContextArguments`, `OwnPosition` and `NearestSetter` tests. Each plan is
+//! written inline: one fetch serving the hierarchy a context is read from, then one fetch passing a
+//! contextual argument, with the arguments and rewrites a case varies. Every verdict is the whole
+//! checker's.
 
 use serde_json::Value;
 use serde_json::json;
@@ -135,6 +136,8 @@ const NO_VARIABLE: &str = "is passed no variable";
 const NOT_DECLARED: &str = "which is not a leaf of the declared";
 const NOT_FETCHED: &str = "is not always fetched where the fetch runs";
 const ROOT_FETCH: &str = "a fetch with no `requires` runs no context rewrite";
+const PAST_NEARER_SETTER: &str = "nearer the field, on which";
+const OWN_OBJECT: &str = "the field is selected on";
 
 //==================================================================================================
 // Contextual arguments: bound, and read from their declaration
@@ -492,6 +495,49 @@ fn rewrite_reading_the_nearest_setter_is_accepted() {
         LABEL_LOCAL,
         &["local"],
         vec![reading(1, "Department", "locale", "local")],
+    )
+    .unwrap();
+}
+
+// The rewrite climbs past the department to the store, which sets `locality` too, and reads the
+// store's `locale`: fetched and of the declared shape, but the wrong object's.
+#[test]
+fn rewrite_climbing_past_the_nearest_setter_is_rejected() {
+    assert_rejected(
+        label_checked(
+            directory_fetch(),
+            AT_DEPARTMENT,
+            LABEL_LOCAL,
+            &["local"],
+            vec![reading(2, "Store", "locale", "local")],
+        ),
+        PAST_NEARER_SETTER,
+    );
+}
+
+// With `locality` set by `Region` and `Department` and not by `Store`, the rewrite climbs past the
+// store to the region, the nearest object that sets it.
+#[test]
+fn rewrite_climbing_past_a_non_setter_is_accepted() {
+    let directory = root_fetch(
+        "directory",
+        &format!(
+            "{{ regions {{ locale stores {{ id {OFFER_KEY} \
+             departments {{ locale {OFFER_KEY} }} }} }} }}"
+        ),
+        Vec::new(),
+    );
+    check(
+        &Fixture::new(include_str!("../testdata/context_region_setter.graphql")),
+        offer_plan(
+            directory,
+            AT_STORE,
+            "stores",
+            LABEL_LOCAL,
+            &["local"],
+            vec![reading(2, "Region", "locale", "local")],
+        ),
+        &format!("{{ {} }}", offer_operation(AT_STORE, "label")),
     )
     .unwrap();
 }
@@ -940,4 +986,173 @@ fn fetch_reaching_no_object_owes_no_context_value() {
 #[test]
 fn same_fetch_on_a_live_path_owes_its_context_value() {
     assert_rejected(summary_under_checked(Value::Null), NOT_FETCHED);
+}
+
+//==================================================================================================
+// The nearest object setting a context, above a field the fetch selects below
+//
+// A contextual value comes from the nearest object above the field that sets the context, the
+// field's own object not counting, and the objects above it run through the fetch's operation as
+// well as its position. Ports of the model's `NearestSetter` tests: each plan fetches the hierarchy
+// from `catalog` and then asks `pricing` for one field at one position.
+
+/// `catalog` and `pricing` over shops, sections, products and items; `Shop` sets the context `shop`,
+/// and so does `Section` if `section_sets`.
+fn shop_fixture(section_sets: bool) -> Fixture {
+    if section_sets {
+        Fixture::new(include_str!("../testdata/context_nearest_setter.graphql"))
+    } else {
+        Fixture::new(include_str!(
+            "../testdata/context_nearest_setter_shop_only.graphql"
+        ))
+    }
+}
+
+/// What `catalog` fetches: every object's key and `currency`, down to the item.
+const CATALOG: &str = "{ shop { __typename id currency section { __typename id currency \
+                       product { id item { __typename id } } } } }";
+
+const AT_SHOP: &str = "shop";
+const AT_SECTION: &str = "shop.section";
+
+/// A field of the item, below the section the fetch runs on.
+fn on_item(selected: &str) -> String {
+    format!("product {{ item {{ {selected} }} }}")
+}
+
+/// A field of the item, below the shop the fetch runs on.
+fn on_section_item(selected: &str) -> String {
+    format!("section {{ {} }}", on_item(selected))
+}
+
+fn itself(selected: &str) -> String {
+    selected.to_string()
+}
+
+/// `pricing` asked, for the `entity_type` objects at `at` after `catalog`, for `field` passed `$c`,
+/// which `rewrite` binds, wherever `around` places it; the client asks for the same at `at`.
+fn pricing_checked(
+    at: &str,
+    entity_type: &str,
+    around: fn(&str) -> String,
+    field: &str,
+    rewrite: Value,
+    section_sets: bool,
+) -> Result<(), CorrectnessError> {
+    check(
+        &shop_fixture(section_sets),
+        sequence(vec![
+            root_fetch("catalog", CATALOG, Vec::new()),
+            flatten(
+                at,
+                entity_fetch(
+                    "pricing",
+                    &[entity_type],
+                    &format!(
+                        "... on {entity_type} {{ {} }}",
+                        around(&format!("{field}(currency: $c)"))
+                    ),
+                    &["c"],
+                    vec![rewrite],
+                ),
+            ),
+        ]),
+        &format!("{{ {} }}", offer_operation(at, &around(field))),
+    )
+}
+
+// The section the fetch runs on is the nearest object above the item that sets `shop`, and the
+// rewrite reads its `currency`.
+#[test]
+fn fetch_object_nearest_read_is_accepted() {
+    pricing_checked(
+        AT_SECTION,
+        "Section",
+        on_item,
+        "price",
+        reading(0, "Section", "currency", "c"),
+        true,
+    )
+    .unwrap();
+}
+
+// The rewrite climbs past the section the fetch runs on to the shop, which sets `shop` too: the
+// item's `price` is sent the shop's `currency`.
+#[test]
+fn fetch_object_climbed_past_is_rejected() {
+    assert_rejected(
+        pricing_checked(
+            AT_SECTION,
+            "Section",
+            on_item,
+            "price",
+            reading(1, "Shop", "currency", "c"),
+            true,
+        ),
+        PAST_NEARER_SETTER,
+    );
+}
+
+// The fetch runs on the shop and selects the item's `price` below its section, which sets `shop`
+// and is nearer than the shop: no rewrite reads the section's value, which the fetch itself
+// resolves.
+#[test]
+fn setter_inside_the_operation_is_rejected() {
+    assert_rejected(
+        pricing_checked(
+            AT_SHOP,
+            "Shop",
+            on_section_item,
+            "price",
+            reading(0, "Shop", "currency", "c"),
+            true,
+        ),
+        PAST_NEARER_SETTER,
+    );
+}
+
+// The same with `shop` set by `Shop` alone: the objects the fetch descends through set nothing,
+// and the shop it runs on is the nearest.
+#[test]
+fn non_setter_inside_the_operation_is_accepted() {
+    pricing_checked(
+        AT_SHOP,
+        "Shop",
+        on_section_item,
+        "price",
+        reading(0, "Shop", "currency", "c"),
+        false,
+    )
+    .unwrap();
+}
+
+// `label` is a field of the section, which sets `shop`, but a field's own object does not count:
+// its value comes from the shop above.
+#[test]
+fn field_own_object_read_is_rejected() {
+    assert_rejected(
+        pricing_checked(
+            AT_SECTION,
+            "Section",
+            itself,
+            "label",
+            reading(0, "Section", "currency", "c"),
+            true,
+        ),
+        OWN_OBJECT,
+    );
+}
+
+// The rewrite climbs from the section to the shop, the nearest object above it setting `shop`.
+#[test]
+fn field_own_object_skipped_is_accepted() {
+    pricing_checked(
+        AT_SECTION,
+        "Section",
+        itself,
+        "label",
+        reading(1, "Shop", "currency", "c"),
+        true,
+    )
+    .unwrap();
 }

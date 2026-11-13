@@ -98,7 +98,6 @@ use std::sync::Arc;
 use apollo_compiler::Name;
 use apollo_compiler::Node;
 use apollo_compiler::ast;
-use apollo_compiler::collections::IndexSet;
 use apollo_compiler::executable::Selection;
 use apollo_compiler::name;
 use apollo_compiler::schema::ExtendedType;
@@ -787,13 +786,15 @@ pub(super) fn check_context_rewrites(
 
 /// A `@fromContext` argument a fetch's operation passes: the field it is an argument of, its
 /// declaration, and the variable the operation passes it, if it passes one (the model's
-/// `ContextUse`).
+/// `ContextUse`), with the types each ancestor of the field's object can have in the operation, one
+/// list per level from its root, outermost first.
 #[derive(Clone, PartialEq, Eq)]
 pub(super) struct ContextUse {
     parent_type: Name,
     field_name: Name,
     declaration: ContextArgument,
     variable: Option<Name>,
+    ancestors: Vec<Vec<Name>>,
 }
 
 impl ContextUse {
@@ -821,9 +822,13 @@ fn argument_variable(arguments: &[Node<ast::Argument>], name: &Name) -> Option<N
 
 /// Every contextual use a fetch's operation makes, read from `root_type` in the subgraph's own
 /// schema (`Subgraph.fetchContextUsesAll`): a field selected at a runtime type declaring a
-/// `@fromContext` argument there. The walk carries a pool of runtime types, as
-/// [`super::resolvable`]'s does, and reads an inline fragment only at the types it applies to, so
-/// each selection is visited once per pool.
+/// `@fromContext` argument there.
+///
+/// The walk carries a pool of runtime types, as [`super::resolvable`]'s does, each with the types
+/// its ancestors can have (`ContextWalkState`), and reads an inline fragment only at the types it
+/// applies to, so each selection is visited once per pool. The paths reaching one type share its
+/// state, their ancestors merged level by level (`mergeAncestors`), which is exact for the
+/// nearest-setter test, asking the same of every type at a level.
 pub(super) fn context_uses(
     subgraph: &Subgraph<'_>,
     subgraph_schema: &ValidFederationSchema,
@@ -834,25 +839,55 @@ pub(super) fn context_uses(
     collect_context_uses(
         subgraph,
         subgraph_schema,
-        std::slice::from_ref(root_type),
+        &[(root_type.clone(), Vec::new())],
         selections,
         &mut uses,
     )?;
     Ok(uses)
 }
 
+/// A runtime type the walk over an operation reaches, with the types each of its ancestors can
+/// have, one list per level from the walk's start.
+type ContextWalkState = (Name, Vec<Vec<Name>>);
+
+/// Adds a state to a pool: into the state for the same type, the ancestors merged level by level
+/// as `List.zipWith` pairs them, or as a new one.
+fn add_context_walk_state(pool: &mut Vec<ContextWalkState>, state: ContextWalkState) {
+    let Some((_, ancestors)) = pool
+        .iter_mut()
+        .find(|(object_type, _)| *object_type == state.0)
+    else {
+        pool.push(state);
+        return;
+    };
+    let merged = ancestors
+        .iter()
+        .zip(state.1)
+        .map(|(left, right)| {
+            let mut level = left.clone();
+            for object_type in right {
+                if !level.contains(&object_type) {
+                    level.push(object_type);
+                }
+            }
+            level
+        })
+        .collect();
+    *ancestors = merged;
+}
+
 fn collect_context_uses(
     subgraph: &Subgraph<'_>,
     schema: &ValidFederationSchema,
-    types: &[Name],
+    states: &[ContextWalkState],
     selections: &[Selection],
     uses: &mut Vec<ContextUse>,
 ) -> Result<(), ComparisonError> {
     for selection in selections {
         match selection {
             Selection::Field(field) => {
-                let mut below: IndexSet<Name> = IndexSet::default();
-                for object_type in types {
+                let mut below: Vec<ContextWalkState> = Vec::new();
+                for (object_type, ancestors) in states {
                     for declaration in subgraph.context_arguments(object_type, &field.name)? {
                         let found = ContextUse {
                             parent_type: object_type.clone(),
@@ -862,17 +897,24 @@ fn collect_context_uses(
                                 &declaration.argument_name,
                             ),
                             declaration,
+                            ancestors: ancestors.clone(),
                         };
                         if !uses.contains(&found) {
                             uses.push(found);
                         }
                     }
-                    if let Some(child_type) = field_output_type(schema, object_type, &field.name) {
-                        below.extend(possible_types(schema, &child_type));
+                    if !field.selection_set.selections.is_empty()
+                        && let Some(child_type) =
+                            field_output_type(schema, object_type, &field.name)
+                    {
+                        for runtime_type in possible_types(schema, &child_type) {
+                            let mut child_ancestors = ancestors.clone();
+                            child_ancestors.push(vec![object_type.clone()]);
+                            add_context_walk_state(&mut below, (runtime_type, child_ancestors));
+                        }
                     }
                 }
-                if !field.selection_set.selections.is_empty() {
-                    let below: Vec<Name> = below.into_iter().collect();
+                if !below.is_empty() {
                     collect_context_uses(
                         subgraph,
                         schema,
@@ -883,9 +925,9 @@ fn collect_context_uses(
                 }
             }
             Selection::InlineFragment(fragment) => {
-                let applying: Vec<Name> = types
+                let applying: Vec<ContextWalkState> = states
                     .iter()
-                    .filter(|object_type| {
+                    .filter(|(object_type, _)| {
                         does_fragment_type_apply(
                             schema,
                             object_type,
@@ -1133,8 +1175,10 @@ pub(super) struct ContextSite<'a> {
 /// where a key holds whatever an earlier fetch put under that response key; nothing at run time
 /// compares what it reads with the declaration. So it is read back against the declaration through
 /// what the fetch can read: in every copy an execution of the fetch reads, the object the rewrite
-/// climbs to has a type that sets the context, and the fields the copy's keys stand for below it
-/// read down to a leaf of the declaration's selection. Which setter is the nearest is not asked.
+/// climbs to has a type that sets the context and is the nearest ancestor of the field's object
+/// that can, and the fields the copy's keys stand for below it read down to a leaf of the
+/// declaration's selection. Every rewrite binding the variable is held to this, though the router
+/// takes the value from the first that finds one.
 pub(super) fn check_context_declared(
     site: &ContextSite<'_>,
     subgraph: &Subgraph<'_>,
@@ -1170,10 +1214,13 @@ pub(super) fn check_context_declared(
 
 /// A context rewrite reads what a declaration asks for (`ContextRewriteMatchesDeclaration`). At
 /// every position of the fetch, for every runtime configuration and every copy the rewrite reads
-/// there, the object the rewrite climbs to has a type that sets the context, and the copy's fields
-/// below it read down to a leaf of that type's selection. Each copy is read at its own types and
-/// fields, siblings included. A rewrite that reads no copy passes; that is availability's concern.
-/// `Err` says why not.
+/// there, the object the rewrite climbs to has a type that sets the context, and the copy is the
+/// declared value of the nearest setter (`ContextRead.FromNearestSetter`): that object is an
+/// ancestor of the field's object, the field's own object not counting, no ancestor between can
+/// have a type setting the context, and the copy's fields below it read down to a leaf of that
+/// type's selection. The ancestors run through the position, then the fetch's operation
+/// (`contextFieldAncestors`). Each copy is read at its own types and fields, siblings included. A
+/// rewrite that reads no copy passes; that is availability's concern. `Err` says why not.
 fn check_rewrite_matches_declaration(
     site: &ContextSite<'_>,
     subgraph: &Subgraph<'_>,
@@ -1209,6 +1256,22 @@ fn check_rewrite_matches_declaration(
                         found.declaration.context
                     ));
                 };
+                let ancestors = context_field_ancestors(&position, &found.ancestors);
+                if depth >= ancestors.len() {
+                    return Err(format!(
+                        "climbs to the `{object_type}` the field is selected on, where a value \
+                         comes from an object above it"
+                    ));
+                }
+                if let Some((nearer, nearer_setter)) =
+                    setter_among(site.schema, &setters, &ancestors[depth + 1..])
+                {
+                    return Err(format!(
+                        "climbs past a `{nearer}` nearer the field, on which `{nearer_setter}` \
+                         sets context `{}`",
+                        found.declaration.context
+                    ));
+                }
                 let selection = match &declared {
                     Some(selection) => selection,
                     None => declared.insert(
@@ -1246,6 +1309,34 @@ fn check_rewrite_matches_declaration(
         }
     }
     Ok(())
+}
+
+/// The types each ancestor of a contextual field's object can have in the response, outermost
+/// first, one list per level, for a fetch at `position` (`contextFieldAncestors`): the position's
+/// levels above the object the fetch runs on, as it admits them, then the ancestors the fetch's
+/// operation selects the field below, less that operation's root, which the position stands for.
+fn context_field_ancestors(position: &ReachedCopy, use_ancestors: &[Vec<Name>]) -> Vec<Vec<Name>> {
+    position
+        .levels
+        .iter()
+        .map(|level| level.narrowed.clone())
+        .chain(use_ancestors.iter().skip(1).cloned())
+        .collect()
+}
+
+/// A type an object at `levels` can have that one of `setters` includes, with that setter: `None`
+/// is the model's `ContextRead.NoSetterAmong`.
+fn setter_among<'s>(
+    schema: &ValidFederationSchema,
+    setters: &'s [Name],
+    levels: &[Vec<Name>],
+) -> Option<(Name, &'s Name)> {
+    levels.iter().flatten().find_map(|object_type| {
+        setters
+            .iter()
+            .find(|setter| type_includes_object(schema, setter, object_type))
+            .map(|setter| (object_type.clone(), setter))
+    })
 }
 
 /// A path as the plan prints it.
