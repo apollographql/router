@@ -14,12 +14,15 @@ use tower::BoxError;
 use tower::ServiceBuilder;
 use tower::ServiceExt;
 
+use self::authenticated::AUTHENTICATED_DIRECTIVE_NAME;
 use self::authenticated::AUTHENTICATED_SPEC_VERSION_RANGE;
 use self::authenticated::AuthenticatedCheckVisitor;
 use self::authenticated::AuthenticatedVisitor;
+use self::policy::POLICY_DIRECTIVE_NAME;
 use self::policy::POLICY_SPEC_VERSION_RANGE;
 use self::policy::PolicyExtractionVisitor;
 use self::policy::PolicyFilteringVisitor;
+use self::scopes::REQUIRES_SCOPES_DIRECTIVE_NAME;
 use self::scopes::REQUIRES_SCOPES_SPEC_VERSION_RANGE;
 use self::scopes::ScopeExtractionVisitor;
 use self::scopes::ScopeFilteringVisitor;
@@ -55,6 +58,42 @@ pub(crate) struct CacheKeyMetadata {
     pub(crate) is_authenticated: bool,
     pub(crate) scopes: Vec<String>,
     pub(crate) policies: Vec<String>,
+}
+
+/// The names the authorization directives have in a supergraph, after any renames on import.
+///
+/// A name is `None` when the supergraph does not link that directive at a supported version;
+/// the directive is then not enforced.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub(crate) struct AuthorizationDirectives {
+    pub(crate) authenticated: Option<String>,
+    pub(crate) requires_scopes: Option<String>,
+    pub(crate) policy: Option<String>,
+}
+
+impl AuthorizationDirectives {
+    pub(crate) fn from_schema(schema: &apollo_compiler::Schema) -> Self {
+        Self {
+            authenticated: Schema::directive_name(
+                schema,
+                &Identity::authenticated_identity(),
+                AUTHENTICATED_SPEC_VERSION_RANGE,
+                &AUTHENTICATED_DIRECTIVE_NAME,
+            ),
+            requires_scopes: Schema::directive_name(
+                schema,
+                &Identity::requires_scopes_identity(),
+                REQUIRES_SCOPES_SPEC_VERSION_RANGE,
+                &REQUIRES_SCOPES_DIRECTIVE_NAME,
+            ),
+            policy: Schema::directive_name(
+                schema,
+                &Identity::policy_identity(),
+                POLICY_SPEC_VERSION_RANGE,
+                &POLICY_DIRECTIVE_NAME,
+            ),
+        }
+    }
 }
 
 /// Authorization plugin
@@ -220,9 +259,12 @@ impl AuthorizationPlugin {
         operation_name: Option<&str>,
         schema: &apollo_compiler::Schema,
         entity_query: bool,
+        directives: &AuthorizationDirectives,
     ) -> CacheKeyMetadata {
         let mut is_authenticated = false;
-        if let Some(mut visitor) = AuthenticatedCheckVisitor::new(schema, document, entity_query) {
+        if let Some(directive_name) = &directives.authenticated {
+            let mut visitor =
+                AuthenticatedCheckVisitor::new(schema, document, entity_query, directive_name);
             // if this fails, the query is invalid and will fail at the query planning phase.
             // We do not return validation errors here for now because that would imply a huge
             // refactoring of telemetry and tests
@@ -232,7 +274,9 @@ impl AuthorizationPlugin {
         }
 
         let mut scopes = Vec::new();
-        if let Some(mut visitor) = ScopeExtractionVisitor::new(schema, document, entity_query) {
+        if let Some(directive_name) = &directives.requires_scopes {
+            let mut visitor =
+                ScopeExtractionVisitor::new(schema, document, entity_query, directive_name);
             // if this fails, the query is invalid and will fail at the query planning phase.
             // We do not return validation errors here for now because that would imply a huge
             // refactoring of telemetry and tests
@@ -242,7 +286,9 @@ impl AuthorizationPlugin {
         }
 
         let mut policies: Vec<String> = Vec::new();
-        if let Some(mut visitor) = PolicyExtractionVisitor::new(schema, document, entity_query) {
+        if let Some(directive_name) = &directives.policy {
+            let mut visitor =
+                PolicyExtractionVisitor::new(schema, document, entity_query, directive_name);
             // if this fails, the query is invalid and will fail at the query planning phase.
             // We do not return validation errors here for now because that would imply a huge
             // refactoring of telemetry and tests
@@ -328,6 +374,7 @@ impl AuthorizationPlugin {
         configuration: &Conf,
         key: &QueryKey,
         schema: &Schema,
+        directives: &AuthorizationDirectives,
     ) -> Result<FilterResult, QueryPlannerError> {
         let dry_run = configuration.directives.dry_run;
 
@@ -347,7 +394,8 @@ impl AuthorizationPlugin {
         let mut is_filtered = false;
         let mut unauthorized_paths: Vec<Path> = vec![];
 
-        let filter_res = Self::authenticated_filter_query(schema, dry_run, &doc, is_authenticated)?;
+        let filter_res =
+            Self::authenticated_filter_query(schema, directives, dry_run, &doc, is_authenticated)?;
 
         let doc = match filter_res {
             None => doc,
@@ -368,7 +416,7 @@ impl AuthorizationPlugin {
             }
         };
 
-        let filter_res = Self::scopes_filter_query(schema, dry_run, &doc, scopes)?;
+        let filter_res = Self::scopes_filter_query(schema, directives, dry_run, &doc, scopes)?;
 
         let doc = match filter_res {
             None => doc,
@@ -389,7 +437,7 @@ impl AuthorizationPlugin {
             }
         };
 
-        let filter_res = Self::policies_filter_query(schema, dry_run, &doc, policies)?;
+        let filter_res = Self::policies_filter_query(schema, directives, dry_run, &doc, policies)?;
 
         let doc = match filter_res {
             None => doc,
@@ -422,15 +470,18 @@ impl AuthorizationPlugin {
 
     fn authenticated_filter_query(
         schema: &Schema,
+        directives: &AuthorizationDirectives,
         dry_run: bool,
         doc: &ast::Document,
         is_authenticated: bool,
     ) -> Result<Option<(ast::Document, Vec<Path>)>, QueryPlannerError> {
-        if let Some(mut visitor) = AuthenticatedVisitor::new(
-            schema.supergraph_schema(),
-            &schema.implementers_map,
-            dry_run,
-        ) {
+        if let Some(directive_name) = &directives.authenticated {
+            let mut visitor = AuthenticatedVisitor::new(
+                schema.supergraph_schema(),
+                &schema.implementers_map,
+                dry_run,
+                directive_name,
+            );
             let modified_query = transform::document(&mut visitor, doc)
                 .map_err(|e| SpecError::TransformError(e.to_string()))?;
 
@@ -464,16 +515,19 @@ impl AuthorizationPlugin {
 
     fn scopes_filter_query(
         schema: &Schema,
+        directives: &AuthorizationDirectives,
         dry_run: bool,
         doc: &ast::Document,
         scopes: &[String],
     ) -> Result<Option<(ast::Document, Vec<Path>)>, QueryPlannerError> {
-        if let Some(mut visitor) = ScopeFilteringVisitor::new(
-            schema.supergraph_schema(),
-            &schema.implementers_map,
-            scopes.iter().cloned().collect(),
-            dry_run,
-        ) {
+        if let Some(directive_name) = &directives.requires_scopes {
+            let mut visitor = ScopeFilteringVisitor::new(
+                schema.supergraph_schema(),
+                &schema.implementers_map,
+                scopes.iter().cloned().collect(),
+                dry_run,
+                directive_name,
+            );
             let modified_query = transform::document(&mut visitor, doc)
                 .map_err(|e| SpecError::TransformError(e.to_string()))?;
             if visitor.query_requires_scopes {
@@ -498,17 +552,20 @@ impl AuthorizationPlugin {
 
     fn policies_filter_query(
         schema: &Schema,
+        directives: &AuthorizationDirectives,
         dry_run: bool,
 
         doc: &ast::Document,
         policies: &[String],
     ) -> Result<Option<(ast::Document, Vec<Path>)>, QueryPlannerError> {
-        if let Some(mut visitor) = PolicyFilteringVisitor::new(
-            schema.supergraph_schema(),
-            &schema.implementers_map,
-            policies.iter().cloned().collect(),
-            dry_run,
-        ) {
+        if let Some(directive_name) = &directives.policy {
+            let mut visitor = PolicyFilteringVisitor::new(
+                schema.supergraph_schema(),
+                &schema.implementers_map,
+                policies.iter().cloned().collect(),
+                dry_run,
+                directive_name,
+            );
             let modified_query = transform::document(&mut visitor, doc)
                 .map_err(|e| SpecError::TransformError(e.to_string()))?;
 

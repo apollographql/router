@@ -9,12 +9,10 @@ use apollo_compiler::executable;
 use apollo_compiler::name;
 use apollo_compiler::schema;
 use apollo_compiler::schema::Implementers;
-use apollo_federation::link::spec::Identity;
 use tower::BoxError;
 
 use crate::json_ext::Path;
 use crate::json_ext::PathElement;
-use crate::spec::Schema;
 use crate::spec::TYPENAME;
 use crate::spec::query::transform;
 use crate::spec::query::transform::TransformState;
@@ -27,7 +25,7 @@ pub(crate) struct AuthenticatedCheckVisitor<'a> {
     schema: &'a schema::Schema,
     fragments: HashMap<&'a Name, &'a Node<executable::Fragment>>,
     pub(crate) found: bool,
-    authenticated_directive_name: String,
+    authenticated_directive_name: &'a str,
     entity_query: bool,
 }
 
@@ -36,23 +34,19 @@ impl<'a> AuthenticatedCheckVisitor<'a> {
         schema: &'a schema::Schema,
         executable: &'a executable::ExecutableDocument,
         entity_query: bool,
-    ) -> Option<Self> {
-        Some(Self {
+        authenticated_directive_name: &'a str,
+    ) -> Self {
+        Self {
             schema,
             entity_query,
             fragments: executable.fragments.iter().collect(),
             found: false,
-            authenticated_directive_name: Schema::directive_name(
-                schema,
-                &Identity::authenticated_identity(),
-                AUTHENTICATED_SPEC_VERSION_RANGE,
-                &AUTHENTICATED_DIRECTIVE_NAME,
-            )?,
-        })
+            authenticated_directive_name,
+        }
     }
 
     fn is_field_authenticated(&self, field: &schema::FieldDefinition) -> bool {
-        field.directives.has(&self.authenticated_directive_name)
+        field.directives.has(self.authenticated_directive_name)
             || self
                 .schema
                 .types
@@ -61,7 +55,7 @@ impl<'a> AuthenticatedCheckVisitor<'a> {
     }
 
     fn is_type_authenticated(&self, t: &schema::ExtendedType) -> bool {
-        t.directives().has(&self.authenticated_directive_name)
+        t.directives().has(self.authenticated_directive_name)
     }
 
     fn entities_operation(&mut self, node: &executable::Operation) -> Result<(), BoxError> {
@@ -184,7 +178,7 @@ pub(crate) struct AuthenticatedVisitor<'a> {
     // the point of application
     fragments_unauthorized_paths: HashMap<String, Vec<Path>>,
     current_path: Path,
-    authenticated_directive_name: String,
+    authenticated_directive_name: &'a str,
     dry_run: bool,
 }
 
@@ -193,8 +187,9 @@ impl<'a> AuthenticatedVisitor<'a> {
         schema: &'a schema::Schema,
         implementers_map: &'a apollo_compiler::collections::HashMap<Name, Implementers>,
         dry_run: bool,
-    ) -> Option<Self> {
-        Some(Self {
+        authenticated_directive_name: &'a str,
+    ) -> Self {
+        Self {
             schema,
             state: TransformState::new(),
             implementers_map,
@@ -203,17 +198,12 @@ impl<'a> AuthenticatedVisitor<'a> {
             unauthorized_paths: Vec::new(),
             fragments_unauthorized_paths: HashMap::new(),
             current_path: Path::default(),
-            authenticated_directive_name: Schema::directive_name(
-                schema,
-                &Identity::authenticated_identity(),
-                AUTHENTICATED_SPEC_VERSION_RANGE,
-                &AUTHENTICATED_DIRECTIVE_NAME,
-            )?,
-        })
+            authenticated_directive_name,
+        }
     }
 
     fn is_field_authenticated(&self, field: &schema::FieldDefinition) -> bool {
-        field.directives.has(&self.authenticated_directive_name)
+        field.directives.has(self.authenticated_directive_name)
             || self
                 .schema
                 .types
@@ -222,7 +212,7 @@ impl<'a> AuthenticatedVisitor<'a> {
     }
 
     fn is_type_authenticated(&self, t: &schema::ExtendedType) -> bool {
-        t.directives().has(&self.authenticated_directive_name)
+        t.directives().has(self.authenticated_directive_name)
     }
 
     fn implementors<'s>(&'s self, type_name: &str) -> impl Iterator<Item = &'s Name> + use<'s> {
@@ -309,7 +299,7 @@ impl transform::Visitor for AuthenticatedVisitor<'_> {
         let operation_requires_authentication = self
             .schema
             .get_object(root_type)
-            .is_some_and(|ty| ty.directives.has(&self.authenticated_directive_name));
+            .is_some_and(|ty| ty.directives.has(self.authenticated_directive_name));
 
         if operation_requires_authentication {
             self.unauthorized_paths.push(self.current_path.clone());
@@ -518,6 +508,7 @@ mod tests {
     use crate::json_ext::Path;
     use crate::plugin::test::MockSubgraph;
     use crate::plugins::authentication::APOLLO_AUTHENTICATION_JWT_CLAIMS;
+    use crate::plugins::authorization::AuthorizationDirectives;
     use crate::plugins::authorization::authenticated::AuthenticatedVisitor;
     use crate::services::router::ClientRequestAccepts;
     use crate::services::supergraph;
@@ -595,7 +586,13 @@ mod tests {
         let doc = ast::Document::parse(query, "query.graphql").unwrap();
 
         let map = schema.implementers_map();
-        let mut visitor = AuthenticatedVisitor::new(&schema, &map, false).unwrap();
+        let directives = AuthorizationDirectives::from_schema(&schema);
+        let mut visitor = AuthenticatedVisitor::new(
+            &schema,
+            &map,
+            false,
+            directives.authenticated.as_deref().unwrap(),
+        );
 
         (
             transform::document(&mut visitor, &doc).unwrap(),

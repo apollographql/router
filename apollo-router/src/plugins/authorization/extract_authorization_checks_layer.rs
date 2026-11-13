@@ -11,6 +11,7 @@ use tower::Service;
 
 use crate::graphql::Error;
 use crate::plugins::authorization::AUTHENTICATION_REQUIRED_KEY;
+use crate::plugins::authorization::AuthorizationDirectives;
 use crate::plugins::authorization::AuthorizationPlugin;
 use crate::plugins::authorization::CacheKeyMetadata;
 use crate::plugins::authorization::REQUIRED_POLICIES_KEY;
@@ -118,6 +119,7 @@ where
                 operation_name,
                 schema.supergraph_schema(),
                 false,
+                &AuthorizationDirectives::from_schema(schema.supergraph_schema()),
             );
             if is_authenticated {
                 req.context
