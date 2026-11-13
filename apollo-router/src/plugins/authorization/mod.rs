@@ -5,6 +5,7 @@ use std::ops::ControlFlow;
 
 use apollo_compiler::ExecutableDocument;
 use apollo_compiler::ast;
+use apollo_federation::link::metadata::LinksMetadata;
 use apollo_federation::link::spec::Identity;
 use http::StatusCode;
 use serde::Deserialize;
@@ -72,22 +73,26 @@ pub(crate) struct AuthorizationDirectives {
 }
 
 impl AuthorizationDirectives {
+    /// Resolves all three names from one parse of the schema's `@link` metadata.
     pub(crate) fn from_schema(schema: &apollo_compiler::Schema) -> Self {
+        let Ok(Some(links)) = LinksMetadata::from_schema(schema) else {
+            return Self::default();
+        };
         Self {
-            authenticated: Schema::directive_name(
-                schema,
+            authenticated: Schema::directive_name_in_links(
+                &links,
                 &Identity::authenticated_identity(),
                 AUTHENTICATED_SPEC_VERSION_RANGE,
                 &AUTHENTICATED_DIRECTIVE_NAME,
             ),
-            requires_scopes: Schema::directive_name(
-                schema,
+            requires_scopes: Schema::directive_name_in_links(
+                &links,
                 &Identity::requires_scopes_identity(),
                 REQUIRES_SCOPES_SPEC_VERSION_RANGE,
                 &REQUIRES_SCOPES_DIRECTIVE_NAME,
             ),
-            policy: Schema::directive_name(
-                schema,
+            policy: Schema::directive_name_in_links(
+                &links,
                 &Identity::policy_identity(),
                 POLICY_SPEC_VERSION_RANGE,
                 &POLICY_DIRECTIVE_NAME,

@@ -34,7 +34,6 @@ use crate::error::ServiceBuildError;
 use crate::error::ValidationErrors;
 use crate::metrics::meter_provider;
 use crate::plugins::authorization;
-use crate::plugins::authorization::AuthorizationDirectives;
 use crate::plugins::authorization::AuthorizationPlugin;
 use crate::plugins::authorization::CacheKeyMetadata;
 use crate::plugins::authorization::FilterResult;
@@ -355,11 +354,9 @@ impl QueryPlannerService {
                     // XXX(@goto-bus-stop): Maybe we can use the `QueryPlanner::subgraph_schemas`
                     // type here directly to avoid having this additional subgraph_schemas field
                     root_node.init_parsed_operations_and_hash_subqueries(&self.subgraph_schemas)?;
-                    let directives =
-                        AuthorizationDirectives::from_schema(self.schema.supergraph_schema());
                     root_node.extract_authorization_metadata(
                         self.schema.supergraph_schema(),
-                        &directives,
+                        &self.schema.authorization_directives,
                         &key,
                     );
                     Ok(())
@@ -551,7 +548,7 @@ impl QueryPlannerService {
                 &self.authorization_config,
                 &key,
                 &self.schema,
-                &AuthorizationDirectives::from_schema(self.schema.supergraph_schema()),
+                &self.schema.authorization_directives,
             )?
         } else {
             FilterResult::Unchanged
