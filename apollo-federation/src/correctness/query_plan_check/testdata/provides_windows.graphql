@@ -1,0 +1,158 @@
+# The supergraph for the `@provides` tests in `tests/resolvable.rs`, composed with
+# `composition::compose` from the three subgraphs below, each of which also links federation v2.3
+# importing `@key`, `@external`, `@provides` and `@shareable`. Recompose it when they change.
+#
+# `shop` marks `Vendor.name`, `Vendor.code` and `Gizmo.label` external, and opens a `@provides`
+# window under `topProducts`, `featured` and `Product.vendor`. `catalog` serves the same schema
+# with nothing external. `ledger` resolves a `Vendor` by `id`, its one field, which it marks
+# external.
+#
+# Subgraph `shop`:
+#
+#   type Query {
+#     topProducts: Product @shareable @provides(fields: "vendor { name }")
+#     products: Product @shareable
+#     items: Item @shareable
+#     featured: Item @shareable @provides(fields: "... on Gizmo { maker { name } }")
+#   }
+#
+#   type Product @key(fields: "id") {
+#     id: ID!
+#     vendor: Vendor @shareable @provides(fields: "code")
+#     maker: Vendor @shareable
+#   }
+#
+#   type Vendor @key(fields: "id") {
+#     id: ID!
+#     name: String @external
+#     code: String @external
+#   }
+#
+#   interface Item {
+#     label: String
+#     maker: Vendor
+#   }
+#
+#   type Gizmo implements Item @shareable {
+#     label: String @external
+#     maker: Vendor
+#   }
+#
+#   type Widget implements Item @shareable {
+#     label: String
+#     maker: Vendor
+#   }
+#
+# Subgraph `catalog`:
+#
+#   type Query {
+#     topProducts: Product @shareable
+#     products: Product @shareable
+#     items: Item @shareable
+#     featured: Item @shareable
+#   }
+#
+#   type Product @key(fields: "id") {
+#     id: ID!
+#     vendor: Vendor @shareable
+#     maker: Vendor @shareable
+#   }
+#
+#   type Vendor @key(fields: "id") {
+#     id: ID!
+#     name: String @shareable
+#     code: String @shareable
+#   }
+#
+#   interface Item {
+#     label: String
+#     maker: Vendor
+#   }
+#
+#   type Gizmo implements Item @shareable {
+#     label: String
+#     maker: Vendor
+#   }
+#
+#   type Widget implements Item @shareable {
+#     label: String
+#     maker: Vendor
+#   }
+#
+# Subgraph `ledger`:
+#
+#   type Vendor @key(fields: "id") {
+#     id: ID! @external
+#   }
+schema @link(url: "https://specs.apollo.dev/link/v1.0") @link(url: "https://specs.apollo.dev/join/v0.3", for: EXECUTION) {
+  query: Query
+}
+
+directive @link(url: String, as: String, for: link__Purpose, import: [link__Import]) repeatable on SCHEMA
+
+directive @join__graph(name: String!, url: String!) on ENUM_VALUE
+
+directive @join__type(graph: join__Graph!, key: join__FieldSet, extension: Boolean! = false, resolvable: Boolean! = true, isInterfaceObject: Boolean! = false) repeatable on OBJECT | INTERFACE | UNION | ENUM | INPUT_OBJECT | SCALAR
+
+directive @join__field(graph: join__Graph, requires: join__FieldSet, provides: join__FieldSet, type: String, external: Boolean, override: String, usedOverridden: Boolean) repeatable on FIELD_DEFINITION | INPUT_FIELD_DEFINITION
+
+directive @join__implements(graph: join__Graph!, interface: String!) repeatable on OBJECT | INTERFACE
+
+directive @join__unionMember(graph: join__Graph!, member: String!) repeatable on UNION
+
+directive @join__enumValue(graph: join__Graph!) repeatable on ENUM_VALUE
+
+enum link__Purpose {
+  """
+  `SECURITY` features provide metadata necessary to securely resolve fields.
+  """
+  SECURITY
+  """
+  `EXECUTION` features provide metadata necessary for operation execution.
+  """
+  EXECUTION
+}
+
+scalar link__Import
+
+enum join__Graph {
+  CATALOG @join__graph(name: "catalog", url: "none")
+  LEDGER @join__graph(name: "ledger", url: "none")
+  SHOP @join__graph(name: "shop", url: "none")
+}
+
+scalar join__FieldSet
+
+type Query @join__type(graph: CATALOG) @join__type(graph: LEDGER) @join__type(graph: SHOP) {
+  topProducts: Product @join__field(graph: CATALOG) @join__field(graph: SHOP, provides: "vendor { name }")
+  products: Product @join__field(graph: CATALOG) @join__field(graph: SHOP)
+  items: Item @join__field(graph: CATALOG) @join__field(graph: SHOP)
+  featured: Item @join__field(graph: CATALOG) @join__field(graph: SHOP, provides: "... on Gizmo { maker { name } }")
+}
+
+type Product @join__type(graph: CATALOG, key: "id") @join__type(graph: SHOP, key: "id") {
+  id: ID!
+  vendor: Vendor @join__field(graph: CATALOG) @join__field(graph: SHOP, provides: "code")
+  maker: Vendor
+}
+
+type Vendor @join__type(graph: CATALOG, key: "id") @join__type(graph: LEDGER, key: "id") @join__type(graph: SHOP, key: "id") {
+  id: ID! @join__field(graph: CATALOG) @join__field(graph: LEDGER, external: true) @join__field(graph: SHOP)
+  name: String @join__field(graph: CATALOG) @join__field(graph: SHOP, external: true)
+  code: String @join__field(graph: CATALOG) @join__field(graph: SHOP, external: true)
+}
+
+interface Item @join__type(graph: CATALOG) @join__type(graph: SHOP) {
+  label: String
+  maker: Vendor
+}
+
+type Gizmo implements Item @join__implements(graph: CATALOG, interface: "Item") @join__implements(graph: SHOP, interface: "Item") @join__type(graph: CATALOG) @join__type(graph: SHOP) {
+  label: String @join__field(graph: CATALOG) @join__field(graph: SHOP, external: true)
+  maker: Vendor
+}
+
+type Widget implements Item @join__implements(graph: CATALOG, interface: "Item") @join__implements(graph: SHOP, interface: "Item") @join__type(graph: CATALOG) @join__type(graph: SHOP) {
+  label: String
+  maker: Vendor
+}

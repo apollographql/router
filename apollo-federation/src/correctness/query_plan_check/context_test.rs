@@ -213,7 +213,9 @@ fn context_met(
         context_rewrites: rewrites,
         protocol: Default::default(),
     };
-    // Outside a deferred block, what a fetch can read is everything fetched before it.
+    // Outside a deferred block, what a fetch can read is everything fetched before it. Every path
+    // here ends at a `U`, so the `requires` is taken as written at `U`: written at another type, it
+    // would leave the fetch running nowhere.
     check_context_rewrites(
         &schema,
         &name!("Query"),
@@ -222,6 +224,7 @@ fn context_met(
         &available,
         &available,
         &fetch,
+        &[name!("U")],
     )
     .is_ok()
 }
@@ -286,6 +289,23 @@ fn missing_runtime_type_is_not_met() {
 fn absent_value_is_not_met() {
     assert!(!context_met(
         &fetch_path(),
+        &[],
+        "{ t { u { id } } }",
+        vec![rewrite_on(name!("A")), rewrite_on(name!("B"))]
+    ));
+}
+
+/// The same absent value, for a fetch whose path ends under a type condition no object there
+/// matches: the fetch never runs, so it reads nothing.
+#[test]
+fn position_matching_no_object_demands_nothing() {
+    let path = vec![
+        key(name!("t")),
+        key(name!("u")),
+        FetchDataPathElement::AnyIndex(Some(vec![name!("I")])),
+    ];
+    assert!(context_met(
+        &path,
         &[],
         "{ t { u { id } } }",
         vec![rewrite_on(name!("A")), rewrite_on(name!("B"))]

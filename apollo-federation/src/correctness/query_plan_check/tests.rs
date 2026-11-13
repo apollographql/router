@@ -94,7 +94,14 @@ impl Fixture {
                     }
                 }
             }
-            PlanNode::Condition(_) => unimplemented!("not needed by the written plans"),
+            PlanNode::Condition(condition) => {
+                for clause in [&mut condition.if_clause, &mut condition.else_clause]
+                    .into_iter()
+                    .flatten()
+                {
+                    self.init_operations(clause);
+                }
+            }
         }
     }
 
@@ -450,7 +457,7 @@ fn an_entry_reading_a_key_the_plan_never_fetched_is_rejected() {
     assert!(
         error
             .to_string()
-            .contains("has not fetched what the subgraph demands"),
+            .contains("reads a key the plan has not fetched"),
         "{error}"
     );
 }
@@ -578,7 +585,7 @@ fn a_deferred_block_missing_an_indirect_dependency_is_rejected() {
     assert!(
         error
             .to_string()
-            .contains("has not fetched what the subgraph demands"),
+            .contains("reads a key the plan has not fetched"),
         "{error}"
     );
 }
@@ -647,3 +654,96 @@ fn a_field_returning_an_interface_object_is_still_checked() {
         "{error}"
     );
 }
+
+//==================================================================================================
+// A path no subgraph can reach
+
+/// `one` resolves `u1` and returns only `B` and `C` from it; `two` adds `A` to `U1`, but resolves
+/// no field returning one.
+fn unreachable_member_fixture() -> Fixture {
+    Fixture::new(include_str!("testdata/unreachable_member.graphql"))
+}
+
+/// The planner's plan for `u1`'s `A` fields: `__typename`, and nothing for `A`.
+const U1_TYPENAME_PLAN: &str = r#"{ "Fetch": {
+    "subgraph_name": "one",
+    "variable_usages": [],
+    "operation_document": "{ u1 { __typename } }",
+    "operation_kind": "query",
+    "input_rewrites": [],
+    "output_rewrites": [],
+    "context_rewrites": []
+} }"#;
+
+// The supergraph's `U1` admits `A`, so the client may ask for one, but only `one` resolves `u1` and
+// it never returns an `A` there. The plan fetches nothing for `A` and the response is the same as
+// if it had. The model rejects this plan, admitting every path; `SubgraphConstraint` is what drops
+// the path no subgraph can reach from what the client is owed, and nothing else here does:
+// narrowing a fetch's fragments shrinks what the plan is credited with, and this plan has no
+// fragment to narrow.
+#[test]
+fn a_member_no_subgraph_returns_there_is_not_owed() {
+    let fixture = unreachable_member_fixture();
+    let plan = fixture.written_plan(U1_TYPENAME_PLAN);
+    fixture
+        .check(&plan, "{ u1 { ... on U2 { ... on A { v } } } }")
+        .unwrap();
+}
+
+// The control: `one` does return a `B` from `u1`, so its `v` is owed and the same plan lacks it.
+#[test]
+fn a_member_the_subgraph_returns_there_is_still_owed() {
+    let fixture = unreachable_member_fixture();
+    let plan = fixture.written_plan(U1_TYPENAME_PLAN);
+    let error = fixture
+        .check(&plan, "{ u1 { ... on U2 { ... on B { v } } } }")
+        .expect_err("`v` on `B` is never fetched");
+    assert!(
+        error.to_string().contains("does not select `v` on B"),
+        "{error}"
+    );
+}
+
+//==================================================================================================
+// A directive's arguments
+
+// `@tint(x: 1)` and `@tint(x: 1.0)` are one `Float!` value once coerced, so one
+// `title @tint(x: 1)` fetched for every node serves both fragments. The model compares argument
+// values as written; the checker coerces literals before comparing (`coerced_for_comparison`).
+#[test]
+fn directive_arguments_equal_after_coercion_are_one_call() {
+    let fixture = Fixture::new(include_str!("testdata/directive_literals.graphql"));
+    let plan = fixture.written_plan(
+        r#"{ "Fetch": {
+            "subgraph_name": "shelf",
+            "variable_usages": [],
+            "operation_document": "{ nodes { __typename title @tint(x: 1) } }",
+            "operation_kind": "query",
+            "input_rewrites": [],
+            "output_rewrites": [],
+            "context_rewrites": []
+        } }"#,
+    );
+    fixture
+        .check(
+            &plan,
+            "{ nodes { ... on Book { title @tint(x: 1) } ... on Film { title @tint(x: 1.0) } } }",
+        )
+        .unwrap();
+}
+
+//==================================================================================================
+// Ports of the model's tests, by what they cover
+
+mod conditional_requires;
+mod context_arguments;
+mod context_reads;
+mod deferred_reads;
+mod entries;
+mod growing_families;
+mod input_renamers;
+mod input_rewrites;
+mod output_renames;
+mod path_conditions;
+mod resolvable;
+mod returned_types;

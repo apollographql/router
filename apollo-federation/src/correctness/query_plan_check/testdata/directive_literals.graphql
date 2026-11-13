@@ -1,0 +1,100 @@
+# The supergraph for the directive-argument test in `tests.rs`, composed from the subgraph below,
+# which links federation v2.3 importing `@key`.
+#
+# `shelf` serves `nodes`, each a `Book` or a `Film` with a `title`, and declares the executable
+# directive `@tint(x: Float!)`, which an operation may apply with an `Int` literal or a `Float` one.
+#
+# Subgraph `shelf`:
+#
+#   directive @tint(x: Float!) on FIELD
+#
+#   type Query {
+#     nodes: [Node]
+#   }
+#
+#   interface Node {
+#     id: ID!
+#     title: String
+#   }
+#
+#   type Book implements Node @key(fields: "id") {
+#     id: ID!
+#     title: String
+#   }
+#
+#   type Film implements Node @key(fields: "id") {
+#     id: ID!
+#     title: String
+#   }
+
+schema
+  @link(url: "https://specs.apollo.dev/link/v1.0")
+  @link(url: "https://specs.apollo.dev/join/v0.3", for: EXECUTION)
+{
+  query: Query
+}
+
+directive @join__enumValue(graph: join__Graph!) repeatable on ENUM_VALUE
+
+directive @join__field(graph: join__Graph, requires: join__FieldSet, provides: join__FieldSet, type: String, external: Boolean, override: String, usedOverridden: Boolean) repeatable on FIELD_DEFINITION | INPUT_FIELD_DEFINITION
+
+directive @join__graph(name: String!, url: String!) on ENUM_VALUE
+
+directive @join__implements(graph: join__Graph!, interface: String!) repeatable on OBJECT | INTERFACE
+
+directive @join__type(graph: join__Graph!, key: join__FieldSet, extension: Boolean! = false, resolvable: Boolean! = true, isInterfaceObject: Boolean! = false) repeatable on OBJECT | INTERFACE | UNION | ENUM | INPUT_OBJECT | SCALAR
+
+directive @join__unionMember(graph: join__Graph!, member: String!) repeatable on UNION
+
+directive @link(url: String, as: String, for: link__Purpose, import: [link__Import]) repeatable on SCHEMA
+
+directive @tint(x: Float!) on FIELD
+
+type Book implements Node
+  @join__implements(graph: SHELF, interface: "Node")
+  @join__type(graph: SHELF, key: "id")
+{
+  id: ID!
+  title: String
+}
+
+type Film implements Node
+  @join__implements(graph: SHELF, interface: "Node")
+  @join__type(graph: SHELF, key: "id")
+{
+  id: ID!
+  title: String
+}
+
+scalar join__FieldSet
+
+enum join__Graph {
+  SHELF @join__graph(name: "shelf", url: "http://shelf")
+}
+
+scalar link__Import
+
+enum link__Purpose {
+  """
+  `SECURITY` features provide metadata necessary to securely resolve fields.
+  """
+  SECURITY
+
+  """
+  `EXECUTION` features provide metadata necessary for operation execution.
+  """
+  EXECUTION
+}
+
+interface Node
+  @join__type(graph: SHELF)
+{
+  id: ID!
+  title: String
+}
+
+type Query
+  @join__type(graph: SHELF)
+{
+  nodes: [Node]
+}
