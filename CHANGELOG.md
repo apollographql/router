@@ -2,6 +2,66 @@
 
 This project adheres to [Semantic Versioning v2.0.0](https://semver.org/spec/v2.0.0.html).
 
+# [2.16.6] - 2026-11-13
+
+## 🚀 Features
+
+### Add a metric to track non-local selection sets observed during query planning
+
+`apollo.router.query_planning.plan.non_local_selections` is a histogram of the
+number of non-local selections estimated during query planning traversal. An
+investigation into the complexity of operations is warranted should this metric
+return values close to the internal non-local selections limit of 100000. The
+histogram uses fixed bucket boundaries of 100, 1000, 25000, 50000, 100000, and
+150000.
+
+By [@lrlna](https://github.com/lrlna) in https://github.com/apollographql/router/pull/10349
+
+## 🐛 Fixes
+
+### Unresponsive replicas no longer break non-cluster Redis caching
+
+Since router 2.15.1, a non-cluster Redis deployment with replicas (for example, a primary with read replicas, or a managed high-availability instance with a standby) could lose its Redis cache entirely while the primary was healthy. This happened when a replica accepted connections but never answered, such as a paused replica or a standby that doesn't accept clients. The router repeatedly logged `redis client aborted; marking for recreation` and `client pool being recreated after connection interrupt`, and cache reads and writes to the primary failed.
+
+Redis Cluster deployments are unchanged. Other Redis deployments no longer open connections to replicas, which the router doesn't read from outside cluster mode, so an unresponsive replica no longer affects caching on the primary. This restores the behavior from before 2.15.1.
+
+By [@BrynCooke](https://github.com/BrynCooke) in https://github.com/apollographql/router/pull/10630
+
+### Fix quadratic API schema generation for contracts that hide most of a supergraph
+
+Generating an API schema removed `@inaccessible` elements one at a time, and each removal updated
+referencer sets spanning the whole schema. Contract variants that hide most of a large supergraph
+took quadratic time, reaching tens of seconds. API schema generation now removes `@inaccessible`
+and `@link`-imported elements in a single pass over the schema, producing the same API schema.
+
+By [@tninesling](https://github.com/tninesling) in https://github.com/apollographql/router/pull/10715
+
+### Keep literal `@skip`/`@include` in subgraph fetches under a variable condition ([PR #10708](https://github.com/apollographql/router/pull/10708))
+
+When a field had a variable `@skip` or `@include`, the query planner dropped `@include(if: false)` and `@skip(if: true)` from nested fields in the same subgraph fetch. Subgraphs then resolved fields the client excluded. The router still removed them from the response, so the cost was extra subgraph work. These directives are now sent to the subgraph.
+
+By [@tninesling](https://github.com/tninesling) in https://github.com/apollographql/router/pull/10708
+
+### Alias conflicting subgraph fields inside a conditional fragment ([PR #10377](https://github.com/apollographql/router/pull/10377))
+
+When a subgraph fetch selects two fields with the same response name but incompatible types (for example `f: Int!` on one type and `f: Int` on another, both needed as `@requires` inputs), the query planner aliases one of them and renames it back after the fetch. If those fields were inside an inline fragment that had no type condition, as happens when a `@skip`/`@include` fragment such as `... on Query @include(if: $a)` or `... @include(if: $a)` is turned into a condition in the query plan, the planner recorded the rename but never applied the alias. Query planning then failed with "Query planning produced an invalid subgraph operation ... must not select different types using the same name".
+
+The alias is now applied inside such fragments, so these operations plan normally.
+
+By [@inanna-apollo](https://github.com/inanna-apollo) in https://github.com/apollographql/router/pull/10377
+
+### Keep executable directives and their argument types through connector expansion
+
+Composing connector subgraphs alongside an executable directive whose argument references a custom type (for example `directive @ownership(owners: [Owner!]) on FIELD` with `enum Owner`) failed satisfiability validation with `INTERNAL_ERROR: Cannot wrap an undefined/null type` (Rust: `Directive argument's inner type does not refer to an existing input type`).
+
+Connector expansion builds one synthetic subgraph per connector, but it never copied executable directive definitions, or the types their arguments reference, into those subgraphs. When another subgraph defined the directive, it still reached the expanded supergraph, but the synthetic subgraphs were recorded as lacking its argument types, so extracting subgraphs from the expanded supergraph produced invalid schemas. When every subgraph used connectors, the directive was dropped from the expanded supergraph entirely.
+
+Each synthetic subgraph now carries the executable directive definitions from its source subgraph, along with their argument types (scalars, enums, and input objects, recursively).
+
+By [@benjamn](https://github.com/benjamn) in https://github.com/apollographql/router/pull/9635
+
+
+
 # [2.16.5] - 2026-10-23
 
 ## 🐛 Fixes
@@ -50,13 +110,13 @@ Demand control adds a base cost of 10 to the estimated cost of every mutation, b
 
 By [@tninesling](https://github.com/tninesling) in https://github.com/apollographql/router/pull/10521
 
-### Fix `CONNECTORS_CANNOT_RESOLVE_KEY` and router startup failure when a connector reads `` through `->first`
+### Fix `CONNECTORS_CANNOT_RESOLVE_KEY` and router startup failure when a connector reads `$this` through `->first`
 
-A field-level `@connect` on an entity that read a `` value through `->first` (for example `queryParams: "id: .tagIds->first"`) failed composition with `CONNECTORS_CANNOT_RESOLVE_KEY`. With a supergraph composed by an older version, the router refused to start with `An internal error has occurred, please report this bug to Apollo. Details: error creating resolvable key`.
+A field-level `@connect` on an entity that read a `$this` value through `->first` (for example `queryParams: "id: $this.tagIds->first"`) failed composition with `CONNECTORS_CANNOT_RESOLVE_KEY`. With a supergraph composed by an older version, the router refused to start with `An internal error has occurred, please report this bug to Apollo. Details: error creating resolvable key`.
 
-The cause was in how connectors work out which `` fields an entity key needs. `->first` was recorded as a read of list index `0`, so the synthesized key came out as `tagIds { "0" }`, which is not a valid field set. List indexes are no longer recorded, so the key is now `tagIds`, the same as for `->last` or a plain `.tagIds`. Schemas like this now compose and the router starts.
+The cause was in how connectors work out which `$this` fields an entity key needs. `->first` was recorded as a read of list index `0`, so the synthesized key came out as `tagIds { "0" }`, which is not a valid field set. List indexes are no longer recorded, so the key is now `tagIds`, the same as for `->last` or a plain `$this.tagIds`. Schemas like this now compose and the router starts.
 
-Reading fields from the first element of a list of objects, such as `.items->first.id` or `.items->first { id }`, also composes now, with the key `items { id }`. This never composed in earlier versions. A bare `.items->first` on a list of objects is still rejected with `CONNECTORS_CANNOT_RESOLVE_KEY`, the same as a bare `.items`, because the key needs to select fields from the objects.
+Reading fields from the first element of a list of objects, such as `$this.items->first.id` or `$this.items->first { id }`, also composes now, with the key `items { id }`. This never composed in earlier versions. A bare `$this.items->first` on a list of objects is still rejected with `CONNECTORS_CANNOT_RESOLVE_KEY`, the same as a bare `$this.items`, because the key needs to select fields from the objects.
 
 When a connector's key still can't be built, the error now names the connector and includes the field set errors, instead of only saying `error creating resolvable key`.
 
@@ -77,26 +137,26 @@ type Product @key(fields: "id") {
 }
 ```
 
-this query returned `"inStock": null` whenever `` was `false`, even though `inStock` isn't conditional:
+this query returned `"inStock": null` whenever `$withShipping` was `false`, even though `inStock` isn't conditional:
 
 ```graphql
-query Product(: Boolean!) {
+query Product($withShipping: Boolean!) {
   product {
     inStock
-    shippingEstimate @include(if: )
+    shippingEstimate @include(if: $withShipping)
   }
 }
 ```
 
 The inline fragments of a fetch node's `requires` can now carry `@skip`/`@include` conditions (serialized as a `conditions` list on the fragment), and the router evaluates them when building entity representations: a fragment excluded by its conditions contributes nothing to the representation. Fetches shared between conditional and unconditional fields stay merged, so this does not add subgraph requests.
 
-The same mechanism also preserves conditions on the entity fetch following a `@requires` when two sibling selections carry opposite conditions on the same variable (for example `... @include(if: )` and `... @skip(if: )`): those conditions were previously dropped from that fetch, so the subgraph was asked for fields the client had excluded, with the union of both `@requires` field sets as inputs. And when every selection leading to a `@requires` field is conditional, the entity fetch following it is now wrapped in the corresponding `Skip`/`Include` node instead of being executed unconditionally.
+The same mechanism also preserves conditions on the entity fetch following a `@requires` when two sibling selections carry opposite conditions on the same variable (for example `... @include(if: $v)` and `... @skip(if: $v)`): those conditions were previously dropped from that fetch, so the subgraph was asked for fields the client had excluded, with the union of both `@requires` field sets as inputs. And when every selection leading to a `@requires` field is conditional, the entity fetch following it is now wrapped in the corresponding `Skip`/`Include` node instead of being executed unconditionally.
 
 By [@sachindshinde](https://github.com/sachindshinde) in https://github.com/apollographql/router/pull/10566
 
 ### Fix `connect/v0.4` routing entity resolution through a non-entity `Query` connector
 
-Under `connect/v0.4`, when a `@key` entity had **both** a type-level reference-resolver `@connect` (mapping from ``) **and** a separate `Query` field `@connect` returning that same type (mapping from ``, with `entity` unset), connector expansion copied the entity's declared `@key` onto the `Query`-field connector's generated subgraph as **resolvable**. That gave the query planner a second, spurious entity path, so it could resolve entity references through the `Query`-field connector — where `` is empty during entity resolution — sending a request with the query parameters stripped and surfacing an upstream error (e.g. a `400` reported as `CONNECTOR_FETCH`).
+Under `connect/v0.4`, when a `@key` entity had **both** a type-level reference-resolver `@connect` (mapping from `$this`) **and** a separate `Query` field `@connect` returning that same type (mapping from `$args`, with `entity` unset), connector expansion copied the entity's declared `@key` onto the `Query`-field connector's generated subgraph as **resolvable**. That gave the query planner a second, spurious entity path, so it could resolve entity references through the `Query`-field connector — where `$args` is empty during entity resolution — sending a request with the query parameters stripped and surfacing an upstream error (e.g. a `400` reported as `CONNECTOR_FETCH`).
 
 `connect/v0.3` was never affected, so bumping only the `@link` from `v0.3` to `v0.4` could break a previously working schema. Expansion now only copies keys for `@interfaceObject` types, and always as `resolvable: false`, matching the `v0.3` behavior.
 
@@ -197,7 +257,7 @@ By [@bryncooke](https://github.com/bryncooke) in https://github.com/apollographq
 
 ### Alias conflicting subgraph fields inside a conditional fragment ([PR #10377](https://github.com/apollographql/router/pull/10377))
 
-When a subgraph fetch selects two fields with the same response name but incompatible types (for example `f: Int!` on one type and `f: Int` on another, both needed as `@requires` inputs), the query planner aliases one of them and renames it back after the fetch. If those fields were inside an inline fragment that had no type condition, as happens when a `@skip`/`@include` fragment such as `... on Query @include(if: )` or `... @include(if: )` is turned into a condition in the query plan, the planner recorded the rename but never applied the alias. Query planning then failed with "Query planning produced an invalid subgraph operation ... must not select different types using the same name".
+When a subgraph fetch selects two fields with the same response name but incompatible types (for example `f: Int!` on one type and `f: Int` on another, both needed as `@requires` inputs), the query planner aliases one of them and renames it back after the fetch. If those fields were inside an inline fragment that had no type condition, as happens when a `@skip`/`@include` fragment such as `... on Query @include(if: $a)` or `... @include(if: $a)` is turned into a condition in the query plan, the planner recorded the rename but never applied the alias. Query planning then failed with "Query planning produced an invalid subgraph operation ... must not select different types using the same name".
 
 The alias is now applied inside such fragments, so these operations plan normally.
 
@@ -721,7 +781,7 @@ telemetry:
         sampler: 0.1
       otlp:
         enabled: true
-        endpoint: 
+        endpoint: ${env.DISTRIBUTED_TRACING_ENDPOINT}
         sampler: 0.02
 ```
 
@@ -762,7 +822,7 @@ response_cache:
       enabled: true
       invalidation:
         enabled: true
-        shared_key: ""
+        shared_key: "${env.INVALIDATION_SHARED_KEY}"
         indexes:                # all three default to true; omit fields you want kept on
           subgraph: false       # disable `By subgraph` invalidation for this subgraph
           type: false           # disable `By type` invalidation for this subgraph
@@ -2737,8 +2797,8 @@ type Query{
 }
 
 ## query ##
-query(: MessageInput) {
-    send(message: ) {
+query($msg: MessageInput) {
+    send(message: $msg) {
         id
     }
 }
@@ -3148,7 +3208,7 @@ response_cache:
       products:
         invalidation:
           enabled: true  # Endpoint now starts
-          shared_key: 
+          shared_key: ${env.INVALIDATION_SHARED_KEY}
 ```
 
 By [@bnjjj](https://github.com/bnjjj) in https://github.com/apollographql/router/pull/8680
@@ -4653,8 +4713,8 @@ By [@carodewig](https://github.com/carodewig) in https://github.com/apollographq
 The connectors plugin will no longer error when using a variable in a nested input argument. The following example would error prior to this change:
 
 ```graphql
-query Query (: String){
-    complexInputType(filters: { inSpace: true, search:  })
+query Query ($query: String){
+    complexInputType(filters: { inSpace: true, search: $query })
 }
 ```
 

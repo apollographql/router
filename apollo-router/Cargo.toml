@@ -1,6 +1,6 @@
 [package]
 name = "apollo-router"
-version = "2.16.5"
+version = "2.16.6"
 authors = ["Apollo Graph, Inc. <packages@apollographql.com>"]
 repository = "https://github.com/apollographql/router/"
 documentation = "https://docs.rs/apollo-router"
@@ -59,7 +59,7 @@ snapshot = []
 addr2line = "0.27.1"
 anyhow = "1.0.86"
 apollo-compiler.workspace = true
-apollo-federation = { path = "../apollo-federation", version = "=2.16.5" }
+apollo-federation = { path = "../apollo-federation", version = "=2.16.6" }
 async-compression = { version = "0.4.6", features = [
     "tokio",
     "futures-io",
@@ -264,7 +264,7 @@ tokio-tungstenite = { version = "0.29.0", features = [
     "rustls-tls-native-roots",
 ] }
 tokio-rustls = { version = "0.26.0", default-features = false }
-hickory-resolver = "0.26.0"
+hickory-resolver = "0.26.2"
 http-serde = "2.1.1"
 hmac = "0.12.1"
 parking_lot = { version = "0.12.3", features = ["serde"] }
