@@ -143,7 +143,7 @@ common_job_environment: &common_job_environment
   CARGO_NET_GIT_FETCH_WITH_CLI: "true"
   RUST_BACKTRACE: full
   CARGO_INCREMENTAL: 0
-  MISE_VERSION: v2026.9.18
+  MISE_VERSION: v2026.11.5
 commands:
   setup_environment:
     parameters:
