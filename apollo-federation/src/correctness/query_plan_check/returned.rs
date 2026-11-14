@@ -198,6 +198,36 @@ impl ReturnedTypes {
         Ok(returned)
     }
 
+    /// What one root fetch selecting `selections` returns, its fields read in `subgraph_schema`:
+    /// with the supergraph's own schema, every field returns every type it can (the model's tests'
+    /// `everyReturnedType`).
+    #[cfg(test)]
+    pub(super) fn of_selections(
+        supergraph_schema: &ValidFederationSchema,
+        subgraph_schema: &ValidFederationSchema,
+        root_type: &Name,
+        selections: &[Selection],
+    ) -> Self {
+        let mut returned = ReturnedTypes::default();
+        let supergraph_types = SchemaTypeLookup::new(supergraph_schema);
+        let subgraph_types = SchemaTypeLookup::new(subgraph_schema);
+        let mut parent_sets = IndexMap::default();
+        let mut fetch = FetchCollecting {
+            supergraph_types: &supergraph_types,
+            subgraph_types: &subgraph_types,
+            parent_sets: &mut parent_sets,
+            child_sets: IndexMap::default(),
+            fields: IndexMap::default(),
+            recorded: IndexSet::default(),
+            lists: IndexSet::default(),
+            narrowed: IndexMap::default(),
+            levels: IndexMap::default(),
+        };
+        let object_types = fetch.lists.insert_full(vec![root_type.clone()]).0;
+        returned.collect(&mut fetch, 0, None, object_types, &[selections]);
+        returned
+    }
+
     /// The node one level below `node`, written at `key` for the object types `types`.
     fn written_at(&mut self, node: usize, key: Name, types: Option<TypeSet>) -> usize {
         if let Some((_, below)) = self.written[node]
@@ -331,6 +361,16 @@ impl ReturnedTypes {
         })
     }
 
+    /// The trie nodes a position meets, read from the query root: the written typed key paths that
+    /// meet it.
+    pub(super) fn written_at_position(&self, position: &[(Name, Option<Vec<Name>>)]) -> Vec<usize> {
+        position
+            .iter()
+            .fold(self.root_written(), |nodes, (key, types)| {
+                self.written_below(&nodes, key, types.as_deref())
+            })
+    }
+
     /// The object types a field at `position` (its own level last), selected at `parent_type`, is
     /// returned as: what every fetch writing it at a typed key path meeting `position` returns.
     #[cfg(test)]
@@ -340,10 +380,7 @@ impl ReturnedTypes {
         parent_type: &Name,
         field_name: &Name,
     ) -> IndexSet<Name> {
-        let nodes = position.iter().fold(vec![0], |nodes, (key, types)| {
-            self.written_below(&nodes, key, types.as_deref())
-        });
-        self.children_at(&nodes, parent_type, field_name)
+        self.children_at(&self.written_at_position(position), parent_type, field_name)
     }
 
     /// The returned types as a path constraint, starting at the query root.

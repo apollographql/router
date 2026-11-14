@@ -158,7 +158,7 @@ use apollo_compiler::validation::Valid;
 
 use self::context::ContextSite;
 use self::context::ContextUse;
-use self::context::check_context_arguments_bound;
+use self::context::check_context_arguments_pass_variables;
 use self::context::check_context_declared;
 use self::context::check_context_rewrites;
 use self::context::check_root_fetch_uses_no_context;
@@ -1010,10 +1010,12 @@ impl Checker<'_> {
             )?;
         }
         self.check_typenames_readable(fetch, reached, available, readable_doc)?;
-        check_context_arguments_bound(fetch, uses)?;
+        check_context_arguments_pass_variables(fetch, uses)?;
         check_context_rewrites(
             self.supergraph_schema,
             &self.root_type,
+            &self.returned,
+            uses,
             reached.path,
             reached.condition,
             available,

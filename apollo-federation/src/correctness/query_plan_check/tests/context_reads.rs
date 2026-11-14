@@ -74,6 +74,18 @@ fn entity_fetch(
     )
 }
 
+/// Asserts the plan was rejected for a contextual value owed off a `setter_type` that no rewrite
+/// reads.
+fn assert_context_value_owed(error: impl std::fmt::Display, setter_type: &str) {
+    let error = error.to_string();
+    assert!(
+        error.contains(&format!(
+            "owed a value off a `{setter_type}` where no rewrite binding it reads one"
+        )),
+        "{error}"
+    );
+}
+
 /// Asserts the plan was rejected for a contextual value missing for data of `runtime_type`.
 fn assert_context_value_missing(error: impl std::fmt::Display, runtime_type: &str) {
     let error = error.to_string();
@@ -177,14 +189,14 @@ fn context_rewrite_per_union_member_is_accepted() {
     .unwrap();
 }
 
-// With no rewrite for `Kiosk`, a kiosk's products are sent no `locale`: the store's rewrite finds
-// nothing on a kiosk. The fetch's positions under the fragment on `Kiosk` have to be found, by
-// looking `products` up on `Kiosk` rather than on the union, for that to be seen.
+// With no rewrite for `Kiosk`, a kiosk's products are sent no `locale`, which their declaration
+// owes them. The fetch's positions under the fragment on `Kiosk` have to be found, by looking
+// `products` up on `Kiosk` rather than on the union, for that to be seen.
 #[test]
 fn union_member_without_a_context_rewrite_is_rejected() {
     let error = check_outlets(&price_plan(&[locale_on("Store")]), "products", "price")
         .expect_err("a kiosk's products are sent no `locale`");
-    assert_context_value_missing(error, "Kiosk");
+    assert_context_value_owed(error, "Kiosk");
 }
 
 // Every featured product is sent its outlet's address's `locale`. The fetch's position ends at
@@ -200,8 +212,8 @@ fn context_value_below_a_union_members_field_is_accepted() {
     .unwrap();
 }
 
-// With only the store's rewrite, a kiosk's featured product is sent no `locale`: the rewrite reads
-// `address` off a `Store` alone, and that narrowing is carried past `address` to the value.
+// With only the store's rewrite, a kiosk's featured product is sent no `locale`, which its
+// declaration owes it: no rewrite targets a kiosk, the store's rewrite reading only off stores.
 #[test]
 fn context_value_below_another_union_members_field_is_rejected() {
     let error = check_outlets(
@@ -210,7 +222,7 @@ fn context_value_below_another_union_members_field_is_rejected() {
         "delivery",
     )
     .expect_err("a kiosk's featured product is sent no `locale`");
-    assert_context_value_missing(error, "Kiosk");
+    assert_context_value_owed(error, "Kiosk");
 }
 
 //==================================================================================================
@@ -290,7 +302,7 @@ fn check_every_store_price(fixture: &Fixture, plan: &str) -> Result<(), Correctn
 // profile, and each product reads it off its own store whatever the owner is. The root fetch's
 // fragment on `Owner` reaches exactly those two types, so the value sits under that fragment once,
 // rather than once per type the path names; guarding it by both names would mount a copy narrowed
-// to each instead, siblings that serve the same (`split_owner_context_is_accepted`).
+// to each instead, which together serve the same (`split_owner_context_is_accepted`).
 #[test]
 fn context_value_under_a_fragment_stating_its_condition_is_accepted() {
     let fixture = owner_profile_fixture();
@@ -313,8 +325,8 @@ const SPLIT_PROFILES: &str = "... on Person { profile { __typename id } } \
                               ... on Company { profile { __typename id } }";
 
 // The `locale` fetched for both owner types under the separate selections: each copy is narrowed
-// to its owner type past the levels the two paths share, but the two are siblings, alike but at
-// the owner, and together serve every product.
+// to its owner type past the levels the two paths share, and between them they cover every type
+// the owner can have, so together they serve every product.
 #[test]
 fn split_owner_context_is_accepted() {
     let fixture = owner_profile_fixture();
@@ -326,7 +338,7 @@ fn split_owner_context_is_accepted() {
 }
 
 // The `locale` fetched under the separate selections for a `Person` alone: a company's products
-// are sent none, and the `Person` copy has no sibling to cover them.
+// are sent none, no copy admitting a `Company` owner.
 #[test]
 fn missing_owner_context_is_rejected() {
     let fixture = owner_profile_fixture();
@@ -355,7 +367,7 @@ fn owner_stores_fetch() -> String {
 }
 
 // Each fetch mounts the `locale` under its own path condition, a copy narrowed to its owner type;
-// the two are siblings and together serve every product.
+// between them they cover both owner types and serve every product.
 #[test]
 fn locale_fetched_per_owner_type_is_accepted() {
     let fixture = owner_profile_fixture();
@@ -366,9 +378,8 @@ fn locale_fetched_per_owner_type_is_accepted() {
     .unwrap();
 }
 
-// The companies' `locale` fetched only where `$company` is true: the two copies are guarded
-// differently, so they are no siblings, and where `$company` is false a company's products are
-// sent none.
+// The companies' `locale` fetched only where `$company` is true: the `Company` copy is guarded by
+// it, so where `$company` is false a company's products are sent none.
 #[test]
 fn locale_fetched_per_owner_type_under_different_guards_is_rejected() {
     let fixture = owner_profile_fixture();

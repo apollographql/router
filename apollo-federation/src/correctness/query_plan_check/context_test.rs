@@ -3,8 +3,8 @@
 //! `@context` is the part of plan correctness with the most moving parts, and every case here is
 //! one a plan the router executes correctly was once rejected over, or one that must stay
 //! rejected. The supergraph carries an interface ancestor: `Query.t` is an `I` implemented by `A`
-//! and `B`, which both declare `prop` and `u`, and `Query.concrete` is a `T`, which has the same
-//! fields and no implementations to choose between.
+//! and `B`, which both declare `prop`, `u` and an `I` `pair`, and `Query.concrete` is a `T`, which
+//! has `prop` and `u` and no implementations to choose between.
 //!
 //! Plans as a whole are not covered here, only the fetch-level machinery.
 
@@ -28,16 +28,19 @@ const SCHEMA_STR: &str = r#"
     interface I {
         prop: String
         u: U
+        pair: I
     }
 
     type A implements I {
         prop: String
         u(ctx: String): U
+        pair: I
     }
 
     type B implements I {
         prop: String
         u(ctx: String): U
+        pair: I
     }
 
     type T {
@@ -52,6 +55,14 @@ const SCHEMA_STR: &str = r#"
 
 fn schema() -> ValidFederationSchema {
     let schema = Schema::parse_and_validate(SCHEMA_STR, "schema.graphql").unwrap();
+    ValidFederationSchema::new(schema).unwrap()
+}
+
+/// The test schema with `Query.media` returning an `A` alone, the plan's `media` returning nothing
+/// else when read in it.
+fn schema_with_media_a() -> ValidFederationSchema {
+    let source = SCHEMA_STR.replace("media: I", "media: A");
+    let schema = Schema::parse_and_validate(source, "schema.graphql").unwrap();
     ValidFederationSchema::new(schema).unwrap()
 }
 
@@ -191,21 +202,43 @@ fn no_climb_stays_under_the_fetch() {
 // Reading the value where the fetch runs
 //==================================================================================================
 
-/// What a fetch at `path` needs of `available`, as the checker asks it.
+/// What a fetch at `path` needs of `available`, as the checker asks it, every field returning every
+/// type it can, the fetch declaring its variable non-null.
 fn context_met(
     path: &[FetchDataPathElement],
     condition: &[BooleanLiteral],
     available: &str,
     rewrites: Vec<Arc<FetchDataRewrite>>,
 ) -> bool {
+    context_met_returning(path, condition, available, rewrites, &schema())
+}
+
+/// [`context_met`], with what the plan returns read in `returning`, a schema whose fields return
+/// fewer types.
+fn context_met_returning(
+    path: &[FetchDataPathElement],
+    condition: &[BooleanLiteral],
+    available: &str,
+    rewrites: Vec<Arc<FetchDataRewrite>>,
+    returning: &ValidFederationSchema,
+) -> bool {
     let schema = schema();
     let available = selections(&schema, available);
+    let returned = ReturnedTypes::of_selections(&schema, returning, &name!("Query"), &available);
+    // The variable is declared non-null, so the value is needed wherever the fetch runs, with no
+    // contextual use to say where it is read.
+    let operation = ExecutableDocument::parse_and_validate(
+        schema.schema(),
+        "query($contextual: String!) { concrete { u(ctx: $contextual) { id } } }",
+        "fetch.graphql",
+    )
+    .unwrap();
     let fetch = FetchNode {
         subgraph_name: "s".into(),
         id: None,
         variable_usages: Vec::new(),
         requires: Vec::new(),
-        operation_document: SerializableDocument::from_string(""),
+        operation_document: SerializableDocument::from_parsed(Arc::new(operation)),
         operation_name: None,
         operation_kind: executable::OperationType::Query,
         input_rewrites: Default::default(),
@@ -219,6 +252,8 @@ fn context_met(
     check_context_rewrites(
         &schema,
         &name!("Query"),
+        &returned,
+        &[],
         path,
         condition,
         &available,
@@ -273,10 +308,12 @@ fn unsplit_position_is_met() {
     ));
 }
 
-/// Drop one of them and the runtime types it covered have no value.
+/// Drop one of them and no rewrite targets a `B`: the router binds the variable to nothing there, so
+/// no value is read, and availability asks for none. Whether one is owed is the declaration's
+/// question (`one_setter_left_unread_is_rejected`).
 #[test]
-fn missing_runtime_type_is_not_met() {
-    assert!(!context_met(
+fn untargeted_runtime_type_is_owed_no_value() {
+    assert!(context_met(
         &fetch_path(),
         &[],
         UNSPLIT,
@@ -312,21 +349,98 @@ fn position_matching_no_object_demands_nothing() {
     ));
 }
 
-/// The value is guarded past the levels the two paths share, and nothing about the fetch says what
-/// that object is.
-#[test]
-fn narrowing_past_the_shared_levels_is_not_met() {
-    let rewrite = renamer(vec![
+/// The value read through `media`, fetched only under `... on A`.
+const MEDIA_NARROWED_TO_A: &str = "{ t { prop u { id } } media { ... on A { prop } } }";
+
+fn read_media_prop() -> Arc<FetchDataRewrite> {
+    renamer(vec![
         FetchDataPathElement::Parent,
         FetchDataPathElement::Parent,
         key(name!("media")),
         key(name!("prop")),
-    ]);
+    ])
+}
+
+/// The value is narrowed to `A` past the levels the two paths share, and nothing about the fetch
+/// says what that object is: a `B` there, which `media` can return, has no copy.
+#[test]
+fn narrowing_past_the_shared_levels_is_not_met() {
     assert!(!context_met(
         &fetch_path(),
         &[],
-        "{ t { prop u { id } } media { ... on A { prop } } }",
-        vec![rewrite]
+        MEDIA_NARROWED_TO_A,
+        vec![read_media_prop()]
+    ));
+}
+
+/// The value read through `media` and its `pair`, both of type `I`, fetched under a fragment per
+/// type at each: copies narrowed apart at two levels. `pair_types` are the `pair` types fetched
+/// below each `media` type.
+fn media_pair_prop(pair_types: fn(&str) -> &'static [&'static str]) -> String {
+    let media: Vec<String> = ["A", "B"]
+        .iter()
+        .map(|media_type| {
+            let pairs: Vec<String> = pair_types(media_type)
+                .iter()
+                .map(|pair_type| format!("... on {pair_type} {{ prop }}"))
+                .collect();
+            format!("... on {media_type} {{ pair {{ {} }} }}", pairs.join(" "))
+        })
+        .collect();
+    format!(
+        "{{ t {{ prop u {{ id }} }} media {{ {} }} }}",
+        media.join(" ")
+    )
+}
+
+fn read_media_pair_prop() -> Arc<FetchDataRewrite> {
+    renamer(vec![
+        FetchDataPathElement::Parent,
+        FetchDataPathElement::Parent,
+        key(name!("media")),
+        key(name!("pair")),
+        key(name!("prop")),
+    ])
+}
+
+/// Every pair of types the two levels can have has its copy, so the value is there whatever objects
+/// the response holds.
+#[test]
+fn copies_narrowed_apart_at_two_levels_are_met() {
+    assert!(context_met(
+        &fetch_path(),
+        &[],
+        &media_pair_prop(|_| &["A", "B"]),
+        vec![read_media_pair_prop()]
+    ));
+}
+
+/// A `B` paired with a `B` has no copy.
+#[test]
+fn missing_pair_of_types_is_not_met() {
+    assert!(!context_met(
+        &fetch_path(),
+        &[],
+        &media_pair_prop(|media_type| if media_type == "A" {
+            &["A", "B"]
+        } else {
+            &["A"]
+        }),
+        vec![read_media_pair_prop()]
+    ));
+}
+
+/// The value narrowed to `A` past the shared levels, as in
+/// [`narrowing_past_the_shared_levels_is_not_met`], where the plan's `media` returns nothing else:
+/// no `B` can be there, so the copy serves every object that can.
+#[test]
+fn narrowing_to_every_returned_type_is_met() {
+    assert!(context_met_returning(
+        &fetch_path(),
+        &[],
+        MEDIA_NARROWED_TO_A,
+        vec![read_media_prop()],
+        &schema_with_media_a(),
     ));
 }
 

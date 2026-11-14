@@ -131,7 +131,7 @@ fn assert_rejected(result: Result<(), CorrectnessError>, reason: &str) {
     assert!(error.contains(reason), "{error}");
 }
 
-const UNBOUND: &str = "which no context rewrite binds";
+const OWED: &str = "where no rewrite binding it reads one";
 const NO_VARIABLE: &str = "is passed no variable";
 const NOT_DECLARED: &str = "which is not a leaf of the declared";
 const NOT_FETCHED: &str = "is not always fetched where the fetch runs";
@@ -252,7 +252,8 @@ fn argument_and_rewrite_both_omitted_is_rejected() {
     );
 }
 
-// `label` is passed a variable no rewrite binds, which reaches `stores` with no value.
+// `label` is passed a variable no rewrite binds, which reaches `stores` with no value where its
+// declaration has the store's.
 #[test]
 fn argument_passed_with_no_rewrite_is_rejected() {
     assert_rejected(
@@ -263,7 +264,7 @@ fn argument_passed_with_no_rewrite_is_rejected() {
             &["local"],
             Vec::new(),
         ),
-        UNBOUND,
+        OWED,
     );
 }
 
@@ -560,7 +561,8 @@ fn one_rewrite_per_setter_is_accepted() {
     .unwrap();
 }
 
-// Only the store's rewrite remains, so an offer under a department is sent no `locale`.
+// Only the store's rewrite remains, so an offer under a department is sent no `locale`, which its
+// declaration owes it: no rewrite targets a department.
 #[test]
 fn one_setter_left_unread_is_rejected() {
     assert_rejected(
@@ -571,7 +573,7 @@ fn one_setter_left_unread_is_rejected() {
             &["local"],
             vec![reading(1, "Store", "locale", "local")],
         ),
-        NOT_FETCHED,
+        OWED,
     );
 }
 
@@ -614,6 +616,66 @@ fn context_declared_on_an_interface_is_read_on_its_implementations_is_accepted()
         &format!("{{ {} }}", offer_operation(AT_OUTLET, "tag")),
     )
     .unwrap();
+}
+
+/// `stores()`, with `outlets` declaring `Offer.tag`'s `locale` as `$locality ... on Store { locale }`:
+/// a department sets the context, but the declaration selects nothing there.
+fn store_only_stores() -> Fixture {
+    Fixture::new(include_str!(
+        "../testdata/context_arguments_store_only.graphql"
+    ))
+}
+
+/// The plan asking `outlets` for the offers' `tag` at `AT_OUTLET`, reading the stores' `locale`
+/// alone, its fetch declaring `$local` non-null if `non_null`.
+fn store_only_checked(non_null: bool) -> Result<(), CorrectnessError> {
+    let mut plan = offer_plan(
+        directory_fetch(),
+        AT_OUTLET,
+        "outlets",
+        "tag(locale: $local)",
+        &["local"],
+        vec![reading(1, "Store", "locale", "local")],
+    );
+    if non_null {
+        let document =
+            &mut plan["Sequence"]["nodes"][1]["Flatten"]["node"]["Fetch"]["operation_document"];
+        *document = json!(
+            document
+                .as_str()
+                .unwrap()
+                .replace("$local: String", "$local: String!")
+        );
+    }
+    check(
+        &store_only_stores(),
+        plan,
+        &format!("{{ {} }}", offer_operation(AT_OUTLET, "tag")),
+    )
+}
+
+// The store's rewrite alone: a department's offers are owed no `locale`, the declaration selecting
+// nothing at a department, and are sent none, as the router sends them.
+#[test]
+fn value_absent_where_the_declaration_selects_nothing_is_accepted() {
+    store_only_checked(false).unwrap();
+}
+
+// A nullable `$local` left unbound at a department is sent as no value. The model's
+// `nullableVariableLeftUnboundIsAccepted`; this is the same plan as the test above.
+#[test]
+fn nullable_variable_left_unbound_is_accepted() {
+    store_only_checked(false).unwrap();
+}
+
+// A non-null `$local` left unbound at a department fails the fetch there, so the department's
+// offers are owed a value no rewrite reads.
+#[test]
+fn non_null_variable_left_unbound_is_rejected() {
+    assert_rejected(
+        store_only_checked(true),
+        "declared non-null where no rewrite",
+    );
 }
 
 /// `Outlet` as a union of `Store` and `Department`: `stores` sets `locality` on both members, its
@@ -666,12 +728,12 @@ fn one_rewrite_per_union_member_is_accepted() {
 }
 
 // Only the store's rewrite remains, so an offer under a department of the union is sent no
-// `locale`.
+// `locale`, which its declaration owes it.
 #[test]
 fn union_member_left_unread_is_rejected() {
     assert_rejected(
         union_label_checked(vec![reading(1, "Store", "locale", "local")]),
-        NOT_FETCHED,
+        OWED,
     );
 }
 
@@ -1155,4 +1217,117 @@ fn field_own_object_skipped_is_accepted() {
         true,
     )
     .unwrap();
+}
+
+//==================================================================================================
+// A contextual field selected under one member alone
+//
+// `details` is sent a product and an other and asked for the `label` of the product's details and
+// the `id` of the other's, so the use is made at a product only. The rewrite `[title]` reads off
+// every object the fetch runs on, the other's too, where no field reads the value.
+
+/// `own_position()` with `product` set on `Product` alone, an `Other`'s details being an
+/// `OtherDetails` with no contextual argument.
+fn product_setter() -> Fixture {
+    Fixture::new(include_str!(
+        "../testdata/context_own_position_product_setter.graphql"
+    ))
+}
+
+/// The whole checker over `catalog` fetching the products' `title` and `other_fetched` for the
+/// others, then `details` sent both and asked for a product's details' `label`, `$ctx` bound by
+/// `context_rewrite` and declared non-null if `non_null`, and an other's details' `id`.
+fn product_label_checked(
+    fixture: &Fixture,
+    other_fetched: &str,
+    context_rewrite: Value,
+    non_null: bool,
+) -> Result<(), CorrectnessError> {
+    let mut details = entity_fetch(
+        "details",
+        &["Product", "Other"],
+        "... on Product { details { label(title: $ctx) } } ... on Other { details { id } }",
+        &["ctx"],
+        vec![context_rewrite],
+    );
+    if non_null {
+        let document = &mut details["Fetch"]["operation_document"];
+        *document = json!(
+            document
+                .as_str()
+                .unwrap()
+                .replace("$ctx: String", "$ctx: String!")
+        );
+    }
+    check(
+        fixture,
+        sequence(vec![
+            root_fetch(
+                "catalog",
+                &format!(
+                    "{{ item {{ __typename {} {} }} }}",
+                    member("Product", "title"),
+                    member("Other", other_fetched)
+                ),
+                Vec::new(),
+            ),
+            flatten("item", details),
+        ]),
+        "{ item { ... on Product { details { label } } ... on Other { details { id } } } }",
+    )
+}
+
+/// The rewrite reading `title` off the object the fetch runs on, whatever its type.
+fn own_title() -> Value {
+    rewrite(vec![json!({ "Key": ["title", null] })], "ctx")
+}
+
+/// The rewrite reading `title` off the products alone.
+fn product_title() -> Value {
+    rewrite(
+        vec![
+            json!({ "TypenameEquals": "Product" }),
+            json!({ "Key": ["title", null] }),
+        ],
+        "ctx",
+    )
+}
+
+// The rewrite reads an other's `title` too, which sets no context, but no field there takes the
+// value, so there is nothing for it to match.
+#[test]
+fn value_off_an_object_no_field_reads_is_accepted() {
+    product_label_checked(&product_setter(), "title", own_title(), false).unwrap();
+}
+
+// With no `title` fetched for the others, the variable is left unbound for them, which no field
+// reads and a nullable variable allows.
+#[test]
+fn value_unfetched_where_no_field_reads_it_is_accepted() {
+    product_label_checked(&product_setter(), "", own_title(), false).unwrap();
+}
+
+// The same with `$ctx` non-null: unbound for the others, it fails the fetch.
+#[test]
+fn non_null_value_unfetched_where_no_field_reads_it_is_rejected() {
+    assert_rejected(
+        product_label_checked(&product_setter(), "", own_title(), true),
+        NOT_FETCHED,
+    );
+}
+
+// `product` set on both members, read off the products alone: an other would owe a value where a
+// field there read one, and none does.
+#[test]
+fn value_untargeted_where_no_field_reads_it_is_accepted() {
+    product_label_checked(&own_position(), "", product_title(), false).unwrap();
+}
+
+// The same with `$ctx` non-null: no rewrite binds it for the others.
+#[test]
+fn non_null_value_untargeted_where_no_field_reads_it_is_rejected() {
+    assert_rejected(
+        product_label_checked(&own_position(), "", product_title(), true),
+        "declared non-null where no rewrite",
+    );
 }
