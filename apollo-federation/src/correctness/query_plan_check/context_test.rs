@@ -225,6 +225,33 @@ fn context_met_returning(
     let schema = schema();
     let available = selections(&schema, available);
     let returned = ReturnedTypes::of_selections(&schema, returning, &name!("Query"), &available);
+    context_met_given(path, condition, &available, rewrites, &returned)
+}
+
+/// [`context_met`], with what the plan returns read off the fetches of `returned`: every field
+/// returning every type it can, but only fields `returned` selects.
+fn context_met_selecting(
+    path: &[FetchDataPathElement],
+    condition: &[BooleanLiteral],
+    available: &str,
+    rewrites: Vec<Arc<FetchDataRewrite>>,
+    returned: &str,
+) -> bool {
+    let schema = schema();
+    let available = selections(&schema, available);
+    let returned = selections(&schema, returned);
+    let returned = ReturnedTypes::of_selections(&schema, &schema, &name!("Query"), &returned);
+    context_met_given(path, condition, &available, rewrites, &returned)
+}
+
+fn context_met_given(
+    path: &[FetchDataPathElement],
+    condition: &[BooleanLiteral],
+    available: &[Selection],
+    rewrites: Vec<Arc<FetchDataRewrite>>,
+    returned: &ReturnedTypes,
+) -> bool {
+    let schema = schema();
     // The variable is declared non-null, so the value is needed wherever the fetch runs, with no
     // contextual use to say where it is read.
     let operation = ExecutableDocument::parse_and_validate(
@@ -252,12 +279,12 @@ fn context_met_returning(
     check_context_rewrites(
         &schema,
         &name!("Query"),
-        &returned,
+        returned,
         &[],
         path,
         condition,
-        &available,
-        &available,
+        available,
+        available,
         &fetch,
         &[name!("U")],
     )
@@ -441,6 +468,57 @@ fn narrowing_to_every_returned_type_is_met() {
         MEDIA_NARROWED_TO_A,
         vec![read_media_prop()],
         &schema_with_media_a(),
+    ));
+}
+
+/// `t`'s `pair` fetched for its `__typename` alone, as a fetch writes a field it can return no object
+/// for.
+const PAIR_TYPENAME_ONLY: &str = "{ t { pair { __typename } u { id } } }";
+/// What the plan returns where no fetch returns an object for `pair`.
+const RETURNING_NO_PAIR: &str = "{ t { u { id } } }";
+
+fn read_pair_prop() -> Arc<FetchDataRewrite> {
+    renamer(vec![
+        FetchDataPathElement::Parent,
+        key(name!("pair")),
+        key(name!("prop")),
+    ])
+}
+
+/// No fetch returns an object for `pair`, so it is null in every response, and the rewrite reading
+/// `prop` below it finds no value, as the router then binds none: only `pair` itself is asked for.
+#[test]
+fn value_below_a_field_returning_no_object_is_owed_nothing() {
+    assert!(context_met_selecting(
+        &fetch_path(),
+        &[],
+        PAIR_TYPENAME_ONLY,
+        vec![read_pair_prop()],
+        RETURNING_NO_PAIR,
+    ));
+}
+
+/// Where `pair` returns an `A` or a `B`, the `prop` below it is owed, and never fetched.
+#[test]
+fn value_below_a_field_returning_objects_is_not_met() {
+    assert!(!context_met(
+        &fetch_path(),
+        &[],
+        PAIR_TYPENAME_ONLY,
+        vec![read_pair_prop()]
+    ));
+}
+
+/// `pair` itself is still asked for: unfetched, the check cannot tell which field its key stands
+/// for, nor whether that field returns an object.
+#[test]
+fn field_returning_no_object_not_fetched_is_not_met() {
+    assert!(!context_met_selecting(
+        &fetch_path(),
+        &[],
+        RETURNING_NO_PAIR,
+        vec![read_pair_prop()],
+        RETURNING_NO_PAIR,
     ));
 }
 

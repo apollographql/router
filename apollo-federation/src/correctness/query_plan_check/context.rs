@@ -108,7 +108,6 @@ use std::sync::Arc;
 use apollo_compiler::Name;
 use apollo_compiler::Node;
 use apollo_compiler::ast;
-use apollo_compiler::collections::IndexSet;
 use apollo_compiler::executable::Selection;
 use apollo_compiler::name;
 use apollo_compiler::schema::ExtendedType;
@@ -363,18 +362,32 @@ impl ReachedCopy {
         }
     }
 
-    /// The fields by which a copy reached by `path` descends past its first `shared` levels, one
-    /// per level past them, each with the response key `path` reaches it by
-    /// (`ReachedCopy.fieldsBelow`).
+    /// The fields a copy's keys stand for past its first `shared` levels, each with the response
+    /// key `path`, the path that reached it, names it by (`ReachedCopy.fieldsBelow`).
     fn fields_below(&self, path: &[FetchDataPathElement], shared: usize) -> Vec<(Name, Name)> {
         key_path(path)
             .into_iter()
             .zip(&self.field_path)
-            .take(self.levels.len())
             .skip(shared.saturating_sub(1))
             .map(|(key, field_name)| (key.clone(), field_name.clone()))
             .collect()
     }
+}
+
+/// A path cut right after its first `count` keys (`FetchDataPath.throughKeys`).
+fn through_keys(count: usize, path: &[FetchDataPathElement]) -> Vec<FetchDataPathElement> {
+    let mut left = count;
+    let mut out = Vec::new();
+    for element in path {
+        if left == 0 {
+            break;
+        }
+        out.push(element.clone());
+        if matches!(element, FetchDataPathElement::Key(_, _)) {
+            left -= 1;
+        }
+    }
+    out
 }
 
 /// The keys of a fetch data path alone (`FetchDataPath.keyPath`).
@@ -754,8 +767,8 @@ fn context_read_copies<'c>(
 
 /// Every sequence of object types the fields `fields`, each with its response key, can return in
 /// turn, followed from an object of type `object_type` below the typed key path `typed_key_path`,
-/// one type per field, as the plan returns them at each field's position (`returnedTypesAlong`). A
-/// sequence stops at a field that returns no type.
+/// one type per field, as the plan returns them at each field's position (`returnedTypesAlong`):
+/// none past a field that returns no type.
 fn returned_types_along(
     schema: &ValidFederationSchema,
     returned: &ReturnedTypes,
@@ -776,9 +789,6 @@ fn returned_types_along(
         .into_iter()
         .filter(|child| returned.returns_at(&nodes, object_type, field_name, child))
         .collect();
-    if result_types.is_empty() {
-        return vec![Vec::new()];
-    }
     result_types
         .iter()
         .flat_map(|result_type| {
@@ -810,11 +820,13 @@ fn choices<T: Clone>(options: &[Vec<T>]) -> Vec<Vec<T>> {
         .collect()
 }
 
-/// When one rewrite finds its value, for one runtime configuration of the fetch's position
-/// (`contextRewriteClauses`): `None` if it reaches no copy ([`context_read_copies`]); else, for
-/// each sequence of types the value's objects can have below the levels the rewrite shares with the
-/// fetch ([`returned_types_along`]), the conditions of the copies with those types, any one of which
-/// holding puts the value there. The shared levels are read at the configuration's types.
+/// The conditions under which one rewrite finds its value, for one runtime configuration of the
+/// fetch's position (`contextRewriteClauses`): one list per key it must find, holding the
+/// conditions of the copies it reaches there ([`context_read_copies`]). It must find the first key
+/// past the levels it shares with the fetch, and then, under every sequence of types the fields
+/// found so far can return ([`returned_types_along`]), the next key, down to the value's own. A
+/// field the plan returns no type for ends the search there, its value being null. The shared
+/// levels are read at the configuration's types.
 #[allow(clippy::too_many_arguments)]
 fn context_rewrite_clauses(
     schema: &ValidFederationSchema,
@@ -824,14 +836,9 @@ fn context_rewrite_clauses(
     readable: &[Selection],
     merged: &[FetchDataPathElement],
     runtime_types: &[Name],
-) -> Option<Vec<Vec<BooleanCondition>>> {
+) -> Vec<Vec<BooleanCondition>> {
     let shared = shared_levels(merged, path);
-    let all_copies = path_copies(schema, root_type, readable, merged);
-    let copies: Vec<&ReachedCopy> =
-        context_read_copies(&all_copies, path, merged, runtime_types).collect();
-    if copies.is_empty() {
-        return None;
-    }
+    let keys_below = fetch_path_depth(merged).saturating_sub(shared.saturating_sub(1));
     let configuration = &runtime_types[..runtime_types.len().min(shared)];
     let object_type = configuration.last().unwrap_or(root_type);
     let typed_key_path: TypedKeyPath = key_path(merged)
@@ -839,39 +846,52 @@ fn context_rewrite_clauses(
         .zip(&configuration[..configuration.len().saturating_sub(1)])
         .map(|(key, type_name)| (key.clone(), Some(vec![type_name.clone()])))
         .collect();
-    let mut types_below: IndexSet<Vec<Name>> = IndexSet::default();
-    for copy in &copies {
-        types_below.extend(returned_types_along(
-            schema,
-            returned,
-            &typed_key_path,
-            object_type,
-            &copy.fields_below(merged, shared),
-        ));
-    }
-    Some(
-        types_below
+    // The copies the rewrite reaches at its `depth`-th key past the shared levels.
+    let reached_at = |depth: usize| -> Vec<ReachedCopy> {
+        let read = if keys_below <= depth {
+            merged.to_vec()
+        } else {
+            through_keys(shared.saturating_sub(1) + depth, merged)
+        };
+        let copies = path_copies(schema, root_type, readable, &read);
+        context_read_copies(&copies, path, &read, runtime_types)
+            .cloned()
+            .collect()
+    };
+    let conditions_at = |reached: &[ReachedCopy], types: &[Name]| -> Vec<BooleanCondition> {
+        reached
             .iter()
-            .map(|types| {
-                copies
-                    .iter()
-                    .filter(|copy| {
-                        let levels = copy.type_levels();
-                        type_levels_admit(&levels[shared.min(levels.len())..], types)
-                    })
-                    .map(|copy| copy.condition.clone())
-                    .collect()
+            .filter(|copy| {
+                let levels = copy.type_levels();
+                type_levels_admit(&levels[shared.min(levels.len())..], types)
             })
-            .collect(),
-    )
+            .map(|copy| copy.condition.clone())
+            .collect()
+    };
+    let mut clauses = vec![conditions_at(&reached_at(keys_below.min(1)), &[])];
+    for depth in 1..keys_below {
+        let next = reached_at(depth + 1);
+        for copy in reached_at(depth) {
+            for types in returned_types_along(
+                schema,
+                returned,
+                &typed_key_path,
+                object_type,
+                &copy.fields_below(merged, shared),
+            ) {
+                clauses.push(conditions_at(&next, &types));
+            }
+        }
+    }
+    clauses
 }
 
 /// When a fetch finds the value bound to one context variable, for one runtime configuration of its
 /// position (`contextValueClauses`): lists of conditions, each of which must cover the fetch's
-/// condition. The router takes the value from whichever rewrite binding the variable finds one, so
-/// the rewrites' conditions are pooled, one list per way of picking one sequence of types for each
-/// rewrite's value ([`context_rewrite_clauses`], [`choices`]). A rewrite that reaches no copy adds
-/// nothing; if none reaches one, the single list is empty.
+/// condition. The router takes the value from whichever rewrite binding the variable finds one, and
+/// a rewrite finds it when it finds every key it must ([`context_rewrite_clauses`]); so for each way
+/// of picking one such key of each rewrite, the conditions of finding them are pooled into one list
+/// ([`choices`]). With no rewrite, the single list is empty.
 #[allow(clippy::too_many_arguments)]
 fn context_value_clauses(
     schema: &ValidFederationSchema,
@@ -893,7 +913,7 @@ fn context_value_clauses(
                 return None;
             }
             let merged = merge_context_path(path, &renamer.path)?;
-            context_rewrite_clauses(
+            Some(context_rewrite_clauses(
                 schema,
                 root_type,
                 returned,
@@ -901,7 +921,7 @@ fn context_value_clauses(
                 readable,
                 &merged,
                 runtime_types,
-            )
+            ))
         })
         .collect();
     choices(&per_rewrite)
