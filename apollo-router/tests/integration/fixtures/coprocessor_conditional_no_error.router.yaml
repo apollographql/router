@@ -1,5 +1,5 @@
 coprocessor:
-  url: "<replace>"
+  url: "${env.TEST_CONFIG_COPROCESSOR_URL}"
   router:
     response:
       condition:

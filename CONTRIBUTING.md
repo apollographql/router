@@ -38,7 +38,7 @@ XTASKs:
 
 - **Tests**: The CI will run `cargo xtask test --no-fail-fast` which will test each relevant permutation of the available features and run the demo subgraphs.
 - **Lints**: The CI will check for lints and clippy compliance.
-- **Checks**: The CI will run cargo-deny to make sure the router doesn't suffer an existing CVE, and that each dependency used by the router is compatible with our license.
+- **Checks**: The CI will run cargo-deny to make sure that each dependency used by the router is compatible with our license, and that your PR doesn't add a dependency with a known security advisory. `check_compliance` fails only on advisories your PR adds. `check_advisories` lists every advisory, including ones already on the target branch; it can fail without blocking your PR.
 
 After you have opened your PR and all of the status checks are passing, please assign it to one of the maintainers (found in the bottom of [the README](./README.md#contributing) who will review it and give feedback.
 

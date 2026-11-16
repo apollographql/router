@@ -1108,3 +1108,50 @@ async fn redacted_validation_errors() {
     }
     "###);
 }
+
+/// An HTTP/2 request whose header list is just over the default 16 KiB limit.
+fn oversized_http2_header_list_request() -> router::Request {
+    Request::builder()
+        .version(http::Version::HTTP_2)
+        .uri("http://localhost:4000/")
+        .header("cookie", "v".repeat(16 * 1024))
+        .body(router::body::empty())
+        .unwrap()
+        .into()
+}
+
+#[tokio::test]
+async fn http2_header_list_check_runs_after_traffic_shaping() {
+    // One request per 10 minutes: the second request finds traffic shaping shedding load.
+    let router = crate::TestHarness::builder()
+        .configuration_json(serde_json::json!({
+            "traffic_shaping": {
+                "router": {
+                    "global_rate_limit": { "capacity": 1, "interval": "10min" }
+                }
+            }
+        }))
+        .unwrap()
+        .build_router()
+        .await
+        .unwrap();
+
+    let response = router
+        .clone()
+        .oneshot(oversized_http2_header_list_request())
+        .await
+        .unwrap();
+    assert_eq!(
+        response.response.status(),
+        http::StatusCode::REQUEST_HEADER_FIELDS_TOO_LARGE
+    );
+
+    let response = router
+        .oneshot(oversized_http2_header_list_request())
+        .await
+        .unwrap();
+    assert_eq!(
+        response.response.status(),
+        http::StatusCode::SERVICE_UNAVAILABLE
+    );
+}

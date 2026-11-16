@@ -2,6 +2,9 @@ limits:
   router:
     max_depth: 1
     http_max_request_bytes: 2000000
+    http1_max_request_headers: 200
+    http1_max_request_buf_size: 800kib
+    http2_max_headers_list_bytes: 32kib
     warn_only: true
     max_root_fields: 1
     parser_max_tokens: 15000

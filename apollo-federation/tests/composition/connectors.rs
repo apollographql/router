@@ -1,3 +1,6 @@
+use apollo_federation::ApiSchemaOptions;
+use apollo_federation::connectors::expand::ExpansionResult;
+use apollo_federation::connectors::expand::expand_connectors;
 use apollo_federation::subgraph::typestate::Subgraph;
 use apollo_federation::supergraph::HintLevel;
 use insta::assert_snapshot;
@@ -1012,5 +1015,139 @@ type Resource @key(fields: "id") {
             codes.contains(&"INCONSISTENT_DESCRIPTION"),
             "Expected the merge hint to survive expansion, got: {codes:?}"
         );
+    }
+
+    /// An executable directive, with argument types (an enum, a custom scalar, and a
+    /// self-referential input object) that nothing else references. Every subgraph that defines
+    /// the directive has to define those types too.
+    const OWNERSHIP_DIRECTIVE_DEFS: &str = r#"
+        directive @ownership(
+            owners: [Owner!]
+            since: DateTime
+            filter: OwnershipFilter
+        ) on FIELD
+
+        enum Owner {
+            ALICE
+            BOB
+        }
+
+        scalar DateTime
+
+        input OwnershipFilter {
+            owner: Owner
+            parent: OwnershipFilter
+        }
+    "#;
+
+    fn ownership_connector_subgraph(connect_version: &str) -> String {
+        format!(
+            r#"
+            extend schema
+            @link(
+                url: "https://specs.apollo.dev/connect/{connect_version}"
+                import: ["@connect", "@source"]
+            )
+            @source(name: "v1", http: {{ baseURL: "http://v1" }})
+
+            {OWNERSHIP_DIRECTIVE_DEFS}
+
+            type Query {{
+                resources: [Resource!]!
+                @connect(source: "v1", http: {{ GET: "/resources" }}, selection: "id name")
+            }}
+
+            type Resource {{
+                id: ID!
+                name: String!
+            }}
+            "#
+        )
+    }
+
+    /// RH-1375: connector expansion replaces a connector subgraph with synthetic subgraphs, and
+    /// subgraph extraction copies executable directive definitions into every subgraph. If the
+    /// synthetic subgraphs don't carry the directive's argument types, the expanded supergraph
+    /// is inconsistent and satisfiability fails with "Cannot wrap an undefined/null type" (JS) or
+    /// a dangling type reference (Rust).
+    #[test]
+    fn executable_directive_arg_types_survive_connector_expansion() {
+        for connect_version in ["v0.2", "v0.4"] {
+            let connector_type_defs = ownership_connector_subgraph(connect_version);
+            let plain_type_defs = format!(
+                r#"
+                {OWNERSHIP_DIRECTIVE_DEFS}
+
+                type Query {{
+                    greeting: String
+                }}
+                "#
+            );
+
+            let with_connectors = ServiceDefinition {
+                name: "with-connectors",
+                type_defs: &connector_type_defs,
+            };
+            let plain = ServiceDefinition {
+                name: "plain",
+                type_defs: &plain_type_defs,
+            };
+
+            let supergraph = compose_as_fed2_connectors_subgraphs(&[with_connectors, plain])
+                .unwrap_or_else(|e| {
+                    panic!("Expected composition to succeed with connect/{connect_version}: {e:?}")
+                });
+
+            let schema_string = supergraph.schema().schema().to_string();
+            assert!(
+                schema_string.contains("directive @ownership("),
+                "supergraph dropped the executable directive: {schema_string}"
+            );
+        }
+    }
+
+    /// Expanding a supergraph made only of connector subgraphs must keep its executable
+    /// directives, and the types their arguments reference, so the router can still plan
+    /// operations that use them.
+    #[test]
+    fn executable_directive_survives_all_connector_expansion() {
+        for connect_version in ["v0.2", "v0.4"] {
+            let connector_type_defs = ownership_connector_subgraph(connect_version);
+            let with_connectors = ServiceDefinition {
+                name: "with-connectors",
+                type_defs: &connector_type_defs,
+            };
+
+            let supergraph = compose_as_fed2_connectors_subgraphs(&[with_connectors])
+                .unwrap_or_else(|e| {
+                    panic!("Expected composition to succeed with connect/{connect_version}: {e:?}")
+                });
+
+            let ExpansionResult::Expanded { raw_sdl, .. } = expand_connectors(
+                &supergraph.schema().schema().to_string(),
+                &ApiSchemaOptions::default(),
+            )
+            .expect("Expected connector expansion to succeed") else {
+                panic!("Expected connector expansion to expand subgraphs");
+            };
+
+            for expected in [
+                "directive @ownership(",
+                "enum Owner",
+                "scalar DateTime",
+                "input OwnershipFilter",
+            ] {
+                assert!(
+                    raw_sdl.contains(expected),
+                    "expanded supergraph dropped `{expected}` with connect/{connect_version}: {raw_sdl}"
+                );
+            }
+
+            apollo_federation::Supergraph::new_with_router_specs(&raw_sdl)
+                .and_then(|expanded| expanded.extract_subgraphs())
+                .unwrap_or_else(|e| {
+                    panic!("Expected subgraph extraction to succeed with connect/{connect_version}: {e}")
+                });
+        }
     }
 }

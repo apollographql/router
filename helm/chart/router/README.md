@@ -48,6 +48,7 @@ helm show values oci://ghcr.io/apollographql/helm-charts/router
 | extraContainers | list | `[]` | An array of extra containers to include in the router pod Example: extraContainers:   - name: coprocessor     image: acme/coprocessor:1.0     ports:       - containerPort: 4001 |
 | extraEnvVars | list | `[]` |  |
 | extraEnvVarsCM | string | `""` |  |
+| extraEnvVarsMap | object | `{}` |  |
 | extraEnvVarsSecret | string | `""` |  |
 | extraLabels | object | `{}` | A map of extra labels to apply to the resources created by this chart Example: extraLabels:   label_one_name: "label_one_value"   label_two_name: "label_two_value" |
 | extraVolumeMounts | list | `[]` |  |

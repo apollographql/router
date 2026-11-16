@@ -25,6 +25,54 @@ use crate::connectors::json_selection::helpers::json_to_string;
 
 pub(crate) const SPECIAL_WHITE_SPACES: [char; 4] = ['\t', '\n', '\x0C', '\r'];
 
+/// Finds the `}` that closes a template expression, one character at a time.
+///
+/// Braces belonging to the JSONSelection itself (such as `{ a }` subselections)
+/// are counted so they don't end the expression, but characters inside the
+/// expression's string literals are not structural: in `{$("}")}` the first
+/// `}` is part of the string `"}"`. String literals follow the JSONSelection
+/// `LitString` rules, where a backslash escapes the next character. Quotes
+/// inside a `#` comment (which runs to the end of the line) do not start a
+/// string, but braces there still count toward nesting.
+#[derive(Default)]
+struct ExpressionEndScanner {
+    depth: usize,
+    quote: Option<char>,
+    escaped: bool,
+    in_comment: bool,
+    found_end: bool,
+}
+
+impl ExpressionEndScanner {
+    /// Consumes the next character after the opening `{`, returning true if
+    /// it is the closing `}` of the expression.
+    fn is_end(&mut self, c: char) -> bool {
+        if let Some(quote) = self.quote {
+            if self.escaped {
+                self.escaped = false;
+            } else if c == '\\' {
+                self.escaped = true;
+            } else if c == quote {
+                self.quote = None;
+            }
+            return false;
+        }
+        match c {
+            '\n' if self.in_comment => self.in_comment = false,
+            '\'' | '"' if !self.in_comment => self.quote = Some(c),
+            '#' => self.in_comment = true,
+            '{' => self.depth += 1,
+            '}' if self.depth == 0 => {
+                self.found_end = true;
+                return true;
+            }
+            '}' => self.depth -= 1,
+            _ => {}
+        }
+        false
+    }
+}
+
 /// A parsed string template, containing a series of [`Part`]s.
 #[derive(Clone, Debug, Default)]
 pub struct StringTemplate {
@@ -81,20 +129,13 @@ impl StringTemplate {
                 offset += 1;
                 continue;
             } else if *next == '{' {
-                let mut braces_count = 0; // Ignore braces within JSONSelection
+                let mut scanner = ExpressionEndScanner::default();
                 let expression = chars
                     .by_ref()
                     .skip(1)
-                    .take_while(|c| {
-                        if *c == '{' {
-                            braces_count += 1;
-                        } else if *c == '}' {
-                            braces_count -= 1;
-                        }
-                        braces_count >= 0
-                    })
+                    .take_while(|c| !scanner.is_end(*c))
                     .collect::<String>();
-                if braces_count >= 0 {
+                if !scanner.found_end {
                     return Err(Error {
                         message: "Invalid expression, missing closing }".into(),
                         location: offset..input.len(),
@@ -637,6 +678,51 @@ mod test_interpolate {
         let mut vars = IndexMap::default();
         vars.insert("$config".to_string(), json!({"one": "string"}));
         assert_eq!(template.interpolate(&vars).unwrap().0, "string");
+    }
+
+    #[test]
+    fn braces_inside_expression_strings_do_not_delimit_the_expression() {
+        let mut vars = IndexMap::default();
+        vars.insert("$config".to_string(), json!({"one": "foo"}));
+        for (template, expected) in [
+            (r#"{$("}")}"#, "}"),
+            (r#"{$("{")}"#, "{"),
+            (r#"{$('}')}"#, "}"),
+            (r#"{$('"}')}"#, "\"}"),
+            (r#"{$("'}")}"#, "'}"),
+            (r#"a{$("\"}")}b"#, "a\"}b"),
+            (r#"{$("\\")}x{$("}")}"#, "\\x}"),
+            (r#"{$("{}")}-{$config.one}"#, "{}-foo"),
+            (r#"{$config.one->eq("}")}"#, "false"),
+            // `#` comments run to the end of the line; quotes inside them do
+            // not start a string.
+            ("{$config.one # don't\n}", "foo"),
+        ] {
+            for spec in [ConnectSpec::V0_2, ConnectSpec::V0_3, ConnectSpec::V0_4] {
+                let parsed = StringTemplate::parse_with_spec(template, spec)
+                    .unwrap_or_else(|e| panic!("{template:?} ({spec:?}): {e:?}"));
+                assert_eq!(
+                    parsed.interpolate(&vars).unwrap(),
+                    (expected.to_string(), vec![]),
+                    "{template:?} ({spec:?})"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn unterminated_string_in_expression_is_missing_closing_brace() {
+        assert_debug_snapshot!(
+            StringTemplate::parse_with_spec(r#"{$("}"#, ConnectSpec::latest()),
+            @r###"
+        Err(
+            Error {
+                message: "Invalid expression, missing closing }",
+                location: 0..5,
+            },
+        )
+        "###
+        );
     }
 }
 

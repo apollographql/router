@@ -8,7 +8,7 @@ batching:
       enabled: true
 
 coprocessor:
-  url: http://127.0.0.1:REPLACEME # Will be overwritten by the test
+  url: ${env.TEST_CONFIG_COPROCESSOR_URL}
   subgraph:
     all:
       request:

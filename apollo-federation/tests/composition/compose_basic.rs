@@ -670,3 +670,25 @@ fn supergraph_sdl_is_reparseable_when_subgraphs_use_extend_schema() {
 
     Supergraph::parse(&sdl).expect("supergraph SDL should be re-parseable");
 }
+
+/// Root type normalization renames `RootQuery` to `Query`. The renamed type must stay an
+/// implementer of `Node`, so the check that `@key`s on an interface are also on its
+/// implementations finds `Query`, rather than failing to look up `RootQuery`.
+#[test]
+fn renamed_root_type_implementing_an_entity_interface_composes() {
+    let result = compose_as_fed2_subgraphs(&[ServiceDefinition {
+        name: "s1",
+        type_defs: r#"
+            schema { query: RootQuery }
+            interface Node @key(fields: "id") { id: ID! }
+            type RootQuery implements Node @key(fields: "id") { id: ID! node(id: ID!): Node }
+        "#,
+    }]);
+    let supergraph = result.expect("composition should succeed");
+    let query = supergraph
+        .schema()
+        .schema()
+        .get_object("Query")
+        .expect("supergraph should define Query");
+    assert!(query.implements_interfaces.contains("Node"));
+}

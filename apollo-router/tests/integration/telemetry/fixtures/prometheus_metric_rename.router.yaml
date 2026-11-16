@@ -12,7 +12,6 @@ telemetry:
   exporters:
     metrics:
       prometheus:
-        listen: 127.0.0.1:4000
         enabled: true
         path: /metrics
       common:

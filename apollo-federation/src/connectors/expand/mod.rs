@@ -275,6 +275,8 @@ mod helpers {
     use crate::link::spec::Identity;
     use crate::schema::FederationSchema;
     use crate::schema::ValidFederationSchema;
+    use crate::schema::directive_location::DirectiveLocationExt;
+    use crate::schema::position::DirectiveDefinitionPosition;
     use crate::schema::position::InterfaceFieldDefinitionPosition;
     use crate::schema::position::ObjectFieldDefinitionPosition;
     use crate::schema::position::ObjectOrInterfaceFieldDefinitionPosition;
@@ -388,6 +390,7 @@ mod helpers {
             connector: &Connector,
         ) -> Result<FederationSchema, FederationError> {
             let mut schema = new_empty_federation_2_subgraph_schema()?;
+            self.process_executable_directives(&mut schema)?;
             let query_alias = self
                 .original_schema
                 .schema()
@@ -543,6 +546,35 @@ mod helpers {
             }
 
             Ok(schema)
+        }
+
+        /// Carry over executable directive definitions, along with the types their arguments
+        /// reference.
+        ///
+        /// Subgraph extraction copies executable directive definitions into every subgraph, since
+        /// an operation using one may be routed to any of them, so each synthetic subgraph needs
+        /// them (and their argument types) to be valid on its own.
+        fn process_executable_directives(
+            &self,
+            to_schema: &mut FederationSchema,
+        ) -> Result<(), FederationError> {
+            for (name, def) in &self.original_schema.schema().directive_definitions {
+                if to_schema.schema().directive_definitions.contains_key(name)
+                    || !def.locations.iter().any(|loc| loc.is_executable_location())
+                {
+                    continue;
+                }
+
+                self.process_inputs(to_schema, &def.arguments)?;
+
+                let pos = DirectiveDefinitionPosition {
+                    directive_name: name.clone(),
+                };
+                pos.pre_insert(to_schema)?;
+                pos.insert(to_schema, def.clone())?;
+            }
+
+            Ok(())
         }
 
         /// Process all input types
@@ -1058,6 +1090,7 @@ mod helpers {
             connector: &Connector,
         ) -> Result<FederationSchema, FederationError> {
             let mut schema = new_empty_federation_2_subgraph_schema()?;
+            self.process_executable_directives(&mut schema)?;
             let query_alias = self
                 .original_schema
                 .schema()
@@ -1205,6 +1238,35 @@ mod helpers {
             }
 
             Ok(schema)
+        }
+
+        /// Carry over executable directive definitions, along with the types their arguments
+        /// reference.
+        ///
+        /// Subgraph extraction copies executable directive definitions into every subgraph, since
+        /// an operation using one may be routed to any of them, so each synthetic subgraph needs
+        /// them (and their argument types) to be valid on its own.
+        fn process_executable_directives(
+            &self,
+            to_schema: &mut FederationSchema,
+        ) -> Result<(), FederationError> {
+            for (name, def) in &self.original_schema.schema().directive_definitions {
+                if to_schema.schema().directive_definitions.contains_key(name)
+                    || !def.locations.iter().any(|loc| loc.is_executable_location())
+                {
+                    continue;
+                }
+
+                self.process_inputs(to_schema, &def.arguments)?;
+
+                let pos = DirectiveDefinitionPosition {
+                    directive_name: name.clone(),
+                };
+                pos.pre_insert(to_schema)?;
+                pos.insert(to_schema, def.clone())?;
+            }
+
+            Ok(())
         }
 
         /// Process all input types

@@ -425,7 +425,6 @@ async fn test_cache_metrics() {
                 "metrics": {
                     "prometheus": {
                         "enabled": true,
-                        "listen": "127.0.0.1:0",
                         "path": "/metrics",
                     },
                 },
@@ -560,7 +559,6 @@ async fn test_cache_error_metrics() {
                 "metrics": {
                     "prometheus": {
                         "enabled": true,
-                        "listen": "127.0.0.1:0",
                         "path": "/metrics",
                     },
                 },

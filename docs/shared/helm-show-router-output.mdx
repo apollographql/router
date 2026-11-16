@@ -32,14 +32,22 @@ managedFederation:
 # e.g.: helm ... --set-file supergraphFile="location of your supergraph file"
 supergraphFile:
 
-# An array of extra environmental variables
+# A map of extra environment variables for the router container, keyed by variable name.
+# Each value is the rest of the env entry (everything except `name`), so they need `value` or `valueFrom`.
+# Null values are ignored. Entries are rendered in alphabetical order.
 # Example:
-# extraEnvVars:
-#   - name: APOLLO_ROUTER_SUPERGRAPH_PATH
-#     value: /etc/apollo/supergraph.yaml
-#   - name: APOLLO_ROUTER_LOG
+# extraEnvVarsMap:
+#   APOLLO_ROUTER_LOG:
 #     value: debug
+#   MY_SECRET:
+#     valueFrom:
+#       secretKeyRef:
+#         name: my-secret
+#         key: my-key
 #
+extraEnvVarsMap: {}
+# An array of extra environment variables, in the same format as a container's `env` list.
+# Use `extraEnvVarsMap` unless ordering matters (for example, to use Kubernetes `$(VAR)` interpolation).
 extraEnvVars: []
 extraEnvVarsCM: ""
 extraEnvVarsSecret: ""
@@ -111,6 +119,14 @@ imagePullSecrets: []
 nameOverride: ""
 fullnameOverride: ""
 
+# -- Sets the [DNS config](https://kubernetes.io/docs/concepts/services-networking/dns-pod-service/#pod-dns-config) for Deployment pods
+# Example:
+# dnsConfig:
+#   options:
+#     - name: "ndots"
+#       value: "2"
+dnsConfig: {}
+
 serviceAccount:
   # Specifies whether a service account should be created
   create: true
@@ -148,7 +164,8 @@ serviceMonitor:
 ingress:
   enabled: false
   className: ""
-  annotations: {}
+  annotations:
+    {}
     # kubernetes.io/ingress.class: nginx
     # kubernetes.io/tls-acme: "true"
   hosts:
