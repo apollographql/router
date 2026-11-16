@@ -150,6 +150,13 @@ type Query
       assumedSize: 50
       requireOneSlicingArgument: false
     )
+  itemsWithUnresolvableSlicingArgument(first: Int): [A]
+    @join__field(graph: SUBGRAPHWITHLISTSIZE)
+    @listSize(
+      slicingArguments: ["first", "input.pagination.first"]
+      assumedSize: 50
+      requireOneSlicingArgument: false
+    )
   search(input: SearchInput!): [A]
     @join__field(graph: SUBGRAPHWITHLISTSIZE)
     @listSize(

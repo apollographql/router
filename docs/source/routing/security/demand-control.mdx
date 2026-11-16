@@ -214,6 +214,8 @@ When requesting 7 books:
 
 When a `slicingArguments` entry references a list-type argument, the router uses the length of that list as the list size. This is useful when your resolver returns one result per input ID or tag, instead of using a numeric paging argument.
 
+If a single value is sent for a list-type argument, GraphQL input coercion treats it as a list with one item, so the router uses a list size of `1`.
+
 ```graphql
 type Query {
   book(id: ID): Book
@@ -279,7 +281,9 @@ query BooksByIds($ids: [ID!]!) {
 
 <MinVersionBadge version="Router v2.12.0" />
 
-When the list size comes from an argument nested in an input object, use a dot-separated path in `slicingArguments`. The router resolves the path against the query arguments and variable values to determine the size.
+When the list size comes from an input field nested in an argument, use a dot-separated path in `slicingArguments`. The router resolves the path against the query arguments and variable values to determine the size.
+
+If a path doesn't resolve against the schema, the router logs a warning when it loads the schema and ignores that entry. Federation v2.12 and above reject paths that don't resolve.
 
 ```graphql
 input PaginationInput {
