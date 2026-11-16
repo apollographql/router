@@ -20,10 +20,9 @@ use super::FieldRoutingSearchSpace;
 use super::NodeSource;
 use super::RoutingSiteKey;
 use super::context;
+use super::requires::input_gate;
 use super::requires::path_condition_fragments;
 use super::requires::path_conditions_context;
-use super::requires::unconditioned_input_path;
-use super::requires::with_own_conditions;
 use super::routing::RoutingChoice;
 use super::selection_label;
 use super::state::CONDITION_DEPTH_LIMIT;
@@ -315,15 +314,14 @@ impl FieldRoutingSearchSpace {
         // Key fields plus __typename, which identifies the entity type. The
         // hop is gated on the path conditions and the field's own, so
         // its inputs keep them.
-        let gate_path = with_own_conditions(&pending.op_path, &pending.selection);
-        self.append_entity_inputs_at(
+        let (gate_path, needed_under) = input_gate(pending)?;
+        self.append_entity_inputs(
             state,
             pending.fetch_node,
             &gate_path,
             anchor_key.as_ref(),
             &source,
         );
-        let needed_under = path_conditions_context(&gate_path)?;
 
         let merge_at = self.pending_merge_at(state, pending);
 
@@ -405,11 +403,11 @@ impl FieldRoutingSearchSpace {
                     routed_key,
                     &source,
                     pending.fetch_node,
-                    &pending.op_path,
+                    &gate_path,
                     new_group,
                 )?;
             } else {
-                self.push_condition_pendings_at(state, pending, routed_key, new_group, &gate_path)?;
+                self.push_condition_pendings(state, pending, routed_key, new_group, &gate_path)?;
             }
         }
 
@@ -496,7 +494,7 @@ impl FieldRoutingSearchSpace {
             Some(key_conditions),
             source,
         );
-        self.push_condition_pendings(state, pending, key_conditions, new_group)?;
+        self.push_condition_pendings(state, pending, key_conditions, new_group, anchor_path)?;
         Ok(())
     }
 
@@ -564,7 +562,13 @@ impl FieldRoutingSearchSpace {
                     &hop_source,
                 );
                 if let Some(routed) = &routed {
-                    self.push_condition_pendings(state, &hop_anchor, routed, next_group)?;
+                    self.push_condition_pendings(
+                        state,
+                        &hop_anchor,
+                        routed,
+                        next_group,
+                        &hop_path,
+                    )?;
                 }
             }
 
@@ -1001,7 +1005,7 @@ impl FieldRoutingSearchSpace {
 
         // The redirect target is gated on the path conditions
         // (`defer_redirect_target`), so the inputs keep them.
-        self.append_entity_inputs_at(
+        self.append_entity_inputs(
             state,
             pending.fetch_node,
             &pending.op_path,
@@ -1402,26 +1406,8 @@ impl FieldRoutingSearchSpace {
     }
 
     /// Select entity-representation inputs (key fields when given, plus
-    /// __typename) in `fetch_node` at the unconditioned input path.
+    /// __typename) in `fetch_node` at `input_path`.
     pub(super) fn append_entity_inputs(
-        &self,
-        state: &mut PlanState,
-        fetch_node: NodeIndex,
-        op_path: &SharedPath<Arc<OpPathElement>>,
-        key_conditions: Option<&Arc<SelectionSet>>,
-        source: &NodeSource,
-    ) {
-        self.append_entity_inputs_at(
-            state,
-            fetch_node,
-            &unconditioned_input_path(op_path),
-            key_conditions,
-            source,
-        );
-    }
-
-    /// Select entity-representation inputs in `fetch_node` at `input_path`.
-    pub(super) fn append_entity_inputs_at(
         &self,
         state: &mut PlanState,
         fetch_node: NodeIndex,
@@ -1462,22 +1448,9 @@ impl FieldRoutingSearchSpace {
         })
     }
 
+    /// Route the conditions `dependent` reads from `anchor` as pendings at
+    /// `input_path`.
     pub(super) fn push_condition_pendings(
-        &self,
-        state: &mut PlanState,
-        anchor: &PendingSelection,
-        conditions_arc: &Arc<SelectionSet>,
-        dependent: NodeIndex,
-    ) -> Result<(), FederationError> {
-        // Condition data is entity-fetch input: route it unconditionally
-        // (see `unconditioned_input_path`).
-        let input_path = unconditioned_input_path(&anchor.op_path);
-        self.push_condition_pendings_at(state, anchor, conditions_arc, dependent, &input_path)
-    }
-
-    /// [`Self::push_condition_pendings`] at `input_path`. Key inputs retain
-    /// the conditions governing their contribution to the representation.
-    pub(super) fn push_condition_pendings_at(
         &self,
         state: &mut PlanState,
         anchor: &PendingSelection,

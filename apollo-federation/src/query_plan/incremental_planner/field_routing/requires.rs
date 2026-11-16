@@ -192,25 +192,23 @@ pub(super) fn path_condition_fragments(
         .collect()
 }
 
-/// `op_path` with @skip/@include stripped from its inline-fragment elements,
-/// for inputs whose contribution carries no path-condition context. Gating
-/// such an input on one branch's Boolean condition leaves the representation
-/// incomplete whenever a different branch executes. Inputs of a gated key hop
-/// use `with_own_conditions` instead, since their `needed_under` context
-/// keeps the representation consistent and selecting them unconditionally
-/// would execute a skipped mutation field.
-/// Condition-only fragments are dropped; type-conditioned fragments keep the
-/// downcast without the conditions.
-pub(super) fn unconditioned_input_path(
-    op_path: &SharedPath<Arc<OpPathElement>>,
-) -> SharedPath<Arc<OpPathElement>> {
-    input_path_keeping(op_path, &DirectiveList::new())
+/// Where the inputs a dependent fetch reads from `pending` are selected,
+/// and the conditions they contribute to the representation under. Inputs
+/// keep the path conditions and the field's own: selected unconditionally,
+/// they would execute a parent mutation field the client skipped. The
+/// context keeps a representation built from differently gated inputs
+/// consistent when their fetches merge.
+pub(super) fn input_gate(
+    pending: &PendingSelection,
+) -> Result<(SharedPath<Arc<OpPathElement>>, OpGraphPathContext), FederationError> {
+    let path = with_own_conditions(&pending.op_path, &pending.selection);
+    let needed_under = path_conditions_context(&path)?;
+    Ok((path, needed_under))
 }
 
 /// `op_path` followed by the @skip/@include on the `selection` field itself
-/// (`email @include(if: $x)`) as a condition-only fragment, so that key
-/// inputs and their representation context retain the field's conditions.
-pub(super) fn with_own_conditions(
+/// (`email @include(if: $x)`) as a condition-only fragment.
+fn with_own_conditions(
     op_path: &SharedPath<Arc<OpPathElement>>,
     selection: &Selection,
 ) -> SharedPath<Arc<OpPathElement>> {
@@ -241,38 +239,6 @@ pub(super) fn path_conditions_context(
         .try_fold(OpGraphPathContext::default(), |context, element| {
             context.with_context_of(element)
         })
-}
-
-/// `op_path` with the @skip/@include not in `kept` stripped from its
-/// inline-fragment elements.
-fn input_path_keeping(
-    op_path: &SharedPath<Arc<OpPathElement>>,
-    kept: &DirectiveList,
-) -> SharedPath<Arc<OpPathElement>> {
-    let mut elements = Vec::with_capacity(op_path.len());
-    for element in op_path.iter() {
-        match element.as_ref() {
-            OpPathElement::Field(_) => elements.push(element.clone()),
-            OpPathElement::InlineFragment(frag) => {
-                let stripped: DirectiveList = frag
-                    .directives
-                    .iter()
-                    .filter(|d| {
-                        (d.name != "skip" && d.name != "include") || kept.iter().any(|k| k == *d)
-                    })
-                    .cloned()
-                    .collect();
-                if stripped.len() == frag.directives.len() {
-                    elements.push(element.clone());
-                } else if !stripped.is_empty() || frag.type_condition_position.is_some() {
-                    elements.push(Arc::new(OpPathElement::InlineFragment(
-                        frag.with_updated_directives(stripped),
-                    )));
-                }
-            }
-        }
-    }
-    SharedPath::from_vec(elements)
 }
 
 // ---------------------------------------------------------------------------
@@ -328,14 +294,12 @@ impl FieldRoutingSearchSpace {
             let input_conflict = key_hop_edge.is_some_and(|e| {
                 Self::has_conflicting_requires_inputs(&state.graph, e, &conditions, &alias_rewrites)
             });
-            // Gated like the key inputs (`commit_key_hop`). Selecting them
-            // unconditionally would execute a skipped mutation field.
-            let gate_path = with_own_conditions(&pending.op_path, &pending.selection);
+            let (gate_path, needed_under) = input_gate(pending)?;
             let input = InputContribution::Requires {
                 source_type_name: source.type_pos.type_name().clone(),
                 conditions: conditions.clone(),
                 condition_alias_rewrites: alias_rewrites,
-                needed_under: path_conditions_context(&gate_path)?,
+                needed_under,
             };
             let dest = if input_conflict {
                 // The original target.fetch_node is abandoned: it retains its
@@ -377,7 +341,7 @@ impl FieldRoutingSearchSpace {
                     .add_ordering_dependency(pending.fetch_node, dest)?;
             }
             if let Some(routed) = &routed {
-                self.push_condition_pendings_at(state, pending, routed, dest, &gate_path)?;
+                self.push_condition_pendings(state, pending, routed, dest, &gate_path)?;
             }
             return Ok(CommitTarget {
                 fetch_node: dest,
@@ -392,14 +356,12 @@ impl FieldRoutingSearchSpace {
         }
 
         // In place: the fields sit alongside the field. No entity
-        // representation reads them, so aliases need no rename back, and
-        // they can share the field's conditions.
+        // representation reads them, so aliases need no rename back.
         let (conditions, _) = self.stage_condition_aliases(state, pending, requires_conditions)?;
-        state.graph.append_selection(
-            target.fetch_node,
-            &with_own_conditions(&pending.op_path, &pending.selection),
-            Some(&conditions),
-        );
+        let (gate_path, _) = input_gate(pending)?;
+        state
+            .graph
+            .append_selection(target.fetch_node, &gate_path, Some(&conditions));
         Ok(target)
     }
 
@@ -528,8 +490,7 @@ mod tests {
 
     /// Only @skip/@include are Boolean conditions a key hop must replay
     /// into the entity fetch. A fragment carrying an unrelated directive
-    /// (e.g. @defer) is not a condition, matching the filter used by
-    /// `unconditioned_input_path`.
+    /// (e.g. @defer) is not a condition.
     #[test]
     fn path_condition_fragments_only_match_skip_include() {
         let skip = SharedPath::new().pushed(fragment_with_directive("skip"));
