@@ -9,7 +9,6 @@ use apollo_compiler::ast::Directive;
 use apollo_compiler::schema::ExtendedType;
 use apollo_compiler::schema::Type;
 use apollo_compiler::ty;
-use itertools::Itertools;
 
 use crate::bail;
 use crate::error::FederationError;
@@ -553,36 +552,42 @@ fn normalize_field_selection_set(schema: &mut FederationSchema) -> Result<(), Fe
     {
         return Ok(());
     }
-
-    let directives_using_field_selection_set: Vec<Name> = [
-        FEDERATION_KEY_DIRECTIVE_NAME_IN_SPEC,
-        FEDERATION_PROVIDES_DIRECTIVE_NAME_IN_SPEC,
-        FEDERATION_REQUIRES_DIRECTIVE_NAME_IN_SPEC,
-    ]
-    .iter()
-    .map(|directive_name| link.directive_name_in_schema(directive_name))
-    .filter(|name_in_schema| {
-        schema
-            .directive_definitions
-            .get(name_in_schema)
-            .and_then(|definition| definition.argument_by_name(&FEDERATION_FIELDS_ARGUMENT_NAME))
-            .is_some_and(|argument| {
-                *argument.ty.inner_named_type() == FIELD_SELECTION_SET_TYPE_NAME
-            })
-    })
-    .collect();
-    if directives_using_field_selection_set.is_empty() {
-        return Ok(());
-    }
-
     let field_set_is_imported = link.imports.iter().any(|import| {
         !import.is_directive && import.element == FEDERATION_FIELDSET_TYPE_NAME_IN_SPEC
     });
-    if field_set_is_imported {
-        let directives = directives_using_field_selection_set
-            .iter()
-            .map(|name| format!(r#""@{name}""#))
-            .join(", ");
+
+    let mut conflicting_directives = Vec::new();
+    let mut rewritten = false;
+    for directive_name in [
+        FEDERATION_KEY_DIRECTIVE_NAME_IN_SPEC,
+        FEDERATION_PROVIDES_DIRECTIVE_NAME_IN_SPEC,
+        FEDERATION_REQUIRES_DIRECTIVE_NAME_IN_SPEC,
+    ] {
+        let name_in_schema = link.directive_name_in_schema(&directive_name);
+        let Some(definition) = schema.directive_definitions.get_mut(&name_in_schema) else {
+            continue;
+        };
+        let Some(index) = definition.arguments.iter().position(|argument| {
+            argument.name == FEDERATION_FIELDS_ARGUMENT_NAME
+                && *argument.ty.inner_named_type() == FIELD_SELECTION_SET_TYPE_NAME
+        }) else {
+            continue;
+        };
+        if field_set_is_imported {
+            conflicting_directives.push(format!(r#""@{name_in_schema}""#));
+        } else if matches!(
+            definition.arguments[index].ty.as_ref(),
+            Type::NonNullNamed(_)
+        ) {
+            // A nullable `FieldSelectionSet` is left as is and rejected by validation, the same as
+            // a nullable `FieldSet` or `String`.
+            definition.make_mut().arguments[index].make_mut().ty =
+                Node::new(Type::NonNullNamed(field_set_name.clone()));
+            rewritten = true;
+        }
+    }
+
+    if !conflicting_directives.is_empty() {
         let alias = if field_set_name == FEDERATION_FIELDSET_TYPE_NAME_IN_SPEC {
             String::new()
         } else {
@@ -590,29 +595,14 @@ fn normalize_field_selection_set(schema: &mut FederationSchema) -> Result<(), Fe
         };
         return Err(SingleFederationError::FieldSelectionSetConflict {
             message: format!(
-                r#"Cannot use "{FIELD_SELECTION_SET_TYPE_NAME}" in the definition of {directives} since "{FEDERATION_FIELDSET_TYPE_NAME_IN_SPEC}" is imported{alias} from feature "{}": "{FIELD_SELECTION_SET_TYPE_NAME}" is another name for "{FEDERATION_FIELDSET_TYPE_NAME_IN_SPEC}". Please use only one of them."#,
+                r#"Cannot use "{FIELD_SELECTION_SET_TYPE_NAME}" in the definition of {} since "{FEDERATION_FIELDSET_TYPE_NAME_IN_SPEC}" is imported{alias} from feature "{}": "{FIELD_SELECTION_SET_TYPE_NAME}" is another name for "{FEDERATION_FIELDSET_TYPE_NAME_IN_SPEC}". Please use only one of them."#,
+                conflicting_directives.join(", "),
                 link.url.identity
             ),
         }
         .into());
     }
-
-    for name_in_schema in directives_using_field_selection_set {
-        let Some(definition) = schema.directive_definitions.get_mut(&name_in_schema) else {
-            continue;
-        };
-        if let Some(argument) = definition
-            .make_mut()
-            .arguments
-            .iter_mut()
-            .find(|argument| argument.name == FEDERATION_FIELDS_ARGUMENT_NAME)
-            && matches!(argument.ty.as_ref(), Type::NonNullNamed(name) if *name == FIELD_SELECTION_SET_TYPE_NAME)
-        {
-            argument.make_mut().ty = Node::new(Type::NonNullNamed(field_set_name.clone()));
-        }
-    }
-
-    if !is_type_referenced(schema, &FIELD_SELECTION_SET_TYPE_NAME) {
+    if rewritten && !is_type_referenced(schema, &FIELD_SELECTION_SET_TYPE_NAME) {
         schema.types.shift_remove(&FIELD_SELECTION_SET_TYPE_NAME);
     }
     Ok(())

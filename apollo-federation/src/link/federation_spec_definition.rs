@@ -1030,21 +1030,20 @@ impl FederationSpecDefinition {
 /// `FIELD_SELECTION_SET_CONFLICT` error.
 pub(crate) fn normalize_field_selection_set_imports(
     url: &Url,
-    imports: Vec<link::Import>,
-) -> Result<Vec<link::Import>, FederationError> {
+    imports: &mut [link::Import],
+) -> Result<(), FederationError> {
     if url.identity != Identity::federation_identity()
         || url.version < (Version { major: 3, minor: 0 })
     {
-        return Ok(imports);
+        return Ok(());
     }
-    let is_type_import =
-        |import: &link::Import, name: &Name| !import.is_directive && import.element == *name;
-    if imports
-        .iter()
-        .any(|import| is_type_import(import, &FIELD_SELECTION_SET_TYPE_NAME))
-        && imports
+    let imports_type = |name: &Name| {
+        imports
             .iter()
-            .any(|import| is_type_import(import, &FEDERATION_FIELDSET_TYPE_NAME_IN_SPEC))
+            .any(|import| !import.is_directive && import.element == *name)
+    };
+    if imports_type(&FIELD_SELECTION_SET_TYPE_NAME)
+        && imports_type(&FEDERATION_FIELDSET_TYPE_NAME_IN_SPEC)
     {
         return Err(SingleFederationError::FieldSelectionSetConflict {
             message: format!(
@@ -1054,20 +1053,13 @@ pub(crate) fn normalize_field_selection_set_imports(
         }
         .into());
     }
-    Ok(imports
-        .into_iter()
-        .map(|import| {
-            if is_type_import(&import, &FIELD_SELECTION_SET_TYPE_NAME) {
-                link::Import {
-                    element: FEDERATION_FIELDSET_TYPE_NAME_IN_SPEC,
-                    is_directive: false,
-                    alias: Some(import.alias.unwrap_or(FIELD_SELECTION_SET_TYPE_NAME)),
-                }
-            } else {
-                import
-            }
-        })
-        .collect())
+    for import in imports {
+        if !import.is_directive && import.element == FIELD_SELECTION_SET_TYPE_NAME {
+            import.alias.get_or_insert(FIELD_SELECTION_SET_TYPE_NAME);
+            import.element = FEDERATION_FIELDSET_TYPE_NAME_IN_SPEC;
+        }
+    }
+    Ok(())
 }
 
 fn field_set_type(schema: &FederationSchema) -> Result<Type, FederationError> {

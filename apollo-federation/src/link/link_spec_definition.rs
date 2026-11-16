@@ -373,7 +373,7 @@ impl LinkSpecDefinition {
             None
         };
 
-        let imports = if self.supports_import() {
+        let mut imports: Vec<Import> = if self.supports_import() {
             directive
                 .specified_argument_by_name("import")
                 .take_if(|arg| !arg.is_null())
@@ -393,10 +393,8 @@ impl LinkSpecDefinition {
         } else {
             Default::default()
         };
-        let imports = normalize_field_selection_set_imports(&url, imports)?
-            .into_iter()
-            .map(Arc::new)
-            .collect();
+        normalize_field_selection_set_imports(&url, &mut imports)?;
+        let imports = imports.into_iter().map(Arc::new).collect();
 
         Ok(Link {
             url,
