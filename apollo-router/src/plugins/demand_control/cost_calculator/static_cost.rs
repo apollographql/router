@@ -2608,7 +2608,13 @@ mod tests {
         // The entity fetch for `detail` extends the items returned by `itemsByIds`, whose size
         // comes from the length of the `ids` variable rather than `list_size` (10).
         let query = "query($ids: [ID!]!) { itemsByIds(ids: $ids) { detail { text } } }";
-        for (ids, count) in [(r#"["a"]"#, 1.0), (r#"["a","b","c"]"#, 3.0)] {
+        // A single value for the list-typed argument is coerced to a list of one item.
+        for (ids, count) in [
+            (r#"["a"]"#, 1.0),
+            (r#"["a","b","c"]"#, 3.0),
+            (r#""a""#, 1.0),
+            ("1000000", 1.0),
+        ] {
             let variables = format!(r#"{{"ids": {ids}}}"#);
             assert_eq!(
                 entity_count_at(
