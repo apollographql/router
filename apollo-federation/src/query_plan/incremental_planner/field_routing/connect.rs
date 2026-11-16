@@ -165,118 +165,118 @@ impl FieldRoutingSearchSpace {
         let child_defer_ref = pending.defer_ref.clone();
         let defer_for_children = child_defer_ref.clone();
 
-        let (fetch_node, child_op_path, response_base) = if let Some(key_conditions) =
-            choice.connector_key_conditions()
-        {
-            // Entity-resolver connector: key fields ride the parent fetch;
-            // the connector group merges at the pending's response path.
-            let source = self.node_source(pending.query_graph_node)?;
-            let key_locally_resolvable =
-                self.can_resolve_in_place(pending.query_graph_node, key_conditions, &source)?;
-            let (local_key, routed_key) =
-                self.split_anchor_key(state, pending, key_conditions, key_locally_resolvable)?;
-            // The connector fetch is gated on the path conditions
-            // (`with_path_conditions` below) and the field's own, so
-            // its inputs keep them, including the key parts routed to
-            // other fetches, and so does its representation, in case the
-            // fetch merges with a differently gated one.
-            let (input_path, needed_under) = input_gate(pending)?;
-            self.append_entity_inputs(
-                state,
-                pending.fetch_node,
-                &input_path,
-                local_key.as_ref(),
-                &source,
-            );
+        let (fetch_node, child_op_path, response_base) =
+            if let Some(key_conditions) = choice.connector_key_conditions() {
+                // Entity-resolver connector: key fields ride the parent fetch;
+                // the connector group merges at the pending's response path.
+                let source = self.node_source(pending.query_graph_node)?;
+                let key_locally_resolvable =
+                    self.can_resolve_in_place(pending.query_graph_node, key_conditions, &source)?;
+                let (local_key, routed_key) =
+                    self.split_anchor_key(state, pending, key_conditions, key_locally_resolvable)?;
+                let (input_path, needed_under) = input_gate(pending)?;
+                self.append_entity_inputs_at(
+                    state,
+                    pending.fetch_node,
+                    &input_path,
+                    local_key.as_ref(),
+                    &source,
+                );
 
-            let merge_at = self.pending_merge_at(state, pending);
+                let merge_at = self.pending_merge_at(state, pending);
 
-            let new_group = state.graph.add_connector_entity_group(
-                source_subgraph,
-                merge_at,
-                connector.clone(),
-                child_defer_ref,
-            );
-            // The entity type as the connector subgraph knows it. It
-            // differs from the source type when the source is an
-            // implementation of an @interfaceObject.
-            let entity_type = key_conditions.type_position.clone();
-            let inputs = vec![InputContribution::Key {
-                source_type_name: source.type_pos.type_name().clone(),
-                conditions: key_conditions.clone(),
-                rewrite_info: InputRewriteInfo {
-                    dest_type: entity_type.clone(),
-                    dest_subgraph: source_subgraph.clone(),
-                },
-                needed_under: needed_under.clone(),
-            }];
-            state
-                .graph
-                .add_dependency(pending.fetch_node, new_group, inputs);
+                let new_group = state.graph.add_connector_entity_group(
+                    source_subgraph,
+                    merge_at,
+                    connector.clone(),
+                    child_defer_ref,
+                );
+                // The entity type as the connector subgraph knows it. It
+                // differs from the source type when the source is an
+                // implementation of an @interfaceObject.
+                let entity_type = key_conditions.type_position.clone();
+                let inputs = vec![InputContribution::Key {
+                    source_type_name: source.type_pos.type_name().clone(),
+                    conditions: key_conditions.clone(),
+                    rewrite_info: InputRewriteInfo {
+                        dest_type: entity_type.clone(),
+                        dest_subgraph: source_subgraph.clone(),
+                    },
+                    needed_under: needed_under.clone(),
+                }];
+                state
+                    .graph
+                    .add_dependency(pending.fetch_node, new_group, inputs);
 
-            if let Some(routed_key) = &routed_key {
-                self.push_condition_pendings(state, pending, routed_key, new_group, &input_path)?;
-            }
+                if let Some(routed_key) = &routed_key {
+                    self.push_condition_pendings_at(
+                        state,
+                        pending,
+                        routed_key,
+                        new_group,
+                        &input_path,
+                    )?;
+                }
 
-            let entity_base_path = self.entity_root_path(entity_type.type_name())?;
-            (
-                new_group,
-                with_path_conditions(entity_base_path, pending).pushed(field_op_element),
-                SharedPath::new(),
-            )
-        } else if matches!(
-            current_node_data.type_,
-            QueryGraphNodeType::FederatedRootType(_)
-        ) {
-            // Root-level connector field: a fresh root group per connector.
-            let root_kind = match &current_node_data.type_ {
-                QueryGraphNodeType::FederatedRootType(kind) => *kind,
-                _ => unreachable!(),
+                let entity_base_path = self.entity_root_path(entity_type.type_name())?;
+                (
+                    new_group,
+                    with_path_conditions(entity_base_path, pending).pushed(field_op_element),
+                    SharedPath::new(),
+                )
+            } else if matches!(
+                current_node_data.type_,
+                QueryGraphNodeType::FederatedRootType(_)
+            ) {
+                // Root-level connector field: a fresh root group per connector.
+                let root_kind = match &current_node_data.type_ {
+                    QueryGraphNodeType::FederatedRootType(kind) => *kind,
+                    _ => unreachable!(),
+                };
+                let root_type_name = self
+                    .supergraph_schema
+                    .schema()
+                    .root_operation(root_kind.into())
+                    .ok_or_else(|| {
+                        FederationError::internal(format!("no root type for {root_kind:?}"))
+                    })?;
+                let root_type: CompositeTypeDefinitionPosition = self
+                    .supergraph_schema
+                    .get_type(root_type_name)?
+                    .try_into()?;
+                let node = state.graph.add_connector_root_group(
+                    source_subgraph,
+                    root_type,
+                    connector.clone(),
+                    child_defer_ref,
+                );
+                (
+                    node,
+                    pending.op_path.pushed(field_op_element),
+                    pending.path_in_fetch.clone(),
+                )
+            } else {
+                // Non-root direct connector (no key): a child group merging
+                // at the pending's response path.
+                let source = self.node_source(pending.query_graph_node)?;
+                let merge_at = self.pending_merge_at(state, pending);
+
+                let new_group = state.graph.add_connector_entity_group(
+                    source_subgraph,
+                    merge_at,
+                    connector.clone(),
+                    child_defer_ref,
+                );
+                state
+                    .graph
+                    .add_dependency(pending.fetch_node, new_group, Vec::new());
+                let entity_base_path = self.entity_root_path(source.type_pos.type_name())?;
+                (
+                    new_group,
+                    with_path_conditions(entity_base_path, pending).pushed(field_op_element),
+                    SharedPath::new(),
+                )
             };
-            let root_type_name = self
-                .supergraph_schema
-                .schema()
-                .root_operation(root_kind.into())
-                .ok_or_else(|| {
-                    FederationError::internal(format!("no root type for {root_kind:?}"))
-                })?;
-            let root_type: CompositeTypeDefinitionPosition = self
-                .supergraph_schema
-                .get_type(root_type_name)?
-                .try_into()?;
-            let node = state.graph.add_connector_root_group(
-                source_subgraph,
-                root_type,
-                connector.clone(),
-                child_defer_ref,
-            );
-            (
-                node,
-                pending.op_path.pushed(field_op_element),
-                pending.path_in_fetch.clone(),
-            )
-        } else {
-            // Non-root direct connector (no key): a child group merging
-            // at the pending's response path.
-            let source = self.node_source(pending.query_graph_node)?;
-            let merge_at = self.pending_merge_at(state, pending);
-
-            let new_group = state.graph.add_connector_entity_group(
-                source_subgraph,
-                merge_at,
-                connector.clone(),
-                child_defer_ref,
-            );
-            state
-                .graph
-                .add_dependency(pending.fetch_node, new_group, Vec::new());
-            let entity_base_path = self.entity_root_path(source.type_pos.type_name())?;
-            (
-                new_group,
-                with_path_conditions(entity_base_path, pending).pushed(field_op_element),
-                SharedPath::new(),
-            )
-        };
 
         // Response path within the connector's fetch group to the field's
         // sub-selections.

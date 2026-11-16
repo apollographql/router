@@ -341,7 +341,7 @@ impl FieldRoutingSearchSpace {
                     .add_ordering_dependency(pending.fetch_node, dest)?;
             }
             if let Some(routed) = &routed {
-                self.push_condition_pendings(state, pending, routed, dest, &gate_path)?;
+                self.push_condition_pendings_at(state, pending, routed, dest, &gate_path)?;
             }
             return Ok(CommitTarget {
                 fetch_node: dest,

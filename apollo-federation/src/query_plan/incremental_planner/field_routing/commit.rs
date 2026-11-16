@@ -311,11 +311,9 @@ impl FieldRoutingSearchSpace {
             None => (true, (None, None)),
         };
 
-        // Key fields plus __typename, which identifies the entity type. The
-        // hop is gated on the path conditions and the field's own, so
-        // its inputs keep them.
+        // Key fields plus __typename, which identifies the entity type.
         let (gate_path, needed_under) = input_gate(pending)?;
-        self.append_entity_inputs(
+        self.append_entity_inputs_at(
             state,
             pending.fetch_node,
             &gate_path,
@@ -398,16 +396,10 @@ impl FieldRoutingSearchSpace {
                     )));
                 }
                 self.commit_circular_key_conditions(
-                    state,
-                    pending,
-                    routed_key,
-                    &source,
-                    pending.fetch_node,
-                    &gate_path,
-                    new_group,
+                    state, pending, routed_key, &source, &gate_path, new_group,
                 )?;
             } else {
-                self.push_condition_pendings(state, pending, routed_key, new_group, &gate_path)?;
+                self.push_condition_pendings_at(state, pending, routed_key, new_group, &gate_path)?;
             }
         }
 
@@ -469,14 +461,12 @@ impl FieldRoutingSearchSpace {
     /// key it can only partially resolve can never match an entity at
     /// runtime, so fail the commit and let backtracking look for an
     /// alternative instead of emitting a fetch that is dead on arrival.
-    #[allow(clippy::too_many_arguments)]
     fn commit_circular_key_conditions(
         &self,
         state: &mut PlanState,
         pending: &PendingSelection,
         key_conditions: &Arc<SelectionSet>,
         source: &NodeSource,
-        anchor_fetch: NodeIndex,
         anchor_path: &SharedPath<Arc<OpPathElement>>,
         new_group: NodeIndex,
     ) -> Result<(), FederationError> {
@@ -487,14 +477,14 @@ impl FieldRoutingSearchSpace {
                 key_conditions,
             )));
         }
-        self.append_entity_inputs(
+        self.append_entity_inputs_at(
             state,
-            anchor_fetch,
+            pending.fetch_node,
             anchor_path,
             Some(key_conditions),
             source,
         );
-        self.push_condition_pendings(state, pending, key_conditions, new_group, anchor_path)?;
+        self.push_condition_pendings_at(state, pending, key_conditions, new_group, anchor_path)?;
         Ok(())
     }
 
@@ -554,7 +544,7 @@ impl FieldRoutingSearchSpace {
                     self.can_resolve_in_place(hop.target_node, key_conds, &hop_source)?;
                 let (in_place, routed) =
                     self.split_in_place(state, &hop_anchor, key_conds, resolvable_in_place);
-                self.append_entity_inputs(
+                self.append_entity_inputs_at(
                     state,
                     prev_group,
                     &hop_path,
@@ -562,7 +552,7 @@ impl FieldRoutingSearchSpace {
                     &hop_source,
                 );
                 if let Some(routed) = &routed {
-                    self.push_condition_pendings(
+                    self.push_condition_pendings_at(
                         state,
                         &hop_anchor,
                         routed,
@@ -1005,7 +995,7 @@ impl FieldRoutingSearchSpace {
 
         // The redirect target is gated on the path conditions
         // (`defer_redirect_target`), so the inputs keep them.
-        self.append_entity_inputs(
+        self.append_entity_inputs_at(
             state,
             pending.fetch_node,
             &pending.op_path,
@@ -1407,7 +1397,7 @@ impl FieldRoutingSearchSpace {
 
     /// Select entity-representation inputs (key fields when given, plus
     /// __typename) in `fetch_node` at `input_path`.
-    pub(super) fn append_entity_inputs(
+    pub(super) fn append_entity_inputs_at(
         &self,
         state: &mut PlanState,
         fetch_node: NodeIndex,
@@ -1450,7 +1440,7 @@ impl FieldRoutingSearchSpace {
 
     /// Route the conditions `dependent` reads from `anchor` as pendings at
     /// `input_path`.
-    pub(super) fn push_condition_pendings(
+    pub(super) fn push_condition_pendings_at(
         &self,
         state: &mut PlanState,
         anchor: &PendingSelection,

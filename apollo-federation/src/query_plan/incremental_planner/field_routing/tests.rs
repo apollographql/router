@@ -2492,7 +2492,7 @@ fn entity_shareable_field_filters_inconsistent_union_members() {
 /// A field with locally-unresolvable @requires reached through an
 /// @include-gated fragment: the same-subgraph entity re-fetch must carry the
 /// gating fragment into its op path (or the hopped selection loses its
-/// condition), while the condition input itself is fetched unconditionally.
+/// condition), and the condition input is fetched under the same gate.
 /// Targets requires.rs trailing_condition_fragments on the self-key-hop
 /// commit path (routing.rs self_key_hop -> commit.rs target_paths).
 #[test]
