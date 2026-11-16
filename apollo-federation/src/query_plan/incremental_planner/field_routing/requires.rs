@@ -193,9 +193,12 @@ pub(super) fn path_condition_fragments(
 }
 
 /// `op_path` with @skip/@include stripped from its inline-fragment elements,
-/// for appending key and @requires input selections. Inputs must be selected
-/// unconditionally: an input gated by one branch's Boolean condition leaves
-/// the representation incomplete whenever a different branch executes.
+/// for inputs whose contribution carries no path-condition context. Gating
+/// such an input on one branch's Boolean condition leaves the representation
+/// incomplete whenever a different branch executes. Inputs of a gated key hop
+/// use `with_own_conditions` instead, since their `needed_under` context
+/// keeps the representation consistent and selecting them unconditionally
+/// would execute a skipped mutation field.
 /// Condition-only fragments are dropped; type-conditioned fragments keep the
 /// downcast without the conditions.
 pub(super) fn unconditioned_input_path(
@@ -325,15 +328,14 @@ impl FieldRoutingSearchSpace {
             let input_conflict = key_hop_edge.is_some_and(|e| {
                 Self::has_conflicting_requires_inputs(&state.graph, e, &conditions, &alias_rewrites)
             });
+            // Gated like the key inputs (`commit_key_hop`). Selecting them
+            // unconditionally would execute a skipped mutation field.
+            let gate_path = with_own_conditions(&pending.op_path, &pending.selection);
             let input = InputContribution::Requires {
                 source_type_name: source.type_pos.type_name().clone(),
                 conditions: conditions.clone(),
                 condition_alias_rewrites: alias_rewrites,
-                // Under the same conditions as the key (`commit_key_hop`).
-                needed_under: path_conditions_context(&with_own_conditions(
-                    &pending.op_path,
-                    &pending.selection,
-                ))?,
+                needed_under: path_conditions_context(&gate_path)?,
             };
             let dest = if input_conflict {
                 // The original target.fetch_node is abandoned: it retains its
@@ -367,17 +369,15 @@ impl FieldRoutingSearchSpace {
                 choice.requires_resolvable_in_place(),
             );
             if let Some(in_place) = &in_place {
-                state.graph.append_selection(
-                    pending.fetch_node,
-                    &unconditioned_input_path(&pending.op_path),
-                    Some(in_place),
-                );
+                state
+                    .graph
+                    .append_selection(pending.fetch_node, &gate_path, Some(in_place));
                 state
                     .graph
                     .add_ordering_dependency(pending.fetch_node, dest)?;
             }
             if let Some(routed) = &routed {
-                self.push_condition_pendings(state, pending, routed, dest)?;
+                self.push_condition_pendings_at(state, pending, routed, dest, &gate_path)?;
             }
             return Ok(CommitTarget {
                 fetch_node: dest,

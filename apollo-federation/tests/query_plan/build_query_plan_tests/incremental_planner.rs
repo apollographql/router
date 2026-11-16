@@ -8360,3 +8360,78 @@ fn inc_preserves_path_conditions(#[case] name: &str, #[case] operation: &str) {
     .unwrap();
     insta::assert_snapshot!(name, plan);
 }
+
+#[test]
+fn inc_requires_inputs_keep_path_conditions_on_mutation() {
+    let planner = planner!(
+        config = incremental_config(),
+        A: r#"
+          type Query {
+              t: T
+          }
+
+          type Mutation {
+              m: T
+          }
+
+          type T @key(fields: "k") {
+              k: ID!
+              a: String
+          }
+        "#,
+        B: r#"
+          type T @key(fields: "k") {
+              k: ID!
+              r: String @requires(fields: "a")
+              a: String @external
+          }
+        "#,
+    );
+    assert_plan!(
+        &planner,
+        r#"
+          mutation Test($s: Boolean!) {
+            ... @skip(if: $s) {
+              m {
+                r
+              }
+            }
+          }
+        "#,
+        @r###"
+    QueryPlan {
+      Sequence {
+        Skip(if: $s) {
+          Fetch(service: "A") {
+            {
+              m {
+                __typename
+                k
+                a
+              }
+            }
+          },
+        },
+        Skip(if: $s) {
+          Flatten(path: "m") {
+            Fetch(service: "B") {
+              {
+                ... on T {
+                  __typename
+                  k
+                  a
+                }
+              } =>
+              {
+                ... on T {
+                  r
+                }
+              }
+            },
+          },
+        },
+      },
+    }
+    "###
+    );
+}
