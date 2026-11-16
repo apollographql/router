@@ -241,7 +241,7 @@ where
 ///
 /// Fields under [`APOLLO_PRIVATE_PREFIX`] or named in [`EXCLUDED_ATTRIBUTES`] are skipped: the
 /// formatters hide them, and no router span declares an excluded name as a field. A non-finite
-/// `f64` or a `u64` above `i64::MAX` has no log representation and is dropped.
+/// `f64` or a `u64` above `i64::MAX` can't be stored as an OpenTelemetry value and is dropped.
 struct SpanFieldsVisitor<'a> {
     fields: Vec<KeyValue>,
     excluded_attributes: &'a HashSet<&'static str>,
@@ -347,7 +347,8 @@ fn debug_string(value: &dyn std::fmt::Debug) -> String {
             }
             formatted
         }
-        // A `Debug` impl that creates a span re-enters here while the buffer is borrowed.
+        // A `Debug` impl that creates or records into a span re-enters here while the buffer is
+        // borrowed.
         Err(_) => format!("{value:?}"),
     })
 }
