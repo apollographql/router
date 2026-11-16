@@ -26,10 +26,6 @@ use crate::plugins::telemetry::config;
 use crate::plugins::telemetry::config_new::logging::Format;
 use crate::plugins::telemetry::config_new::logging::StdOut;
 use crate::plugins::telemetry::consts::EVENT_ATTRIBUTE_OMIT_LOG;
-use crate::plugins::telemetry::consts::OTEL_KIND;
-use crate::plugins::telemetry::consts::OTEL_NAME;
-use crate::plugins::telemetry::consts::OTEL_STATUS_CODE;
-use crate::plugins::telemetry::consts::OTEL_STATUS_MESSAGE;
 use crate::plugins::telemetry::formatters::RateLimitFormatter;
 use crate::plugins::telemetry::formatters::json::Json;
 use crate::plugins::telemetry::formatters::text::Text;
@@ -193,7 +189,7 @@ where
             return;
         }
         if let Some(span) = ctx.span(id) {
-            let mut visitor = SpanFieldsVisitor::new(&self.excluded_attributes, false);
+            let mut visitor = SpanFieldsVisitor::new(&self.excluded_attributes);
             // We're checking if it's sampled to not add both attributes in OtelData and our LogAttributes
             if !span.is_sampled() {
                 visitor.fields.reserve(attrs.metadata().fields().len());
@@ -217,8 +213,10 @@ where
             return;
         }
         if let Some(span) = ctx.span(id) {
-            // A sampled span's OtelData holds the other fields, and the formatters read it too.
-            let mut visitor = SpanFieldsVisitor::new(&self.excluded_attributes, span.is_sampled());
+            // Recorded for sampled spans too, although OtelData also gets them: the formatters print
+            // a key from LogAttributes in place of its OtelData copy, and only LogAttributes values
+            // are typed and expanded as JSON.
+            let mut visitor = SpanFieldsVisitor::new(&self.excluded_attributes);
             values.record(&mut visitor);
             if visitor.fields.is_empty() {
                 return;
@@ -245,21 +243,13 @@ where
 struct SpanFieldsVisitor<'a> {
     fields: Vec<KeyValue>,
     excluded_attributes: &'a HashSet<&'static str>,
-    /// Keep only [`OTEL_SPAN_PROPERTIES`], for a span whose other fields are in its `OtelData`.
-    span_properties_only: bool,
 }
 
-/// Fields the OpenTelemetry layer doesn't keep as attributes in `OtelData`: it applies them to the
-/// span's name or status, or ignores them once the span has started.
-const OTEL_SPAN_PROPERTIES: [&str; 4] =
-    [OTEL_NAME, OTEL_KIND, OTEL_STATUS_CODE, OTEL_STATUS_MESSAGE];
-
 impl<'a> SpanFieldsVisitor<'a> {
-    fn new(excluded_attributes: &'a HashSet<&'static str>, span_properties_only: bool) -> Self {
+    fn new(excluded_attributes: &'a HashSet<&'static str>) -> Self {
         Self {
             fields: Vec::new(),
             excluded_attributes,
-            span_properties_only,
         }
     }
 
@@ -274,9 +264,7 @@ impl<'a> SpanFieldsVisitor<'a> {
     /// formatted, which is most of what such a field costs.
     fn skips(&self, field: &Field) -> bool {
         let name = field.name();
-        name.starts_with(APOLLO_PRIVATE_PREFIX)
-            || self.excluded_attributes.contains(name)
-            || (self.span_properties_only && !OTEL_SPAN_PROPERTIES.contains(&name))
+        name.starts_with(APOLLO_PRIVATE_PREFIX) || self.excluded_attributes.contains(name)
     }
 
     fn push(&mut self, name: &'static str, value: opentelemetry::Value) {
@@ -677,8 +665,9 @@ connector:
         }
     }
 
-    /// A sampled span keeps its fields in the OpenTelemetry span data, which the formatters read
-    /// alongside the log attributes. A field must reach only one of the two.
+    /// A sampled span keeps its fields in the OpenTelemetry span data, and a field recorded after
+    /// the span starts also reaches the log attributes. The formatters read both, and must print
+    /// each key once.
     #[test]
     fn text_logs_show_a_late_field_of_a_sampled_span_once() {
         let buff = LogBuffer::default();
@@ -730,6 +719,41 @@ connector:
         assert_eq!(
             logs.matches(r#""otel.status_code":"OK""#).count(),
             1,
+            "{logs}"
+        );
+    }
+
+    /// A late field's JSON string is expanded as before. The OpenTelemetry span data holds it as a
+    /// plain string, so the log attributes' copy is the one printed.
+    #[test]
+    fn json_logs_expand_a_late_field_of_a_sampled_span() {
+        let buff = LogBuffer::default();
+        let format = Json::new(
+            Resource::builder_empty().build(),
+            JsonFormat {
+                display_timestamp: false,
+                display_current_span: true,
+                display_span_list: false,
+                expand_json_string_values: true,
+                ..Default::default()
+            },
+        );
+        let subscriber = tracing_subscriber::Registry::default()
+            .with(DynAttributeLayer::new())
+            .with(otel::layer().with_tracer(make_tracer()))
+            .with(EventsOnly::new(FmtLayer::new(format, buff.clone())))
+            .with(SpanFieldsLayer::default());
+
+        ::tracing::subscriber::with_default(subscriber, || {
+            let span = info_span!("sampled", late = ::tracing::field::Empty);
+            span.record("late", r#"{"b":2}"#);
+            let _span = span.enter();
+            info!("Hello");
+        });
+
+        let logs = buff.to_string();
+        assert!(
+            logs.contains(r#""span":{"late":{"b":2},"name":"sampled"}"#),
             "{logs}"
         );
     }
