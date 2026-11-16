@@ -24,6 +24,7 @@ use crate::link::Link;
 use crate::link::Purpose;
 use crate::link::argument::directive_optional_list_argument;
 use crate::link::argument::directive_optional_string_argument;
+use crate::link::federation_spec_definition::normalize_field_selection_set_imports;
 use crate::link::spec::Identity;
 use crate::link::spec::Url;
 use crate::link::spec::Version;
@@ -387,11 +388,15 @@ impl LinkSpecDefinition {
                 })
                 .unwrap_or(&[])
                 .iter()
-                .map(|value| Ok(Arc::new(Import::try_from(value.as_ref())?)))
-                .collect::<Result<Vec<Arc<Import>>, FederationError>>()?
+                .map(|value| Import::try_from(value.as_ref()))
+                .collect::<Result<Vec<Import>, FederationError>>()?
         } else {
             Default::default()
         };
+        let imports = normalize_field_selection_set_imports(&url, imports)?
+            .into_iter()
+            .map(Arc::new)
+            .collect();
 
         Ok(Link {
             url,

@@ -2438,3 +2438,272 @@ mod authentication_validations {
         );
     }
 }
+
+mod field_selection_set {
+    use super::*;
+
+    /// A federation v3.0 subgraph defining `@key`, `@provides` and `@requires` the way GraphQL
+    /// Federation source schemas do, with `fields: <fields_type>`.
+    fn subgraph(version: &str, imports: &str, fields_type: &str, extra: &str) -> String {
+        format!(
+            r#"
+            extend schema
+              @link(url: "https://specs.apollo.dev/federation/{version}", import: ["@key", "@provides", "@requires", "@external"{imports}])
+
+            type Query {{
+              t: T @provides(fields: "name")
+            }}
+
+            type T @key(fields: "id") {{
+              id: ID!
+              name: String @external
+              weight: Int @external
+              shipping: Int @requires(fields: "weight")
+            }}
+
+            directive @key(fields: {fields_type}, resolvable: Boolean = true) repeatable on OBJECT | INTERFACE
+            directive @provides(fields: {fields_type}) on FIELD_DEFINITION
+            directive @requires(fields: {fields_type}) on FIELD_DEFINITION
+            scalar FieldSelectionSet
+            {extra}
+            "#
+        )
+    }
+
+    #[test]
+    fn accepts_field_selection_set_on_v3() {
+        let schema =
+            build_and_validate(&subgraph("v3.0", "", "FieldSelectionSet!", "")).schema_string();
+        for directive in ["key", "provides", "requires"] {
+            assert!(
+                schema.contains(&format!(
+                    "directive @{directive}(fields: federation__FieldSet!"
+                )),
+                "@{directive} should use federation__FieldSet!:\n{schema}"
+            );
+        }
+        assert!(
+            !schema.contains("FieldSelectionSet"),
+            "the FieldSelectionSet scalar should be removed:\n{schema}"
+        );
+    }
+
+    #[test]
+    fn errors_on_field_selection_set_with_field_set_imported() {
+        assert_errors!(
+            build_for_errors_with_option(
+                &subgraph("v3.0", r#", "FieldSet""#, "FieldSelectionSet!", ""),
+                BuildOption::AsIs
+            ),
+            [(
+                "FIELD_SELECTION_SET_CONFLICT",
+                r#"[S] Cannot use "FieldSelectionSet" in the definition of "@key", "@provides", "@requires" since "FieldSet" is imported from feature "https://specs.apollo.dev/federation": "FieldSelectionSet" is another name for "FieldSet". Please use only one of them."#,
+            )]
+        );
+    }
+
+    #[test]
+    fn errors_on_field_selection_set_with_renamed_field_set_imported() {
+        assert_errors!(
+            build_for_errors_with_option(
+                &subgraph(
+                    "v3.0",
+                    r#", { name: "FieldSet", as: "Fields" }"#,
+                    "FieldSelectionSet!",
+                    "",
+                ),
+                BuildOption::AsIs
+            ),
+            [(
+                "FIELD_SELECTION_SET_CONFLICT",
+                r#"[S] Cannot use "FieldSelectionSet" in the definition of "@key", "@provides", "@requires" since "FieldSet" is imported as "Fields" from feature "https://specs.apollo.dev/federation": "FieldSelectionSet" is another name for "FieldSet". Please use only one of them."#,
+            )]
+        );
+    }
+
+    #[test]
+    fn accepts_field_set_imported_as_field_selection_set_on_v3() {
+        let schema = build_and_validate(&subgraph(
+            "v3.0",
+            r#", { name: "FieldSet", as: "FieldSelectionSet" }"#,
+            "FieldSelectionSet!",
+            "",
+        ))
+        .schema_string();
+        assert!(
+            schema.contains("directive @key(fields: FieldSelectionSet!"),
+            "{schema}"
+        );
+    }
+
+    #[test]
+    fn accepts_field_selection_set_on_v3_with_renamed_directive() {
+        let doc = r#"
+            extend schema
+              @link(url: "https://specs.apollo.dev/federation/v3.0", import: [{ name: "@key", as: "@myKey" }])
+
+            type Query {
+              t: T
+            }
+
+            type T @myKey(fields: "id") {
+              id: ID!
+            }
+
+            directive @myKey(fields: FieldSelectionSet!, resolvable: Boolean = true) repeatable on OBJECT | INTERFACE
+            scalar FieldSelectionSet
+        "#;
+        let schema = build_and_validate(doc).schema_string();
+        assert!(
+            schema.contains("directive @myKey(fields: federation__FieldSet!"),
+            "{schema}"
+        );
+        assert!(!schema.contains("FieldSelectionSet"), "{schema}");
+    }
+
+    #[test]
+    fn keeps_field_selection_set_scalar_used_elsewhere() {
+        let schema = build_and_validate(&subgraph(
+            "v3.0",
+            "",
+            "FieldSelectionSet!",
+            "extend type Query { selection: FieldSelectionSet }",
+        ))
+        .schema_string();
+        assert!(
+            schema.contains("directive @key(fields: federation__FieldSet!"),
+            "{schema}"
+        );
+        assert!(schema.contains("scalar FieldSelectionSet"), "{schema}");
+    }
+
+    #[test]
+    fn accepts_imported_field_selection_set_on_v3() {
+        let schema = build_and_validate(&subgraph(
+            "v3.0",
+            r#", "FieldSelectionSet""#,
+            "FieldSelectionSet!",
+            "",
+        ))
+        .schema_string();
+        // The import is `FieldSet` under the name `FieldSelectionSet`, so the definitions are kept.
+        for directive in ["key", "provides", "requires"] {
+            assert!(
+                schema.contains(&format!(
+                    "directive @{directive}(fields: FieldSelectionSet!"
+                )),
+                "@{directive} should use FieldSelectionSet!:\n{schema}"
+            );
+        }
+        assert!(schema.contains("scalar FieldSelectionSet"), "{schema}");
+        assert!(!schema.contains("FieldSet!"), "{schema}");
+    }
+
+    #[test]
+    fn adds_imported_field_selection_set_definitions_on_v3() {
+        let doc = r#"
+            extend schema
+              @link(url: "https://specs.apollo.dev/federation/v3.0", import: ["@key", "FieldSelectionSet"])
+
+            type Query {
+              t: T
+            }
+
+            type T @key(fields: "id") {
+              id: ID!
+            }
+        "#;
+        let schema = build_and_validate(doc).schema_string();
+        assert!(
+            schema.contains("directive @key(fields: FieldSelectionSet!"),
+            "{schema}"
+        );
+        assert!(schema.contains("scalar FieldSelectionSet"), "{schema}");
+    }
+
+    #[test]
+    fn errors_on_importing_both_field_set_and_field_selection_set() {
+        assert_errors!(
+            build_for_errors_with_option(
+                &subgraph(
+                    "v3.0",
+                    r#", "FieldSet", "FieldSelectionSet""#,
+                    "FieldSelectionSet!",
+                    "",
+                ),
+                BuildOption::AsIs
+            ),
+            [(
+                "FIELD_SELECTION_SET_CONFLICT",
+                r#"[S] Cannot import both "FieldSet" and "FieldSelectionSet" from feature "https://specs.apollo.dev/federation": "FieldSelectionSet" is another name for "FieldSet". Please remove one of these imports."#,
+            )]
+        );
+    }
+
+    #[test]
+    fn errors_on_importing_field_selection_set_before_v3() {
+        assert_errors!(
+            build_for_errors_with_option(
+                &subgraph(
+                    "v2.12",
+                    r#", "FieldSelectionSet""#,
+                    "FieldSelectionSet!",
+                    "",
+                ),
+                BuildOption::AsIs
+            ),
+            [(
+                "INVALID_LINK_DIRECTIVE_USAGE",
+                r#"[S] Cannot import unknown element "FieldSelectionSet"."#,
+            )]
+        );
+    }
+
+    #[test]
+    fn errors_on_nullable_field_selection_set_on_v3() {
+        assert_errors!(
+            build_for_errors_with_option(
+                &subgraph("v3.0", "", "FieldSelectionSet", ""),
+                BuildOption::AsIs
+            ),
+            [
+                (
+                    "DIRECTIVE_DEFINITION_INVALID",
+                    r#"[S] Invalid definition for directive "@key": argument "fields" should have type "federation__FieldSet!" but found type "FieldSelectionSet""#,
+                ),
+                (
+                    "DIRECTIVE_DEFINITION_INVALID",
+                    r#"[S] Invalid definition for directive "@requires": argument "fields" should have type "federation__FieldSet!" but found type "FieldSelectionSet""#,
+                ),
+                (
+                    "DIRECTIVE_DEFINITION_INVALID",
+                    r#"[S] Invalid definition for directive "@provides": argument "fields" should have type "federation__FieldSet!" but found type "FieldSelectionSet""#,
+                ),
+            ]
+        );
+    }
+
+    #[test]
+    fn errors_on_field_selection_set_before_v3() {
+        assert_errors!(
+            build_for_errors_with_option(
+                &subgraph("v2.12", "", "FieldSelectionSet!", ""),
+                BuildOption::AsIs
+            ),
+            [
+                (
+                    "DIRECTIVE_DEFINITION_INVALID",
+                    r#"[S] Invalid definition for directive "@key": argument "fields" should have type "federation__FieldSet!" but found type "FieldSelectionSet!""#,
+                ),
+                (
+                    "DIRECTIVE_DEFINITION_INVALID",
+                    r#"[S] Invalid definition for directive "@requires": argument "fields" should have type "federation__FieldSet!" but found type "FieldSelectionSet!""#,
+                ),
+                (
+                    "DIRECTIVE_DEFINITION_INVALID",
+                    r#"[S] Invalid definition for directive "@provides": argument "fields" should have type "federation__FieldSet!" but found type "FieldSelectionSet!""#,
+                ),
+            ]
+        );
+    }
+}

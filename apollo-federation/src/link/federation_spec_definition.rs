@@ -68,6 +68,9 @@ pub(crate) const FEDERATION_FIELD_SELECTION_MAP_TYPE_NAME_IN_SPEC: Name =
     name!("FieldSelectionMap");
 
 pub(crate) const FEDERATION_FIELDSET_TYPE_NAME_IN_SPEC: Name = name!("FieldSet");
+/// The name GraphQL Federation (composite schemas) source schemas use for `FieldSet`, the type of
+/// the `fields:` argument of `@key`, `@provides` and `@requires`. Accepted on federation v3.0+.
+pub(crate) const FIELD_SELECTION_SET_TYPE_NAME: Name = name!("FieldSelectionSet");
 pub(crate) const FEDERATION_FIELDS_ARGUMENT_NAME: Name = name!("fields");
 pub(crate) const FEDERATION_FORMAT_ARGUMENT_NAME: Name = name!("format");
 pub(crate) const FEDERATION_RESOLVABLE_ARGUMENT_NAME: Name = name!("resolvable");
@@ -1014,6 +1017,57 @@ impl FederationSpecDefinition {
             }),
         )
     }
+}
+
+/// On federation v3.0+, importing `FieldSelectionSet` imports `FieldSet` under that name.
+///
+/// `FieldSelectionSet` is what GraphQL Federation source schemas call `FieldSet`. Mapping the
+/// import to `{ name: "FieldSet", as: "FieldSelectionSet" }` keeps it a single federation type, so
+/// `@key(fields: FieldSelectionSet!)` matches the spec definition and the type isn't merged into the
+/// supergraph. An explicit alias (`{ name: "FieldSelectionSet", as: "Foo" }`) is kept.
+///
+/// Since both names refer to the same type, importing both `FieldSet` and `FieldSelectionSet` is a
+/// `FIELD_SELECTION_SET_CONFLICT` error.
+pub(crate) fn normalize_field_selection_set_imports(
+    url: &Url,
+    imports: Vec<link::Import>,
+) -> Result<Vec<link::Import>, FederationError> {
+    if url.identity != Identity::federation_identity()
+        || url.version < (Version { major: 3, minor: 0 })
+    {
+        return Ok(imports);
+    }
+    let is_type_import =
+        |import: &link::Import, name: &Name| !import.is_directive && import.element == *name;
+    if imports
+        .iter()
+        .any(|import| is_type_import(import, &FIELD_SELECTION_SET_TYPE_NAME))
+        && imports
+            .iter()
+            .any(|import| is_type_import(import, &FEDERATION_FIELDSET_TYPE_NAME_IN_SPEC))
+    {
+        return Err(SingleFederationError::FieldSelectionSetConflict {
+            message: format!(
+                r#"Cannot import both "{FEDERATION_FIELDSET_TYPE_NAME_IN_SPEC}" and "{FIELD_SELECTION_SET_TYPE_NAME}" from feature "{}": "{FIELD_SELECTION_SET_TYPE_NAME}" is another name for "{FEDERATION_FIELDSET_TYPE_NAME_IN_SPEC}". Please remove one of these imports."#,
+                url.identity
+            ),
+        }
+        .into());
+    }
+    Ok(imports
+        .into_iter()
+        .map(|import| {
+            if is_type_import(&import, &FIELD_SELECTION_SET_TYPE_NAME) {
+                link::Import {
+                    element: FEDERATION_FIELDSET_TYPE_NAME_IN_SPEC,
+                    is_directive: false,
+                    alias: Some(import.alias.unwrap_or(FIELD_SELECTION_SET_TYPE_NAME)),
+                }
+            } else {
+                import
+            }
+        })
+        .collect())
 }
 
 fn field_set_type(schema: &FederationSchema) -> Result<Type, FederationError> {

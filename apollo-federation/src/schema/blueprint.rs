@@ -3,8 +3,13 @@ use std::sync::Arc;
 
 use apollo_compiler::Name;
 use apollo_compiler::Node;
+use apollo_compiler::Schema;
+use apollo_compiler::ast;
 use apollo_compiler::ast::Directive;
+use apollo_compiler::schema::ExtendedType;
+use apollo_compiler::schema::Type;
 use apollo_compiler::ty;
+use itertools::Itertools;
 
 use crate::bail;
 use crate::error::FederationError;
@@ -15,10 +20,12 @@ use crate::error::suggestion::suggestion_list;
 use crate::link::Link;
 use crate::link::federation_spec_definition::FED_1;
 use crate::link::federation_spec_definition::FEDERATION_FIELDS_ARGUMENT_NAME;
+use crate::link::federation_spec_definition::FEDERATION_FIELDSET_TYPE_NAME_IN_SPEC;
 use crate::link::federation_spec_definition::FEDERATION_KEY_DIRECTIVE_NAME_IN_SPEC;
 use crate::link::federation_spec_definition::FEDERATION_PROVIDES_DIRECTIVE_NAME_IN_SPEC;
 use crate::link::federation_spec_definition::FEDERATION_REQUIRES_DIRECTIVE_NAME_IN_SPEC;
 use crate::link::federation_spec_definition::FEDERATION_VERSIONS;
+use crate::link::federation_spec_definition::FIELD_SELECTION_SET_TYPE_NAME;
 use crate::link::federation_spec_definition::FederationSpecDefinition;
 use crate::link::federation_spec_definition::fed1_link_imports;
 use crate::link::federation_spec_definition::get_federation_spec_definition_from_subgraph;
@@ -26,6 +33,7 @@ use crate::link::link_spec_definition::LINK_DIRECTIVE_NAME_IN_SPEC;
 use crate::link::link_spec_definition::LinkSpecDefinition;
 use crate::link::spec::Identity;
 use crate::link::spec::Url;
+use crate::link::spec::Version;
 use crate::link::spec_definition::SpecDefinition;
 use crate::schema::FederationSchema;
 use crate::schema::ValidFederationSchema;
@@ -323,6 +331,8 @@ impl FederationBlueprint {
         schema: &mut FederationSchema,
     ) -> Result<(), FederationError> {
         let federation_spec = get_federation_spec_definition_from_subgraph(schema)?;
+        // Must run before `add_elements_to_schema` checks user-provided definitions.
+        normalize_field_selection_set(schema)?;
         federation_spec.add_elements_to_schema(schema)?;
         Self::expand_known_features(schema)
     }
@@ -467,4 +477,129 @@ fn all_default_federation_directive_names() -> HashSet<Name> {
         .iter()
         .map(|spec| spec.name().clone())
         .collect()
+}
+
+/// Accepts `FieldSelectionSet` as federation's `FieldSet` in federation v3.0+ subgraphs.
+///
+/// GraphQL Federation source schemas define `@key`, `@provides` and `@requires` with
+/// `fields: FieldSelectionSet!`, which is federation's `FieldSet` under another name. A custom
+/// scalar can't normally be redefined as another custom scalar, so this rewrites a
+/// `fields: FieldSelectionSet!` argument of user-provided definitions of those directives to
+/// `fields: FieldSet!`, using the name federation's `FieldSet` has in this schema. The definitions
+/// are then validated like any other. A nullable `fields: FieldSelectionSet` is left as is and
+/// rejected, the same as a nullable `FieldSet` or `String`. The user's `FieldSelectionSet` scalar
+/// is removed if nothing else references it, so it isn't merged into the supergraph.
+///
+/// If `FieldSet` is imported, using the user's `FieldSelectionSet` in those definitions too is a
+/// `FIELD_SELECTION_SET_CONFLICT` error.
+fn normalize_field_selection_set(schema: &mut FederationSchema) -> Result<(), FederationError> {
+    let Some(link) = schema
+        .metadata()
+        .and_then(|metadata| metadata.for_identity(FederationSpecDefinition::latest().identity()))
+    else {
+        return Ok(());
+    };
+    if link.url.version < (Version { major: 3, minor: 0 }) {
+        return Ok(());
+    }
+    let field_set_name = link.type_name_in_schema(&FEDERATION_FIELDSET_TYPE_NAME_IN_SPEC);
+    let schema = schema.schema_mut();
+    // Only a user-defined custom scalar is a stand-in for `FieldSet`. If `FieldSelectionSet` is
+    // imported (see `normalize_field_selection_set_imports`), it already is federation's
+    // `FieldSet` and there's nothing to rewrite.
+    if field_set_name == FIELD_SELECTION_SET_TYPE_NAME
+        || !matches!(
+            schema.types.get(&FIELD_SELECTION_SET_TYPE_NAME),
+            Some(ExtendedType::Scalar(_))
+        )
+    {
+        return Ok(());
+    }
+
+    let directives_using_field_selection_set: Vec<Name> = [
+        FEDERATION_KEY_DIRECTIVE_NAME_IN_SPEC,
+        FEDERATION_PROVIDES_DIRECTIVE_NAME_IN_SPEC,
+        FEDERATION_REQUIRES_DIRECTIVE_NAME_IN_SPEC,
+    ]
+    .iter()
+    .map(|directive_name| link.directive_name_in_schema(directive_name))
+    .filter(|name_in_schema| {
+        schema
+            .directive_definitions
+            .get(name_in_schema)
+            .and_then(|definition| definition.argument_by_name(&FEDERATION_FIELDS_ARGUMENT_NAME))
+            .is_some_and(|argument| {
+                *argument.ty.inner_named_type() == FIELD_SELECTION_SET_TYPE_NAME
+            })
+    })
+    .collect();
+    if directives_using_field_selection_set.is_empty() {
+        return Ok(());
+    }
+
+    let field_set_is_imported = link.imports.iter().any(|import| {
+        !import.is_directive && import.element == FEDERATION_FIELDSET_TYPE_NAME_IN_SPEC
+    });
+    if field_set_is_imported {
+        let directives = directives_using_field_selection_set
+            .iter()
+            .map(|name| format!(r#""@{name}""#))
+            .join(", ");
+        let alias = if field_set_name == FEDERATION_FIELDSET_TYPE_NAME_IN_SPEC {
+            String::new()
+        } else {
+            format!(r#" as "{field_set_name}""#)
+        };
+        return Err(SingleFederationError::FieldSelectionSetConflict {
+            message: format!(
+                r#"Cannot use "{FIELD_SELECTION_SET_TYPE_NAME}" in the definition of {directives} since "{FEDERATION_FIELDSET_TYPE_NAME_IN_SPEC}" is imported{alias} from feature "{}": "{FIELD_SELECTION_SET_TYPE_NAME}" is another name for "{FEDERATION_FIELDSET_TYPE_NAME_IN_SPEC}". Please use only one of them."#,
+                link.url.identity
+            ),
+        }
+        .into());
+    }
+
+    for name_in_schema in directives_using_field_selection_set {
+        let Some(definition) = schema.directive_definitions.get_mut(&name_in_schema) else {
+            continue;
+        };
+        if let Some(argument) = definition
+            .make_mut()
+            .arguments
+            .iter_mut()
+            .find(|argument| argument.name == FEDERATION_FIELDS_ARGUMENT_NAME)
+            && matches!(argument.ty.as_ref(), Type::NonNullNamed(name) if *name == FIELD_SELECTION_SET_TYPE_NAME)
+        {
+            argument.make_mut().ty = Node::new(Type::NonNullNamed(field_set_name.clone()));
+        }
+    }
+
+    if !is_type_referenced(schema, &FIELD_SELECTION_SET_TYPE_NAME) {
+        schema.types.shift_remove(&FIELD_SELECTION_SET_TYPE_NAME);
+    }
+    Ok(())
+}
+
+/// Whether any field, argument, input field or directive argument in `schema` has type `name`.
+fn is_type_referenced(schema: &Schema, name: &Name) -> bool {
+    let is_name = |ty: &Type| ty.inner_named_type() == name;
+    let any_argument = |arguments: &[Node<ast::InputValueDefinition>]| {
+        arguments.iter().any(|argument| is_name(&argument.ty))
+    };
+    let references =
+        |field: &ast::FieldDefinition| is_name(&field.ty) || any_argument(&field.arguments);
+    schema
+        .directive_definitions
+        .values()
+        .any(|definition| any_argument(&definition.arguments))
+        || schema.types.values().any(|ty| match ty {
+            ExtendedType::Object(object) => object.fields.values().any(|field| references(field)),
+            ExtendedType::Interface(interface) => {
+                interface.fields.values().any(|field| references(field))
+            }
+            ExtendedType::InputObject(input) => {
+                input.fields.values().any(|field| is_name(&field.ty))
+            }
+            _ => false,
+        })
 }
