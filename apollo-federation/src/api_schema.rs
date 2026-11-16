@@ -1,8 +1,20 @@
 //! Implements API schema generation.
+use apollo_compiler::Name;
 use apollo_compiler::Node;
+use apollo_compiler::Schema;
+use apollo_compiler::ast;
+use apollo_compiler::ast::Directive;
+use apollo_compiler::collections::IndexMap;
+use apollo_compiler::collections::IndexSet;
 use apollo_compiler::name;
+use apollo_compiler::schema::Component;
+use apollo_compiler::schema::ComponentName;
 use apollo_compiler::schema::DirectiveDefinition;
 use apollo_compiler::schema::DirectiveLocation;
+use apollo_compiler::schema::EnumType;
+use apollo_compiler::schema::ExtendedType;
+use apollo_compiler::schema::FieldDefinition;
+use apollo_compiler::schema::InputObjectType;
 use apollo_compiler::schema::InputValueDefinition;
 use apollo_compiler::ty;
 
@@ -11,99 +23,6 @@ use crate::error::FederationError;
 use crate::link::inaccessible_spec_definition::InaccessibleSpecDefinition;
 use crate::schema::FederationSchema;
 use crate::schema::ValidFederationSchema;
-use crate::schema::position;
-
-/// Remove types and directives imported by `@link`.
-fn remove_core_feature_elements(schema: &mut FederationSchema) -> Result<(), FederationError> {
-    let Some(metadata) = schema.metadata() else {
-        return Ok(());
-    };
-
-    // First collect the things to be removed so we do not hold any immutable references
-    // to the schema while mutating it below.
-    let types_for_removal = schema
-        .get_types()
-        .filter(|position| metadata.source_link_of_type(position.type_name()).is_some())
-        .collect::<Vec<_>>();
-
-    let directives_for_removal = schema
-        .get_directive_definitions()
-        .filter(|position| {
-            metadata
-                .source_link_of_directive(&position.directive_name)
-                .is_some()
-        })
-        .collect::<Vec<_>>();
-
-    // First remove children of elements that need to be removed, so there won't be outgoing
-    // references from the type.
-    for position in &types_for_removal {
-        match position {
-            position::TypeDefinitionPosition::Object(position) => {
-                let object = position.get(schema.schema())?.clone();
-                object
-                    .fields
-                    .keys()
-                    .map(|field_name| position.field(field_name.clone()))
-                    .try_for_each(|child| child.remove(schema))?;
-            }
-            position::TypeDefinitionPosition::Interface(position) => {
-                let interface = position.get(schema.schema())?.clone();
-                interface
-                    .fields
-                    .keys()
-                    .map(|field_name| position.field(field_name.clone()))
-                    .try_for_each(|child| child.remove(schema))?;
-            }
-            position::TypeDefinitionPosition::InputObject(position) => {
-                let input_object = position.get(schema.schema())?.clone();
-                input_object
-                    .fields
-                    .keys()
-                    .map(|field_name| position.field(field_name.clone()))
-                    .try_for_each(|child| child.remove(schema))?;
-            }
-            position::TypeDefinitionPosition::Enum(position) => {
-                let enum_ = position.get(schema.schema())?.clone();
-                enum_
-                    .values
-                    .keys()
-                    .map(|field_name| position.value(field_name.clone()))
-                    .try_for_each(|child| child.remove(schema))?;
-            }
-            _ => {}
-        }
-    }
-
-    for position in &directives_for_removal {
-        position.remove(schema)?;
-    }
-
-    for position in &types_for_removal {
-        match position {
-            position::TypeDefinitionPosition::Object(position) => {
-                position.remove(schema)?;
-            }
-            position::TypeDefinitionPosition::Interface(position) => {
-                position.remove(schema)?;
-            }
-            position::TypeDefinitionPosition::InputObject(position) => {
-                position.remove(schema)?;
-            }
-            position::TypeDefinitionPosition::Enum(position) => {
-                position.remove(schema)?;
-            }
-            position::TypeDefinitionPosition::Scalar(position) => {
-                position.remove(schema)?;
-            }
-            position::TypeDefinitionPosition::Union(position) => {
-                position.remove(schema)?;
-            }
-        }
-    }
-
-    Ok(())
-}
 
 #[derive(Debug, Default, Clone)]
 pub struct ApiSchemaOptions {
@@ -128,14 +47,16 @@ pub(crate) fn to_api_schema(
         stream.remove(&mut api_schema)?;
     }
 
-    if let Some(inaccessible_spec) = InaccessibleSpecDefinition::get_from_schema(&api_schema)? {
-        inaccessible_spec.validate_inaccessible(&api_schema)?;
-        inaccessible_spec.remove_inaccessible_elements(&mut api_schema)?;
-    }
-
-    remove_core_feature_elements(&mut api_schema)?;
-
+    let inaccessible = match InaccessibleSpecDefinition::get_from_schema(&api_schema)? {
+        Some(inaccessible_spec) => {
+            inaccessible_spec.validate_inaccessible(&api_schema)?;
+            Some(inaccessible_spec.directive_name(&api_schema)?)
+        }
+        None => None,
+    };
+    let hidden = HiddenElements::new(&api_schema, inaccessible);
     let mut schema = api_schema.into_inner();
+    hidden.remove_from(&mut schema);
 
     if options.include_defer {
         schema
@@ -213,4 +134,290 @@ fn stream_definition() -> Node<DirectiveDefinition> {
         repeatable: false,
         locations: vec![DirectiveLocation::Field],
     })
+}
+
+/// Elements left out of the API schema: those marked `@inaccessible`, everything imported by
+/// `@link`, and every element whose type is one of those.
+struct HiddenElements {
+    inaccessible: Option<Name>,
+    types: IndexSet<Name>,
+    directives: IndexSet<Name>,
+}
+
+impl HiddenElements {
+    fn new(schema: &FederationSchema, inaccessible: Option<Name>) -> Self {
+        let metadata = schema.metadata();
+        let types = schema
+            .schema()
+            .types
+            .iter()
+            .filter(|(name, ty)| {
+                inaccessible
+                    .as_ref()
+                    .is_some_and(|inaccessible| ty.directives().has(inaccessible))
+                    || (!ty.is_built_in()
+                        && metadata
+                            .is_some_and(|metadata| metadata.source_link_of_type(name).is_some()))
+            })
+            .map(|(name, _)| name.clone())
+            .collect();
+        let directives = schema
+            .schema()
+            .directive_definitions
+            .keys()
+            .filter(|name| {
+                metadata.is_some_and(|metadata| metadata.source_link_of_directive(name).is_some())
+            })
+            .cloned()
+            .collect();
+        Self {
+            inaccessible,
+            types,
+            directives,
+        }
+    }
+
+    // Removing elements through their positions updates schema-wide referencers on every
+    // removal, which is quadratic when contracts hide most of the schema. Filtering the raw
+    // schema needs no referencers, and `ValidFederationSchema::new` rebuilds them afterwards.
+    fn remove_from(&self, schema: &mut Schema) {
+        schema.types.retain(|name, _| !self.types.contains(name));
+        for ty in schema.types.values_mut() {
+            if !ty.is_built_in() {
+                self.filter_type(ty);
+            }
+        }
+        schema
+            .directive_definitions
+            .retain(|name, _| !self.directives.contains(name));
+        for directive in schema.directive_definitions.values_mut() {
+            if self.changes_input_values(&directive.arguments) {
+                self.filter_input_values(&mut directive.make_mut().arguments);
+            }
+        }
+        let definition = schema.schema_definition.make_mut();
+        self.strip_directives(&mut definition.directives.0);
+        for root in [
+            &mut definition.query,
+            &mut definition.mutation,
+            &mut definition.subscription,
+        ] {
+            if root
+                .as_ref()
+                .is_some_and(|root| self.types.contains(&**root))
+            {
+                *root = None;
+            }
+        }
+    }
+
+    fn is_inaccessible(&self, directives: &ast::DirectiveList) -> bool {
+        self.inaccessible
+            .as_ref()
+            .is_some_and(|inaccessible| directives.has(inaccessible))
+    }
+
+    fn hides(&self, directives: &ast::DirectiveList, ty: &Name) -> bool {
+        self.is_inaccessible(directives) || self.types.contains(ty)
+    }
+
+    fn hides_input_value(&self, value: &InputValueDefinition) -> bool {
+        self.hides(&value.directives, value.ty.inner_named_type())
+    }
+
+    fn hides_field(&self, field: &FieldDefinition) -> bool {
+        self.hides(&field.directives, field.ty.inner_named_type())
+    }
+
+    fn has_hidden_directive<D: DirectiveName>(&self, directives: &[D]) -> bool {
+        directives
+            .iter()
+            .any(|directive| self.directives.contains(directive.name()))
+    }
+
+    fn strip_directives<D: DirectiveName>(&self, directives: &mut Vec<D>) {
+        directives.retain(|directive| !self.directives.contains(directive.name()));
+    }
+
+    fn changes_input_values(&self, values: &[Node<InputValueDefinition>]) -> bool {
+        values.iter().any(|value| {
+            self.hides_input_value(value) || self.has_hidden_directive(&value.directives.0)
+        })
+    }
+
+    fn filter_input_values(&self, values: &mut Vec<Node<InputValueDefinition>>) {
+        values.retain(|value| !self.hides_input_value(value));
+        for value in values.iter_mut() {
+            if self.has_hidden_directive(&value.directives.0) {
+                self.strip_directives(&mut value.make_mut().directives.0);
+            }
+        }
+    }
+
+    fn changes_field(&self, field: &FieldDefinition) -> bool {
+        self.has_hidden_directive(&field.directives.0)
+            || self.changes_input_values(&field.arguments)
+    }
+
+    fn changes_fields(&self, fields: &IndexMap<Name, Component<FieldDefinition>>) -> bool {
+        fields
+            .values()
+            .any(|field| self.hides_field(field) || self.changes_field(field))
+    }
+
+    fn filter_fields(&self, fields: &mut IndexMap<Name, Component<FieldDefinition>>) {
+        fields.retain(|_, field| !self.hides_field(field));
+        for field in fields.values_mut() {
+            if self.changes_field(field) {
+                let field = field.make_mut();
+                self.strip_directives(&mut field.directives.0);
+                self.filter_input_values(&mut field.arguments);
+            }
+        }
+    }
+
+    fn hides_any_type(&self, names: &IndexSet<ComponentName>) -> bool {
+        names.iter().any(|name| self.types.contains(&**name))
+    }
+
+    fn filter_type_names(&self, names: &mut IndexSet<ComponentName>) {
+        names.retain(|name| !self.types.contains(&**name));
+    }
+
+    fn changes_fields_type(
+        &self,
+        directives: &[Component<Directive>],
+        fields: &IndexMap<Name, Component<FieldDefinition>>,
+        implements_interfaces: &IndexSet<ComponentName>,
+    ) -> bool {
+        self.has_hidden_directive(directives)
+            || self.changes_fields(fields)
+            || self.hides_any_type(implements_interfaces)
+    }
+
+    fn filter_fields_type(
+        &self,
+        directives: &mut Vec<Component<Directive>>,
+        fields: &mut IndexMap<Name, Component<FieldDefinition>>,
+        implements_interfaces: &mut IndexSet<ComponentName>,
+    ) {
+        self.strip_directives(directives);
+        self.filter_fields(fields);
+        self.filter_type_names(implements_interfaces);
+    }
+
+    fn filter_type(&self, ty: &mut ExtendedType) {
+        match ty {
+            ExtendedType::Scalar(scalar) => {
+                if self.has_hidden_directive(&scalar.directives.0) {
+                    self.strip_directives(&mut scalar.make_mut().directives.0);
+                }
+            }
+            ExtendedType::Object(object) => {
+                if self.changes_fields_type(
+                    &object.directives.0,
+                    &object.fields,
+                    &object.implements_interfaces,
+                ) {
+                    let object = object.make_mut();
+                    self.filter_fields_type(
+                        &mut object.directives.0,
+                        &mut object.fields,
+                        &mut object.implements_interfaces,
+                    );
+                }
+            }
+            ExtendedType::Interface(interface) => {
+                if self.changes_fields_type(
+                    &interface.directives.0,
+                    &interface.fields,
+                    &interface.implements_interfaces,
+                ) {
+                    let interface = interface.make_mut();
+                    self.filter_fields_type(
+                        &mut interface.directives.0,
+                        &mut interface.fields,
+                        &mut interface.implements_interfaces,
+                    );
+                }
+            }
+            ExtendedType::Union(union_) => {
+                if self.has_hidden_directive(&union_.directives.0)
+                    || self.hides_any_type(&union_.members)
+                {
+                    let union_ = union_.make_mut();
+                    self.strip_directives(&mut union_.directives.0);
+                    self.filter_type_names(&mut union_.members);
+                }
+            }
+            ExtendedType::Enum(enum_) => self.filter_enum(enum_),
+            ExtendedType::InputObject(input_object) => self.filter_input_object(input_object),
+        }
+    }
+
+    fn filter_enum(&self, enum_: &mut Node<EnumType>) {
+        let changes_value = |directives: &ast::DirectiveList| {
+            self.is_inaccessible(directives) || self.has_hidden_directive(directives)
+        };
+        if !self.has_hidden_directive(&enum_.directives.0)
+            && !enum_
+                .values
+                .values()
+                .any(|value| changes_value(&value.directives))
+        {
+            return;
+        }
+        let enum_ = enum_.make_mut();
+        self.strip_directives(&mut enum_.directives.0);
+        enum_
+            .values
+            .retain(|_, value| !self.is_inaccessible(&value.directives));
+        for value in enum_.values.values_mut() {
+            if self.has_hidden_directive(&value.directives.0) {
+                self.strip_directives(&mut value.make_mut().directives.0);
+            }
+        }
+    }
+
+    fn filter_input_object(&self, input_object: &mut Node<InputObjectType>) {
+        let changes_field = |field: &InputValueDefinition| {
+            self.hides_input_value(field) || self.has_hidden_directive(&field.directives.0)
+        };
+        if !self.has_hidden_directive(&input_object.directives.0)
+            && !input_object
+                .fields
+                .values()
+                .any(|field| changes_field(field))
+        {
+            return;
+        }
+        let input_object = input_object.make_mut();
+        self.strip_directives(&mut input_object.directives.0);
+        input_object
+            .fields
+            .retain(|_, field| !self.hides_input_value(field));
+        for field in input_object.fields.values_mut() {
+            if self.has_hidden_directive(&field.directives.0) {
+                self.strip_directives(&mut field.make_mut().directives.0);
+            }
+        }
+    }
+}
+
+/// Lets the directive helpers take both `ast` and `schema` directive lists, whose elements wrap
+/// directives differently.
+trait DirectiveName {
+    fn name(&self) -> &Name;
+}
+
+impl DirectiveName for Node<Directive> {
+    fn name(&self) -> &Name {
+        &self.name
+    }
+}
+
+impl DirectiveName for Component<Directive> {
+    fn name(&self) -> &Name {
+        &self.name
+    }
 }
