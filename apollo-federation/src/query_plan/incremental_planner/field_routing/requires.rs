@@ -392,11 +392,12 @@ impl FieldRoutingSearchSpace {
         }
 
         // In place: the fields sit alongside the field. No entity
-        // representation reads them, so aliases need no rename back.
+        // representation reads them, so aliases need no rename back, and
+        // they can share the field's conditions.
         let (conditions, _) = self.stage_condition_aliases(state, pending, requires_conditions)?;
         state.graph.append_selection(
             target.fetch_node,
-            &unconditioned_input_path(&pending.op_path),
+            &with_own_conditions(&pending.op_path, &pending.selection),
             Some(&conditions),
         );
         Ok(target)
