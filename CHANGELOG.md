@@ -2,6 +2,54 @@
 
 This project adheres to [Semantic Versioning v2.0.0](https://semver.org/spec/v2.0.0.html).
 
+# [2.19.1] - 2026-11-13
+
+## 🚀 Features
+
+### Add a metric to track non-local selection sets observed during query planning
+
+`apollo.router.query_planning.plan.non_local_selections` is a histogram of the
+number of non-local selections estimated during query planning traversal. An
+investigation into the complexity of operations is warranted should this metric
+return values close to the internal non-local selections limit of 100000. The
+histogram uses fixed bucket boundaries of 100, 1000, 25000, 50000, 100000, and
+150000.
+
+By [@lrlna](https://github.com/lrlna) in https://github.com/apollographql/router/pull/10349
+
+## 🐛 Fixes
+
+### Unresponsive replicas no longer break non-cluster Redis caching
+
+Since router 2.15.1, a non-cluster Redis deployment with replicas (for example, a primary with read replicas, or a managed high-availability instance with a standby) could lose its Redis cache entirely while the primary was healthy. This happened when a replica accepted connections but never answered, such as a paused replica or a standby that doesn't accept clients. The router repeatedly logged `redis client aborted; marking for recreation` and `client pool being recreated after connection interrupt`, and cache reads and writes to the primary failed.
+
+Redis Cluster deployments are unchanged. Other Redis deployments no longer open connections to replicas, which the router doesn't read from outside cluster mode, so an unresponsive replica no longer affects caching on the primary. This restores the behavior from before 2.15.1.
+
+By [@BrynCooke](https://github.com/BrynCooke) in https://github.com/apollographql/router/pull/10630
+
+### Fix quadratic API schema generation for contracts that hide most of a supergraph
+
+Generating an API schema removed `@inaccessible` elements one at a time, and each removal updated
+referencer sets spanning the whole schema. Contract variants that hide most of a large supergraph
+took quadratic time, reaching tens of seconds. API schema generation now removes `@inaccessible`
+and `@link`-imported elements in a single pass over the schema, producing the same API schema.
+
+By [@tninesling](https://github.com/tninesling) in https://github.com/apollographql/router/pull/10715
+
+### Keep literal `@skip`/`@include` in subgraph fetches under a variable condition ([PR #10708](https://github.com/apollographql/router/pull/10708))
+
+When a field had a variable `@skip` or `@include`, the query planner dropped `@include(if: false)` and `@skip(if: true)` from nested fields in the same subgraph fetch. Subgraphs then resolved fields the client excluded. The router still removed them from the response, so the cost was extra subgraph work. These directives are now sent to the subgraph.
+
+By [@tninesling](https://github.com/tninesling) in https://github.com/apollographql/router/pull/10708
+
+### Return a 400 with `QUERY_PLAN_COMPLEXITY_EXCEEDED` when query planning complexity limits are exceeded
+
+When a query plan was rejected for exceeding a planner complexity limit — the non-local selections limit, the `supergraph.query_planning.experimental_paths_limit` option, or the cap on path combinations — the router returned an HTTP 500 with a generic `INTERNAL_SERVER_ERROR` code, making it indistinguishable from a genuine internal failure. These rejections are now returned as an HTTP 400 response with the `QUERY_PLAN_COMPLEXITY_EXCEEDED` extension code, so clients and monitoring can correctly attribute them to the operation rather than to the router.
+
+By [@apollo-mateuswgoettems](https://github.com/apollo-mateuswgoettems) in https://github.com/apollographql/router/pull/10197
+
+
+
 # [2.19.0] - 2026-10-21
 
 ## 🚀 Features

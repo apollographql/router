@@ -1428,6 +1428,166 @@ mod test {
         }
     }
 
+    /// Tests against a fake standalone primary whose `ROLE` reply advertises a replica that
+    /// accepts TCP connections but never answers, like a paused replica or an HA standby that
+    /// doesn't accept clients.
+    mod standalone_with_unresponsive_replica {
+        use std::collections::HashMap;
+        use std::sync::Arc;
+        use std::sync::atomic::AtomicUsize;
+        use std::sync::atomic::Ordering;
+        use std::time::Duration;
+
+        use parking_lot::Mutex;
+        use serde_json::json;
+        use tokio::io::AsyncBufReadExt;
+        use tokio::io::AsyncReadExt;
+        use tokio::io::AsyncWriteExt;
+        use tokio::io::BufReader;
+        use tokio::net::TcpListener;
+        use tokio::net::TcpStream;
+        use tokio::net::tcp::OwnedReadHalf;
+        use tower::BoxError;
+
+        use crate::cache::redis::RedisCacheStorage;
+        use crate::cache::redis::RedisKey;
+        use crate::cache::redis::RedisValue;
+
+        type Store = Arc<Mutex<HashMap<Vec<u8>, Vec<u8>>>>;
+
+        /// Accepts connections and holds them open without ever replying. Returns its port and
+        /// the number of connections it has accepted.
+        async fn unresponsive_replica() -> (u16, Arc<AtomicUsize>) {
+            let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+            let port = listener.local_addr().unwrap().port();
+            let accepted = Arc::new(AtomicUsize::new(0));
+            let counter = accepted.clone();
+            tokio::spawn(async move {
+                let mut held = Vec::new();
+                while let Ok((socket, _)) = listener.accept().await {
+                    counter.fetch_add(1, Ordering::SeqCst);
+                    held.push(socket);
+                }
+            });
+            (port, accepted)
+        }
+
+        /// Serves just enough of the protocol for fred to connect and run GET/SET, and reports
+        /// `replica_port` as a connected replica in its `ROLE` reply.
+        async fn primary(replica_port: u16) -> u16 {
+            let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+            let port = listener.local_addr().unwrap().port();
+            let store = Store::default();
+            tokio::spawn(async move {
+                while let Ok((socket, _)) = listener.accept().await {
+                    tokio::spawn(serve(socket, store.clone(), replica_port));
+                }
+            });
+            port
+        }
+
+        async fn serve(socket: TcpStream, store: Store, replica_port: u16) {
+            let (reader, mut writer) = socket.into_split();
+            let mut reader = BufReader::new(reader);
+            while let Some(args) = read_command(&mut reader).await {
+                let reply = respond(&args, &store, replica_port);
+                if writer.write_all(&reply).await.is_err() {
+                    return;
+                }
+            }
+        }
+
+        /// Reads one command sent as a RESP array of bulk strings.
+        async fn read_command(reader: &mut BufReader<OwnedReadHalf>) -> Option<Vec<Vec<u8>>> {
+            let mut line = String::new();
+            reader.read_line(&mut line).await.ok()?;
+            let count: usize = line.trim().strip_prefix('*')?.parse().ok()?;
+            let mut args = Vec::with_capacity(count);
+            for _ in 0..count {
+                line.clear();
+                reader.read_line(&mut line).await.ok()?;
+                let len: usize = line.trim().strip_prefix('$')?.parse().ok()?;
+                let mut arg = vec![0; len + 2];
+                reader.read_exact(&mut arg).await.ok()?;
+                arg.truncate(len);
+                args.push(arg);
+            }
+            Some(args)
+        }
+
+        fn bulk(value: &[u8]) -> Vec<u8> {
+            let mut out = format!("${}\r\n", value.len()).into_bytes();
+            out.extend_from_slice(value);
+            out.extend_from_slice(b"\r\n");
+            out
+        }
+
+        fn respond(args: &[Vec<u8>], store: &Store, replica_port: u16) -> Vec<u8> {
+            let command = String::from_utf8_lossy(&args[0]).to_ascii_uppercase();
+            match command.as_str() {
+                "PING" => b"+PONG\r\n".to_vec(),
+                "CLIENT" => b":1\r\n".to_vec(),
+                "INFO" => bulk(b"# Server\r\nredis_version:7.4.0\r\n"),
+                "ROLE" => {
+                    let port = replica_port.to_string();
+                    let mut out = b"*3\r\n".to_vec();
+                    out.extend(bulk(b"master"));
+                    out.extend(b":0\r\n*1\r\n*3\r\n");
+                    out.extend(bulk(b"127.0.0.1"));
+                    out.extend(bulk(port.as_bytes()));
+                    out.extend(bulk(b"0"));
+                    out
+                }
+                "SET" => {
+                    store.lock().insert(args[1].clone(), args[2].clone());
+                    b"+OK\r\n".to_vec()
+                }
+                "GET" => match store.lock().get(&args[1]) {
+                    Some(value) => bulk(value),
+                    None => b"$-1\r\n".to_vec(),
+                },
+                _ => b"+OK\r\n".to_vec(),
+            }
+        }
+
+        /// Replicas aren't used outside of cluster mode, so a replica that never answers must
+        /// neither delay the connection to the primary nor be connected to at all. With eager
+        /// replica connections, the client would connect to it, stall until fred's internal
+        /// timeout, abort and recreate the whole pool, in a loop.
+        #[tokio::test]
+        async fn pool_connects_and_serves_commands_without_touching_the_replica()
+        -> Result<(), BoxError> {
+            let (replica_port, replica_connections) = unresponsive_replica().await;
+            let primary_port = primary(replica_port).await;
+            let config = serde_json::from_value(json!({
+                "urls": [format!("redis://127.0.0.1:{primary_port}")],
+                "required_to_start": true,
+                "timeout": "1s",
+            }))?;
+            let storage = RedisCacheStorage::new(config, "test").await?;
+
+            // fred's internal command timeout is 10s; connecting well within that shows the
+            // replica didn't stall the connection
+            tokio::time::timeout(Duration::from_secs(5), storage.create_client_pool())
+                .await
+                .expect("connecting to the primary should not wait on the replica")?;
+
+            let key = RedisKey("standalone_replica_key".to_string());
+            storage
+                .insert(key.clone(), RedisValue("value".to_string()), None)
+                .await;
+            let fetched: RedisValue<String> = storage.get(key).await?;
+            assert_eq!(fetched.0, "value");
+
+            assert_eq!(
+                replica_connections.load(Ordering::SeqCst),
+                0,
+                "a standalone pool should never connect to a replica"
+            );
+            Ok(())
+        }
+    }
+
     /// Runs the storage against in-process fake deployments of each topology, with one replica
     /// misbehaving in each way replicas fail in production, and checks that the pool stays usable
     /// and that reads go to the right nodes.
