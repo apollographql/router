@@ -966,6 +966,7 @@ mod tests {
     use crate::router_factory::Endpoint;
     use crate::router_factory::RouterFactory;
     use crate::router_factory::RouterSuperServiceFactory;
+    use crate::services::Plugins;
     use crate::services::RouterRequest;
     use crate::services::new_service::ServiceFactory;
     use crate::services::router;
@@ -2295,6 +2296,7 @@ mod tests {
             type Future = <Self::RouterService as Service<RouterRequest>>::Future;
             fn web_endpoints(&self) -> MultiMap<ListenAddr, Endpoint>;
             fn pipeline_ref(&self) -> Arc<PipelineRef>;
+            fn plugins(&self) -> Arc<Plugins>;
         }
         impl ServiceFactory<RouterRequest> for MyRouterFactory {
             type Service = router::BoxService;

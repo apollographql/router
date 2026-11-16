@@ -18,6 +18,8 @@ pub(super) enum RequestSizeLimitError {
     BodyTooLarge,
     /// Request query payload too large
     QueryTooLarge,
+    /// Request header fields too large
+    OversizedHeaderList,
 }
 
 struct BodyLimitControlInner {
