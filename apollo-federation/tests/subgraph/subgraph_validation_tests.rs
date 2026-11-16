@@ -1028,6 +1028,86 @@ mod custom_error_message_for_misnamed_directives {
             ]
         );
     }
+
+    /// Builds `doc` as is and returns the hint appended to its single unknown-directive error.
+    fn unknown_directive_hint(doc: &str) -> String {
+        let errors = build_for_errors_with_option(doc, BuildOption::AsIs);
+        assert_eq!(errors.len(), 1, "expected a single error: {errors:?}");
+        let (code, message) = &errors[0];
+        assert_eq!(code, "INVALID_GRAPHQL");
+        message
+            .lines()
+            .last()
+            .expect("non-empty message")
+            .trim()
+            .to_string()
+    }
+
+    const LOOKUP_SCHEMA: &str = r#"
+        type Query {
+          t(id: ID!): T @lookup
+        }
+
+        type T @key(fields: "id") {
+          id: ID!
+        }
+    "#;
+
+    fn with_federation_link(version: &str, schema: &str) -> String {
+        format!(
+            r#"extend schema @link(url: "https://specs.apollo.dev/federation/{version}", import: ["@key"])
+            {schema}"#
+        )
+    }
+
+    #[test]
+    fn has_suggestions_if_a_fed3_directive_is_used_in_fed1() {
+        assert_eq!(
+            unknown_directive_hint(LOOKUP_SCHEMA),
+            r#"If you meant the "@lookup" federation directive, note that this schema is a federation 1 schema. To use it, it needs to @link to the federation specification v3.0 or later."#
+        );
+    }
+
+    #[test]
+    fn has_suggestions_if_a_fed3_directive_is_misspelled_in_fed1() {
+        assert_eq!(
+            unknown_directive_hint(&LOOKUP_SCHEMA.replace("@lookup", "@lookp")),
+            r#"Did you mean "@lookup"? If so, note that it was added in federation v3.0 but this schema is a federation 1 one. To use it, it needs to @link to the federation specification v3.0 or later."#
+        );
+    }
+
+    #[test]
+    fn has_suggestions_if_a_fed3_directive_is_used_in_fed2() {
+        assert_eq!(
+            unknown_directive_hint(&with_federation_link("v2.12", LOOKUP_SCHEMA)),
+            r#"If you meant the "@lookup" federation directive, note that it was added in federation v3.0 but this schema links federation v2.12. To use it, update the @link to the federation specification to v3.0 or later."#
+        );
+    }
+
+    #[test]
+    fn has_suggestions_if_a_directive_is_used_before_the_version_that_added_it() {
+        let schema = r#"
+            type Query {
+              t(id: ID!): T @cacheTag(format: "t")
+            }
+
+            type T @key(fields: "id") {
+              id: ID!
+            }
+        "#;
+        assert_eq!(
+            unknown_directive_hint(&with_federation_link("v2.0", schema)),
+            r#"If you meant the "@cacheTag" federation directive, note that it was added in federation v2.12 but this schema links federation v2.0. To use it, update the @link to the federation specification to v2.12 or later."#
+        );
+    }
+
+    #[test]
+    fn has_suggestions_if_a_fed3_directive_is_not_imported_in_fed3() {
+        assert_eq!(
+            unknown_directive_hint(&with_federation_link("v3.0", LOOKUP_SCHEMA)),
+            r#"If you meant the "@lookup" federation directive, you should use fully-qualified name "@federation__lookup" or add "@lookup" to the \`import\` argument of the @link to the federation specification."#
+        );
+    }
 }
 
 // PORT_NOTE: Corresponds to '@core/@link handling' tests in JS

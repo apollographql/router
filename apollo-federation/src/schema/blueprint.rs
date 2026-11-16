@@ -238,11 +238,31 @@ impl FederationBlueprint {
             //     work).
             //  3. the directive has an `import`, but it's been aliased to another name.
 
+            //  4. the directive was added in a later federation version than the one the schema
+            //     links.
+            let added_in = federation_version_adding_directive(unknown_directive_name);
+
             if !is_fed2 {
                 // Case #1.
+                let message = match added_in {
+                    Some(version) if *version > FEDERATION_V2_0 => format!(
+                        r#"{error_message} If you meant the "@{unknown_directive_name}" federation directive, note that this schema is a federation 1 schema. To use it, it needs to @link to the federation specification v{version} or later."#
+                    ),
+                    _ => format!(
+                        r#"{error_message} If you meant the "@{unknown_directive_name}" federation 2 directive, note that this schema is a federation 1 schema. To be a federation 2 schema, it needs to @link to the federation specification v2."#
+                    ),
+                };
+                return SingleFederationError::InvalidGraphQL { message };
+            }
+
+            let linked_version = metadata.federation_spec_definition().version();
+            if let Some(version) = added_in
+                && version > linked_version
+            {
+                // Case #4.
                 return SingleFederationError::InvalidGraphQL {
                     message: format!(
-                        r#"{error_message} If you meant the "@{unknown_directive_name}" federation 2 directive, note that this schema is a federation 1 schema. To be a federation 2 schema, it needs to @link to the federation specification v2."#
+                        r#"{error_message} If you meant the "@{unknown_directive_name}" federation directive, note that it was added in federation v{version} but this schema links federation v{linked_version}. To use it, update the @link to the federation specification to v{version} or later."#
                     ),
                 };
             }
@@ -282,15 +302,20 @@ impl FederationBlueprint {
             );
             if !suggestions.is_empty() {
                 let did_you_mean = did_you_mean(suggestions.iter().map(|s| format!("@{s}")));
-                let note = if suggestions.len() == 1 {
-                    "it is a federation 2 directive"
-                } else {
-                    "they are federation 2 directives"
+                // The version needed for all the suggestions to be available.
+                let required_version = suggestions
+                    .iter()
+                    .filter_map(|name| federation_version_adding_directive(name))
+                    .max()
+                    .filter(|version| **version > FEDERATION_V2_0);
+                let note = match (required_version, suggestions.len()) {
+                    (None, 1) => "it is a federation 2 directive but this schema is a federation 1 one. To be a federation 2 schema, it needs to @link to the federation specification v2.".to_string(),
+                    (None, _) => "they are federation 2 directives but this schema is a federation 1 one. To be a federation 2 schema, it needs to @link to the federation specification v2.".to_string(),
+                    (Some(version), 1) => format!("it was added in federation v{version} but this schema is a federation 1 one. To use it, it needs to @link to the federation specification v{version} or later."),
+                    (Some(version), _) => format!("this schema is a federation 1 one. To use them, it needs to @link to the federation specification v{version} or later."),
                 };
                 return SingleFederationError::InvalidGraphQL {
-                    message: format!(
-                        "{error_message}{did_you_mean} If so, note that {note} but this schema is a federation 1 one. To be a federation 2 schema, it needs to @link to the federation specification v2."
-                    ),
+                    message: format!("{error_message}{did_you_mean} If so, note that {note}"),
                 };
             }
             // fall-through
@@ -470,6 +495,19 @@ pub(crate) const FEDERATION_OPERATION_FIELDS: [Name; 2] = [
     FEDERATION_SERVICE_FIELD_NAME,
     FEDERATION_ENTITIES_FIELD_NAME,
 ];
+
+const FEDERATION_V2_0: Version = Version { major: 2, minor: 0 };
+
+/// The first federation version whose spec defines `directive_name`, if any.
+fn federation_version_adding_directive(directive_name: &str) -> Option<&'static Version> {
+    FEDERATION_VERSIONS.versions().find(|version| {
+        FEDERATION_VERSIONS.find(version).is_some_and(|spec| {
+            spec.directive_specs()
+                .iter()
+                .any(|directive| directive.name() == directive_name)
+        })
+    })
+}
 
 fn all_default_federation_directive_names() -> HashSet<Name> {
     FederationSpecDefinition::latest()
