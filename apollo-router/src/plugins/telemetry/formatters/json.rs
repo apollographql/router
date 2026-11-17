@@ -177,6 +177,7 @@ where
         let mut serializer = serializer.serialize_map(None)?;
 
         let ext = self.0.extensions();
+        let log_attributes = ext.get::<LogAttributes>();
 
         // Get otel attributes
         {
@@ -187,6 +188,8 @@ where
                     !key_name.starts_with(APOLLO_PRIVATE_PREFIX)
                         && !key_name.starts_with(APOLLO_CONNECTOR_PREFIX)
                         && !self.1.contains(&key_name)
+                        // Written below with its type and JSON expansion.
+                        && !log_attributes.is_some_and(|attrs| attrs.contains_key(&kv.key))
                 }) {
                     serializer.serialize_entry(kv.key.as_str(), &kv.value.as_str())?;
                 }
@@ -194,7 +197,7 @@ where
         }
         // Get custom dynamic attributes
         {
-            let custom_attributes = ext.get::<LogAttributes>().map(|attrs| attrs.attributes());
+            let custom_attributes = log_attributes.map(|attrs| attrs.attributes());
             if let Some(custom_attributes) = custom_attributes {
                 #[cfg(test)]
                 let custom_attributes: Vec<&opentelemetry::KeyValue> = {
