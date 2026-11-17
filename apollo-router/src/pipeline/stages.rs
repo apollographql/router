@@ -506,9 +506,10 @@ pub(crate) fn build_query_parsing_service(
 
     ServiceBuilder::new()
         .layer(QueryParsingCacheLayer::new(cache_config))
-        .apply_plugin_layer(plugins, |authorization: &AuthorizationPlugin| {
-            authorization.authorization_requirements_layer(schema.clone())
-        })
+        .apply_plugin_layer(
+            plugins,
+            AuthorizationPlugin::authorization_requirements_layer,
+        )
         .layer(LimitRecursiveSelectionLayer::new(
             max_recursive_selections,
             warn_only,

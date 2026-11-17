@@ -6,6 +6,7 @@ use std::sync::Arc;
 
 use apollo_compiler::ExecutableDocument;
 use apollo_compiler::ast;
+use apollo_compiler::validation::Valid;
 use apollo_federation::link::metadata::LinksMetadata;
 use apollo_federation::link::spec::Identity;
 use http::StatusCode;
@@ -76,6 +77,11 @@ pub(crate) struct AuthorizationDirectives {
 }
 
 impl AuthorizationDirectives {
+    /// Whether the supergraph links at least one of the directives at a supported version.
+    pub(crate) fn any_linked(&self) -> bool {
+        self.authenticated.is_some() || self.requires_scopes.is_some() || self.policy.is_some()
+    }
+
     /// Resolves all three names from one parse of the schema's `@link` metadata.
     pub(crate) fn from_schema(schema: &apollo_compiler::Schema) -> Self {
         let Ok(Some(links)) = LinksMetadata::from_schema(schema) else {
@@ -238,6 +244,8 @@ pub(crate) struct AuthorizationPlugin {
     require_authentication: bool,
     reject_unauthorized: bool,
     directives_enabled: bool,
+    supergraph_schema: Arc<Valid<apollo_compiler::Schema>>,
+    directives: AuthorizationDirectives,
 }
 
 impl AuthorizationPlugin {
@@ -259,16 +267,15 @@ impl AuthorizationPlugin {
 
     /// Returns a layer for the query parsing service that stores each parsed operation's
     /// authorization requirements on its document, or an identity layer when authorization
-    /// directives are disabled or `schema` links none of them.
+    /// directives are disabled or the supergraph links none of them.
     pub(crate) fn authorization_requirements_layer(
         &self,
-        schema: Arc<Schema>,
     ) -> OptionLayer<AuthorizationRequirementsLayer> {
         tower::util::option_layer(
-            (self.directives_enabled && Self::links_authorization_directives(&schema)).then(|| {
+            (self.directives_enabled && self.directives.any_linked()).then(|| {
                 AuthorizationRequirementsLayer::new(
-                    Arc::new(schema.supergraph_schema().clone()),
-                    schema.authorization_directives.clone(),
+                    self.supergraph_schema.clone(),
+                    self.directives.clone(),
                 )
             }),
         )
@@ -626,6 +633,8 @@ impl Plugin for AuthorizationPlugin {
             require_authentication: init.config.require_authentication,
             reject_unauthorized: init.config.directives.reject_unauthorized,
             directives_enabled: init.config.directives.enabled,
+            directives: AuthorizationDirectives::from_schema(&init.supergraph_schema),
+            supergraph_schema: init.supergraph_schema,
         })
     }
 

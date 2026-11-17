@@ -216,12 +216,12 @@ mod tests {
             .unwrap()
     }
 
-    /// A plugin registry holding the authorization plugin, built from `configuration`'s
-    /// `authorization` section.
-    async fn authorization_plugins(configuration: &Configuration) -> Plugins {
+    /// A plugin registry holding the authorization plugin, built for the supergraph `sdl` from
+    /// `configuration`'s `authorization` section.
+    async fn authorization_plugins(sdl: &str, configuration: &Configuration) -> Plugins {
         let plugin = <AuthorizationPlugin as Plugin>::new(PluginInit::fake_new(
             AuthorizationPlugin::configuration(configuration),
-            Default::default(),
+            Arc::new(sdl.to_string()),
         ))
         .await
         .unwrap();
@@ -237,7 +237,7 @@ mod tests {
         configuration: Configuration,
     ) -> crate::services::query_parsing::BoxCloneService {
         let schema = schema(sdl, &configuration);
-        let plugins = authorization_plugins(&configuration).await;
+        let plugins = authorization_plugins(sdl, &configuration).await;
         build_query_parsing_service(schema, Arc::new(configuration), &plugins)
     }
 
