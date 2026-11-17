@@ -2527,7 +2527,7 @@ static INVALID_TAG_NAME: LazyLock<ErrorCodeDefinition> = LazyLock::new(|| {
 static FIELD_SELECTION_SET_CONFLICT: LazyLock<ErrorCodeDefinition> = LazyLock::new(|| {
     ErrorCodeDefinition::new(
         "FIELD_SELECTION_SET_CONFLICT".to_owned(),
-        "A schema uses both `FieldSet` and `FieldSelectionSet`, which are two names for the same federation type.".to_owned(),
+        "A `@link` to the federation specification imports both `FieldSet` and `FieldSelectionSet`, which are two names for the same federation type.".to_owned(),
         Some(ErrorCodeMetadata {
             added_in: "3.0.0",
             replaces: &[],

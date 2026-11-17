@@ -844,40 +844,33 @@ fn misc_requires_rejected_when_sibling_field_returns_query_root() {
 }
 
 /// GraphQL Federation source schemas define `@key`, `@provides` and `@requires` with
-/// `fields: FieldSelectionSet!`. On federation v3.0 these compose, whether `FieldSelectionSet` is
-/// the subgraph's own scalar or imported, and it doesn't end up in the supergraph or the API
-/// schema.
+/// `fields: FieldSelectionSet!`. On federation v3.0 these compose when `FieldSelectionSet` is
+/// imported, and it doesn't end up in the supergraph or the API schema.
 #[test]
 fn misc_field_selection_set_definitions_with_fed3() {
-    for extra_import in ["", r#", "FieldSelectionSet""#] {
-        compose_with_field_selection_set_definitions(extra_import);
-    }
-}
-
-fn compose_with_field_selection_set_definitions(extra_import: &str) {
     let subgraph_a = Subgraph::parse(
         "subgraphA",
         "http://subgraphA",
-        &format!(r#"
+        r#"
         extend schema
-          @link(url: "https://specs.apollo.dev/federation/v3.0", import: ["@key", "@provides", "@requires", "@external"{extra_import}])
+          @link(url: "https://specs.apollo.dev/federation/v3.0", import: ["@key", "@provides", "@requires", "@external", "FieldSelectionSet"])
 
-        type Query {{
+        type Query {
           t: T @provides(fields: "name")
-        }}
+        }
 
-        type T @key(fields: "id") {{
+        type T @key(fields: "id") {
           id: ID!
           name: String @external
           weight: Int @external
           shipping: Int @requires(fields: "weight")
-        }}
+        }
 
         directive @key(fields: FieldSelectionSet!, resolvable: Boolean = true) repeatable on OBJECT | INTERFACE
         directive @provides(fields: FieldSelectionSet!) on FIELD_DEFINITION
         directive @requires(fields: FieldSelectionSet!) on FIELD_DEFINITION
         scalar FieldSelectionSet
-        "#),
+        "#,
     )
     .expect("valid subgraph");
 
@@ -898,7 +891,7 @@ fn compose_with_field_selection_set_definitions(extra_import: &str) {
     .expect("valid subgraph");
 
     let result = compose(vec![subgraph_a, subgraph_b])
-        .unwrap_or_else(|e| panic!("composition should succeed (import{extra_import}): {e:?}"));
+        .unwrap_or_else(|e| panic!("composition should succeed: {e:?}"));
 
     let supergraph = result.schema().schema();
     assert!(!supergraph.types.contains_key("FieldSelectionSet"));
