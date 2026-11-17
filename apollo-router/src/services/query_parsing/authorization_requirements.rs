@@ -4,29 +4,32 @@ use std::sync::Arc;
 use std::task::Context as TaskContext;
 use std::task::Poll;
 
+use apollo_compiler::Schema;
+use apollo_compiler::validation::Valid;
 use futures::future::BoxFuture;
 use tower::Layer;
 use tower::Service;
 
+use crate::plugins::authorization::AuthorizationDirectives;
 use crate::plugins::authorization::AuthorizationPlugin;
 use crate::plugins::authorization::CacheKeyMetadata;
 use crate::services::query_parsing::ParsedDocument;
 use crate::services::query_parsing::ParsedDocumentInner;
 use crate::services::query_parsing::Request;
-use crate::spec::Schema;
 
 /// Which `@authenticated`, `@requiresScopes` and `@policy` requirements the document's selected
-/// operation has.
+/// operation has, given the supergraph and the names its authorization directives have there.
 pub(crate) fn operation_requirements(
     doc: &ParsedDocumentInner,
-    schema: &Schema,
+    supergraph_schema: &Valid<Schema>,
+    directives: &AuthorizationDirectives,
 ) -> CacheKeyMetadata {
     AuthorizationPlugin::generate_cache_metadata(
         &doc.executable,
         doc.operation.name.as_deref(),
-        schema.supergraph_schema(),
+        supergraph_schema,
         false,
-        &schema.authorization_directives,
+        directives,
     )
 }
 
@@ -36,12 +39,19 @@ pub(crate) fn operation_requirements(
 /// the document carries its requirements. Parse errors pass through unchanged.
 #[derive(Clone)]
 pub(crate) struct AuthorizationRequirementsLayer {
-    schema: Arc<Schema>,
+    supergraph_schema: Arc<Valid<Schema>>,
+    directives: Arc<AuthorizationDirectives>,
 }
 
 impl AuthorizationRequirementsLayer {
-    pub(crate) fn new(schema: Arc<Schema>) -> Self {
-        Self { schema }
+    pub(crate) fn new(
+        supergraph_schema: Arc<Valid<Schema>>,
+        directives: AuthorizationDirectives,
+    ) -> Self {
+        Self {
+            supergraph_schema,
+            directives: Arc::new(directives),
+        }
     }
 }
 
@@ -51,7 +61,8 @@ impl<S> Layer<S> for AuthorizationRequirementsLayer {
     fn layer(&self, inner: S) -> Self::Service {
         AuthorizationRequirementsService {
             inner,
-            schema: self.schema.clone(),
+            supergraph_schema: self.supergraph_schema.clone(),
+            directives: self.directives.clone(),
         }
     }
 }
@@ -59,7 +70,8 @@ impl<S> Layer<S> for AuthorizationRequirementsLayer {
 #[derive(Clone)]
 pub(crate) struct AuthorizationRequirementsService<S> {
     inner: S,
-    schema: Arc<Schema>,
+    supergraph_schema: Arc<Valid<Schema>>,
+    directives: Arc<AuthorizationDirectives>,
 }
 
 impl<S> Service<Request> for AuthorizationRequirementsService<S>
@@ -78,12 +90,13 @@ where
     fn call(&mut self, req: Request) -> Self::Future {
         let inner = self.inner.clone();
         let mut inner = std::mem::replace(&mut self.inner, inner);
-        let schema = self.schema.clone();
+        let supergraph_schema = self.supergraph_schema.clone();
+        let directives = self.directives.clone();
 
         Box::pin(async move {
             let doc = inner.call(req).await?;
             doc.authorization
-                .get_or_init(|| operation_requirements(&doc, &schema));
+                .get_or_init(|| operation_requirements(&doc, &supergraph_schema, &directives));
             Ok(doc)
         })
     }
@@ -105,6 +118,7 @@ mod tests {
     use crate::plugin::test::await_mock_driver;
     use crate::services::Plugins;
     use crate::spec::Query;
+    use crate::spec::Schema;
     use crate::spec::SpecError;
 
     const POLICY_SCHEMA: &str =
@@ -146,13 +160,16 @@ mod tests {
             }
         });
 
-        let result = AuthorizationRequirementsLayer::new(schema)
-            .layer(mock)
-            .oneshot(Request::new(
-                query.to_string(),
-                operation_name.map(str::to_string),
-            ))
-            .await;
+        let result = AuthorizationRequirementsLayer::new(
+            Arc::new(schema.supergraph_schema().clone()),
+            schema.authorization_directives.clone(),
+        )
+        .layer(mock)
+        .oneshot(Request::new(
+            query.to_string(),
+            operation_name.map(str::to_string),
+        ))
+        .await;
         await_mock_driver(driver).await;
         result
     }
