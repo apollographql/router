@@ -107,8 +107,9 @@ where
                 }
             };
 
-            // The query parsing service stores the requirements on the document. A document
-            // built anywhere else has none, and must not be read as requiring nothing.
+            // Requirements are stored on the document only when the authorization plugin is
+            // installed. Without them, work them out here: a missing value never means the
+            // operation requires nothing.
             let CacheKeyMetadata {
                 is_authenticated,
                 scopes,
