@@ -8362,82 +8362,7 @@ fn inc_preserves_path_conditions(#[case] name: &str, #[case] operation: &str) {
 }
 
 #[test]
-fn inc_requires_inputs_keep_path_conditions_on_mutation() {
-    let planner = planner!(
-        config = incremental_config(),
-        A: r#"
-          type Query {
-              t: T
-          }
-
-          type Mutation {
-              m: T
-          }
-
-          type T @key(fields: "k") {
-              k: ID!
-              a: String
-          }
-        "#,
-        B: r#"
-          type T @key(fields: "k") {
-              k: ID!
-              r: String @requires(fields: "a")
-              a: String @external
-          }
-        "#,
-    );
-    assert_plan!(
-        &planner,
-        r#"
-          mutation Test($s: Boolean!) {
-            ... @skip(if: $s) {
-              m {
-                r
-              }
-            }
-          }
-        "#,
-        @r###"
-    QueryPlan {
-      Sequence {
-        Skip(if: $s) {
-          Fetch(service: "A") {
-            {
-              m {
-                __typename
-                k
-                a
-              }
-            }
-          },
-        },
-        Skip(if: $s) {
-          Flatten(path: "m") {
-            Fetch(service: "B") {
-              {
-                ... on T {
-                  __typename
-                  k
-                  a
-                }
-              } =>
-              {
-                ... on T {
-                  r
-                }
-              }
-            },
-          },
-        },
-      },
-    }
-    "###
-    );
-}
-
-#[test]
-fn inc_from_context_local_inputs_keep_path_conditions_on_mutation() {
+fn inc_inputs_keep_path_conditions_on_mutation() {
     let planner = planner!(
         config = incremental_config(),
         Subgraph1: r#"
@@ -8446,23 +8371,39 @@ fn inc_from_context_local_inputs_keep_path_conditions_on_mutation() {
         }
         type Mutation {
           m: T!
+          p: P @provides(fields: "a")
         }
         type T @key(fields: "id") @context(name: "context") {
           id: ID!
           u: U!
           prop: String!
+          remote: String! @external
         }
         type U @key(fields: "id") {
           id: ID!
-          field(a: String @fromContext(field: "$context { prop }")): Int!
+          local(a: String @fromContext(field: "$context { prop }")): Int!
+          routed(a: String @fromContext(field: "$context { remote }")): Int!
+        }
+        type P @key(fields: "k") {
+          k: ID!
+          a: String @external
+          r: String @requires(fields: "a")
         }
         "#,
         Subgraph2: r#"
         type Query {
           a: Int!
         }
+        type T @key(fields: "id") {
+          id: ID!
+          remote: String!
+        }
         type U @key(fields: "id") {
           id: ID!
+        }
+        type P @key(fields: "k") {
+          k: ID!
+          a: String @shareable
         }
         "#,
     );
@@ -8473,7 +8414,7 @@ fn inc_from_context_local_inputs_keep_path_conditions_on_mutation() {
           ... @skip(if: $s) {
             m {
               u {
-                field
+                local
               }
             }
           }
@@ -8506,7 +8447,7 @@ fn inc_from_context_local_inputs_keep_path_conditions_on_mutation() {
               } =>
               {
                 ... on U {
-                  field(a: $contextualArgument_1_0)
+                  local(a: $contextualArgument_1_0)
                 }
               }
             },
@@ -8516,42 +8457,6 @@ fn inc_from_context_local_inputs_keep_path_conditions_on_mutation() {
     }
     "###
     );
-}
-
-#[test]
-fn inc_from_context_routed_inputs_keep_path_conditions_on_mutation() {
-    let planner = planner!(
-        config = incremental_config(),
-        Subgraph1: r#"
-        type Query {
-          t: T!
-        }
-        type Mutation {
-          m: T!
-        }
-        type T @key(fields: "id") @context(name: "context") {
-          id: ID!
-          u: U!
-          prop: String! @external
-        }
-        type U @key(fields: "id") {
-          id: ID!
-          field(a: String @fromContext(field: "$context { prop }")): Int!
-        }
-        "#,
-        Subgraph2: r#"
-        type Query {
-          a: Int!
-        }
-        type T @key(fields: "id") {
-          id: ID!
-          prop: String!
-        }
-        type U @key(fields: "id") {
-          id: ID!
-        }
-        "#,
-    );
     assert_plan!(
         &planner,
         r#"
@@ -8559,7 +8464,7 @@ fn inc_from_context_routed_inputs_keep_path_conditions_on_mutation() {
           ... @skip(if: $s) {
             m {
               u {
-                field
+                routed
               }
             }
           }
@@ -8593,7 +8498,7 @@ fn inc_from_context_routed_inputs_keep_path_conditions_on_mutation() {
               } =>
               {
                 ... on T {
-                  prop
+                  remote
                 }
               }
             },
@@ -8610,7 +8515,7 @@ fn inc_from_context_routed_inputs_keep_path_conditions_on_mutation() {
               } =>
               {
                 ... on U {
-                  field(a: $contextualArgument_1_0)
+                  routed(a: $contextualArgument_1_1)
                 }
               }
             },
@@ -8620,51 +8525,23 @@ fn inc_from_context_routed_inputs_keep_path_conditions_on_mutation() {
     }
     "###
     );
-}
-
-#[test]
-fn inc_in_place_requires_inputs_keep_path_conditions_on_mutation() {
-    let planner = planner!(
-        config = incremental_config(),
-        A: r#"
-          type Query {
-              t: T
-          }
-
-          type Mutation {
-              m: T @provides(fields: "a")
-          }
-
-          type T @key(fields: "k") {
-              k: ID!
-              a: String @external
-              r: String @requires(fields: "a")
-          }
-        "#,
-        B: r#"
-          type T @key(fields: "k") {
-              k: ID!
-              a: String @shareable
-          }
-        "#,
-    );
     assert_plan!(
         &planner,
         r#"
-          mutation Test($s: Boolean!) {
-            ... @skip(if: $s) {
-              m {
-                r
-              }
+        mutation Test($s: Boolean!) {
+          ... @skip(if: $s) {
+            p {
+              r
             }
           }
+        }
         "#,
         @r###"
     QueryPlan {
       Skip(if: $s) {
-        Fetch(service: "A") {
+        Fetch(service: "Subgraph1") {
           {
-            m {
+            p {
               a
               r
             }

@@ -1,4 +1,4 @@
-# Composed from subgraphs with hash: 45e1fa6096bb3f17bbba57d92871ced1542441b6
+# Composed from subgraphs with hash: c134b6b8e443636733039db2d3a24a72d6f282a8
 schema
   @link(url: "https://specs.apollo.dev/link/v1.0")
   @link(url: "https://specs.apollo.dev/join/v0.5", for: EXECUTION)
@@ -66,6 +66,16 @@ type Mutation
   @join__type(graph: SUBGRAPH1)
 {
   m: T!
+  p: P @join__field(graph: SUBGRAPH1, provides: "a")
+}
+
+type P
+  @join__type(graph: SUBGRAPH1, key: "k")
+  @join__type(graph: SUBGRAPH2, key: "k")
+{
+  k: ID!
+  a: String @join__field(graph: SUBGRAPH1, external: true) @join__field(graph: SUBGRAPH2)
+  r: String @join__field(graph: SUBGRAPH1, requires: "a")
 }
 
 type Query
@@ -83,7 +93,8 @@ type T
 {
   id: ID!
   u: U! @join__field(graph: SUBGRAPH1)
-  prop: String! @join__field(graph: SUBGRAPH1, external: true) @join__field(graph: SUBGRAPH2)
+  prop: String! @join__field(graph: SUBGRAPH1)
+  remote: String! @join__field(graph: SUBGRAPH1, external: true) @join__field(graph: SUBGRAPH2)
 }
 
 type U
@@ -91,5 +102,6 @@ type U
   @join__type(graph: SUBGRAPH2, key: "id")
 {
   id: ID!
-  field: Int! @join__field(graph: SUBGRAPH1, contextArguments: [{context: "Subgraph1__context", name: "a", type: "String", selection: " { prop }"}])
+  local: Int! @join__field(graph: SUBGRAPH1, contextArguments: [{context: "Subgraph1__context", name: "a", type: "String", selection: " { prop }"}])
+  routed: Int! @join__field(graph: SUBGRAPH1, contextArguments: [{context: "Subgraph1__context", name: "a", type: "String", selection: " { remote }"}])
 }
