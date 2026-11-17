@@ -52,23 +52,12 @@ impl JSONSelection {
         data: &JSON,
         vars: &IndexMap<String, JSON>,
     ) -> (Option<JSON>, Vec<ApplyToError>) {
-        self.apply_with_context(data, vars, ApplyContext::new(self.spec()))
-    }
-
-    /// Like [`Self::apply_with_vars`], but with the global registry of custom
-    /// `->` method definitions (`@source(methods:)`) available during evaluation.
-    /// Connectors thread their merged registry in here at request time.
-    #[allow(dead_code)] // Used once connector threading lands (next commit).
-    pub(crate) fn apply_with_vars_and_methods(
-        &self,
-        data: &JSON,
-        vars: &IndexMap<String, JSON>,
-        methods: Option<Ref<MethodRegistry>>,
-    ) -> (Option<JSON>, Vec<ApplyToError>) {
+        // Custom `->` methods resolve against the registry this selection was
+        // bound to (see `JSONSelection::with_methods`), if any.
         self.apply_with_context(
             data,
             vars,
-            ApplyContext::new(self.spec()).with_methods(methods),
+            ApplyContext::new(self.spec()).with_methods(self.methods.clone()),
         )
     }
 
@@ -107,29 +96,10 @@ impl JSONSelection {
     }
 
     pub fn shape(&self) -> Shape {
-        self.shape_with_context(
-            ShapeContext::new(SourceId::Other("JSONSelection".into())).with_spec(self.spec()),
-        )
-    }
-
-    /// Like [`Self::shape`], but with the global registry of custom `->` method
-    /// definitions (`@source(methods:)`) available, so `->customMethod` calls
-    /// resolve to their body's shape during shape analysis (e.g. composition
-    /// validation). Without it, a custom-method call shapes as "method not
-    /// found".
-    pub(crate) fn shape_with_methods(&self, methods: Option<Ref<MethodRegistry>>) -> Shape {
-        self.shape_with_context(
-            ShapeContext::new(SourceId::Other("JSONSelection".into()))
-                .with_spec(self.spec())
-                .with_methods(methods),
-        )
-    }
-
-    fn shape_with_context(&self, context: ShapeContext) -> Shape {
         self.compute_output_shape(
             // Relatively static/unchanging inputs to compute_output_shape,
             // passed down by immutable shared reference.
-            &context,
+            &ShapeContext::new(SourceId::Other("JSONSelection".into())).with_spec(self.spec()),
             // If we don't know anything about the shape of the input data, we
             // can represent the data symbolically using the $root variable
             // shape. Subproperties needed from this shape will show up as
@@ -147,6 +117,14 @@ impl JSONSelection {
     pub(crate) fn compute_output_shape(&self, context: &ShapeContext, input_shape: Shape) -> Shape {
         debug_assert_eq!(context.spec(), self.spec());
 
+        // A context that does not carry a method registry picks up the one this
+        // selection is bound to, so custom `->` calls shape as their bodies
+        // rather than as "method not found".
+        if context.methods().is_none() && self.methods.is_some() {
+            let context = context.clone().with_methods(self.methods.clone());
+            return self.compute_output_shape(&context, input_shape);
+        }
+
         let computable: &dyn ApplyToInternal = match &self.inner {
             TopLevelSelection::Named(selection) => selection,
             TopLevelSelection::Value(lit) => lit,
@@ -161,32 +139,6 @@ impl JSONSelection {
         } else {
             // Otherwise, we'll want to register the input_shape as $root in a
             // cloned_context, so $root is reliably defined either way.
-            let cloned_context = context
-                .clone()
-                .with_named_shapes([("$root".to_string(), input_shape.clone())]);
-            computable.compute_output_shape(&cloned_context, input_shape, dollar_shape)
-        }
-    }
-
-    /// Like [`Self::compute_output_shape`], but with an explicit `$` (Dollar)
-    /// shape instead of clamping `$` to the input shape. Used for custom `->`
-    /// method (`@source(methods:)`) bodies, where `@` is the receiver but `$`
-    /// *lags* to the caller's ambient root — mirroring the runtime frame built
-    /// in `apply_custom_method`.
-    pub(crate) fn compute_output_shape_with_dollar(
-        &self,
-        context: &ShapeContext,
-        input_shape: Shape,
-        dollar_shape: Shape,
-    ) -> Shape {
-        let computable: &dyn ApplyToInternal = match &self.inner {
-            TopLevelSelection::Named(selection) => selection,
-            TopLevelSelection::Value(lit) => lit,
-        };
-
-        if Some(&input_shape) == context.named_shapes().get("$root") {
-            computable.compute_output_shape(context, input_shape, dollar_shape)
-        } else {
             let cloned_context = context
                 .clone()
                 .with_named_shapes([("$root".to_string(), input_shape.clone())]);
@@ -213,16 +165,16 @@ fn lookup_variable<'a>(
 
 /// Dispatch a custom `->` method defined via `@source(methods:)`.
 ///
-/// Semantics (the Splice Correspondence Principle): `input->Name(args)`
-/// evaluates the custom's body as a standalone selection over `input`, exactly as
-/// the inline body would mean:
+/// Semantics: `input->Name(args)` evaluates the method's body as a standalone
+/// selection over `input`:
 /// - arguments are evaluated **eagerly, once, in the caller's scope**;
-/// - the body runs with `@` = the receiver (`input`), but `$` *lags* — it keeps
-///   the caller's ambient root binding rather than being clamped to the
-///   receiver — so `$`/`@` read exactly as they would if the body were spliced
-///   inline at the call site. The positional params are bound as `Local`s, and
-///   the caller's `External`s are carried forward; caller *locals* are still
-///   dropped (no accidental capture, no closures);
+/// - the body runs in a fresh scope where `@` and `$` are both the receiver
+///   (`input`), the positional params are bound as `Local`s, and the caller's
+///   `External`s (`$args`, `$this`, …) are carried forward. Caller *locals* are
+///   dropped (no accidental capture, no closures). Binding `$` to the receiver
+///   makes a body mean the same thing whichever form it is written in
+///   (`y: $.x`, `{ y: $.x }`, or `$.x`), and wherever it is called from, just
+///   as `$` in a top-level selection is the response it is applied to;
 /// - recursion is impossible because composition guarantees the custom call graph
 ///   is a DAG, so there is no runtime depth guard.
 ///
@@ -289,17 +241,15 @@ fn apply_custom_method(
         arg_values.push(value.unwrap_or(JSON::Null));
     }
 
-    // Build the body's frame: carry the caller's `External`s and the ambient
-    // `$` (Dollar) root forward, and bind params as locals. `@` is the receiver
-    // (`data`, passed as the apply value below), but `$` *lags* — it keeps the
-    // caller's root rather than being clamped to the receiver — so the body
-    // reads `$`/`@` exactly as the equivalent inline selection would. Caller
-    // *locals* are deliberately dropped (no accidental capture).
+    // Build the body's frame: carry the caller's `External`s forward, bind `$`
+    // to the receiver (`data`, which is also `@` below), and bind params as
+    // locals. Caller *locals* are deliberately dropped (no accidental capture).
     let mut frame: VarsWithPathsMap = vars
         .iter()
-        .filter(|(var, _)| matches!(var, KnownVariable::External(_) | KnownVariable::Dollar))
+        .filter(|(var, _)| matches!(var, KnownVariable::External(_)))
         .map(|(var, (value, path))| (var.clone(), (*value, path.clone())))
         .collect();
+    frame.insert(KnownVariable::Dollar, (data, method_path.clone()));
     for (param, value) in custom.params.iter().zip(arg_values.iter()) {
         // Params are stored bare; the var lookup keys locals by their full
         // `$`-prefixed spelling, so bind `$param`.
@@ -601,6 +551,24 @@ impl ShapeContext {
             self.named_shapes.insert(name.clone(), shape.clone());
         }
         self
+    }
+
+    /// A context for computing the shape of a custom `->` method body: the
+    /// same ambient context, but with only the external variables (`$args`,
+    /// `$this`, …) and `$root` kept from the caller's named shapes, plus the
+    /// method's parameters. Matches the runtime frame built in
+    /// `apply_custom_method`, which drops the caller's local variables (like
+    /// one bound by `->as`), so a body that reads one fails validation instead
+    /// of passing it and failing on every request.
+    pub(crate) fn for_method_body(
+        &self,
+        params: impl IntoIterator<Item = (String, Shape)>,
+    ) -> Self {
+        let mut body_context = self.clone();
+        body_context.named_shapes.retain(|name, _| {
+            name == "$root" || name.parse::<crate::connectors::Namespace>().is_ok()
+        });
+        body_context.with_named_shapes(params)
     }
 
     pub(crate) fn source_id(&self) -> &SourceId {
@@ -1239,7 +1207,7 @@ impl ApplyToInternal for WithRange<PathList> {
                 let method_path =
                     input_path.append(JSON::String(format!("->{}", method_name.as_ref()).into()));
 
-                // A custom custom wins over a built-in of the same name. See
+                // A custom method wins over a built-in of the same name. See
                 // `MethodRegistry` for why: it makes shipping a new built-in
                 // additive rather than a breaking change for schemas that
                 // already define that name themselves.
@@ -1586,9 +1554,8 @@ impl ApplyToInternal for WithRange<PathList> {
                     }
 
                     // Custom `->` method (`methods:`): the body's output
-                    // shape is the method's result shape. The body sees `@` =
-                    // input (the receiver) but `$` *lagging* to the caller's
-                    // `dollar_shape` (matching the runtime frame in
+                    // shape is the method's result shape. The body sees both `@`
+                    // and `$` as the receiver (matching the runtime frame in
                     // `apply_custom_method`), with each param bound to its
                     // argument's shape as a local (`$param`). Args are shaped in
                     // the caller's scope. Unknown-tolerant and computed per call
@@ -1615,13 +1582,18 @@ impl ApplyToInternal for WithRange<PathList> {
                         .cloned()
                         .zip(arg_shapes)
                         .map(|(param, shape)| (format!("${param}"), shape));
-                    let body_context = context.clone().with_named_shapes(param_shapes);
-                    let result_shape = custom.body.compute_output_shape_with_dollar(
-                        &body_context,
-                        input_shape,
-                        dollar_shape.clone(),
-                    );
+                    let body_context = context.for_method_body(param_shapes);
+                    let result_shape = custom.body.compute_output_shape(&body_context, input_shape);
                     (result_shape, Some(tail))
+                } else if context
+                    .methods()
+                    .is_some_and(|registry| registry.is_declared(method_name.as_str()))
+                {
+                    // Declared, but the registry could not give it a definition
+                    // (it is part of a cycle, already reported). Shaping the call
+                    // as unknown keeps that one error from being followed by a
+                    // "not found" for every call.
+                    (Shape::unknown([]), Some(tail))
                 } else {
                     (
                         Shape::error(
@@ -2355,7 +2327,8 @@ mod tests {
             })
             .collect::<Vec<_>>();
         let registry = Ref::new(MethodRegistry::build(compiled).expect("registry should build"));
-        sel.apply_with_vars_and_methods(&data, &IndexMap::default(), Some(registry))
+        sel.with_methods(Some(registry))
+            .apply_with_vars(&data, &IndexMap::default())
     }
 
     /// `->min` and `->max` are not built-ins, but they are expressible as methods
@@ -2390,7 +2363,8 @@ mod tests {
             })
             .collect::<Vec<_>>();
         let registry = Ref::new(MethodRegistry::build(compiled).expect("registry should build"));
-        sel.apply_with_vars_and_methods(&data, &IndexMap::default(), Some(registry))
+        sel.with_methods(Some(registry))
+            .apply_with_vars(&data, &IndexMap::default())
     }
 
     #[test]
@@ -2503,10 +2477,9 @@ mod tests {
 
     #[test]
     fn custom_def_top_level_identity() {
-        // When a custom is invoked at the *root* (`$->T`), the receiver and the
-        // ambient root coincide, so `foo ≡ @.foo ≡ $.foo` at the top of the
-        // body. This is the degenerate case — see `custom_def_dollar_lags`
-        // for where `$` and `@` diverge.
+        // At the top of a body, `foo ≡ @.foo ≡ $.foo`: `@` and `$` are both
+        // the receiver. See `custom_def_dollar_is_the_receiver` for a call on a
+        // nested value.
         let (out, errors) = apply_with_methods(
             "$->T",
             &[("T", "{ f: foo g: @.foo h: $.foo }")],
@@ -2517,16 +2490,16 @@ mod tests {
     }
 
     #[test]
-    fn custom_def_dollar_lags() {
-        // Inside a custom body `@` is the receiver, but `$` *lags* to the caller's
-        // ambient root. Invoking `T` on a nested value (`nested->T`) makes the
-        // two distinct: `@.x` reads the receiver's `x`, `$.x` reads the root's.
+    fn custom_def_dollar_is_the_receiver() {
+        // Inside a method body `$` is the receiver, like `@`, even when the
+        // method is called on a nested value (`nested->T`): the body never sees
+        // the caller's root.
         let (out, errors) = apply_with_methods(
             "nested->T",
             &[("T", "{ at: @.x dollar: $.x }")],
             json!({ "x": "root", "nested": { "x": "inner" } }),
         );
-        assert_eq!(out, Some(json!({ "at": "inner", "dollar": "root" })));
+        assert_eq!(out, Some(json!({ "at": "inner", "dollar": "inner" })));
         assert!(errors.is_empty(), "{errors:?}");
     }
 
@@ -2583,7 +2556,7 @@ mod tests {
             })
             .collect::<Vec<_>>();
         let registry = Ref::new(MethodRegistry::build(compiled).expect("registry should build"));
-        JSONSelection::shape_with_methods(&sel, Some(registry)).pretty_print()
+        sel.with_methods(Some(registry)).shape().pretty_print()
     }
 
     #[test]

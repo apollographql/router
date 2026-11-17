@@ -290,6 +290,14 @@ pub enum Code {
     /// an object-typed field. Auto-derive over nested object types is not yet
     /// supported; provide an explicit `selection:`. (Parked co-design item.)
     UnsupportedMethodAutoDerive,
+    /// A call to a custom `->` method passes a different number of arguments
+    /// than the method declares parameters. Such a call fails on every request.
+    MethodArgumentCount,
+    /// A custom `->` method body reads a variable that is neither one of its
+    /// parameters nor one connectors provide (`$args`, `$this`, …). A body
+    /// cannot see variables bound where it is called, such as one bound by
+    /// `->as`.
+    InvalidMethodVariable,
 }
 
 impl Code {

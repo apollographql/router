@@ -22,6 +22,9 @@ use nom::sequence::preceded;
 use nom::sequence::terminated;
 use serde_json_bytes::Value as JSON;
 
+use super::Ref;
+use super::custom_methods::CompiledMethod;
+use super::custom_methods::MethodRegistry;
 use super::helpers::spaces_or_comments;
 use super::helpers::vec_push;
 use super::known_var::KnownVariable;
@@ -197,10 +200,37 @@ pub(crate) trait VarPaths {
 // JSONSelection     ::= PathSelection | NakedSubSelection
 // NakedSubSelection ::= NamedSelection* StarSelection?
 
-#[derive(Debug, PartialEq, Eq, Clone)]
+#[derive(PartialEq, Eq, Clone)]
 pub struct JSONSelection {
     pub(crate) inner: TopLevelSelection,
     pub spec: ConnectSpec,
+
+    /// The subgraph's custom `->` method registry (`methods:` and `@method`),
+    /// or `None` when no methods are declared or the selection has not been
+    /// bound to a subgraph yet (see [`Self::with_methods`]).
+    ///
+    /// The registry travels *with* the selection rather than beside it, so
+    /// everything that evaluates or analyzes a selection (`apply_with_vars`,
+    /// `shape`, `variable_references`, and their callers in expansion,
+    /// validation, and the runtime) resolves custom methods without having to
+    /// be handed the registry separately. Keeping it beside the selection meant
+    /// every consumer had to remember to thread it in, and the ones that forgot
+    /// saw a declared method as "not found".
+    pub(crate) methods: Option<Ref<MethodRegistry>>,
+}
+
+// Hand-written so a selection with no methods attached prints exactly as the
+// derived impl did, which keeps the many `{:?}` snapshots of parsed selections
+// stable.
+impl std::fmt::Debug for JSONSelection {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let mut debug = f.debug_struct("JSONSelection");
+        debug.field("inner", &self.inner).field("spec", &self.spec);
+        if let Some(methods) = &self.methods {
+            debug.field("methods", methods);
+        }
+        debug.finish()
+    }
 }
 
 /// Non-lossy top-level classification of a [`JSONSelection`]. A parse
@@ -257,10 +287,55 @@ impl JSONSelection {
         self.spec
     }
 
+    /// Bind this selection to a subgraph's custom `->` method registry, so
+    /// evaluating or analyzing it resolves calls to declared methods. Cheap
+    /// (`Arc` clone). Passing `None` detaches any registry.
+    pub fn with_methods(mut self, methods: Option<Ref<MethodRegistry>>) -> Self {
+        self.methods = methods;
+        self
+    }
+
+    /// In-place form of [`Self::with_methods`].
+    pub(crate) fn set_methods(&mut self, methods: Option<Ref<MethodRegistry>>) {
+        self.methods = methods;
+    }
+
+    /// The custom methods this selection can reach: the ones it calls
+    /// directly, then the ones those bodies call, and so on, each listed once
+    /// in first-reached order. Empty when no registry is attached. Terminates
+    /// because a registry's call graph is acyclic by construction.
+    pub(crate) fn reachable_methods(&self) -> Vec<&CompiledMethod> {
+        let Some(registry) = self.methods.as_deref() else {
+            return Vec::new();
+        };
+        let mut seen: IndexSet<&str> = IndexSet::default();
+        let mut reached: Vec<&CompiledMethod> = Vec::new();
+        let mut pending: Vec<&CompiledMethod> = self
+            .method_calls()
+            .into_iter()
+            .filter_map(|name| registry.get(name.as_ref()))
+            .collect();
+        while let Some(method) = pending.pop() {
+            if !seen.insert(method.name.as_str()) {
+                continue;
+            }
+            reached.push(method);
+            pending.extend(
+                method
+                    .body
+                    .method_calls()
+                    .into_iter()
+                    .filter_map(|name| registry.get(name.as_ref())),
+            );
+        }
+        reached
+    }
+
     pub fn named(sub: SubSelection) -> Self {
         Self {
             inner: TopLevelSelection::Named(sub),
             spec: ConnectSpec::latest(),
+            methods: None,
         }
     }
 
@@ -269,6 +344,7 @@ impl JSONSelection {
         Self {
             inner: TopLevelSelection::Value(WithRange::new(LitExpr::Path(path), range)),
             spec: ConnectSpec::latest(),
+            methods: None,
         }
     }
 
@@ -286,6 +362,7 @@ impl JSONSelection {
         Self {
             inner: TopLevelSelection::Named(SubSelection::default()),
             spec: ConnectSpec::latest(),
+            methods: None,
         }
     }
 
@@ -347,6 +424,7 @@ impl JSONSelection {
             // `cut`), so a malformed header surfaces as `Err::Failure` rather
             // than being silently reparsed as a body.
             Ok((rest, params)) => {
+                Self::check_params(input, spec, &params)?;
                 // `params` are bare names (no `$`); the parser keys local
                 // variables by their full `$`-prefixed spelling (e.g. `$n`), so
                 // seed the body span with that form.
@@ -374,6 +452,45 @@ impl JSONSelection {
                 unreachable!("nom::Err::Incomplete not expected here")
             }
         }
+    }
+
+    /// Reject parameter lists that would silently misbehave: a parameter
+    /// named like a variable connectors provide (`$args`, `$this`, …) would
+    /// hide that variable for the whole body, and a repeated name would bind
+    /// only the last argument passed for it.
+    fn check_params(
+        input: &str,
+        spec: ConnectSpec,
+        params: &[WithRange<String>],
+    ) -> Result<(), JSONSelectionParseError> {
+        let error = |param: &WithRange<String>, message: String| {
+            let offset = param.range().map_or(0, |range| range.start);
+            JSONSelectionParseError {
+                message,
+                fragment: input.get(offset..).unwrap_or_default().to_string(),
+                offset,
+                spec,
+            }
+        };
+        let mut seen: IndexSet<&str> = IndexSet::default();
+        for param in params {
+            let name = param.as_ref().as_str();
+            if format!("${name}").parse::<Namespace>().is_ok() {
+                return Err(error(
+                    param,
+                    format!(
+                        "Parameter `${name}` would hide the `${name}` variable inside the method body; choose a different name"
+                    ),
+                ));
+            }
+            if !seen.insert(name) {
+                return Err(error(
+                    param,
+                    format!("Parameter `${name}` is declared more than once"),
+                ));
+            }
+        }
+        Ok(())
     }
 
     /// Shared tail of [`Self::parse_with_spec`] and [`Self::parse_def_with_spec`]:
@@ -468,6 +585,7 @@ impl JSONSelection {
                     Self {
                         inner: TopLevelSelection::Value(WithRange::new(LitExpr::Path(path), range)),
                         spec,
+                        methods: None,
                     }
                 }),
                 // By convention, most ::parse methods do not consume trailing
@@ -479,6 +597,7 @@ impl JSONSelection {
                 map(SubSelection::parse_naked, |sub| Self {
                     inner: TopLevelSelection::Named(sub),
                     spec,
+                    methods: None,
                 }),
                 // It's tempting to hoist the all_consuming(terminated(...))
                 // checks outside the alt((...)) so we only need to handle
@@ -544,12 +663,14 @@ impl JSONSelection {
                         return Self {
                             inner: TopLevelSelection::Value(only.path.clone()),
                             spec,
+                            methods: None,
                         };
                     }
                 }
                 Self {
                     inner: TopLevelSelection::Named(sub),
                     spec,
+                    methods: None,
                 }
             }),
             // Most ::parse methods do not consume trailing spaces_or_comments,
@@ -637,6 +758,7 @@ impl JSONSelection {
                 JSONSelection {
                     inner: TopLevelSelection::Value(lit),
                     spec,
+                    methods: None,
                 },
             ))
         }
@@ -648,11 +770,13 @@ impl JSONSelection {
                 return Self {
                     inner: TopLevelSelection::Value(only.path.clone()),
                     spec,
+                    methods: None,
                 };
             }
             Self {
                 inner: TopLevelSelection::Named(sub),
                 spec,
+                methods: None,
             }
         });
 
@@ -691,10 +815,32 @@ impl JSONSelection {
         }
     }
 
+    /// Every external variable (`$args`, `$this`, `$status`, …) this selection
+    /// reads when evaluated, including reads inside the bodies of the custom
+    /// methods it can reach (see [`Self::reachable_methods`]).
+    ///
+    /// Callers rely on this list to decide which inputs to supply at request
+    /// time and which `@key` fields an entity connector needs, so a variable
+    /// read only inside a method body has to be on it. Those references carry
+    /// no `location`, because their offsets are relative to the method body's
+    /// text, not to this selection's.
     pub fn variable_references(&self) -> impl Iterator<Item = VariableReference<Namespace>> + '_ {
-        self.external_var_paths()
+        let own = self
+            .external_var_paths()
             .into_iter()
-            .flat_map(|var_path| var_path.variable_reference())
+            .flat_map(|var_path| var_path.variable_reference());
+        let from_methods = self.reachable_methods().into_iter().flat_map(|method| {
+            method
+                .body
+                .external_var_paths()
+                .into_iter()
+                .flat_map(|var_path| var_path.variable_reference())
+                .map(|reference| VariableReference {
+                    location: None,
+                    ..reference
+                })
+        });
+        own.chain(from_methods)
     }
 
     /// Collect every `->method(...)` call site appearing anywhere in this
@@ -708,6 +854,15 @@ impl JSONSelection {
     /// position would let a cyclic def slip through. Builtin and def names are
     /// not distinguished here — the registry partitions them afterward.
     pub(crate) fn method_calls(&self) -> Vec<&WithRange<String>> {
+        self.method_calls_with_arg_counts()
+            .into_iter()
+            .map(|(name, _)| name)
+            .collect()
+    }
+
+    /// Like [`Self::method_calls`], but pairs each method name with the number
+    /// of arguments passed at that call site.
+    pub(crate) fn method_calls_with_arg_counts(&self) -> Vec<(&WithRange<String>, usize)> {
         let mut out = Vec::new();
         match &self.inner {
             TopLevelSelection::Named(sub) => collect_methods_subselection(sub, &mut out),
@@ -717,13 +872,19 @@ impl JSONSelection {
     }
 }
 
-fn collect_methods_subselection<'a>(sub: &'a SubSelection, out: &mut Vec<&'a WithRange<String>>) {
+fn collect_methods_subselection<'a>(
+    sub: &'a SubSelection,
+    out: &mut Vec<(&'a WithRange<String>, usize)>,
+) {
     for named in &sub.selections {
         collect_methods_lit(&named.path, out);
     }
 }
 
-fn collect_methods_lit<'a>(lit: &'a WithRange<LitExpr>, out: &mut Vec<&'a WithRange<String>>) {
+fn collect_methods_lit<'a>(
+    lit: &'a WithRange<LitExpr>,
+    out: &mut Vec<(&'a WithRange<String>, usize)>,
+) {
     match lit.as_ref() {
         LitExpr::String(_) | LitExpr::Number(_) | LitExpr::Bool(_) | LitExpr::Null => {}
         LitExpr::LegacyObject(map) => {
@@ -752,7 +913,7 @@ fn collect_methods_lit<'a>(lit: &'a WithRange<LitExpr>, out: &mut Vec<&'a WithRa
 
 fn collect_methods_pathlist<'a>(
     path: &'a WithRange<PathList>,
-    out: &mut Vec<&'a WithRange<String>>,
+    out: &mut Vec<(&'a WithRange<String>, usize)>,
 ) {
     match path.as_ref() {
         PathList::Var(_, tail) | PathList::Key(_, tail) | PathList::Question(tail) => {
@@ -763,7 +924,7 @@ fn collect_methods_pathlist<'a>(
             collect_methods_pathlist(tail, out);
         }
         PathList::Method(name, args, tail) => {
-            out.push(name);
+            out.push((name, args.as_ref().map_or(0, |args| args.args.len())));
             if let Some(args) = args {
                 for arg in &args.args {
                     collect_methods_lit(arg, out);
@@ -1253,6 +1414,18 @@ impl Ranged for PathSelection {
 impl PathSelection {
     pub(crate) fn parse(input: Span) -> ParseResult<Self> {
         PathList::parse(input).map(|(input, path)| (input, Self { path }))
+    }
+
+    /// The name of the external variable this path starts from (`$args`,
+    /// `$this`, or an unrecognized `$name`), including its leading `$`.
+    pub(crate) fn external_variable_name(&self) -> Option<&str> {
+        match self.path.as_ref() {
+            PathList::Var(var, _) => match var.as_ref() {
+                KnownVariable::External(name) => Some(name.as_str()),
+                _ => None,
+            },
+            _ => None,
+        }
     }
 
     pub(crate) fn variable_reference<N: FromStr + ToString>(&self) -> Option<VariableReference<N>> {
@@ -2244,7 +2417,7 @@ impl Display for Key {
 
 // Identifier ::= [a-zA-Z_] NO_SPACE [0-9a-zA-Z_]*
 
-pub(super) fn is_identifier(input: &str) -> bool {
+pub(crate) fn is_identifier(input: &str) -> bool {
     // TODO Don't use the whole parser for this?
     let depth = DepthCounter::default();
     all_consuming(parse_identifier_no_space)
@@ -2946,6 +3119,7 @@ mod tests {
                     None,
                 )),
                 spec,
+                methods: None,
             },
         );
     }

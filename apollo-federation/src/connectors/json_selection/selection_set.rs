@@ -73,6 +73,7 @@ impl JSONSelection {
                     &selection_set,
                 )),
                 spec: self.spec,
+                methods: self.methods.clone(),
             },
             TopLevelSelection::Value(lit) => {
                 // For a top-level PathSelection we can still refine its trailing
@@ -92,6 +93,7 @@ impl JSONSelection {
                 Self {
                     inner: TopLevelSelection::Value(new_lit),
                     spec: self.spec,
+                    methods: self.methods.clone(),
                 }
             }
         }

@@ -1,5 +1,3 @@
-use std::sync::Arc;
-
 use apollo_compiler::ExecutableDocument;
 use apollo_compiler::Name;
 use apollo_compiler::collections::HashMap;
@@ -26,7 +24,6 @@ use crate::connectors::ApplyToErrorKind;
 use crate::connectors::ConnectSpec;
 use crate::connectors::Connector;
 use crate::connectors::JSONSelection;
-use crate::connectors::MethodRegistry;
 use crate::connectors::ProblemLocation;
 use crate::connectors::runtime::errors::RuntimeError;
 use crate::connectors::runtime::inputs::ContextReader;
@@ -128,7 +125,6 @@ pub fn handle_raw_response(
         data,
         parts,
         &inputs,
-        connector.methods.clone(),
         warnings,
     );
     if success {
@@ -363,14 +359,12 @@ fn is_success(
     data: &Value,
     parts: &Parts,
     inputs: &IndexMap<String, Value>,
-    methods: Option<Arc<MethodRegistry>>,
     mut warnings: Vec<Problem>,
 ) -> (bool, Vec<Problem>) {
     let Some(is_success_selection) = is_success_selection else {
         return (parts.status.is_success(), warnings);
     };
-    let (res, apply_to_errors) =
-        is_success_selection.apply_with_vars_and_methods(data, inputs, methods);
+    let (res, apply_to_errors) = is_success_selection.apply_with_vars(data, inputs);
     warnings.extend(aggregate_apply_to_errors(
         apply_to_errors,
         ProblemLocation::IsSuccess,
@@ -535,9 +529,7 @@ pub(super) fn map_response(
     inputs: IndexMap<String, Value>,
     mut warnings: Vec<Problem>,
 ) -> MappedResponse {
-    let (res, apply_to_errors) =
-        key.selection()
-            .apply_with_vars_and_methods(data, &inputs, connector.methods.clone());
+    let (res, apply_to_errors) = key.selection().apply_with_vars(data, &inputs);
 
     // Declared errors are the author's, addressed to the client; diagnostics
     // are the language's, addressed to the author. The split decides what
@@ -598,8 +590,7 @@ pub(super) fn map_error(
 ) -> MappedResponse {
     // Do we have an error message mapping set for this connector?
     let message = if let Some(message_selection) = &connector.error_settings.message {
-        let (res, apply_to_errors) =
-            message_selection.apply_with_vars_and_methods(data, &inputs, connector.methods.clone());
+        let (res, apply_to_errors) = message_selection.apply_with_vars(data, &inputs);
         warnings.extend(aggregate_apply_to_errors(
             apply_to_errors,
             ProblemLocation::ErrorsMessage,
@@ -634,11 +625,7 @@ pub(super) fn map_error(
     // can't make sense of it in the if/else due to how the builder is constructed.
     let mut extension_code = "CONNECTOR_FETCH".to_string();
     if let Some(extensions_selection) = &connector.error_settings.source_extensions {
-        let (res, apply_to_errors) = extensions_selection.apply_with_vars_and_methods(
-            data,
-            &inputs,
-            connector.methods.clone(),
-        );
+        let (res, apply_to_errors) = extensions_selection.apply_with_vars(data, &inputs);
         warnings.extend(aggregate_apply_to_errors(
             apply_to_errors,
             ProblemLocation::SourceErrorsExtensions,
@@ -662,11 +649,7 @@ pub(super) fn map_error(
     }
 
     if let Some(extensions_selection) = &connector.error_settings.connect_extensions {
-        let (res, apply_to_errors) = extensions_selection.apply_with_vars_and_methods(
-            data,
-            &inputs,
-            connector.methods.clone(),
-        );
+        let (res, apply_to_errors) = extensions_selection.apply_with_vars(data, &inputs);
         warnings.extend(aggregate_apply_to_errors(
             apply_to_errors,
             ProblemLocation::ConnectErrorsExtensions,
@@ -1100,10 +1083,13 @@ mod tests {
 
     use super::MappedResponse;
     use super::deserialize_response;
+    use super::handle_raw_response;
     use super::is_success;
     use super::map_response;
     use crate::connectors::ConnectSpec;
+    use crate::connectors::Connector;
     use crate::connectors::JSONSelection;
+    use crate::connectors::runtime::inputs::ContextReader;
     use crate::connectors::runtime::inputs::RequestInputs;
     use crate::connectors::runtime::key::ResponseKey;
 
@@ -1124,14 +1110,8 @@ mod tests {
         let data = json!({"status": "ok"});
         let parts = make_parts(200);
 
-        let (success, problems) = is_success(
-            Some(&selection),
-            &data,
-            &parts,
-            &Default::default(),
-            None,
-            vec![],
-        );
+        let (success, problems) =
+            is_success(Some(&selection), &data, &parts, &Default::default(), vec![]);
 
         assert!(!success, "non-boolean isSuccess should fail the request");
         assert_eq!(problems.len(), 1, "expected one problem, got: {problems:?}");
@@ -1165,7 +1145,6 @@ mod tests {
                 &data,
                 &make_parts(200),
                 &Default::default(),
-                None,
                 vec![],
             );
 
@@ -1291,10 +1270,7 @@ mod tests {
         );
     }
 
-    fn make_connector(
-        output_type: Option<Type>,
-        spec: ConnectSpec,
-    ) -> crate::connectors::models::Connector {
+    fn make_connector(output_type: Option<Type>, spec: ConnectSpec) -> Connector {
         use apollo_compiler::name;
 
         use crate::connectors::ConnectId;
@@ -1846,62 +1822,110 @@ mod tests {
         assert_eq!(error.message, "original error");
     }
 
-    /// End-to-end runtime: a `Connector` carrying a `methods` registry resolves a
-    /// `$->Def` selection through `map_response` (exercises the
-    /// `Connector.methods` → `apply_with_vars_and_methods` → dispatch threading).
-    #[test]
-    fn map_response_resolves_custom_def_from_connector_registry() {
-        use apollo_compiler::name;
+    /// Extract the single connector on `Query.f` from a v0.5 subgraph, the way
+    /// the router does, so these tests exercise the same registry binding and
+    /// input-key collection that production does.
+    fn methods_connector(source_methods: &str, connect_args: &str) -> Connector {
+        let sdl = format!(
+            r#"extend schema
+@link(url: "https://specs.apollo.dev/connect/v0.5", import: ["@connect", "@source"])
+@source(name: "v", http: {{ baseURL: "http://localhost" }}, methods: {source_methods})
 
-        use super::map_response;
-        use crate::connectors::CompiledMethod;
-        use crate::connectors::ConnectId;
-        use crate::connectors::ConnectSpec;
-        use crate::connectors::Connector;
-        use crate::connectors::MethodRegistry;
+type Query {{
+  f(id: ID): JSON @connect(source: "v", http: {{ GET: "/" }}, {connect_args})
+}}
 
-        let registry = Arc::new(
-            MethodRegistry::build([
-                CompiledMethod::parse("User", "id name", ConnectSpec::V0_5).unwrap()
-            ])
-            .unwrap(),
+scalar JSON
+"#
         );
+        let schema = Schema::parse(&sdl, "test.graphql").unwrap();
+        let mut connectors = Connector::from_schema(&schema, "test").unwrap();
+        assert_eq!(connectors.len(), 1);
+        connectors.remove(0)
+    }
 
-        let connector = Connector {
-            spec: ConnectSpec::V0_5,
-            schema_subtypes_map: Default::default(),
-            methods: Some(registry),
-            id: ConnectId::new("subgraph".into(), None, name!(Query), name!(user), None, 0),
-            transport: None,
-            selection: JSONSelection::parse("$").unwrap(),
-            entity_resolver: None,
-            config: Default::default(),
-            max_requests: None,
-            batch_settings: None,
-            request_headers: Default::default(),
-            response_headers: Default::default(),
-            request_variable_keys: Default::default(),
-            response_variable_keys: Default::default(),
-            error_settings: Default::default(),
-            output_type: None,
-            label: "test".into(),
-        };
+    struct TestContext(Map<serde_json_bytes::ByteString, Value>);
 
+    impl ContextReader for &TestContext {
+        fn get_key(&self, key: &str) -> Option<Value> {
+            self.0.get(key).cloned()
+        }
+    }
+
+    /// Run `data` through `handle_raw_response` for `connector`, with
+    /// `$args.id = "7"` and `$context = { a: "A", b: "B" }`.
+    fn respond(connector: &Connector, status: u16, data: Value) -> MappedResponse {
+        let mut args = Map::new();
+        args.insert("id", json!("7"));
         let key = ResponseKey::RootField {
-            name: "user".to_string(),
-            inputs: RequestInputs::default(),
-            selection: Arc::new(
-                JSONSelection::parse_with_spec("$->User", ConnectSpec::V0_5).unwrap(),
-            ),
+            name: "f".to_string(),
+            inputs: RequestInputs {
+                args,
+                ..Default::default()
+            },
+            selection: Arc::new(connector.selection.clone()),
         };
-        let data = json!({ "id": 1, "name": "Alice", "extra": true });
+        let context = TestContext(
+            json!({ "a": "A", "b": "B" })
+                .as_object()
+                .cloned()
+                .unwrap_or_default(),
+        );
+        handle_raw_response(
+            &data,
+            &make_parts(status),
+            key,
+            connector,
+            &context,
+            &Default::default(),
+        )
+    }
 
-        let result = map_response(&connector, &data, key, Default::default(), vec![]);
-        let MappedResponse::Data { data, problems, .. } = result else {
-            panic!("expected Data variant");
+    #[test]
+    fn selection_calling_a_method_resolves_through_from_schema() {
+        let connector = methods_connector(r#"{ User: "id name" }"#, r#"selection: "$->User""#);
+        let MappedResponse::Data { data, problems, .. } = respond(
+            &connector,
+            200,
+            json!({ "id": 1, "name": "Alice", "extra": true }),
+        ) else {
+            panic!("expected Data");
         };
         assert!(problems.is_empty(), "unexpected problems: {problems:?}");
-        // The `User` def resolves: only id + name, `extra` dropped.
         assert_eq!(data, json!({ "id": 1, "name": "Alice" }));
+    }
+
+    #[test]
+    fn variables_read_only_inside_a_method_body_are_supplied() {
+        // `$args`, `$status`, and `$context.b` appear only in the body. The
+        // caller reads `$context.a`, so `$context` is already an input; `b` must
+        // still be included even though the caller never names it.
+        let connector = methods_connector(
+            r#"{ Tag: "id: $args.id status: $status b: $context.b" }"#,
+            r#"selection: "a: $context.a ...$->Tag""#,
+        );
+        let MappedResponse::Data { data, problems, .. } = respond(&connector, 200, json!({}))
+        else {
+            panic!("expected Data");
+        };
+        assert!(problems.is_empty(), "unexpected problems: {problems:?}");
+        assert_eq!(
+            data,
+            json!({ "a": "A", "id": "7", "status": 200, "b": "B" })
+        );
+    }
+
+    #[test]
+    fn is_success_and_errors_message_can_call_methods() {
+        let connector = methods_connector(
+            r#"{ ok: "$status->eq(200)", Msg: "$.error" }"#,
+            r#"selection: "id", isSuccess: "$->ok", errors: { message: "$->Msg" }"#,
+        );
+        let MappedResponse::Error { error, .. } =
+            respond(&connector, 201, json!({ "error": "nope" }))
+        else {
+            panic!("a 201 is not `->ok`, so this should be an error");
+        };
+        assert_eq!(error.message, "nope");
     }
 }

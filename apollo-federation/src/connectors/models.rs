@@ -32,9 +32,7 @@ pub use self::source::SourceName;
 use super::ConnectId;
 use super::JSONSelection;
 use super::MethodRegistry;
-use super::PathSelection;
 use super::id::ConnectorPosition;
-use super::json_selection::VarPaths;
 use super::spec::connect::ConnectBatchArguments;
 use super::spec::connect::ConnectDirectiveArguments;
 use super::spec::errors::ErrorsArguments;
@@ -127,6 +125,30 @@ impl ConnectorErrorsSettings {
             source_extensions,
             connect_extensions,
             connect_is_success,
+        }
+    }
+
+    /// Bind every selection in these settings to a subgraph's custom `->`
+    /// method registry. See [`JSONSelection::with_methods`].
+    pub(crate) fn set_methods(&mut self, methods: Option<Arc<MethodRegistry>>) {
+        // Destructured so a new selection-valued field is a compile error here
+        // until it is bound too.
+        let Self {
+            message,
+            source_extensions,
+            connect_extensions,
+            connect_is_success,
+        } = self;
+        for selection in [
+            message,
+            source_extensions,
+            connect_extensions,
+            connect_is_success,
+        ]
+        .into_iter()
+        .flatten()
+        {
+            selection.set_methods(methods.clone());
         }
     }
 
@@ -288,7 +310,7 @@ impl Connector {
 
         // Create our transport (absent for mapping-only connectors)
         let source_http = source.map(|s| &s.http);
-        let transport = connect
+        let mut transport = connect
             .http
             .map(|connect_http| HttpJsonTransport::from_directive(connect_http, source_http, spec))
             .transpose()?;
@@ -303,8 +325,18 @@ impl Connector {
             .as_ref()
             .or_else(|| source.and_then(|s| s.is_success.as_ref()));
 
-        let error_settings =
+        let mut error_settings =
             ConnectorErrorsSettings::from_directive(connect_errors, source_errors, is_success);
+
+        // Bind every selection this connector owns to the subgraph's method
+        // registry before anything reads them, so the variable references
+        // collected below include reads made inside method bodies.
+        let mut selection = connect.selection;
+        selection.set_methods(methods.clone());
+        error_settings.set_methods(methods.clone());
+        if let Some(transport) = &mut transport {
+            transport.set_methods(methods.clone());
+        }
 
         // Collect all variables and subselections used in the request mappings
         let request_references: IndexSet<VariableReference<Namespace>> = transport
@@ -313,8 +345,7 @@ impl Connector {
             .unwrap_or_default();
 
         // Collect all variables and subselections used in response mappings (including errors.message and errors.extensions)
-        let response_references: IndexSet<VariableReference<Namespace>> = connect
-            .selection
+        let response_references: IndexSet<VariableReference<Namespace>> = selection
             .variable_references()
             .chain(error_settings.variable_references())
             .collect();
@@ -356,7 +387,7 @@ impl Connector {
         Ok(Connector {
             id,
             transport,
-            selection: connect.selection,
+            selection,
             entity_resolver,
             config: None,
             max_requests: None,
@@ -419,11 +450,10 @@ impl Connector {
             .as_ref()
             .into_iter()
             .flat_map(|t| t.variable_references());
-        let selection_refs = self
-            .selection
-            .external_var_paths()
-            .into_iter()
-            .flat_map(PathSelection::variable_reference);
+        // Includes reads inside the custom methods the selection calls, so an
+        // entity connector whose `$this.id` appears only in a method body still
+        // gets an `@key` with `id`.
+        let selection_refs = self.selection.variable_references();
         transport_refs.chain(selection_refs)
     }
 

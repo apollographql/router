@@ -32,8 +32,11 @@ use crate::connectors::ConnectSpec;
 use crate::connectors::JSONSelection;
 use crate::connectors::MethodError;
 use crate::connectors::MethodRegistry;
+use crate::connectors::json_selection::VarPaths;
+use crate::connectors::json_selection::is_identifier;
 use crate::connectors::json_selection::methods::is_builtin_method_name;
 use crate::connectors::json_selection::methods::is_reserved_method_name;
+use crate::connectors::spec::METHOD_AS_ARGUMENT_NAME;
 use crate::connectors::spec::connect::CONNECT_SELECTION_ARGUMENT_NAME;
 use crate::connectors::spec::connect::IS_SUCCESS_ARGUMENT_NAME;
 use crate::connectors::spec::methods::METHODS_ARGUMENT_NAME;
@@ -98,9 +101,12 @@ fn applied_directives(schema: &Schema) -> Vec<&Directive> {
 /// Build the global method registry from every `methods:` block, leniently:
 /// method bodies that fail to parse are skipped (their errors are reported by
 /// [`validate`]), and if the assembled set is not admissible (duplicate,
-/// builtin shadow, or cycle) the whole registry is dropped (`None`). The result
-/// is stored on [`SchemaInfo`] so the shape pass can resolve `->customMethod`
+/// reserved shadow, or cycle) a best-effort registry from
+/// [`MethodRegistry::build_lenient`] stands in, so the errors [`validate`]
+/// reports are not buried under follow-on "not found" errors. The result is
+/// stored on [`SchemaInfo`] so the shape pass can resolve `->customMethod`
 /// calls during composition; this never itself emits user-facing errors.
+/// `None` only when no methods are declared.
 pub(super) fn build_registry(
     schema: &Schema,
     source_directive_name: &Name,
@@ -136,7 +142,12 @@ pub(super) fn build_registry(
     if compiled.is_empty() {
         return None;
     }
-    MethodRegistry::build(compiled).ok().map(Arc::new)
+    // When the declared methods do not form a valid registry, `validate`
+    // reports why; a lenient registry lets the rest of validation keep
+    // resolving calls to them instead of reporting each as "not found".
+    let registry = MethodRegistry::build(compiled.clone())
+        .unwrap_or_else(|_| MethodRegistry::build_lenient(compiled));
+    Some(Arc::new(registry))
 }
 
 /// Validate `@method` directives: version gate, `selection:` parse, and the
@@ -171,24 +182,44 @@ pub(super) fn validate_method_directives(schema: &SchemaInfo) -> Vec<Message> {
                 continue;
             }
 
+            // 2. `as:` names the method, so it must be callable as `->name`.
+            //    A name that is not would register a method nobody can call,
+            //    and the only symptom would be "unknown method" at a call site.
+            if let Some(as_value) =
+                directive.specified_argument_by_name(METHOD_AS_ARGUMENT_NAME.as_str())
+                && let Some(name) = as_value.as_str()
+                && !is_identifier(name)
+            {
+                messages.push(Message {
+                    code: Code::InvalidMethod,
+                    message: format!(
+                        "`@{method_directive}(as: \"{name}\")` is not a valid method name. A method name must start with a letter or `_` and contain only letters, digits, and `_`."
+                    ),
+                    locations: as_value.line_column_range(sources).into_iter().collect(),
+                });
+            }
+
             match directive
                 .specified_argument_by_name(CONNECT_SELECTION_ARGUMENT_NAME.as_str())
                 .and_then(|value| value.as_str())
             {
-                // 2. Explicit selection: must parse as a method body.
-                Some(selection) => {
-                    if let Err(err) = CompiledMethod::parse("__mapping__", selection, spec) {
-                        messages.push(Message {
-                            code: Code::InvalidMethod,
-                            message: format!(
-                                "`@{method_directive}(selection:)` is not a valid mapping: {}",
-                                err.message
-                            ),
-                            locations,
-                        });
-                    }
-                }
-                // 3. Auto-derive: object-typed fields are the parked co-design
+                // 3. Explicit selection: must parse as a method body.
+                Some(selection) => match CompiledMethod::parse("__mapping__", selection, spec) {
+                    Ok(method) => messages.extend(validate_body_variables(
+                        &method,
+                        &format!("@{method_directive}(selection:)"),
+                        &locations,
+                    )),
+                    Err(err) => messages.push(Message {
+                        code: Code::InvalidMethod,
+                        message: format!(
+                            "`@{method_directive}(selection:)` is not a valid mapping: {}",
+                            err.message
+                        ),
+                        locations,
+                    }),
+                },
+                // 4. Auto-derive: object-typed fields are the parked co-design
                 //    item — require an explicit `selection:` for now.
                 None => {
                     if let Some((field_name, _)) = fields.iter().find(|(_, field)| {
@@ -282,7 +313,14 @@ pub(super) fn validate(schema: &SchemaInfo) -> Vec<Message> {
                 continue;
             };
             match CompiledMethod::parse(method_name.as_str(), body, spec) {
-                Ok(method) => compiled.push(method),
+                Ok(method) => {
+                    messages.extend(validate_body_variables(
+                        &method,
+                        &format!("@{directive_name}(methods: {{ {method_name}: }})"),
+                        &value_locations,
+                    ));
+                    compiled.push(method);
+                }
                 Err(err) => messages.push(Message {
                     code: Code::InvalidMethod,
                     message: format!(
@@ -360,6 +398,36 @@ pub(super) fn validate(schema: &SchemaInfo) -> Vec<Message> {
     messages
 }
 
+/// Report variables a method body reads that it cannot see: anything other
+/// than its own parameters and the variables connectors provide (`$args`,
+/// `$this`, `$status`, …).
+///
+/// A body runs in a fresh scope at request time, so a variable bound where the
+/// method is called (say by `$.n->as($x)->useX`) is not visible inside it.
+/// Without this check such a body composes and then fails on every request.
+fn validate_body_variables(
+    method: &CompiledMethod,
+    coordinate: &str,
+    locations: &[Range<LineColumn>],
+) -> Vec<Message> {
+    let mut seen = std::collections::HashSet::new();
+    method
+        .body
+        .external_var_paths()
+        .into_iter()
+        .filter_map(|path| path.external_variable_name())
+        .filter(|name| name.parse::<crate::connectors::Namespace>().is_err())
+        .filter(|name| seen.insert(*name))
+        .map(|name| Message {
+            code: Code::InvalidMethodVariable,
+            message: format!(
+                "`{coordinate}` reads `{name}`, which is not one of its parameters or a variable connectors provide. A method body cannot see variables bound where it is called; pass the value as an argument instead."
+            ),
+            locations: locations.to_vec(),
+        })
+        .collect()
+}
+
 /// Reject `->method` calls that name neither a built-in nor a declared method.
 ///
 /// Without this, a typo like `->fisrt` composes cleanly and only fails per
@@ -379,12 +447,12 @@ pub(super) fn validate_method_calls(schema: &SchemaInfo) -> Vec<Message> {
     let connect_directive_name = schema.connect_directive_name();
     let method_directive_name = &schema.connect_link.method_directive_name;
 
-    // If the registry failed to assemble (duplicate, reserved shadow, cycle),
-    // `schema.methods()` is `None` and every custom call would look unknown. Those
-    // errors are already reported; staying quiet here avoids burying them under
-    // a pile of misleading "unknown method" follow-ons.
+    // If the declared methods failed to form a registry (duplicate, reserved
+    // shadow, cycle), `schema.methods()` holds a lenient stand-in that still
+    // knows every declared name, so those calls are not reported as unknown on
+    // top of the error that explains what is actually wrong.
     let registry = schema.methods();
-    let declared = |name: &str| registry.is_some_and(|registry| registry.get(name).is_some());
+    let declared = |name: &str| registry.is_some_and(|registry| registry.is_declared(name));
 
     // Fatal only for the spec version that introduces the check. v0.1–v0.4
     // shipped without it, so a schema carrying a typo'd method composes and
@@ -438,8 +506,25 @@ pub(super) fn validate_method_calls(schema: &SchemaInfo) -> Vec<Message> {
     let mut check = |parsed: &JSONSelection,
                      locations: Vec<Range<LineColumn>>,
                      coordinate: String| {
-        for method in parsed.method_calls() {
+        for (method, arg_count) in parsed.method_calls_with_arg_counts() {
             let name = method.as_ref().as_str();
+            // A call to a declared method must pass one argument per parameter;
+            // otherwise it fails on every request. Checked here rather than in
+            // the shape pass so it is caught wherever the call appears, even
+            // under a field whose type does not get its shape checked.
+            if let Some(custom) = registry.and_then(|registry| registry.get(name)) {
+                if arg_count != custom.params.len() {
+                    messages.push(Message {
+                        code: Code::MethodArgumentCount,
+                        message: format!(
+                            "`{coordinate}` calls `->{name}` with {arg_count} argument(s), but `{name}` declares {} parameter(s).",
+                            custom.params.len()
+                        ),
+                        locations: locations.clone(),
+                    });
+                }
+                continue;
+            }
             if is_builtin_method_name(name) || declared(name) {
                 continue;
             }
@@ -1143,5 +1228,249 @@ type Child {
             codes(schema).contains(&Code::UnsupportedMethodAutoDerive),
             "expected UnsupportedMethodAutoDerive for an object-typed field"
         );
+    }
+
+    /// A v0.5 subgraph with one `@source` carrying `methods_literal` and one
+    /// `Query.f: JSON` connector whose `@connect` arguments are `connect_args`.
+    fn review_schema(methods_literal: &str, connect_args: &str) -> String {
+        format!(
+            r#"extend schema
+@link(url: "https://specs.apollo.dev/connect/v0.5", import: ["@connect", "@source"])
+@source(name: "v", http: {{ baseURL: "http://localhost" }}, methods: {methods_literal})
+
+type Query {{
+  f(id: ID): JSON @connect(source: "v", {connect_args})
+}}
+
+scalar JSON
+"#
+        )
+    }
+
+    /// Like [`review_schema`], but `Query.f` returns `T { id: ID }`, so the
+    /// selection is type-checked field by field rather than accepted whole as
+    /// a custom scalar.
+    fn review_schema_typed(methods_literal: &str, selection: &str) -> String {
+        format!(
+            r#"extend schema
+@link(url: "https://specs.apollo.dev/connect/v0.5", import: ["@connect", "@source"])
+@source(name: "v", http: {{ baseURL: "http://localhost" }}, methods: {methods_literal})
+
+type Query {{
+  f: T @connect(source: "v", http: {{ GET: "/" }}, selection: "{selection}")
+}}
+
+type T {{
+  id: ID
+}}
+"#
+        )
+    }
+
+    fn errors_only(messages: Vec<Message>) -> Vec<Message> {
+        messages
+            .into_iter()
+            .filter(|m| m.code.severity() == Severity::Error)
+            .collect()
+    }
+
+    #[test]
+    fn variables_used_only_in_a_method_body_are_collected_as_inputs() {
+        use crate::connectors::Namespace;
+
+        let schema = review_schema(
+            r#"{ Tag: "id: $args.id status: $status" }"#,
+            r#"http: { GET: "/" }, selection: "$->Tag""#,
+        );
+        let parsed = apollo_compiler::Schema::parse(&schema, "test.graphql").unwrap();
+        let connectors = crate::connectors::Connector::from_schema(&parsed, "test").unwrap();
+        let keys = &connectors[0].response_variable_keys;
+        assert!(
+            keys.contains_key(&Namespace::Args),
+            "$args used in a method body must be an input: {keys:?}"
+        );
+        assert!(
+            keys.contains_key(&Namespace::Status),
+            "$status used in a method body must be an input: {keys:?}"
+        );
+    }
+
+    #[test]
+    fn is_success_can_call_a_declared_method() {
+        let schema = review_schema(
+            r#"{ ok: "$status->eq(200)" }"#,
+            r#"http: { GET: "/" }, selection: "id", isSuccess: "$->ok""#,
+        );
+        let errors = errors_only(validate_sdl(schema));
+        assert!(errors.is_empty(), "{errors:?}");
+    }
+
+    #[test]
+    fn errors_message_can_call_a_declared_method() {
+        let schema = review_schema(
+            r#"{ Msg: "$.error" }"#,
+            r#"http: { GET: "/" }, selection: "id", errors: { message: "$->Msg" }"#,
+        );
+        let errors = errors_only(validate_sdl(schema));
+        assert!(errors.is_empty(), "{errors:?}");
+    }
+
+    #[test]
+    fn http_body_can_call_a_declared_method() {
+        let schema = review_schema(
+            r#"{ Wrap: "{ id: @ }" }"#,
+            r#"http: { POST: "/", body: "$args.id->Wrap" }, selection: "id""#,
+        );
+        let errors = errors_only(validate_sdl(schema));
+        assert!(errors.is_empty(), "{errors:?}");
+    }
+
+    #[test]
+    fn url_can_call_a_declared_method() {
+        let schema = review_schema(
+            r#"{ Up: "@->toString" }"#,
+            r#"http: { GET: "/{$args.id->Up}" }, selection: "id""#,
+        );
+        let errors = errors_only(validate_sdl(schema));
+        assert!(errors.is_empty(), "{errors:?}");
+    }
+
+    #[test]
+    fn broken_registry_does_not_add_unknown_method_noise() {
+        let schema = r#"extend schema
+@link(url: "https://specs.apollo.dev/connect/v0.5", import: ["@connect", "@source"])
+@source(name: "v", http: { baseURL: "http://localhost" }, methods: { foo: "id" })
+
+type Query {
+  a: T @connect(source: "v", http: { GET: "/a" }, selection: "$->foo", methods: { foo: "id" })
+  b: T @connect(source: "v", http: { GET: "/b" }, selection: "$->foo")
+}
+
+type T {
+  id: ID
+}
+"#
+        .to_string();
+        let codes: Vec<_> = errors_only(validate_sdl(schema))
+            .into_iter()
+            .map(|m| m.code)
+            .collect();
+        assert_eq!(codes, vec![Code::DuplicateMethod], "{codes:?}");
+    }
+
+    #[test]
+    fn wrong_argument_count_is_a_compose_error() {
+        let schema = review_schema_typed(r#"{ pair: "($a, $b) => $a" }"#, "id: $->pair(1)");
+        let errors = errors_only(validate_sdl(schema));
+        assert!(!errors.is_empty(), "->pair(1) should not compose");
+    }
+
+    #[test]
+    fn method_body_cannot_see_caller_locals() {
+        let schema = review_schema_typed(r#"{ useX: "$x" }"#, "id: $.n->as($x)->useX");
+        let errors = errors_only(validate_sdl(schema));
+        assert!(
+            !errors.is_empty(),
+            "a body reading the caller's ->as local should not compose"
+        );
+    }
+
+    #[test]
+    fn parameter_named_like_a_builtin_variable_is_rejected() {
+        let schema = review_schema(
+            r#"{ f: "($args) => $args" }"#,
+            r#"http: { GET: "/" }, selection: "id""#,
+        );
+        let errors = errors_only(validate_sdl(schema));
+        assert!(!errors.is_empty(), "($args) => should be rejected");
+    }
+
+    #[test]
+    fn duplicate_parameter_names_are_rejected() {
+        let schema = review_schema(
+            r#"{ g: "($a, $a) => $a" }"#,
+            r#"http: { GET: "/" }, selection: "id""#,
+        );
+        let errors = errors_only(validate_sdl(schema));
+        assert!(!errors.is_empty(), "($a, $a) => should be rejected");
+    }
+
+    #[test]
+    fn method_directive_as_must_be_an_identifier() {
+        let schema = r#"extend schema
+@link(url: "https://specs.apollo.dev/connect/v0.5", import: ["@connect", "@source", "@method"])
+@source(name: "v", http: { baseURL: "http://localhost" })
+
+type Query {
+  t: T @connect(source: "v", http: { GET: "/" }, selection: "id")
+}
+
+type T @method(as: "not-an-identifier!") {
+  id: ID
+}
+"#
+        .to_string();
+        let errors = errors_only(validate_sdl(schema));
+        assert!(!errors.is_empty(), "@method(as:) must be an identifier");
+    }
+
+    #[test]
+    fn cycle_reports_only_the_cycle() {
+        let schema = review_schema_typed(r#"{ a: "$->b", b: "$->a" }"#, "id: $->a");
+        let codes: Vec<_> = errors_only(validate_sdl(schema))
+            .into_iter()
+            .map(|m| m.code)
+            .collect();
+        assert_eq!(codes, vec![Code::NonInlinableMethods], "{codes:?}");
+    }
+
+    #[test]
+    fn request_body_calls_a_method_at_request_time() {
+        let schema = review_schema(
+            r#"{ Wrap: "{ id: @ }" }"#,
+            r#"http: { POST: "/", body: "$args.id->Wrap" }, selection: "id""#,
+        );
+        let parsed = apollo_compiler::Schema::parse(&schema, "test.graphql").unwrap();
+        let connectors = crate::connectors::Connector::from_schema(&parsed, "test").unwrap();
+        let body = connectors[0]
+            .transport
+            .as_ref()
+            .and_then(|transport| transport.body.as_ref())
+            .expect("connector has a body");
+        let mut vars = apollo_compiler::collections::IndexMap::default();
+        vars.insert("$args".to_string(), serde_json_bytes::json!({ "id": "7" }));
+        let (value, errors) = body.apply_with_vars(&serde_json_bytes::json!({}), &vars);
+        assert!(errors.is_empty(), "{errors:?}");
+        assert_eq!(value, Some(serde_json_bytes::json!({ "id": "7" })));
+    }
+
+    #[test]
+    fn this_read_only_inside_a_method_body_becomes_part_of_the_key() {
+        let schema = r#"extend schema
+@link(url: "https://specs.apollo.dev/connect/v0.5", import: ["@connect", "@source"])
+@source(name: "v", http: { baseURL: "http://localhost" }, methods: { Owner: "ownerId: $this.id" })
+
+type Query {
+  t: T @connect(source: "v", http: { GET: "/t" }, selection: "id")
+}
+
+type T {
+  id: ID
+  owner: JSON @connect(source: "v", http: { GET: "/owner" }, selection: "$->Owner")
+}
+
+scalar JSON
+"#;
+        let parsed = apollo_compiler::Schema::parse(schema, "test.graphql").unwrap();
+        let connectors = crate::connectors::Connector::from_schema(&parsed, "test").unwrap();
+        let owner = connectors
+            .iter()
+            .find(|c| c.id.coordinate().contains("owner"))
+            .expect("T.owner connector");
+        let key = owner
+            .resolvable_key(&parsed)
+            .expect("key builds")
+            .expect("T.owner needs a key");
+        assert_eq!(key.serialize().no_indent().to_string(), "id");
     }
 }

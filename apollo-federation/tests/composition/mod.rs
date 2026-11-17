@@ -14,6 +14,7 @@ mod compose_types;
 mod compose_upgrade_subgraphs;
 mod compose_validation;
 mod connectors;
+mod connectors_methods;
 mod demand_control;
 mod directive_argument_merge_strategies;
 mod external;

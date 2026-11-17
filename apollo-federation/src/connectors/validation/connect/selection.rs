@@ -129,9 +129,9 @@ impl<'schema> Selection<'schema> {
     /// Shape-based type checking for v0.3+ (actively maintained)
     fn type_check_shape_based(self, schema: &SchemaInfo) -> Result<Vec<(Name, Name)>, Message> {
         let coordinate = self.coordinate.connect;
-        // Compute the selection's shape, resolving any custom `->` methods
-        // (`@source(methods:)`) against the schema's def registry.
-        let shape = self.parsed.shape_with_methods(schema.methods().cloned());
+        // `parse_mapping_argument` bound the selection to the schema's custom
+        // `->` methods, so calls to them shape as their bodies.
+        let shape = self.parsed.shape();
 
         match coordinate.element {
             ConnectedElement::Field {

@@ -341,7 +341,7 @@ pub(crate) fn directive_specifications() -> Vec<Box<dyn TypeAndDirectiveSpecific
     vec![
         Box::new(connect_directive_spec()),
         Box::new(source_directive_spec()),
-        Box::new(mapping_directive_spec()),
+        Box::new(method_directive_spec()),
     ]
 }
 
@@ -360,7 +360,7 @@ pub(crate) fn directive_specifications() -> Vec<Box<dyn TypeAndDirectiveSpecific
 // spec version, with its *use* gated to connect/v0.5+ in validation. Stricter
 // per-version directive gating (emitting `@method` only for v0.5+) is a
 // possible pre-release follow-up.
-fn mapping_directive_spec() -> DirectiveSpecification {
+fn method_directive_spec() -> DirectiveSpecification {
     DirectiveSpecification::new(
         METHOD_DIRECTIVE_NAME_IN_SPEC,
         &[

@@ -23,6 +23,7 @@ pub use source::SourceHTTPArguments;
 pub(crate) use source::extract_source_directive_arguments;
 use strum::IntoEnumIterator;
 use strum_macros::EnumIter;
+pub(crate) use type_and_directive_specifications::METHOD_AS_ARGUMENT_NAME;
 
 use self::connect::CONNECT_DIRECTIVE_NAME_IN_SPEC;
 use self::source::SOURCE_DIRECTIVE_NAME_IN_SPEC;

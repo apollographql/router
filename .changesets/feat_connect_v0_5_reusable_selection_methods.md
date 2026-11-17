@@ -25,7 +25,7 @@ type Query {
 }
 ```
 
-A method body refers to its own input as `@`. `$` is left alone, so it still means what it would mean where the call appears.
+Inside a method body, `@` and `$` both refer to the method's input, so a body means the same thing wherever it is called from. A body can read the variables connectors provide (`$args`, `$this`, `$status`, and so on) and its own parameters, but not variables bound where it is called (by `->as`, say); pass those in as arguments.
 
 Methods share **one namespace per subgraph**, whichever directive declares them. Putting a method on a `@connect` keeps it next to the connector that motivated it; it does *not* scope it to that connector, and it still collides with a same-named method declared anywhere else in the subgraph.
 

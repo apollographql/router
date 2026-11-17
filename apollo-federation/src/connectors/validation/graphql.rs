@@ -21,7 +21,9 @@ pub(crate) struct SchemaInfo<'schema> {
     pub(crate) shape_lookup: IndexMap<String, Shape>,
     /// The global registry of custom `->` method definitions (`@source(methods:)`,
     /// `@connect(methods:)`, and `@method`), so shape-based validation can resolve
-    /// `->customMethod` calls. `None` when no (admissible) methods are declared.
+    /// `->customMethod` calls. `None` when no methods are declared; a lenient
+    /// stand-in when the declared ones do not form a valid registry (see
+    /// `methods::build_registry`).
     methods: Option<std::sync::Arc<crate::connectors::MethodRegistry>>,
 }
 
@@ -45,7 +47,7 @@ impl<'schema> SchemaInfo<'schema> {
         }
     }
 
-    /// The global custom-method registry, if any admissible methods are declared.
+    /// The global custom-method registry, if any methods are declared.
     pub(crate) fn methods(&self) -> Option<&std::sync::Arc<crate::connectors::MethodRegistry>> {
         self.methods.as_ref()
     }

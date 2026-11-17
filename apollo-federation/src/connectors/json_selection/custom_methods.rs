@@ -2,12 +2,11 @@
 //! later step, the `@method` directive).
 //!
 //! A method is a **name for an inlinable JSONSelection** over its input. Invoking
-//! `input->Name(args)` evaluates the method's body with `@` bound to the receiver
-//! (`input`) and the positional parameters bound as locals, while `$` *lags* —
-//! it keeps the caller's ambient root rather than being clamped to the receiver.
-//! That is what makes the body mean exactly what the equivalent inline selection
-//! would mean at the call site (the Splice Correspondence Principle), and it is
-//! why a method body refers to its own input as `@`, not `$`. See
+//! `input->Name(args)` evaluates the method's body with both `@` and `$` bound to
+//! the receiver (`input`) and the positional parameters bound as locals, so a
+//! body means the same thing in every form it can be written in and wherever it
+//! is called from, the way `$` in a top-level selection is the response it is
+//! applied to. A body cannot see the caller's local variables. See
 //! `apply_custom_method` for the frame construction. Methods are global,
 //! flat-namespaced, and closure-free; a set of methods is admitted iff every method
 //! could be inlined (its full expansion is finite — i.e. the call graph is a
@@ -21,6 +20,7 @@ use std::collections::HashMap;
 use std::collections::HashSet;
 
 use indexmap::IndexMap;
+use indexmap::IndexSet;
 
 use super::JSONSelection;
 use super::JSONSelectionParseError;
@@ -149,6 +149,11 @@ pub(crate) enum MethodError {
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct MethodRegistry {
     methods: IndexMap<String, CompiledMethod>,
+
+    /// Names that are declared but have no usable definition. Always empty for
+    /// a registry from [`Self::build`]; only [`Self::build_lenient`] fills it,
+    /// with the members of a cycle. See [`Self::is_declared`].
+    unusable: IndexSet<String>,
 }
 
 impl MethodRegistry {
@@ -184,10 +189,51 @@ impl MethodRegistry {
         }
 
         if errors.is_empty() {
-            Ok(Self { methods: map })
+            Ok(Self {
+                methods: map,
+                unusable: IndexSet::default(),
+            })
         } else {
             Err(errors)
         }
+    }
+
+    /// Build a best-effort registry for validation to keep checking with when
+    /// [`Self::build`] fails, so its errors are not followed by one "method not
+    /// found" per call to a method the author did declare.
+    ///
+    /// The first of several same-named methods wins, a method shadowing a
+    /// reserved name is dropped (so the call means the reserved built-in), and
+    /// the members of each cycle are kept only as names: they are
+    /// [declared](Self::is_declared) but have no definition, so calls to them
+    /// shape as unknown. The result is acyclic, but must never reach request
+    /// time: the schema it came from does not compose.
+    pub(crate) fn build_lenient(methods: impl IntoIterator<Item = CompiledMethod>) -> Self {
+        let mut map: IndexMap<String, CompiledMethod> = IndexMap::new();
+        for method in methods {
+            if !is_reserved_method_name(&method.name) && !map.contains_key(&method.name) {
+                map.insert(method.name.clone(), method);
+            }
+        }
+        let mut unusable = IndexSet::default();
+        while let Some(cycle) = find_cycle(&map) {
+            for name in cycle {
+                if let Some(method) = map.shift_remove(&name) {
+                    unusable.insert(method.name);
+                }
+            }
+        }
+        Self {
+            methods: map,
+            unusable,
+        }
+    }
+
+    /// Whether `name` was declared as a custom method, whether or not it has a
+    /// usable definition. Differs from `get(name).is_some()` only for a
+    /// registry from [`Self::build_lenient`].
+    pub(crate) fn is_declared(&self, name: &str) -> bool {
+        self.methods.contains_key(name) || self.unusable.contains(name)
     }
 
     // Consumed by runtime dispatch (step 2) and the shape pass (step 3).
@@ -403,5 +449,57 @@ mod tests {
             MethodRegistry::build([named_method("a", "$->eq($->b)"), named_method("b", "$->a")])
                 .expect_err("cycle through a method argument should error");
         assert!(matches!(err[0], MethodError::NotInlinable { .. }));
+    }
+
+    fn apply_with(
+        methods: &[(&str, &str)],
+        selection: &str,
+        data: serde_json_bytes::Value,
+    ) -> (Option<serde_json_bytes::Value>, Vec<String>) {
+        let registry = std::sync::Arc::new(
+            MethodRegistry::build(methods.iter().map(|(n, b)| named_method(n, b)))
+                .expect("registry should build"),
+        );
+        let selection = JSONSelection::parse_with_spec(selection, ConnectSpec::V0_5)
+            .expect("selection should parse");
+        let (value, errors) = selection
+            .with_methods(Some(registry))
+            .apply_with_vars(&data, &Default::default());
+        (
+            value,
+            errors
+                .into_iter()
+                .map(|e| e.message().to_string())
+                .collect(),
+        )
+    }
+
+    /// `$` inside a method body must mean the same thing for every body form.
+    #[test]
+    fn dollar_in_a_body_means_the_same_in_every_body_form() {
+        let data = serde_json_bytes::json!({ "x": 2, "a": { "x": 1 } });
+        let (named, _) = apply_with(&[("M", "y: $.x")], "$.a->M", data.clone());
+        let (value, _) = apply_with(&[("M", "{ y: $.x }")], "$.a->M", data.clone());
+        assert_eq!(named, value, "`y: $.x` and `{{ y: $.x }}` should agree");
+        let (bare, _) = apply_with(&[("M", "$.x")], "$.a->M", data);
+        let named_y = named.as_ref().and_then(|v| v.get("y")).cloned();
+        assert_eq!(
+            named_y, bare,
+            "`y: $.x` and `$.x` should read the same `$.x`"
+        );
+    }
+
+    #[test]
+    fn wrong_argument_count_fails_at_runtime_with_a_clear_message() {
+        let (value, errors) = apply_with(
+            &[("pair", "($a, $b) => { a: $a b: $b }")],
+            "$->pair(1)",
+            serde_json_bytes::json!({}),
+        );
+        assert_eq!(value, None);
+        assert!(
+            errors.iter().any(|e| e.contains("expects 2 argument(s)")),
+            "{errors:?}"
+        );
     }
 }
