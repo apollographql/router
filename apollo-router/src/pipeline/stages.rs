@@ -506,7 +506,7 @@ pub(crate) fn build_query_parsing_service(
 
     ServiceBuilder::new()
         .layer(QueryParsingCacheLayer::new(cache_config))
-        .apply_plugin_layer(
+        .apply_optional_plugin_layer(
             plugins,
             AuthorizationPlugin::authorization_requirements_layer,
         )

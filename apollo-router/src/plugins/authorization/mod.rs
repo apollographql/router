@@ -34,7 +34,6 @@ use crate::Context;
 use crate::error::QueryPlannerError;
 use crate::graphql;
 use crate::json_ext::Path;
-use crate::layers::OptionLayer;
 use crate::layers::ServiceBuilderExt;
 use crate::plugin::Plugin;
 use crate::plugin::PluginInit;
@@ -266,19 +265,17 @@ impl AuthorizationPlugin {
     }
 
     /// Returns a layer for the query parsing service that stores each parsed operation's
-    /// authorization requirements on its document, or an identity layer when authorization
-    /// directives are disabled or the supergraph links none of them.
+    /// authorization requirements on its document, or `None` when authorization directives
+    /// are disabled or the supergraph links none of them.
     pub(crate) fn authorization_requirements_layer(
         &self,
-    ) -> OptionLayer<AuthorizationRequirementsLayer> {
-        tower::util::option_layer(
-            (self.directives_enabled && self.directives.any_linked()).then(|| {
-                AuthorizationRequirementsLayer::new(
-                    self.supergraph_schema.clone(),
-                    self.directives.clone(),
-                )
-            }),
-        )
+    ) -> Option<AuthorizationRequirementsLayer> {
+        (self.directives_enabled && self.directives.any_linked()).then(|| {
+            AuthorizationRequirementsLayer::new(
+                self.supergraph_schema.clone(),
+                self.directives.clone(),
+            )
+        })
     }
 
     pub(crate) fn configuration(configuration: &Configuration) -> Conf {
