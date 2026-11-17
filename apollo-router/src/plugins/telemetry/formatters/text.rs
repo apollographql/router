@@ -199,7 +199,8 @@ impl Text {
             write!(writer, "{}", style.prefix())?;
         }
 
-        if let Some(dyn_attributes) = ext.get::<LogAttributes>() {
+        let log_attributes = ext.get::<LogAttributes>();
+        if let Some(dyn_attributes) = log_attributes {
             let mut attrs = dyn_attributes
                 .attributes()
                 .iter()
@@ -234,6 +235,8 @@ impl Text {
                     let key_name = kv.key.as_str();
                     !key_name.starts_with(APOLLO_PRIVATE_PREFIX)
                         && !self.excluded_attributes.contains(&key_name)
+                        // Already written from the log attributes.
+                        && !log_attributes.is_some_and(|attrs| attrs.contains_key(&kv.key))
                 })
                 .peekable();
             if attrs.peek().is_some() && !wrote_something {
