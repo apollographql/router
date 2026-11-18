@@ -49,6 +49,14 @@ directive @federation__listSize(assumedSize: Int, slicingArguments: [String!], s
 
 directive @federation__cacheTag(format: String!) repeatable on OBJECT | FIELD_DEFINITION
 
+directive @federation__lookup on FIELD_DEFINITION
+
+directive @federation__internal on OBJECT | FIELD_DEFINITION
+
+directive @federation__is(field: federation__FieldSelectionMap!) on ARGUMENT_DEFINITION
+
+directive @federation__require(field: federation__FieldSelectionMap!) on ARGUMENT_DEFINITION
+
 enum link__Purpose {
   """
   `SECURITY` features provide metadata necessary to securely resolve fields.
@@ -69,6 +77,8 @@ scalar federation__Scope
 scalar federation__Policy
 
 scalar federation__ContextFieldValue
+
+scalar federation__FieldSelectionMap
 
 type Query {
   t: T
@@ -140,6 +150,14 @@ directive @federation__listSize(assumedSize: Int, slicingArguments: [String!], s
 
 directive @federation__cacheTag(format: String!) repeatable on OBJECT | FIELD_DEFINITION
 
+directive @federation__lookup on FIELD_DEFINITION
+
+directive @federation__internal on OBJECT | FIELD_DEFINITION
+
+directive @federation__is(field: federation__FieldSelectionMap!) on ARGUMENT_DEFINITION
+
+directive @federation__require(field: federation__FieldSelectionMap!) on ARGUMENT_DEFINITION
+
 enum link__Purpose {
   """
   `SECURITY` features provide metadata necessary to securely resolve fields.
@@ -160,6 +178,8 @@ scalar federation__Scope
 scalar federation__Policy
 
 scalar federation__ContextFieldValue
+
+scalar federation__FieldSelectionMap
 
 enum E {
   V1

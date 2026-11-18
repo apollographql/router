@@ -31,8 +31,9 @@ fn compose_and_test_reversibility(subgraphs: &[ServiceDefinition<'_>]) {
         // fields/types.
         let expected_subgraph = Subgraph::parse(expected.name, "", expected.type_defs)
             .expect("Expected subgraph schema unexpectedly failed to parse.")
-            .into_fed2_test_subgraph(false)
-            .expect("Expected subgraph schema unexpectedly failed to convert to Fed 2.")
+            // Extracted subgraphs link the latest federation version, so the expected one does too.
+            .into_fed3_test_subgraph(false)
+            .expect("Expected subgraph schema unexpectedly failed to convert to Fed 3.")
             .expand_links()
             .expect("Expected subgraph schema unexpectedly failed to expand")
             .validate()

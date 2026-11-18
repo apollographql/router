@@ -29,7 +29,7 @@ expression: response
               "inputRewrites": null,
               "outputRewrites": null,
               "contextRewrites": null,
-              "schemaAwareHash": "77eac1cc310bce67a20fc913685be1a70e0cf1590271b09241b2fbfb8369d3d4",
+              "schemaAwareHash": "9f836ac15274ef4f377378d5ea1df3efb27bc9173fe8086a6ec1ab7e0dbbe718",
               "authorization": {
                 "is_authenticated": false,
                 "scopes": [],
@@ -81,7 +81,7 @@ expression: response
                     "renameKeyTo": "contextualArgument_1_0"
                   }
                 ],
-                "schemaAwareHash": "4ff62f66ebb6514078be6f82300a442269cc980a0630a9b07d078a38d1195f91",
+                "schemaAwareHash": "5810e4e6dde4879e129ddaca04b7d44810155e9a29f30db553a3b3d0746715fa",
                 "authorization": {
                   "is_authenticated": false,
                   "scopes": [],

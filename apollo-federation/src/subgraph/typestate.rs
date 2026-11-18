@@ -271,16 +271,37 @@ impl Subgraph<Initial> {
     }
 
     /// Given a schema that is assumed to _not_ be a fed2 schema (it does not have a `@link` to the federation spec),
-    /// converts the schema to a fed2 schema by adding `@link` to the last known federation spec.
+    /// converts the schema to a fed2 schema by adding `@link` to federation v2.15, the last 2.x
+    /// version.
     ///
     /// - It is assumed to have no `@link` to the federation spec.
-    /// - Returns an equivalent subgraph with a `@link` added with latest federation spec.
+    /// - Returns an equivalent subgraph with a `@link` added to federation v2.15.
     /// - Based on the `include_all_imports` param, we either import ALL directive definitions OR just up to fed v2.4
     /// - This is mainly for testing and not optimized.
+    ///
+    /// Use [`Self::into_fed3_test_subgraph`] to link federation v3.
     // PORT_NOTE: Corresponds to `asFed2SubgraphDocument` function in JS, but simplified.
     pub fn into_fed2_test_subgraph(self, include_all_imports: bool) -> Result<Self, SubgraphError> {
+        let federation_spec = FederationSpecDefinition::for_version(&Version {
+            major: 2,
+            minor: 15,
+        })
+        .expect("federation v2.15 is a known version");
+        self.into_test_subgraph(federation_spec, include_all_imports)
+    }
+
+    /// Same as [`Self::into_fed2_test_subgraph`], but adds a `@link` to the latest federation spec
+    /// (v3.x), so v3-only directives are imported too when `include_all_imports` is set.
+    pub fn into_fed3_test_subgraph(self, include_all_imports: bool) -> Result<Self, SubgraphError> {
+        self.into_test_subgraph(FederationSpecDefinition::latest(), include_all_imports)
+    }
+
+    fn into_test_subgraph(
+        self,
+        federation_spec: &FederationSpecDefinition,
+        include_all_imports: bool,
+    ) -> Result<Self, SubgraphError> {
         let mut schema = self.state.schema;
-        let federation_spec = FederationSpecDefinition::latest();
         // we cannot use FederationSpecDefinition::add_elements_to_schema as we don't have FederationSchema yet
         let imports: Vec<Node<Value>> = if include_all_imports {
             federation_spec
