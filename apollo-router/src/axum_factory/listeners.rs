@@ -1405,6 +1405,142 @@ mod tests {
         .await;
     }
 
+    /// Starts a server whose only route that answers without a supergraph is `/custom`.
+    async fn init_with_custom_endpoint() -> crate::http_server_factory::HttpServerHandle {
+        let conf = Arc::new(Configuration::fake_builder().build().unwrap());
+        let endpoint = service_fn(|req: router::Request| async move {
+            router::Response::http_response_builder()
+                .response(http::Response::builder().body(body::empty())?)
+                .context(req.context)
+                .build()
+        })
+        .boxed_clone();
+        let mut web_endpoints = MultiMap::new();
+        web_endpoints.insert(
+            conf.supergraph.listen.clone(),
+            Endpoint::from_router_service("/custom".to_string(), endpoint),
+        );
+        let (supergraph_mock, _) = tower_test::mock::pair::<
+            crate::services::supergraph::Request,
+            crate::services::supergraph::Response,
+        >();
+        init_with_config(
+            crate::pipeline::from_supergraph_mock(supergraph_mock).await,
+            conf,
+            web_endpoints,
+        )
+        .await
+        .unwrap()
+        .0
+    }
+
+    /// Reads one HTTP/2 frame, returning its type, stream ID and payload, or `None` at EOF.
+    async fn read_h2_frame(stream: &mut tokio::net::TcpStream) -> Option<(u8, u32, Vec<u8>)> {
+        use tokio::io::AsyncReadExt;
+
+        let mut header = [0u8; 9];
+        stream.read_exact(&mut header).await.ok()?;
+        let len = u32::from_be_bytes([0, header[0], header[1], header[2]]) as usize;
+        let stream_id = u32::from_be_bytes(header[5..9].try_into().unwrap()) & 0x7fff_ffff;
+        let mut payload = vec![0u8; len];
+        stream.read_exact(&mut payload).await.ok()?;
+        Some((header[3], stream_id, payload))
+    }
+
+    #[tokio::test]
+    async fn it_does_not_count_http2_connections_closed_by_graceful_shutdown() {
+        async {
+            let server = init_with_custom_endpoint().await;
+            let addr = server.graphql_listen_address().clone().unwrap();
+
+            // One served request, so the shutdown branch waits for the connection to close.
+            let (response, conn) = try_send_h2c(&addr, "/custom", []).await;
+            assert_eq!(response.unwrap().status(), StatusCode::OK);
+
+            server.shutdown().await.unwrap();
+            // The router sends GOAWAY NO_ERROR and closes the connection, which ends the client's
+            // connection task.
+            conn.await.unwrap().unwrap();
+
+            assert!(
+                crate::metrics::collect_metrics()
+                    .find(CONNECTION_ERRORS)
+                    .is_none()
+            );
+        }
+        .with_metrics()
+        .await;
+    }
+
+    #[tokio::test]
+    async fn it_counts_http2_connections_closed_with_an_error_during_graceful_shutdown() {
+        async {
+            use tokio::io::AsyncWriteExt;
+
+            const HEADERS_FRAME: u8 = 0x1;
+            const GOAWAY_FRAME: u8 = 0x7;
+            const CONTINUATION_FRAME: u8 = 0x9;
+            const END_STREAM: u8 = 0x1;
+            const END_HEADERS: u8 = 0x4;
+
+            let server = init_with_custom_endpoint().await;
+            let addr = server.graphql_listen_address().clone().unwrap();
+            let (ip, port) = addr.ip_and_port().unwrap();
+            let mut stream = tokio::net::TcpStream::connect((ip, port)).await.unwrap();
+            stream.write_all(H2_PREFACE_AND_SETTINGS).await.unwrap();
+
+            // GET /custom on stream 1, HPACK-encoded with the static table: :method GET,
+            // :scheme http, then :path as a literal.
+            let mut block = vec![0x82, 0x86, 0x04, 7];
+            block.extend(b"/custom");
+            let request = h2_frame(HEADERS_FRAME, END_HEADERS | END_STREAM, 1, &block);
+            stream.write_all(&request).await.unwrap();
+            while let Some((kind, stream_id, _)) = read_h2_frame(&mut stream).await {
+                if kind == HEADERS_FRAME && stream_id == 1 {
+                    break;
+                }
+            }
+
+            // Graceful shutdown starts with a GOAWAY NO_ERROR. This client never answers the
+            // PING that follows, so the router keeps reading frames from it.
+            server.shutdown().await.unwrap();
+            loop {
+                let (kind, _, payload) = read_h2_frame(&mut stream).await.expect("a GOAWAY");
+                if kind == GOAWAY_FRAME {
+                    assert_eq!(payload[4..8], [0, 0, 0, 0], "NO_ERROR");
+                    break;
+                }
+            }
+
+            let mut flood = h2_frame(HEADERS_FRAME, END_STREAM, 3, &[]);
+            for _ in 0..100 {
+                flood.extend(h2_frame(CONTINUATION_FRAME, 0, 3, &[]));
+            }
+            stream.write_all(&flood).await.unwrap();
+            let mut go_away = None;
+            while let Some((kind, _, payload)) = read_h2_frame(&mut stream).await {
+                if kind == GOAWAY_FRAME {
+                    go_away = Some(h2::Reason::from(u32::from_be_bytes(
+                        payload[4..8].try_into().unwrap(),
+                    )));
+                }
+            }
+            assert_eq!(go_away, Some(h2::Reason::ENHANCE_YOUR_CALM));
+
+            assert_counter!(
+                "apollo.router.server.connection.errors",
+                1,
+                "error.type" = "ENHANCE_YOUR_CALM",
+                "network.protocol.name" = "http",
+                "network.protocol.version" = "2",
+                "server.address" = ip.to_string(),
+                "server.port" = port.to_string()
+            );
+        }
+        .with_metrics()
+        .await;
+    }
+
     #[test]
     fn http2_error_type_skips_no_error_and_bounds_unknown_codes() {
         assert_eq!(http2_error_type(h2::Reason::NO_ERROR), None);
