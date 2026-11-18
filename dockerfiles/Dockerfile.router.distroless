@@ -22,7 +22,11 @@ FROM gcr.io/distroless/cc-debian13:nonroot AS base
 # its own binary. Left empty, the script downloads a release instead.
 FROM scratch AS router-artifacts
 
-FROM debian:trixie-slim AS downloader
+# This stage runs on the build host's platform, since it only fetches and
+# extracts the Router tarball. The script selects the tarball for the target
+# platform from TARGETPLATFORM. In a multi-platform build that keeps these steps
+# out of QEMU emulation, where they take many times longer.
+FROM --platform=$BUILDPLATFORM debian:trixie-slim AS downloader
 ARG ROUTER_RELEASE=latest
 ARG ARTIFACT_URL=
 ARG CIRCLE_TOKEN=
