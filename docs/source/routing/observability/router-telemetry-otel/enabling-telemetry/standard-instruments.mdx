@@ -385,7 +385,7 @@ telemetry:
   - `server.address` - The address that the router is listening on.
   - `server.port` - The port that the router is listening on if not a unix socket.
   - `http.connection.state` - Either `active` or `terminating`.
-- `apollo.router.server.connection.errors` - Number of client connections the router closed with a protocol error code. Today only HTTP/2 connections are counted: it increments once per connection when the router closes it with a GOAWAY frame carrying an error code. The client receives no HTTP response for requests still in progress on that connection. Connections the client closes, network errors and graceful shutdowns are not counted.
+- `apollo.router.server.connection.errors` - Number of client connections the router closed with a protocol error code. Only HTTP/2 connections are counted. It increments once per connection when the router closes it with a GOAWAY frame carrying an error code. The client receives no HTTP response for requests still in progress on that connection. Connections the client closes, network errors and connections closed cleanly by a graceful shutdown are not counted.
   - `network.protocol.name` - Always `http`.
   - `network.protocol.version` - The HTTP version of the connection. Always `2`.
   - `server.address` - The address that the router is listening on.
