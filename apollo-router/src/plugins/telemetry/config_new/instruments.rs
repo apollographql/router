@@ -44,6 +44,7 @@ use crate::metrics;
 use crate::plugins::subscription::SUBSCRIPTION_SUBGRAPH_NAME_CONTEXT_KEY;
 use crate::plugins::telemetry::CLIENT_NAME;
 use crate::plugins::telemetry::config_new::Selectors;
+use crate::plugins::telemetry::config_new::Stage;
 use crate::plugins::telemetry::config_new::apollo::instruments::ApolloConnectorInstruments;
 use crate::plugins::telemetry::config_new::apollo::instruments::ApolloSubgraphInstruments;
 use crate::plugins::telemetry::config_new::attributes::DefaultAttributeRequirementLevel;
@@ -1900,6 +1901,13 @@ pub(crate) enum Increment {
     FieldCustom(Option<opentelemetry::Value>),
 }
 
+/// Whether an `event_custom` value is selected only on response events. Each response chunk then
+/// records its own value. A value selected at request or response time would be recorded once for
+/// the whole response, so this holds whenever the selector can run on events.
+fn selects_only_on_events<T: Selector>(increment: &Increment, selector: &T) -> bool {
+    matches!(increment, Increment::EventCustom(_)) && selector.is_active(Stage::ResponseEvent)
+}
+
 fn value_to_f64(value: &opentelemetry::Value) -> Option<f64> {
     match value {
         opentelemetry::Value::F64(f) => Some(*f),
@@ -2006,7 +2014,12 @@ where
             inner.attributes = selectors.on_request(request).into_iter().collect();
         }
 
-        if let Some(selected_value) = inner.selector.as_ref().and_then(|s| s.on_request(request)) {
+        if let Some(selected_value) = inner
+            .selector
+            .as_ref()
+            .filter(|s| !selects_only_on_events(&inner.increment, s.as_ref()))
+            .and_then(|s| s.on_request(request))
+        {
             let new_incr = match &inner.increment {
                 Increment::EventCustom(None) => Increment::EventCustom(Some(selected_value)),
                 Increment::Custom(None) => Increment::Custom(Some(selected_value)),
@@ -2047,6 +2060,7 @@ where
         if let Some(selected_value) = inner
             .selector
             .as_ref()
+            .filter(|s| !selects_only_on_events(&inner.increment, s.as_ref()))
             .and_then(|s| s.on_response(response))
         {
             let new_incr = match &inner.increment {
@@ -2437,7 +2451,12 @@ where
         if let Some(selectors) = &inner.selectors {
             inner.attributes = selectors.on_request(request).into_iter().collect();
         }
-        if let Some(selected_value) = inner.selector.as_ref().and_then(|s| s.on_request(request)) {
+        if let Some(selected_value) = inner
+            .selector
+            .as_ref()
+            .filter(|s| !selects_only_on_events(&inner.increment, s.as_ref()))
+            .and_then(|s| s.on_request(request))
+        {
             let new_incr = match &inner.increment {
                 Increment::EventCustom(None) => Increment::EventCustom(Some(selected_value)),
                 Increment::FieldCustom(None) => Increment::FieldCustom(Some(selected_value)),
@@ -2477,6 +2496,7 @@ where
         if let Some(selected_value) = inner
             .selector
             .as_ref()
+            .filter(|s| !selects_only_on_events(&inner.increment, s.as_ref()))
             .and_then(|s| s.on_response(response))
         {
             let new_incr = match &inner.increment {
