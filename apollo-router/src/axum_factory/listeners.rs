@@ -240,7 +240,7 @@ async fn handle_connection<C, E: AsRef<dyn std::error::Error + Send + Sync>>(
         // the connection finished first
         res = &mut connection => {
             if let Err(err) = res {
-                record_connection_error(err.as_ref(), connection_start);
+                record_connection_error(err.as_ref(), connection_start, &connection_handle.address);
             }
         }
         // the shutdown receiver was triggered first,
@@ -258,7 +258,7 @@ async fn handle_connection<C, E: AsRef<dyn std::error::Error + Send + Sync>>(
 
                 match connection.timeout(connection_shutdown_timeout).await {
                     Ok(Err(err)) => {
-                        record_connection_error(err.as_ref(), connection_start);
+                        record_connection_error(err.as_ref(), connection_start, &connection_handle.address);
                     }
                     Ok(Ok(())) => {}
                     Err(_) => tracing::warn!(
@@ -625,16 +625,33 @@ fn classify_hyper_rejection(err: &(dyn std::error::Error + Send + Sync + 'static
 /// hyper rejects HTTP/1 requests with oversized headers (431) or URI (414), and h2 closes HTTP/2
 /// connections with a GOAWAY, before any request reaches the axum service layer. Neither is seen
 /// by the normal metrics and tracing middleware, so they are recorded here from the error.
-fn record_connection_error(err: &(dyn std::error::Error + Send + Sync + 'static), start: Instant) {
+fn record_connection_error(
+    err: &(dyn std::error::Error + Send + Sync + 'static),
+    start: Instant,
+    address: &ListenAddr,
+) {
     if let Some(status_code) = classify_hyper_rejection(err) {
         record_rejected_request(status_code, start);
     } else if let Some(error_type) = http2_go_away_sent(err).and_then(http2_error_type) {
+        use opentelemetry::KeyValue;
+
+        let mut attributes = vec![
+            KeyValue::new("error.type", error_type),
+            KeyValue::new("network.protocol.name", "http"),
+            KeyValue::new("network.protocol.version", "2"),
+        ];
+        if let Some((ip, port)) = address.ip_and_port() {
+            attributes.push(KeyValue::new("server.address", ip.to_string()));
+            attributes.push(KeyValue::new("server.port", port.to_string()));
+        } else {
+            attributes.push(KeyValue::new("server.address", address.to_string()));
+        }
         u64_counter_with_unit!(
-            "apollo.router.http2.server.connection.errors",
-            "Number of client HTTP/2 connections the router closed with an HTTP/2 error code.",
-            "{error}",
+            "apollo.router.server.connection.errors",
+            "Number of client connections the router closed with a protocol error code.",
+            "{connection}",
             1,
-            "error.type" = error_type
+            attributes
         );
     }
 }
@@ -1192,7 +1209,7 @@ mod tests {
         server.shutdown().await.unwrap();
     }
 
-    const HTTP2_CONNECTION_ERRORS: &str = "apollo.router.http2.server.connection.errors";
+    const CONNECTION_ERRORS: &str = "apollo.router.server.connection.errors";
 
     const H2_PREFACE_AND_SETTINGS: &[u8] = b"PRI * HTTP/2.0\r\n\r\nSM\r\n\r\n\0\0\0\x04\0\0\0\0\0";
 
@@ -1331,15 +1348,19 @@ mod tests {
             match outcome {
                 Ok(_) => assert!(
                     crate::metrics::collect_metrics()
-                        .find(HTTP2_CONNECTION_ERRORS)
+                        .find(CONNECTION_ERRORS)
                         .is_none()
                 ),
                 Err(reason) => {
-                    let error_type = http2_error_type(reason).unwrap();
+                    let (ip, port) = addr.ip_and_port().unwrap();
                     assert_counter!(
-                        "apollo.router.http2.server.connection.errors",
+                        "apollo.router.server.connection.errors",
                         1,
-                        "error.type" = error_type
+                        "error.type" = http2_error_type(reason).unwrap(),
+                        "network.protocol.name" = "http",
+                        "network.protocol.version" = "2",
+                        "server.address" = ip.to_string(),
+                        "server.port" = port.to_string()
                     );
                 }
             }
@@ -1376,7 +1397,7 @@ mod tests {
 
             assert!(
                 crate::metrics::collect_metrics()
-                    .find(HTTP2_CONNECTION_ERRORS)
+                    .find(CONNECTION_ERRORS)
                     .is_none()
             );
         }
