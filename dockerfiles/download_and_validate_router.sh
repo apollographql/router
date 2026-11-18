@@ -1,22 +1,57 @@
 #!/bin/bash
 set -e
 
-# Download and validate Router binary This script handles both release downloads
-# and artifact downloads with checksum validation NOTE: This script is only
-# intended to be executed from inside Dockerfile.router which lives besides
-# this.
+# Download and validate Router binary. This script handles local artifacts,
+# release downloads, and artifact downloads, all with checksum validation.
+# NOTE: This script is only intended to be executed from inside
+# Dockerfile.router (or Dockerfile.router.distroless) which live beside this.
+#
+# There are three ways to source the Router tarball, tried in this order:
+#
+#   1. Local artifacts: if ${LOCAL_ARTIFACTS_DIR}/sha256sums.txt exists, the
+#      tarball for TARGETPLATFORM is taken from that directory. CI uses this for
+#      nightly and test builds by passing
+#      `--build-context router-artifacts=<dir>` to `docker buildx build`, where
+#      <dir> holds one tarball per platform. Because each platform's build picks
+#      its own tarball, this is what makes multi-platform builds possible for
+#      binaries that haven't been published as a release.
+#   2. ARTIFACT_URL: a single tarball downloaded from a URL (e.g. a CircleCI
+#      artifact), used regardless of TARGETPLATFORM. Kept for the DIY build
+#      script in `diy/`.
+#   3. Release: the published release tarball for ROUTER_RELEASE and
+#      TARGETPLATFORM.
+
+LOCAL_ARTIFACTS_DIR="${LOCAL_ARTIFACTS_DIR:-/router-artifacts}"
+
+if [ -f "${LOCAL_ARTIFACTS_DIR}/sha256sums.txt" ]; then
+    SOURCE="local"
+elif [ -n "${ARTIFACT_URL}" ]; then
+    SOURCE="artifact_url"
+else
+    SOURCE="release"
+fi
 
 # Validate required environment variables early
-if [ -z "${ARTIFACT_URL}" ]; then
-    # Release build path - requires ROUTER_RELEASE
-    if [ -z "${ROUTER_RELEASE}" ]; then
-        echo "Error: ROUTER_RELEASE environment variable is required for release builds"
-        exit 1
-    fi
+case "${SOURCE}" in
+    "release")
+        if [ -z "${ROUTER_RELEASE}" ]; then
+            echo "Error: ROUTER_RELEASE environment variable is required for release builds"
+            exit 1
+        fi
+        ;;
+    "artifact_url")
+        if [ -z "${CIRCLE_TOKEN}" ]; then
+            echo "Error: CIRCLE_TOKEN environment variable is required when ARTIFACT_URL is set"
+            exit 1
+        fi
+        # ARTIFACT_URL_SHA256SUM is optional but recommended
+        ;;
+esac
 
-    # Release build path - requires TARGETPLATFORM (a variable set by Docker buildx)
+if [ "${SOURCE}" != "artifact_url" ]; then
+    # Requires TARGETPLATFORM (a variable set by Docker buildx)
     if [ -z "${TARGETPLATFORM}" ]; then
-        echo "Error: TARGETPLATFORM environment variable is required for release builds"
+        echo "Error: TARGETPLATFORM environment variable is required for ${SOURCE} builds"
         exit 1
     fi
 
@@ -33,29 +68,63 @@ if [ -z "${ARTIFACT_URL}" ]; then
             exit 1
             ;;
     esac
-else
-    # Artifact build path - requires CIRCLE_TOKEN.
-    if [ -z "${CIRCLE_TOKEN}" ]; then
-        echo "Error: CIRCLE_TOKEN environment variable is required when ARTIFACT_URL is set"
+fi
+
+# Validates a tarball against its entry in a sha256sums.txt-style file.
+#
+# Usage: verify_sha256sum <tarball> <sums-file>
+verify_sha256sum () {
+    local tarball="$1"
+    local sums_file="$2"
+    local tarball_name expected actual
+
+    tarball_name="$(basename "${tarball}")"
+    # sha256sum writes "<hash>  <name>", or "<hash> *<name>" in binary mode
+    expected=$(awk -v name="${tarball_name}" '$2 == name || $2 == "*" name { print $1; exit }' "${sums_file}")
+    if [ -z "${expected}" ]; then
+        echo "Error: Could not find checksum for ${tarball_name} in ${sums_file}"
         exit 1
     fi
-    # ARTIFACT_URL_SHA256SUM is optional but recommended
-fi
+
+    actual=$(sha256sum "${tarball}" | cut -d' ' -f1)
+    if [ "${expected}" != "${actual}" ]; then
+        echo "Error: Tarball checksum validation failed for ${tarball_name}!"
+        echo "Expected: ${expected}"
+        echo "Actual: ${actual}"
+        exit 1
+    fi
+
+    echo "Tarball checksum validation passed for ${tarball_name}: ${actual}"
+}
 
 # MOTIVATION
 #
 # Once upon a time, we encountered a case where the Router binary which was
 # inside the built Docker container was corrupted.  This script supports
-# downloading the Router binary and validating it against a provided checksum
-# which is calculated out of band (in CircleCI, typically) and passed into the
-# Docker build as an optional environment variables.
+# validating the Router tarball against a checksum which is calculated out of
+# band (in CircleCI, typically) before it is extracted into the image.
 
-# ARTIFACT_URL is used for nightly builds, which are built in CircleCI and
-# downloaded from the CircleCI API.  If ARTIFACT_URL is not set, we assume we
-# are building a release and will download the Router binary from the official
-# release URL.
+case "${SOURCE}" in
+"local")
+    echo "Using local Router artifact for ${TARGETPLATFORM} from ${LOCAL_ARTIFACTS_DIR}"
 
-if [ -z "${ARTIFACT_URL}" ]; then
+    # Exactly one tarball per architecture is expected in the directory.
+    shopt -s nullglob
+    TARBALLS=("${LOCAL_ARTIFACTS_DIR}"/router-*-"${ARCH}".tar.gz)
+    shopt -u nullglob
+    if [ "${#TARBALLS[@]}" -ne 1 ]; then
+        echo "Error: Expected exactly one router-*-${ARCH}.tar.gz in ${LOCAL_ARTIFACTS_DIR}, found ${#TARBALLS[@]}"
+        ls -la "${LOCAL_ARTIFACTS_DIR}"
+        exit 1
+    fi
+
+    verify_sha256sum "${TARBALLS[0]}" "${LOCAL_ARTIFACTS_DIR}/sha256sums.txt"
+
+    # Extract the tarball, which literally drops a dist/ directory.
+    tar -xzf "${TARBALLS[0]}"
+    ;;
+
+"release")
     echo "Downloading Router release: ${ROUTER_RELEASE}"
     # Download router tarball directly instead of using installer
     TARBALL_NAME="router-${ROUTER_RELEASE}-${ARCH}.tar.gz"
@@ -90,28 +159,13 @@ if [ -z "${ARTIFACT_URL}" ]; then
       "https://github.com/apollographql/router/releases/download/${ROUTER_RELEASE}/sha256sums.txt" \
         -o sha256sums.txt
 
-    # Extract the expected checksum for the tarball
-    EXPECTED_SHA256SUM=$(grep "${TARBALL_NAME}" sha256sums.txt | cut -d' ' -f1)
-    if [ -z "${EXPECTED_SHA256SUM}" ]; then
-        echo "ERROR: Could not find checksum for ${TARBALL_NAME} in sha256sums.txt"
-        exit 1
-    fi
-
-    # Calculate actual checksum of downloaded tarball
-    ACTUAL_SHA256SUM=$(sha256sum "${TARBALL_NAME}" | cut -d' ' -f1)
-
-    if [ "${EXPECTED_SHA256SUM}" != "${ACTUAL_SHA256SUM}" ]; then
-        echo "Error: Tarball checksum validation failed!"
-        echo "Expected: ${EXPECTED_SHA256SUM}"
-        echo "Actual: ${ACTUAL_SHA256SUM}"
-        exit 1
-    fi
-
-    echo "Tarball checksum validation passed: ${ACTUAL_SHA256SUM}"
+    verify_sha256sum "${TARBALL_NAME}" sha256sums.txt
 
     # Extract the tarball, which literally drops a dist/ directory.
     tar -xzf "${TARBALL_NAME}"
-else
+    ;;
+
+"artifact_url")
     echo "Downloading Router artifact: ${ARTIFACT_URL}"
 
     curl -sSL -H "Circle-Token: ${CIRCLE_TOKEN}" -o "artifact.tar.gz" "${ARTIFACT_URL}"
@@ -132,6 +186,7 @@ else
 
     # Extract the tarball, which literally drops a dist/ directory.
     tar -xzf "artifact.tar.gz"
-fi
+    ;;
+esac
 
 echo "Router download and validation completed successfully"

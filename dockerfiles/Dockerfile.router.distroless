@@ -15,6 +15,13 @@
 # Named so the downloader stage below can read the base image's /etc/passwd.
 FROM gcr.io/distroless/cc-debian13:nonroot AS base
 
+# Router tarballs built earlier in a CI pipeline, mounted for
+# download_and_validate_router.sh. CI replaces this empty stage by passing
+# `--build-context router-artifacts=<dir>`, where <dir> holds one tarball per
+# platform and a sha256sums.txt, so a multi-platform build gives each platform
+# its own binary. Left empty, the script downloads a release instead.
+FROM scratch AS router-artifacts
+
 FROM debian:trixie-slim AS downloader
 ARG ROUTER_RELEASE=latest
 ARG ARTIFACT_URL=
@@ -36,7 +43,8 @@ WORKDIR /
 
 # Copy and run the router download script
 COPY download_and_validate_router.sh /tmp/download_and_validate_router.sh
-RUN chmod +x /tmp/download_and_validate_router.sh && /tmp/download_and_validate_router.sh
+RUN --mount=type=bind,from=router-artifacts,target=/router-artifacts \
+  chmod +x /tmp/download_and_validate_router.sh && /tmp/download_and_validate_router.sh
 
 # Lay out /dist exactly as the Debian image does, so that anything mounting
 # over /dist/config/router.yaml or /dist/schema keeps working across flavors.
