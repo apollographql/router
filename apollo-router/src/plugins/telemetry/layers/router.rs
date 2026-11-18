@@ -792,4 +792,99 @@ mod tests {
         .with_metrics()
         .await;
     }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn test_static_value_is_recorded_once_per_request() {
+        let config = r#"
+telemetry:
+  instrumentation:
+    instruments:
+      default_requirement_level: none
+      router:
+        test.static.counter:
+          type: counter
+          unit: unit
+          description: counter with a static value
+          value:
+            static: 5
+        test.static.histogram:
+          type: histogram
+          unit: unit
+          description: histogram with a static value
+          value:
+            static: 5
+        test.static.ok.counter:
+          type: counter
+          unit: unit
+          description: counter with a static value and a condition that passes on the response
+          value:
+            static: 5
+          condition:
+            eq:
+              - 200
+              - response_status: code
+        test.static.failed.counter:
+          type: counter
+          unit: unit
+          description: counter with a static value and a condition that fails on the response
+          value:
+            static: 5
+          condition:
+            eq:
+              - 500
+              - response_status: code
+"#;
+        let _guard = crate::test_harness::tracing_test::dispatcher_guard();
+        async {
+            let plugin = PluginTestHarness::<Telemetry>::builder()
+                .config(config)
+                .build()
+                .await
+                .expect("test harness");
+            let (mock_service, mut handle) =
+                tower_test::mock::pair::<RouterRequest, RouterResponse>();
+            let driver = tokio::spawn(async move {
+                for _ in 0..2 {
+                    let (req, responder) = handle.next_request().await.unwrap();
+                    responder.send_response(
+                        RouterResponse::fake_builder()
+                            .context(req.context)
+                            .status_code(StatusCode::OK)
+                            .data(json!({"data": {"__typename": "Query"}}))
+                            .build()
+                            .unwrap(),
+                    );
+                }
+            });
+            let mut service = ServiceBuilder::new()
+                .layer(plugin.instrument_router_layer())
+                .service(mock_service);
+            for _ in 0..2 {
+                service
+                    .ready()
+                    .await
+                    .unwrap()
+                    .call(RouterRequest::fake_builder().build().unwrap())
+                    .await
+                    .unwrap()
+                    .next_response()
+                    .await
+                    .unwrap()
+                    .unwrap();
+            }
+            drop(service);
+            crate::plugin::test::await_mock_driver(driver).await;
+
+            assert_counter!("test.static.counter", 10.0);
+            assert_histogram_count!("test.static.histogram", 2);
+            assert_histogram_sum!("test.static.histogram", 10.0);
+            assert_counter!("test.static.ok.counter", 10.0);
+            assert_counter_not_exists!("test.static.failed.counter", f64);
+        }
+        .with_metrics()
+        .await;
+        assert!(!crate::test_harness::tracing_test::logs_contain(
+            "this is a bug and should not happen"
+        ));
+    }
 }
