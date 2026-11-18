@@ -129,7 +129,8 @@ impl<'schema> Selection<'schema> {
     /// Shape-based type checking for v0.3+ (actively maintained)
     fn type_check_shape_based(self, schema: &SchemaInfo) -> Result<Vec<(Name, Name)>, Message> {
         let coordinate = self.coordinate.connect;
-        // Add shape() method to the selection
+        // `parse_mapping_argument` bound the selection to the schema's custom
+        // `->` methods, so calls to them shape as their bodies.
         let shape = self.parsed.shape();
 
         match coordinate.element {
@@ -686,10 +687,10 @@ impl<'schema> SelectionValidator<'schema> {
                         if !field_def.arguments.is_empty() {
                             let mut locations = self.get_shape_locations(field_shape.locations());
                             // Also include field definition location from schema
-                            if let Some(def_location) =
+                            if let Some(method_location) =
                                 field_def.line_column_range(&self.schema.sources)
                             {
-                                locations.push(def_location);
+                                locations.push(method_location);
                             }
                             return Err(Message {
                                 code: Code::ConnectorsFieldWithArguments,

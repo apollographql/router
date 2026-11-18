@@ -17,6 +17,15 @@ use crate::connectors::string_template::StringTemplate;
 pub struct HeaderValue(StringTemplate);
 
 impl HeaderValue {
+    /// Bind this value's `{…}` expressions to a subgraph's custom `->` method
+    /// registry. See [`JSONSelection::with_methods`].
+    pub(crate) fn set_methods(
+        &mut self,
+        methods: Option<std::sync::Arc<crate::connectors::MethodRegistry>>,
+    ) {
+        self.0.set_methods(methods);
+    }
+
     pub fn parse_with_spec(s: &str, spec: ConnectSpec) -> Result<Self, string_template::Error> {
         let template = StringTemplate::parse_with_spec(s, spec)?;
         // Validate that any constant parts are valid header values.

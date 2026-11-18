@@ -214,6 +214,7 @@ input_file: apollo-federation/src/connectors/expand/tests/schemas/expand/entity_
                 "Tractor",
             ),
         ),
+        methods: None,
         label: Label(
             "connectors.v1 http: GET /tractors?id={$args.id}",
         ),

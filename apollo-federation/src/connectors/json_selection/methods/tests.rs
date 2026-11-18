@@ -14,7 +14,7 @@ fn test_missing_method() {
         (
             None,
             vec![ApplyToError::from_json(&json!({
-                "message": "Method ->bogus not found",
+                "message": "Method ->bogus not found (no built-in or `methods:` method with that name)",
                 "path": ["nested", "path", "->bogus"],
                 "range": [13, 18],
             }))],

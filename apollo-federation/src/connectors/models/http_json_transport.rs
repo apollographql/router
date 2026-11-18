@@ -46,6 +46,47 @@ pub struct HttpJsonTransport {
 }
 
 impl HttpJsonTransport {
+    /// Bind every request-side expression (URL templates, header values, body,
+    /// and the path/query-param selections) to a subgraph's custom `->` method
+    /// registry. See [`JSONSelection::with_methods`].
+    pub(crate) fn set_methods(
+        &mut self,
+        methods: Option<std::sync::Arc<crate::connectors::MethodRegistry>>,
+    ) {
+        // Destructured so a new expression-valued field is a compile error here
+        // until it is bound too.
+        let Self {
+            source_template,
+            connect_template,
+            method: _,
+            headers,
+            body,
+            source_path,
+            source_query_params,
+            connect_path,
+            connect_query_params,
+        } = self;
+        if let Some(template) = source_template {
+            template.set_methods(methods.clone());
+        }
+        connect_template.set_methods(methods.clone());
+        for header in headers {
+            header.set_methods(methods.clone());
+        }
+        for selection in [
+            body,
+            source_path,
+            source_query_params,
+            connect_path,
+            connect_query_params,
+        ]
+        .into_iter()
+        .flatten()
+        {
+            selection.set_methods(methods.clone());
+        }
+    }
+
     pub fn from_directive(
         http: ConnectHTTPArguments,
         source: Option<&SourceHTTPArguments>,

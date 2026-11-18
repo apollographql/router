@@ -289,7 +289,7 @@ impl<'schema> Transport<'schema> {
                     .collect(),
             }]
         })?;
-        let url = StringTemplate::parse_with_spec(url_string, schema.connect_link.spec)
+        let mut url = StringTemplate::parse_with_spec(url_string, schema.connect_link.spec)
             .map_err(|string_template::Error { message, location }| Message {
                 code: Code::InvalidUrl,
                 message: format!("In {coordinate}: {message}"),
@@ -298,6 +298,7 @@ impl<'schema> Transport<'schema> {
                     .collect(),
             })
             .map_err(|e| vec![e])?;
+        url.set_methods(schema.methods().cloned());
 
         if source_name.is_some() {
             return if url_string.starts_with("http://") || url_string.starts_with("https://") {

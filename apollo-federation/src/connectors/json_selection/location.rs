@@ -245,10 +245,12 @@ pub(crate) mod strip_ranges {
                 TopLevelSelection::Named(subselect) => Self {
                     inner: TopLevelSelection::Named(subselect.strip_ranges()),
                     spec: self.spec,
+                    methods: self.methods.clone(),
                 },
                 TopLevelSelection::Value(lit) => Self {
                     inner: TopLevelSelection::Value(lit.strip_ranges()),
                     spec: self.spec,
+                    methods: self.methods.clone(),
                 },
             }
         }

@@ -4,7 +4,7 @@ use shape::Shape;
 use shape::ShapeCase;
 use shape::location::SourceId;
 
-use crate::connectors::ConnectSpec;
+use crate::connectors::json_selection::ApplyContext;
 use crate::connectors::json_selection::ApplyToError;
 use crate::connectors::json_selection::ApplyToInternal;
 use crate::connectors::json_selection::MethodArgs;
@@ -19,6 +19,8 @@ use crate::connectors::json_selection::methods::common::could_satisfy;
 use crate::connectors::json_selection::methods::common::may_be_missing;
 use crate::connectors::json_selection::methods::common::or_missing;
 use crate::connectors::json_selection::methods::common::present_arg;
+#[cfg(test)]
+use crate::connectors::spec::ConnectSpec;
 use crate::impl_arrow_method;
 
 impl_arrow_method!(GetMethod, get_method, get_shape);
@@ -36,8 +38,9 @@ fn get_method(
     data: &JSON,
     vars: &VarsWithPathsMap,
     input_path: &InputPath<JSON>,
-    spec: ConnectSpec,
+    context: &ApplyContext,
 ) -> (Option<JSON>, Vec<ApplyToError>) {
+    let spec = context.spec();
     let Some(index_literal) = method_args.and_then(|MethodArgs { args, .. }| args.first()) else {
         return (
             None,
@@ -58,7 +61,7 @@ fn get_method(
             vars,
             input_path,
             data,
-            spec,
+            context,
         ),
         JSON::Array(input_value) => handle_array_method(
             method_name,
@@ -67,7 +70,7 @@ fn get_method(
             vars,
             input_path,
             data,
-            spec,
+            context,
         ),
         JSON::Object(input_value) => handle_object_method(
             method_name,
@@ -76,7 +79,7 @@ fn get_method(
             vars,
             input_path,
             data,
-            spec,
+            context,
         ),
         _ => (
             None,
@@ -100,9 +103,11 @@ fn handle_string_method(
     vars: &VarsWithPathsMap,
     input_path: &InputPath<JSON>,
     data: &JSON,
-    spec: ConnectSpec,
+    context: &ApplyContext,
 ) -> (Option<JSON>, Vec<ApplyToError>) {
-    let (index, index_apply_to_errors) = index_literal.apply_to_path(data, vars, input_path, spec);
+    let spec = context.spec();
+    let (index, index_apply_to_errors) =
+        index_literal.apply_to_path(data, vars, input_path, context);
 
     match index {
         Some(JSON::Number(index_value)) => {
@@ -188,9 +193,11 @@ fn handle_array_method(
     vars: &VarsWithPathsMap,
     input_path: &InputPath<JSON>,
     data: &JSON,
-    spec: ConnectSpec,
+    context: &ApplyContext,
 ) -> (Option<JSON>, Vec<ApplyToError>) {
-    let (index, index_apply_to_errors) = index_literal.apply_to_path(data, vars, input_path, spec);
+    let spec = context.spec();
+    let (index, index_apply_to_errors) =
+        index_literal.apply_to_path(data, vars, input_path, context);
 
     match index {
         Some(JSON::Number(index_value)) => {
@@ -277,9 +284,11 @@ fn handle_object_method(
     vars: &VarsWithPathsMap,
     input_path: &InputPath<JSON>,
     data: &JSON,
-    spec: ConnectSpec,
+    context: &ApplyContext,
 ) -> (Option<JSON>, Vec<ApplyToError>) {
-    let (index, index_apply_to_errors) = index_literal.apply_to_path(data, vars, input_path, spec);
+    let spec = context.spec();
+    let (index, index_apply_to_errors) =
+        index_literal.apply_to_path(data, vars, input_path, context);
 
     match index {
         Some(JSON::String(index_value)) => {

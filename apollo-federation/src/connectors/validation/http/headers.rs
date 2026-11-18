@@ -39,7 +39,10 @@ impl<'schema> Headers<'schema> {
         let connect_spec = schema.connect_link.spec;
         for header in Header::from_http_arg(http_arg, originating_directive, connect_spec) {
             let header = match header {
-                Ok(header) => header,
+                Ok(mut header) => {
+                    header.set_methods(schema.methods().cloned());
+                    header
+                }
                 Err(err) => {
                     let (message, locations) = match err {
                         HeaderParseError::Other { message, node } => (

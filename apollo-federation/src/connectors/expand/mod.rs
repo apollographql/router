@@ -438,6 +438,7 @@ mod helpers {
                 key_name.clone(),
                 link.connect_directive_name.clone(),
                 link.source_directive_name.clone(),
+                link.method_directive_name.clone(),
             ]));
 
             Self {
@@ -1096,6 +1097,7 @@ mod helpers {
                 key_name.clone(),
                 link.connect_directive_name.clone(),
                 link.source_directive_name.clone(),
+                link.method_directive_name.clone(),
             ]));
 
             Self {

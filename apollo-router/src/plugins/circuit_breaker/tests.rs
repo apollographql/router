@@ -328,6 +328,7 @@ fn connector_request() -> ConnectorRequest {
     let connector = Arc::new(Connector {
         spec: ConnectSpec::V0_1,
         schema_subtypes_map: Default::default(),
+        methods: None,
         id: ConnectId::new(
             "products".into(),
             Some(SourceName::cast("api")),

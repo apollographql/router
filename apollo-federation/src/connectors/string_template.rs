@@ -10,6 +10,7 @@ use std::fmt::Display;
 use std::fmt::Write;
 use std::ops::Range;
 use std::str::FromStr;
+use std::sync::Arc;
 
 use apollo_compiler::collections::IndexMap;
 use http::Uri;
@@ -21,6 +22,7 @@ pub(crate) use self::encoding::UriString;
 use super::ApplyToError;
 use super::ConnectSpec;
 use crate::connectors::JSONSelection;
+use crate::connectors::MethodRegistry;
 use crate::connectors::json_selection::helpers::json_to_string;
 
 pub(crate) const SPECIAL_WHITE_SPACES: [char; 4] = ['\t', '\n', '\x0C', '\r'];
@@ -64,6 +66,16 @@ impl FromStr for StringTemplate {
 impl StringTemplate {
     pub fn parse_with_spec(input: &str, spec: ConnectSpec) -> Result<Self, Error> {
         Self::common_parse_with_spec(input, 0, spec)
+    }
+
+    /// Bind every `{…}` expression in this template to a subgraph's custom
+    /// `->` method registry. See [`JSONSelection::with_methods`].
+    pub(crate) fn set_methods(&mut self, methods: Option<Arc<MethodRegistry>>) {
+        for part in &mut self.parts {
+            if let Part::Expression(expression) = part {
+                expression.expression.set_methods(methods.clone());
+            }
+        }
     }
 
     /// Parse a [`StringTemplate`] from a particular `offset` according to a

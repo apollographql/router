@@ -765,7 +765,9 @@ pub(crate) fn parse_mapping_argument(
     };
 
     let selection = match JSONSelection::parse_with_spec(string, schema.connect_link.spec) {
-        Ok(selection) => selection,
+        // Bound to the subgraph's custom `->` methods, so a call to a declared
+        // method shapes as its body rather than as "method not found".
+        Ok(selection) => selection.with_methods(schema.methods().cloned()),
         Err(e) => {
             return Err(Message {
                 code,

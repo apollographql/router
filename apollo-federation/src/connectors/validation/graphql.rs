@@ -19,6 +19,12 @@ pub(crate) struct SchemaInfo<'schema> {
     pub(crate) connect_link: ConnectLink,
     /// A lookup map for the Shapes computed from GraphQL types.
     pub(crate) shape_lookup: IndexMap<String, Shape>,
+    /// The global registry of custom `->` method definitions (`@source(methods:)`,
+    /// `@connect(methods:)`, and `@method`), so shape-based validation can resolve
+    /// `->customMethod` calls. `None` when no methods are declared; a lenient
+    /// stand-in when the declared ones do not form a valid registry (see
+    /// `methods::build_registry`).
+    methods: Option<std::sync::Arc<crate::connectors::MethodRegistry>>,
 }
 
 impl<'schema> SchemaInfo<'schema> {
@@ -26,11 +32,24 @@ impl<'schema> SchemaInfo<'schema> {
         federation_schema: &'schema FederationSchema,
         connect_link: ConnectLink,
     ) -> Self {
+        let methods = super::methods::build_registry(
+            federation_schema.schema(),
+            &connect_link.source_directive_name,
+            &connect_link.connect_directive_name,
+            &connect_link.method_directive_name,
+            connect_link.spec,
+        );
         Self {
             federation_schema,
             connect_link,
             shape_lookup: shapes_for_schema(federation_schema.schema()),
+            methods,
         }
+    }
+
+    /// The global custom-method registry, if any methods are declared.
+    pub(crate) fn methods(&self) -> Option<&std::sync::Arc<crate::connectors::MethodRegistry>> {
+        self.methods.as_ref()
     }
 
     /// The schema plus the federation metadata computed during link expansion: link metadata,

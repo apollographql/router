@@ -38,6 +38,17 @@ pub struct Header {
 }
 
 impl Header {
+    /// Bind this header's value expressions to a subgraph's custom `->` method
+    /// registry. See [`JSONSelection::with_methods`].
+    pub(crate) fn set_methods(
+        &mut self,
+        methods: Option<std::sync::Arc<crate::connectors::MethodRegistry>>,
+    ) {
+        if let HeaderSource::Value(value) = &mut self.source {
+            value.set_methods(methods);
+        }
+    }
+
     /// Get a list of headers from the `headers` argument in a `@connect` or `@source` directive.
     pub(crate) fn from_http_arg(
         http_arg: &[(Name, Node<Value>)],

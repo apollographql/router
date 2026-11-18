@@ -175,6 +175,7 @@ input_file: apollo-federation/src/connectors/expand/tests/schemas/expand/interfa
                 "String",
             ),
         ),
+        methods: None,
         label: Label(
             "connectors.json http: GET /itfs/{$this.id}/e",
         ),
@@ -332,6 +333,7 @@ input_file: apollo-federation/src/connectors/expand/tests/schemas/expand/interfa
                 ),
             ),
         ),
+        methods: None,
         label: Label(
             "connectors.json http: GET /itfs",
         ),
@@ -579,6 +581,7 @@ input_file: apollo-federation/src/connectors/expand/tests/schemas/expand/interfa
                 "Itf",
             ),
         ),
+        methods: None,
         label: Label(
             "connectors.json http: GET /itfs/{$args.id}",
         ),
