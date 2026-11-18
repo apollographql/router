@@ -1,4 +1,4 @@
-### Deliver `@defer` responses under a type condition in a list of mixed types ([PR #PULL_NUMBER](https://github.com/apollographql/router/pull/PULL_NUMBER))
+### Deliver `@defer` responses under a type condition in a list of mixed types ([PR #10816](https://github.com/apollographql/router/pull/10816))
 
 A `@defer` on a type condition on a list defining an interface implemented by more than one object returned the wrong deferred data:
 * If a deferred field was non-null, the deferred data was dropped without an error. The deferred data is now correctly returned.
@@ -71,4 +71,4 @@ It now delivers `title` for the `Item` in the list:
 }
 ```
 
-By [@lrlna](https://github.com/lrlna) in https://github.com/apollographql/router/pull/PULL_NUMBER
+By [@lrlna](https://github.com/lrlna) in https://github.com/apollographql/router/pull/10816
