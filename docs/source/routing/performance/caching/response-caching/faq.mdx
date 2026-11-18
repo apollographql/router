@@ -67,7 +67,7 @@ The tag format must always generate a valid string value. For nested objects in 
 
 ### How does `@cacheControl` work?
 
-The `@cacheControl` directive is a subgraph-level directive. In Apollo Server, it automatically generates the appropriate `Cache-Control` response header based on your schema. For details, see the [Apollo Server documentation](https://www.apollographql.com/docs/apollo-server/api/plugin/cache-control).
+The `@cacheControl` directive is a subgraph-level directive. In Apollo Server, it automatically generates the appropriate `Cache-Control` response header based on your schema. A field's `scope` defaults to `PUBLIC`, so set `scope: PRIVATE` on fields that return user-specific data. For details, see the [Apollo Server documentation](https://www.apollographql.com/docs/apollo-server/api/plugin/cache-control).
 
 ### What happens to cached operations without cache tags?
 

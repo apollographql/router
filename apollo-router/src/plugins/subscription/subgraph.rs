@@ -302,8 +302,7 @@ async fn call_websocket(
         .clamp(Duration::from_millis(500), Duration::from_secs(60));
 
     // Forward GraphQL subscription stream to WebSocket handle, with optional reconnection on
-    // connection drop. Connection lifecycle is managed by the WebSocket infrastructure, so we
-    // don't need to handle connection_closed_signal here.
+    // connection drop.
     // Use a dedicated span for the long-lived forwarding task. `info_span!` parents to the
     // current (subgraph request) span by default, so reconnect handshakes stay chained to the
     // originating trace — but because a child holds its parent only by id, the request span is

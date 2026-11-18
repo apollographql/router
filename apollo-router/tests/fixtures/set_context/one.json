@@ -155,55 +155,31 @@
     },
     {
       "request": {
-        "query": "query QueryLL__Subgraph1__1($representations: [_Any!]!, $contextualArgument_1_0_0: String, $contextualArgument_1_0_1: String) { _0: _entities(representations: $representations) { ... on U { field(a: $contextualArgument_1_0_0) } } _1: _entities(representations: $representations) { ... on U { field(a: $contextualArgument_1_0_1) } } }",
+        "query": "query QueryLL__Subgraph1__1($representations_0: [_Any!]!, $representations_1: [_Any!]!, $contextualArgument_1_0_0: String, $contextualArgument_1_0_1: String) { _entities_0: _entities(representations: $representations_0) { ... on U { field(a: $contextualArgument_1_0_0) } } _entities_1: _entities(representations: $representations_1) { ... on U { field(a: $contextualArgument_1_0_1) } } }",
         "operationName": "QueryLL__Subgraph1__1",
         "variables": {
           "contextualArgument_1_0_0": "prop value 1",
           "contextualArgument_1_0_1": "prop value 2",
-          "representations": [
-            { "__typename": "U", "id": "3" },
+          "representations_0": [
+            { "__typename": "U", "id": "3" }
+          ],
+          "representations_1": [
             { "__typename": "U", "id": "4" }
           ]
         }
       },
       "response": {
         "data": {
-          "_entities": [
+          "_entities_0": [
             {
               "id": "3",
               "field": 3456
-            },
-            {
-              "id": "4",
-              "field": 4567
             }
-          ]
-        }
-      }
-    },
-    {
-      "request": {
-        "query": "query QueryLL__Subgraph1__1($representations: [_Any!]!, $contextualArgument_1_0_0: String, $contextualArgument_1_0_1: String) { _0: _entities(representations: $representations) { ... on U { field(a: $contextualArgument_1_0_0) } } _1: _entities(representations: $representations) { ... on U { field(a: $contextualArgument_1_0_1) } } }",
-        "operationName": "QueryLL__Subgraph1__1",
-        "variables": {
-          "contextualArgument_1_0_1": "prop value 2",
-          "contextualArgument_1_0_0": "prop value 1",
-          "representations": [
-            { "__typename": "U", "id": "3" },
-            { "__typename": "U", "id": "4" }
-          ]
-        }
-      },
-      "response": {
-        "data": {
-          "_entities": [
-            {
-              "id": "3",
-              "field": 3456
-            },
+          ],
+          "_entities_1": [
             {
               "id": "4",
-              "field": 4567
+              "field": 222
             }
           ]
         }

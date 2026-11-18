@@ -67,7 +67,7 @@
 
     // Auto-merge non-major updates from other package managers (these usually don't come in batches)
     {
-      matchManagers: ['docker', 'mise', 'github-actions', 'circleci'],
+      matchManagers: ['dockerfile', 'docker-compose', 'mise', 'github-actions', 'circleci'],
       matchUpdateTypes: [
         'minor',
         'patch',

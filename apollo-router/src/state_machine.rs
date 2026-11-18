@@ -1049,6 +1049,7 @@ mod tests {
     use crate::plugin::DynPlugin;
     use crate::router_factory::RouterFactory;
     use crate::router_factory::RouterServiceFactory;
+    use crate::services::Plugins;
     use crate::services::router;
     use crate::services::router::pipeline_handle::PipelineHandle;
     use crate::uplink::license_enforcement::LicenseLimits;
@@ -2420,6 +2421,7 @@ mod tests {
             fn create(&self) -> router::BoxCloneService;
             fn web_endpoints(&self) -> MultiMap<ListenAddr, Endpoint>;
             fn pipeline_handle(&self) -> Arc<PipelineHandle>;
+            fn plugins(&self) -> Arc<Plugins>;
         }
 
         impl Clone for MyRouterFactory {

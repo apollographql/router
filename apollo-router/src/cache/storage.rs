@@ -262,7 +262,7 @@ where
 
         let instant = Instant::now();
         let redis_value = redis
-            .get(RedisKey(key.clone()))
+            .get(RedisKey(key.clone()), Default::default())
             .await
             .ok()
             .and_then(|mut v| match init_from_redis(&mut v.0) {

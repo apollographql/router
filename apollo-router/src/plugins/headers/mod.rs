@@ -1533,12 +1533,12 @@ mod test {
             context: ctx,
             subgraph_name: String::from("test"),
             subscription_stream: None,
-            connection_closed_signal: None,
             query_hash: Default::default(),
             authorization: Default::default(),
             executable_document: None,
             id: SubgraphRequestId(String::new()),
             is_deferred_fetch: false,
+            is_aliased_entities_fetch: false,
         };
 
         let call = tokio::spawn(service.ready().await?.call(req));
@@ -1938,12 +1938,12 @@ mod test {
             context: Context::new(),
             subgraph_name: String::from("test"),
             subscription_stream: None,
-            connection_closed_signal: None,
             query_hash: Default::default(),
             authorization: Default::default(),
             executable_document: None,
             id: SubgraphRequestId(String::new()),
             is_deferred_fetch: false,
+            is_aliased_entities_fetch: false,
         };
         HeadersService::<tower_test::mock::Mock<SubgraphRequest, SubgraphResponse>>::modify_subgraph_request(&service.operations, &mut request);
         let headers = request
@@ -2011,12 +2011,12 @@ mod test {
             context: Context::new(),
             subgraph_name: String::from("test"),
             subscription_stream: None,
-            connection_closed_signal: None,
             query_hash: Default::default(),
             authorization: Default::default(),
             executable_document: None,
             id: SubgraphRequestId(String::new()),
             is_deferred_fetch: false,
+            is_aliased_entities_fetch: false,
         };
         HeadersService::<tower_test::mock::Mock<SubgraphRequest, SubgraphResponse>>::modify_subgraph_request(&service.operations, &mut request);
         let headers = request
@@ -2094,12 +2094,12 @@ mod test {
             context: ctx,
             subgraph_name: String::from("test"),
             subscription_stream: None,
-            connection_closed_signal: None,
             query_hash: Default::default(),
             authorization: Default::default(),
             executable_document: None,
             id: SubgraphRequestId(String::new()),
             is_deferred_fetch: false,
+            is_aliased_entities_fetch: false,
         }
     }
 

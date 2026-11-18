@@ -13,6 +13,7 @@ use crate::spec::Schema;
 use crate::uplink::license_enforcement::LicenseState;
 
 mod plugin_instantiation;
+mod query_parsing;
 pub(crate) mod stage_stack;
 mod subgraph_apq;
 mod traffic_shaping;

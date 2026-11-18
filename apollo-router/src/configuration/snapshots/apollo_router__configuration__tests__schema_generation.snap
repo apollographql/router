@@ -5977,7 +5977,7 @@ expression: "&schema"
       "description": "In memory cache configuration",
       "properties": {
         "limit": {
-          "description": "Number of entries in the Least Recently Used cache",
+          "description": "The maximum number of entries in the cache. The cache will start evicting entries when this\nnumber is reached.",
           "format": "uint",
           "minimum": 1,
           "type": "integer"
@@ -7532,7 +7532,7 @@ expression: "&schema"
           "default": {
             "limit": 512
           },
-          "description": "Configures the in memory cache (always active)"
+          "description": "Configures the in memory cache."
         },
         "redis": {
           "anyOf": [

@@ -8,7 +8,6 @@ use chrono::prelude::Utc;
 use walkdir::WalkDir;
 use xtask::*;
 
-use crate::commands::Compliance;
 use crate::commands::Licenses;
 use crate::commands::changeset::slurp_and_remove_changesets;
 
@@ -76,7 +75,7 @@ impl Prepare {
         self.ensure_prereqs()?;
         let version = self.update_cargo_tomls(&self.version)?;
         self.update_lock()?;
-        self.check_compliance()?;
+        self.update_licenses()?;
 
         if let Version::Nightly = &self.version {
             println!("Skipping various steps because this is a nightly build.");
@@ -371,12 +370,10 @@ impl Prepare {
         std::fs::write("./CHANGELOG.md", updated)?;
         Ok(())
     }
-    /// Update the license list with `cargo about generate --workspace -o licenses.html about.hbs`.
+    /// Update the license list with `cargo about generate --workspace -o licenses.html about.hbs`,
+    /// unless `--skip-license-check` is set.
     ///     (If not installed, you can install `cargo-about` by running `cargo install cargo-about`.)
-    /// Run `cargo xtask check-compliance`.
-    fn check_compliance(&self) -> Result<()> {
-        println!("checking compliance");
-        Compliance::default().run()?;
+    fn update_licenses(&self) -> Result<()> {
         if !self.skip_license_check {
             println!("updating licenses.html");
             Licenses::default().run()?;

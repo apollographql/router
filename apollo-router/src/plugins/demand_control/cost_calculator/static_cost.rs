@@ -213,14 +213,7 @@ impl StaticCostCalculator {
         let own_list_size_directives: Vec<ListSizeDirective> = definition
             .list_size_directive_entries()
             .iter()
-            .map(|entry| {
-                ListSizeDirective::new(
-                    &entry.directive,
-                    field,
-                    ctx.variables,
-                    entry.parsed_sized_fields.clone(),
-                )
-            })
+            .map(|entry| ListSizeDirective::new(entry, field, ctx.variables))
             .collect::<Result<Vec<_>, _>>()?;
 
         let effective_expected_size = own_list_size_directives
@@ -1483,6 +1476,8 @@ mod tests {
     /// Tests for array-based slicing arguments in @listSize directive
     mod array_slicing_argument_tests {
         use super::estimated_cost;
+        use super::planned_cost_rust;
+        use crate::test_harness::tracing_test;
 
         const SCHEMA: &str = include_str!("./fixtures/custom_cost_schema.graphql");
 
@@ -1518,6 +1513,59 @@ mod tests {
             let query = r#"query Q($ids: [ID!]) { itemsByIdsWithAssumedSize(ids: $ids) { id } }"#;
             // assumedSize is 50 in the schema
             assert_eq!(estimated_cost(SCHEMA, query, variables), 50.0);
+        }
+
+        /// Per GraphQL input coercion, a single value supplied for a list-typed argument is a
+        /// list of one item, so the list size is 1 rather than the value itself.
+        #[rstest::rstest]
+        #[case::string_variable(
+            r#"query Q($ids: [ID!]!) { itemsByIds(ids: $ids) { id } }"#,
+            r#"{"ids": "a"}"#
+        )]
+        #[case::int_variable(
+            r#"query Q($ids: [ID!]!) { itemsByIds(ids: $ids) { id } }"#,
+            r#"{"ids": 1000000}"#
+        )]
+        #[case::inline_string(r#"query { itemsByIds(ids: "a") { id } }"#, "{}")]
+        #[case::inline_int(r#"query { itemsByIds(ids: 1000000) { id } }"#, "{}")]
+        fn single_value_for_list_argument_is_one_item(
+            #[case] query: &str,
+            #[case] variables: &str,
+        ) {
+            assert_eq!(estimated_cost(SCHEMA, query, variables), 1.0);
+        }
+
+        /// The same coercion applies when scoring the fetches of a query plan, where each fetch
+        /// is scored against its subgraph schema rather than the supergraph.
+        #[test]
+        fn single_value_for_list_argument_is_one_item_in_query_plan() {
+            let query = r#"query Q($ids: [ID!]!) { itemsByIds(ids: $ids) { id } }"#;
+            assert_eq!(planned_cost_rust(SCHEMA, query, r#"{"ids": "a"}"#), 1.0);
+            assert_eq!(planned_cost_rust(SCHEMA, query, r#"{"ids": 1000000}"#), 1.0);
+            assert_eq!(
+                planned_cost_rust(SCHEMA, query, r#"{"ids": ["a", "b", "c"]}"#),
+                3.0
+            );
+        }
+
+        /// A `slicingArguments` entry that does not resolve against the schema is dropped (with a
+        /// warning) at schema load, so it never contributes a size; the remaining entries and
+        /// `assumedSize` apply as usual.
+        #[rstest::rstest]
+        #[case::resolvable_argument_present(
+            r#"query { itemsWithUnresolvableSlicingArgument(first: 3) { id } }"#,
+            3.0
+        )]
+        #[case::resolvable_argument_absent(
+            r#"query { itemsWithUnresolvableSlicingArgument { id } }"#,
+            50.0 // assumedSize
+        )]
+        fn unresolvable_slicing_argument_is_ignored(#[case] query: &str, #[case] expected: f64) {
+            let _guard = tracing_test::dispatcher_guard();
+            assert_eq!(estimated_cost(SCHEMA, query, "{}"), expected);
+            assert!(tracing_test::logs_contain(
+                "Slicing argument `input.pagination.first` of @listSize on `Query.itemsWithUnresolvableSlicingArgument` does not resolve"
+            ));
         }
     }
 

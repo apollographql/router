@@ -79,6 +79,7 @@ use crate::plugins::healthcheck::Config as HealthCheck;
 use crate::router_factory::RouterFactory;
 use crate::services::MULTIPART_DEFER_ACCEPT;
 use crate::services::MULTIPART_DEFER_CONTENT_TYPE;
+use crate::services::Plugins;
 use crate::services::RouterRequest;
 use crate::services::RouterResponse;
 use crate::services::SupergraphResponse;
@@ -141,6 +142,7 @@ type MockRouterServiceType = tower_test::mock::Mock<RouterRequest, RouterRespons
 #[derive(Clone)]
 struct TestRouterFactory {
     inner: MockRouterServiceType,
+    plugins: Arc<Plugins>,
 }
 
 impl RouterFactory for TestRouterFactory {
@@ -158,6 +160,10 @@ impl RouterFactory for TestRouterFactory {
             None,
             "dummy".to_string(),
         ))
+    }
+
+    fn plugins(&self) -> Arc<Plugins> {
+        self.plugins.clone()
     }
 }
 
@@ -185,6 +191,10 @@ impl RouterFactory for CountingRouterFactory {
             None,
             "dummy".to_string(),
         ))
+    }
+
+    fn plugins(&self) -> Arc<Plugins> {
+        Arc::new(Plugins::default())
     }
 }
 
@@ -327,6 +337,7 @@ async fn init(
         .create(
             TestRouterFactory {
                 inner: service.into_inner(),
+                plugins: Default::default(),
             },
             Arc::new(
                 Configuration::fake_builder()
@@ -376,6 +387,21 @@ async fn init(
 }
 
 pub(super) async fn init_with_config(
+    router_service: impl Service<
+        router::Request,
+        Response = router::Response,
+        Error = BoxError,
+        Future = BoxFuture<'static, router::ServiceResult>,
+    > + Send
+    + 'static,
+    conf: Arc<Configuration>,
+    web_endpoints: MultiMap<ListenAddr, Endpoint>,
+) -> Result<(HttpServerHandle, Client), ApolloRouterError> {
+    init_with_plugins(router_service, conf, web_endpoints, Default::default()).await
+}
+
+/// Like [`init_with_config`], with the plugin registry the server layers plugin endpoints from.
+pub(super) async fn init_with_plugins(
     mut router_service: impl Service<
         router::Request,
         Response = router::Response,
@@ -385,6 +411,7 @@ pub(super) async fn init_with_config(
     + 'static,
     conf: Arc<Configuration>,
     web_endpoints: MultiMap<ListenAddr, Endpoint>,
+    plugins: Arc<Plugins>,
 ) -> Result<(HttpServerHandle, Client), ApolloRouterError> {
     let server_factory = AxumHttpServerFactory::new();
     let (service, mut handle) = tower_test::mock::spawn();
@@ -404,6 +431,7 @@ pub(super) async fn init_with_config(
         .create(
             TestRouterFactory {
                 inner: service.into_inner(),
+                plugins,
             },
             conf,
             None,
@@ -462,6 +490,7 @@ async fn init_unix(
         .create(
             TestRouterFactory {
                 inner: service.into_inner(),
+                plugins: Default::default(),
             },
             Arc::new(
                 Configuration::fake_builder()
@@ -1617,6 +1646,107 @@ async fn it_errors_on_bad_accept_header() -> Result<(), ApolloRouterError> {
 }
 
 #[test(tokio::test)]
+async fn it_returns_graphql_response_json_content_type_when_accepted()
+-> Result<(), ApolloRouterError> {
+    let expected_response = graphql::Response::builder()
+        .data(json!({"__typename": "Query"}))
+        .build();
+    let example_response = expected_response.clone();
+    let (mock, mut handle) = tower_test::mock::pair::<
+        crate::services::supergraph::Request,
+        crate::services::supergraph::Response,
+    >();
+    let driver = tokio::spawn(async move {
+        let (req, responder) = handle.next_request().await.unwrap();
+        responder.send_response(SupergraphResponse::new_from_graphql_response(
+            example_response,
+            req.context,
+        ));
+    });
+    let router_service = crate::pipeline::from_supergraph_mock(mock).await;
+    let (server, client) = init(router_service).await;
+    let url = format!("{}", server.graphql_listen_address().as_ref().unwrap());
+
+    let response = client
+        .post(url.as_str())
+        .header(ACCEPT, "application/graphql-response+json")
+        .header(CONTENT_TYPE, APPLICATION_JSON.essence_str())
+        .body(json!({ "query": "{ __typename }" }).to_string())
+        .send()
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), StatusCode::OK);
+    assert_eq!(
+        response.headers().get(header::CONTENT_TYPE),
+        Some(&HeaderValue::from_static(
+            "application/graphql-response+json"
+        ))
+    );
+    assert_eq!(
+        response.json::<graphql::Response>().await.unwrap(),
+        expected_response
+    );
+
+    server.shutdown().await?;
+    driver.await.unwrap();
+    Ok(())
+}
+
+#[test(tokio::test)]
+async fn it_prefers_graphql_response_json_when_accepted_alongside_lower_priority_json()
+-> Result<(), ApolloRouterError> {
+    let expected_response = graphql::Response::builder()
+        .data(json!({"__typename": "Query"}))
+        .build();
+    let example_response = expected_response.clone();
+    let (mock, mut handle) = tower_test::mock::pair::<
+        crate::services::supergraph::Request,
+        crate::services::supergraph::Response,
+    >();
+    let driver = tokio::spawn(async move {
+        let (req, responder) = handle.next_request().await.unwrap();
+        responder.send_response(SupergraphResponse::new_from_graphql_response(
+            example_response,
+            req.context,
+        ));
+    });
+    let router_service = crate::pipeline::from_supergraph_mock(mock).await;
+    let (server, client) = init(router_service).await;
+    let url = format!("{}", server.graphql_listen_address().as_ref().unwrap());
+
+    // The recommended Accept header for a spec-compliant GraphQL-over-HTTP client: prefer
+    // application/graphql-response+json, but still accept application/json as a fallback.
+    let response = client
+        .post(url.as_str())
+        .header(
+            ACCEPT,
+            "application/graphql-response+json, application/json;q=0.9",
+        )
+        .header(CONTENT_TYPE, APPLICATION_JSON.essence_str())
+        .body(json!({ "query": "{ __typename }" }).to_string())
+        .send()
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), StatusCode::OK);
+    assert_eq!(
+        response.headers().get(header::CONTENT_TYPE),
+        Some(&HeaderValue::from_static(
+            "application/graphql-response+json"
+        ))
+    );
+    assert_eq!(
+        response.json::<graphql::Response>().await.unwrap(),
+        expected_response
+    );
+
+    server.shutdown().await?;
+    driver.await.unwrap();
+    Ok(())
+}
+
+#[test(tokio::test)]
 async fn it_displays_homepage() {
     let conf = Arc::new(Configuration::fake_builder().build().unwrap());
 
@@ -2309,6 +2439,7 @@ async fn it_supports_server_restart() {
 
     let supergraph_service_factory = TestRouterFactory {
         inner: service.into_inner(),
+        plugins: Default::default(),
     };
 
     let (all_connections_stopped_sender, _) = mpsc::channel::<()>(1);

@@ -1150,7 +1150,7 @@ impl ResponseCache {
         use std::net::Ipv4Addr;
         use std::net::SocketAddr;
         if truncate_namespace {
-            storage.truncate_namespace().await?;
+            storage.truncate_namespace_for_test().await?;
         }
 
         let storage = Arc::new(StorageInterface {
@@ -1449,6 +1449,17 @@ impl CacheService {
         // This check is what enables Batching and response caching to work together, so be very careful
         // before making any changes to it.
         if request.is_part_of_batch() {
+            return self.service.call(request).await;
+        }
+        // Entity fetches whose entities carry different `@fromContext` values are rewritten into
+        // aliased `_entities_<i>` copies with per-entity `representations_<i>` variables. The
+        // cache only understands the plain `_entities` / `representations` shape: without the
+        // `representations` variable it would treat the request as a root query, failing it when
+        // the planned operation's `$representations` has no value while computing invalidation
+        // keys, and otherwise caching the whole batch under a key that entity invalidation can
+        // never match. Bypass the cache for such requests until it can key each alias as its own
+        // single-entity fetch.
+        if request.is_aliased_entities_fetch {
             return self.service.call(request).await;
         }
 

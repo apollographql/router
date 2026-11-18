@@ -1,6 +1,6 @@
 use std::cell::RefCell;
-use std::collections::HashMap;
 use std::collections::HashSet;
+use std::fmt::Write as _;
 use std::io::IsTerminal;
 use std::marker::PhantomData;
 use std::sync::Arc;
@@ -18,8 +18,8 @@ use tracing_subscriber::Layer;
 use tracing_subscriber::fmt::MakeWriter;
 use tracing_subscriber::layer::Context;
 
-use super::config_new::ToOtelValue;
 use super::dynamic_attribute::LogAttributes;
+use super::formatters::APOLLO_PRIVATE_PREFIX;
 use super::formatters::EXCLUDED_ATTRIBUTES;
 use super::formatters::EventFormatter;
 use crate::plugins::telemetry::config;
@@ -33,10 +33,15 @@ use crate::plugins::telemetry::reload::otel::IsSampled;
 use crate::plugins::telemetry::reload::otel::LayeredTracer;
 use crate::plugins::telemetry::resource::ConfigResource;
 
+/// A layer that writes logs, and whether the fields of spans are needed to write them.
+pub(crate) struct LogFormatLayer<S> {
+    pub(crate) layer: Box<dyn Layer<S> + Send + Sync>,
+    /// Whether the layer's format shows span fields; see [`Format::shows_span_fields`].
+    pub(crate) shows_span_fields: bool,
+}
+
 /// Returns the layer that writes logs to stdout, or `None` when stdout logging is disabled.
-pub(crate) fn create_fmt_layer(
-    config: &config::Conf,
-) -> Option<Box<dyn Layer<LayeredTracer> + Send + Sync>> {
+pub(crate) fn create_fmt_layer(config: &config::Conf) -> Option<LogFormatLayer<LayeredTracer>> {
     match &config.exporters.logging.stdout {
         StdOut {
             enabled,
@@ -48,29 +53,23 @@ pub(crate) fn create_fmt_layer(
                 Some(tty) if std::io::stdout().is_terminal() => tty,
                 _ => format,
             };
-            match format {
+            let resource = config.exporters.logging.common.to_resource();
+            let layer = match format {
                 Format::Json(format_config) => {
-                    let format = Json::new(
-                        config.exporters.logging.common.to_resource(),
-                        format_config.clone(),
-                    );
-                    Some(
-                        FmtLayer::new(RateLimitFormatter::new(format, rate_limit), std::io::stdout)
-                            .boxed(),
-                    )
+                    let format = Json::new(resource, format_config.clone());
+                    FmtLayer::new(RateLimitFormatter::new(format, rate_limit), std::io::stdout)
+                        .boxed()
                 }
-
                 Format::Text(format_config) => {
-                    let format = Text::new(
-                        config.exporters.logging.common.to_resource(),
-                        format_config.clone(),
-                    );
-                    Some(
-                        FmtLayer::new(RateLimitFormatter::new(format, rate_limit), std::io::stdout)
-                            .boxed(),
-                    )
+                    let format = Text::new(resource, format_config.clone());
+                    FmtLayer::new(RateLimitFormatter::new(format, rate_limit), std::io::stdout)
+                        .boxed()
                 }
-            }
+            };
+            Some(LogFormatLayer {
+                layer,
+                shows_span_fields: format.shows_span_fields(),
+            })
         }
         _ => None,
     }
@@ -78,7 +77,6 @@ pub(crate) fn create_fmt_layer(
 
 pub(crate) struct FmtLayer<T, S, W> {
     fmt_event: T,
-    excluded_attributes: HashSet<&'static str>,
     make_writer: W,
     _inner: PhantomData<S>,
 }
@@ -92,7 +90,6 @@ where
     pub(crate) fn new(fmt_event: T, make_writer: W) -> Self {
         Self {
             fmt_event,
-            excluded_attributes: EXCLUDED_ATTRIBUTES.into(),
             make_writer,
             _inner: PhantomData,
         }
@@ -106,9 +103,9 @@ where
     W: for<'writer> MakeWriter<'writer> + 'static,
 {
     fn on_event(&self, event: &Event<'_>, ctx: Context<'_, S>) {
-        let mut visitor = FieldsVisitor::new(&self.excluded_attributes);
-        event.record(&mut visitor);
-        if visitor.omit_from_logs {
+        let mut omit = OmitFromLogs::default();
+        event.record(&mut omit);
+        if omit.0 {
             return;
         }
 
@@ -148,8 +145,8 @@ where
 /// callbacks don't take the reload lock. See
 /// [`EventsOnly`](crate::plugins::telemetry::reload::log_layers::EventsOnly).
 ///
-/// Recording can be switched off through [`SpanFieldsLayer::enabled`] while nothing writes logs.
-/// It starts on.
+/// Recording can be switched off through [`SpanFieldsLayer::enabled`] while no log format shows
+/// span fields. It starts on.
 pub(crate) struct SpanFieldsLayer {
     excluded_attributes: HashSet<&'static str>,
     enabled: Arc<AtomicBool>,
@@ -192,21 +189,18 @@ where
             return;
         }
         if let Some(span) = ctx.span(id) {
-            let mut visitor = FieldsVisitor::new(&self.excluded_attributes);
+            let mut visitor = SpanFieldsVisitor::new(&self.excluded_attributes);
             // We're checking if it's sampled to not add both attributes in OtelData and our LogAttributes
             if !span.is_sampled() {
+                visitor.fields.reserve(attrs.metadata().fields().len());
                 attrs.record(&mut visitor);
             }
             let mut extensions = span.extensions_mut();
             if let Some(log_attrs) = extensions.get_mut::<LogAttributes>() {
-                log_attrs.extend(visitor.values.into_iter().filter_map(|(k, v)| {
-                    Some(KeyValue::new(Key::new(k), v.maybe_to_otel_value()?))
-                }));
+                log_attrs.extend(visitor.fields);
             } else {
                 let mut fields = LogAttributes::default();
-                fields.extend(visitor.values.into_iter().filter_map(|(k, v)| {
-                    Some(KeyValue::new(Key::new(k), v.maybe_to_otel_value()?))
-                }));
+                fields.extend(visitor.fields);
                 extensions.insert(fields);
             }
         } else {
@@ -219,13 +213,17 @@ where
             return;
         }
         if let Some(span) = ctx.span(id) {
+            // Recorded for sampled spans too, although OtelData also gets them: the formatters print
+            // a key from LogAttributes in place of its OtelData copy, and only LogAttributes values
+            // are typed and expanded as JSON.
+            let mut visitor = SpanFieldsVisitor::new(&self.excluded_attributes);
+            values.record(&mut visitor);
+            if visitor.fields.is_empty() {
+                return;
+            }
             let mut extensions = span.extensions_mut();
             if let Some(fields) = extensions.get_mut::<LogAttributes>() {
-                let mut visitor = FieldsVisitor::new(&self.excluded_attributes);
-                values.record(&mut visitor);
-                fields.extend(visitor.values.into_iter().filter_map(|(k, v)| {
-                    Some(KeyValue::new(Key::new(k), v.maybe_to_otel_value()?))
-                }));
+                fields.extend(visitor.fields);
             } else {
                 eprintln!(
                     "SpanFieldsLayer::on_record: cannot access to LogAttributes, this is a bug"
@@ -237,78 +235,124 @@ where
     }
 }
 
-#[derive(Debug)]
-pub(crate) struct FieldsVisitor<'a, 'b> {
-    pub(crate) values: HashMap<&'a str, serde_json::Value>,
-    excluded_attributes: &'b HashSet<&'static str>,
-    omit_from_logs: bool,
+/// Collects span fields as the [`KeyValue`]s that the log formatters read from [`LogAttributes`].
+///
+/// Fields under [`APOLLO_PRIVATE_PREFIX`] or named in [`EXCLUDED_ATTRIBUTES`] are skipped: the
+/// formatters hide them, and no router span declares an excluded name as a field. A non-finite
+/// `f64` or a `u64` above `i64::MAX` can't be stored as an OpenTelemetry value and is dropped.
+struct SpanFieldsVisitor<'a> {
+    fields: Vec<KeyValue>,
+    excluded_attributes: &'a HashSet<&'static str>,
 }
 
-impl<'b> FieldsVisitor<'_, 'b> {
-    fn new(excluded_attributes: &'b HashSet<&'static str>) -> Self {
+impl<'a> SpanFieldsVisitor<'a> {
+    fn new(excluded_attributes: &'a HashSet<&'static str>) -> Self {
         Self {
-            values: HashMap::with_capacity(0),
+            fields: Vec::new(),
             excluded_attributes,
-            omit_from_logs: false,
         }
+    }
+
+    /// Records a number or boolean field.
+    fn record_primitive(&mut self, field: &Field, value: impl Into<opentelemetry::Value>) {
+        if !self.skips(field) {
+            self.push(field.name(), value.into());
+        }
+    }
+
+    /// Whether a field is skipped. Checked before a string is copied or a `Debug` value is
+    /// formatted, which is most of what such a field costs.
+    fn skips(&self, field: &Field) -> bool {
+        let name = field.name();
+        name.starts_with(APOLLO_PRIVATE_PREFIX) || self.excluded_attributes.contains(name)
+    }
+
+    fn push(&mut self, name: &'static str, value: opentelemetry::Value) {
+        self.fields
+            .push(KeyValue::new(Key::from_static_str(name), value));
     }
 }
 
-impl field::Visit for FieldsVisitor<'_, '_> {
-    /// Visit a double precision floating point value.
+impl field::Visit for SpanFieldsVisitor<'_> {
     fn record_f64(&mut self, field: &Field, value: f64) {
-        self.values
-            .insert(field.name(), serde_json::Value::from(value));
+        if value.is_finite() {
+            self.record_primitive(field, value);
+        }
     }
 
-    /// Visit a signed 64-bit integer value.
     fn record_i64(&mut self, field: &Field, value: i64) {
-        self.values
-            .insert(field.name(), serde_json::Value::from(value));
+        self.record_primitive(field, value);
     }
 
-    /// Visit an unsigned 64-bit integer value.
     fn record_u64(&mut self, field: &Field, value: u64) {
-        self.values
-            .insert(field.name(), serde_json::Value::from(value));
+        if let Ok(value) = i64::try_from(value) {
+            self.record_primitive(field, value);
+        }
     }
 
-    /// Visit a boolean value.
     fn record_bool(&mut self, field: &Field, value: bool) {
-        self.values
-            .insert(field.name(), serde_json::Value::from(value));
-
-        if field.name() == EVENT_ATTRIBUTE_OMIT_LOG && value {
-            self.omit_from_logs = true;
-        }
+        self.record_primitive(field, value);
     }
 
-    /// Visit a string value.
     fn record_str(&mut self, field: &Field, value: &str) {
-        let field_name = field.name();
-        if self.excluded_attributes.contains(field_name) {
-            return;
+        if !self.skips(field) {
+            self.push(field.name(), value.to_owned().into());
         }
-        self.values
-            .insert(field_name, serde_json::Value::from(value));
     }
 
     fn record_debug(&mut self, field: &Field, value: &dyn std::fmt::Debug) {
-        let field_name = field.name();
-        if self.excluded_attributes.contains(field_name) {
-            return;
+        if !self.skips(field) {
+            let name = field.name();
+            let name = name.strip_prefix("r#").unwrap_or(name);
+            self.push(name, debug_string(value).into());
         }
-        match field_name {
-            name if name.starts_with("r#") => {
-                self.values
-                    .insert(&name[2..], serde_json::Value::from(format!("{value:?}")));
-            }
-            name => {
-                self.values
-                    .insert(name, serde_json::Value::from(format!("{value:?}")));
-            }
-        };
     }
+}
+
+/// Capacity [`DEBUG_BUF`] keeps between calls. Without a cap, one very large value would leave
+/// that much memory held by every thread that formatted one, and Tokio can run hundreds of
+/// blocking threads.
+const DEBUG_BUF_RETAINED_CAPACITY: usize = 4 * 1024;
+
+thread_local! {
+    /// The buffer [`debug_string`] formats into.
+    static DEBUG_BUF: RefCell<String> = const { RefCell::new(String::new()) };
+}
+
+/// Formats `value` with `Debug` into a string allocated at its exact length.
+///
+/// `format!` can't size its buffer for a lone `{:?}`, so it reallocates as the output grows.
+/// This formats into a reused per-thread buffer instead and copies the result once.
+fn debug_string(value: &dyn std::fmt::Debug) -> String {
+    DEBUG_BUF.with(|buf| match buf.try_borrow_mut() {
+        Ok(mut buf) => {
+            buf.clear();
+            let _ = write!(buf, "{value:?}");
+            let formatted = buf.as_str().to_owned();
+            if buf.capacity() > DEBUG_BUF_RETAINED_CAPACITY {
+                buf.clear();
+                buf.shrink_to(DEBUG_BUF_RETAINED_CAPACITY);
+            }
+            formatted
+        }
+        // A `Debug` impl that creates or records into a span re-enters here while the buffer is
+        // borrowed.
+        Err(_) => format!("{value:?}"),
+    })
+}
+
+/// Whether an event asks to be left out of the logs with [`EVENT_ATTRIBUTE_OMIT_LOG`].
+#[derive(Default)]
+struct OmitFromLogs(bool);
+
+impl field::Visit for OmitFromLogs {
+    fn record_bool(&mut self, field: &Field, value: bool) {
+        if field.name() == EVENT_ATTRIBUTE_OMIT_LOG && value {
+            self.0 = true;
+        }
+    }
+
+    fn record_debug(&mut self, _field: &Field, _value: &dyn std::fmt::Debug) {}
 }
 
 #[cfg(test)]
@@ -336,6 +380,7 @@ mod tests {
     use opentelemetry::InstrumentationScope;
     use opentelemetry::trace::TracerProvider as _;
     use opentelemetry_sdk::Resource;
+    use opentelemetry_sdk::trace::Sampler;
     use opentelemetry_sdk::trace::SdkTracerProvider;
     use parking_lot::Mutex;
     use parking_lot::MutexGuard;
@@ -345,9 +390,11 @@ mod tests {
     use tracing::info_span;
     use tracing_subscriber::fmt;
     use tracing_subscriber::layer::SubscriberExt;
+    use tracing_subscriber::registry::LookupSpan as _;
 
     use super::*;
     use crate::graphql;
+    use crate::json_ext::Path;
     use crate::plugins::telemetry::config_new::events;
     use crate::plugins::telemetry::config_new::events::log_event;
     use crate::plugins::telemetry::config_new::logging::JsonFormat;
@@ -616,6 +663,207 @@ connector:
                 assert!(logs.contains(field), "with_tracer: {with_tracer}, {logs}");
             }
         }
+    }
+
+    /// A sampled span keeps its fields in the OpenTelemetry span data, and a field recorded after
+    /// the span starts also reaches the log attributes. The formatters read both, and must print
+    /// each key once.
+    #[test]
+    fn text_logs_show_a_late_field_of_a_sampled_span_once() {
+        let buff = LogBuffer::default();
+        let format = Text::new(
+            Resource::builder_empty().build(),
+            TextFormat {
+                display_timestamp: false,
+                ..Default::default()
+            },
+        );
+        let subscriber = tracing_subscriber::Registry::default()
+            .with(DynAttributeLayer::new())
+            .with(otel::layer().with_tracer(make_tracer()))
+            .with(EventsOnly::new(FmtLayer::new(format, buff.clone())))
+            .with(SpanFieldsLayer::default());
+
+        ::tracing::subscriber::with_default(subscriber, log_from_sampled_span_with_late_field);
+
+        let logs = buff.to_string();
+        assert_eq!(logs.matches("early=set").count(), 1, "{logs}");
+        assert_eq!(logs.matches("late=recorded").count(), 1, "{logs}");
+        // Not an OTel attribute, so it is shown only because the log attributes keep it.
+        assert_eq!(logs.matches("otel.status_code=OK").count(), 1, "{logs}");
+    }
+
+    #[test]
+    fn json_logs_show_a_late_field_of_a_sampled_span_once() {
+        let buff = LogBuffer::default();
+        let format = Json::new(
+            Resource::builder_empty().build(),
+            JsonFormat {
+                display_timestamp: false,
+                display_current_span: true,
+                display_span_list: false,
+                ..Default::default()
+            },
+        );
+        let subscriber = tracing_subscriber::Registry::default()
+            .with(DynAttributeLayer::new())
+            .with(otel::layer().with_tracer(make_tracer()))
+            .with(EventsOnly::new(FmtLayer::new(format, buff.clone())))
+            .with(SpanFieldsLayer::default());
+
+        ::tracing::subscriber::with_default(subscriber, log_from_sampled_span_with_late_field);
+
+        let logs = buff.to_string();
+        assert_eq!(logs.matches(r#""early":"set""#).count(), 1, "{logs}");
+        assert_eq!(logs.matches(r#""late":"recorded""#).count(), 1, "{logs}");
+        assert_eq!(
+            logs.matches(r#""otel.status_code":"OK""#).count(),
+            1,
+            "{logs}"
+        );
+    }
+
+    /// A late field's JSON string is expanded as before. The OpenTelemetry span data holds it as a
+    /// plain string, so the log attributes' copy is the one printed.
+    #[test]
+    fn json_logs_expand_a_late_field_of_a_sampled_span() {
+        let buff = LogBuffer::default();
+        let format = Json::new(
+            Resource::builder_empty().build(),
+            JsonFormat {
+                display_timestamp: false,
+                display_current_span: true,
+                display_span_list: false,
+                expand_json_string_values: true,
+                ..Default::default()
+            },
+        );
+        let subscriber = tracing_subscriber::Registry::default()
+            .with(DynAttributeLayer::new())
+            .with(otel::layer().with_tracer(make_tracer()))
+            .with(EventsOnly::new(FmtLayer::new(format, buff.clone())))
+            .with(SpanFieldsLayer::default());
+
+        ::tracing::subscriber::with_default(subscriber, || {
+            let span = info_span!("sampled", late = ::tracing::field::Empty);
+            span.record("late", r#"{"b":2}"#);
+            let _span = span.enter();
+            info!("Hello");
+        });
+
+        let logs = buff.to_string();
+        assert!(
+            logs.contains(r#""span":{"late":{"b":2},"name":"sampled"}"#),
+            "{logs}"
+        );
+    }
+
+    fn log_from_sampled_span_with_late_field() {
+        let span = info_span!(
+            "sampled",
+            early = "set",
+            late = ::tracing::field::Empty,
+            "otel.status_code" = ::tracing::field::Empty,
+        );
+        span.record("late", "recorded");
+        span.record("otel.status_code", "OK");
+        let _span = span.enter();
+        info!("Hello");
+    }
+
+    /// The router sets `dd.trace_id` as a dynamic attribute, so JSON logs keep it when the format
+    /// hides span fields and span fields aren't recorded.
+    #[test]
+    fn json_logs_keep_dd_trace_id_while_span_fields_are_not_recorded() {
+        let buff = LogBuffer::default();
+        let format_config = JsonFormat {
+            display_timestamp: false,
+            display_span_list: false,
+            ..Default::default()
+        };
+        assert!(!Format::Json(format_config.clone()).shows_span_fields());
+        let format = Json::new(Resource::builder_empty().build(), format_config);
+        let span_fields = SpanFieldsLayer::default();
+        span_fields.enabled().store(false, Ordering::Relaxed);
+        // Unsampled, so dynamic attributes go to `LogAttributes` rather than the OTel span.
+        let tracer = SdkTracerProvider::builder()
+            .with_sampler(Sampler::AlwaysOff)
+            .build()
+            .tracer_with_scope(InstrumentationScope::builder("test").build());
+        let subscriber = tracing_subscriber::Registry::default()
+            .with(DynAttributeLayer::new())
+            .with(otel::layer().with_tracer(tracer))
+            .with(EventsOnly::new(FmtLayer::new(format, buff.clone())))
+            .with(span_fields);
+
+        ::tracing::subscriber::with_default(subscriber, || {
+            let root = info_span!("router", field = "value");
+            root.set_span_dyn_attribute("dd.trace_id".into(), "1234".into());
+            let _root = root.enter();
+            info!("Hello");
+        });
+
+        let logs = buff.to_string();
+        assert!(logs.contains(r#""dd.trace_id":"1234""#), "{logs}");
+    }
+
+    #[test]
+    fn span_fields_layer_records_the_fields_formatters_print() {
+        let subscriber = tracing_subscriber::Registry::default().with(SpanFieldsLayer::default());
+        ::tracing::subscriber::with_default(subscriber, || {
+            let path = Path::from_slice(&["topProducts", "@", "reviews"]);
+            let span = info_span!(
+                "span",
+                "graphql.path" = %path,
+                "apollo.connector.source.name" = "source",
+                "apollo_private.request" = true,
+                "apollo_private.variables" = "{}",
+                "code.lineno" = 42_i64,
+                "code.filepath" = "excluded.rs",
+                count = u64::MAX,
+                ratio = f64::NAN,
+                late = ::tracing::field::Empty,
+            );
+            span.record("late", 1.5_f64);
+
+            let mut fields = span
+                .with_subscriber(|(id, dispatch)| {
+                    let registry = dispatch.downcast_ref::<tracing_subscriber::Registry>()?;
+                    let span = registry.span(id)?;
+                    let extensions = span.extensions();
+                    let attributes = extensions.get::<LogAttributes>()?;
+                    Some(
+                        attributes
+                            .attributes()
+                            .iter()
+                            .map(|kv| format!("{}={}", kv.key, kv.value))
+                            .collect::<Vec<_>>(),
+                    )
+                })
+                .flatten()
+                .expect("log attributes");
+            fields.sort();
+
+            // Private fields, excluded names, NaN and a u64 beyond i64 are dropped, as the
+            // formatters don't print them for spans.
+            assert_eq!(
+                fields,
+                [
+                    "apollo.connector.source.name=source",
+                    "graphql.path=/topProducts/@/reviews",
+                    "late=1.5",
+                ]
+            );
+        });
+    }
+
+    #[test]
+    fn debug_string_releases_a_large_buffer() {
+        let large = "x".repeat(4 * DEBUG_BUF_RETAINED_CAPACITY);
+        let formatted = debug_string(&large);
+
+        assert_eq!(formatted.len(), large.len() + 2);
+        assert!(DEBUG_BUF.with(|buf| buf.borrow().capacity()) <= DEBUG_BUF_RETAINED_CAPACITY);
     }
 
     #[tokio::test]

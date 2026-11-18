@@ -1,4 +1,4 @@
-"Long type"
+"A 64-bit signed integer"
 scalar Long
 """
 ISO 8601, extended format with nanoseconds, Zulu (or "[+-]seconds" as a string or number relative to now)
@@ -116,7 +116,6 @@ enum MessageLevel {
 }
 enum RouterEntitlementAudience {
   SELF_HOSTED
-  CLOUD
 }
 "Exposes a URL that specifies the behaviour of this scalar."
 directive @specifiedBy(

@@ -2,6 +2,9 @@
 /apollo-router/ @apollographql/router-core
 /apollo-router/src/plugins/connectors @apollographql/orchestration-language @apollographql/router-core
 /apollo-router/src/plugins/fleet_detector.rs @apollographql/runtime-readiness @apollographql/router-core
+/apollo-router/src/plugins/demand_control/ @apollographql/orchestration-language @apollographql/router-core
+/apollo-router/tests/integration/demand_control.rs @apollographql/orchestration-language @apollographql/router-core
+/apollo-router/tests/integration/snapshots/*demand_control* @apollographql/orchestration-language @apollographql/router-core
 /apollo-router-benchmarks/ @apollographql/router-core @apollographql/orchestration-language
 /examples/ @apollographql/router-core
 /.github/CODEOWNERS @apollographql/router-core

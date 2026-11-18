@@ -45,9 +45,11 @@ helm show values oci://ghcr.io/apollographql/helm-charts/router
 | containerPorts.http | int | `4000` | If you override the port in `router.configuration.server.listen` then make sure to match the listen port here |
 | containerPorts.metrics | int | `9090` | For exposing the metrics port when running a serviceMonitor for example |
 | deploymentAnnotations | object | `{}` |  |
+| dnsConfig | object | `{}` | Sets the [DNS config](https://kubernetes.io/docs/concepts/services-networking/dns-pod-service/#pod-dns-config) for Deployment pods Example: dnsConfig:   options:     - name: "ndots"       value: "2" |
 | extraContainers | list | `[]` | An array of extra containers to include in the router pod Example: extraContainers:   - name: coprocessor     image: acme/coprocessor:1.0     ports:       - containerPort: 4001 |
 | extraEnvVars | list | `[]` |  |
 | extraEnvVarsCM | string | `""` |  |
+| extraEnvVarsMap | object | `{}` |  |
 | extraEnvVarsSecret | string | `""` |  |
 | extraLabels | object | `{}` | A map of extra labels to apply to the resources created by this chart Example: extraLabels:   label_one_name: "label_one_value"   label_two_name: "label_two_value" |
 | extraVolumeMounts | list | `[]` |  |
