@@ -1018,6 +1018,19 @@ mod tests {
                 }
             }
         }}"#);
+        // The same labeled @defer which is used under sibling type conditions
+        s!(r#"
+            query Q { topProducts {
+                upc
+                ... on Book { ...Deferred }
+                ... on Furniture { ...Deferred }
+            }}
+            fragment Deferred on Product {
+                ... @defer(label: "A") {
+                    name
+                }
+            }
+        "#);
     }
 
     async fn subselections_keys(query: &str, planner: &QueryPlannerService) -> String {

@@ -8,6 +8,8 @@ use serde_json_bytes::ByteString;
 use super::DeferStats;
 use super::Operation;
 use crate::Configuration;
+use crate::json_ext::Path;
+use crate::json_ext::PathElement;
 use crate::spec::Condition;
 use crate::spec::FieldType;
 use crate::spec::Fragment;
@@ -100,6 +102,34 @@ impl Visitor<'_> for SubSelectionKeyVisitor {
 pub(crate) struct SubSelectionValue {
     pub(crate) selection_set: Vec<Selection>,
     pub(crate) type_name: String,
+}
+
+impl SubSelectionValue {
+    /// The selections at `path`, which starts at the operation root.
+    ///
+    /// A deferred fragment's selections are stored wrapped in the fields of its path, so this
+    /// finds them again for the object a deferred response is for. Indices and type conditions in
+    /// `path` select objects, not fields, so only its keys are followed.
+    pub(crate) fn selection_set_at(&self, path: &Path) -> Option<&[Selection]> {
+        let mut selection_set = self.selection_set.as_slice();
+        for element in path.iter() {
+            let PathElement::Key(key, _) = element else {
+                continue;
+            };
+            selection_set = match selection_set {
+                [
+                    Selection::Field {
+                        name,
+                        alias,
+                        selection_set: Some(nested),
+                        ..
+                    },
+                ] if alias.as_ref().unwrap_or(name).as_str() == key => nested,
+                _ => return None,
+            };
+        }
+        Some(selection_set)
+    }
 }
 
 /// The values of boolean variables used for conditional `@defer`, packed least-significant-bit
@@ -405,6 +435,10 @@ fn collect_from_selection_set<'a>(
 mod tests {
     use super::BooleanValues;
     use super::SubSelectionKey;
+    use super::collect_subselections;
+    use crate::Configuration;
+    use crate::spec::Query;
+    use crate::spec::Schema;
 
     #[track_caller]
     fn assert_round_trips(key: SubSelectionKey) {
@@ -438,5 +472,84 @@ mod tests {
                 });
             }
         }
+    }
+
+    /// Asserts a query has exactly one deferred subselection.
+    #[track_caller]
+    fn assert_deferred_type_name(query: &str, defer_path: &[&str], type_name: &str) {
+        let configuration = Configuration::default();
+        let schema = Schema::parse(
+            include_str!("../../query_planner/testdata/schema.graphql"),
+            &configuration,
+        )
+        .unwrap();
+        let doc = Query::parse_document(query, None, &schema, &configuration).unwrap();
+        let (fragments, operation, defer_stats, _) =
+            Query::extract_query_information(&schema, query, &doc.executable, None).unwrap();
+        let subselections =
+            collect_subselections(&configuration, &operation, &fragments.map, &defer_stats)
+                .unwrap();
+        let deferred: Vec<_> = subselections
+            .iter()
+            .filter(|(key, _)| key.defer_label.is_some())
+            .map(|(key, value)| {
+                (
+                    key.defer_label.as_deref(),
+                    key.defer_path
+                        .iter()
+                        .map(String::as_str)
+                        .collect::<Vec<_>>(),
+                    value.type_name.as_str(),
+                )
+            })
+            .collect();
+        assert_eq!(deferred, [(Some("A"), defer_path.to_vec(), type_name)]);
+    }
+
+    #[test]
+    fn deferred_type_name_under_type_condition() {
+        assert_deferred_type_name(
+            r#"{ topProducts { upc ... on Book { ... @defer(label: "A") { title } } } }"#,
+            &["topProducts"],
+            "Book",
+        );
+    }
+
+    #[test]
+    fn deferred_type_name_on_type_condition() {
+        assert_deferred_type_name(
+            r#"{ topProducts { upc ... on Book @defer(label: "A") { title } } }"#,
+            &["topProducts"],
+            "Book",
+        );
+    }
+
+    #[test]
+    fn deferred_type_name_of_fragment_spread() {
+        assert_deferred_type_name(
+            r#"{ topProducts { upc ...BookTitle @defer(label: "A") } }
+            fragment BookTitle on Book { title }"#,
+            &["topProducts"],
+            "Book",
+        );
+    }
+
+    #[test]
+    fn deferred_type_name_under_type_condition_above_nested_field() {
+        assert_deferred_type_name(
+            r#"{ topProducts { upc ... on Book { reviews { id ... @defer(label: "A") { body } } } } }"#,
+            &["topProducts", "reviews"],
+            "Review",
+        );
+    }
+
+    #[test]
+    fn deferred_type_name_under_sibling_type_conditions() {
+        assert_deferred_type_name(
+            r#"{ topProducts { upc ... on Book { ...Deferred } ... on Furniture { ...Deferred } } }
+            fragment Deferred on Product { ... @defer(label: "A") { name } }"#,
+            &["topProducts"],
+            "Product",
+        );
     }
 }

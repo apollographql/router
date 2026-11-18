@@ -28,6 +28,7 @@ use tracing::Span;
 use crate::Configuration;
 use crate::apollo_studio_interop::ReferencedEnums;
 use crate::apollo_studio_interop::extract_enums_from_response;
+use crate::apollo_studio_interop::extract_enums_from_selection_set;
 use crate::graphql::Error;
 use crate::graphql::IncrementalResponse;
 use crate::graphql::Response;
@@ -286,7 +287,7 @@ impl ExecutionService {
         let has_next = response.has_next.unwrap_or(true);
         let variables_set = query.defer_variables_set(variables);
 
-        tracing::debug_span!("format_response").in_scope(|| {
+        let deferred = tracing::debug_span!("format_response").in_scope(|| {
             if !query.unauthorized.paths.is_empty() {
                 query.unauthorized.log_unauthorized_paths();
                 query
@@ -294,13 +295,26 @@ impl ExecutionService {
                     .update_response_with_unauthorized_path_errors(&mut response);
             }
 
-            let paths = query.format_response_filtered_then_original(
-                &mut response,
-                variables,
-                schema.api_schema(),
-                variables_set,
-                insert_result_coercion_errors,
-            );
+            let (deferred, paths) = if response.path.is_some() {
+                Self::format_deferred_response(
+                    query,
+                    variables,
+                    schema,
+                    variables_set,
+                    insert_result_coercion_errors,
+                    nullified_paths,
+                    &mut response,
+                )
+            } else {
+                let paths = query.format_response_filtered_then_original(
+                    &mut response,
+                    variables,
+                    schema.api_schema(),
+                    variables_set,
+                    insert_result_coercion_errors,
+                );
+                (Vec::new(), paths)
+            };
 
             for error in response.errors.iter_mut() {
                 if let Some(path) = &mut error.path {
@@ -335,14 +349,35 @@ impl ExecutionService {
                     &mut referenced_enums,
                 )
             };
+            // Deferred objects are formatted with the selections at their path, not from the root.
+            if let ApolloMetricsReferenceMode::Extended = metrics_ref_mode
+                && let Some(path) = &response.path
+                && let Some(selection_set) = query
+                    .subselection(&response.label, Some(path), variables_set)
+                    .and_then(|subselection| subselection.selection_set_at(path))
+            {
+                for (_, object) in &deferred {
+                    if let Value::Object(object) = object {
+                        extract_enums_from_selection_set(
+                            selection_set,
+                            &query.fragments,
+                            schema.api_schema(),
+                            object,
+                            &mut referenced_enums,
+                        );
+                    }
+                }
+            }
 
             context
                 .extensions()
                 .with_lock(|lock| lock.insert::<ReferencedEnums>(referenced_enums));
+
+            deferred
         });
 
-        match (response.path.as_ref(), response.data.as_ref()) {
-            (None, _) | (_, None) => {
+        match response.path {
+            None => {
                 if is_deferred {
                     response.has_next = Some(has_next);
                 }
@@ -360,55 +395,90 @@ impl ExecutionService {
                 response.label = rewrite_defer_label(&response);
                 Some(response)
             }
-            // if the deferred response specified a path, we must extract the
-            // values matched by that path and create a separate response for
-            // each of them.
+            // A deferred response gets a separate incremental response for each of its objects.
             // While { "data": { "a": { "b": 1 } } } and { "data": { "b": 1 }, "path: ["a"] }
             // would merge in the same ways, some clients will generate code
             // that checks the specific type of the deferred response at that
             // path, instead of starting from the root object, so to support
             // this, we extract the value at that path.
-            // In particular, that means that a deferred fragment in an object
-            // under an array would generate one response par array element
-            (Some(response_path), Some(response_data)) => {
-                let mut sub_responses = Vec::new();
-                // TODO: this selection at `response_path` below is applied on the response data _after_
-                // is has been post-processed with the user query (in the "format_response" span above).
-                // It is not quite right however, because `response_path` (sent by the query planner)
-                // may contain `PathElement::Fragment`, whose goal is to filter out only those entities that
-                // match the fragment type. However, because the data is been filtered, `response_data` will
-                // not contain the `__typename` value for entities (even though those are in the unfiltered
-                // data), at least unless the user query selects them manually. The result being that those
-                // `PathElement::Fragment` in the path will be essentially ignored (we'll match any object
-                // for which we don't have a `__typename` as we would otherwise miss the data that we need
-                // to return). I believe this might make it possible to return some data that should not have
-                // been returned (at least not in that particular response). And while this is probably only
-                // true in fairly contrived examples, this is not working as intended by the query planner,
-                // so it is dodgy and could create bigger problems in the future.
-                response_data.select_values_and_paths(schema, response_path, |path, value| {
-                    // if the deferred path points to an array, split it into multiple subresponses
-                    // because the root must be an object
-                    if let Value::Array(array) = value {
-                        let mut parent = path.clone();
-                        for (i, value) in array.iter().enumerate() {
-                            parent.push(PathElement::Index(i));
-                            sub_responses.push((parent.clone(), value.clone()));
-                            parent.pop();
-                        }
-                    } else {
-                        sub_responses.push((path.clone(), value.clone()));
-                    }
-                });
-
-                Self::split_incremental_response(
-                    query,
-                    has_next,
-                    variables_set,
-                    response,
-                    sub_responses,
-                )
+            Some(_) => {
+                Self::split_incremental_response(query, has_next, variables_set, response, deferred)
             }
         }
+    }
+
+    /// Formats a deferred response, which is for each object under its path that its `@defer`
+    /// applies to. Returns each formatted object with its path, and the nullified paths.
+    ///
+    /// The objects are taken out of the data first, because formatting removes the `__typename`
+    /// they are matched by. The query planner's path has the type conditions above the `@defer`,
+    /// and the type of the deferred fragment is added to it. Each object is then formatted on its
+    /// own, so that an error bubbling up nulls that object only. Errors and value completions are
+    /// moved to `response`, which gives them to the incremental response of their path.
+    fn format_deferred_response(
+        query: &Query,
+        variables: &Object,
+        schema: &Schema,
+        variables_set: BooleanValues,
+        insert_result_coercion_errors: bool,
+        nullified_paths: &[Path],
+        response: &mut Response,
+    ) -> (Vec<(Path, Value)>, Vec<Path>) {
+        let mut objects = Vec::new();
+        if let (Some(response_path), Some(data), Some(subselection)) = (
+            &response.path,
+            &mut response.data,
+            query.subselection(&response.label, response.path.as_ref(), variables_set),
+        ) {
+            let mut path = response_path.clone();
+            path.push(PathElement::Fragment(subselection.type_name.clone()));
+            data.select_values_and_paths_mut(schema, &path, |object_path, object| {
+                // Objects under a path that an earlier response nullified are not sent.
+                if !nullified_paths
+                    .iter()
+                    .any(|nullified| object_path.starts_with(nullified))
+                {
+                    objects.push(
+                        Response::builder()
+                            .and_label(response.label.clone())
+                            .path(object_path.clone())
+                            .data(std::mem::take(object))
+                            .build(),
+                    );
+                }
+            });
+        }
+        response.data = None;
+
+        let mut deferred = Vec::with_capacity(objects.len());
+        let mut nullified = Vec::new();
+        let mut value_completions = Vec::new();
+        for mut object in objects {
+            nullified.extend(query.format_response_filtered_then_original(
+                &mut object,
+                variables,
+                schema.api_schema(),
+                variables_set,
+                insert_result_coercion_errors,
+            ));
+            response.errors.append(&mut object.errors);
+            if let Some(Value::Array(completions)) =
+                object.extensions.remove(EXTENSIONS_VALUE_COMPLETION_KEY)
+            {
+                value_completions.extend(completions);
+            }
+            deferred.push((
+                object.path.unwrap_or_default(),
+                object.data.unwrap_or_default(),
+            ));
+        }
+        if !value_completions.is_empty() {
+            response.extensions.insert(
+                EXTENSIONS_VALUE_COMPLETION_KEY,
+                Value::Array(value_completions),
+            );
+        }
+        (deferred, nullified)
     }
 
     fn split_incremental_response(

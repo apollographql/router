@@ -32,6 +32,7 @@ use crate::graphql::Request;
 use crate::graphql::Response;
 use crate::json_ext::Object;
 use crate::json_ext::Path;
+use crate::json_ext::PathElement;
 use crate::json_ext::ResponsePathElement;
 use crate::json_ext::Value;
 use crate::plugins::authorization::UnauthorizedPaths;
@@ -168,19 +169,12 @@ impl Query {
         match data {
             Some(Value::Object(mut input)) => {
                 if self.is_deferred(defer_conditions) {
-                    // Get subselection from hashmap
-                    match self.subselections.get(&SubSelectionKey {
-                        defer_label: response.label.clone(),
+                    match self.subselection(
+                        &response.label,
+                        response.path.as_ref(),
                         defer_conditions,
-                        defer_path: response
-                            .path
-                            .as_ref()
-                            .map(subselections::defer_path_from_response_path)
-                            .unwrap_or_default(),
-                    }) {
+                    ) {
                         Some(subselection) => {
-                            let mut output =
-                                Object::with_capacity(subselection.selection_set.len());
                             let mut parameters = FormatParameters {
                                 variables,
                                 schema,
@@ -190,16 +184,28 @@ impl Query {
                             };
 
                             response.data = Some(
-                                match self.apply_root_selection_set(
-                                    &subselection.type_name,
-                                    &subselection.selection_set,
-                                    &mut parameters,
-                                    &mut input,
-                                    &mut output,
-                                    &mut Vec::new(),
-                                ) {
-                                    Ok(()) => output.into(),
-                                    Err(InvalidValue) => Value::Null,
+                                match response.path.as_ref().filter(|path| !path.is_empty()) {
+                                    Some(path) => self.format_deferred(
+                                        subselection,
+                                        path,
+                                        &mut parameters,
+                                        input,
+                                    ),
+                                    None => {
+                                        let mut output =
+                                            Object::with_capacity(subselection.selection_set.len());
+                                        match self.apply_root_selection_set(
+                                            &subselection.type_name,
+                                            &subselection.selection_set,
+                                            &mut parameters,
+                                            &mut input,
+                                            &mut output,
+                                            &mut Vec::new(),
+                                        ) {
+                                            Ok(()) => output.into(),
+                                            Err(InvalidValue) => Value::Null,
+                                        }
+                                    }
                                 },
                             );
 
@@ -1357,6 +1363,62 @@ impl Query {
             .and_then(|Variable { default_value, .. }| default_value.as_ref())
     }
 
+    /// The subselection of the response with this label and path: the primary response when both
+    /// are absent, otherwise a deferred response.
+    pub(crate) fn subselection(
+        &self,
+        label: &Option<String>,
+        response_path: Option<&Path>,
+        defer_conditions: BooleanValues,
+    ) -> Option<&SubSelectionValue> {
+        self.subselections.get(&SubSelectionKey {
+            defer_label: label.clone(),
+            defer_conditions,
+            defer_path: response_path
+                .map(subselections::defer_path_from_response_path)
+                .unwrap_or_default(),
+        })
+    }
+
+    /// Formats the object at `path` that a deferred response is for, by executing the selections
+    /// of its deferred fragment on it, as `ExecuteSelectionSet` does for a deferred fragment in the
+    /// `@defer` specification. An error bubbling up to the object nulls this object only.
+    fn format_deferred<'a: 'b, 'b>(
+        &'a self,
+        subselection: &'a SubSelectionValue,
+        path: &'b Path,
+        parameters: &mut FormatParameters,
+        input: Object,
+    ) -> Value {
+        // The subselection was found with this path, and it is stored wrapped in the fields of
+        // that same path, so its selections are always there.
+        let selection_set = subselection.selection_set_at(path);
+        debug_assert!(selection_set.is_some(), "no deferred selections at {path}");
+        let selection_set = selection_set.unwrap_or_default();
+
+        let mut response_path = path
+            .iter()
+            .filter_map(|element| match element {
+                PathElement::Key(key, _) => Some(ResponsePathElement::Key(key.as_str())),
+                PathElement::Index(index) => Some(ResponsePathElement::Index(*index)),
+                PathElement::Flatten(_) | PathElement::Fragment(_) => None,
+            })
+            .collect();
+        let type_name = Name::new_unchecked(&subselection.type_name);
+        let mut output = Value::Null;
+        // On an error, `format_named_type` leaves `output` null, which is the result.
+        let _ = self.format_named_type(
+            parameters,
+            &executable::Type::Named(type_name.clone()),
+            &mut Value::Object(input),
+            &type_name,
+            &mut output,
+            &mut response_path,
+            selection_set,
+        );
+        output
+    }
+
     pub(crate) fn contains_error_path(
         &self,
         label: &Option<String>,
@@ -1364,13 +1426,7 @@ impl Query {
         path: &Path,
         defer_conditions: BooleanValues,
     ) -> bool {
-        let selection_set = match self.subselections.get(&SubSelectionKey {
-            defer_label: label.clone(),
-            defer_conditions,
-            defer_path: response_path
-                .map(subselections::defer_path_from_response_path)
-                .unwrap_or_default(),
-        }) {
+        let selection_set = match self.subselection(label, response_path, defer_conditions) {
             Some(subselection) => &subselection.selection_set,
             None => &self.operation.selection_set,
         };
