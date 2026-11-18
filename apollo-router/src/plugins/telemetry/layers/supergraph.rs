@@ -719,4 +719,199 @@ mod tests {
         crate::plugin::test::await_mock_driver(driver).await;
         assert_eq!(ftv1_counter.load(Ordering::Relaxed), 10);
     }
+
+    const CONTEXT_VALUE_INSTRUMENTS: &str = r#"
+telemetry:
+  instrumentation:
+    instruments:
+      default_requirement_level: none
+      supergraph:
+        test.context.counter:
+          type: counter
+          unit: unit
+          description: counter whose value comes from the context
+          value:
+            response_context: test_value
+          condition:
+            exists:
+              response_context: test_value
+        test.context.histogram:
+          type: histogram
+          unit: unit
+          description: histogram whose value comes from the context
+          value:
+            response_context: test_value
+          condition:
+            exists:
+              response_context: test_value
+"#;
+
+    const INSTRUMENT_BUG_LOG: &str = "this is a bug and should not happen";
+
+    /// Sends `requests` supergraph requests through the telemetry layer and reads every chunk
+    /// of each response. The mocked service sets the context key `test_value` to 74 and responds
+    /// with `chunks`. With `clear_on_first_chunk`, the key is set to null when the first chunk
+    /// is read, which is after the layer has called `on_response`.
+    ///
+    /// These tests drive the real layer rather than the YAML instrument fixtures because the
+    /// fixtures deliver response events before the response, the reverse of production order.
+    async fn send_requests(
+        config: &str,
+        requests: usize,
+        chunks: Vec<crate::graphql::Response>,
+        clear_on_first_chunk: bool,
+    ) {
+        let plugin = PluginTestHarness::<Telemetry>::builder()
+            .config(config)
+            .build()
+            .await
+            .expect("test harness");
+        let (mock_service, mut handle) =
+            tower_test::mock::pair::<SupergraphRequest, SupergraphResponse>();
+        let driver = tokio::spawn(async move {
+            for _ in 0..requests {
+                let (req, responder) = handle.next_request().await.unwrap();
+                req.context.insert("test_value", 74).unwrap();
+                let context = req.context.clone();
+                let stream = futures::stream::iter(chunks.clone()).map(move |chunk| {
+                    if clear_on_first_chunk {
+                        context.insert_json_value("test_value", serde_json_bytes::Value::Null);
+                    }
+                    chunk
+                });
+                responder.send_response(SupergraphResponse {
+                    context: req.context,
+                    response: http::Response::new(stream.boxed()),
+                });
+            }
+        });
+        let mut service = ServiceBuilder::new()
+            .layer(plugin.instrument_supergraph_layer())
+            .service(mock_service);
+        for _ in 0..requests {
+            let mut response = service
+                .ready()
+                .await
+                .unwrap()
+                .call(
+                    SupergraphRequest::fake_builder()
+                        .query("{ __typename }")
+                        .build()
+                        .unwrap(),
+                )
+                .await
+                .unwrap();
+            while response.next_response().await.is_some() {}
+        }
+        drop(service);
+        crate::plugin::test::await_mock_driver(driver).await;
+    }
+
+    /// A primary response followed by `count - 1` deferred chunks, each with a `price`.
+    fn response_chunks(count: usize) -> Vec<crate::graphql::Response> {
+        (1..=count)
+            .map(|i| {
+                crate::graphql::Response::builder()
+                    .data(json!({ "price": 10 * i }))
+                    .has_next(i < count)
+                    .build()
+            })
+            .collect()
+    }
+
+    fn assert_no_instrument_bug_logged() {
+        crate::test_harness::tracing_test::logs_assert(|lines| {
+            match lines.iter().find(|line| line.contains(INSTRUMENT_BUG_LOG)) {
+                Some(line) => Err(format!("unexpected error log: {line}")),
+                None => Ok(()),
+            }
+        })
+        .unwrap();
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn test_response_context_value_is_recorded_once_per_request() {
+        let _guard = crate::test_harness::tracing_test::dispatcher_guard();
+        async {
+            send_requests(CONTEXT_VALUE_INSTRUMENTS, 2, response_chunks(1), false).await;
+
+            assert_counter!("test.context.counter", 148.0);
+            assert_histogram_count!("test.context.histogram", 2);
+            assert_histogram_sum!("test.context.histogram", 148.0);
+        }
+        .with_metrics()
+        .await;
+        assert_no_instrument_bug_logged();
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn test_response_context_value_is_recorded_once_for_deferred_response() {
+        let _guard = crate::test_harness::tracing_test::dispatcher_guard();
+        async {
+            send_requests(CONTEXT_VALUE_INSTRUMENTS, 1, response_chunks(3), false).await;
+
+            assert_counter!("test.context.counter", 74.0);
+            assert_histogram_count!("test.context.histogram", 1);
+            assert_histogram_sum!("test.context.histogram", 74.0);
+        }
+        .with_metrics()
+        .await;
+        assert_no_instrument_bug_logged();
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn test_response_context_value_is_not_counted_again_when_missing_on_events() {
+        let config = r#"
+telemetry:
+  instrumentation:
+    instruments:
+      default_requirement_level: none
+      supergraph:
+        test.context.counter:
+          type: counter
+          unit: unit
+          description: counter whose value comes from the context
+          value:
+            response_context: test_value
+"#;
+        async {
+            send_requests(config, 1, response_chunks(3), true).await;
+
+            assert_counter!("test.context.counter", 74.0);
+        }
+        .with_metrics()
+        .await;
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn test_value_only_available_on_events_is_recorded_per_event() {
+        let config = r#"
+telemetry:
+  instrumentation:
+    instruments:
+      default_requirement_level: none
+      supergraph:
+        test.price.counter:
+          type: counter
+          unit: unit
+          description: counter whose value comes from the response data
+          value:
+            response_data: $.price
+        test.price.histogram:
+          type: histogram
+          unit: unit
+          description: histogram whose value comes from the response data
+          value:
+            response_data: $.price
+"#;
+        async {
+            send_requests(config, 1, response_chunks(3), false).await;
+
+            assert_counter!("test.price.counter", 60.0);
+            assert_histogram_count!("test.price.histogram", 3);
+            assert_histogram_sum!("test.price.histogram", 60.0);
+        }
+        .with_metrics()
+        .await;
+    }
 }
