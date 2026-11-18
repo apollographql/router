@@ -1,23 +1,21 @@
 ---
 source: apollo-router/src/configuration/tests.rs
 expression: new_config
-snapshot_kind: text
----
 ---
 cors:
   allow_credentials: true
   methods:
-    - GET
-    - POST
-    - OPTIONS
+  - GET
+  - POST
+  - OPTIONS
   allow_headers:
-    - content-type
-    - authorization
+  - content-type
+  - authorization
   expose_headers:
-    - x-custom-header
+  - x-custom-header
   max_age: 3600s
   policies:
-    - origins:
-        - "https://studio.apollographql.com"
-        - "https://myapp.com"
-        - "https://api.example.com"
+  - origins:
+    - https://studio.apollographql.com
+    - https://myapp.com
+    - https://api.example.com

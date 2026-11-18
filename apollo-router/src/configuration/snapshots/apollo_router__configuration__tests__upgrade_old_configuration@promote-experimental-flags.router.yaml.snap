@@ -2,7 +2,6 @@
 source: apollo-router/src/configuration/tests.rs
 expression: new_config
 ---
----
 supergraph:
   query_planning:
     experimental_plans_limit: 100
@@ -15,7 +14,7 @@ traffic_shaping:
     accounts:
       http2: enable
 coprocessor:
-  url: "http://example.com"
+  url: http://example.com
   client:
     http2: enable
 telemetry:

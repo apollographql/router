@@ -2,7 +2,6 @@
 source: apollo-router/src/configuration/tests.rs
 expression: new_config
 ---
----
 supergraph: {}
 apq:
   router:
@@ -11,5 +10,4 @@ apq:
         limit: 2000
       redis:
         urls:
-          - "http://example.com"
-
+        - http://example.com

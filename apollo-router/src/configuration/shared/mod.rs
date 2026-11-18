@@ -119,13 +119,13 @@ mod tests {
         #[case] yaml: &str,
         #[case] expected: Option<Duration>,
     ) {
-        let client: Client = serde_yaml::from_str(yaml).unwrap();
+        let client: Client = yaml_serde::from_str(yaml).unwrap();
         assert_eq!(client.pool_idle_timeout, expected);
     }
 
     #[test]
     fn test_pool_idle_timeout_default_when_omitted() {
-        let client: Client = serde_yaml::from_str("{}").unwrap();
+        let client: Client = yaml_serde::from_str("{}").unwrap();
         assert_eq!(client.pool_idle_timeout, Some(DEFAULT_POOL_IDLE_TIMEOUT));
     }
 
@@ -139,13 +139,13 @@ mod tests {
     fn test_client_default_has_pool_idle_timeout() {
         let client = Client::default();
         assert_eq!(client.pool_idle_timeout, Some(DEFAULT_POOL_IDLE_TIMEOUT));
-        assert_eq!(client, serde_yaml::from_str::<Client>("{}").unwrap());
+        assert_eq!(client, yaml_serde::from_str::<Client>("{}").unwrap());
         assert_eq!(client, Client::builder().build());
     }
 
     #[test]
     fn test_client_deny_unknown_fields() {
-        let result: Result<Client, _> = serde_yaml::from_str("bogus_field: true");
+        let result: Result<Client, _> = yaml_serde::from_str("bogus_field: true");
         assert!(result.is_err());
     }
 
@@ -164,7 +164,7 @@ mod tests {
         #[case] yaml: &str,
         #[case] expected: Option<Duration>,
     ) {
-        let client: Client = serde_yaml::from_str(yaml).unwrap();
+        let client: Client = yaml_serde::from_str(yaml).unwrap();
         assert_eq!(client.experimental_http2_keep_alive_interval, expected);
     }
 
@@ -183,7 +183,7 @@ mod tests {
         #[case] yaml: &str,
         #[case] expected: Option<Duration>,
     ) {
-        let client: Client = serde_yaml::from_str(yaml).unwrap();
+        let client: Client = yaml_serde::from_str(yaml).unwrap();
         assert_eq!(client.experimental_http2_keep_alive_timeout, expected);
     }
 }
