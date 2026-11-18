@@ -761,6 +761,28 @@ telemetry:
         chunks: Vec<crate::graphql::Response>,
         clear_on_first_chunk: bool,
     ) {
+        send_requests_with(
+            config,
+            requests,
+            chunks,
+            clear_on_first_chunk,
+            None,
+            "{ __typename }",
+        )
+        .await
+    }
+
+    /// Like `send_requests`, with a custom `query`. The mocked response also carries the header
+    /// `x-test-value: 74`. With `chunk_values`, the mocked service sets `test_value` to the next
+    /// value each time a chunk is read, so each chunk carries its own context value.
+    async fn send_requests_with(
+        config: &str,
+        requests: usize,
+        chunks: Vec<crate::graphql::Response>,
+        clear_on_first_chunk: bool,
+        chunk_values: Option<Vec<i64>>,
+        query: &'static str,
+    ) {
         let plugin = PluginTestHarness::<Telemetry>::builder()
             .config(config)
             .build()
@@ -773,15 +795,25 @@ telemetry:
                 let (req, responder) = handle.next_request().await.unwrap();
                 req.context.insert("test_value", 74).unwrap();
                 let context = req.context.clone();
+                let chunk_values = chunk_values.clone();
+                let mut index = 0usize;
                 let stream = futures::stream::iter(chunks.clone()).map(move |chunk| {
                     if clear_on_first_chunk {
                         context.insert_json_value("test_value", serde_json_bytes::Value::Null);
                     }
+                    if let Some(values) = &chunk_values {
+                        context.insert("test_value", values[index]).unwrap();
+                    }
+                    index += 1;
                     chunk
                 });
+                let mut response = http::Response::new(stream.boxed());
+                response
+                    .headers_mut()
+                    .insert("x-test-value", http::HeaderValue::from_static("74"));
                 responder.send_response(SupergraphResponse {
                     context: req.context,
-                    response: http::Response::new(stream.boxed()),
+                    response,
                 });
             }
         });
@@ -795,7 +827,7 @@ telemetry:
                 .unwrap()
                 .call(
                     SupergraphRequest::fake_builder()
-                        .query("{ __typename }")
+                        .query(query)
                         .build()
                         .unwrap(),
                 )
@@ -913,5 +945,149 @@ telemetry:
         }
         .with_metrics()
         .await;
+    }
+
+    /// `event_custom` counters and histograms valued from the context, a response header and a
+    /// static value.
+    const EVENT_CUSTOM_INSTRUMENTS: &str = r#"
+telemetry:
+  instrumentation:
+    instruments:
+      default_requirement_level: none
+      supergraph:
+        test.event.counter:
+          type: counter
+          unit: unit
+          description: per-chunk counter whose value comes from the context
+          value:
+            event_custom:
+              response_context: test_value
+        test.event.histogram:
+          type: histogram
+          unit: unit
+          description: per-chunk histogram whose value comes from the context
+          value:
+            event_custom:
+              response_context: test_value
+        test.event_header.counter:
+          type: counter
+          unit: unit
+          description: per-chunk counter whose value comes from a response header
+          value:
+            event_custom:
+              response_header: x-test-value
+        test.event_header.histogram:
+          type: histogram
+          unit: unit
+          description: per-chunk histogram whose value comes from a response header
+          value:
+            event_custom:
+              response_header: x-test-value
+        test.event_static.counter:
+          type: counter
+          unit: unit
+          description: per-chunk counter with a static value
+          value:
+            event_custom:
+              static: 5
+        test.event_static.histogram:
+          type: histogram
+          unit: unit
+          description: per-chunk histogram with a static value
+          value:
+            event_custom:
+              static: 5
+"#;
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn test_event_custom_value_is_recorded_once_for_plain_response() {
+        let _guard = crate::test_harness::tracing_test::dispatcher_guard();
+        async {
+            send_requests(EVENT_CUSTOM_INSTRUMENTS, 1, response_chunks(1), false).await;
+
+            assert_counter!("test.event.counter", 74.0);
+            assert_histogram_count!("test.event.histogram", 1);
+            assert_histogram_sum!("test.event.histogram", 74.0);
+            assert_counter!("test.event_header.counter", 74.0);
+            assert_histogram_count!("test.event_header.histogram", 1);
+            assert_histogram_sum!("test.event_header.histogram", 74.0);
+            assert_counter!("test.event_static.counter", 5.0);
+            assert_histogram_count!("test.event_static.histogram", 1);
+            assert_histogram_sum!("test.event_static.histogram", 5.0);
+        }
+        .with_metrics()
+        .await;
+        assert_no_instrument_bug_logged();
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn test_event_custom_value_is_recorded_per_deferred_chunk() {
+        let _guard = crate::test_harness::tracing_test::dispatcher_guard();
+        async {
+            send_requests(EVENT_CUSTOM_INSTRUMENTS, 1, response_chunks(3), false).await;
+
+            assert_counter!("test.event.counter", 222.0);
+            assert_histogram_count!("test.event.histogram", 3);
+            assert_histogram_sum!("test.event.histogram", 222.0);
+            // A response header has one value for the whole response, so it is recorded once.
+            assert_counter!("test.event_header.counter", 74.0);
+            assert_histogram_count!("test.event_header.histogram", 1);
+            assert_histogram_sum!("test.event_header.histogram", 74.0);
+            assert_counter!("test.event_static.counter", 15.0);
+            assert_histogram_count!("test.event_static.histogram", 3);
+            assert_histogram_sum!("test.event_static.histogram", 15.0);
+        }
+        .with_metrics()
+        .await;
+        assert_no_instrument_bug_logged();
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn test_event_custom_value_is_read_from_each_deferred_chunk() {
+        let _guard = crate::test_harness::tracing_test::dispatcher_guard();
+        async {
+            send_requests_with(
+                EVENT_CUSTOM_INSTRUMENTS,
+                1,
+                response_chunks(3),
+                false,
+                Some(vec![10, 20, 30]),
+                "{ __typename }",
+            )
+            .await;
+
+            assert_counter!("test.event.counter", 60.0);
+            assert_histogram_count!("test.event.histogram", 3);
+            assert_histogram_sum!("test.event.histogram", 60.0);
+        }
+        .with_metrics()
+        .await;
+        assert_no_instrument_bug_logged();
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn test_event_custom_value_is_recorded_per_subscription_event() {
+        let _guard = crate::test_harness::tracing_test::dispatcher_guard();
+        async {
+            send_requests_with(
+                EVENT_CUSTOM_INSTRUMENTS,
+                1,
+                response_chunks(4),
+                false,
+                None,
+                "subscription { __typename }",
+            )
+            .await;
+
+            assert_counter!("test.event.counter", 296.0);
+            assert_histogram_count!("test.event.histogram", 4);
+            assert_histogram_sum!("test.event.histogram", 296.0);
+            assert_counter!("test.event_static.counter", 20.0);
+            assert_histogram_count!("test.event_static.histogram", 4);
+            assert_histogram_sum!("test.event_static.histogram", 20.0);
+        }
+        .with_metrics()
+        .await;
+        assert_no_instrument_bug_logged();
     }
 }
