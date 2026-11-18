@@ -32,10 +32,39 @@ RUN --mount=type=bind,from=router-artifacts,target=/router-artifacts \
   chmod +x /tmp/download_and_validate_router.sh && /tmp/download_and_validate_router.sh
 
 # Use a multi-stage build to install the debug tools if DEBUG_IMAGE is true
-FROM rust:slim-trixie AS install-debug-tools-true
+#
+# This stage runs on the build host's platform and cross-compiles the tools for
+# the target platform. In a multi-platform build that keeps compilation out of
+# QEMU emulation, where building these crates takes many times longer.
+FROM --platform=$BUILDPLATFORM rust:slim-trixie AS install-debug-tools-true
+ARG BUILDARCH
+ARG TARGETARCH
+# Add the Rust target and, when cross-compiling, the target's GCC as linker
+RUN \
+  case "${TARGETARCH}" in \
+    amd64) echo x86_64-unknown-linux-gnu > /tmp/rust-target ;; \
+    arm64) echo aarch64-unknown-linux-gnu > /tmp/rust-target ;; \
+    *) echo "Error: Unsupported TARGETARCH '${TARGETARCH}'" >&2; exit 1 ;; \
+  esac \
+  && rustup target add "$(cat /tmp/rust-target)" \
+  && if [ "${TARGETARCH}" != "${BUILDARCH}" ]; then \
+    case "${TARGETARCH}" in \
+      amd64) gcc_pkg=gcc-x86-64-linux-gnu linker=x86_64-linux-gnu-gcc ;; \
+      arm64) gcc_pkg=gcc-aarch64-linux-gnu linker=aarch64-linux-gnu-gcc ;; \
+    esac \
+    && apt-get update -y \
+    && apt-get install -y "${gcc_pkg}" \
+    && rm -rf /var/lib/apt/lists/* \
+    && echo "${linker}" > /tmp/rust-linker; \
+  fi
 # We use the rust addr2line to avoid this error/perf issue https://github.com/iced-rs/iced/issues/2394
-RUN cargo install addr2line --locked --features="bin"
-RUN cargo install flamegraph --locked
+RUN \
+  target="$(cat /tmp/rust-target)" \
+  && if [ -f /tmp/rust-linker ]; then \
+    export "CARGO_TARGET_$(echo "${target}" | tr 'a-z-' 'A-Z_')_LINKER=$(cat /tmp/rust-linker)"; \
+  fi \
+  && cargo install addr2line --locked --features="bin" --target "${target}" \
+  && cargo install flamegraph --locked --target "${target}"
 
 FROM rust:slim-trixie AS install-debug-tools-false
 # Do nothing
