@@ -1285,7 +1285,8 @@ mod tests {
         match response {
             Ok(response) => Ok(response.status()),
             Err(err) => {
-                // Wait until the router has closed the connection, so it has recorded the error.
+                // On the current-thread runtime the router records the error in the same poll
+                // that closes the connection, so it has been recorded once the client sees EOF.
                 let _ = conn.await;
                 let h2_err =
                     std::iter::successors(Some(&err as &(dyn std::error::Error + 'static)), |e| {
@@ -1517,6 +1518,8 @@ mod tests {
                 flood.extend(h2_frame(CONTINUATION_FRAME, 0, 3, &[]));
             }
             stream.write_all(&flood).await.unwrap();
+            // On the current-thread runtime the router records the error in the same poll
+            // that closes the connection, so it has been recorded once the client sees EOF.
             let mut go_away = None;
             while let Some((kind, _, payload)) = read_h2_frame(&mut stream).await {
                 if kind == GOAWAY_FRAME {
