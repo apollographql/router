@@ -1800,7 +1800,7 @@ async fn all_stock_router_example_yamls_are_valid() {
                 let raw_yaml = std::fs::read_to_string(entry_path)
                     .unwrap_or_else(|e| panic!("unable to read {display_path}: {e}"));
                 {
-                    let mut configuration: Configuration = serde_yaml::from_str(&raw_yaml)
+                    let mut configuration: Configuration = yaml_serde::from_str(&raw_yaml)
                         .unwrap_or_else(|e| panic!("unable to parse YAML {display_path}: {e}"));
                     let (_mock_guard, configuration) = if configuration.persisted_queries.enabled {
                         let (_mock_guard, uplink_config) = mock_empty_pq_uplink().await;

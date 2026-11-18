@@ -100,7 +100,7 @@ fn lookup_dir(
                     )
                 })?;
 
-                match serde_yaml::from_str(&s) {
+                match yaml_serde::from_str(&s) {
                     Ok(data) => Some(data),
                     Err(e) => {
                         return Err(format!(

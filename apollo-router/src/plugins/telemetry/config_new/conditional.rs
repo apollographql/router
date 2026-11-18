@@ -433,7 +433,7 @@ mod test {
                 - "val"
         "#;
 
-        let conditional: super::Conditional<RouterSelector> = serde_yaml::from_str(config).unwrap();
+        let conditional: super::Conditional<RouterSelector> = yaml_serde::from_str(config).unwrap();
         let result = on_request(&conditional);
         assert!(result.is_none());
         let result = on_response(conditional);
@@ -451,7 +451,7 @@ mod test {
                 - 201
         "#;
 
-        let conditional: super::Conditional<RouterSelector> = serde_yaml::from_str(config).unwrap();
+        let conditional: super::Conditional<RouterSelector> = yaml_serde::from_str(config).unwrap();
         let result = on_request(&conditional);
         assert!(result.is_none());
         let result = on_response(conditional);
@@ -472,7 +472,7 @@ mod test {
                 - val
         "#;
 
-        let conditional: super::Conditional<RouterSelector> = serde_yaml::from_str(config).unwrap();
+        let conditional: super::Conditional<RouterSelector> = yaml_serde::from_str(config).unwrap();
         let result = on_request(&conditional);
         assert_eq!(
             result.expect("expected result"),
@@ -494,7 +494,7 @@ mod test {
                 - 201
         "#;
 
-        let conditional: super::Conditional<RouterSelector> = serde_yaml::from_str(config).unwrap();
+        let conditional: super::Conditional<RouterSelector> = yaml_serde::from_str(config).unwrap();
         let result = on_request(&conditional);
         assert!(result.is_none());
         let result = on_response(conditional);
@@ -512,7 +512,7 @@ mod test {
                 - 999
         "#;
 
-        let conditional: super::Conditional<RouterSelector> = serde_yaml::from_str(config).unwrap();
+        let conditional: super::Conditional<RouterSelector> = yaml_serde::from_str(config).unwrap();
         let result = on_request(&conditional);
         assert!(result.is_none());
         let result = on_response(conditional);
@@ -529,7 +529,7 @@ mod test {
                 - 999
         "#;
 
-        let conditional: super::Conditional<RouterSelector> = serde_yaml::from_str(config).unwrap();
+        let conditional: super::Conditional<RouterSelector> = yaml_serde::from_str(config).unwrap();
         let result = on_request(&conditional);
         assert!(result.is_none());
         let result = on_response(conditional);
@@ -547,7 +547,7 @@ mod test {
                 - 999
         "#;
 
-        let conditional: super::Conditional<RouterSelector> = serde_yaml::from_str(config).unwrap();
+        let conditional: super::Conditional<RouterSelector> = yaml_serde::from_str(config).unwrap();
         let result = on_request(&conditional);
         assert!(result.is_none());
         let result = on_response(conditional);
@@ -564,7 +564,7 @@ mod test {
                 - 999
         "#;
 
-        let conditional: super::Conditional<RouterSelector> = serde_yaml::from_str(config).unwrap();
+        let conditional: super::Conditional<RouterSelector> = yaml_serde::from_str(config).unwrap();
         let result = on_request(&conditional);
         assert!(result.is_none());
         let result = on_response(conditional);
@@ -583,7 +583,7 @@ mod test {
                 - 201
         "#;
 
-        let conditional: super::Conditional<RouterSelector> = serde_yaml::from_str(config).unwrap();
+        let conditional: super::Conditional<RouterSelector> = yaml_serde::from_str(config).unwrap();
         let result = on_request(&conditional);
         assert!(result.is_none());
         let result = on_response(conditional);
@@ -603,7 +603,7 @@ mod test {
                 - 201
         "#;
 
-        serde_yaml::from_str::<super::Conditional<RouterSelector>>(config)
+        yaml_serde::from_str::<super::Conditional<RouterSelector>>(config)
             .expect_err("Could have failed to deserialize");
     }
 
@@ -618,7 +618,7 @@ mod test {
                 - 201
         "#;
 
-        let result = serde_yaml::from_str::<super::Conditional<RouterSelector>>(config);
+        let result = yaml_serde::from_str::<super::Conditional<RouterSelector>>(config);
         assert!(
             result
                 .expect_err("should have got error")
@@ -635,7 +635,7 @@ mod test {
               aaargh: ""
         "#;
 
-        let result = serde_yaml::from_str::<super::Conditional<RouterSelector>>(config);
+        let result = yaml_serde::from_str::<super::Conditional<RouterSelector>>(config);
         assert!(
             result
                 .expect_err("should have got error")
@@ -650,7 +650,7 @@ mod test {
             "foo"
         "#;
 
-        let result = serde_yaml::from_str::<super::Conditional<RouterSelector>>(config);
+        let result = yaml_serde::from_str::<super::Conditional<RouterSelector>>(config);
         assert!(
             result
                 .expect_err("should have got error")

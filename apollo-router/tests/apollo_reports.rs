@@ -84,7 +84,7 @@ async fn config(
             .expect("could not start axum server")
     });
 
-    let mut config = serde_yaml::from_str(config_str).expect("config yaml was invalid");
+    let mut config = yaml_serde::from_str(config_str).expect("config yaml was invalid");
 
     config = jsonpath_lib::replace_with(config, "$.telemetry.apollo.endpoint", &mut |_| {
         Some(serde_json::Value::String(format!("http://{addr}")))

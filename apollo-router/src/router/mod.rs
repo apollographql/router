@@ -43,7 +43,7 @@ use crate::uplink::UplinkConfig;
 /// use apollo_router::Configuration;
 ///
 /// async {
-///     let configuration = serde_yaml::from_str::<Configuration>("Config").unwrap();
+///     let configuration = yaml_serde::from_str::<Configuration>("Config").unwrap();
 ///     let schema = "schema";
 ///     RouterHttpServer::builder()
 ///             .configuration(configuration)
@@ -59,7 +59,7 @@ use crate::uplink::UplinkConfig;
 /// use apollo_router::Configuration;
 ///
 /// async {
-///     let configuration = serde_yaml::from_str::<Configuration>("Config").unwrap();
+///     let configuration = yaml_serde::from_str::<Configuration>("Config").unwrap();
 ///     let schema = "schema";
 ///     let mut server = RouterHttpServer::builder()
 ///             .configuration(configuration)

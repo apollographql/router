@@ -502,7 +502,7 @@ impl IntegrationTest {
 
         std::fs::write(
             &self.test_config_location,
-            serde_yaml::to_string(&updated_config).unwrap(),
+            yaml_serde::to_string(&updated_config).unwrap(),
         )
         .expect("Failed to write updated config");
     }
@@ -885,7 +885,7 @@ impl IntegrationTest {
 
         fs::write(
             &test_config_location,
-            serde_yaml::to_string(&config).unwrap(),
+            yaml_serde::to_string(&config).unwrap(),
         )
         .expect("could not write config");
         fs::copy(&supergraph, &test_schema_location).expect("could not write schema");
@@ -1351,7 +1351,7 @@ impl IntegrationTest {
             &self.redis_namespace,
             Some(&self.port_replacements),
         );
-        let mut content = serde_yaml::to_string(&config).unwrap();
+        let mut content = yaml_serde::to_string(&config).unwrap();
         // Append a unique comment so file content always changes. PollWatcher uses
         // with_compare_contents(true); identical rewrites may not emit Data events on Windows.
         let stamp = SystemTime::now()
@@ -2428,7 +2428,7 @@ fn merge_overrides(
     }
 
     // Parse the config as yaml
-    let mut config: Value = serde_yaml::from_str(&yaml_with_ports).unwrap();
+    let mut config: Value = yaml_serde::from_str(&yaml_with_ports).unwrap();
 
     // Insert subgraph overrides, making sure to keep other overrides if present
     let overrides = subgraph_overrides
