@@ -1732,7 +1732,7 @@ fn requires_input_built_under_key_conditions() {
         &gated_key_hop_schema(),
         "query($x: Boolean!, $y: Boolean!) { posts { author { score ... @include(if: $x) { emailDomain } ... @include(if: $y) { email } } } }",
     );
-    insta::assert_snapshot!(plan_str, @r#"
+    insta::assert_snapshot!(plan_str, @r###"
     QueryPlan {
       Sequence {
         Fetch(service: "a") {
@@ -1741,7 +1741,11 @@ fn requires_input_built_under_key_conditions() {
               author {
                 __typename
                 id
-                name
+                ... @include(if: $x) {
+                  __typename
+                  id
+                  name
+                }
               }
             }
           }
@@ -1790,7 +1794,7 @@ fn requires_input_built_under_key_conditions() {
         },
       },
     }
-    "#);
+    "###);
 }
 
 /// A deferred field local to the parent subgraph is redirected into an entity
@@ -2488,7 +2492,7 @@ fn entity_shareable_field_filters_inconsistent_union_members() {
 /// A field with locally-unresolvable @requires reached through an
 /// @include-gated fragment: the same-subgraph entity re-fetch must carry the
 /// gating fragment into its op path (or the hopped selection loses its
-/// condition), while the condition input itself is fetched unconditionally.
+/// condition), and the condition input is fetched under the same gate.
 /// Targets requires.rs trailing_condition_fragments on the self-key-hop
 /// commit path (routing.rs self_key_hop -> commit.rs target_paths).
 #[test]
@@ -2503,24 +2507,28 @@ fn requires_under_include_fragment_keeps_condition_on_entity_fetch() {
         Fetch(service: "b") {
           {
             productInB {
-              __typename
-              id
-            }
-          }
-        },
-        Flatten(path: "productInB") {
-          Fetch(service: "a") {
-            {
-              ... on Product {
+              ... @include(if: $v) {
                 __typename
                 id
               }
-            } =>
-            {
-              ... on Product {
-                weight
-              }
             }
+          }
+        },
+        Include(if: $v) {
+          Flatten(path: "productInB") {
+            Fetch(service: "a") {
+              {
+                ... on Product {
+                  __typename
+                  id
+                }
+              } =>
+              {
+                ... on Product {
+                  weight
+                }
+              }
+            },
           },
         },
         Include(if: $v) {

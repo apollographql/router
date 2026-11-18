@@ -20,11 +20,9 @@ use super::FieldRoutingSearchSpace;
 use super::NodeSource;
 use super::RoutingSiteKey;
 use super::context;
-use super::requires::gated_input_path;
-use super::requires::trailing_condition_fragments;
-use super::requires::trailing_conditions_context;
-use super::requires::unconditioned_input_path;
-use super::requires::with_own_conditions;
+use super::requires::input_gate;
+use super::requires::path_condition_fragments;
+use super::requires::path_conditions_context;
 use super::routing::RoutingChoice;
 use super::selection_label;
 use super::state::CONDITION_DEPTH_LIMIT;
@@ -313,19 +311,15 @@ impl FieldRoutingSearchSpace {
             None => (true, (None, None)),
         };
 
-        // Key fields plus __typename, which identifies the entity type. The
-        // hop is gated on the trailing conditions and the field's own, so
-        // its inputs keep them (see `gated_input_path`).
-        let gate_path = with_own_conditions(&pending.op_path, &pending.selection);
-        let input_path = gated_input_path(&gate_path);
+        // Key fields plus __typename, which identifies the entity type.
+        let (gate_path, needed_under) = input_gate(pending)?;
         self.append_entity_inputs_at(
             state,
             pending.fetch_node,
-            &input_path,
+            &gate_path,
             anchor_key.as_ref(),
             &source,
         );
-        let needed_under = trailing_conditions_context(&gate_path)?;
 
         let merge_at = self.pending_merge_at(state, pending);
 
@@ -402,22 +396,10 @@ impl FieldRoutingSearchSpace {
                     )));
                 }
                 self.commit_circular_key_conditions(
-                    state,
-                    pending,
-                    routed_key,
-                    &source,
-                    pending.fetch_node,
-                    &pending.op_path,
-                    new_group,
+                    state, pending, routed_key, &source, &gate_path, new_group,
                 )?;
             } else {
-                self.push_condition_pendings_at(
-                    state,
-                    pending,
-                    routed_key,
-                    new_group,
-                    &input_path,
-                )?;
+                self.push_condition_pendings_at(state, pending, routed_key, new_group, &gate_path)?;
             }
         }
 
@@ -479,14 +461,12 @@ impl FieldRoutingSearchSpace {
     /// key it can only partially resolve can never match an entity at
     /// runtime, so fail the commit and let backtracking look for an
     /// alternative instead of emitting a fetch that is dead on arrival.
-    #[allow(clippy::too_many_arguments)]
     fn commit_circular_key_conditions(
         &self,
         state: &mut PlanState,
         pending: &PendingSelection,
         key_conditions: &Arc<SelectionSet>,
         source: &NodeSource,
-        anchor_fetch: NodeIndex,
         anchor_path: &SharedPath<Arc<OpPathElement>>,
         new_group: NodeIndex,
     ) -> Result<(), FederationError> {
@@ -497,14 +477,14 @@ impl FieldRoutingSearchSpace {
                 key_conditions,
             )));
         }
-        self.append_entity_inputs(
+        self.append_entity_inputs_at(
             state,
-            anchor_fetch,
+            pending.fetch_node,
             anchor_path,
             Some(key_conditions),
             source,
         );
-        self.push_condition_pendings(state, pending, key_conditions, new_group)?;
+        self.push_condition_pendings_at(state, pending, key_conditions, new_group, anchor_path)?;
         Ok(())
     }
 
@@ -564,7 +544,7 @@ impl FieldRoutingSearchSpace {
                     self.can_resolve_in_place(hop.target_node, key_conds, &hop_source)?;
                 let (in_place, routed) =
                     self.split_in_place(state, &hop_anchor, key_conds, resolvable_in_place);
-                self.append_entity_inputs(
+                self.append_entity_inputs_at(
                     state,
                     prev_group,
                     &hop_path,
@@ -572,7 +552,13 @@ impl FieldRoutingSearchSpace {
                     &hop_source,
                 );
                 if let Some(routed) = &routed {
-                    self.push_condition_pendings(state, &hop_anchor, routed, next_group)?;
+                    self.push_condition_pendings_at(
+                        state,
+                        &hop_anchor,
+                        routed,
+                        next_group,
+                        &hop_path,
+                    )?;
                 }
             }
 
@@ -904,7 +890,7 @@ impl FieldRoutingSearchSpace {
         } else {
             // Hops restart the op path at the new group's root: empty for
             // root hops; for key hops, `... on <ConcreteType>` (entity
-            // fetches start from the _Entity union) plus any trailing
+            // fetches start from the _Entity union) plus the ancestor
             // @skip/@include fragments.
             let base = if matches!(choice, RoutingChoice::RootHop(_)) {
                 SharedPath::new()
@@ -913,7 +899,7 @@ impl FieldRoutingSearchSpace {
                     qg.edge_endpoints(choice.edge_index().expect("edge-based choice"))?;
                 let dest = self.node_source(field_source)?;
                 let mut initial_path = self.entity_root_path(dest.type_pos.type_name())?;
-                for element in trailing_condition_fragments(&pending.op_path) {
+                for element in path_condition_fragments(&pending.op_path) {
                     initial_path = initial_path.pushed(element);
                 }
                 initial_path
@@ -1007,12 +993,12 @@ impl FieldRoutingSearchSpace {
         let source = self.node_source(pending.query_graph_node)?;
         let subgraph = qg.node_weight(pending.query_graph_node)?.source.clone();
 
-        // The redirect target is gated on the trailing conditions
+        // The redirect target is gated on the path conditions
         // (`defer_redirect_target`), so the inputs keep them.
         self.append_entity_inputs_at(
             state,
             pending.fetch_node,
-            &gated_input_path(&pending.op_path),
+            &pending.op_path,
             Some(&key_conditions),
             &source,
         );
@@ -1039,7 +1025,7 @@ impl FieldRoutingSearchSpace {
                 dest_type,
                 dest_subgraph: subgraph,
             },
-            needed_under: trailing_conditions_context(&pending.op_path)?,
+            needed_under: path_conditions_context(&pending.op_path)?,
         });
 
         let edge = self.wire_key_edge(state, pending.fetch_node, new_group, key_input);
@@ -1117,7 +1103,7 @@ impl FieldRoutingSearchSpace {
             SharedPath::new()
         } else {
             let mut path = self.entity_root_path(type_pos.type_name())?;
-            for element in trailing_condition_fragments(&pending.op_path) {
+            for element in path_condition_fragments(&pending.op_path) {
                 path = path.pushed(element);
             }
             path
@@ -1410,25 +1396,7 @@ impl FieldRoutingSearchSpace {
     }
 
     /// Select entity-representation inputs (key fields when given, plus
-    /// __typename) in `fetch_node` at the unconditioned input path.
-    pub(super) fn append_entity_inputs(
-        &self,
-        state: &mut PlanState,
-        fetch_node: NodeIndex,
-        op_path: &SharedPath<Arc<OpPathElement>>,
-        key_conditions: Option<&Arc<SelectionSet>>,
-        source: &NodeSource,
-    ) {
-        self.append_entity_inputs_at(
-            state,
-            fetch_node,
-            &unconditioned_input_path(op_path),
-            key_conditions,
-            source,
-        );
-    }
-
-    /// Select entity-representation inputs in `fetch_node` at `input_path`.
+    /// __typename) in `fetch_node` at `input_path`.
     pub(super) fn append_entity_inputs_at(
         &self,
         state: &mut PlanState,
@@ -1470,22 +1438,8 @@ impl FieldRoutingSearchSpace {
         })
     }
 
-    pub(super) fn push_condition_pendings(
-        &self,
-        state: &mut PlanState,
-        anchor: &PendingSelection,
-        conditions_arc: &Arc<SelectionSet>,
-        dependent: NodeIndex,
-    ) -> Result<(), FederationError> {
-        // Condition data is entity-fetch input: route it unconditionally
-        // (see `unconditioned_input_path`).
-        let input_path = unconditioned_input_path(&anchor.op_path);
-        self.push_condition_pendings_at(state, anchor, conditions_arc, dependent, &input_path)
-    }
-
-    /// [`Self::push_condition_pendings`] at `input_path`, e.g. a
-    /// `gated_input_path` for the key parts of a fetch whose representation
-    /// is built under the conditions that path keeps.
+    /// Route the conditions `dependent` reads from `anchor` as pendings at
+    /// `input_path`.
     pub(super) fn push_condition_pendings_at(
         &self,
         state: &mut PlanState,
