@@ -266,9 +266,9 @@ where
                 // having multiple of those spans
                 let is_fixed_size = body.size_hint().exact().is_some();
                 let bytes = if is_fixed_size {
-                    router::body::into_bytes(body).await?
+                    router::body::into_client_request_bytes(body).await?
                 } else {
-                    router::body::into_bytes(body)
+                    router::body::into_client_request_bytes(body)
                         .instrument(tracing::debug_span!("receive_body"))
                         .await?
                 };
@@ -436,8 +436,7 @@ where
             .extensions()
             .with_lock(|lock| lock.get::<CanceledRequest>().is_some())
         {
-            parts.status = StatusCode::from_u16(499)
-                .expect("499 is not a standard status code but common enough");
+            parts.status = router::body::client_closed_request_status();
         }
 
         match body.next().await {
@@ -615,9 +614,9 @@ where
             // having multiple of those spans
             let is_fixed_size = body.size_hint().exact().is_some();
             let bytes = if is_fixed_size {
-                router::body::into_bytes(body).await?
+                router::body::into_client_request_bytes(body).await?
             } else {
-                router::body::into_bytes(body)
+                router::body::into_client_request_bytes(body)
                     .instrument(tracing::debug_span!("receive_body"))
                     .await?
             };
