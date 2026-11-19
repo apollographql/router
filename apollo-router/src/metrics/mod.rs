@@ -720,8 +720,12 @@ pub(crate) mod test_utils {
             // Sort the datapoints so that we can compare them
             serde_metric.data.datapoints.sort();
 
-            // Redact duration metrics;
-            if serde_metric.name.ends_with(".duration") {
+            // Redact duration-style metrics; their sums are wall-clock timings that would
+            // otherwise make snapshots non-deterministic. `time_to_first_response` is also a
+            // wall-clock duration despite its name not ending in `.duration`.
+            if serde_metric.name.ends_with(".duration")
+                || serde_metric.name.ends_with(".time_to_first_response")
+            {
                 serde_metric
                     .data
                     .datapoints

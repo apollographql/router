@@ -23,7 +23,8 @@ OpenTelemetry specifies multiple [standard metric instruments](https://opentelem
 
   * `http.server.active_requests` - The number of active requests in flight.
   * `http.server.request.body.size` - A histogram of request body sizes for requests handled by the router.
-  * `http.server.request.duration` - A histogram of request durations for requests handled by the router.
+  * `http.server.request.duration` - A histogram of request durations for requests handled by the router. This measures the **full** request lifecycle, from request start until the client-facing response stream closes. For `@defer` and subscription responses it therefore includes the streamed tail, not only the time to the first response. If the client disconnects or the stream is cancelled before completion, the duration is recorded using the elapsed time at the moment the stream is dropped. The sample is recorded exactly once per request. See [Duration semantics](#httpserverrequestduration-covers-the-full-request-lifecycle) for the behavior change and how to recover the previous meaning.
+  * `http.server.request.time_to_first_response` - A histogram of the time from request start until the router has the primary response ready to send (status, headers, and the first response chunk). This is **opt-in** (disabled by default). For non-streamed responses it is approximately equal to `http.server.request.duration`; for `@defer` and subscription responses it is shorter, because it excludes the streamed tail. See [Why "time to first response" and not "time to first byte"](#why-time-to-first-response-and-not-time-to-first-byte) for what this metric does and does not measure.
   * `http.server.response.body.size` - A histogram of response body sizes for requests handled by the router.
 
 + In the [subgraph service](#router-request-lifecycle-services):
@@ -64,6 +65,7 @@ telemetry:
         http.server.active_requests: false # (default is true)
         http.server.request.body.size: false # (default is true)
         http.server.request.duration: false # (default is true)
+        http.server.request.time_to_first_response: true # (opt-in, default is false)
         http.server.response.body.size: false # (default is true)
       subgraph:
         http.client.request.body.size: false # (default is true)
@@ -94,6 +96,34 @@ telemetry:
         http.client.request.duration:
           attributes:
             connector.source.name: true
+```
+
+#### `http.server.request.duration` covers the full request lifecycle
+
+Previously, `http.server.request.duration` stopped timing when the primary response was ready to send. It now times the entire request, from request start until the client-facing response stream closes. For a plain (non-streamed) response the two moments are effectively the same, so the metric is unchanged. For `@defer` and subscription responses, the recorded duration is now larger because it includes the time spent streaming deferred chunks or subscription events.
+
+<Note>
+
+This is a behavior change to a widely-used metric. If you have dashboards or alerts built on `http.server.request.duration` for operations that use `@defer` or subscriptions, their values will increase after upgrading, because the streamed tail is now included. To recover the previous "time to the first response" measurement, enable [`http.server.request.time_to_first_response`](#why-time-to-first-response-and-not-time-to-first-byte), which preserves the old semantics.
+
+</Note>
+
+The duration is recorded exactly once per request: when the response stream completes normally, or, if the client disconnects or the stream is cancelled before completion, at the moment the stream is dropped (using the elapsed time at that point). This guarantees a duration is always recorded, including for a client that opens a request and then hangs.
+
+#### Why "time to first response" and not "time to first byte"
+
+`http.server.request.time_to_first_response` measures the time from request start until the router has the **primary response ready to send**: the response status, headers, and the first response chunk. It is measured inside the router, at the point the response becomes ready to hand back to the client transport.
+
+It deliberately does **not** claim to be "time to first byte" (TTFB). The standard [TTFB](https://developer.mozilla.org/en-US/docs/Glossary/Time_to_first_byte) is a client-observed, network-inclusive measurement: the time until the first byte of the response is received by the client. The router cannot measure that. Its measurement ends before response serialization, transport write, and network transit to the client, so it is always smaller than a true client-side TTFB. Naming this metric `time_to_first_response` names exactly what the router observes (the response becoming ready), without implying a client-side or network measurement it does not perform. The name also keeps parity with `http.server.request.duration`, which measures from the same start point to a later moment in the same lifecycle.
+
+This instrument is opt-in. Unlike the other standard router instruments, it stays disabled even when `default_requirement_level` is `required` or `recommended`, so upgrading does not silently add a new histogram to your metrics pipeline. Enable it explicitly when you want the first-response timing:
+
+```yaml title="router.yaml"
+telemetry:
+  instrumentation:
+    instruments:
+      router:
+        http.server.request.time_to_first_response: true
 ```
 
 ### Apollo standard instruments
