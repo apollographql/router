@@ -98,6 +98,16 @@ impl EntityCounts {
         }
     }
 
+    /// How many levels below the root the node for a flatten path is: one per response key and
+    /// one per list (`@`) marker. Type conditions are part of those elements, so they don't add
+    /// levels.
+    fn depth(path: &Path) -> usize {
+        path.0
+            .iter()
+            .filter(|element| matches!(element, PathElement::Key(..) | PathElement::Flatten(_)))
+            .count()
+    }
+
     fn node(&self, path: &Path) -> Option<&EntityCounts> {
         let mut node = self;
         for element in &path.0 {
@@ -880,7 +890,7 @@ impl StaticCostCalculator {
             return Ok(counts);
         }
 
-        fetches.sort_by_key(|(path, _)| path.map_or(0, |path| path.0.len()));
+        fetches.sort_by_key(|(path, _)| path.map_or(0, EntityCounts::depth));
         for (path, fetch_node) in fetches {
             let Some(path) = path else {
                 // Root fetch: its selections land at the response root, one object each.
