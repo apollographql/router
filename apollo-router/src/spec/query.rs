@@ -141,15 +141,11 @@ impl Query {
             Some(Value::Object(mut input)) => {
                 if self.is_deferred(defer_conditions) {
                     // Get subselection from hashmap
-                    match self.subselections.get(&SubSelectionKey {
-                        defer_label: response.label.clone(),
+                    match self.deferred_subselection(
+                        &response.label,
+                        response.path.as_ref(),
                         defer_conditions,
-                        defer_path: response
-                            .path
-                            .as_ref()
-                            .map(subselections::defer_path_from_response_path)
-                            .unwrap_or_default(),
-                    }) {
+                    ) {
                         Some(subselection) => {
                             let mut output =
                                 Object::with_capacity(subselection.selection_set.len());
@@ -1307,6 +1303,22 @@ impl Query {
             .and_then(|Variable { default_value, .. }| default_value.as_ref())
     }
 
+    /// The subselection that formats the deferred response with this label and path.
+    pub(crate) fn deferred_subselection(
+        &self,
+        label: &Option<String>,
+        response_path: Option<&Path>,
+        defer_conditions: BooleanValues,
+    ) -> Option<&SubSelectionValue> {
+        self.subselections.get(&SubSelectionKey {
+            defer_label: label.clone(),
+            defer_conditions,
+            defer_path: response_path
+                .map(subselections::defer_path_from_response_path)
+                .unwrap_or_default(),
+        })
+    }
+
     pub(crate) fn contains_error_path(
         &self,
         label: &Option<String>,
@@ -1314,13 +1326,8 @@ impl Query {
         path: &Path,
         defer_conditions: BooleanValues,
     ) -> bool {
-        let selection_set = match self.subselections.get(&SubSelectionKey {
-            defer_label: label.clone(),
-            defer_conditions,
-            defer_path: response_path
-                .map(subselections::defer_path_from_response_path)
-                .unwrap_or_default(),
-        }) {
+        let selection_set = match self.deferred_subselection(label, response_path, defer_conditions)
+        {
             Some(subselection) => &subselection.selection_set,
             None => &self.operation.selection_set,
         };
