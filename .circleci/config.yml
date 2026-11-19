@@ -456,7 +456,7 @@ commands:
       - run:
           name: Delete large files from cache
           command: |
-            find target/debug/deps -type f -size +50M -delete
+            find target/debug/build -type f -size +50M -print -delete
             rm target/debug/router*
       - when:
           condition:
