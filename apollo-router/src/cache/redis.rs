@@ -34,6 +34,7 @@ use fred::types::config::UnresponsiveConfig;
 use fred::types::scan::ScanResult;
 use futures::Stream;
 use futures::future::join_all;
+use futures::future::select_all;
 use parking_lot::RwLock;
 use tokio::sync::Mutex;
 use tokio::sync::broadcast::error::RecvError;
@@ -554,7 +555,10 @@ impl RedisCacheStorage {
         let watcher_handle = tokio::spawn(async move {
             // WARN: the client_handles returning is the signal that fred has been aborted; don't
             // remove it!
-            let _fred_aborted = join_all(client_handles).await;
+            // Any one client ending leaves the pool routing commands to a dead client; recreate it.
+            if !client_handles.is_empty() {
+                let _fred_aborted = select_all(client_handles).await;
+            }
             if let Some(inner) = client_pool_downgraded.upgrade() {
                 inner.write().take();
                 tracing::info!("redis client aborted; marking for recreation");
@@ -2605,6 +2609,46 @@ mod test {
             let result = storage.client().await;
 
             assert!(result.is_err(), "first call after abort should error");
+            wait_for_recreation(&storage).await;
+            assert!(storage.client().await.is_ok());
+            Ok(())
+        }
+
+        #[tokio::test]
+        #[rstest::rstest]
+        async fn one_aborted_client_marks_pool_for_recreation(
+            #[values(Standalone, PrimaryWithReplica, Sentinel, Cluster)] deployment: Deployment,
+        ) -> Result<(), BoxError> {
+            let _guard = lock_for_static().lock().await;
+            let mut config = redis_config(deployment);
+            config.pool_size = 2;
+            let storage = RedisCacheStorage::new(config, "test").await?;
+            storage.create_client_pool().await?;
+
+            // quit() ends this client's connection task, as an exhausted reconnect policy does.
+            let victim = {
+                let guard = storage.inner.read();
+                guard.as_ref().unwrap().pool.clients()[0].clone()
+            };
+            victim.quit().await?;
+
+            let mut marked = false;
+            for _ in 0..40 {
+                if storage.inner.read().is_none() {
+                    marked = true;
+                    break;
+                }
+                tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+            }
+            assert!(
+                marked,
+                "pool should be marked for recreation when any client in it aborts"
+            );
+
+            assert!(
+                storage.client().await.is_err(),
+                "first call after abort should error"
+            );
             wait_for_recreation(&storage).await;
             assert!(storage.client().await.is_ok());
             Ok(())
