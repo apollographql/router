@@ -855,87 +855,51 @@ impl StaticCostCalculator {
 
     /// Estimate the number of entities at each entity-fetch flatten path.
     ///
-    /// An entity at a flatten path was produced by an earlier fetch, whose cost we already
-    /// estimate by sizing its lists. We walk the plan's fetches and record, at each flatten path,
-    /// the number of objects the producing fetch places there — reusing the same `@listSize`
-    /// sizing as cost scoring. A later entity fetch at that path then just looks the count up; it
-    /// extends those objects with more fields without changing how many there are.
+    /// An entity at a flatten path was produced by another fetch, whose cost we already estimate
+    /// by sizing its lists. We walk the plan's fetches and record, at each flatten path, the number
+    /// of objects a fetch places there — reusing the same `@listSize` sizing as cost scoring. An
+    /// entity fetch at that path then just looks the count up; it extends those objects with more
+    /// fields without changing how many there are.
+    ///
+    /// Several fetches can select the same list, and size it differently when their subgraphs
+    /// have different configured list sizes. They describe the same list in the response, so the
+    /// largest size is kept. A fetch only records counts below the path its data lands at, so
+    /// fetches are walked shallowest path first: every count is then final before a fetch at that
+    /// path reads it. (Plan order wouldn't do: it only puts a fetch after the ones it depends on,
+    /// and another fetch selecting the same list can come later or run in parallel.)
     fn estimate_entity_counts(
         &self,
         root: &PlanNode,
         variables: &Object,
     ) -> Result<EntityCounts, DemandControlError> {
         let mut counts = EntityCounts::default();
-        collect_flatten_paths(root, &mut counts);
+        let mut fetches = Vec::new();
+        collect_fetches(root, None, &mut counts, &mut fetches);
         // Without flatten paths there are no entity fetches to size, so skip walking the fetches.
-        if !counts.is_empty() {
-            self.accumulate_entity_counts(root, variables, &mut counts)?;
+        if counts.is_empty() {
+            return Ok(counts);
+        }
+
+        fetches.sort_by_key(|(path, _)| path.map_or(0, |path| path.0.len()));
+        for (path, fetch_node) in fetches {
+            let Some(path) = path else {
+                // Root fetch: its selections land at the response root, one object each.
+                self.record_counts_in_fetch(fetch_node, &mut counts, 1, variables)?;
+                continue;
+            };
+            // Every flatten path was added by `collect_fetches`.
+            let Some(base) = counts.node_mut(path) else {
+                continue;
+            };
+            // The objects being extended already exist at the flatten path; their count was
+            // recorded by the fetches above it. If we somehow haven't seen a producer, fall back
+            // to the size `_entities` is scored with when it has no count.
+            let base_count = base
+                .count
+                .unwrap_or_else(|| self.default_list_size(&fetch_node.service_name));
+            self.record_counts_in_fetch(fetch_node, base, base_count, variables)?;
         }
         Ok(counts)
-    }
-
-    /// Walk the plan in execution order, recording object counts at flatten paths. Fetches are
-    /// processed before the flattens that depend on them (`Sequence` order), so an entity fetch's
-    /// base count is already in `counts` by the time we reach it.
-    fn accumulate_entity_counts(
-        &self,
-        node: &PlanNode,
-        variables: &Object,
-        counts: &mut EntityCounts,
-    ) -> Result<(), DemandControlError> {
-        match node {
-            PlanNode::Sequence { nodes } | PlanNode::Parallel { nodes } => {
-                for node in nodes {
-                    self.accumulate_entity_counts(node, variables, counts)?;
-                }
-            }
-            PlanNode::Fetch(fetch_node) => {
-                // Root fetch: its selections land at the response root, one object each.
-                self.record_counts_in_fetch(fetch_node, counts, 1, variables)?;
-            }
-            PlanNode::Flatten(flatten_node) => {
-                if let PlanNode::Fetch(fetch_node) = flatten_node.node.as_ref() {
-                    // Every flatten path was added by `collect_flatten_paths`.
-                    let Some(base) = counts.node_mut(&flatten_node.path) else {
-                        return Ok(());
-                    };
-                    // The objects being extended already exist at the flatten path; their count was
-                    // recorded by an earlier fetch. If we somehow haven't seen the producer, fall
-                    // back to the size `_entities` is scored with when it has no count.
-                    let base_count = base
-                        .count
-                        .unwrap_or_else(|| self.default_list_size(&fetch_node.service_name));
-                    self.record_counts_in_fetch(fetch_node, base, base_count, variables)?;
-                } else {
-                    self.accumulate_entity_counts(&flatten_node.node, variables, counts)?;
-                }
-            }
-            PlanNode::Condition {
-                condition: _,
-                if_clause,
-                else_clause,
-            } => {
-                if let Some(node) = if_clause {
-                    self.accumulate_entity_counts(node, variables, counts)?;
-                }
-                if let Some(node) = else_clause {
-                    self.accumulate_entity_counts(node, variables, counts)?;
-                }
-            }
-            PlanNode::Defer { primary, deferred } => {
-                if let Some(node) = &primary.node {
-                    self.accumulate_entity_counts(node, variables, counts)?;
-                }
-                for deferred_node in deferred {
-                    if let Some(node) = &deferred_node.node {
-                        self.accumulate_entity_counts(node, variables, counts)?;
-                    }
-                }
-            }
-            // A subscription's follow-up fetches (`rest`) aren't scored, so they aren't counted.
-            PlanNode::Subscription { .. } => {}
-        }
-        Ok(())
     }
 
     /// Walk one fetch's subgraph operation, recording object counts at the flatten paths under
@@ -1125,17 +1089,30 @@ fn operation_base_cost(operation: &Operation) -> f64 {
     if operation.is_mutation() { 10.0 } else { 0.0 }
 }
 
-/// Adds every flatten path in the plan (the response paths entity fetches target) to `out`.
-fn collect_flatten_paths(node: &PlanNode, out: &mut EntityCounts) {
+/// Collects the plan's fetches into `fetches`, each with the flatten path its data lands at
+/// (`None` for a fetch at the response root), and adds every flatten path (the response paths
+/// entity fetches target) to `counts`.
+fn collect_fetches<'a>(
+    node: &'a PlanNode,
+    flatten_path: Option<&'a Path>,
+    counts: &mut EntityCounts,
+    fetches: &mut Vec<(Option<&'a Path>, &'a FetchNode)>,
+) {
     match node {
         PlanNode::Sequence { nodes } | PlanNode::Parallel { nodes } => {
             for node in nodes {
-                collect_flatten_paths(node, out);
+                collect_fetches(node, flatten_path, counts, fetches);
             }
         }
+        PlanNode::Fetch(fetch_node) => fetches.push((flatten_path, fetch_node)),
         PlanNode::Flatten(flatten_node) => {
-            out.insert(&flatten_node.path);
-            collect_flatten_paths(&flatten_node.node, out);
+            counts.insert(&flatten_node.path);
+            collect_fetches(
+                &flatten_node.node,
+                Some(&flatten_node.path),
+                counts,
+                fetches,
+            );
         }
         PlanNode::Condition {
             condition: _,
@@ -1143,23 +1120,24 @@ fn collect_flatten_paths(node: &PlanNode, out: &mut EntityCounts) {
             else_clause,
         } => {
             if let Some(node) = if_clause {
-                collect_flatten_paths(node, out);
+                collect_fetches(node, flatten_path, counts, fetches);
             }
             if let Some(node) = else_clause {
-                collect_flatten_paths(node, out);
+                collect_fetches(node, flatten_path, counts, fetches);
             }
         }
         PlanNode::Defer { primary, deferred } => {
             if let Some(node) = &primary.node {
-                collect_flatten_paths(node, out);
+                collect_fetches(node, flatten_path, counts, fetches);
             }
             for deferred_node in deferred {
                 if let Some(node) = &deferred_node.node {
-                    collect_flatten_paths(node, out);
+                    collect_fetches(node, flatten_path, counts, fetches);
                 }
             }
         }
-        PlanNode::Fetch(_) | PlanNode::Subscription { .. } => {}
+        // A subscription's follow-up fetches (`rest`) aren't scored, so they aren't counted.
+        PlanNode::Subscription { .. } => {}
     }
 }
 
@@ -2736,6 +2714,70 @@ mod tests {
                 ),
                 Some(15)
             );
+        }
+    }
+
+    /// Reverses the children of every `Parallel` node, whose order carries no meaning.
+    fn reverse_parallel_nodes(node: &mut PlanNode) {
+        match node {
+            PlanNode::Sequence { nodes } => nodes.iter_mut().for_each(reverse_parallel_nodes),
+            PlanNode::Parallel { nodes } => {
+                nodes.reverse();
+                nodes.iter_mut().for_each(reverse_parallel_nodes);
+            }
+            _ => {}
+        }
+    }
+
+    #[test]
+    fn entity_counts_use_largest_size_whatever_the_plan_order() {
+        // `items` is selected from both `first` (list size 3) and `second` (list size 10). They
+        // are the same list in the response, so the larger size counts the items: both for the
+        // entity fetch that extends them, and for the entity fetch that extends the `reviews`
+        // nested under them (10 items × 10 reviews).
+        //
+        // The fetch to `second` and the entity fetch for `reviews` run in parallel, so the result
+        // must not depend on which of them comes first in the plan.
+        let schema = include_str!("./fixtures/federated_shared_list_schema.graphql");
+        let query = "{ shelf { items { a b reviews { author } } } }";
+        let subgraph_list_sizes = SubgraphConfiguration {
+            all: None,
+            subgraphs: [("first".to_string(), Some(3))].into_iter().collect(),
+        };
+        let (mut node, calculator) = plan_and_calculator(schema, query, 10, subgraph_list_sizes);
+        let PlanNode::Sequence { nodes } = &node else {
+            panic!("expected a sequence, got: {node:?}");
+        };
+        assert!(
+            matches!(&nodes[1], PlanNode::Parallel { nodes } if nodes.len() == 2),
+            "expected the fetches after the first to run in parallel, got: {node:?}"
+        );
+
+        for _ in 0..2 {
+            let variables = Object::new();
+            let counts = calculator
+                .estimate_entity_counts(&node, &variables)
+                .unwrap();
+            assert_eq!(
+                counts.count_at(&Path::from_slice(&["shelf", "items", "@"])),
+                Some(10)
+            );
+            assert_eq!(
+                counts.count_at(&Path::from_slice(&["shelf", "items", "@", "reviews", "@"])),
+                Some(100)
+            );
+
+            let ctx = PlanScoringContext {
+                variables: &variables,
+                entity_counts: &counts,
+            };
+            let cost = calculator.score_plan_node(&node, &ctx).unwrap();
+            // reviews: _entities[10] × (Item(1) + reviews[10] × Review(1))
+            assert_eq!(cost.get("reviews"), Some(110.0));
+            // authors: _entities[100] × Review(1)
+            assert_eq!(cost.get("authors"), Some(100.0));
+
+            reverse_parallel_nodes(&mut node);
         }
     }
 
