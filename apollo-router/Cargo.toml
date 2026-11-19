@@ -441,7 +441,6 @@ unexpected_cfgs = { level = "warn", check-cfg = ['cfg(tracing_unstable)'] }
 
 # Compatibility with the 2024 edition, remove after switching to it:
 boxed_slice_into_iter = "warn"
-dependency_on_unit_never_type_fallback = "warn"
 deprecated_safe_2024 = "warn"
 impl_trait_overcaptures = "warn"
 keyword_idents_2024 = "warn"
