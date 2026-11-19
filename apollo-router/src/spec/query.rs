@@ -170,8 +170,9 @@ impl Query {
         match data {
             Some(Value::Object(mut input)) => {
                 if self.is_deferred(defer_conditions) {
-                    // Can either be a `primary` or `deferred` as is determined
-                    // by `split_deferred_response`.
+                    // A deferred response arrives here already split to one
+                    // object by `split_deferred_response`.  The label and path
+                    // of this response determine the subselection.
                     match self.subselection(
                         &response.label,
                         response.path.as_ref(),

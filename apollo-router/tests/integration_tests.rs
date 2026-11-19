@@ -1252,11 +1252,24 @@ async fn run_mixed_list_defer(
     query: &str,
     subgraphs: MockedSubgraphs,
 ) -> (graphql::Response, Vec<serde_json::Value>) {
-    let config = serde_json::json!({
-        "include_subgraph_errors": {
-            "all": true
-        }
-    });
+    run_mixed_list_defer_with_config(
+        query,
+        subgraphs,
+        serde_json::json!({
+            "include_subgraph_errors": {
+                "all": true
+            }
+        }),
+    )
+    .await
+}
+
+/// Like `run_mixed_list_defer`, with the router configuration given.
+async fn run_mixed_list_defer_with_config(
+    query: &str,
+    subgraphs: MockedSubgraphs,
+    config: serde_json::Value,
+) -> (graphql::Response, Vec<serde_json::Value>) {
     let (router, _) = setup_sandboxed_router_and_registry_with_schema(
         config,
         include_str!("fixtures/defer_mixed_list_supergraph.graphql"),
@@ -1614,6 +1627,59 @@ async fn defer_under_type_condition_null_in_nullable_list() {
             }]},
         })]
     );
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn defer_authenticated_field_under_type_condition_in_mixed_list() {
+    let subgraphs = mixed_list_subgraphs(
+        "children",
+        MIXED_LIST_PRIMARY_QUERY,
+        // `secret` is filtered out of the query plan, so the entity fetch only asks for `title`.
+        MIXED_LIST_TITLE_QUERY,
+        // Authorization filtering keeps `secret` from reaching the client, since the subgraph still returns it. 
+        serde_json::json!({"data": {"_entities": [{"title": "Item 2", "secret": "leaked"}]}}),
+    );
+    let (primary, incremental) = run_mixed_list_defer_with_config(
+        r#"{ page { mixed { id children { id ... on Item { ... @defer(label: "d") { title secret } } } } } }"#,
+        subgraphs,
+        serde_json::json!({
+            "include_subgraph_errors": {
+                "all": true
+            },
+            "authorization": {
+                "directives": {
+                    "enabled": true
+                }
+            }
+        }),
+    )
+    .await;
+    assert_eq!(
+        json!(primary.data),
+        json!({"page": {"mixed": [
+            {"id": "m1", "children": [{"id": "o1"}]},
+            {"id": "m2", "children": [{"id": "2"}]},
+            {"id": "m3", "children": [{"id": "o3"}]},
+        ]}})
+    );
+    assert_eq!(incremental.len(), 1, "{incremental:?}");
+    let item = &incremental[0];
+    assert_eq!(item["label"], "d");
+    assert_eq!(
+        item["path"],
+        serde_json::json!(["page", "mixed", 1, "children", 0])
+    );
+    assert_eq!(
+        item["data"],
+        serde_json::json!({"title": "Item 2", "secret": null})
+    );
+    // The following bug is pre-existing on `dev-v3.x` and is described in
+    // ROUTER-2372:
+    // Errors are deliberately not asserted on. The payload should carry an
+    // "Unauthorized field or type" error for `secret`, but it doesn't.  This is
+    // because the error's path has an `... on Item` element, which does not
+    // match a response path, so the error is dropped.
+    // An error should be asserted on once this bug is fixed.
 }
 
 #[tokio::test(flavor = "multi_thread")]
