@@ -6,12 +6,13 @@
           "subgraph_name": "locations",
           "id": null,
           "variable_usages": [],
+          "fetch_kind": {
+            "kind": "Root"
+          },
           "operation_document": "{ locations { __typename id name } }",
           "operation_name": null,
           "operation_kind": "query",
-          "input_rewrites": [],
-          "output_rewrites": [],
-          "context_rewrites": []
+          "output_rewrites": []
         }
       },
       {
@@ -32,28 +33,31 @@
               "subgraph_name": "reviews",
               "id": null,
               "variable_usages": [],
-              "requires": [
-                {
-                  "kind": "InlineFragment",
-                  "typeCondition": "Location",
-                  "selections": [
-                    {
-                      "kind": "Field",
-                      "name": "__typename"
-                    },
-                    {
-                      "kind": "Field",
-                      "name": "id"
-                    }
-                  ]
-                }
-              ],
+              "fetch_kind": {
+                "kind": "Entities",
+                "requires": [
+                  {
+                    "kind": "InlineFragment",
+                    "typeCondition": "Location",
+                    "selections": [
+                      {
+                        "kind": "Field",
+                        "name": "__typename"
+                      },
+                      {
+                        "kind": "Field",
+                        "name": "id"
+                      }
+                    ]
+                  }
+                ],
+                "input_rewrites": [],
+                "context_rewrites": []
+              },
               "operation_document": "query($representations: [_Any!]!) { _entities(representations: $representations) { ... on Location { overallRating } } }",
               "operation_name": null,
               "operation_kind": "query",
-              "input_rewrites": [],
-              "output_rewrites": [],
-              "context_rewrites": []
+              "output_rewrites": []
             }
           }
         }

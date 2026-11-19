@@ -58,33 +58,59 @@ impl From<&'_ next::SubscriptionNode> for plan::PlanNode {
 
 impl From<&'_ Box<next::FetchNode>> for plan::PlanNode {
     fn from(value: &'_ Box<next::FetchNode>) -> Self {
+        Self::Fetch(value.as_ref().into())
+    }
+}
+
+impl From<&'_ next::FetchNode> for super::fetch::FetchNode {
+    fn from(value: &'_ next::FetchNode) -> Self {
         let next::FetchNode {
             subgraph_name,
             protocol: _,
             id,
             variable_usages,
-            requires,
+            kind,
             operation_document,
             operation_name,
             operation_kind,
-            input_rewrites,
             output_rewrites,
-            context_rewrites,
-        } = &**value;
-        Self::Fetch(super::fetch::FetchNode {
+        } = value;
+        Self {
             service_name: subgraph_name.clone(),
-            requires: requires.clone(),
+            kind: kind.into(),
             variable_usages: variable_usages.iter().map(|v| v.clone().into()).collect(),
             operation: operation_document.clone(),
             operation_name: operation_name.clone().map(|n| n.into()),
             operation_kind: (*operation_kind).into(),
             id: id.map(|id| id.to_string()),
-            input_rewrites: option_vec(input_rewrites),
             output_rewrites: option_vec(output_rewrites),
-            context_rewrites: option_vec(context_rewrites),
             schema_aware_hash: Default::default(),
             authorization: Default::default(),
-        })
+        }
+    }
+}
+
+impl From<&'_ next::FetchKind> for super::fetch::FetchKind {
+    fn from(value: &'_ next::FetchKind) -> Self {
+        match value {
+            next::FetchKind::Root => Self::Root,
+            next::FetchKind::Entities(selection) => Self::Entities(selection.into()),
+        }
+    }
+}
+
+impl From<&'_ next::EntitySelection> for super::fetch::EntitySelection {
+    fn from(value: &'_ next::EntitySelection) -> Self {
+        let next::EntitySelection {
+            requires,
+            input_rewrites,
+            context_rewrites,
+        } = value;
+        Self {
+            requires: requires.clone(),
+            input_rewrites: option_vec(input_rewrites),
+            context_rewrites: option_vec(context_rewrites),
+        }
     }
 }
 
@@ -144,21 +170,22 @@ impl From<&'_ next::FetchNode> for subscription::SubscriptionNode {
             protocol: _,
             id: _,
             variable_usages,
-            requires: _,
+            kind,
             operation_document,
             operation_name,
             operation_kind,
-            input_rewrites,
             output_rewrites,
-            context_rewrites: _,
         } = value;
+        let input_rewrites = kind
+            .entity_selection()
+            .and_then(|selection| option_vec(&selection.input_rewrites));
         Self {
             service_name: subgraph_name.clone(),
             variable_usages: variable_usages.iter().map(|v| v.clone().into()).collect(),
             operation: operation_document.clone(),
             operation_name: operation_name.clone().map(|n| n.into()),
             operation_kind: (*operation_kind).into(),
-            input_rewrites: option_vec(input_rewrites),
+            input_rewrites,
             output_rewrites: option_vec(output_rewrites),
         }
     }

@@ -424,6 +424,10 @@ plugins:
 expose_query_plan: true
 ```
 
+If you parse `extensions.apolloQueryPlan.object`, update your parser for the Router v3 JSON format.
+
+- Read the fetch type from `fetchKind.kind`. For an `Entities` fetch, read `requires`, `inputRewrites`, and `contextRewrites` from `fetchKind`.
+
 ### Removed plain string syntax from telemetry selectors
 
 The shorthand plain string syntax was removed from custom telemetry selectors in the `supergraph`, `router`, and `subgraph` stages. Use the `static` field instead:

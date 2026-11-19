@@ -21,14 +21,15 @@ expression: response
             {
               "kind": "Fetch",
               "serviceName": "Subgraph1",
+              "fetchKind": {
+                "kind": "Root"
+              },
               "variableUsages": [],
               "operation": "query Query_Null_Param__Subgraph1__0 { t { __typename prop id u { __typename id } } }",
               "operationName": "Query_Null_Param__Subgraph1__0",
               "operationKind": "query",
               "id": null,
-              "inputRewrites": null,
               "outputRewrites": null,
-              "contextRewrites": null,
               "schemaAwareHash": "9f836ac15274ef4f377378d5ea1df3efb27bc9173fe8086a6ec1ab7e0dbbe718",
               "authorization": {
                 "is_authenticated": false,
@@ -45,22 +46,37 @@ expression: response
               "node": {
                 "kind": "Fetch",
                 "serviceName": "Subgraph1",
-                "requires": [
-                  {
-                    "kind": "InlineFragment",
-                    "typeCondition": "U",
-                    "selections": [
-                      {
-                        "kind": "Field",
-                        "name": "__typename"
-                      },
-                      {
-                        "kind": "Field",
-                        "name": "id"
-                      }
-                    ]
-                  }
-                ],
+                "fetchKind": {
+                  "kind": "Entities",
+                  "requires": [
+                    {
+                      "kind": "InlineFragment",
+                      "typeCondition": "U",
+                      "selections": [
+                        {
+                          "kind": "Field",
+                          "name": "__typename"
+                        },
+                        {
+                          "kind": "Field",
+                          "name": "id"
+                        }
+                      ]
+                    }
+                  ],
+                  "inputRewrites": null,
+                  "contextRewrites": [
+                    {
+                      "kind": "KeyRenamer",
+                      "path": [
+                        "..",
+                        "... on T",
+                        "prop"
+                      ],
+                      "renameKeyTo": "contextualArgument_1_0"
+                    }
+                  ]
+                },
                 "variableUsages": [
                   "contextualArgument_1_0"
                 ],
@@ -68,19 +84,7 @@ expression: response
                 "operationName": "Query_Null_Param__Subgraph1__1",
                 "operationKind": "query",
                 "id": null,
-                "inputRewrites": null,
                 "outputRewrites": null,
-                "contextRewrites": [
-                  {
-                    "kind": "KeyRenamer",
-                    "path": [
-                      "..",
-                      "... on T",
-                      "prop"
-                    ],
-                    "renameKeyTo": "contextualArgument_1_0"
-                  }
-                ],
                 "schemaAwareHash": "5810e4e6dde4879e129ddaca04b7d44810155e9a29f30db553a3b3d0746715fa",
                 "authorization": {
                   "is_authenticated": false,

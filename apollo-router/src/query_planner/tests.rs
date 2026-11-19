@@ -32,6 +32,8 @@ use crate::json_ext::PathElement;
 use crate::layers::unconstrained_buffer::UnconstrainedBuffer;
 use crate::plugin::test::MockSubgraph;
 use crate::query_planner;
+use crate::query_planner::fetch::EntitySelection;
+use crate::query_planner::fetch::FetchKind;
 use crate::query_planner::fetch::FetchNode;
 use crate::services::SubgraphResponse;
 use crate::services::SubgraphServices;
@@ -380,15 +382,13 @@ async fn defer() {
                 subselection: Some("{ t { x } }".to_string()),
                 node: Some(Box::new(PlanNode::Fetch(FetchNode {
                     service_name: "X".into(),
-                    requires: vec![],
+                    kind: FetchKind::Root,
                     variable_usages: vec![],
                     operation: SerializableDocument::from_string("{ t { id __typename x } }"),
                     operation_name: Some("t".into()),
                     operation_kind: OperationKind::Query,
                     id: Some("fetch1".into()),
-                    input_rewrites: None,
                     output_rewrites: None,
-                    context_rewrites: None,
                     schema_aware_hash: Default::default(),
                     authorization: Default::default(),
                 }))),
@@ -404,28 +404,32 @@ async fn defer() {
                     path: Path(vec![PathElement::Key("t".to_string(), None)]),
                     node: Box::new(PlanNode::Fetch(FetchNode {
                         service_name: "Y".into(),
-                        requires: vec![requires_selection::Selection::InlineFragment(
-                            requires_selection::InlineFragment {
-                                conditions: vec![],
-                                type_condition: Some(name!("T")),
-                                selections: vec![
-                                    requires_selection::Selection::Field(
-                                        requires_selection::Field {
-                                            alias: None,
-                                            name: name!("id"),
-                                            selections: Vec::new(),
-                                        },
-                                    ),
-                                    requires_selection::Selection::Field(
-                                        requires_selection::Field {
-                                            alias: None,
-                                            name: name!("__typename"),
-                                            selections: Vec::new(),
-                                        },
-                                    ),
-                                ],
-                            },
-                        )],
+                        kind: FetchKind::Entities(EntitySelection {
+                            requires: vec![requires_selection::Selection::InlineFragment(
+                                requires_selection::InlineFragment {
+                                    conditions: vec![],
+                                    type_condition: Some(name!("T")),
+                                    selections: vec![
+                                        requires_selection::Selection::Field(
+                                            requires_selection::Field {
+                                                alias: None,
+                                                name: name!("id"),
+                                                selections: Vec::new(),
+                                            },
+                                        ),
+                                        requires_selection::Selection::Field(
+                                            requires_selection::Field {
+                                                alias: None,
+                                                name: name!("__typename"),
+                                                selections: Vec::new(),
+                                            },
+                                        ),
+                                    ],
+                                },
+                            )],
+                            input_rewrites: None,
+                            context_rewrites: None,
+                        }),
                         variable_usages: vec![],
                         operation: SerializableDocument::from_string(
                             "query($representations:[_Any!]!){_entities(representations:$representations){...on T{y}}}",
@@ -433,9 +437,7 @@ async fn defer() {
                         operation_name: None,
                         operation_kind: OperationKind::Query,
                         id: Some("fetch2".into()),
-                        input_rewrites: None,
                         output_rewrites: None,
-                        context_rewrites: None,
                         schema_aware_hash: Default::default(),
                         authorization: Default::default(),
                     })),
@@ -695,6 +697,7 @@ async fn dependent_mutations() {
                     {
                         "kind": "Fetch",
                         "serviceName": "A",
+                        "fetchKind": { "kind": "Root" },
                         "variableUsages": [],
                         "operation": "mutation{mutationA{__typename}}",
                         "operationKind": "mutation"
@@ -707,6 +710,7 @@ async fn dependent_mutations() {
                         "node": {
                             "kind": "Fetch",
                             "serviceName": "B",
+                            "fetchKind": { "kind": "Root" },
                             "variableUsages": [],
                             "operation": "mutation{...on Mutation{mutationB}}",
                             "operationKind": "mutation"
@@ -1920,15 +1924,13 @@ fn broken_plan_does_not_panic() {
     let mut plan = QueryPlan {
         root: Some(Arc::new(PlanNode::Fetch(FetchNode {
             service_name: "X".into(),
-            requires: vec![],
+            kind: FetchKind::Root,
             variable_usages: vec![],
             operation: SerializableDocument::from_string(operation),
             operation_name: Some("t".into()),
             operation_kind: OperationKind::Query,
             id: Some("fetch1".into()),
-            input_rewrites: None,
             output_rewrites: None,
-            context_rewrites: None,
             schema_aware_hash: Default::default(),
             authorization: Default::default(),
         }))),
@@ -1989,7 +1991,7 @@ async fn defer_depends_skips_fetch_when_typename_missing() {
                         // node can depend on it for __typename and id.
                         PlanNode::Fetch(FetchNode {
                             service_name: "X".into(),
-                            requires: vec![],
+                            kind: FetchKind::Root,
                             variable_usages: vec![],
                             operation: SerializableDocument::from_string(
                                 "{ start { __typename id inner { __typename id sub { __typename subId } } } }",
@@ -1997,9 +1999,7 @@ async fn defer_depends_skips_fetch_when_typename_missing() {
                             operation_name: None,
                             operation_kind: OperationKind::Query,
                             id: Some("fetch1".into()),
-                            input_rewrites: None,
                             output_rewrites: None,
-                            context_rewrites: None,
                             schema_aware_hash: Default::default(),
                             authorization: Default::default(),
                         }),
@@ -2012,28 +2012,32 @@ async fn defer_depends_skips_fetch_when_typename_missing() {
                             ]),
                             node: Box::new(PlanNode::Fetch(FetchNode {
                                 service_name: "Y".into(),
-                                requires: vec![requires_selection::Selection::InlineFragment(
-                                    requires_selection::InlineFragment {
-                                        conditions: vec![],
-                                        type_condition: Some(name!("Sub")),
-                                        selections: vec![
-                                            requires_selection::Selection::Field(
-                                                requires_selection::Field {
-                                                    alias: None,
-                                                    name: name!("__typename"),
-                                                    selections: Vec::new(),
-                                                },
-                                            ),
-                                            requires_selection::Selection::Field(
-                                                requires_selection::Field {
-                                                    alias: None,
-                                                    name: name!("subId"),
-                                                    selections: Vec::new(),
-                                                },
-                                            ),
-                                        ],
-                                    },
-                                )],
+                                kind: FetchKind::Entities(EntitySelection {
+                                    requires: vec![requires_selection::Selection::InlineFragment(
+                                        requires_selection::InlineFragment {
+                                            conditions: vec![],
+                                            type_condition: Some(name!("Sub")),
+                                            selections: vec![
+                                                requires_selection::Selection::Field(
+                                                    requires_selection::Field {
+                                                        alias: None,
+                                                        name: name!("__typename"),
+                                                        selections: Vec::new(),
+                                                    },
+                                                ),
+                                                requires_selection::Selection::Field(
+                                                    requires_selection::Field {
+                                                        alias: None,
+                                                        name: name!("subId"),
+                                                        selections: Vec::new(),
+                                                    },
+                                                ),
+                                            ],
+                                        },
+                                    )],
+                                    input_rewrites: None,
+                                    context_rewrites: None,
+                                }),
                                 variable_usages: vec![],
                                 operation: SerializableDocument::from_string(
                                     "query($representations:[_Any!]!){_entities(representations:$representations){...on Sub{data}}}",
@@ -2041,9 +2045,7 @@ async fn defer_depends_skips_fetch_when_typename_missing() {
                                 operation_name: None,
                                 operation_kind: OperationKind::Query,
                                 id: Some("fetch0".into()),
-                                input_rewrites: None,
                                 output_rewrites: None,
-                                context_rewrites: None,
                                 schema_aware_hash: Default::default(),
                                 authorization: Default::default(),
                             })),
@@ -2073,50 +2075,54 @@ async fn defer_depends_skips_fetch_when_typename_missing() {
                     ]),
                     node: Box::new(PlanNode::Fetch(FetchNode {
                         service_name: "Z".into(),
-                        requires: vec![requires_selection::Selection::InlineFragment(
-                            requires_selection::InlineFragment {
-                                conditions: vec![],
-                                type_condition: Some(name!("Inner")),
-                                selections: vec![
-                                    requires_selection::Selection::Field(
-                                        requires_selection::Field {
-                                            alias: None,
-                                            name: name!("__typename"),
-                                            selections: Vec::new(),
-                                        },
-                                    ),
-                                    requires_selection::Selection::Field(
-                                        requires_selection::Field {
-                                            alias: None,
-                                            name: name!("id"),
-                                            selections: Vec::new(),
-                                        },
-                                    ),
-                                    requires_selection::Selection::Field(
-                                        requires_selection::Field {
-                                            alias: None,
-                                            name: name!("sub"),
-                                            selections: vec![
-                                                requires_selection::Selection::Field(
-                                                    requires_selection::Field {
-                                                        alias: None,
-                                                        name: name!("subId"),
-                                                        selections: Vec::new(),
-                                                    },
-                                                ),
-                                                requires_selection::Selection::Field(
-                                                    requires_selection::Field {
-                                                        alias: None,
-                                                        name: name!("data"),
-                                                        selections: Vec::new(),
-                                                    },
-                                                ),
-                                            ],
-                                        },
-                                    ),
-                                ],
-                            },
-                        )],
+                        kind: FetchKind::Entities(EntitySelection {
+                            requires: vec![requires_selection::Selection::InlineFragment(
+                                requires_selection::InlineFragment {
+                                    conditions: vec![],
+                                    type_condition: Some(name!("Inner")),
+                                    selections: vec![
+                                        requires_selection::Selection::Field(
+                                            requires_selection::Field {
+                                                alias: None,
+                                                name: name!("__typename"),
+                                                selections: Vec::new(),
+                                            },
+                                        ),
+                                        requires_selection::Selection::Field(
+                                            requires_selection::Field {
+                                                alias: None,
+                                                name: name!("id"),
+                                                selections: Vec::new(),
+                                            },
+                                        ),
+                                        requires_selection::Selection::Field(
+                                            requires_selection::Field {
+                                                alias: None,
+                                                name: name!("sub"),
+                                                selections: vec![
+                                                    requires_selection::Selection::Field(
+                                                        requires_selection::Field {
+                                                            alias: None,
+                                                            name: name!("subId"),
+                                                            selections: Vec::new(),
+                                                        },
+                                                    ),
+                                                    requires_selection::Selection::Field(
+                                                        requires_selection::Field {
+                                                            alias: None,
+                                                            name: name!("data"),
+                                                            selections: Vec::new(),
+                                                        },
+                                                    ),
+                                                ],
+                                            },
+                                        ),
+                                    ],
+                                },
+                            )],
+                            input_rewrites: None,
+                            context_rewrites: None,
+                        }),
                         variable_usages: vec![],
                         operation: SerializableDocument::from_string(
                             "query($representations:[_Any!]!){_entities(representations:$representations){...on Inner{target{x}}}}",
@@ -2124,9 +2130,7 @@ async fn defer_depends_skips_fetch_when_typename_missing() {
                         operation_name: None,
                         operation_kind: OperationKind::Query,
                         id: None,
-                        input_rewrites: None,
                         output_rewrites: None,
-                        context_rewrites: None,
                         schema_aware_hash: Default::default(),
                         authorization: Default::default(),
                     })),

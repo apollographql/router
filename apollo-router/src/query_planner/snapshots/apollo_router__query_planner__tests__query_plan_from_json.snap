@@ -7,7 +7,7 @@ Sequence {
         Fetch(
             FetchNode {
                 service_name: "product",
-                requires: [],
+                kind: Root,
                 variable_usages: [],
                 operation: "{topProducts{__typename ...on Book{__typename isbn}...on Furniture{name}}product(upc:\"1\"){__typename ...on Book{__typename isbn}...on Furniture{name}}}",
                 operation_name: Some(
@@ -15,9 +15,7 @@ Sequence {
                 ),
                 operation_kind: Query,
                 id: None,
-                input_rewrites: None,
                 output_rewrites: None,
-                context_rewrites: None,
                 schema_aware_hash: QueryHash(
                     "",
                 ),
@@ -48,32 +46,38 @@ Sequence {
                                 node: Fetch(
                                     FetchNode {
                                         service_name: "books",
-                                        requires: [
-                                            InlineFragment(
-                                                InlineFragment {
-                                                    type_condition: Some(
-                                                        "Book",
+                                        kind: Entities(
+                                            EntitySelection {
+                                                requires: [
+                                                    InlineFragment(
+                                                        InlineFragment {
+                                                            type_condition: Some(
+                                                                "Book",
+                                                            ),
+                                                            conditions: [],
+                                                            selections: [
+                                                                Field(
+                                                                    Field {
+                                                                        alias: None,
+                                                                        name: "__typename",
+                                                                        selections: [],
+                                                                    },
+                                                                ),
+                                                                Field(
+                                                                    Field {
+                                                                        alias: None,
+                                                                        name: "isbn",
+                                                                        selections: [],
+                                                                    },
+                                                                ),
+                                                            ],
+                                                        },
                                                     ),
-                                                    conditions: [],
-                                                    selections: [
-                                                        Field(
-                                                            Field {
-                                                                alias: None,
-                                                                name: "__typename",
-                                                                selections: [],
-                                                            },
-                                                        ),
-                                                        Field(
-                                                            Field {
-                                                                alias: None,
-                                                                name: "isbn",
-                                                                selections: [],
-                                                            },
-                                                        ),
-                                                    ],
-                                                },
-                                            ),
-                                        ],
+                                                ],
+                                                input_rewrites: None,
+                                                context_rewrites: None,
+                                            },
+                                        ),
                                         variable_usages: [
                                             "test_variable",
                                         ],
@@ -81,9 +85,7 @@ Sequence {
                                         operation_name: None,
                                         operation_kind: Query,
                                         id: None,
-                                        input_rewrites: None,
                                         output_rewrites: None,
-                                        context_rewrites: None,
                                         schema_aware_hash: QueryHash(
                                             "",
                                         ),
@@ -112,54 +114,58 @@ Sequence {
                                 node: Fetch(
                                     FetchNode {
                                         service_name: "product",
-                                        requires: [
-                                            InlineFragment(
-                                                InlineFragment {
-                                                    type_condition: Some(
-                                                        "Book",
+                                        kind: Entities(
+                                            EntitySelection {
+                                                requires: [
+                                                    InlineFragment(
+                                                        InlineFragment {
+                                                            type_condition: Some(
+                                                                "Book",
+                                                            ),
+                                                            conditions: [],
+                                                            selections: [
+                                                                Field(
+                                                                    Field {
+                                                                        alias: None,
+                                                                        name: "__typename",
+                                                                        selections: [],
+                                                                    },
+                                                                ),
+                                                                Field(
+                                                                    Field {
+                                                                        alias: None,
+                                                                        name: "isbn",
+                                                                        selections: [],
+                                                                    },
+                                                                ),
+                                                                Field(
+                                                                    Field {
+                                                                        alias: None,
+                                                                        name: "title",
+                                                                        selections: [],
+                                                                    },
+                                                                ),
+                                                                Field(
+                                                                    Field {
+                                                                        alias: None,
+                                                                        name: "year",
+                                                                        selections: [],
+                                                                    },
+                                                                ),
+                                                            ],
+                                                        },
                                                     ),
-                                                    conditions: [],
-                                                    selections: [
-                                                        Field(
-                                                            Field {
-                                                                alias: None,
-                                                                name: "__typename",
-                                                                selections: [],
-                                                            },
-                                                        ),
-                                                        Field(
-                                                            Field {
-                                                                alias: None,
-                                                                name: "isbn",
-                                                                selections: [],
-                                                            },
-                                                        ),
-                                                        Field(
-                                                            Field {
-                                                                alias: None,
-                                                                name: "title",
-                                                                selections: [],
-                                                            },
-                                                        ),
-                                                        Field(
-                                                            Field {
-                                                                alias: None,
-                                                                name: "year",
-                                                                selections: [],
-                                                            },
-                                                        ),
-                                                    ],
-                                                },
-                                            ),
-                                        ],
+                                                ],
+                                                input_rewrites: None,
+                                                context_rewrites: None,
+                                            },
+                                        ),
                                         variable_usages: [],
                                         operation: "query($representations:[_Any!]!){_entities(representations:$representations){...on Book{name}}}",
                                         operation_name: None,
                                         operation_kind: Query,
                                         id: None,
-                                        input_rewrites: None,
                                         output_rewrites: None,
-                                        context_rewrites: None,
                                         schema_aware_hash: QueryHash(
                                             "",
                                         ),
@@ -189,40 +195,44 @@ Sequence {
                                 node: Fetch(
                                     FetchNode {
                                         service_name: "books",
-                                        requires: [
-                                            InlineFragment(
-                                                InlineFragment {
-                                                    type_condition: Some(
-                                                        "Book",
+                                        kind: Entities(
+                                            EntitySelection {
+                                                requires: [
+                                                    InlineFragment(
+                                                        InlineFragment {
+                                                            type_condition: Some(
+                                                                "Book",
+                                                            ),
+                                                            conditions: [],
+                                                            selections: [
+                                                                Field(
+                                                                    Field {
+                                                                        alias: None,
+                                                                        name: "__typename",
+                                                                        selections: [],
+                                                                    },
+                                                                ),
+                                                                Field(
+                                                                    Field {
+                                                                        alias: None,
+                                                                        name: "isbn",
+                                                                        selections: [],
+                                                                    },
+                                                                ),
+                                                            ],
+                                                        },
                                                     ),
-                                                    conditions: [],
-                                                    selections: [
-                                                        Field(
-                                                            Field {
-                                                                alias: None,
-                                                                name: "__typename",
-                                                                selections: [],
-                                                            },
-                                                        ),
-                                                        Field(
-                                                            Field {
-                                                                alias: None,
-                                                                name: "isbn",
-                                                                selections: [],
-                                                            },
-                                                        ),
-                                                    ],
-                                                },
-                                            ),
-                                        ],
+                                                ],
+                                                input_rewrites: None,
+                                                context_rewrites: None,
+                                            },
+                                        ),
                                         variable_usages: [],
                                         operation: "query($representations:[_Any!]!){_entities(representations:$representations){...on Book{__typename isbn title year}}}",
                                         operation_name: None,
                                         operation_kind: Query,
                                         id: None,
-                                        input_rewrites: None,
                                         output_rewrites: None,
-                                        context_rewrites: None,
                                         schema_aware_hash: QueryHash(
                                             "",
                                         ),
@@ -248,54 +258,58 @@ Sequence {
                                 node: Fetch(
                                     FetchNode {
                                         service_name: "product",
-                                        requires: [
-                                            InlineFragment(
-                                                InlineFragment {
-                                                    type_condition: Some(
-                                                        "Book",
+                                        kind: Entities(
+                                            EntitySelection {
+                                                requires: [
+                                                    InlineFragment(
+                                                        InlineFragment {
+                                                            type_condition: Some(
+                                                                "Book",
+                                                            ),
+                                                            conditions: [],
+                                                            selections: [
+                                                                Field(
+                                                                    Field {
+                                                                        alias: None,
+                                                                        name: "__typename",
+                                                                        selections: [],
+                                                                    },
+                                                                ),
+                                                                Field(
+                                                                    Field {
+                                                                        alias: None,
+                                                                        name: "isbn",
+                                                                        selections: [],
+                                                                    },
+                                                                ),
+                                                                Field(
+                                                                    Field {
+                                                                        alias: None,
+                                                                        name: "title",
+                                                                        selections: [],
+                                                                    },
+                                                                ),
+                                                                Field(
+                                                                    Field {
+                                                                        alias: None,
+                                                                        name: "year",
+                                                                        selections: [],
+                                                                    },
+                                                                ),
+                                                            ],
+                                                        },
                                                     ),
-                                                    conditions: [],
-                                                    selections: [
-                                                        Field(
-                                                            Field {
-                                                                alias: None,
-                                                                name: "__typename",
-                                                                selections: [],
-                                                            },
-                                                        ),
-                                                        Field(
-                                                            Field {
-                                                                alias: None,
-                                                                name: "isbn",
-                                                                selections: [],
-                                                            },
-                                                        ),
-                                                        Field(
-                                                            Field {
-                                                                alias: None,
-                                                                name: "title",
-                                                                selections: [],
-                                                            },
-                                                        ),
-                                                        Field(
-                                                            Field {
-                                                                alias: None,
-                                                                name: "year",
-                                                                selections: [],
-                                                            },
-                                                        ),
-                                                    ],
-                                                },
-                                            ),
-                                        ],
+                                                ],
+                                                input_rewrites: None,
+                                                context_rewrites: None,
+                                            },
+                                        ),
                                         variable_usages: [],
                                         operation: "query($representations:[_Any!]!){_entities(representations:$representations){...on Book{name}}}",
                                         operation_name: None,
                                         operation_kind: Query,
                                         id: None,
-                                        input_rewrites: None,
                                         output_rewrites: None,
-                                        context_rewrites: None,
                                         schema_aware_hash: QueryHash(
                                             "",
                                         ),

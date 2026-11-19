@@ -1,5 +1,6 @@
 use std::fmt::Write;
 
+use apollo_federation::query_plan::FetchKind;
 use apollo_federation::query_plan::PlanNode;
 use apollo_federation::query_plan::QueryPlan;
 use apollo_federation::query_plan::TopLevelPlanNode;
@@ -266,7 +267,7 @@ fn correctly_handle_case_where_there_is_too_many_plans_to_consider() {
         panic!()
     };
     assert_eq!(fetch.subgraph_name.as_ref(), "S1");
-    assert!(fetch.requires.is_empty());
+    assert!(matches!(fetch.kind, FetchKind::Root));
     let doc = fetch.operation_document.as_parsed().unwrap();
     assert!(doc.fragments.is_empty());
     let mut operations = doc.operations.iter();

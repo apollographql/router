@@ -87,14 +87,15 @@ async fn basic_batch() {
                 {
                   "kind": "Fetch",
                   "serviceName": "connectors.json http: GET /users",
+                  "fetchKind": {
+                    "kind": "Root"
+                  },
                   "variableUsages": [],
                   "operation": "{ users { __typename id } }",
                   "operationName": null,
                   "operationKind": "query",
                   "id": null,
-                  "inputRewrites": null,
                   "outputRewrites": null,
-                  "contextRewrites": null,
                   "schemaAwareHash": "5de5ce5bb82e33112f9eea609cd09a6133bb4f14b6444c492ebc21834a787c1a",
                   "authorization": {
                     "is_authenticated": false,
@@ -111,30 +112,33 @@ async fn basic_batch() {
                   "node": {
                     "kind": "Fetch",
                     "serviceName": "[BATCH] connectors.json http: POST /users-batch",
-                    "requires": [
-                      {
-                        "kind": "InlineFragment",
-                        "typeCondition": "User",
-                        "selections": [
-                          {
-                            "kind": "Field",
-                            "name": "__typename"
-                          },
-                          {
-                            "kind": "Field",
-                            "name": "id"
-                          }
-                        ]
-                      }
-                    ],
+                    "fetchKind": {
+                      "kind": "Entities",
+                      "requires": [
+                        {
+                          "kind": "InlineFragment",
+                          "typeCondition": "User",
+                          "selections": [
+                            {
+                              "kind": "Field",
+                              "name": "__typename"
+                            },
+                            {
+                              "kind": "Field",
+                              "name": "id"
+                            }
+                          ]
+                        }
+                      ],
+                      "inputRewrites": null,
+                      "contextRewrites": null
+                    },
                     "variableUsages": [],
                     "operation": "query($representations: [_Any!]!) { _entities(representations: $representations) { ... on User { name username } } }",
                     "operationName": null,
                     "operationKind": "query",
                     "id": null,
-                    "inputRewrites": null,
                     "outputRewrites": null,
-                    "contextRewrites": null,
                     "schemaAwareHash": "70e973c47c31b3a36af0a586c9f5b196b7cf57938e166f3773569adef19b7b10",
                     "authorization": {
                       "is_authenticated": false,

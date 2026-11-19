@@ -46,14 +46,15 @@ expression: response
             {
               "kind": "Fetch",
               "serviceName": "searchSubgraph",
+              "fetchKind": {
+                "kind": "Root"
+              },
               "variableUsages": [],
               "operation": "query Search__searchSubgraph__0 { search { __typename ... on MovieResult { sections { __typename ... on EntityCollectionSection { __typename id } ... on GallerySection { __typename id } } id } ... on ArticleResult { id sections { __typename ... on GallerySection { __typename id } ... on EntityCollectionSection { __typename id } } } } }",
               "operationName": "Search__searchSubgraph__0",
               "operationKind": "query",
               "id": null,
-              "inputRewrites": null,
               "outputRewrites": null,
-              "contextRewrites": null,
               "schemaAwareHash": "f665ad8913e780774801f2f27ffbdcf636e2db7e1f9f4398e93aea2236a4993d",
               "authorization": {
                 "is_authenticated": false,
@@ -75,36 +76,41 @@ expression: response
                   "node": {
                     "kind": "Fetch",
                     "serviceName": "artworkSubgraph",
-                    "requires": [
-                      {
-                        "kind": "InlineFragment",
-                        "typeCondition": "GallerySection",
-                        "selections": [
-                          {
-                            "kind": "Field",
-                            "name": "__typename"
-                          },
-                          {
-                            "kind": "Field",
-                            "name": "id"
-                          }
-                        ]
-                      },
-                      {
-                        "kind": "InlineFragment",
-                        "typeCondition": "EntityCollectionSection",
-                        "selections": [
-                          {
-                            "kind": "Field",
-                            "name": "__typename"
-                          },
-                          {
-                            "kind": "Field",
-                            "name": "id"
-                          }
-                        ]
-                      }
-                    ],
+                    "fetchKind": {
+                      "kind": "Entities",
+                      "requires": [
+                        {
+                          "kind": "InlineFragment",
+                          "typeCondition": "GallerySection",
+                          "selections": [
+                            {
+                              "kind": "Field",
+                              "name": "__typename"
+                            },
+                            {
+                              "kind": "Field",
+                              "name": "id"
+                            }
+                          ]
+                        },
+                        {
+                          "kind": "InlineFragment",
+                          "typeCondition": "EntityCollectionSection",
+                          "selections": [
+                            {
+                              "kind": "Field",
+                              "name": "__typename"
+                            },
+                            {
+                              "kind": "Field",
+                              "name": "id"
+                            }
+                          ]
+                        }
+                      ],
+                      "inputRewrites": null,
+                      "contextRewrites": null
+                    },
                     "variableUsages": [
                       "articleResultParam"
                     ],
@@ -112,9 +118,7 @@ expression: response
                     "operationName": "Search__artworkSubgraph__1",
                     "operationKind": "query",
                     "id": null,
-                    "inputRewrites": null,
                     "outputRewrites": null,
-                    "contextRewrites": null,
                     "schemaAwareHash": "3b4da5663426a3d1718012f2ace869fb0be6deeca65e99fd20edef0f4f128bbf",
                     "authorization": {
                       "is_authenticated": false,
@@ -134,36 +138,41 @@ expression: response
                   "node": {
                     "kind": "Fetch",
                     "serviceName": "artworkSubgraph",
-                    "requires": [
-                      {
-                        "kind": "InlineFragment",
-                        "typeCondition": "EntityCollectionSection",
-                        "selections": [
-                          {
-                            "kind": "Field",
-                            "name": "__typename"
-                          },
-                          {
-                            "kind": "Field",
-                            "name": "id"
-                          }
-                        ]
-                      },
-                      {
-                        "kind": "InlineFragment",
-                        "typeCondition": "GallerySection",
-                        "selections": [
-                          {
-                            "kind": "Field",
-                            "name": "__typename"
-                          },
-                          {
-                            "kind": "Field",
-                            "name": "id"
-                          }
-                        ]
-                      }
-                    ],
+                    "fetchKind": {
+                      "kind": "Entities",
+                      "requires": [
+                        {
+                          "kind": "InlineFragment",
+                          "typeCondition": "EntityCollectionSection",
+                          "selections": [
+                            {
+                              "kind": "Field",
+                              "name": "__typename"
+                            },
+                            {
+                              "kind": "Field",
+                              "name": "id"
+                            }
+                          ]
+                        },
+                        {
+                          "kind": "InlineFragment",
+                          "typeCondition": "GallerySection",
+                          "selections": [
+                            {
+                              "kind": "Field",
+                              "name": "__typename"
+                            },
+                            {
+                              "kind": "Field",
+                              "name": "id"
+                            }
+                          ]
+                        }
+                      ],
+                      "inputRewrites": null,
+                      "contextRewrites": null
+                    },
                     "variableUsages": [
                       "movieResultParam"
                     ],
@@ -171,9 +180,7 @@ expression: response
                     "operationName": "Search__artworkSubgraph__2",
                     "operationKind": "query",
                     "id": null,
-                    "inputRewrites": null,
                     "outputRewrites": null,
-                    "contextRewrites": null,
                     "schemaAwareHash": "004082576eac772198a1178963baf4c3492400748b91d6d11eda66bc6c1bd94c",
                     "authorization": {
                       "is_authenticated": false,

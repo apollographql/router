@@ -220,7 +220,7 @@ After you enable the plugin, you can control query plan exposure using the <code
 
 `Apollo-Expose-Query-Plan: true`
 
-This returns the query plan in the response under the <code>extensions.queryPlan</code> key alongside your actual data.
+This returns the query plan in the response under the <code>extensions.apolloQueryPlan</code> key alongside your actual data.
 
 ##### Option 2: Dry-run mode
 
@@ -242,14 +242,13 @@ Example dry-run response
         "node": {
           "kind": "Fetch",
           "serviceName": "product",
+          "fetchKind": { "kind": "Root" },
           "variableUsages": [],
           "operation": "query AllMyProducts__product__0 { products { id name } }",
           "operationName": "AllMyProducts__product__0",
           "operationKind": "query",
           "id": null,
-          "inputRewrites": null,
           "outputRewrites": null,
-          "contextRewrites": null,
           "schemaAwareHash": "bbd661aa50bc5f199f09772a121801bb59a33c239ac72b69053416f6f09bd19a",
           "authorization": {
             "is_authenticated": false,
@@ -263,6 +262,8 @@ Example dry-run response
   }
 }
 ```
+
+In the JSON plan, `fetchKind.kind` is `Root` for a root fetch and `Entities` for an entity fetch. An entity fetch stores `requires`, `inputRewrites`, and `contextRewrites` inside `fetchKind`.
 
 This approach ensures you're analyzing the most similar query plans your router generates in your specific environment configuration, eliminating discrepancies that can arise from standalone tools or simplified reproductions.
 

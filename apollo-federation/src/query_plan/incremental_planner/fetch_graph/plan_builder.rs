@@ -815,6 +815,26 @@ impl FetchGraph {
             .map(|ss| trim_requires(&ss))
             .unwrap_or_default();
 
+        let kind = if is_entity {
+            crate::query_plan::FetchKind::Entities(crate::query_plan::EntitySelection {
+                requires,
+                input_rewrites: Arc::new(input_rewrites),
+                context_rewrites: node
+                    .context_rewrites
+                    .iter()
+                    .cloned()
+                    .map(|r| Arc::new(r.into()))
+                    .collect(),
+            })
+        } else if node.context_rewrites.is_empty() {
+            crate::query_plan::FetchKind::Root
+        } else {
+            return Err(FederationError::internal(format!(
+                "root fetch to {} reads context values, which only entity fetches can",
+                node.subgraph,
+            )));
+        };
+
         // 7. Construct FetchNode. Connector fetches carry the connector's
         // synthetic service name, the same name expansion would have given
         // its virtual subgraph, because the router dispatches fetches to
@@ -832,18 +852,11 @@ impl FetchGraph {
             },
             id: None,
             variable_usages,
-            requires,
+            kind,
             operation_document: SerializableDocument::from_parsed(operation_document),
             operation_name: op_name,
             operation_kind: node_root_kind.into(),
-            input_rewrites: Arc::new(input_rewrites),
             output_rewrites,
-            context_rewrites: node
-                .context_rewrites
-                .iter()
-                .cloned()
-                .map(|r| Arc::new(r.into()))
-                .collect(),
         }));
 
         // 8. Wrap entity/root-hop fetches in FlattenNode.
@@ -1504,7 +1517,7 @@ mod tests {
             "entity fetches target the subgraph Query root even under a mutation",
         );
         assert!(
-            !entity_fetch.requires.is_empty(),
+            matches!(entity_fetch.kind, crate::query_plan::FetchKind::Entities(_)),
             "entity fetch carries the key representation requires",
         );
     }

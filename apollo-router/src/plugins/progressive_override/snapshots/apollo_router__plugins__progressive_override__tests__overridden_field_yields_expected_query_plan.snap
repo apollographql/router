@@ -26,14 +26,15 @@ expression: query_plan
             {
               "kind": "Fetch",
               "serviceName": "Subgraph1",
+              "fetchKind": {
+                "kind": "Root"
+              },
               "variableUsages": [],
               "operation": "{ percent100 { __typename id } }",
               "operationName": null,
               "operationKind": "query",
               "id": null,
-              "inputRewrites": null,
               "outputRewrites": null,
-              "contextRewrites": null,
               "schemaAwareHash": "1e16d19ef6c50214c3bdf868c6591b3483b077e7d9a00d1f6638f2bb3ab400a1",
               "authorization": {
                 "is_authenticated": false,
@@ -49,30 +50,33 @@ expression: query_plan
               "node": {
                 "kind": "Fetch",
                 "serviceName": "Subgraph2",
-                "requires": [
-                  {
-                    "kind": "InlineFragment",
-                    "typeCondition": "T",
-                    "selections": [
-                      {
-                        "kind": "Field",
-                        "name": "__typename"
-                      },
-                      {
-                        "kind": "Field",
-                        "name": "id"
-                      }
-                    ]
-                  }
-                ],
+                "fetchKind": {
+                  "kind": "Entities",
+                  "requires": [
+                    {
+                      "kind": "InlineFragment",
+                      "typeCondition": "T",
+                      "selections": [
+                        {
+                          "kind": "Field",
+                          "name": "__typename"
+                        },
+                        {
+                          "kind": "Field",
+                          "name": "id"
+                        }
+                      ]
+                    }
+                  ],
+                  "inputRewrites": null,
+                  "contextRewrites": null
+                },
                 "variableUsages": [],
                 "operation": "query($representations: [_Any!]!) { _entities(representations: $representations) { ... on T { foo } } }",
                 "operationName": null,
                 "operationKind": "query",
                 "id": null,
-                "inputRewrites": null,
                 "outputRewrites": null,
-                "contextRewrites": null,
                 "schemaAwareHash": "b9eaf3036edee18ba52cae2f451d711f70e2b589916819a435865c9c75130a50",
                 "authorization": {
                   "is_authenticated": false,

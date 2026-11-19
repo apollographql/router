@@ -9,6 +9,9 @@
       "node": {
         "kind": "Fetch",
         "serviceName": "accounts",
+        "fetchKind": {
+          "kind": "Root"
+        },
         "variableUsages": [],
         "operation": "query Me__accounts__0{me{__typename id}}",
         "operationName": "Me__accounts__0",
@@ -25,30 +28,39 @@
           }
         ],
         "label": null,
-        "queryPath": ["me"],
+        "queryPath": [
+          "me"
+        ],
         "subselection": "{ ... on User { name username } }",
         "node": {
           "kind": "Flatten",
-          "path": ["me"],
+          "path": [
+            "me"
+          ],
           "node": {
             "kind": "Fetch",
             "serviceName": "accounts",
-            "requires": [
-              {
-                "kind": "InlineFragment",
-                "typeCondition": "User",
-                "selections": [
-                  {
-                    "kind": "Field",
-                    "name": "__typename"
-                  },
-                  {
-                    "kind": "Field",
-                    "name": "id"
-                  }
-                ]
-              }
-            ],
+            "fetchKind": {
+              "kind": "Entities",
+              "requires": [
+                {
+                  "kind": "InlineFragment",
+                  "typeCondition": "User",
+                  "selections": [
+                    {
+                      "kind": "Field",
+                      "name": "__typename"
+                    },
+                    {
+                      "kind": "Field",
+                      "name": "id"
+                    }
+                  ]
+                }
+              ],
+              "inputRewrites": null,
+              "contextRewrites": null
+            },
             "variableUsages": [],
             "operation": "query Me__accounts__1($representations:[_Any!]!){_entities(representations:$representations){...on User{name username}}}",
             "operationName": "Me__accounts__1",
@@ -62,6 +74,9 @@
   "elseClause": {
     "kind": "Fetch",
     "serviceName": "accounts",
+    "fetchKind": {
+      "kind": "Root"
+    },
     "variableUsages": [],
     "operation": "query Me__accounts__2{me{id name username}}",
     "operationName": "Me__accounts__2",

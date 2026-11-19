@@ -82,13 +82,11 @@ impl FetchNode {
             protocol: _,
             id,
             variable_usages: _,
-            requires,
+            kind,
             operation_document,
             operation_name: _,
             operation_kind: _,
-            input_rewrites: _,
             output_rewrites: _,
-            context_rewrites: _,
         } = self;
         state.write(format_args!("Fetch(service: {subgraph_name:?}"))?;
         if let Some(id) = id {
@@ -97,7 +95,7 @@ impl FetchNode {
         state.write(") {")?;
         state.indent()?;
 
-        if !requires.is_empty() {
+        if let FetchKind::Entities(EntitySelection { requires, .. }) = kind {
             write_requires_selections(state, requires)?;
             state.write(" =>")?;
             state.new_line()?;

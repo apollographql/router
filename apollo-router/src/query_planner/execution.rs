@@ -302,15 +302,15 @@ impl PlanNode {
                         errors = Vec::new();
                     } else {
                         match Variables::new(
-                            &fetch_node.requires,
+                            fetch_node.kind.requires(),
                             &fetch_node.variable_usages,
                             parent_value,
                             current_dir,
                             parameters.supergraph_request,
                             parameters.query,
                             parameters.schema.as_ref(),
-                            &fetch_node.input_rewrites,
-                            &fetch_node.context_rewrites,
+                            fetch_node.kind.input_rewrites(),
+                            fetch_node.kind.context_rewrites(),
                         ) {
                             Some(variables) => {
                                 let paths = variables.inverted_paths.clone();

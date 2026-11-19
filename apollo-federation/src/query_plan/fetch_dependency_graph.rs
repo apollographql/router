@@ -3026,29 +3026,41 @@ impl FetchDependencyGraphNode {
                 })
                 .collect()
         }
+        let kind = if self.is_entity_fetch {
+            super::FetchKind::Entities(super::EntitySelection {
+                requires: input_nodes
+                    .as_ref()
+                    .map(executable::SelectionSet::try_from)
+                    .transpose()?
+                    .map(|selection_set| trim_requires_selection_set(&selection_set))
+                    .transpose()?
+                    .unwrap_or_default(),
+                input_rewrites: self.input_rewrites.clone(),
+                context_rewrites: self
+                    .context_inputs
+                    .iter()
+                    .cloned()
+                    .map(|r| Arc::new(r.into()))
+                    .collect(),
+            })
+        } else if self.context_inputs.is_empty() {
+            super::FetchKind::Root
+        } else {
+            bail!(
+                "root fetch to {} reads context values, which only entity fetches can",
+                self.subgraph_name
+            );
+        };
         let node = super::PlanNode::Fetch(Box::new(super::FetchNode {
             subgraph_name: self.subgraph_name.clone(),
             protocol: Default::default(),
             id: self.id.get().copied(),
             variable_usages,
-            requires: input_nodes
-                .as_ref()
-                .map(executable::SelectionSet::try_from)
-                .transpose()?
-                .map(|selection_set| trim_requires_selection_set(&selection_set))
-                .transpose()?
-                .unwrap_or_default(),
+            kind,
             operation_document: SerializableDocument::from_parsed(operation_document),
             operation_name,
             operation_kind: self.root_kind.into(),
-            input_rewrites: self.input_rewrites.clone(),
             output_rewrites,
-            context_rewrites: self
-                .context_inputs
-                .iter()
-                .cloned()
-                .map(|r| Arc::new(r.into()))
-                .collect(),
         }));
 
         Ok(Some(if let Some(path) = self.merge_at.clone() {

@@ -44,9 +44,10 @@ expression: response
                 "policies": [],
                 "scopes": []
               },
-              "contextRewrites": null,
+              "fetchKind": {
+                "kind": "Root"
+              },
               "id": null,
-              "inputRewrites": null,
               "kind": "Fetch",
               "operation": "query Query_fetch_dependent_failure__Subgraph1__0 { t { __typename prop id u { __typename id } } }",
               "operationKind": "query",
@@ -64,40 +65,43 @@ expression: response
                   "policies": [],
                   "scopes": []
                 },
-                "contextRewrites": [
-                  {
-                    "kind": "KeyRenamer",
-                    "path": [
-                      "..",
-                      "... on T",
-                      "prop"
-                    ],
-                    "renameKeyTo": "contextualArgument_1_0"
-                  }
-                ],
+                "fetchKind": {
+                  "contextRewrites": [
+                    {
+                      "kind": "KeyRenamer",
+                      "path": [
+                        "..",
+                        "... on T",
+                        "prop"
+                      ],
+                      "renameKeyTo": "contextualArgument_1_0"
+                    }
+                  ],
+                  "inputRewrites": null,
+                  "kind": "Entities",
+                  "requires": [
+                    {
+                      "kind": "InlineFragment",
+                      "selections": [
+                        {
+                          "kind": "Field",
+                          "name": "__typename"
+                        },
+                        {
+                          "kind": "Field",
+                          "name": "id"
+                        }
+                      ],
+                      "typeCondition": "U"
+                    }
+                  ]
+                },
                 "id": null,
-                "inputRewrites": null,
                 "kind": "Fetch",
                 "operation": "query Query_fetch_dependent_failure__Subgraph1__1($representations: [_Any!]!, $contextualArgument_1_0: String) { _entities(representations: $representations) { ... on U { field(a: $contextualArgument_1_0) } } }",
                 "operationKind": "query",
                 "operationName": "Query_fetch_dependent_failure__Subgraph1__1",
                 "outputRewrites": null,
-                "requires": [
-                  {
-                    "kind": "InlineFragment",
-                    "selections": [
-                      {
-                        "kind": "Field",
-                        "name": "__typename"
-                      },
-                      {
-                        "kind": "Field",
-                        "name": "id"
-                      }
-                    ],
-                    "typeCondition": "U"
-                  }
-                ],
                 "schemaAwareHash": "658b78f163ea9e019b80067cbfaf4034d0fd01a710f1f2263022492eb7e92dd0",
                 "serviceName": "Subgraph1",
                 "variableUsages": [

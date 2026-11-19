@@ -4337,8 +4337,8 @@ fn context_rewrite_path_includes_typename_equals() {
 
     // The rewrite path must include the TypenameEquals guard:
     // [Parent, TypenameEquals("T"), Key("prop")], not [Parent, Key("prop")].
-    assert_eq!(fetch.context_rewrites.len(), 1);
-    let FetchDataRewrite::KeyRenamer(renamer) = &*fetch.context_rewrites[0] else {
+    assert_eq!(fetch.kind.context_rewrites().len(), 1);
+    let FetchDataRewrite::KeyRenamer(renamer) = &*fetch.kind.context_rewrites()[0] else {
         panic!("expected KeyRenamer");
     };
     assert_eq!(renamer.rename_key_to.as_str(), "contextualArgument_1_0");
@@ -4481,10 +4481,10 @@ fn inc_from_context_multi_hop_ancestor() {
     // The rewrite path should walk 2+ Parent elements back to the
     // grandparent A, with a TypenameEquals guard for A.
     assert!(
-        !fetch.context_rewrites.is_empty(),
+        !fetch.kind.context_rewrites().is_empty(),
         "context rewrites must be present on the deepest fetch"
     );
-    let FetchDataRewrite::KeyRenamer(renamer) = &*fetch.context_rewrites[0] else {
+    let FetchDataRewrite::KeyRenamer(renamer) = &*fetch.kind.context_rewrites()[0] else {
         panic!("expected KeyRenamer");
     };
 
@@ -4513,7 +4513,7 @@ fn context_rewrite_paths(plan: &QueryPlan) -> Vec<(String, Vec<FetchDataPathElem
     fn walk(node: &PlanNode, out: &mut Vec<(String, Vec<FetchDataPathElement>)>) {
         match node {
             PlanNode::Fetch(fetch) => {
-                for rewrite in &fetch.context_rewrites {
+                for rewrite in fetch.kind.context_rewrites() {
                     if let FetchDataRewrite::KeyRenamer(renamer) = &**rewrite {
                         out.push((renamer.rename_key_to.to_string(), renamer.path.clone()));
                     }

@@ -344,7 +344,11 @@ fn can_use_a_key_on_an_interface_object_type_even_for_a_concrete_implementation(
 
     let fetch_nodes = find_fetch_nodes_for_subgraph("S2", &plan);
     assert_eq!(fetch_nodes.len(), 1);
-    let rewrites = fetch_nodes[0].input_rewrites.clone();
+    let selection = fetch_nodes[0]
+        .kind
+        .entity_selection()
+        .expect("an entity fetch");
+    let rewrites = selection.input_rewrites.clone();
     assert_eq!(rewrites.len(), 1);
     let rewrite = rewrites[0].clone();
     match rewrite.deref() {

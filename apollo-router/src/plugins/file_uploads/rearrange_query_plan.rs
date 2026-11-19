@@ -317,6 +317,7 @@ mod tests {
         normalize_json::<PlanNode>(json!({
           "kind": "Fetch",
           "serviceName": service_name.to_owned(),
+          "fetchKind": { "kind": "Root" },
           "variableUsages": variables.to_owned(),
           "operation": "",
           "operationKind": "query"

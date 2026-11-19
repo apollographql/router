@@ -60,9 +60,9 @@ macro_rules! node_assert {
         let expected_rewrites = &[ $( $rename_key_to ),+ ];
         let expected_paths = &[ $( $path.into_iter().map(parse_fetch_data_path_element).collect::<Vec<_>>() ),+ ];
         assert_eq!(expected_rewrites.len(), expected_paths.len());
-        assert_eq!(node.context_rewrites.len(), expected_rewrites.len());
+        assert_eq!(node.kind.context_rewrites().len(), expected_rewrites.len());
         node
-            .context_rewrites
+            .kind.context_rewrites()
             .iter()
             .map(|rewriter| {
                 let FetchDataRewrite::KeyRenamer(renamer) = &**rewriter else {
@@ -342,7 +342,7 @@ fn set_context_test_variable_is_already_in_a_different_fetch_group() {
             Some(PlanNode::Flatten(node)) => match &*node.node {
                 PlanNode::Fetch(node) => {
                     assert_eq!(
-                        node.context_rewrites,
+                        node.kind.context_rewrites(),
                         vec![Arc::new(FetchDataRewrite::KeyRenamer(
                             FetchDataKeyRenamer {
                                 rename_key_to: Name::new("contextualArgument_2_0").unwrap(),
@@ -442,7 +442,7 @@ fn set_context_test_variable_is_a_list() {
             Some(PlanNode::Flatten(node)) => match &*node.node {
                 PlanNode::Fetch(node) => {
                     assert_eq!(
-                        node.context_rewrites,
+                        node.kind.context_rewrites(),
                         vec![Arc::new(FetchDataRewrite::KeyRenamer(
                             FetchDataKeyRenamer {
                                 rename_key_to: Name::new("contextualArgument_1_0").unwrap(),
