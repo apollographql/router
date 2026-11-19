@@ -66,25 +66,27 @@ struct ScoringContext<'a> {
 /// a count is the number of objects at a path regardless of their concrete type. Only flatten
 /// paths (and their prefixes) have nodes, so scoring a fetch's operation only tracks counts for
 /// selections that can lead to an entity fetch.
+///
+/// Response keys are borrowed from the plan's flatten paths, which outlive the scoring of the plan.
 #[derive(Default)]
-struct EntityCounts {
-    keys: HashMap<String, EntityCounts>,
-    list: Option<Box<EntityCounts>>,
+struct EntityCounts<'a> {
+    keys: HashMap<&'a str, EntityCounts<'a>>,
+    list: Option<Box<EntityCounts<'a>>>,
     /// The largest number of objects any fetch seen so far places at this path.
     count: Option<i32>,
 }
 
-impl EntityCounts {
+impl<'a> EntityCounts<'a> {
     fn is_empty(&self) -> bool {
         self.keys.is_empty() && self.list.is_none()
     }
 
     /// Adds nodes for a flatten path and its prefixes.
-    fn insert(&mut self, path: &Path) {
+    fn insert(&mut self, path: &'a Path) {
         let mut node = self;
         for element in &path.0 {
             node = match element {
-                PathElement::Key(key, _) => node.keys.entry(key.clone()).or_default(),
+                PathElement::Key(key, _) => node.keys.entry(key.as_str()).or_default(),
                 PathElement::Flatten(_) => node.list.get_or_insert_default(),
                 // Flatten paths are static, so they don't contain these.
                 PathElement::Index(_) | PathElement::Fragment(_) => node,
@@ -103,11 +105,11 @@ impl EntityCounts {
     }
 
     #[cfg(test)]
-    fn node(&self, path: &Path) -> Option<&EntityCounts> {
+    fn node(&self, path: &Path) -> Option<&EntityCounts<'a>> {
         let mut node = self;
         for element in &path.0 {
             node = match element {
-                PathElement::Key(key, _) => node.keys.get(key)?,
+                PathElement::Key(key, _) => node.keys.get(key.as_str())?,
                 PathElement::Flatten(_) => node.list.as_deref()?,
                 PathElement::Index(_) | PathElement::Fragment(_) => node,
             };
@@ -115,11 +117,11 @@ impl EntityCounts {
         Some(node)
     }
 
-    fn node_mut(&mut self, path: &Path) -> Option<&mut EntityCounts> {
+    fn node_mut(&mut self, path: &Path) -> Option<&mut EntityCounts<'a>> {
         let mut node = self;
         for element in &path.0 {
             node = match element {
-                PathElement::Key(key, _) => node.keys.get_mut(key)?,
+                PathElement::Key(key, _) => node.keys.get_mut(key.as_str())?,
                 PathElement::Flatten(_) => node.list.as_deref_mut()?,
                 PathElement::Index(_) | PathElement::Fragment(_) => node,
             };
@@ -135,7 +137,7 @@ impl EntityCounts {
 
     /// The node for the field `response_key` of type `ty` selected at this path. A list type
     /// adds one `@` per level of list nesting, like the query planner does for flatten paths.
-    fn field_mut(&mut self, response_key: &str, ty: &ast::Type) -> Option<&mut EntityCounts> {
+    fn field_mut(&mut self, response_key: &str, ty: &ast::Type) -> Option<&mut EntityCounts<'a>> {
         let mut node = self.keys.get_mut(response_key)?;
         let mut ty = ty;
         while let ast::Type::List(inner) | ast::Type::NonNullList(inner) = ty {
@@ -152,13 +154,13 @@ impl EntityCounts {
 
 /// Where scoring is in the response while it walks a fetch's operation: the `EntityCounts` node
 /// for the current response path, and the estimated number of objects at that path.
-struct ObjectCount<'a> {
-    counts: &'a mut EntityCounts,
+struct ObjectCount<'a, 'plan> {
+    counts: &'a mut EntityCounts<'plan>,
     count: i32,
 }
 
-impl ObjectCount<'_> {
-    fn reborrow(&mut self) -> ObjectCount<'_> {
+impl<'plan> ObjectCount<'_, 'plan> {
+    fn reborrow(&mut self) -> ObjectCount<'_, 'plan> {
         ObjectCount {
             counts: &mut *self.counts,
             count: self.count,
@@ -825,11 +827,11 @@ impl StaticCostCalculator {
     /// fetches are scored shallowest path first: every count is then final before a fetch at that
     /// path reads it. (Plan order wouldn't do: it only puts a fetch after the ones it depends on,
     /// and another fetch selecting the same list can come later or run in parallel.)
-    fn score_plan(
+    fn score_plan<'a>(
         &self,
-        root: &PlanNode,
+        root: &'a PlanNode,
         variables: &Object,
-    ) -> Result<(CostBySubgraph, EntityCounts), DemandControlError> {
+    ) -> Result<(CostBySubgraph, EntityCounts<'a>), DemandControlError> {
         let mut entity_counts = EntityCounts::default();
         let mut fetches = Vec::new();
         let plan_cost = collect_fetches(root, None, &mut entity_counts, &mut fetches);
@@ -953,7 +955,7 @@ fn operation_base_cost(operation: &Operation) -> f64 {
 fn collect_fetches<'a>(
     node: &'a PlanNode,
     flatten_path: Option<&'a Path>,
-    entity_counts: &mut EntityCounts,
+    entity_counts: &mut EntityCounts<'a>,
     fetches: &mut Vec<PlannedFetch<'a>>,
 ) -> PlanCost {
     let mut collect = |node| collect_fetches(node, flatten_path, entity_counts, fetches);
