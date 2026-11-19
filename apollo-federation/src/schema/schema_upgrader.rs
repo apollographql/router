@@ -797,10 +797,7 @@ impl SchemaUpgrader {
                     continue;
                 };
                 let type_in_other_subgraphs = entries.iter().any(|(subgraph_name, _)| {
-                    if subgraph_name != upgrade_metadata.subgraph_name.as_str() {
-                        return true;
-                    }
-                    false
+                    subgraph_name != upgrade_metadata.subgraph_name.as_str()
                 });
                 if type_in_other_subgraphs
                     && !obj_pos.has_applied_directive(schema, &shareable_directive_name)

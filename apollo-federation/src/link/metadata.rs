@@ -546,13 +546,9 @@ impl LinksMetadata {
             }
         }
         // The spec name-in-schema can't be already mapped to another @link/`Link`.
-        if self
+        !self
             .by_spec_name_in_schema
             .contains_key(spec_name_in_schema)
-        {
-            return false;
-        }
-        true
     }
 
     /// This is a method that helps us handle the case where:

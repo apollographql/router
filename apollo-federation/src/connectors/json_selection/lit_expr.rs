@@ -757,7 +757,7 @@ mod tests {
                 .unwrap_or_else(|e| panic!("Failed to parse '{keyword}': {e:?}"));
             assert_eq!(
                 parsed.strip_ranges(),
-                WithRange::new(expected.clone(), None),
+                WithRange::new(expected, None),
                 "'{keyword}' should parse as its literal",
             );
 
