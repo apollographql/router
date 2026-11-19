@@ -2,6 +2,6 @@ coprocessor:
   url: http://localhost:3000 # Required. Replace with the URL of your coprocessor's HTTP endpoint.
                              # Supports HTTP (http://localhost:3000), HTTPS (https://example.com:8443),
                              # and Unix Domain Socket (unix:///tmp/coprocessor.sock) URLs.
-  supergraph: # Hook into the supergraph service
+  router: # Hook into the router service. Labels must be set at the router stage so the router can filter them per operation.
     request:
       context: all
