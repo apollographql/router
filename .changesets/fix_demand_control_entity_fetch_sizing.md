@@ -1,7 +1,23 @@
-### Fix demand control `_entities` cardinality estimation ([PR #9192](https://github.com/apollographql/router/pull/9192))
+### Size `_entities` fetches by their parent lists in demand control estimates ([PR #9192](https://github.com/apollographql/router/pull/9192))
 
-When estimating the cost of a federated operation, the demand control plugin sized every entity fetch (`_entities`) with the configured `list_size` default, ignoring how many parent objects the fetch actually extends. For nested-list operations (e.g. `topProducts { reviews { author { name } } }`) this could both overcount (an `_entities` fetch often resolves a single object per parent) and undercount (nested lists can produce far more entities than `list_size`), so the estimate could wrongly reject inexpensive operations or admit expensive ones.
+When estimating the cost of a federated operation, demand control sized every entity fetch (`_entities`) with the configured `list_size`, regardless of how many objects the fetch extends. The estimate was too high when an entity fetch extends a single object, and too low when it extends objects in nested lists.
 
-The estimator now counts entity representations from the parent list sizes along the response path, using the same list sizing as the rest of cost estimation: the `@listSize` directive (`assumedSize`, `slicingArguments`, and `sizedFields`) and per-subgraph `list_size` configuration. Because an entity fetch is sized by the list it is fetched through, its count reflects the `list_size` configured for the subgraph that returns the list, not the subgraph the entity fetch is sent to. As a result, estimated costs for operations with entity fetches may change.
+An entity fetch is now sized by the number of objects at the response path it extends, which is the product of the list sizes along that path. Those list sizes are the ones the rest of the estimate already uses: `@listSize` (`assumedSize`, `slicingArguments`, and `sizedFields`), then the `list_size` configured for the subgraph that returns the list, then the global `list_size`.
 
-By [@duckki](https://github.com/duckki) in https://github.com/apollographql/router/pull/9192
+For example, with `list_size: 10` and fields that each need an entity fetch to another subgraph:
+
+| Operation | Entities fetched, before | Entities fetched, now |
+| --- | --- | --- |
+| `product { inStock }` | 10 | 1 |
+| `companies { employees { salary } }` | 10 | 100 (10 companies × 10 employees) |
+| `products(first: 3) { inStock }`, where `products` has `@listSize(slicingArguments: ["first"])` | 10 | 3 |
+
+Estimated costs for operations with entity fetches can go up as well as down, so review your configured `max` values before upgrading if you run demand control in `enforce` mode.
+
+This fix doesn't change the following behaviors of the estimate:
+
+- A list without `@listSize` is still assumed to have `list_size` items.
+- Costs are summed across fragments on different object types, even though an object can only match one of them. A field selected in several such fragments is counted once per fragment.
+- `@skip` and `@include` are only applied when their condition is a literal. A condition given as a variable is ignored, and the field is counted.
+
+By [@duckki](https://github.com/duckki) and [@sachindshinde](https://github.com/sachindshinde) in https://github.com/apollographql/router/pull/9192
