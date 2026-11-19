@@ -17,53 +17,57 @@
       },
       {
         "Flatten": {
-          "path": [
+          "members": [
             {
-              "Key": [
-                "feed",
-                null
-              ]
-            },
-            {
-              "AnyIndex": null
-            }
-          ],
-          "node": {
-            "Fetch": {
-              "subgraph_name": "reviews",
-              "id": null,
-              "variable_usages": [],
-              "fetch_kind": {
-                "kind": "Entities",
-                "requires": [
+              "paths": [
+                [
                   {
-                    "kind": "InlineFragment",
-                    "typeCondition": "Film",
-                    "selections": [
-                      {
-                        "kind": "Field",
-                        "name": "__typename"
-                      },
-                      {
-                        "kind": "Field",
-                        "name": "code"
-                      },
-                      {
-                        "kind": "Field",
-                        "name": "minutes"
-                      }
+                    "Key": [
+                      "feed",
+                      null
                     ]
+                  },
+                  {
+                    "AnyIndex": null
                   }
-                ],
-                "input_rewrites": [],
-                "context_rewrites": []
-              },
-              "operation_document": "query($representations: [_Any!]!) { _entities(representations: $representations) { ... on Film { summary } } }",
-              "operation_name": null,
-              "operation_kind": "query",
-              "output_rewrites": []
+                ]
+              ],
+              "fetch": {
+                "subgraph_name": "reviews",
+                "id": null,
+                "variable_usages": [],
+                "fetch_kind": {
+                  "kind": "Entities",
+                  "requires": [
+                    {
+                      "kind": "InlineFragment",
+                      "typeCondition": "Film",
+                      "selections": [
+                        {
+                          "kind": "Field",
+                          "name": "__typename"
+                        },
+                        {
+                          "kind": "Field",
+                          "name": "code"
+                        },
+                        {
+                          "kind": "Field",
+                          "name": "minutes"
+                        }
+                      ]
+                    }
+                  ],
+                  "input_rewrites": [],
+                  "context_rewrites": []
+                },
+                "operation_document": "query($representations: [_Any!]!) { _entities(representations: $representations) { ... on Film { summary } } }",
+                "operation_name": null,
+                "operation_kind": "query",
+                "output_rewrites": []
+              }
             }
-          }
+          ]
         }
       }
     ]

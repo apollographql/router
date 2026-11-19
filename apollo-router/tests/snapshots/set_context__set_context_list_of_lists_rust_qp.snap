@@ -51,60 +51,65 @@ expression: response
             },
             {
               "kind": "Flatten",
-              "node": {
-                "authorization": {
-                  "is_authenticated": false,
-                  "policies": [],
-                  "scopes": []
-                },
-                "fetchKind": {
-                  "contextRewrites": [
-                    {
-                      "kind": "KeyRenamer",
-                      "path": [
-                        "..",
-                        "... on T",
-                        "prop"
-                      ],
-                      "renameKeyTo": "contextualArgument_1_0"
-                    }
-                  ],
-                  "inputRewrites": null,
-                  "kind": "Entities",
-                  "requires": [
-                    {
-                      "kind": "InlineFragment",
-                      "selections": [
+              "members": [
+                {
+                  "fetch": {
+                    "authorization": {
+                      "is_authenticated": false,
+                      "policies": [],
+                      "scopes": []
+                    },
+                    "fetchKind": {
+                      "contextRewrites": [
                         {
-                          "kind": "Field",
-                          "name": "__typename"
-                        },
-                        {
-                          "kind": "Field",
-                          "name": "id"
+                          "kind": "KeyRenamer",
+                          "path": [
+                            "..",
+                            "... on T",
+                            "prop"
+                          ],
+                          "renameKeyTo": "contextualArgument_1_0"
                         }
                       ],
-                      "typeCondition": "U"
-                    }
+                      "inputRewrites": null,
+                      "kind": "Entities",
+                      "requires": [
+                        {
+                          "kind": "InlineFragment",
+                          "selections": [
+                            {
+                              "kind": "Field",
+                              "name": "__typename"
+                            },
+                            {
+                              "kind": "Field",
+                              "name": "id"
+                            }
+                          ],
+                          "typeCondition": "U"
+                        }
+                      ]
+                    },
+                    "id": null,
+                    "operation": "query QueryLL__Subgraph1__1($representations: [_Any!]!, $contextualArgument_1_0: String) { _entities(representations: $representations) { ... on U { field(a: $contextualArgument_1_0) } } }",
+                    "operationKind": "query",
+                    "operationName": "QueryLL__Subgraph1__1",
+                    "outputRewrites": null,
+                    "schemaAwareHash": "c9d097af48e4c80add54e8311215687234a5abdf2dadebb2ad049c70b7c932cf",
+                    "serviceName": "Subgraph1",
+                    "variableUsages": [
+                      "contextualArgument_1_0"
+                    ]
+                  },
+                  "paths": [
+                    [
+                      "tList",
+                      "@",
+                      "uList",
+                      "@"
+                    ]
                   ]
-                },
-                "id": null,
-                "kind": "Fetch",
-                "operation": "query QueryLL__Subgraph1__1($representations: [_Any!]!, $contextualArgument_1_0: String) { _entities(representations: $representations) { ... on U { field(a: $contextualArgument_1_0) } } }",
-                "operationKind": "query",
-                "operationName": "QueryLL__Subgraph1__1",
-                "outputRewrites": null,
-                "schemaAwareHash": "c9d097af48e4c80add54e8311215687234a5abdf2dadebb2ad049c70b7c932cf",
-                "serviceName": "Subgraph1",
-                "variableUsages": [
-                  "contextualArgument_1_0"
-                ]
-              },
-              "path": [
-                "tList",
-                "@",
-                "uList",
-                "@"
+                }
               ]
             }
           ]

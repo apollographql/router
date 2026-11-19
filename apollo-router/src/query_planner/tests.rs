@@ -400,9 +400,9 @@ async fn defer() {
                 label: None,
                 query_path: Path(vec![PathElement::Key("t".to_string(), None)]),
                 subselection: Some("{ y }".to_string()),
-                node: Some(Arc::new(PlanNode::Flatten(FlattenNode {
-                    path: Path(vec![PathElement::Key("t".to_string(), None)]),
-                    node: Box::new(PlanNode::Fetch(FetchNode {
+                node: Some(Arc::new(PlanNode::Flatten(FlattenNode::at_path(
+                    Path(vec![PathElement::Key("t".to_string(), None)]),
+                    FetchNode {
                         service_name: "Y".into(),
                         kind: FetchKind::Entities(EntitySelection {
                             requires: vec![requires_selection::Selection::InlineFragment(
@@ -440,8 +440,8 @@ async fn defer() {
                         output_rewrites: None,
                         schema_aware_hash: Default::default(),
                         authorization: Default::default(),
-                    })),
-                }))),
+                    },
+                )))),
             }],
         })),
         usage_reporting: UsageReporting::Error("this is a test report key".to_string()).into(),
@@ -704,17 +704,16 @@ async fn dependent_mutations() {
                     },
                     {
                         "kind": "Flatten",
-                        "path": [
-                            "mutationA"
-                        ],
-                        "node": {
-                            "kind": "Fetch",
-                            "serviceName": "B",
-                            "fetchKind": { "kind": "Root" },
-                            "variableUsages": [],
-                            "operation": "mutation{...on Mutation{mutationB}}",
-                            "operationKind": "mutation"
-                        }
+                        "members": [{
+                            "paths": [["mutationA"]],
+                            "fetch": {
+                                "serviceName": "B",
+                                "fetchKind": { "kind": "Root" },
+                                "variableUsages": [],
+                                "operation": "mutation{...on Mutation{mutationB}}",
+                                "operationKind": "mutation"
+                            }
+                        }]
                     }
                 ]
             }"#,
@@ -776,6 +775,67 @@ async fn dependent_mutations() {
     crate::plugin::test::await_mock_driver(driver_a).await;
     drop(sf);
     crate::plugin::test::await_mock_driver(driver_b).await;
+}
+
+/// Planners emit one member at one path; anything else needs batch execution, which the
+/// router does not have yet.
+#[tokio::test]
+async fn flatten_with_several_members_is_unsupported() {
+    let schema = include_str!("../testdata/a_b_supergraph.graphql");
+    let fetch = r#"{
+        "serviceName": "B",
+        "fetchKind": { "kind": "Root" },
+        "variableUsages": [],
+        "operation": "{__typename}",
+        "operationKind": "query"
+    }"#;
+    let query_plan = QueryPlan {
+        formatted_query_plan: Default::default(),
+        root: serde_json::from_str(&format!(
+            r#"{{
+                "kind": "Flatten",
+                "members": [
+                    {{ "paths": [["a"]], "fetch": {fetch} }},
+                    {{ "paths": [["b"]], "fetch": {fetch} }}
+                ]
+            }}"#
+        ))
+        .expect("plan JSON"),
+        usage_reporting: UsageReporting::Error("this is a test report key".to_string()).into(),
+        query: Arc::new(Query::empty_for_tests()),
+        estimated_size: Default::default(),
+    };
+
+    let schema = Arc::new(Schema::parse(schema, &Default::default()).unwrap());
+    let sf = FetchService::new(
+        schema.clone(),
+        Default::default(),
+        Arc::new(subgraph_services(Vec::new())),
+        Arc::new(ConnectorServices::empty(schema.clone())),
+        None,
+        Arc::new(SubgraphConfiguration::<HoistOrphanErrors>::default()),
+    );
+
+    let (sender, _) = tokio::sync::mpsc::channel(10);
+    let response = query_plan
+        .execute(
+            &Context::new(),
+            &sf,
+            &Default::default(),
+            &schema,
+            &Default::default(),
+            sender,
+            None,
+            &None,
+            None,
+        )
+        .await;
+    let codes: Vec<_> = response
+        .errors
+        .iter()
+        .map(|error| error.extensions.get("code").cloned())
+        .collect();
+    assert_eq!(codes, vec![Some("UNSUPPORTED_QUERY_PLAN".into())]);
 }
 
 #[tokio::test]
@@ -2004,13 +2064,13 @@ async fn defer_depends_skips_fetch_when_typename_missing() {
                             authorization: Default::default(),
                         }),
                         // Dependency fetch: gets sub.data (the deferred node depends on this)
-                        PlanNode::Flatten(FlattenNode {
-                            path: Path(vec![
+                        PlanNode::Flatten(FlattenNode::at_path(
+                            Path(vec![
                                 PathElement::Key("start".to_string(), None),
                                 PathElement::Key("inner".to_string(), None),
                                 PathElement::Key("sub".to_string(), None),
                             ]),
-                            node: Box::new(PlanNode::Fetch(FetchNode {
+                            FetchNode {
                                 service_name: "Y".into(),
                                 kind: FetchKind::Entities(EntitySelection {
                                     requires: vec![requires_selection::Selection::InlineFragment(
@@ -2048,8 +2108,8 @@ async fn defer_depends_skips_fetch_when_typename_missing() {
                                 output_rewrites: None,
                                 schema_aware_hash: Default::default(),
                                 authorization: Default::default(),
-                            })),
-                        }),
+                            },
+                        )),
                     ],
                 })),
             },
@@ -2068,12 +2128,12 @@ async fn defer_depends_skips_fetch_when_typename_missing() {
                     PathElement::Key("inner".to_string(), None),
                 ]),
                 subselection: Some("{ target { x } }".to_string()),
-                node: Some(Arc::new(PlanNode::Flatten(FlattenNode {
-                    path: Path(vec![
+                node: Some(Arc::new(PlanNode::Flatten(FlattenNode::at_path(
+                    Path(vec![
                         PathElement::Key("start".to_string(), None),
                         PathElement::Key("inner".to_string(), None),
                     ]),
-                    node: Box::new(PlanNode::Fetch(FetchNode {
+                    FetchNode {
                         service_name: "Z".into(),
                         kind: FetchKind::Entities(EntitySelection {
                             requires: vec![requires_selection::Selection::InlineFragment(
@@ -2133,8 +2193,8 @@ async fn defer_depends_skips_fetch_when_typename_missing() {
                         output_rewrites: None,
                         schema_aware_hash: Default::default(),
                         authorization: Default::default(),
-                    })),
-                }))),
+                    },
+                )))),
             }],
         })),
         usage_reporting: UsageReporting::Error("this is a test report key".to_string()).into(),

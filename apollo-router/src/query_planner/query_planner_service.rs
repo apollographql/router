@@ -1066,10 +1066,7 @@ mod tests {
                         check_query_plan_coverage(node, parent_label, subselections)
                     }
                 }
-                PlanNode::Fetch(_) => {}
-                PlanNode::Flatten(flatten) => {
-                    check_query_plan_coverage(&flatten.node, parent_label, subselections)
-                }
+                PlanNode::Fetch(_) | PlanNode::Flatten(_) => {}
                 PlanNode::Condition {
                     condition: _,
                     if_clause,

@@ -75,7 +75,10 @@ impl Fixture {
     fn init_operations(&self, node: &mut PlanNode) {
         match node {
             PlanNode::Fetch(fetch) => self.init_operation(fetch),
-            PlanNode::Flatten(flatten) => self.init_operations(&mut flatten.node),
+            PlanNode::Flatten(flatten) => flatten
+                .members
+                .iter_mut()
+                .for_each(|member| self.init_operation(&mut member.fetch)),
             PlanNode::Sequence(sequence) => sequence
                 .nodes
                 .iter_mut()
@@ -395,9 +398,9 @@ fn aliased_requires_plan(
                 "operation_kind": "query",
                 "output_rewrites": []
             }} }},
-            {{ "Flatten": {{
-                "path": [{{ "Key": ["feed", null] }}, {{ "AnyIndex": null }}],
-                "node": {{ "Fetch": {{
+            {{ "Flatten": {{ "members": [{{
+                "paths": [[{{ "Key": ["feed", null] }}, {{ "AnyIndex": null }}]],
+                "fetch": {{
                     "subgraph_name": "reviews",
                     "variable_usages": [],
                     "fetch_kind": {{
@@ -420,8 +423,8 @@ fn aliased_requires_plan(
                     "operation_document": "query($representations: [_Any!]!) {{ _entities(representations: $representations) {{ ... on Book {{ blurb }} }} }}",
                     "operation_kind": "query",
                     "output_rewrites": []
-                }} }}
-            }} }}
+                }}
+            }}] }} }}
         ] }} }}"#
         ),
     )
@@ -515,7 +518,7 @@ fn defer_plan(fixture: &Fixture, depends: &[u64]) -> QueryPlan {
     let fetch = |subgraph: &str, id: Option<u64>, kind: &str, operation: &str| {
         let id = id.map_or("null".to_string(), |id| id.to_string());
         format!(
-            r#"{{ "Fetch": {{
+            r#"{{
                 "subgraph_name": "{subgraph}",
                 "id": {id},
                 "variable_usages": [],
@@ -523,7 +526,7 @@ fn defer_plan(fixture: &Fixture, depends: &[u64]) -> QueryPlan {
                 "operation_document": "{operation}",
                 "operation_kind": "query",
                 "output_rewrites": []
-            }} }}"#
+            }}"#
         )
     };
     let ids_fetch = fetch(
@@ -556,10 +559,10 @@ fn defer_plan(fixture: &Fixture, depends: &[u64]) -> QueryPlan {
                     "sub_selection": null,
                     "node": {{ "Parallel": {{ "nodes": [
                         {{ "Sequence": {{ "nodes": [
-                            {ids_fetch},
-                            {{ "Flatten": {{ "path": {feed}, "node": {isbn_fetch} }} }}
+                            {{ "Fetch": {ids_fetch} }},
+                            {{ "Flatten": {{ "members": [{{ "paths": [{feed}], "fetch": {isbn_fetch} }}] }} }}
                         ] }} }},
-                        {root_typename_fetch}
+                        {{ "Fetch": {root_typename_fetch} }}
                     ] }} }}
                 }},
                 "deferred": [{{
@@ -567,7 +570,7 @@ fn defer_plan(fixture: &Fixture, depends: &[u64]) -> QueryPlan {
                     "label": null,
                     "query_path": [],
                     "sub_selection": null,
-                    "node": {{ "Flatten": {{ "path": {feed}, "node": {blurb_fetch} }} }}
+                    "node": {{ "Flatten": {{ "members": [{{ "paths": [{feed}], "fetch": {blurb_fetch} }}] }} }}
                 }}]
             }} }}"#
     ))

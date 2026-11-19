@@ -130,10 +130,19 @@ impl From<&'_ next::ParallelNode> for plan::PlanNode {
 
 impl From<&'_ next::FlattenNode> for plan::PlanNode {
     fn from(value: &'_ next::FlattenNode) -> Self {
-        let next::FlattenNode { path, node } = value;
+        let next::FlattenNode { members } = value;
         Self::Flatten(plan::FlattenNode {
-            path: crate::json_ext::Path(vec(path)),
-            node: Box::new(node.into()),
+            members: members
+                .iter()
+                .map(|member| plan::FlattenMember {
+                    paths: member
+                        .paths
+                        .iter()
+                        .map(|path| crate::json_ext::Path(vec(path)))
+                        .collect(),
+                    fetch: (&member.fetch).into(),
+                })
+                .collect(),
         })
     }
 }

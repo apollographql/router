@@ -170,7 +170,16 @@ fn plan_node_query_hashes(
                         query_hashes.push(node.schema_aware_hash.clone());
                     }
                 }
-                PlanNode::Flatten(node) => new_targets.push(&node.node),
+                PlanNode::Flatten(node) => {
+                    for member in &node.members {
+                        let fetch = &member.fetch;
+                        if !fetch.kind.is_entities()
+                            && batching_config.batch_include(&fetch.service_name)
+                        {
+                            query_hashes.push(fetch.schema_aware_hash.clone());
+                        }
+                    }
+                }
                 PlanNode::Defer { .. } | PlanNode::Subscription { .. } => {
                     return Err(BatchingUnsupportedError);
                 }

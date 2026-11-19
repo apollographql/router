@@ -92,7 +92,9 @@ fn stamp_fetch_id(plan_node: &mut PlanNode, id: u64) {
             fetch.id = Some(id);
         }
         PlanNode::Flatten(flatten) => {
-            stamp_fetch_id(&mut flatten.node, id);
+            for member in &mut flatten.members {
+                member.fetch.id = Some(id);
+            }
         }
         PlanNode::Condition(condition) => {
             if let Some(node) = condition.if_clause.as_deref_mut() {
@@ -839,7 +841,7 @@ impl FetchGraph {
         // synthetic service name, the same name expansion would have given
         // its virtual subgraph, because the router dispatches fetches to
         // connectors by service name.
-        let fetch_node = PlanNode::Fetch(Box::new(crate::query_plan::FetchNode {
+        let fetch = crate::query_plan::FetchNode {
             subgraph_name: match &node.connector {
                 Some(c) => Arc::from(c.id.synthetic_name()),
                 None => node.subgraph.clone(),
@@ -857,17 +859,17 @@ impl FetchGraph {
             operation_name: op_name,
             operation_kind: node_root_kind.into(),
             output_rewrites,
-        }));
+        };
 
         // 8. Wrap entity/root-hop fetches in FlattenNode.
         let mut plan_node = match &node.kind {
             FetchGroupKind::Entity { merge_at } | FetchGroupKind::RootHop { merge_at, .. } => {
-                PlanNode::Flatten(crate::query_plan::FlattenNode {
-                    path: merge_at.clone(),
-                    node: Box::new(fetch_node),
-                })
+                PlanNode::Flatten(crate::query_plan::FlattenNode::at_path(
+                    merge_at.clone(),
+                    fetch,
+                ))
             }
-            FetchGroupKind::Root { .. } => fetch_node,
+            FetchGroupKind::Root { .. } => PlanNode::Fetch(Box::new(fetch)),
         };
 
         // 9. Gate the fetch on its hoisted group conditions.
@@ -1508,9 +1510,7 @@ mod tests {
         let PlanNode::Flatten(flatten) = &seq.nodes[1] else {
             panic!("expected Flatten(entity fetch) second");
         };
-        let PlanNode::Fetch(entity_fetch) = flatten.node.as_ref() else {
-            panic!("expected entity Fetch inside Flatten");
-        };
+        let (_, entity_fetch) = flatten.single().expect("one entity fetch at one path");
         assert_eq!(
             entity_fetch.operation_kind,
             executable::OperationType::Query,

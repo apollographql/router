@@ -105,47 +105,52 @@ async fn basic_batch() {
                 },
                 {
                   "kind": "Flatten",
-                  "path": [
-                    "users",
-                    "@"
-                  ],
-                  "node": {
-                    "kind": "Fetch",
-                    "serviceName": "[BATCH] connectors.json http: POST /users-batch",
-                    "fetchKind": {
-                      "kind": "Entities",
-                      "requires": [
-                        {
-                          "kind": "InlineFragment",
-                          "typeCondition": "User",
-                          "selections": [
-                            {
-                              "kind": "Field",
-                              "name": "__typename"
-                            },
-                            {
-                              "kind": "Field",
-                              "name": "id"
-                            }
-                          ]
-                        }
+                  "members": [
+                    {
+                      "paths": [
+                        [
+                          "users",
+                          "@"
+                        ]
                       ],
-                      "inputRewrites": null,
-                      "contextRewrites": null
-                    },
-                    "variableUsages": [],
-                    "operation": "query($representations: [_Any!]!) { _entities(representations: $representations) { ... on User { name username } } }",
-                    "operationName": null,
-                    "operationKind": "query",
-                    "id": null,
-                    "outputRewrites": null,
-                    "schemaAwareHash": "70e973c47c31b3a36af0a586c9f5b196b7cf57938e166f3773569adef19b7b10",
-                    "authorization": {
-                      "is_authenticated": false,
-                      "scopes": [],
-                      "policies": []
+                      "fetch": {
+                        "serviceName": "[BATCH] connectors.json http: POST /users-batch",
+                        "fetchKind": {
+                          "kind": "Entities",
+                          "requires": [
+                            {
+                              "kind": "InlineFragment",
+                              "typeCondition": "User",
+                              "selections": [
+                                {
+                                  "kind": "Field",
+                                  "name": "__typename"
+                                },
+                                {
+                                  "kind": "Field",
+                                  "name": "id"
+                                }
+                              ]
+                            }
+                          ],
+                          "inputRewrites": null,
+                          "contextRewrites": null
+                        },
+                        "variableUsages": [],
+                        "operation": "query($representations: [_Any!]!) { _entities(representations: $representations) { ... on User { name username } } }",
+                        "operationName": null,
+                        "operationKind": "query",
+                        "id": null,
+                        "outputRewrites": null,
+                        "schemaAwareHash": "70e973c47c31b3a36af0a586c9f5b196b7cf57938e166f3773569adef19b7b10",
+                        "authorization": {
+                          "is_authenticated": false,
+                          "scopes": [],
+                          "policies": []
+                        }
+                      }
                     }
-                  }
+                  ]
                 }
               ]
             }

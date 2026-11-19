@@ -44,46 +44,51 @@ expression: query_plan
             },
             {
               "kind": "Flatten",
-              "path": [
-                "percent100"
-              ],
-              "node": {
-                "kind": "Fetch",
-                "serviceName": "Subgraph2",
-                "fetchKind": {
-                  "kind": "Entities",
-                  "requires": [
-                    {
-                      "kind": "InlineFragment",
-                      "typeCondition": "T",
-                      "selections": [
-                        {
-                          "kind": "Field",
-                          "name": "__typename"
-                        },
-                        {
-                          "kind": "Field",
-                          "name": "id"
-                        }
-                      ]
-                    }
+              "members": [
+                {
+                  "paths": [
+                    [
+                      "percent100"
+                    ]
                   ],
-                  "inputRewrites": null,
-                  "contextRewrites": null
-                },
-                "variableUsages": [],
-                "operation": "query($representations: [_Any!]!) { _entities(representations: $representations) { ... on T { foo } } }",
-                "operationName": null,
-                "operationKind": "query",
-                "id": null,
-                "outputRewrites": null,
-                "schemaAwareHash": "b9eaf3036edee18ba52cae2f451d711f70e2b589916819a435865c9c75130a50",
-                "authorization": {
-                  "is_authenticated": false,
-                  "scopes": [],
-                  "policies": []
+                  "fetch": {
+                    "serviceName": "Subgraph2",
+                    "fetchKind": {
+                      "kind": "Entities",
+                      "requires": [
+                        {
+                          "kind": "InlineFragment",
+                          "typeCondition": "T",
+                          "selections": [
+                            {
+                              "kind": "Field",
+                              "name": "__typename"
+                            },
+                            {
+                              "kind": "Field",
+                              "name": "id"
+                            }
+                          ]
+                        }
+                      ],
+                      "inputRewrites": null,
+                      "contextRewrites": null
+                    },
+                    "variableUsages": [],
+                    "operation": "query($representations: [_Any!]!) { _entities(representations: $representations) { ... on T { foo } } }",
+                    "operationName": null,
+                    "operationKind": "query",
+                    "id": null,
+                    "outputRewrites": null,
+                    "schemaAwareHash": "b9eaf3036edee18ba52cae2f451d711f70e2b589916819a435865c9c75130a50",
+                    "authorization": {
+                      "is_authenticated": false,
+                      "scopes": [],
+                      "policies": []
+                    }
+                  }
                 }
-              }
+              ]
             }
           ]
         }

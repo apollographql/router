@@ -17,131 +17,139 @@
       },
       {
         "Flatten": {
-          "path": [
+          "members": [
             {
-              "Key": [
-                "latestReviews",
-                null
-              ]
-            },
-            {
-              "AnyIndex": null
-            },
-            {
-              "Key": [
-                "location",
-                null
-              ]
-            }
-          ],
-          "node": {
-            "Fetch": {
-              "subgraph_name": "locations",
-              "id": null,
-              "variable_usages": [],
-              "fetch_kind": {
-                "kind": "Entities",
-                "requires": [
+              "paths": [
+                [
                   {
-                    "kind": "InlineFragment",
-                    "typeCondition": "Location",
-                    "selections": [
-                      {
-                        "kind": "Field",
-                        "name": "__typename"
-                      },
-                      {
-                        "kind": "Field",
-                        "name": "id"
-                      },
-                      {
-                        "kind": "Field",
-                        "name": "reviewsForLocation",
-                        "selections": [
-                          {
-                            "kind": "Field",
-                            "name": "id"
-                          },
-                          {
-                            "kind": "Field",
-                            "name": "rating"
-                          }
-                        ]
-                      }
+                    "Key": [
+                      "latestReviews",
+                      null
+                    ]
+                  },
+                  {
+                    "AnyIndex": null
+                  },
+                  {
+                    "Key": [
+                      "location",
+                      null
                     ]
                   }
-                ],
-                "input_rewrites": [],
-                "context_rewrites": []
-              },
-              "operation_document": "query($representations: [_Any!]!) { _entities(representations: $representations) { ... on Location { name reviews { __typename id } } } }",
-              "operation_name": null,
-              "operation_kind": "query",
-              "output_rewrites": []
+                ]
+              ],
+              "fetch": {
+                "subgraph_name": "locations",
+                "id": null,
+                "variable_usages": [],
+                "fetch_kind": {
+                  "kind": "Entities",
+                  "requires": [
+                    {
+                      "kind": "InlineFragment",
+                      "typeCondition": "Location",
+                      "selections": [
+                        {
+                          "kind": "Field",
+                          "name": "__typename"
+                        },
+                        {
+                          "kind": "Field",
+                          "name": "id"
+                        },
+                        {
+                          "kind": "Field",
+                          "name": "reviewsForLocation",
+                          "selections": [
+                            {
+                              "kind": "Field",
+                              "name": "id"
+                            },
+                            {
+                              "kind": "Field",
+                              "name": "rating"
+                            }
+                          ]
+                        }
+                      ]
+                    }
+                  ],
+                  "input_rewrites": [],
+                  "context_rewrites": []
+                },
+                "operation_document": "query($representations: [_Any!]!) { _entities(representations: $representations) { ... on Location { name reviews { __typename id } } } }",
+                "operation_name": null,
+                "operation_kind": "query",
+                "output_rewrites": []
+              }
             }
-          }
+          ]
         }
       },
       {
         "Flatten": {
-          "path": [
+          "members": [
             {
-              "Key": [
-                "latestReviews",
-                null
-              ]
-            },
-            {
-              "AnyIndex": null
-            },
-            {
-              "Key": [
-                "location",
-                null
-              ]
-            },
-            {
-              "Key": [
-                "reviews",
-                null
-              ]
-            },
-            {
-              "AnyIndex": null
-            }
-          ],
-          "node": {
-            "Fetch": {
-              "subgraph_name": "reviews",
-              "id": null,
-              "variable_usages": [],
-              "fetch_kind": {
-                "kind": "Entities",
-                "requires": [
+              "paths": [
+                [
                   {
-                    "kind": "InlineFragment",
-                    "typeCondition": "Review",
-                    "selections": [
-                      {
-                        "kind": "Field",
-                        "name": "__typename"
-                      },
-                      {
-                        "kind": "Field",
-                        "name": "id"
-                      }
+                    "Key": [
+                      "latestReviews",
+                      null
                     ]
+                  },
+                  {
+                    "AnyIndex": null
+                  },
+                  {
+                    "Key": [
+                      "location",
+                      null
+                    ]
+                  },
+                  {
+                    "Key": [
+                      "reviews",
+                      null
+                    ]
+                  },
+                  {
+                    "AnyIndex": null
                   }
-                ],
-                "input_rewrites": [],
-                "context_rewrites": []
-              },
-              "operation_document": "query($representations: [_Any!]!) { _entities(representations: $representations) { ... on Review { rating } } }",
-              "operation_name": null,
-              "operation_kind": "query",
-              "output_rewrites": []
+                ]
+              ],
+              "fetch": {
+                "subgraph_name": "reviews",
+                "id": null,
+                "variable_usages": [],
+                "fetch_kind": {
+                  "kind": "Entities",
+                  "requires": [
+                    {
+                      "kind": "InlineFragment",
+                      "typeCondition": "Review",
+                      "selections": [
+                        {
+                          "kind": "Field",
+                          "name": "__typename"
+                        },
+                        {
+                          "kind": "Field",
+                          "name": "id"
+                        }
+                      ]
+                    }
+                  ],
+                  "input_rewrites": [],
+                  "context_rewrites": []
+                },
+                "operation_document": "query($representations: [_Any!]!) { _entities(representations: $representations) { ... on Review { rating } } }",
+                "operation_name": null,
+                "operation_kind": "query",
+                "output_rewrites": []
+              }
             }
-          }
+          ]
         }
       }
     ]

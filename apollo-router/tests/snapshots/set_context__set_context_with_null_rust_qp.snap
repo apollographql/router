@@ -39,59 +39,64 @@ expression: response
             },
             {
               "kind": "Flatten",
-              "path": [
-                "t",
-                "u"
-              ],
-              "node": {
-                "kind": "Fetch",
-                "serviceName": "Subgraph1",
-                "fetchKind": {
-                  "kind": "Entities",
-                  "requires": [
-                    {
-                      "kind": "InlineFragment",
-                      "typeCondition": "U",
-                      "selections": [
+              "members": [
+                {
+                  "paths": [
+                    [
+                      "t",
+                      "u"
+                    ]
+                  ],
+                  "fetch": {
+                    "serviceName": "Subgraph1",
+                    "fetchKind": {
+                      "kind": "Entities",
+                      "requires": [
                         {
-                          "kind": "Field",
-                          "name": "__typename"
-                        },
+                          "kind": "InlineFragment",
+                          "typeCondition": "U",
+                          "selections": [
+                            {
+                              "kind": "Field",
+                              "name": "__typename"
+                            },
+                            {
+                              "kind": "Field",
+                              "name": "id"
+                            }
+                          ]
+                        }
+                      ],
+                      "inputRewrites": null,
+                      "contextRewrites": [
                         {
-                          "kind": "Field",
-                          "name": "id"
+                          "kind": "KeyRenamer",
+                          "path": [
+                            "..",
+                            "... on T",
+                            "prop"
+                          ],
+                          "renameKeyTo": "contextualArgument_1_0"
                         }
                       ]
+                    },
+                    "variableUsages": [
+                      "contextualArgument_1_0"
+                    ],
+                    "operation": "query Query_Null_Param__Subgraph1__1($representations: [_Any!]!, $contextualArgument_1_0: String) { _entities(representations: $representations) { ... on U { field(a: $contextualArgument_1_0) } } }",
+                    "operationName": "Query_Null_Param__Subgraph1__1",
+                    "operationKind": "query",
+                    "id": null,
+                    "outputRewrites": null,
+                    "schemaAwareHash": "5810e4e6dde4879e129ddaca04b7d44810155e9a29f30db553a3b3d0746715fa",
+                    "authorization": {
+                      "is_authenticated": false,
+                      "scopes": [],
+                      "policies": []
                     }
-                  ],
-                  "inputRewrites": null,
-                  "contextRewrites": [
-                    {
-                      "kind": "KeyRenamer",
-                      "path": [
-                        "..",
-                        "... on T",
-                        "prop"
-                      ],
-                      "renameKeyTo": "contextualArgument_1_0"
-                    }
-                  ]
-                },
-                "variableUsages": [
-                  "contextualArgument_1_0"
-                ],
-                "operation": "query Query_Null_Param__Subgraph1__1($representations: [_Any!]!, $contextualArgument_1_0: String) { _entities(representations: $representations) { ... on U { field(a: $contextualArgument_1_0) } } }",
-                "operationName": "Query_Null_Param__Subgraph1__1",
-                "operationKind": "query",
-                "id": null,
-                "outputRewrites": null,
-                "schemaAwareHash": "5810e4e6dde4879e129ddaca04b7d44810155e9a29f30db553a3b3d0746715fa",
-                "authorization": {
-                  "is_authenticated": false,
-                  "scopes": [],
-                  "policies": []
+                  }
                 }
-              }
+              ]
             }
           ]
         }

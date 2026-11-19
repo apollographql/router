@@ -4236,7 +4236,12 @@ fn assert_no_self_dependent_deferred_blocks(defer: &DeferNode) {
 fn collect_fetch_ids(node: &PlanNode, ids: &mut Vec<String>) {
     match node {
         PlanNode::Fetch(fetch) => ids.extend(fetch.id.map(|id| id.to_string())),
-        PlanNode::Flatten(flatten) => collect_fetch_ids(&flatten.node, ids),
+        PlanNode::Flatten(flatten) => ids.extend(
+            flatten
+                .members
+                .iter()
+                .filter_map(|member| member.fetch.id.map(|id| id.to_string())),
+        ),
         PlanNode::Sequence(sequence) => sequence
             .nodes
             .iter()
@@ -4331,9 +4336,7 @@ fn context_rewrite_path_includes_typename_equals() {
     let Some(PlanNode::Flatten(node)) = node.nodes.get(1) else {
         panic!("expected flatten node at index 1");
     };
-    let PlanNode::Fetch(fetch) = &*node.node else {
-        panic!("expected fetch node inside flatten");
-    };
+    let (_, fetch) = node.single().expect("one fetch at one path");
 
     // The rewrite path must include the TypenameEquals guard:
     // [Parent, TypenameEquals("T"), Key("prop")], not [Parent, Key("prop")].
@@ -4474,9 +4477,7 @@ fn inc_from_context_multi_hop_ancestor() {
     let Some(flatten) = last_flatten else {
         panic!("expected at least one flatten node");
     };
-    let PlanNode::Fetch(fetch) = &*flatten.node else {
-        panic!("expected fetch node inside flatten");
-    };
+    let (_, fetch) = flatten.single().expect("one fetch at one path");
 
     // The rewrite path should walk 2+ Parent elements back to the
     // grandparent A, with a TypenameEquals guard for A.
@@ -4519,7 +4520,11 @@ fn context_rewrite_paths(plan: &QueryPlan) -> Vec<(String, Vec<FetchDataPathElem
                     }
                 }
             }
-            PlanNode::Flatten(flatten) => walk(&flatten.node, out),
+            PlanNode::Flatten(flatten) => {
+                for member in &flatten.members {
+                    walk(&PlanNode::Fetch(Box::new(member.fetch.clone())), out);
+                }
+            }
             PlanNode::Sequence(seq) => seq.nodes.iter().for_each(|n| walk(n, out)),
             PlanNode::Parallel(par) => par.nodes.iter().for_each(|n| walk(n, out)),
             other => panic!("unexpected plan node in context test: {other:?}"),

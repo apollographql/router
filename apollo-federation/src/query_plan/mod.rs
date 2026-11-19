@@ -162,8 +162,51 @@ pub struct ParallelNode {
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct FlattenNode {
-    pub path: Vec<FetchDataPathElement>,
-    pub node: Box<PlanNode>,
+    pub members: Vec<FlattenMember>,
+}
+
+/// One fetch of a `FlattenNode`. An entity fetch collects its representations at every one of
+/// its paths.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct FlattenMember {
+    pub paths: Vec<Vec<FetchDataPathElement>>,
+    pub fetch: FetchNode,
+}
+
+impl FlattenNode {
+    /// `fetch` with its whole response merging at `path`.
+    pub fn at_path(path: Vec<FetchDataPathElement>, fetch: FetchNode) -> Self {
+        Self {
+            members: vec![FlattenMember {
+                paths: vec![path],
+                fetch,
+            }],
+        }
+    }
+
+    /// The fetch and the path it merges at, when the node is one fetch at one path.
+    pub fn single(&self) -> Option<(&[FetchDataPathElement], &FetchNode)> {
+        let [member] = self.members.as_slice() else {
+            return None;
+        };
+        let [path] = member.paths.as_slice() else {
+            return None;
+        };
+        Some((path.as_slice(), &member.fetch))
+    }
+
+    /// The fetches this node stands for, each on its own at one path. For tools that reason
+    /// about individual fetches.
+    pub fn batched_fetches(&self) -> Vec<PlanNode> {
+        self.members
+            .iter()
+            .flat_map(|member| {
+                member.paths.iter().map(|path| {
+                    PlanNode::Flatten(Self::at_path(path.clone(), member.fetch.clone()))
+                })
+            })
+            .collect()
+    }
 }
 
 /// A `DeferNode` corresponds to one or more `@defer` applications at the same level of "nestedness"
@@ -328,6 +371,10 @@ mod tests {
 
     use super::*;
 
+    fn item() -> Vec<FetchDataPathElement> {
+        vec![FetchDataPathElement::Key(name!("item"), None)]
+    }
+
     fn fetch(kind: FetchKind) -> FetchNode {
         FetchNode {
             subgraph_name: "inventory".into(),
@@ -354,6 +401,30 @@ mod tests {
             input_rewrites: Default::default(),
             context_rewrites: Vec::new(),
         }))
+    }
+
+    /// `single()` only answers for exactly one member at exactly one path.
+    #[test]
+    fn single_requires_one_member_at_one_path() {
+        let member = |paths| FlattenMember {
+            paths,
+            fetch: entity_fetch(),
+        };
+        let cases = [
+            (vec![member(vec![item()])], Some(1)),
+            (vec![member(vec![item()]), member(vec![item()])], None),
+            (vec![member(vec![item(), item()])], None),
+            (Vec::new(), None),
+        ];
+        for (members, single_path_len) in cases {
+            let flatten = FlattenNode { members };
+            assert_eq!(
+                flatten.single().map(|(path, _)| path.len()),
+                single_path_len
+            );
+            let fetch_count: usize = flatten.members.iter().map(|m| m.paths.len()).sum();
+            assert_eq!(flatten.batched_fetches().len(), fetch_count);
+        }
     }
 
     /// A fetch's kind is written out, so reading a plan never guesses it from `requires`.

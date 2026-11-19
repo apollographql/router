@@ -503,7 +503,17 @@ impl StaticCostCalculator {
         match plan_node {
             PlanNode::Sequence { nodes } => self.summed_score_of_nodes(nodes, variables),
             PlanNode::Parallel { nodes } => self.summed_score_of_nodes(nodes, variables),
-            PlanNode::Flatten(flatten_node) => self.score_plan_node(&flatten_node.node, variables),
+            PlanNode::Flatten(flatten_node) => {
+                let mut sum = CostBySubgraph::default();
+                for member in &flatten_node.members {
+                    sum += self.estimated_cost_of_operation(
+                        &member.fetch.service_name,
+                        &member.fetch.operation,
+                        variables,
+                    )?;
+                }
+                Ok(sum)
+            }
             PlanNode::Condition {
                 condition: _,
                 if_clause,

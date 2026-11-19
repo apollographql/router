@@ -3051,7 +3051,7 @@ impl FetchDependencyGraphNode {
                 self.subgraph_name
             );
         };
-        let node = super::PlanNode::Fetch(Box::new(super::FetchNode {
+        let fetch = super::FetchNode {
             subgraph_name: self.subgraph_name.clone(),
             protocol: Default::default(),
             id: self.id.get().copied(),
@@ -3061,15 +3061,12 @@ impl FetchDependencyGraphNode {
             operation_name,
             operation_kind: self.root_kind.into(),
             output_rewrites,
-        }));
+        };
 
         Ok(Some(if let Some(path) = self.merge_at.clone() {
-            super::PlanNode::Flatten(super::FlattenNode {
-                path,
-                node: Box::new(node),
-            })
+            super::PlanNode::Flatten(super::FlattenNode::at_path(path, fetch))
         } else {
-            node
+            super::PlanNode::Fetch(Box::new(fetch))
         }))
     }
 

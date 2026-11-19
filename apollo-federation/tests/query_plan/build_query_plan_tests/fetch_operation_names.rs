@@ -13,10 +13,8 @@ fn second_operation(plan: &QueryPlan) -> String {
     let [_, PlanNode::Flatten(node)] = &*node.nodes else {
         panic!()
     };
-    let PlanNode::Fetch(node) = &*node.node else {
-        panic!()
-    };
-    node.operation_document.to_string()
+    let (_, fetch) = node.single().expect("one fetch at one path");
+    fetch.operation_document.to_string()
 }
 
 macro_rules! assert_starts_with {

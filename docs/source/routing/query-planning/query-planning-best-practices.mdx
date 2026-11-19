@@ -263,7 +263,7 @@ Example dry-run response
 }
 ```
 
-In the JSON plan, `fetchKind.kind` is `Root` for a root fetch and `Entities` for an entity fetch. An entity fetch stores `requires`, `inputRewrites`, and `contextRewrites` inside `fetchKind`.
+In the JSON plan, `fetchKind.kind` is `Root` for a root fetch and `Entities` for an entity fetch. An entity fetch stores `requires`, `inputRewrites`, and `contextRewrites` inside `fetchKind`. A `Flatten` node contains a `members` array. Each member has a `paths` array of response paths and a `fetch` object without a `kind: "Fetch"` tag.
 
 This approach ensures you're analyzing the most similar query plans your router generates in your specific environment configuration, eliminating discrepancies that can arise from standalone tools or simplified reproductions.
 

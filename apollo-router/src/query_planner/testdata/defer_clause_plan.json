@@ -34,39 +34,44 @@
         "subselection": "{ ... on User { name username } }",
         "node": {
           "kind": "Flatten",
-          "path": [
-            "me"
-          ],
-          "node": {
-            "kind": "Fetch",
-            "serviceName": "accounts",
-            "fetchKind": {
-              "kind": "Entities",
-              "requires": [
-                {
-                  "kind": "InlineFragment",
-                  "typeCondition": "User",
-                  "selections": [
-                    {
-                      "kind": "Field",
-                      "name": "__typename"
-                    },
-                    {
-                      "kind": "Field",
-                      "name": "id"
-                    }
-                  ]
-                }
+          "members": [
+            {
+              "paths": [
+                [
+                  "me"
+                ]
               ],
-              "inputRewrites": null,
-              "contextRewrites": null
-            },
-            "variableUsages": [],
-            "operation": "query Me__accounts__1($representations:[_Any!]!){_entities(representations:$representations){...on User{name username}}}",
-            "operationName": "Me__accounts__1",
-            "operationKind": "query",
-            "id": null
-          }
+              "fetch": {
+                "serviceName": "accounts",
+                "fetchKind": {
+                  "kind": "Entities",
+                  "requires": [
+                    {
+                      "kind": "InlineFragment",
+                      "typeCondition": "User",
+                      "selections": [
+                        {
+                          "kind": "Field",
+                          "name": "__typename"
+                        },
+                        {
+                          "kind": "Field",
+                          "name": "id"
+                        }
+                      ]
+                    }
+                  ],
+                  "inputRewrites": null,
+                  "contextRewrites": null
+                },
+                "variableUsages": [],
+                "operation": "query Me__accounts__1($representations:[_Any!]!){_entities(representations:$representations){...on User{name username}}}",
+                "operationName": "Me__accounts__1",
+                "operationKind": "query",
+                "id": null
+              }
+            }
+          ]
         }
       }
     ]

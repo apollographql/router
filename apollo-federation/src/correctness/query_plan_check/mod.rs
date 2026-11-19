@@ -142,6 +142,7 @@ use crate::query_plan::FetchDataPathElement;
 use crate::query_plan::FetchDataRewrite;
 use crate::query_plan::FetchKind;
 use crate::query_plan::FetchNode;
+use crate::query_plan::ParallelNode;
 use crate::query_plan::PlanNode;
 use crate::query_plan::QueryPlan;
 use crate::query_plan::TopLevelPlanNode;
@@ -317,10 +318,9 @@ fn check_path_reaches_a_type(path: &[FetchDataPathElement]) -> Result<(), Compar
 fn condition_variables(plan: &QueryPlan) -> IndexSet<Name> {
     fn walk(node: &PlanNode, out: &mut IndexSet<Name>) {
         match node {
-            PlanNode::Fetch(_) => {}
+            PlanNode::Fetch(_) | PlanNode::Flatten(_) => {}
             PlanNode::Sequence(sequence) => sequence.nodes.iter().for_each(|n| walk(n, out)),
             PlanNode::Parallel(parallel) => parallel.nodes.iter().for_each(|n| walk(n, out)),
-            PlanNode::Flatten(flatten) => walk(&flatten.node, out),
             PlanNode::Defer(defer) => {
                 defer.primary.node.iter().for_each(|n| walk(n, out));
                 defer
@@ -343,14 +343,13 @@ fn condition_variables(plan: &QueryPlan) -> IndexSet<Name> {
         Some(TopLevelPlanNode::Subscription(subscription)) => {
             subscription.rest.iter().for_each(|n| walk(n, &mut out));
         }
-        Some(TopLevelPlanNode::Fetch(_)) => {}
+        Some(TopLevelPlanNode::Fetch(_)) | Some(TopLevelPlanNode::Flatten(_)) => {}
         Some(TopLevelPlanNode::Sequence(node)) => {
             node.nodes.iter().for_each(|n| walk(n, &mut out));
         }
         Some(TopLevelPlanNode::Parallel(node)) => {
             node.nodes.iter().for_each(|n| walk(n, &mut out));
         }
-        Some(TopLevelPlanNode::Flatten(node)) => walk(&node.node, &mut out),
         Some(TopLevelPlanNode::Defer(node)) => {
             node.primary.node.iter().for_each(|n| walk(n, &mut out));
             node.deferred
@@ -426,13 +425,24 @@ impl<'a> Checker<'a> {
                 Ok(added)
             }
             PlanNode::Flatten(flatten) => {
+                let Some((flatten_path, fetch)) = flatten.single() else {
+                    // Fetches sent together never read what each other fetch, so they select
+                    // what they would run in parallel, each at its paths.
+                    let nodes = flatten.batched_fetches();
+                    return self.walk_node(
+                        &PlanNode::Parallel(ParallelNode { nodes }),
+                        reached,
+                        available,
+                        readable,
+                    );
+                };
                 if self.options.check_empty_flatten_path_type_condition {
-                    check_path_reaches_a_type(&flatten.path)?;
+                    check_path_reaches_a_type(flatten_path)?;
                 }
                 let mut path = reached.path.to_vec();
-                path.extend(flatten.path.iter().cloned());
+                path.extend(flatten_path.iter().cloned());
                 self.walk_node(
-                    &flatten.node,
+                    &PlanNode::Fetch(Box::new(fetch.clone())),
                     Reached {
                         path: &path,
                         ..reached

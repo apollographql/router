@@ -11,7 +11,6 @@ use super::MapField;
 use super::Result as UploadResult;
 use super::error::FileUploadError;
 use crate::query_planner::DeferredNode;
-use crate::query_planner::FlattenNode;
 use crate::query_planner::PlanNode;
 use crate::services::execution::QueryPlan;
 
@@ -156,12 +155,17 @@ fn rearrange_plan_node<'a>(
             PlanNode::Defer { primary, deferred }
         }
         PlanNode::Flatten(flatten_node) => {
-            // Rearrange and validate nodes inside 'flatten_node'
-            let node = rearrange_plan_node(&flatten_node.node, acc_variables, variable_ranges)?;
-            PlanNode::Flatten(FlattenNode {
-                node: Box::new(node),
-                path: flatten_node.path.clone(),
-            })
+            // Extract variables used in this node.
+            let usages = flatten_node
+                .members
+                .iter()
+                .flat_map(|member| member.fetch.variable_usages.iter());
+            for variable in usages {
+                if let Some((name, range)) = variable_ranges.get_key_value(variable.as_ref()) {
+                    acc_variables.entry(name).or_insert(range);
+                }
+            }
+            PlanNode::Flatten(flatten_node.clone())
         }
         PlanNode::Sequence { nodes } => {
             // We can't rearange nodes inside a Sequence so just error if "file ranges" of nodes overlaps.
@@ -321,6 +325,22 @@ mod tests {
           "variableUsages": variables.to_owned(),
           "operation": "",
           "operationKind": "query"
+        }))
+    }
+
+    fn fake_flatten(service_name: &str, variables: Vec<&str>) -> serde_json::Value {
+        normalize_json::<PlanNode>(json!({
+          "kind": "Flatten",
+          "members": [{
+            "paths": [[]],
+            "fetch": {
+              "serviceName": service_name.to_owned(),
+              "fetchKind": { "kind": "Root" },
+              "variableUsages": variables.to_owned(),
+              "operation": "",
+              "operationKind": "query"
+            },
+          }],
         }))
     }
 
@@ -563,11 +583,7 @@ mod tests {
 
     #[test]
     fn test_valid_flatten_node() {
-        let root_json = json!({
-          "kind": "Flatten",
-          "path": [],
-          "node": fake_fetch("uploads", vec!["file"]),
-        });
+        let root_json = fake_flatten("uploads", vec!["file"]);
         let query_plan = fake_query_plan(root_json.clone());
 
         let map_field = MapField::new(indexmap! {
@@ -580,39 +596,11 @@ mod tests {
     }
 
     #[test]
-    fn test_inner_error_within_flatten_node() {
-        let query_plan = fake_query_plan(json!({
-          "kind": "Flatten",
-          "path": [],
-          "node": {
-            "kind": "Sequence",
-            "nodes": [
-              fake_fetch("uploads1", vec!["file2"]),
-              fake_fetch("uploads2", vec!["file1"])
-            ]
-          },
-        }));
-
-        let map_field = MapField::new(indexmap! {
-            "0".to_owned() => vec!["variables.file1".to_owned()],
-            "1".to_owned() => vec!["variables.file2".to_owned()],
-        })
-        .unwrap();
-
-        let result = rearrange_query_plan(&query_plan, &map_field);
-        assert_matches!(result, Err(FileUploadError::MisorderedVariables));
-    }
-
-    #[test]
     fn test_flatten_node_overlapping_with_external_node() {
         let query_plan = fake_query_plan(json!({
           "kind": "Sequence",
           "nodes": [
-            {
-              "kind": "Flatten",
-              "path": [],
-              "node": fake_fetch("uploads1", vec!["file"]),
-            },
+            fake_flatten("uploads1", vec!["file"]),
             fake_fetch("uploads2", vec!["file"]),
           ]
         }));

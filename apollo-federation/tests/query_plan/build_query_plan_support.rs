@@ -309,7 +309,11 @@ pub(crate) fn find_fetch_nodes_for_subgraph<'plan>(
                 }
             }
             TopLevelPlanNode::Flatten(inner) => {
-                visit_node(subgraph_name, &mut fetch_nodes, Some(&inner.node))
+                for member in &inner.members {
+                    if member.fetch.subgraph_name.as_ref() == subgraph_name {
+                        fetch_nodes.push(&member.fetch)
+                    }
+                }
             }
             TopLevelPlanNode::Defer(inner) => {
                 visit_node(
@@ -353,7 +357,11 @@ pub(crate) fn find_fetch_nodes_for_subgraph<'plan>(
                     }
                 }
                 PlanNode::Flatten(inner) => {
-                    visit_node(subgraph_name, fetch_nodes, Some(&inner.node))
+                    for member in &inner.members {
+                        if member.fetch.subgraph_name.as_ref() == subgraph_name {
+                            fetch_nodes.push(&member.fetch)
+                        }
+                    }
                 }
                 PlanNode::Defer(inner) => {
                     visit_node(subgraph_name, fetch_nodes, inner.primary.node.as_deref());
