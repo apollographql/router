@@ -293,6 +293,13 @@ impl Subgraph {
         let mut entities = Vec::new();
         let immutable_type_map = schema.types.to_owned();
         for (named_type, extended_type) in immutable_type_map.iter() {
+            // Interfaces may also have `@key` (entity interfaces), but union members must be
+            // object types. Like the `_Entity` type spec in `typestate.rs`, only include objects:
+            // `_entities` always resolves to object types, and federation requires that every
+            // implementation of an entity interface is itself an entity in that subgraph.
+            if !matches!(extended_type, ExtendedType::Object(_)) {
+                continue;
+            }
             let is_entity = extended_type
                 .directives()
                 .iter()
