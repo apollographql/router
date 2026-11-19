@@ -293,6 +293,8 @@ async fn subscription_task(
                 let _ = sender
                     .send(subscription_fatal_error("subscription has been closed due to a configuration reload", SUBSCRIPTION_CONFIG_RELOAD_EXTENSION_CODE))
                     .await;
+
+                break;
             }
             message = receiver.next() => {
                 match message {
@@ -423,6 +425,7 @@ mod tests {
     /// reads the previous one, like a slow consumer or a slow execution hook.
     struct Harness {
         client_rx: mpsc::Receiver<Response>,
+        configuration_tx: mpsc::Sender<Weak<Configuration>>,
         schema_tx: mpsc::Sender<Arc<Schema>>,
         _closed_tx: broadcast::Sender<()>,
         task: JoinHandle<()>,
@@ -476,6 +479,7 @@ mod tests {
                 })
                 .unwrap_or_else(|_| panic!("the params channel has room"));
 
+            let (configuration_tx, configuration_rx) = mpsc::channel(1);
             let (schema_tx, schema_rx) = mpsc::channel(1);
 
             let task = tokio::spawn(subscription_task(
@@ -484,12 +488,13 @@ mod tests {
                 query_plan,
                 params_rx,
                 supergraph_request,
-                Box::pin(futures::stream::pending()),
+                Box::pin(ReceiverStream::new(configuration_rx)),
                 Box::pin(ReceiverStream::new(schema_rx)),
             ));
 
             Self {
                 client_rx,
+                configuration_tx,
                 schema_tx,
                 _closed_tx: closed_tx,
                 task,
@@ -556,6 +561,20 @@ mod tests {
         assert_eq!(
             harness.expect_close().await,
             SUBSCRIPTION_SCHEMA_RELOAD_EXTENSION_CODE
+        );
+        harness.expect_ended().await;
+    }
+
+    #[tokio::test]
+    async fn configuration_reload_closes_subscription_while_events_keep_arriving() {
+        let mut harness = Harness::start(Context::new(), SubscriptionConfig::default());
+        harness.expect_events(1, 3).await;
+
+        harness.configuration_tx.send(Weak::new()).await.unwrap();
+
+        assert_eq!(
+            harness.expect_close().await,
+            SUBSCRIPTION_CONFIG_RELOAD_EXTENSION_CODE
         );
         harness.expect_ended().await;
     }
