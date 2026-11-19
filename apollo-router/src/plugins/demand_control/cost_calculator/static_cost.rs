@@ -2792,6 +2792,42 @@ mod tests {
     }
 
     #[test]
+    fn entity_counts_use_largest_size_across_interface_and_object_selections() {
+        // `first` selects `toys` through the `Animal` interface, whose `@listSize` is 3. `second`
+        // doesn't know the interface, so it selects the same list through `Cat`, whose `@listSize`
+        // is 7. They are the same list in the response, so the entity fetch to `third` that
+        // extends the toys is sized by the larger of the two.
+        let schema = include_str!("./fixtures/federated_interface_list_schema.graphql");
+        let query = "{ pet { toys { a b c } } }";
+        let (mut node, calculator) = plan_and_calculator(schema, query, 10, Default::default());
+
+        for _ in 0..2 {
+            let variables = Object::new();
+            let counts = calculator
+                .estimate_entity_counts(&node, &variables)
+                .unwrap();
+            assert_eq!(
+                counts.count_at(&Path::from_slice(&["pet", "toys", "@"])),
+                Some(7)
+            );
+
+            let ctx = PlanScoringContext {
+                variables: &variables,
+                entity_counts: &counts,
+            };
+            let cost = calculator.score_plan_node(&node, &ctx).unwrap();
+            // first: pet(1) + toys[3] × Toy(1), sized by `Animal.toys`
+            assert_eq!(cost.get("first"), Some(4.0));
+            // second: _entities[1] × (Cat(1) + toys[7] × Toy(1)), sized by `Cat.toys`
+            assert_eq!(cost.get("second"), Some(8.0));
+            // third: _entities[7] × Toy(1)
+            assert_eq!(cost.get("third"), Some(7.0));
+
+            reverse_parallel_nodes(&mut node);
+        }
+    }
+
+    #[test]
     fn negative_slicing_argument_does_not_produce_negative_entity_fetch_cost() {
         let query = "{ firstItems(first: -5) { detail { text } } }";
         assert_eq!(
