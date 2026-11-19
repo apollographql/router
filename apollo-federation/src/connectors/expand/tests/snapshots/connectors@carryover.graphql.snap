@@ -348,6 +348,7 @@ input_file: apollo-federation/src/connectors/expand/tests/schemas/expand/carryov
             connect_extensions: None,
             connect_is_success: None,
         },
+        requires: [],
         output_type: Some(
             List(
                 Named(
@@ -762,6 +763,7 @@ input_file: apollo-federation/src/connectors/expand/tests/schemas/expand/carryov
             connect_extensions: None,
             connect_is_success: None,
         },
+        requires: [],
         output_type: Some(
             Named(
                 "T",
@@ -949,6 +951,7 @@ input_file: apollo-federation/src/connectors/expand/tests/schemas/expand/carryov
             connect_extensions: None,
             connect_is_success: None,
         },
+        requires: [],
         output_type: Some(
             Named(
                 "R",

@@ -1002,6 +1002,7 @@ connector:
                     debug: Default::default(),
                 }));
                 let connector = Arc::new(Connector {
+                    requires: Vec::new(),
                     id: ConnectId::new(
                         "connector_subgraph".into(),
                         Some(SourceName::cast("source")),
@@ -1440,6 +1441,7 @@ subgraph:
                     debug: Default::default(),
                 }));
                 let connector = Arc::new(Connector {
+                    requires: Vec::new(),
                     id: ConnectId::new(
                         "connector_subgraph".into(),
                         Some(SourceName::cast("source")),

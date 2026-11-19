@@ -627,6 +627,7 @@ mod tests {
         };
 
         let connector = Connector {
+            requires: Vec::new(),
             spec: ConnectSpec::V0_5,
             schema_subtypes_map: Default::default(),
             id: ConnectId::new(
@@ -885,6 +886,7 @@ mod tests {
         };
 
         let connector = Connector {
+            requires: Vec::new(),
             spec: ConnectSpec::V0_5,
             schema_subtypes_map: Default::default(),
             id: ConnectId::new(
@@ -1192,6 +1194,7 @@ mod tests {
         };
 
         let connector = Connector {
+            requires: Vec::new(),
             spec: ConnectSpec::V0_5,
             schema_subtypes_map: Default::default(),
             id: ConnectId::new(
@@ -1292,6 +1295,7 @@ mod tests {
     #[tokio::test]
     async fn test_handle_responses_root_fields() {
         let connector = Arc::new(Connector {
+            requires: Vec::new(),
             spec: ConnectSpec::V0_1,
             schema_subtypes_map: Default::default(),
             id: ConnectId::new(
@@ -1408,6 +1412,7 @@ mod tests {
     #[tokio::test]
     async fn test_handle_responses_entities() {
         let connector = Arc::new(Connector {
+            requires: Vec::new(),
             spec: ConnectSpec::V0_1,
             schema_subtypes_map: Default::default(),
             id: ConnectId::new(
@@ -1530,6 +1535,7 @@ mod tests {
     #[tokio::test]
     async fn test_handle_responses_batch() {
         let connector = Arc::new(Connector {
+            requires: Vec::new(),
             spec: ConnectSpec::V0_2,
             id: ConnectId::new_on_object("subgraph_name".into(), None, name!(User), None, 0),
             schema_subtypes_map: Default::default(),
@@ -1657,6 +1663,7 @@ mod tests {
     #[tokio::test]
     async fn test_handle_responses_batch_reordered_extra_and_missing() {
         let connector = Arc::new(Connector {
+            requires: Vec::new(),
             spec: ConnectSpec::V0_2,
             id: ConnectId::new_on_object("subgraph_name".into(), None, name!(User), None, 0),
             schema_subtypes_map: Default::default(),
@@ -1771,6 +1778,7 @@ mod tests {
     #[tokio::test]
     async fn test_handle_responses_entity_field() {
         let connector = Arc::new(Connector {
+            requires: Vec::new(),
             spec: ConnectSpec::V0_1,
             schema_subtypes_map: Default::default(),
             id: ConnectId::new(
@@ -1903,6 +1911,7 @@ mod tests {
     #[tokio::test]
     async fn test_handle_responses_errors() {
         let connector = Arc::new(Connector {
+            requires: Vec::new(),
             spec: ConnectSpec::V0_1,
             schema_subtypes_map: Default::default(),
             id: ConnectId::new(
@@ -2189,6 +2198,7 @@ mod tests {
     async fn test_handle_responses_status() {
         let selection = JSONSelection::parse("$status").unwrap();
         let connector = Arc::new(Connector {
+            requires: Vec::new(),
             spec: ConnectSpec::V0_1,
             schema_subtypes_map: Default::default(),
             id: ConnectId::new(
@@ -2288,6 +2298,7 @@ mod tests {
             connect_is_success: Some(is_success.clone()),
         };
         let connector = Arc::new(Connector {
+            requires: Vec::new(),
             spec: ConnectSpec::V0_1,
             schema_subtypes_map: Default::default(),
             id: ConnectId::new(
@@ -2397,6 +2408,7 @@ mod tests {
 
     fn make_connector() -> Arc<Connector> {
         Arc::new(Connector {
+            requires: Vec::new(),
             spec: ConnectSpec::V0_1,
             schema_subtypes_map: Default::default(),
             id: ConnectId::new(
@@ -2531,6 +2543,7 @@ mod tests {
     #[tokio::test]
     async fn errors_as_data_maps_message_and_extensions_when_is_success_false() {
         let connector = Arc::new(Connector {
+            requires: Vec::new(),
             spec: ConnectSpec::V0_2,
             schema_subtypes_map: Default::default(),
             id: ConnectId::new(
@@ -2662,6 +2675,7 @@ mod tests {
     #[tokio::test]
     async fn errors_as_data_deep_merges_nested_extensions_with_defaults() {
         let connector = Arc::new(Connector {
+            requires: Vec::new(),
             spec: ConnectSpec::V0_2,
             schema_subtypes_map: Default::default(),
             id: ConnectId::new(
@@ -2766,6 +2780,7 @@ mod tests {
     #[tokio::test]
     async fn errors_as_data_deep_merges_nested_extensions_across_source_and_connect() {
         let connector = Arc::new(Connector {
+            requires: Vec::new(),
             spec: ConnectSpec::V0_2,
             schema_subtypes_map: Default::default(),
             id: ConnectId::new(

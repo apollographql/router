@@ -63,6 +63,7 @@ mod tests {
     #[test]
     fn test_connect_spec_counts() {
         let connector = Connector {
+            requires: Vec::new(),
             spec: ConnectSpec::V0_1,
             schema_subtypes_map: Default::default(),
             id: ConnectId::new(

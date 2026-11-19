@@ -172,6 +172,7 @@ mod tests {
                 debug: Default::default(),
             }));
             let connector = Connector {
+                requires: Vec::new(),
                 id: ConnectId::new(
                     "subgraph".into(),
                     Some(SourceName::cast("source")),
@@ -262,6 +263,7 @@ mod tests {
                 debug: Default::default(),
             }));
             let connector = Connector {
+                requires: Vec::new(),
                 id: ConnectId::new(
                     "subgraph".into(),
                     Some(SourceName::cast("source")),
