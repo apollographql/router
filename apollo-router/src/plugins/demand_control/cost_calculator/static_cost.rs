@@ -5,7 +5,6 @@ use apollo_compiler::ast;
 use apollo_compiler::ast::NamedType;
 use apollo_compiler::executable::ExecutableDocument;
 use apollo_compiler::executable::Field;
-use apollo_compiler::executable::FragmentMap;
 use apollo_compiler::executable::FragmentSpread;
 use apollo_compiler::executable::InlineFragment;
 use apollo_compiler::executable::Operation;
@@ -30,11 +29,8 @@ use crate::json_ext::Object;
 use crate::json_ext::Path;
 use crate::json_ext::PathElement;
 use crate::plugins::demand_control::cost_calculator::directives::ListSizeDirective;
-use crate::query_planner::DeferredNode;
 use crate::query_planner::PlanNode;
-use crate::query_planner::Primary;
 use crate::query_planner::QueryPlan;
-use crate::query_planner::fetch::FetchNode;
 use crate::query_planner::rewrites::DataRewrite;
 use crate::spec::TYPENAME;
 
@@ -50,19 +46,17 @@ struct ScoringContext<'a> {
     query: &'a ExecutableDocument,
     variables: &'a Object,
     should_estimate_requires: bool,
-    /// When scoring a subgraph operation triggered by an entity fetch (i.e. FetchNode.requires
-    /// is non-empty), this holds the estimated number of representations that will be sent.
+    /// The subgraph the operation is sent to, or an empty string for a supergraph operation.
+    subgraph: &'a str,
+    /// Whether this is the operation of an entity fetch (i.e. `FetchNode.requires` is non-empty).
+    is_entity_fetch: bool,
+    /// For an entity fetch, the estimated number of representations that will be sent, if known.
     /// Used as the `instance_count` for the `_entities` root field instead of the configured
     /// default `list_size`.
     entity_count_hint: Option<i32>,
-}
-
-/// Context for scoring a query plan (`score_plan_node` and its helpers).
-struct PlanScoringContext<'a> {
-    variables: &'a Object,
-    /// Estimated entity count at each entity-fetch flatten path. Precomputed by
-    /// `estimate_entity_counts`.
-    entity_counts: &'a EntityCounts,
+    /// Response keys the query planner aliased in this fetch's operation, mapped to the response
+    /// key the data ends up under (which is the one flatten paths use).
+    renamed_keys: HashMap<&'a str, &'a str>,
 }
 
 /// Estimated number of objects at each response path that an entity fetch targets.
@@ -70,8 +64,8 @@ struct PlanScoringContext<'a> {
 /// This is a trie over the plan's flatten paths, reduced to what identifies a position in the
 /// response shape: field response keys and list (`@`) markers. Type conditions are ignored, so
 /// a count is the number of objects at a path regardless of their concrete type. Only flatten
-/// paths (and their prefixes) have nodes, which lets the walk over a fetch's operation skip any
-/// selection that can't lead to an entity fetch.
+/// paths (and their prefixes) have nodes, so scoring a fetch's operation only tracks counts for
+/// selections that can lead to an entity fetch.
 #[derive(Default)]
 struct EntityCounts {
     keys: HashMap<String, EntityCounts>,
@@ -108,6 +102,7 @@ impl EntityCounts {
             .count()
     }
 
+    #[cfg(test)]
     fn node(&self, path: &Path) -> Option<&EntityCounts> {
         let mut node = self;
         for element in &path.0 {
@@ -133,6 +128,7 @@ impl EntityCounts {
     }
 
     /// The estimated number of objects at a flatten path, if a fetch that produces them was seen.
+    #[cfg(test)]
     fn count_at(&self, path: &Path) -> Option<i32> {
         self.node(path)?.count
     }
@@ -154,16 +150,59 @@ impl EntityCounts {
     }
 }
 
-/// The parts of walking one fetch's operation to count objects (`record_counts_in_selection_set`)
-/// that stay the same throughout the walk.
-struct CountingContext<'a> {
-    schema: &'a DemandControlledSchema,
+/// Where scoring is in the response while it walks a fetch's operation: the `EntityCounts` node
+/// for the current response path, and the estimated number of objects at that path.
+struct ObjectCount<'a> {
+    counts: &'a mut EntityCounts,
+    count: i32,
+}
+
+impl ObjectCount<'_> {
+    fn reborrow(&mut self) -> ObjectCount<'_> {
+        ObjectCount {
+            counts: &mut *self.counts,
+            count: self.count,
+        }
+    }
+}
+
+/// A fetch in a query plan, with what scoring needs to know about where it sits in the plan.
+struct PlannedFetch<'a> {
+    /// The response path the fetch's data lands at, or `None` for the response root.
+    flatten_path: Option<&'a Path>,
     subgraph: &'a str,
-    fragments: &'a FragmentMap,
-    variables: &'a Object,
-    /// Response keys the query planner aliased in this fetch's operation, mapped to the response
-    /// key the data ends up under (which is the one flatten paths use).
-    renamed_keys: HashMap<&'a str, &'a str>,
+    operation: &'a SerializableDocument,
+    is_entity_fetch: bool,
+    output_rewrites: &'a [DataRewrite],
+}
+
+/// How the costs of a plan's fetches combine into the cost of the plan. This has the plan's
+/// structure, with each fetch replaced by its index in the list of fetches collected with it.
+enum PlanCost {
+    Fetch(usize),
+    Sum(Vec<PlanCost>),
+    Max(Box<PlanCost>, Box<PlanCost>),
+}
+
+impl PlanCost {
+    fn total(&self, fetches: &[PlannedFetch], fetch_costs: &[f64]) -> CostBySubgraph {
+        match self {
+            PlanCost::Fetch(index) => {
+                CostBySubgraph::new(fetches[*index].subgraph, fetch_costs[*index])
+            }
+            PlanCost::Sum(nodes) => {
+                let mut sum = CostBySubgraph::default();
+                for node in nodes {
+                    sum += node.total(fetches, fetch_costs);
+                }
+                sum
+            }
+            PlanCost::Max(left, right) => CostBySubgraph::maximum(
+                left.total(fetches, fetch_costs),
+                right.total(fetches, fetch_costs),
+            ),
+        }
+    }
 }
 
 /// Sizing information on a field's output
@@ -323,14 +362,11 @@ impl StaticCostCalculator {
     }
 
     /// Computes the `field`'s output size from the `@listSize` context flowing into it, plus the
-    /// directive context its children inherit. This is the sizing logic shared by `score_field`
-    /// and `record_counts_in_selection_set`; both feed it the same `(list_size_directives,
-    /// inherited_list_sizes)` pair and read the same output information back.
-    ///
-    /// `definition` is the field's schema definition. If it's None, treated as "no `@listSize`".
+    /// directive context its children inherit. `score_field` uses the size both to cost the field
+    /// and to count the objects it returns.
     fn output_sizing(
         &self,
-        definition: Option<&FieldDefinition>,
+        definition: &FieldDefinition,
         field: &Field,
         list_size_directives: &[ListSizeDirective],
         inherited_list_sizes: &[ListSizeDirective],
@@ -358,10 +394,8 @@ impl StaticCostCalculator {
             .filter_map(|dir| dir.descend(field.name.as_str()))
             .collect();
 
-        let own_list_size_directives = match definition {
-            Some(definition) => Self::own_list_size_directives(definition, field, variables)?,
-            None => Vec::new(),
-        };
+        let own_list_size_directives =
+            Self::own_list_size_directives(definition, field, variables)?;
 
         // This field's own `@listSize`, or an ancestor sizedFields size that descended onto it.
         let effective_expected_size = own_list_size_directives
@@ -412,6 +446,9 @@ impl StaticCostCalculator {
     /// This should be okay, as we don't want this implementation to have to know about
     /// any deduplication happening in the query planner, and we're estimating an upper
     /// bound for cost anyway.
+    ///
+    /// When `objects` is given, this also records how many objects the field places at its
+    /// response path, for sizing the entity fetches that extend them (see `score_plan`).
     fn score_field(
         &self,
         ctx: &ScoringContext,
@@ -419,7 +456,7 @@ impl StaticCostCalculator {
         parent_type: &NamedType,
         list_size_directives: &[ListSizeDirective],
         inherited_list_sizes: &[ListSizeDirective],
-        subgraph: &str,
+        objects: Option<ObjectCount>,
     ) -> Result<f64, DemandControlError> {
         // When we pre-process the schema, __typename isn't included. So, we short-circuit here to avoid failed lookups.
         if field.name == TYPENAME {
@@ -440,16 +477,17 @@ impl StaticCostCalculator {
             })?;
 
         let sizing = self.output_sizing(
-            Some(definition),
+            definition,
             field,
             list_size_directives,
             inherited_list_sizes,
-            subgraph,
+            ctx.subgraph,
             ctx.variables,
         )?;
 
-        let instance_count = if field.ty().is_list()
-            && field.name == ENTITIES_QUERY
+        let is_entities_field = ctx.is_entity_fetch && field.name == ENTITIES_QUERY;
+        let instance_count = if is_entities_field
+            && field.ty().is_list()
             && sizing.list_size_from_upstream.is_none()
             && let Some(hint) = ctx.entity_count_hint
         {
@@ -458,6 +496,33 @@ impl StaticCostCalculator {
             hint.max(0)
         } else {
             sizing.instance_count
+        };
+
+        // Follow the response path into this field, recording how many objects it places there.
+        let child_objects = match objects {
+            None => None,
+            // `_entities` isn't part of the response: its selections land directly at the entity
+            // fetch's flatten path, once per representation.
+            Some(objects) if is_entities_field => Some(ObjectCount {
+                counts: objects.counts,
+                count: instance_count,
+            }),
+            Some(ObjectCount { counts, count }) => {
+                let response_key = field.response_name().as_str();
+                let response_key = ctx
+                    .renamed_keys
+                    .get(response_key)
+                    .copied()
+                    .unwrap_or(response_key);
+                counts
+                    .field_mut(response_key, field.ty())
+                    .and_then(|counts| {
+                        let count = count.saturating_mul(instance_count);
+                        counts.record(count);
+                        // Stop following the path once nothing below it is an entity fetch's.
+                        (!counts.is_empty()).then_some(ObjectCount { counts, count })
+                    })
+            }
         };
 
         // Per-call cost: the cost to resolve this field once (from @cost on the field
@@ -507,7 +572,7 @@ impl StaticCostCalculator {
             field.ty().inner_named_type(),
             &sizing.own_list_size_directives,
             &sizing.descended_list_sizes,
-            subgraph,
+            child_objects,
         )?;
 
         let mut requirements_cost = 0.0;
@@ -523,7 +588,7 @@ impl StaticCostCalculator {
                     parent_type,
                     &sizing.own_list_size_directives,
                     &[],
-                    subgraph,
+                    None,
                 )?;
             }
         }
@@ -551,7 +616,7 @@ impl StaticCostCalculator {
         fragment_spread: &FragmentSpread,
         list_size_directives: &[ListSizeDirective],
         inherited_list_sizes: &[ListSizeDirective],
-        subgraph: &str,
+        objects: Option<ObjectCount>,
     ) -> Result<f64, DemandControlError> {
         let fragment = fragment_spread.fragment_def(ctx.query).ok_or_else(|| {
             DemandControlError::QueryParseFailure(format!(
@@ -565,7 +630,7 @@ impl StaticCostCalculator {
             fragment.type_condition(),
             list_size_directives,
             inherited_list_sizes,
-            subgraph,
+            objects,
         )
     }
 
@@ -576,7 +641,7 @@ impl StaticCostCalculator {
         parent_type: &NamedType,
         list_size_directives: &[ListSizeDirective],
         inherited_list_sizes: &[ListSizeDirective],
-        subgraph: &str,
+        objects: Option<ObjectCount>,
     ) -> Result<f64, DemandControlError> {
         self.score_selection_set(
             ctx,
@@ -587,7 +652,7 @@ impl StaticCostCalculator {
                 .unwrap_or(parent_type),
             list_size_directives,
             inherited_list_sizes,
-            subgraph,
+            objects,
         )
     }
 
@@ -595,7 +660,7 @@ impl StaticCostCalculator {
         &self,
         operation: &Operation,
         ctx: &ScoringContext,
-        subgraph: &str,
+        objects: Option<ObjectCount>,
     ) -> Result<f64, DemandControlError> {
         let mut cost = operation_base_cost(operation);
 
@@ -612,7 +677,7 @@ impl StaticCostCalculator {
             root_type_name,
             &[],
             &[],
-            subgraph,
+            objects,
         )?;
 
         Ok(cost)
@@ -625,7 +690,7 @@ impl StaticCostCalculator {
         parent_type: &NamedType,
         list_size_directives: &[ListSizeDirective],
         inherited_list_sizes: &[ListSizeDirective],
-        subgraph: &str,
+        objects: Option<ObjectCount>,
     ) -> Result<f64, DemandControlError> {
         match selection {
             Selection::Field(f) => self.score_field(
@@ -634,14 +699,14 @@ impl StaticCostCalculator {
                 parent_type,
                 list_size_directives,
                 inherited_list_sizes,
-                subgraph,
+                objects,
             ),
             Selection::FragmentSpread(s) => self.score_fragment_spread(
                 ctx,
                 s,
                 list_size_directives,
                 inherited_list_sizes,
-                subgraph,
+                objects,
             ),
             Selection::InlineFragment(i) => self.score_inline_fragment(
                 ctx,
@@ -649,7 +714,7 @@ impl StaticCostCalculator {
                 parent_type,
                 list_size_directives,
                 inherited_list_sizes,
-                subgraph,
+                objects,
             ),
         }
     }
@@ -661,7 +726,7 @@ impl StaticCostCalculator {
         parent_type_name: &NamedType,
         list_size_directives: &[ListSizeDirective],
         inherited_list_sizes: &[ListSizeDirective],
-        subgraph: &str,
+        mut objects: Option<ObjectCount>,
     ) -> Result<f64, DemandControlError> {
         let mut cost = 0.0;
         for selection in selection_set.selections.iter() {
@@ -671,7 +736,7 @@ impl StaticCostCalculator {
                 parent_type_name,
                 list_size_directives,
                 inherited_list_sizes,
-                subgraph,
+                objects.as_mut().map(ObjectCount::reborrow),
             )?;
         }
         Ok(cost)
@@ -692,134 +757,24 @@ impl StaticCostCalculator {
         false
     }
 
-    fn score_plan_node(
+    /// Scores the operation(s) in a document.
+    fn score_document(
         &self,
-        plan_node: &PlanNode,
-        ctx: &PlanScoringContext,
-    ) -> Result<CostBySubgraph, DemandControlError> {
-        match plan_node {
-            PlanNode::Sequence { nodes } => self.summed_score_of_nodes(nodes, ctx),
-            PlanNode::Parallel { nodes } => self.summed_score_of_nodes(nodes, ctx),
-            PlanNode::Flatten(flatten_node) => {
-                // Check if the inner node is an entity fetch (non-empty requires).
-                // If so, supply the entity count precomputed for this flatten path so that
-                // _entities is scored with the right number of representations.
-                if let PlanNode::Fetch(fetch_node) = flatten_node.node.as_ref()
-                    && !fetch_node.requires.is_empty()
-                {
-                    let entity_count = ctx.entity_counts.count_at(&flatten_node.path);
-                    return self.estimated_cost_of_operation(
-                        &fetch_node.service_name,
-                        &fetch_node.operation,
-                        ctx,
-                        entity_count,
-                    );
-                }
-                // Non-entity flatten or nested structure: recurse normally.
-                self.score_plan_node(&flatten_node.node, ctx)
-            }
-            // TODO: Evaluate the condition using the ctx.variables.
-            PlanNode::Condition {
-                condition: _,
-                if_clause,
-                else_clause,
-            } => self.max_score_of_nodes(if_clause, else_clause, ctx),
-            PlanNode::Defer { primary, deferred } => {
-                self.summed_score_of_deferred_nodes(primary, deferred, ctx)
-            }
-            PlanNode::Fetch(fetch_node) => self.estimated_cost_of_operation(
-                &fetch_node.service_name,
-                &fetch_node.operation,
-                ctx,
-                None,
-            ),
-            PlanNode::Subscription { primary, rest: _ } => self.estimated_cost_of_operation(
-                &primary.service_name,
-                &primary.operation,
-                ctx,
-                None,
-            ),
+        ctx: &ScoringContext,
+        mut objects: Option<ObjectCount>,
+    ) -> Result<f64, DemandControlError> {
+        let mut cost = 0.0;
+        if let Some(op) = &ctx.query.operations.anonymous {
+            cost += self.score_operation(op, ctx, objects.as_mut().map(ObjectCount::reborrow))?;
         }
-    }
-
-    fn estimated_cost_of_operation(
-        &self,
-        subgraph: &str,
-        operation: &SerializableDocument,
-        ctx: &PlanScoringContext,
-        entity_count_hint: Option<i32>,
-    ) -> Result<CostBySubgraph, DemandControlError> {
-        tracing::debug!("On subgraph {}, scoring operation: {}", subgraph, operation);
-
-        let schema = self.subgraph_schemas.get(subgraph).ok_or_else(|| {
-            DemandControlError::QueryParseFailure(format!(
-                "Query planner did not provide a schema for service {subgraph}"
-            ))
-        })?;
-
-        let operation = operation
-            .as_parsed()
-            .map_err(DemandControlError::SubgraphOperationNotInitialized)?;
-        let cost = self.estimated(
-            operation,
-            schema,
-            ctx.variables,
-            false,
-            subgraph,
-            entity_count_hint,
-        )?;
-        Ok(CostBySubgraph::new(subgraph, cost))
-    }
-
-    fn max_score_of_nodes(
-        &self,
-        left: &Option<Box<PlanNode>>,
-        right: &Option<Box<PlanNode>>,
-        ctx: &PlanScoringContext,
-    ) -> Result<CostBySubgraph, DemandControlError> {
-        match (left, right) {
-            (None, None) => Ok(CostBySubgraph::default()),
-            (None, Some(right)) => self.score_plan_node(right, ctx),
-            (Some(left), None) => self.score_plan_node(left, ctx),
-            (Some(left), Some(right)) => {
-                let left_score = self.score_plan_node(left, ctx)?;
-                let right_score = self.score_plan_node(right, ctx)?;
-                Ok(CostBySubgraph::maximum(left_score, right_score))
-            }
+        for (_name, op) in ctx.query.operations.named.iter() {
+            cost += self.score_operation(op, ctx, objects.as_mut().map(ObjectCount::reborrow))?;
         }
-    }
-
-    fn summed_score_of_deferred_nodes(
-        &self,
-        primary: &Primary,
-        deferred: &Vec<DeferredNode>,
-        ctx: &PlanScoringContext,
-    ) -> Result<CostBySubgraph, DemandControlError> {
-        let mut score = CostBySubgraph::default();
-        if let Some(node) = &primary.node {
-            score += self.score_plan_node(node, ctx)?;
-        }
-        for d in deferred {
-            if let Some(node) = &d.node {
-                score += self.score_plan_node(node, ctx)?;
-            }
-        }
-        Ok(score)
-    }
-
-    fn summed_score_of_nodes(
-        &self,
-        nodes: &Vec<PlanNode>,
-        ctx: &PlanScoringContext,
-    ) -> Result<CostBySubgraph, DemandControlError> {
-        let mut sum = CostBySubgraph::default();
-        for node in nodes {
-            sum += self.score_plan_node(node, ctx)?;
-        }
-        Ok(sum)
+        Ok(cost)
     }
 
     /// Determine cost for a single-subgraph operation.
+    #[cfg(test)]
     pub(crate) fn estimated(
         &self,
         query: &ExecutableDocument,
@@ -827,23 +782,18 @@ impl StaticCostCalculator {
         variables: &Object,
         should_estimate_requires: bool,
         subgraph: &str,
-        entity_count_hint: Option<i32>,
     ) -> Result<f64, DemandControlError> {
-        let mut cost = 0.0;
         let ctx = ScoringContext {
             schema,
             query,
             variables,
             should_estimate_requires,
-            entity_count_hint,
+            subgraph,
+            is_entity_fetch: false,
+            entity_count_hint: None,
+            renamed_keys: Default::default(),
         };
-        if let Some(op) = &query.operations.anonymous {
-            cost += self.score_operation(op, &ctx, subgraph)?;
-        }
-        for (_name, op) in query.operations.named.iter() {
-            cost += self.score_operation(op, &ctx, subgraph)?;
-        }
-        Ok(cost)
+        self.score_document(&ctx, None)
     }
 
     /// Determine cost for an operation which may span multiple subgraphs.
@@ -855,97 +805,102 @@ impl StaticCostCalculator {
         let Some(root) = query_plan.root.as_ref() else {
             return Ok(CostBySubgraph::default());
         };
-        let entity_counts = self.estimate_entity_counts(root, variables)?;
-        let ctx = PlanScoringContext {
-            variables,
-            entity_counts: &entity_counts,
-        };
-        self.score_plan_node(root, &ctx)
+        let (cost, _) = self.score_plan(root, variables)?;
+        Ok(cost)
     }
 
-    /// Estimate the number of entities at each entity-fetch flatten path.
+    /// Scores the fetches of a query plan and combines their costs. Also returns the estimated
+    /// number of objects at each entity-fetch flatten path, which the scoring is based on.
     ///
-    /// An entity at a flatten path was produced by another fetch, whose cost we already estimate
-    /// by sizing its lists. We walk the plan's fetches and record, at each flatten path, the number
-    /// of objects a fetch places there — reusing the same `@listSize` sizing as cost scoring. An
-    /// entity fetch at that path then just looks the count up; it extends those objects with more
-    /// fields without changing how many there are.
+    /// An entity fetch's `_entities` field returns one object per entity at the fetch's flatten
+    /// path. Those entities were produced by another fetch, whose lists we size when scoring it.
+    /// So as a fetch is scored, we record at each flatten path the number of objects it places
+    /// there, and an entity fetch at that path then just looks the count up; it extends those
+    /// objects with more fields without changing how many there are.
     ///
-    /// Several fetches can select the same list, and size it differently when their subgraphs
-    /// have different configured list sizes. They describe the same list in the response, so the
+    /// Several fetches can select the same list, and size it differently: their subgraphs can
+    /// have different configured list sizes, or one can select the list through an interface and
+    /// another through an object type. They describe the same list in the response, so the
     /// largest size is kept. A fetch only records counts below the path its data lands at, so
-    /// fetches are walked shallowest path first: every count is then final before a fetch at that
+    /// fetches are scored shallowest path first: every count is then final before a fetch at that
     /// path reads it. (Plan order wouldn't do: it only puts a fetch after the ones it depends on,
     /// and another fetch selecting the same list can come later or run in parallel.)
-    fn estimate_entity_counts(
+    fn score_plan(
         &self,
         root: &PlanNode,
         variables: &Object,
-    ) -> Result<EntityCounts, DemandControlError> {
-        let mut counts = EntityCounts::default();
+    ) -> Result<(CostBySubgraph, EntityCounts), DemandControlError> {
+        let mut entity_counts = EntityCounts::default();
         let mut fetches = Vec::new();
-        collect_fetches(root, None, &mut counts, &mut fetches);
-        // Without flatten paths there are no entity fetches to size, so skip walking the fetches.
-        if counts.is_empty() {
-            return Ok(counts);
+        let plan_cost = collect_fetches(root, None, &mut entity_counts, &mut fetches);
+
+        let mut order: Vec<usize> = (0..fetches.len()).collect();
+        order.sort_by_key(|index| fetches[*index].flatten_path.map_or(0, EntityCounts::depth));
+        let mut fetch_costs = vec![0.0; fetches.len()];
+        for index in order {
+            fetch_costs[index] =
+                self.score_fetch(&fetches[index], &mut entity_counts, variables)?;
         }
 
-        fetches.sort_by_key(|(path, _)| path.map_or(0, EntityCounts::depth));
-        for (path, fetch_node) in fetches {
-            let Some(path) = path else {
-                // Root fetch: its selections land at the response root, one object each.
-                self.record_counts_in_fetch(fetch_node, &mut counts, 1, variables)?;
-                continue;
-            };
-            // Every flatten path was added by `collect_fetches`.
-            let Some(base) = counts.node_mut(path) else {
-                continue;
-            };
-            // The objects being extended already exist at the flatten path; their count was
-            // recorded by the fetches above it. If we somehow haven't seen a producer, fall back
-            // to the size `_entities` is scored with when it has no count.
-            let base_count = base
-                .count
-                .unwrap_or_else(|| self.default_list_size(&fetch_node.service_name));
-            self.record_counts_in_fetch(fetch_node, base, base_count, variables)?;
-        }
-        Ok(counts)
+        Ok((plan_cost.total(&fetches, &fetch_costs), entity_counts))
     }
 
-    /// Walk one fetch's subgraph operation, recording object counts at the flatten paths under
-    /// `base` (the response path the fetch's data lands at, holding `base_count` objects). For an
-    /// entity fetch the `_entities` field and its `... on T` fragments are path-transparent — their
-    /// selections land directly at `base`, once per representation.
-    fn record_counts_in_fetch(
+    /// Scores one fetch's subgraph operation, recording in `entity_counts` the number of objects
+    /// it places at the flatten paths below its own.
+    fn score_fetch(
         &self,
-        fetch_node: &FetchNode,
-        base: &mut EntityCounts,
-        base_count: i32,
+        fetch: &PlannedFetch,
+        entity_counts: &mut EntityCounts,
         variables: &Object,
-    ) -> Result<(), DemandControlError> {
-        // Nothing below this fetch's path is the target of an entity fetch.
-        if base.is_empty() {
-            return Ok(());
-        }
-        let subgraph = fetch_node.service_name.as_ref();
-        let Some(schema) = self.subgraph_schemas.get(subgraph) else {
-            return Ok(());
-        };
-        let document = fetch_node
+    ) -> Result<f64, DemandControlError> {
+        let subgraph = fetch.subgraph;
+        tracing::debug!(
+            "On subgraph {}, scoring operation: {}",
+            subgraph,
+            fetch.operation
+        );
+
+        let schema = self.subgraph_schemas.get(subgraph).ok_or_else(|| {
+            DemandControlError::QueryParseFailure(format!(
+                "Query planner did not provide a schema for service {subgraph}"
+            ))
+        })?;
+        let query = fetch
             .operation
             .as_parsed()
             .map_err(DemandControlError::SubgraphOperationNotInitialized)?;
-        let Ok(operation) = document.operations.get(None) else {
-            return Ok(());
+
+        // The objects this fetch's selections land on, and how many of them there are.
+        let (objects, entity_count_hint) = match fetch.flatten_path {
+            // Root fetch: its selections land at the response root, which is one object.
+            None => (
+                Some(ObjectCount {
+                    counts: entity_counts,
+                    count: 1,
+                }),
+                None,
+            ),
+            // The objects being extended already exist at the flatten path; their count was
+            // recorded by the fetches above it. If we somehow haven't seen a producer, fall back
+            // to the size `_entities` is scored with when it has no count.
+            Some(path) => match entity_counts.node_mut(path) {
+                Some(counts) => {
+                    let recorded = counts.count;
+                    let count = recorded.unwrap_or_else(|| self.default_list_size(subgraph));
+                    (Some(ObjectCount { counts, count }), recorded)
+                }
+                None => (None, None),
+            },
         };
+        // Don't track objects if nothing below this fetch's path is the target of an entity fetch.
+        let objects = objects.filter(|objects| !objects.counts.is_empty());
 
         // When selections in a fetch can't be merged under one response key, the query planner
         // aliases them and adds a rewrite that restores the original key in the fetched data.
         // Flatten paths refer to the data after rewrites, so map the aliases back.
-        let renamed_keys = fetch_node
+        let renamed_keys = fetch
             .output_rewrites
             .iter()
-            .flatten()
             .filter_map(|rewrite| match rewrite {
                 DataRewrite::KeyRenamer(renamer) => match renamer.path.0.last() {
                     Some(PathElement::Key(alias, _)) => {
@@ -956,124 +911,18 @@ impl StaticCostCalculator {
                 DataRewrite::ValueSetter(_) => None,
             })
             .collect();
-        let ctx = CountingContext {
+
+        let ctx = ScoringContext {
             schema,
-            subgraph,
-            fragments: &document.fragments,
+            query,
             variables,
+            should_estimate_requires: false,
+            subgraph,
+            is_entity_fetch: fetch.is_entity_fetch,
+            entity_count_hint,
             renamed_keys,
         };
-
-        if fetch_node.requires.is_empty() {
-            self.record_counts_in_selection_set(
-                &ctx,
-                &operation.selection_set,
-                base,
-                base_count,
-                &[],
-                &[],
-            )?;
-        } else {
-            for selection in &operation.selection_set.selections {
-                if let Selection::Field(field) = selection
-                    && field.name == ENTITIES_QUERY
-                {
-                    self.record_counts_in_selection_set(
-                        &ctx,
-                        &field.selection_set,
-                        base,
-                        base_count,
-                        &[],
-                        &[],
-                    )?;
-                }
-            }
-        }
-        Ok(())
-    }
-
-    /// Recurse a selection set, following the response path through `counts` and multiplying the
-    /// object count by each list field's `instance_count` (sized exactly as `score_field` sizes a
-    /// list). Records the count at every flatten path it reaches, and skips selections that don't
-    /// lead to one.
-    /// - Mirrors `score_selection_set`/`score_selection`/`score_field`.
-    fn record_counts_in_selection_set(
-        &self,
-        ctx: &CountingContext,
-        selection_set: &SelectionSet,
-        counts: &mut EntityCounts,
-        current_count: i32,
-        parent_list_sizes: &[ListSizeDirective],
-        inherited_list_sizes: &[ListSizeDirective],
-    ) -> Result<(), DemandControlError> {
-        let parent_type = &selection_set.ty;
-        for selection in &selection_set.selections {
-            match selection {
-                Selection::Field(field) => {
-                    // Sizing mirrors `score_field`.
-                    if field.name == TYPENAME || StaticCostCalculator::skipped_by_directives(field)
-                    {
-                        continue;
-                    }
-
-                    let response_key = field.response_name().as_str();
-                    let response_key = ctx
-                        .renamed_keys
-                        .get(response_key)
-                        .copied()
-                        .unwrap_or(response_key);
-                    let Some(child_counts) = counts.field_mut(response_key, field.ty()) else {
-                        continue;
-                    };
-
-                    let definition = ctx.schema.output_field_definition(parent_type, &field.name);
-                    let sizing = self.output_sizing(
-                        definition,
-                        field,
-                        parent_list_sizes,
-                        inherited_list_sizes,
-                        ctx.subgraph,
-                        ctx.variables,
-                    )?;
-                    let child_count = current_count.saturating_mul(sizing.instance_count);
-                    child_counts.record(child_count);
-
-                    if !child_counts.is_empty() {
-                        self.record_counts_in_selection_set(
-                            ctx,
-                            &field.selection_set,
-                            child_counts,
-                            child_count,
-                            &sizing.own_list_size_directives,
-                            &sizing.descended_list_sizes,
-                        )?;
-                    }
-                }
-                Selection::InlineFragment(inline_fragment) => {
-                    self.record_counts_in_selection_set(
-                        ctx,
-                        &inline_fragment.selection_set,
-                        counts,
-                        current_count,
-                        parent_list_sizes,
-                        inherited_list_sizes,
-                    )?;
-                }
-                Selection::FragmentSpread(fragment_spread) => {
-                    if let Some(fragment) = ctx.fragments.get(&fragment_spread.fragment_name) {
-                        self.record_counts_in_selection_set(
-                            ctx,
-                            &fragment.selection_set,
-                            counts,
-                            current_count,
-                            parent_list_sizes,
-                            inherited_list_sizes,
-                        )?;
-                    }
-                }
-            }
-        }
-        Ok(())
+        self.score_document(&ctx, objects)
     }
 
     pub(crate) fn actual(
@@ -1099,55 +948,76 @@ fn operation_base_cost(operation: &Operation) -> f64 {
     if operation.is_mutation() { 10.0 } else { 0.0 }
 }
 
-/// Collects the plan's fetches into `fetches`, each with the flatten path its data lands at
-/// (`None` for a fetch at the response root), and adds every flatten path (the response paths
-/// entity fetches target) to `counts`.
+/// Collects the plan's fetches into `fetches`, adds every flatten path (the response paths entity
+/// fetches target) to `entity_counts`, and returns how the fetches' costs combine.
 fn collect_fetches<'a>(
     node: &'a PlanNode,
     flatten_path: Option<&'a Path>,
-    counts: &mut EntityCounts,
-    fetches: &mut Vec<(Option<&'a Path>, &'a FetchNode)>,
-) {
+    entity_counts: &mut EntityCounts,
+    fetches: &mut Vec<PlannedFetch<'a>>,
+) -> PlanCost {
+    let mut collect = |node| collect_fetches(node, flatten_path, entity_counts, fetches);
     match node {
         PlanNode::Sequence { nodes } | PlanNode::Parallel { nodes } => {
-            for node in nodes {
-                collect_fetches(node, flatten_path, counts, fetches);
-            }
+            PlanCost::Sum(nodes.iter().map(collect).collect())
         }
-        PlanNode::Fetch(fetch_node) => fetches.push((flatten_path, fetch_node)),
+        PlanNode::Fetch(fetch_node) => {
+            fetches.push(PlannedFetch {
+                flatten_path,
+                subgraph: &fetch_node.service_name,
+                operation: &fetch_node.operation,
+                is_entity_fetch: !fetch_node.requires.is_empty(),
+                output_rewrites: fetch_node.output_rewrites.as_deref().unwrap_or_default(),
+            });
+            PlanCost::Fetch(fetches.len() - 1)
+        }
         PlanNode::Flatten(flatten_node) => {
-            counts.insert(&flatten_node.path);
+            entity_counts.insert(&flatten_node.path);
             collect_fetches(
                 &flatten_node.node,
                 Some(&flatten_node.path),
-                counts,
+                entity_counts,
                 fetches,
-            );
+            )
         }
+        // TODO: Evaluate the condition using the variables.
         PlanNode::Condition {
             condition: _,
             if_clause,
             else_clause,
-        } => {
-            if let Some(node) = if_clause {
-                collect_fetches(node, flatten_path, counts, fetches);
+        } => match (if_clause, else_clause) {
+            (None, None) => PlanCost::Sum(Vec::new()),
+            (Some(node), None) | (None, Some(node)) => collect(node),
+            (Some(if_node), Some(else_node)) => {
+                let if_cost = collect(if_node);
+                let else_cost = collect(else_node);
+                PlanCost::Max(Box::new(if_cost), Box::new(else_cost))
             }
-            if let Some(node) = else_clause {
-                collect_fetches(node, flatten_path, counts, fetches);
-            }
+        },
+        PlanNode::Defer { primary, deferred } => PlanCost::Sum(
+            primary
+                .node
+                .iter()
+                .map(|node| &**node)
+                .chain(
+                    deferred
+                        .iter()
+                        .filter_map(|deferred| deferred.node.as_deref()),
+                )
+                .map(collect)
+                .collect(),
+        ),
+        // A subscription's follow-up fetches (`rest`) aren't scored.
+        PlanNode::Subscription { primary, rest: _ } => {
+            fetches.push(PlannedFetch {
+                flatten_path,
+                subgraph: &primary.service_name,
+                operation: &primary.operation,
+                is_entity_fetch: false,
+                output_rewrites: &[],
+            });
+            PlanCost::Fetch(fetches.len() - 1)
         }
-        PlanNode::Defer { primary, deferred } => {
-            if let Some(node) = &primary.node {
-                collect_fetches(node, flatten_path, counts, fetches);
-            }
-            for deferred_node in deferred {
-                if let Some(node) = &deferred_node.node {
-                    collect_fetches(node, flatten_path, counts, fetches);
-                }
-            }
-        }
-        // A subscription's follow-up fetches (`rest`) aren't scored, so they aren't counted.
-        PlanNode::Subscription { .. } => {}
     }
 }
 
@@ -1302,12 +1172,7 @@ mod tests {
             variables: &Object,
         ) -> Result<f64, DemandControlError> {
             let planner_node: PlanNode = query_plan.node.as_ref().unwrap().into();
-            let entity_counts = self.estimate_entity_counts(&planner_node, variables)?;
-            let ctx = PlanScoringContext {
-                variables,
-                entity_counts: &entity_counts,
-            };
-            Ok(self.score_plan_node(&planner_node, &ctx)?.total())
+            Ok(self.score_plan(&planner_node, variables)?.0.total())
         }
     }
 
@@ -1349,7 +1214,6 @@ mod tests {
                 &variables,
                 true,
                 "",
-                None,
             )
             .unwrap()
     }
@@ -1381,14 +1245,7 @@ mod tests {
         );
 
         calculator
-            .estimated(
-                &query,
-                &calculator.supergraph_schema,
-                &variables,
-                true,
-                "",
-                None,
-            )
+            .estimated(&query, &calculator.supergraph_schema, &variables, true, "")
             .unwrap()
     }
 
@@ -1793,7 +1650,6 @@ mod tests {
                 &Default::default(),
                 true,
                 "",
-                None,
             )
             .unwrap();
 
@@ -1806,7 +1662,6 @@ mod tests {
                 &Default::default(),
                 true,
                 "",
-                None,
             )
             .unwrap();
 
@@ -1942,7 +1797,6 @@ mod tests {
                 &Default::default(),
                 true,
                 "",
-                None,
             )
             .unwrap();
 
@@ -2307,9 +2161,9 @@ mod tests {
         }
     }
 
-    /// Walks `query_str` (parsed against `schema`) with the count walk and returns the count
-    /// recorded at `path`. Exercises `record_counts_in_selection_set` directly — the core of the
-    /// count pre-pass — without building a full query plan.
+    /// Scores `query_str` (parsed against `schema`) while counting objects, and returns the count
+    /// recorded at `path`. Exercises the counting in `score_field` directly, without building a
+    /// full query plan.
     fn recorded_count_for(
         schema: &Valid<apollo_compiler::Schema>,
         query_str: &str,
@@ -2321,27 +2175,25 @@ mod tests {
         let dc_schema = Arc::new(DemandControlledSchema::new(Arc::new(schema.clone())).unwrap());
         let calc =
             StaticCostCalculator::new(dc_schema, Default::default(), Default::default(), list_size);
-        let operation = executable.operations.get(None).unwrap();
 
         let target = Path::from_slice(path);
         let mut counts = EntityCounts::default();
         counts.insert(&target);
-        let ctx = CountingContext {
+        let ctx = ScoringContext {
             schema: &calc.supergraph_schema,
-            subgraph: "",
-            fragments: &executable.fragments,
+            query: &executable,
             variables: &Object::new(),
+            should_estimate_requires: false,
+            subgraph: "",
+            is_entity_fetch: false,
+            entity_count_hint: None,
             renamed_keys: Default::default(),
         };
-        calc.record_counts_in_selection_set(
-            &ctx,
-            &operation.selection_set,
-            &mut counts,
-            1,
-            &[],
-            &[],
-        )
-        .unwrap();
+        let objects = ObjectCount {
+            counts: &mut counts,
+            count: 1,
+        };
+        calc.score_document(&ctx, Some(objects)).unwrap();
         counts.count_at(&target)
     }
 
@@ -2520,8 +2372,7 @@ mod tests {
             .unwrap_or_default()
     }
 
-    /// Returns the estimated entity count recorded at `path` for a rust query plan, exercising
-    /// `estimate_entity_counts` directly.
+    /// Returns the estimated entity count recorded at `path` when scoring a rust query plan.
     fn entity_count_at(
         schema_str: &str,
         query_str: &str,
@@ -2531,8 +2382,8 @@ mod tests {
     ) -> Option<i32> {
         let (node, calculator) =
             plan_and_calculator(schema_str, query_str, list_size, Default::default());
-        let counts = calculator
-            .estimate_entity_counts(&node, &parse_variables(variables_str))
+        let (_, counts) = calculator
+            .score_plan(&node, &parse_variables(variables_str))
             .unwrap();
         counts.count_at(&Path::from_slice(path))
     }
@@ -2547,15 +2398,10 @@ mod tests {
     ) -> CostBySubgraph {
         let (node, calculator) =
             plan_and_calculator(schema_str, query_str, list_size, subgraph_list_sizes);
-        let variables = parse_variables(variables_str);
-        let entity_counts = calculator
-            .estimate_entity_counts(&node, &variables)
+        let (cost, _) = calculator
+            .score_plan(&node, &parse_variables(variables_str))
             .unwrap();
-        let ctx = PlanScoringContext {
-            variables: &variables,
-            entity_counts: &entity_counts,
-        };
-        calculator.score_plan_node(&node, &ctx).unwrap()
+        cost
     }
 
     #[test]
@@ -2765,9 +2611,7 @@ mod tests {
 
         for _ in 0..2 {
             let variables = Object::new();
-            let counts = calculator
-                .estimate_entity_counts(&node, &variables)
-                .unwrap();
+            let (cost, counts) = calculator.score_plan(&node, &variables).unwrap();
             assert_eq!(
                 counts.count_at(&Path::from_slice(&["shelf", "items", "@"])),
                 Some(10)
@@ -2777,11 +2621,6 @@ mod tests {
                 Some(100)
             );
 
-            let ctx = PlanScoringContext {
-                variables: &variables,
-                entity_counts: &counts,
-            };
-            let cost = calculator.score_plan_node(&node, &ctx).unwrap();
             // reviews: _entities[10] × (Item(1) + reviews[10] × Review(1))
             assert_eq!(cost.get("reviews"), Some(110.0));
             // authors: _entities[100] × Review(1)
@@ -2803,19 +2642,12 @@ mod tests {
 
         for _ in 0..2 {
             let variables = Object::new();
-            let counts = calculator
-                .estimate_entity_counts(&node, &variables)
-                .unwrap();
+            let (cost, counts) = calculator.score_plan(&node, &variables).unwrap();
             assert_eq!(
                 counts.count_at(&Path::from_slice(&["pet", "toys", "@"])),
                 Some(7)
             );
 
-            let ctx = PlanScoringContext {
-                variables: &variables,
-                entity_counts: &counts,
-            };
-            let cost = calculator.score_plan_node(&node, &ctx).unwrap();
             // first: pet(1) + toys[3] × Toy(1), sized by `Animal.toys`
             assert_eq!(cost.get("first"), Some(4.0));
             // second: _entities[1] × (Cat(1) + toys[7] × Toy(1)), sized by `Cat.toys`
