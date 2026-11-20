@@ -1453,7 +1453,7 @@ mod http_version_negotiation {
     #[case::http2_only(Some(Http2Config::Http2Only), ExpectedVersion::Http2)]
     #[case::http2_enabled(Some(Http2Config::Enable), ExpectedVersion::Any)]
     #[case::http2_disabled(Some(Http2Config::Disable), ExpectedVersion::Http11)]
-    #[case::http2_unset(None, ExpectedVersion::Http11)]
+    #[case::http2_unset_is_not_http2_only(None, ExpectedVersion::Http11)]
     #[tokio::test(flavor = "multi_thread")]
     async fn test_unix_socket_http_version(
         #[case] http2_config: Option<Http2Config>,
