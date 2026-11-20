@@ -179,6 +179,57 @@ async fn it_rejects_a_batched_deferred_query() -> Result<(), BoxError> {
     Ok(())
 }
 
+/// With batching disabled we should get an INVALID_GRAPHQL_REQUEST error back.
+#[tokio::test(flavor = "multi_thread")]
+async fn it_rejects_batches_when_batching_is_disabled() -> Result<(), BoxError> {
+    const REQUEST_COUNT: usize = 2;
+
+    let requests: Vec<_> = (0..REQUEST_COUNT)
+        .map(|index| {
+            Request::fake_builder()
+                .query(format!(
+                    "query op{index}{{ entryA(count: {REQUEST_COUNT}) {{ index }} }}"
+                ))
+                .build()
+        })
+        .collect();
+
+    // Start up the router. We don't expect any subgraph requests.
+    let mut router = IntegrationTest::builder()
+        .config(indoc::indoc! {"
+            batching:
+              enabled: false
+
+            include_subgraph_errors:
+              all: true
+        "})
+        .supergraph("tests/fixtures/batching/schema.graphql")
+        .build()
+        .await;
+
+    router.start().await;
+    router.assert_started().await;
+
+    // Execute the request
+    let request = serde_json::to_value(requests)?;
+    let (_span, response) = router
+        .execute_query(Query::builder().body(request).build())
+        .await;
+
+    assert_eq!(response.status(), http::StatusCode::BAD_REQUEST);
+    let response = serde_json::from_slice::<graphql::Response>(&response.bytes().await?)?;
+    assert_eq!(response.errors.len(), 1);
+    assert_eq!(
+        response.errors[0]
+            .extensions
+            .get("code")
+            .and_then(|v| v.as_str()),
+        Some("INVALID_GRAPHQL_REQUEST")
+    );
+
+    Ok(())
+}
+
 #[tokio::test(flavor = "multi_thread")]
 async fn it_batches_with_errors_in_single_graph() -> Result<(), BoxError> {
     const REQUEST_COUNT: usize = 4;

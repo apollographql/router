@@ -13,12 +13,11 @@ use crate::services::execution;
 use crate::spec::Query;
 use crate::spec::QueryHash;
 
-/// Analyze the query plan for a batch query.
+/// Layer type for [`BatchingPlugin::query_plan_analysis_layer`].
 ///
 /// This informs the [`BatchQuery`] about the query plan fetch node hashes.
 ///
-/// It also reject the request if it contains any subscription or defer nodes, which is not
-/// supported in batch requests.
+/// [`BatchingPlugin::query_plan_analysis_layer`]: super::BatchingPlugin::query_plan_analysis_layer
 #[derive(Clone)]
 pub(crate) struct BatchQueryPlanAnalysisLayer {
     _private: (),
@@ -77,7 +76,7 @@ where
                 return inner.call(req).await.map_err(Into::into);
             };
 
-            if batching.enabled && (is_deferred || is_subscription) {
+            if is_deferred || is_subscription {
                 let code = if is_deferred {
                     "BATCHING_DEFER_UNSUPPORTED"
                 } else {
