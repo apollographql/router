@@ -152,6 +152,7 @@ mod forbid_http_get_mutations_tests {
                     {
                         "kind": "Fetch",
                         "serviceName": "product",
+                        "fetchKind": { "kind": "Root" },
                         "variableUsages": [],
                         "operation": "{__typename}",
                         "operationKind": "mutation"
@@ -166,6 +167,7 @@ mod forbid_http_get_mutations_tests {
                     {
                         "kind": "Fetch",
                         "serviceName": "product",
+                        "fetchKind": { "kind": "Root" },
                         "variableUsages": [],
                         "operation": "{__typename}",
                         "operationKind": "query"

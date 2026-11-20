@@ -4236,7 +4236,12 @@ fn assert_no_self_dependent_deferred_blocks(defer: &DeferNode) {
 fn collect_fetch_ids(node: &PlanNode, ids: &mut Vec<String>) {
     match node {
         PlanNode::Fetch(fetch) => ids.extend(fetch.id.map(|id| id.to_string())),
-        PlanNode::Flatten(flatten) => collect_fetch_ids(&flatten.node, ids),
+        PlanNode::Flatten(flatten) => ids.extend(
+            flatten
+                .members
+                .iter()
+                .filter_map(|member| member.fetch.id.map(|id| id.to_string())),
+        ),
         PlanNode::Sequence(sequence) => sequence
             .nodes
             .iter()
@@ -4331,14 +4336,12 @@ fn context_rewrite_path_includes_typename_equals() {
     let Some(PlanNode::Flatten(node)) = node.nodes.get(1) else {
         panic!("expected flatten node at index 1");
     };
-    let PlanNode::Fetch(fetch) = &*node.node else {
-        panic!("expected fetch node inside flatten");
-    };
+    let (_, fetch) = node.single().expect("one fetch at one path");
 
     // The rewrite path must include the TypenameEquals guard:
     // [Parent, TypenameEquals("T"), Key("prop")], not [Parent, Key("prop")].
-    assert_eq!(fetch.context_rewrites.len(), 1);
-    let FetchDataRewrite::KeyRenamer(renamer) = &*fetch.context_rewrites[0] else {
+    assert_eq!(fetch.kind.context_rewrites().len(), 1);
+    let FetchDataRewrite::KeyRenamer(renamer) = &*fetch.kind.context_rewrites()[0] else {
         panic!("expected KeyRenamer");
     };
     assert_eq!(renamer.rename_key_to.as_str(), "contextualArgument_1_0");
@@ -4474,17 +4477,15 @@ fn inc_from_context_multi_hop_ancestor() {
     let Some(flatten) = last_flatten else {
         panic!("expected at least one flatten node");
     };
-    let PlanNode::Fetch(fetch) = &*flatten.node else {
-        panic!("expected fetch node inside flatten");
-    };
+    let (_, fetch) = flatten.single().expect("one fetch at one path");
 
     // The rewrite path should walk 2+ Parent elements back to the
     // grandparent A, with a TypenameEquals guard for A.
     assert!(
-        !fetch.context_rewrites.is_empty(),
+        !fetch.kind.context_rewrites().is_empty(),
         "context rewrites must be present on the deepest fetch"
     );
-    let FetchDataRewrite::KeyRenamer(renamer) = &*fetch.context_rewrites[0] else {
+    let FetchDataRewrite::KeyRenamer(renamer) = &*fetch.kind.context_rewrites()[0] else {
         panic!("expected KeyRenamer");
     };
 
@@ -4513,13 +4514,17 @@ fn context_rewrite_paths(plan: &QueryPlan) -> Vec<(String, Vec<FetchDataPathElem
     fn walk(node: &PlanNode, out: &mut Vec<(String, Vec<FetchDataPathElement>)>) {
         match node {
             PlanNode::Fetch(fetch) => {
-                for rewrite in &fetch.context_rewrites {
+                for rewrite in fetch.kind.context_rewrites() {
                     if let FetchDataRewrite::KeyRenamer(renamer) = &**rewrite {
                         out.push((renamer.rename_key_to.to_string(), renamer.path.clone()));
                     }
                 }
             }
-            PlanNode::Flatten(flatten) => walk(&flatten.node, out),
+            PlanNode::Flatten(flatten) => {
+                for member in &flatten.members {
+                    walk(&PlanNode::Fetch(Box::new(member.fetch.clone())), out);
+                }
+            }
             PlanNode::Sequence(seq) => seq.nodes.iter().for_each(|n| walk(n, out)),
             PlanNode::Parallel(par) => par.nodes.iter().for_each(|n| walk(n, out)),
             other => panic!("unexpected plan node in context test: {other:?}"),

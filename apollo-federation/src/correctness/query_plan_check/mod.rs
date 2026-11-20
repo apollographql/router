@@ -137,9 +137,12 @@ use super::response_shape_compare::ComparisonError;
 use super::subgraph_constraint::SubgraphConstraint;
 use crate::correctness::CheckerOptions;
 use crate::query_plan::DeferredDependency;
+use crate::query_plan::EntitySelection;
 use crate::query_plan::FetchDataPathElement;
 use crate::query_plan::FetchDataRewrite;
+use crate::query_plan::FetchKind;
 use crate::query_plan::FetchNode;
+use crate::query_plan::ParallelNode;
 use crate::query_plan::PlanNode;
 use crate::query_plan::QueryPlan;
 use crate::query_plan::TopLevelPlanNode;
@@ -315,10 +318,9 @@ fn check_path_reaches_a_type(path: &[FetchDataPathElement]) -> Result<(), Compar
 fn condition_variables(plan: &QueryPlan) -> IndexSet<Name> {
     fn walk(node: &PlanNode, out: &mut IndexSet<Name>) {
         match node {
-            PlanNode::Fetch(_) => {}
+            PlanNode::Fetch(_) | PlanNode::Flatten(_) => {}
             PlanNode::Sequence(sequence) => sequence.nodes.iter().for_each(|n| walk(n, out)),
             PlanNode::Parallel(parallel) => parallel.nodes.iter().for_each(|n| walk(n, out)),
-            PlanNode::Flatten(flatten) => walk(&flatten.node, out),
             PlanNode::Defer(defer) => {
                 defer.primary.node.iter().for_each(|n| walk(n, out));
                 defer
@@ -341,14 +343,13 @@ fn condition_variables(plan: &QueryPlan) -> IndexSet<Name> {
         Some(TopLevelPlanNode::Subscription(subscription)) => {
             subscription.rest.iter().for_each(|n| walk(n, &mut out));
         }
-        Some(TopLevelPlanNode::Fetch(_)) => {}
+        Some(TopLevelPlanNode::Fetch(_)) | Some(TopLevelPlanNode::Flatten(_)) => {}
         Some(TopLevelPlanNode::Sequence(node)) => {
             node.nodes.iter().for_each(|n| walk(n, &mut out));
         }
         Some(TopLevelPlanNode::Parallel(node)) => {
             node.nodes.iter().for_each(|n| walk(n, &mut out));
         }
-        Some(TopLevelPlanNode::Flatten(node)) => walk(&node.node, &mut out),
         Some(TopLevelPlanNode::Defer(node)) => {
             node.primary.node.iter().for_each(|n| walk(n, &mut out));
             node.deferred
@@ -424,13 +425,24 @@ impl<'a> Checker<'a> {
                 Ok(added)
             }
             PlanNode::Flatten(flatten) => {
+                let Some((flatten_path, fetch)) = flatten.single() else {
+                    // Fetches sent together never read what each other fetch, so they select
+                    // what they would run in parallel, each at its paths.
+                    let nodes = flatten.batched_fetches();
+                    return self.walk_node(
+                        &PlanNode::Parallel(ParallelNode { nodes }),
+                        reached,
+                        available,
+                        readable,
+                    );
+                };
                 if self.options.check_empty_flatten_path_type_condition {
-                    check_path_reaches_a_type(&flatten.path)?;
+                    check_path_reaches_a_type(flatten_path)?;
                 }
                 let mut path = reached.path.to_vec();
-                path.extend(flatten.path.iter().cloned());
+                path.extend(flatten_path.iter().cloned());
                 self.walk_node(
-                    &flatten.node,
+                    &PlanNode::Fetch(Box::new(fetch.clone())),
                     Reached {
                         path: &path,
                         ..reached
@@ -582,7 +594,7 @@ impl<'a> Checker<'a> {
         // under that type. For an interface object, one subgraph type standing for every
         // implementation, a fetch whose entries cover only some of them resolves nothing for the
         // rest; `interpret_fetch_node` merges every `_entities` fragment regardless.
-        let selected = if fetch.requires.is_empty() {
+        let selected = if requires(fetch).is_empty() {
             body
         } else {
             let entity_body = entity_body(fetch, &body)?;
@@ -599,8 +611,10 @@ impl<'a> Checker<'a> {
             &fetch.output_rewrites,
             selected,
         );
-        let contributed =
-            remove_context_arguments(&context_variables(&fetch.context_rewrites), contributed);
+        let contributed = remove_context_arguments(
+            &context_variables(fetch.kind.context_rewrites()),
+            contributed,
+        );
         Ok(selections_at(
             self.supergraph_schema,
             available,
@@ -675,9 +689,14 @@ impl Checker<'_> {
         readable: &[Selection],
     ) -> Result<(), ComparisonError> {
         let grouped;
-        let fetch = if fetch.requires.iter().any(has_conditions) {
+        let fetch = if let Some(selection) = fetch.kind.entity_selection()
+            && selection.requires.iter().any(has_conditions)
+        {
             grouped = FetchNode {
-                requires: group_requires_by_type_condition(&fetch.requires),
+                kind: FetchKind::Entities(EntitySelection {
+                    requires: group_requires_by_type_condition(&selection.requires),
+                    ..selection.clone()
+                }),
                 ..fetch.clone()
             };
             &grouped
@@ -761,10 +780,10 @@ impl Checker<'_> {
          -> Result<bool, ComparisonError> {
             if table[entry][case].is_none() {
                 table[entry][case] = Some(checker.requirement_matches_case(
-                    &fetch.requires[entry],
+                    &requires(fetch)[entry],
                     require_types[entry],
                     cases[case].0,
-                    &fetch.input_rewrites,
+                    input_rewrites(fetch),
                     &per_case[case],
                     reached,
                     available,
@@ -801,7 +820,7 @@ impl Checker<'_> {
                 return Err(ComparisonError::new(format!(
                     "fetch to {}: `requires` entry {} is matched by no entity case:\n{}",
                     fetch.subgraph_name,
-                    fetch.requires[entry],
+                    requires(fetch)[entry],
                     describe(computed(
                         cases.iter().map(|case| case.0),
                         table[entry].iter()
@@ -867,7 +886,7 @@ impl Checker<'_> {
         entry: usize,
         require_type: &Name,
     ) -> Result<(), ComparisonError> {
-        let entry_item = std::slice::from_ref(&fetch.requires[entry]);
+        let entry_item = std::slice::from_ref(&requires(fetch)[entry]);
         let as_read = entry_selections(
             self.supergraph_schema,
             require_type,
@@ -883,13 +902,13 @@ impl Checker<'_> {
         let renamed = apply_key_renamers(
             self.supergraph_schema,
             type_filter_meets,
-            &fetch.input_rewrites,
+            input_rewrites(fetch),
             as_read.clone(),
         );
         let inverted = invert_key_renamers(
             self.supergraph_schema,
             type_filter_covers,
-            &fetch.input_rewrites,
+            input_rewrites(fetch),
             as_sent.clone(),
         );
         if same_keys(&renamed, &as_sent) && same_keys(&inverted, &as_read) {
@@ -898,7 +917,8 @@ impl Checker<'_> {
         Err(ComparisonError::new(format!(
             "fetch to {}: `requires` entry {} does not agree with the fetch's input rewrites: \
              the keys it reads and the keys it sends are not the ones the rewrites carry between",
-            fetch.subgraph_name, fetch.requires[entry]
+            fetch.subgraph_name,
+            requires(fetch)[entry]
         )))
     }
 
@@ -1030,12 +1050,27 @@ impl Checker<'_> {
     }
 }
 
+/// An entity fetch's `requires`, and nothing for a root fetch.
+fn requires(fetch: &FetchNode) -> &[requires_selection::Selection] {
+    fetch
+        .kind
+        .entity_selection()
+        .map_or(&[], |selection| &selection.requires)
+}
+
+/// The rewrites applied to what an entity fetch sends, and nothing for a root fetch.
+fn input_rewrites(fetch: &FetchNode) -> &[Arc<FetchDataRewrite>] {
+    fetch
+        .kind
+        .entity_selection()
+        .map_or(&[], |selection| &selection.input_rewrites)
+}
+
 /// The type condition each `requires` entry declares.
 ///
 /// This is the model's `requiresWellFormed`: every entry is a type-conditioned inline fragment.
 fn require_types(fetch: &FetchNode) -> Result<Vec<&Name>, ComparisonError> {
-    fetch
-        .requires
+    requires(fetch)
         .iter()
         .map(|require_item| match require_item {
             requires_selection::Selection::InlineFragment(fragment) => {
