@@ -233,15 +233,31 @@ impl PluginPrivate for AuthenticationPlugin {
     type Config = Conf;
 
     fn licensed_features(config: &Self::Config) -> Vec<LicensedSetting> {
-        if config.router.is_some() {
-            vec![LicensedSetting {
-                feature: AllowedFeature::Authentication,
-                name: "Authentication plugin",
-                path: "authentication.router",
-            }]
-        } else {
-            Vec::new()
-        }
+        [
+            (
+                config.router.is_some(),
+                "Authentication plugin",
+                "authentication.router",
+            ),
+            (
+                config.subgraph.is_some(),
+                "Subgraph authentication",
+                "authentication.subgraph",
+            ),
+            (
+                config.connector.is_some(),
+                "Connector authentication",
+                "authentication.connector",
+            ),
+        ]
+        .into_iter()
+        .filter(|(configured, _, _)| *configured)
+        .map(|(_, name, path)| LicensedSetting {
+            feature: AllowedFeature::Authentication,
+            name,
+            path,
+        })
+        .collect()
     }
 
     async fn new(init: PluginInit<Self::Config>) -> Result<Self, BoxError> {

@@ -540,15 +540,22 @@ impl PluginPrivate for AuthorizationPlugin {
     type Config = Conf;
 
     fn licensed_features(config: &Self::Config) -> Vec<LicensedSetting> {
+        let mut settings = Vec::new();
+        if config.require_authentication {
+            settings.push(LicensedSetting {
+                feature: AllowedFeature::Authorization,
+                name: "Required authentication",
+                path: "authorization.require_authentication",
+            });
+        }
         if config.directives.enabled {
-            vec![LicensedSetting {
+            settings.push(LicensedSetting {
                 feature: AllowedFeature::Authorization,
                 name: "Authorization directives",
                 path: "authorization.directives.enabled",
-            }]
-        } else {
-            Vec::new()
+            });
         }
+        settings
     }
 
     async fn new(init: PluginInit<Self::Config>) -> Result<Self, BoxError> {

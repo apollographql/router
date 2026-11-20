@@ -1228,6 +1228,55 @@ mod test {
     }
 
     #[test]
+    fn test_require_authentication_is_restricted() {
+        let yaml = indoc::indoc! {"
+            authorization:
+              require_authentication: true
+              directives:
+                enabled: false
+        "};
+        assert_eq!(
+            unlicensed_restricted_paths(yaml),
+            ["authorization.require_authentication"]
+        );
+    }
+
+    #[test]
+    fn test_subgraph_authentication_is_restricted() {
+        let yaml = indoc::indoc! {r#"
+            authentication:
+              subgraph:
+                all:
+                  aws_sig_v4:
+                    default_chain:
+                      service_name: "Foo"
+                      region: "us-east-1"
+        "#};
+        assert_eq!(
+            unlicensed_restricted_paths(yaml),
+            ["authentication.subgraph"]
+        );
+    }
+
+    #[test]
+    fn test_connector_authentication_is_restricted() {
+        let yaml = indoc::indoc! {r#"
+            authentication:
+              connector:
+                sources:
+                  subgraph.ec2:
+                    aws_sig_v4:
+                      default_chain:
+                        region: "eu-north-1"
+                        service_name: "ec2"
+        "#};
+        assert_eq!(
+            unlicensed_restricted_paths(yaml),
+            ["authentication.connector"]
+        );
+    }
+
+    #[test]
     fn test_disabled_sections_are_not_restricted() {
         let yaml = indoc::indoc! {"
             authorization:
