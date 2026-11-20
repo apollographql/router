@@ -510,7 +510,7 @@ impl StaticCostCalculator {
                 count: instance_count,
             }),
             Some(ObjectCount { counts, count }) => {
-                let response_key = field.response_name().as_str();
+                let response_key = field.response_key().as_str();
                 let response_key = ctx
                     .renamed_keys
                     .get(response_key)
@@ -804,13 +804,7 @@ impl StaticCostCalculator {
         query_plan: &QueryPlan,
         variables: &Object,
     ) -> Result<CostBySubgraph, DemandControlError> {
-<<<<<<< HEAD
-        self.score_plan_node(&query_plan.root, variables)
-=======
-        let Some(root) = query_plan.root.as_ref() else {
-            return Ok(CostBySubgraph::default());
-        };
-        let (cost, _) = self.score_plan(root, variables)?;
+        let (cost, _) = self.score_plan(&query_plan.root, variables)?;
         Ok(cost)
     }
 
@@ -928,7 +922,6 @@ impl StaticCostCalculator {
             renamed_keys,
         };
         self.score_document(&ctx, objects)
->>>>>>> 4a0fbb0 (fix(demand-control): size _entities fetches by the number of entities at the fetch path (#9192))
     }
 
     pub(crate) fn actual(
