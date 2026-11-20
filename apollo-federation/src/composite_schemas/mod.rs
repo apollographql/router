@@ -5,6 +5,7 @@
 //! detection stamps an implicit federation `@link` onto schemas that carry none. The rest of this
 //! module is the composition behaviour those directives need.
 
+pub(crate) mod cross_schema;
 pub(crate) mod detection;
 #[cfg(test)]
 mod tests;
