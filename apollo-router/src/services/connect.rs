@@ -10,9 +10,9 @@ use static_assertions::assert_impl_all;
 use tower::BoxError;
 
 use crate::Context;
-use crate::batching::BatchQuery;
 use crate::graphql;
 use crate::graphql::Request as GraphQLRequest;
+use crate::plugins::batching::BatchQuery;
 use crate::query_planner::fetch::Variables;
 
 pub(crate) type BoxCloneService = tower::util::BoxCloneService<Request, Response, BoxError>;

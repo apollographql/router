@@ -180,7 +180,6 @@ fn effective_settings(config: &Configuration) -> Value {
         "persisted_queries": config.persisted_queries,
         "limits": config.limits,
         "plugins": config.document_section("plugins"),
-        "batching": config.batching,
         "experimental_type_conditioned_fetching": config.experimental_type_conditioned_fetching,
         "experimental_hoist_orphan_errors": config.experimental_hoist_orphan_errors,
     });

@@ -149,6 +149,7 @@ pub(crate) async fn create_plugins(
     // Implements no wrap hook, so this position only sets construction order: its layers are
     // placed in `pipeline::stages`, outside every plugin's subgraph and connector request hooks.
     registrar.add_optional("circuit_breaker").await;
+    registrar.add_mandatory("batching").await;
     registrar.add_user_plugins(extra).await;
 
     // Because this plugin intercepts subgraph requests

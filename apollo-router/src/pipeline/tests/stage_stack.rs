@@ -48,7 +48,13 @@ async fn stage_plugins(plugins: &[(&str, serde_json::Value)]) -> Plugins {
 
 /// Every mandatory plugin the stack builders apply, with traffic shaping left at its defaults.
 pub(crate) async fn required_stage_plugins() -> Arc<Plugins> {
-    Arc::new(stage_plugins(&[(APOLLO_TRAFFIC_SHAPING, serde_json::json!({}))]).await)
+    Arc::new(
+        stage_plugins(&[
+            (APOLLO_TRAFFIC_SHAPING, serde_json::json!({})),
+            ("apollo.batching", serde_json::json!({})),
+        ])
+        .await,
+    )
 }
 
 pub(crate) type Handle = tower_test::mock::Handle<SubgraphRequest, SubgraphResponse>;

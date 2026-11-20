@@ -24,7 +24,6 @@ use tokio_stream::Stream;
 use tower::BoxError;
 
 use crate::Context;
-use crate::batching::BatchQuery;
 use crate::error::Error;
 use crate::graphql;
 use crate::http_ext::TryIntoHeaderName;
@@ -35,6 +34,7 @@ use crate::json_ext::Path;
 use crate::plugins::authentication::APOLLO_AUTHENTICATION_JWT_CLAIMS;
 use crate::plugins::authentication::subgraph::SigningParamsConfig;
 use crate::plugins::authorization::CacheKeyMetadata;
+use crate::plugins::batching::BatchQuery;
 use crate::plugins::response_cache::cache_control::CacheControl;
 use crate::query_planner::fetch::OperationKind;
 use crate::spec::QueryHash;

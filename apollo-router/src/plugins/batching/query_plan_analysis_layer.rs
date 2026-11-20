@@ -4,21 +4,20 @@ use futures::future::BoxFuture;
 use http::StatusCode;
 use tower::BoxError;
 
-use crate::batching::BatchQuery;
 use crate::graphql;
 use crate::json_ext::Object;
+use crate::plugins::batching::state::BatchQuery;
 use crate::query_planner::PlanNode;
 use crate::query_planner::QueryPlan;
 use crate::services::execution;
 use crate::spec::Query;
 use crate::spec::QueryHash;
 
-/// Analyze the query plan for a batch query.
+/// Layer type for [`BatchingPlugin::query_plan_analysis_layer`].
 ///
 /// This informs the [`BatchQuery`] about the query plan fetch node hashes.
 ///
-/// It also reject the request if it contains any subscription or defer nodes, which is not
-/// supported in batch requests.
+/// [`BatchingPlugin::query_plan_analysis_layer`]: super::BatchingPlugin::query_plan_analysis_layer
 #[derive(Clone)]
 pub(crate) struct BatchQueryPlanAnalysisLayer {
     _private: (),
@@ -70,11 +69,10 @@ where
             let is_deferred = plan.is_deferred(variables);
             let is_subscription = plan.is_subscription();
 
-            let Some(batching) = req
-                .context
-                .extensions()
-                .with_lock(|lock| lock.get::<crate::configuration::Batching>().cloned())
-            else {
+            let Some(batching) = req.context.extensions().with_lock(|lock| {
+                lock.get::<Arc<crate::plugins::batching::config::BatchingConfig>>()
+                    .cloned()
+            }) else {
                 return inner.call(req).await.map_err(Into::into);
             };
 
@@ -120,7 +118,7 @@ struct BatchingUnsupportedError;
 
 fn query_hashes(
     plan: &QueryPlan,
-    batching_config: &crate::configuration::Batching,
+    batching_config: &crate::plugins::batching::config::BatchingConfig,
     variables: &Object,
 ) -> Result<Vec<Arc<QueryHash>>, BatchingUnsupportedError> {
     match &plan.root {
@@ -144,7 +142,7 @@ fn query_hashes(
 /// details and don't use _ so that future node types must be handled here.
 fn plan_node_query_hashes(
     root_node: &PlanNode,
-    batching_config: &crate::configuration::Batching,
+    batching_config: &crate::plugins::batching::config::BatchingConfig,
     variables: &Object,
     query: &Query,
 ) -> Result<Vec<Arc<QueryHash>>, BatchingUnsupportedError> {
@@ -209,10 +207,13 @@ mod tests {
     use super::BatchQueryPlanAnalysisLayer;
     use crate::Configuration;
     use crate::Context;
-    use crate::batching::Batch;
-    use crate::batching::BatchQuery;
     use crate::compute_job::ComputeJobType;
+    use crate::configuration::subgraph::SubgraphConfiguration;
     use crate::graphql;
+    use crate::plugins::batching::config::BatchingConfig;
+    use crate::plugins::batching::config::CommonBatchingConfig;
+    use crate::plugins::batching::state::Batch;
+    use crate::plugins::batching::state::BatchQuery;
     use crate::query_planner::QueryPlan;
     use crate::query_planner::QueryPlannerService;
     use crate::services::QueryPlannerRequest;
@@ -270,7 +271,7 @@ mod tests {
 
         let schema = Arc::new(
             Schema::parse(
-                include_str!("../../tests/fixtures/batching/schema.graphql"),
+                include_str!("../../../tests/fixtures/batching/schema.graphql"),
                 &configuration,
             )
             .unwrap(),
@@ -292,7 +293,14 @@ mod tests {
 
         let context = Context::new();
         context.extensions().with_lock(|lock| {
-            lock.insert(configuration.batching.clone());
+            lock.insert(Arc::new(BatchingConfig {
+                enabled: true,
+                subgraph: Some(SubgraphConfiguration {
+                    all: CommonBatchingConfig { enabled: true },
+                    subgraphs: Default::default(),
+                }),
+                ..Default::default()
+            }));
             lock.insert(batch_query);
         });
 
@@ -372,7 +380,7 @@ mod tests {
 
         let schema = Arc::new(
             Schema::parse(
-                include_str!("../../tests/fixtures/batching/schema.graphql"),
+                include_str!("../../../tests/fixtures/batching/schema.graphql"),
                 &configuration,
             )
             .unwrap(),
@@ -392,7 +400,14 @@ mod tests {
 
         let context = Context::new();
         context.extensions().with_lock(|lock| {
-            lock.insert(configuration.batching.clone());
+            lock.insert(Arc::new(BatchingConfig {
+                enabled: true,
+                subgraph: Some(SubgraphConfiguration {
+                    all: CommonBatchingConfig { enabled: true },
+                    subgraphs: Default::default(),
+                }),
+                ..Default::default()
+            }));
             lock.insert(batch_query);
         });
 

@@ -12,6 +12,7 @@ use crate::Context;
 use crate::TestHarness;
 use crate::graphql;
 use crate::plugin::test::MockSubgraph;
+use crate::plugins::batching::config::BatchingConfig;
 use crate::plugins::subscription::notification::Notify;
 use crate::services::router::ClientRequestAccepts;
 use crate::services::subgraph;
@@ -1363,7 +1364,11 @@ async fn batching_defer_unsupported_and_incorrect_header() {
         },
     }))
     .unwrap();
-    let batching = configuration.batching.clone();
+    let batching_config = configuration
+        .plugin_config("apollo.batching")
+        .expect("batching config exists")
+        .typed::<BatchingConfig>()
+        .expect("batching config of known type");
 
     let service = TestHarness::builder()
         .configuration(Arc::new(configuration))
@@ -1374,7 +1379,7 @@ async fn batching_defer_unsupported_and_incorrect_header() {
 
     let context = Context::new();
     context.extensions().with_lock(|lock| {
-        lock.insert(batching);
+        lock.insert(Arc::new(batching_config));
     });
 
     let request = supergraph::Request::fake_builder()
@@ -1404,7 +1409,11 @@ async fn batching_defer_unsupported_and_incorrect_variable() {
         },
     }))
     .unwrap();
-    let batching = configuration.batching.clone();
+    let batching_config = configuration
+        .plugin_config("apollo.batching")
+        .expect("batching config exists")
+        .typed::<BatchingConfig>()
+        .expect("batching config of known type");
 
     let service = TestHarness::builder()
         .configuration(Arc::new(configuration))
@@ -1417,7 +1426,7 @@ async fn batching_defer_unsupported_and_incorrect_variable() {
     // XXX(@goto-bus-stop): not ideal but this implies that the `Accept` header was passed in
     // correctly; the router service is normally responsible for populating this context value
     context.extensions().with_lock(|lock| {
-        lock.insert(batching);
+        lock.insert(Arc::new(batching_config));
     });
 
     let request = supergraph::Request::fake_builder()
