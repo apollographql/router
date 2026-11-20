@@ -2,7 +2,7 @@
 //! Schemas"), plus the Apollo-specific restrictions on federation directives in source schemas.
 //!
 //! Rules that validate selection maps against other source schemas (`IS_INVALID_FIELDS`,
-//! `REQUIRE_INVALID_FIELDS`) run before merging, across subgraphs.
+//! `REQUIRE_INVALID_FIELDS`) live in [`super::cross_schema`].
 
 use apollo_compiler::Name;
 use apollo_compiler::Node;
