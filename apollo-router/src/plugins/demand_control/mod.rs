@@ -44,6 +44,8 @@ use crate::plugins::demand_control::strategy::StrategyFactory;
 use crate::plugins::telemetry::tracing::apollo_telemetry::emit_error_event;
 use crate::services::execution;
 use crate::services::subgraph;
+use crate::uplink::license_enforcement::AllowedFeature;
+use crate::uplink::license_enforcement::LicensedSetting;
 
 pub(crate) mod cost_calculator;
 pub(crate) mod strategy;
@@ -498,6 +500,18 @@ impl DemandControl {
 #[async_trait::async_trait]
 impl PluginPrivate for DemandControl {
     type Config = DemandControlConfig;
+
+    fn licensed_features(config: &Self::Config) -> Vec<LicensedSetting> {
+        if config.enabled {
+            vec![LicensedSetting {
+                feature: AllowedFeature::DemandControl,
+                name: "Demand control plugin",
+                path: "demand_control.enabled",
+            }]
+        } else {
+            Vec::new()
+        }
+    }
 
     async fn new(init: PluginInit<Self::Config>) -> Result<Self, BoxError> {
         if !init.config.enabled {

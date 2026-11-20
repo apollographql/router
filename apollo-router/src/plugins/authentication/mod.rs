@@ -40,6 +40,8 @@ use crate::plugins::authentication::subgraph::make_signing_params;
 use crate::services::connector_service::ConnectorSourceRef;
 use crate::services::router;
 use crate::services::subgraph::http::APPLICATION_JSON_HEADER_VALUE;
+use crate::uplink::license_enforcement::AllowedFeature;
+use crate::uplink::license_enforcement::LicensedSetting;
 
 pub(crate) mod jwks;
 
@@ -229,6 +231,18 @@ fn default_poll_interval() -> Duration {
 #[async_trait::async_trait]
 impl PluginPrivate for AuthenticationPlugin {
     type Config = Conf;
+
+    fn licensed_features(config: &Self::Config) -> Vec<LicensedSetting> {
+        if config.router.is_some() {
+            vec![LicensedSetting {
+                feature: AllowedFeature::Authentication,
+                name: "Authentication plugin",
+                path: "authentication.router",
+            }]
+        } else {
+            Vec::new()
+        }
+    }
 
     async fn new(init: PluginInit<Self::Config>) -> Result<Self, BoxError> {
         let subgraph = Self::init_subgraph(&init).await?;

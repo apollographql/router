@@ -98,6 +98,8 @@ use crate::services::subgraph::SubgraphRequestId;
 use crate::services::supergraph;
 use crate::spec::QueryHash;
 use crate::spec::TYPENAME;
+use crate::uplink::license_enforcement::AllowedFeature;
+use crate::uplink::license_enforcement::LicensedSetting;
 
 /// Change this key if you introduce a breaking change in response caching algorithm to make sure it won't take the previous entries
 pub(crate) const RESPONSE_CACHE_VERSION: &str = "1.2";
@@ -458,6 +460,18 @@ pub(crate) struct CacheHitMiss {
 impl PluginPrivate for ResponseCache {
     const HIDDEN_FROM_CONFIG_JSON_SCHEMA: bool = true;
     type Config = Config;
+
+    fn licensed_features(config: &Self::Config) -> Vec<LicensedSetting> {
+        if config.enabled {
+            vec![LicensedSetting {
+                feature: AllowedFeature::ResponseCaching,
+                name: "Subgraph response caching",
+                path: "response_cache.enabled",
+            }]
+        } else {
+            Vec::new()
+        }
+    }
 
     async fn new(init: PluginInit<Self::Config>) -> Result<Self, BoxError>
     where

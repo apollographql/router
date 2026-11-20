@@ -9,23 +9,14 @@ Configuration yaml:
 * Authentication plugin
   .authentication.router
 
-* Subgraph response caching
-  .response_cache.enabled
-
-* Federated subscriptions
-  .subscription.enabled
-
 * Coprocessor plugin
   .coprocessor
 
-* Query plan caching
-  .supergraph.query_planning.cache.redis
-
 * Demand control plugin
-  .demand_control
+  .demand_control.enabled
 
-* Restricted
-  .plugins.['experimental.restricted'].enabled
+* Operation aliases limiting
+  .limits.router.max_aliases
 
 * Operation depth limiting
   .limits.router.max_depth
@@ -36,5 +27,14 @@ Configuration yaml:
 * Operation root fields limiting
   .limits.router.max_root_fields
 
-* Operation aliases limiting
-  .limits.router.max_aliases
+* Restricted
+  .plugins.['experimental.restricted'].enabled
+
+* Subgraph response caching
+  .response_cache.enabled
+
+* Federated subscriptions
+  .subscription.enabled
+
+* Query plan caching
+  .supergraph.query_planning.cache.redis

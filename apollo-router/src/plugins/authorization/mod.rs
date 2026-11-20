@@ -39,6 +39,8 @@ use crate::spec::Schema;
 use crate::spec::SpecError;
 use crate::spec::query::transform;
 use crate::spec::query::traverse;
+use crate::uplink::license_enforcement::AllowedFeature;
+use crate::uplink::license_enforcement::LicensedSetting;
 
 pub(crate) mod authenticated;
 pub(crate) mod extract_authorization_checks_layer;
@@ -536,6 +538,18 @@ impl AuthorizationPlugin {
 #[async_trait::async_trait]
 impl PluginPrivate for AuthorizationPlugin {
     type Config = Conf;
+
+    fn licensed_features(config: &Self::Config) -> Vec<LicensedSetting> {
+        if config.directives.enabled {
+            vec![LicensedSetting {
+                feature: AllowedFeature::Authorization,
+                name: "Authorization directives",
+                path: "authorization.directives.enabled",
+            }]
+        } else {
+            Vec::new()
+        }
+    }
 
     async fn new(init: PluginInit<Self::Config>) -> Result<Self, BoxError> {
         Ok(AuthorizationPlugin {
