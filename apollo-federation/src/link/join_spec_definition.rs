@@ -90,6 +90,70 @@ pub(crate) const JOIN_DIRECTIVE_GRAPHS_ARGUMENT_NAME: Name = name!("graphs");
 pub(crate) struct GraphDirectiveArguments<'doc> {
     pub(crate) name: &'doc str,
     pub(crate) url: &'doc str,
+    /// SDL of the graph's `@internal` elements (join v0.6+), which are not part of the merged
+    /// schema but are needed to plan entity lookups.
+    pub(crate) internal_definitions: Option<&'doc str>,
+}
+
+/// One graph's argument recorded on `@join__field` (join v0.6+): an argument of a lookup field
+/// (`lookupArguments`), or a `@require` argument, which the merged field does not have
+/// (`requireArguments`). Merging may drop a lookup argument that other graphs lack, so extraction
+/// restores the lookup's arguments from these.
+#[derive(Debug)]
+pub(crate) struct JoinArgument<'doc> {
+    pub(crate) name: &'doc str,
+    pub(crate) type_: &'doc str,
+    /// The `@is` or `@require` selection map. A lookup argument without `@is` has none.
+    pub(crate) selection: Option<&'doc str>,
+    /// The default value, in GraphQL syntax.
+    pub(crate) default: Option<&'doc str>,
+}
+
+impl<'doc> JoinArgument<'doc> {
+    fn from_value(list_name: &str, value: &'doc Value) -> Result<Self, FederationError> {
+        let Value::Object(input_object) = value else {
+            bail!(r#"Item "{value}" in {list_name} list is not an object"#)
+        };
+        let (mut name, mut type_, mut selection, mut default) = (None, None, None, None);
+        for (input_field_name, field_value) in input_object {
+            let slot = match input_field_name.as_str() {
+                "name" => &mut name,
+                "type" => &mut type_,
+                "selection" => &mut selection,
+                "default" => &mut default,
+                _ => bail!(r#"Found unknown {list_name} input field "{input_field_name}""#),
+            };
+            if slot.is_some() {
+                bail!(r#"Input field "{input_field_name}" in {list_name} is repeated"#)
+            }
+            let Some(text) = field_value.as_str() else {
+                bail!(r#"Input field "{input_field_name}" in {list_name} is not a string"#)
+            };
+            *slot = Some(text);
+        }
+        let (Some(name), Some(type_)) = (name, type_) else {
+            bail!(r#"Input fields "name" and "type" are required in {list_name}"#)
+        };
+        Ok(Self {
+            name,
+            type_,
+            selection,
+            default,
+        })
+    }
+
+    fn list(
+        application: &'doc Node<Directive>,
+        argument_name: &Name,
+    ) -> Result<Vec<Self>, FederationError> {
+        let Some(values) = directive_optional_list_argument(application, argument_name)? else {
+            return Ok(Vec::new());
+        };
+        values
+            .iter()
+            .map(|value| Self::from_value(argument_name, value))
+            .collect()
+    }
 }
 
 pub(crate) struct TypeDirectiveArguments<'doc> {
@@ -175,7 +239,7 @@ impl<'doc> TryFrom<&'doc Value> for ContextArgument<'doc> {
     }
 }
 
-#[derive(Debug)]
+#[derive(Debug, Default)]
 pub(crate) struct FieldDirectiveArguments<'doc> {
     pub(crate) graph: Option<Name>,
     pub(crate) requires: Option<&'doc str>,
@@ -186,6 +250,10 @@ pub(crate) struct FieldDirectiveArguments<'doc> {
     pub(crate) override_label: Option<&'doc str>,
     pub(crate) user_overridden: Option<bool>,
     pub(crate) context_arguments: Option<Vec<ContextArgument<'doc>>>,
+    /// Whether the field is a `@lookup` field in the graph (join v0.6+).
+    pub(crate) lookup: bool,
+    pub(crate) lookup_arguments: Vec<JoinArgument<'doc>>,
+    pub(crate) require_arguments: Vec<JoinArgument<'doc>>,
 }
 
 pub(crate) struct ImplementsDirectiveArguments<'doc> {
@@ -289,6 +357,10 @@ impl JoinSpecDefinition {
         Ok(GraphDirectiveArguments {
             name: directive_required_string_argument(application, &JOIN_NAME_ARGUMENT_NAME)?,
             url: directive_required_string_argument(application, &JOIN_URL_ARGUMENT_NAME)?,
+            internal_definitions: directive_optional_string_argument(
+                application,
+                &JOIN_INTERNALDEFINITIONS_ARGUMENT_NAME,
+            )?,
         })
     }
 
@@ -385,6 +457,13 @@ impl JoinSpecDefinition {
                     .try_collect()
             })
             .transpose()?,
+            lookup: directive_optional_boolean_argument(application, &JOIN_LOOKUP_ARGUMENT_NAME)?
+                .unwrap_or(false),
+            lookup_arguments: JoinArgument::list(application, &JOIN_LOOKUPARGUMENTS_ARGUMENT_NAME)?,
+            require_arguments: JoinArgument::list(
+                application,
+                &JOIN_REQUIREARGUMENTS_ARGUMENT_NAME,
+            )?,
         })
     }
 

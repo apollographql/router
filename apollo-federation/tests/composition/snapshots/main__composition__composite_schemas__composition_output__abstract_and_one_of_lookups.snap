@@ -112,10 +112,11 @@ input PersonByInput @oneOf {
 }
 
 type Query {
-  mediaByKey(key: MediaKeyInput!): Media
-  person(by: PersonByInput!): Person
-  _entities(representations: [_Any!]!): [_Entity]!
+  mediaByKey(
+    key: MediaKeyInput! @federation__is(field: "{ isbn: <Book>.isbn } | { upc: <Movie>.upc }"),
+  ): Media @federation__lookup
+  person(
+    by: PersonByInput! @federation__is(field: "{ id } | { email }"),
+  ): Person @federation__lookup
   _service: _Service!
 }
-
-union _Entity = Book | Movie | Person
