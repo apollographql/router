@@ -45,7 +45,7 @@ schema @link(url: "https://specs.apollo.dev/link/v1.0") @link(url: "https://spec
 }
 
 type Lookups {
-  productById(id: ID!): Product
+  productById(id: ID!): Product @federation__lookup
 }
 
 type Product @key(fields: "id") {
@@ -54,8 +54,5 @@ type Product @key(fields: "id") {
 
 type Query {
   lookups: Lookups!
-  _entities(representations: [_Any!]!): [_Entity]!
   _service: _Service!
 }
-
-union _Entity = Product

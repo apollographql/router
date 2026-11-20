@@ -1898,6 +1898,43 @@ mod composition_output {
     }
 }
 
+/// One field of a subgraph extracted from the supergraph, as printed SDL.
+fn extracted_field(
+    supergraph: &Supergraph<Satisfiable>,
+    subgraph: &str,
+    type_name: &str,
+    field: &str,
+) -> String {
+    let subgraphs = super::test_helpers::extract_subgraphs_from_supergraph_result(supergraph)
+        .expect("extracts");
+    let (_, subgraph) = subgraphs
+        .into_iter()
+        .find(|(name, _)| &**name == subgraph)
+        .expect("subgraph is extracted");
+    subgraph
+        .schema
+        .schema()
+        .type_field(type_name, field)
+        .expect("field is extracted")
+        .to_string()
+}
+
+fn extracted_type(supergraph: &Supergraph<Satisfiable>, subgraph: &str, type_name: &str) -> String {
+    let subgraphs = super::test_helpers::extract_subgraphs_from_supergraph_result(supergraph)
+        .expect("extracts");
+    let (_, subgraph) = subgraphs
+        .into_iter()
+        .find(|(name, _)| &**name == subgraph)
+        .expect("subgraph is extracted");
+    subgraph
+        .schema
+        .schema()
+        .types
+        .get(type_name)
+        .expect("type is extracted")
+        .to_string()
+}
+
 /// The `@join__type` applications on `type_name` in the supergraph.
 fn join_types(supergraph: &Supergraph<Satisfiable>, type_name: &str) -> Vec<String> {
     supergraph
@@ -2007,6 +2044,101 @@ mod key_resolvability {
         assert_eq!(
             join_types(&supergraph, "Product"),
             [r#"@join__type(graph: A, key: "id dimension { width height }")"#]
+        );
+    }
+}
+
+mod extraction {
+    use super::*;
+
+    #[test]
+    fn lookup_arguments_dropped_by_merging_are_restored() {
+        // `sku` is only in "a", so merging drops it from the supergraph field. The lookup in "a"
+        // still takes it.
+        let supergraph = compose_sources(&[
+            (
+                "a",
+                r#"
+                type Query {
+                  product(id: ID @is(field: "id"), sku: String, upc: String @is(field: "upc")): Product
+                    @lookup @shareable
+                }
+                type Product @key(fields: "id") { id: ID! sku: String! upc: String! }
+                "#,
+            ),
+            (
+                "b",
+                r#"
+                type Query { product(id: ID @is(field: "id")): Product @lookup @shareable }
+                type Product @key(fields: "id") { id: ID! name: String }
+                "#,
+            ),
+        ])
+        .expect("composes");
+        assert_eq!(
+            extracted_field(&supergraph, "a", "Query", "product"),
+            r#"product(
+  id: ID @federation__is(field: "id"),
+  sku: String,
+  upc: String @federation__is(field: "upc"),
+): Product @shareable @federation__lookup"#
+        );
+        assert_eq!(
+            extracted_field(&supergraph, "b", "Query", "product"),
+            r#"product(
+  id: ID @federation__is(field: "id"),
+): Product @shareable @federation__lookup"#
+        );
+    }
+
+    #[test]
+    fn require_argument_default_value_is_restored() {
+        let supergraph = compose_sources(&[
+            (
+                "a",
+                r#"
+                type Query { productById(id: ID!): Product @lookup }
+                type Product @key(fields: "id") {
+                  id: ID!
+                  price(weight: Int = 3 @require(field: "weight")): Int
+                }
+                "#,
+            ),
+            (
+                "b",
+                r#"
+                type Query { productByIdInB(id: ID!): Product @lookup }
+                type Product @key(fields: "id") { id: ID! weight: Int }
+                "#,
+            ),
+        ])
+        .expect("composes");
+        assert_eq!(
+            extracted_field(&supergraph, "a", "Product", "price"),
+            r#"price(
+  weight: Int = 3 @federation__require(field: "weight"),
+): Int"#
+        );
+    }
+
+    #[test]
+    fn internal_one_of_input_keeps_one_of() {
+        // The lookup's `@is` alternatives are only valid against a `@oneOf` input.
+        let supergraph = compose_sources(&[(
+            "a",
+            r#"
+            type Query {
+              products: [Product]
+              product(by: ProductBy! @is(field: "{ id } | { sku }")): Product @lookup @internal
+            }
+            input ProductBy @oneOf @internal { id: ID sku: String }
+            type Product @key(fields: "id") @key(fields: "sku") { id: ID! sku: String! }
+            "#,
+        )])
+        .expect("composes");
+        assert_eq!(
+            extracted_type(&supergraph, "a", "ProductBy"),
+            "input ProductBy @oneOf {\n  id: ID\n  sku: String\n}\n"
         );
     }
 }
