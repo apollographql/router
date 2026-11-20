@@ -366,6 +366,40 @@ fn detects_arguments() {
 }
 
 #[test]
+fn computes_key_selections_per_type() {
+    let schema = schema();
+    let map = parse("{ bookId: <Book>.isbn } | { movieId: <Movie>.id }").unwrap();
+    let book: Vec<String> = super::value::selections_for_type(&map, &schema, &name!("Book"))
+        .iter()
+        .map(|t| t.to_string())
+        .collect();
+    assert_eq!(book, ["isbn"]);
+    let movie: Vec<String> = super::value::selections_for_type(&map, &schema, &name!("Movie"))
+        .iter()
+        .map(|t| t.to_string())
+        .collect();
+    assert_eq!(movie, ["id"]);
+
+    let map = parse("{ id } | { addressId: author.id } | { title }").unwrap();
+    let book: Vec<String> = super::value::selections_for_type(&map, &schema, &name!("Book"))
+        .iter()
+        .map(|t| t.to_string())
+        .collect();
+    assert_eq!(book, ["id", "author { id }", "title"]);
+
+    let map = parse("dimension.{ width, height }").unwrap();
+    assert_eq!(
+        super::value::selections_for_type(&map, &schema, &name!("Product"))[0].to_string(),
+        "dimension { width height }"
+    );
+    let map = parse("mediaById<Book>.isbn").unwrap();
+    assert_eq!(
+        super::value::selections_for_type(&map, &schema, &name!("Query"))[0].to_string(),
+        "mediaById { ... on Book { isbn } }"
+    );
+}
+
+#[test]
 fn checks_mappability_per_alternative() {
     let schema = schema();
     let mappable = |map: &str, concrete| is_mappable(&parse(map).unwrap(), &schema, &concrete);
