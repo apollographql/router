@@ -15,8 +15,8 @@ type Product @join__type(graph: A, key: "id") @join__type(graph: A, key: "upc") 
 }
 
 type Query @join__type(graph: A) {
-  productById(productId: ID!): Product
-  productByUpc(upc: String!): Product
+  productById(productId: ID!): Product @join__field(graph: A, lookup: true, lookupArguments: [{name: "productId", type: "ID!", selection: "id"}])
+  productByUpc(upc: String!): Product @join__field(graph: A, lookup: true, lookupArguments: [{name: "upc", type: "String!"}])
 }
 
 enum join__Graph {
