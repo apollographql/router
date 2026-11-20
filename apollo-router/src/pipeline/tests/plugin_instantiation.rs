@@ -574,7 +574,7 @@ async fn test_optional_plugin_added_with_restricted_allowed_features(
     "coprocessor",
     HashSet::from_iter(vec![AllowedFeature::DemandControl]))
 ]
-async fn test_optional_plugin_not_added_with_restricted_allowed_features(
+async fn test_optional_plugin_added_without_its_licence_feature(
     #[case] plugin: &str,
     #[case] allowed_features: HashSet<AllowedFeature>,
 ) {
@@ -582,6 +582,7 @@ async fn test_optional_plugin_not_added_with_restricted_allowed_features(
      * GIVEN
      *  - a restricted license whose allowed feature set does not contain the given `plugin`
      *  - a valid config including valid config for the given `plugin`
+     *    (the startup licence check, not the pipeline, refuses unlicensed settings)
      *  - a valid schema
      * */
     let license = LicenseState::Licensed {
@@ -620,13 +621,12 @@ async fn test_optional_plugin_not_added_with_restricted_allowed_features(
 
     /*
      * THEN
-     *  - since the plugin is not part of the `allowed_features` set
-     *    the plugin should not have been added.
+     *  - the plugin should have been added: building the pipeline doesn't check the license.
      * - mandatory plugins should have been added.
      * */
     assert!(
-        !service.plugins.contains_key(&format!("apollo.{plugin}")),
-        "Plugin {plugin} should not have been added"
+        service.plugins.contains_key(&format!("apollo.{plugin}")),
+        "Plugin {plugin} should have been added"
     );
     assert!(
         MANDATORY_PLUGINS

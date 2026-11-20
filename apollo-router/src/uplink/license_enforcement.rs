@@ -638,23 +638,6 @@ impl From<&str> for AllowedFeature {
     }
 }
 
-impl AllowedFeature {
-    /// Creates an allowed feature from a plugin name
-    pub fn from_plugin_name(plugin_name: &str) -> Option<AllowedFeature> {
-        match plugin_name {
-            "traffic_shaping" => Some(AllowedFeature::TrafficShaping),
-            "limits" => Some(AllowedFeature::RequestLimits),
-            "subscription" => Some(AllowedFeature::Subscriptions),
-            "authorization" => Some(AllowedFeature::Authorization),
-            "authentication" => Some(AllowedFeature::Authentication),
-            "response_cache" => Some(AllowedFeature::ResponseCaching),
-            "demand_control" => Some(AllowedFeature::DemandControl),
-            "coprocessor" => Some(AllowedFeature::Coprocessors),
-            _other => None,
-        }
-    }
-}
-
 impl<'de> Deserialize<'de> for AllowedFeature {
     fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
     where
