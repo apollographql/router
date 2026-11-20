@@ -8,7 +8,6 @@ use serde_json_bytes::Map as JsonMap;
 
 use crate::json_ext::Object;
 use crate::json_ext::Value;
-use crate::plugins::batching::config::BatchingMode;
 
 /// A GraphQL `Request` used to represent both supergraph and subgraph requests.
 #[derive(Clone, Debug, PartialEq, Eq, Hash, Serialize, Deserialize, Default)]
@@ -157,51 +156,6 @@ impl Request {
         let seed = RequestFromBytesSeed(data);
         let mut de = serde_json::Deserializer::from_slice(data);
         seed.deserialize(&mut de)
-    }
-
-    /// Convert Bytes into a GraphQL [`Request`].
-    ///
-    /// An error will be produced in the event that the bytes array cannot be
-    /// turned into a valid GraphQL `Request`.
-    pub(crate) fn batch_from_bytes(bytes: &[u8]) -> Result<Vec<Request>, serde_json::Error> {
-        let value: Value = serde_json::from_slice(bytes).map_err(serde_json::Error::custom)?;
-
-        Request::process_batch_values(value)
-    }
-
-    fn allocate_result_array(value: &Value) -> Vec<Request> {
-        match value.as_array() {
-            Some(array) => Vec::with_capacity(array.len()),
-            None => Vec::with_capacity(1),
-        }
-    }
-
-    fn process_batch_values(value: Value) -> Result<Vec<Request>, serde_json::Error> {
-        let mut result = Request::allocate_result_array(&value);
-
-        if let Value::Array(entries) = value {
-            u64_histogram!(
-                "apollo.router.operations.batching.size",
-                "Number of queries contained within each query batch",
-                entries.len() as u64,
-                mode = BatchingMode::BatchHttpLink.to_string() // Only supported mode right now
-            );
-
-            u64_counter!(
-                "apollo.router.operations.batching",
-                "Total requests with batched operations",
-                1,
-                mode = BatchingMode::BatchHttpLink.to_string() // Only supported mode right now
-            );
-            for entry in entries {
-                let bytes = serde_json::to_vec(&entry)?;
-                result.push(Request::deserialize_from_bytes(&bytes.into())?);
-            }
-        } else {
-            let bytes = serde_json::to_vec(&value)?;
-            result.push(Request::deserialize_from_bytes(&bytes.into())?);
-        }
-        Ok(result)
     }
 
     fn process_value(value: &Value) -> Result<Request, serde_json::Error> {
