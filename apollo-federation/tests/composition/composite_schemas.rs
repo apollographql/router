@@ -1490,8 +1490,199 @@ mod cross_schema_validation {
     }
 }
 
+mod internal_merging {
+    use super::*;
+
+    #[test]
+    fn internal_elements_are_not_merged() {
+        let supergraph = compose_sources(&[(
+            "a",
+            r#"
+            type Query {
+              top: Product
+              productBySku(sku: ID!): Product @lookup @internal
+              productByKey(key: ProductKey! @is(field: "{ id }")): Product @lookup @internal
+              lookups: InternalLookups @internal
+            }
+            type InternalLookups @internal { productById(id: ID!): Product @lookup }
+            input ProductKey @internal { id: ID! }
+            type Product @key(fields: "id") { id: ID! sku: ID! }
+            "#,
+        )])
+        .expect("composes");
+        let sdl = print_sdl(supergraph.schema().schema());
+        for internal in [
+            "productBySku",
+            "productByKey",
+            "lookups",
+            "InternalLookups",
+            "ProductKey",
+        ] {
+            assert!(
+                !sdl.contains(internal),
+                "{internal} is in the supergraph:\n{sdl}"
+            );
+        }
+        assert!(sdl.contains("top: Product"), "{sdl}");
+    }
+
+    #[test]
+    fn internal_lookup_does_not_conflict_with_public_lookup() {
+        // Spec `INVALID_FIELD_SHARING` excludes `@internal` declarations.
+        let supergraph = compose_sources(&[
+            (
+                "a",
+                r#"
+                type Query { productById(id: ID!): Product @lookup }
+                type Product @key(fields: "id") { id: ID! name: String }
+                "#,
+            ),
+            (
+                "b",
+                r#"
+                type Query { productById(id: ID!): Product @lookup @internal }
+                type Product @key(fields: "id") { id: ID! price: Int }
+                "#,
+            ),
+        ])
+        .expect("composes");
+        let sdl = print_sdl(supergraph.schema().schema());
+        assert!(
+            sdl.contains("productById(id: ID!): Product @join__field(graph: A)\n"),
+            "{sdl}"
+        );
+    }
+
+    #[test]
+    fn require_arguments_and_their_internal_input_types_are_not_merged() {
+        // `@require` arguments are supplied by the executor and do not participate in merging,
+        // and neither do internal input types.
+        let supergraph = compose_sources(&[
+            (
+                "a",
+                r#"
+                type Query { productById(id: ID!): Product @lookup }
+                type Product @key(fields: "id") {
+                  id: ID!
+                  shipping(zip: String, dimension: Dimension! @require(field: "{ width }")): Int
+                }
+                input Dimension @internal { width: Int }
+                "#,
+            ),
+            (
+                "b",
+                r#"
+                type Query { productByIdInB(id: ID!): Product @lookup }
+                type Product @key(fields: "id") { id: ID! width: Int }
+                "#,
+            ),
+        ])
+        .expect("composes");
+        let sdl = print_sdl(supergraph.schema().schema());
+        assert!(!sdl.contains("Dimension"), "{sdl}");
+        assert!(
+            sdl.contains("shipping(zip: String): Int @join__field(graph: A)"),
+            "{sdl}"
+        );
+    }
+
+    #[test]
+    fn internal_input_types_do_not_conflict_across_schemas() {
+        // Spec "Merge Input Types": internal input types neither contribute fields to nor
+        // constrain an input type of the same name in another source schema.
+        let supergraph = compose_sources(&[
+            (
+                "a",
+                r#"
+                type Query { productById(id: ID!): Product @lookup }
+                type Product @key(fields: "id") {
+                  id: ID!
+                  shipping(dimension: Dimension @require(field: "{ width }")): Int
+                }
+                input Dimension @internal { width: Int }
+                "#,
+            ),
+            (
+                "b",
+                r#"
+                type Query { productByIdInB(id: ID!): Product @lookup }
+                type Product @key(fields: "id") {
+                  id: ID!
+                  tax(dimension: Dimension @require(field: "{ length: height }")): Int
+                }
+                input Dimension @internal { length: Int! }
+                "#,
+            ),
+            (
+                "c",
+                r#"
+                type Query {
+                  productByIdInC(id: ID!): Product @lookup
+                  boxes(dimension: Dimension): [Int]
+                }
+                type Product @key(fields: "id") { id: ID! width: Int height: Int! }
+                input Dimension { depth: Int! }
+                "#,
+            ),
+        ])
+        .expect("composes");
+        let sdl = print_sdl(supergraph.schema().schema());
+        assert!(
+            sdl.contains("input Dimension @join__type(graph: C) {\n  depth: Int!\n}"),
+            "{sdl}"
+        );
+    }
+
+    #[test]
+    fn recursive_internal_input_types_are_not_merged() {
+        let supergraph = compose_sources(&[(
+            "a",
+            r#"
+            type Query {
+              productById(id: ID!): Product @lookup
+              productByKey(key: ProductKey! @is(field: "{ sku }")): Product @lookup @internal
+            }
+            input ProductKey @internal { sku: ID! fallback: ProductKey other: OtherKey }
+            input OtherKey @internal { key: ProductKey }
+            type Product @key(fields: "id") { id: ID! sku: ID! }
+            "#,
+        )])
+        .expect("composes");
+        let sdl = print_sdl(supergraph.schema().schema());
+        assert!(!sdl.contains("ProductKey"), "{sdl}");
+        assert!(!sdl.contains("OtherKey"), "{sdl}");
+    }
+}
+
 mod internal_root_type {
     use super::*;
+
+    #[test]
+    fn internal_query_root_type_holds_only_internal_lookups() {
+        // `@internal` on a type is shorthand for `@internal` on each of its fields, so the
+        // lookups of "b" stay out of the supergraph. The `_service`/`_entities` fields that
+        // federation adds are not subject to `INTERNAL_INVALID_USAGE`.
+        let supergraph = compose_sources(&[
+            (
+                "a",
+                r#"
+                type Query { productById(id: ID!): Product @lookup }
+                type Product @key(fields: "id") { id: ID! name: String sku: ID! @shareable }
+                "#,
+            ),
+            (
+                "b",
+                r#"
+                type Query @internal { productBySku(sku: ID!): Product @lookup }
+                type Product @key(fields: "id") { id: ID! sku: ID! @shareable price: Int }
+                "#,
+            ),
+        ])
+        .expect("composes");
+        let sdl = print_sdl(supergraph.schema().schema());
+        assert!(!sdl.contains("productBySku"), "{sdl}");
+        assert!(sdl.contains("price: Int @join__field(graph: B)"), "{sdl}");
+    }
 
     #[test]
     fn internal_query_root_type_with_non_lookup_field() {
