@@ -308,6 +308,7 @@ mod tests {
         Some(Value::Array(Array::String(vec!["A".into(), "B".into()])))
     )]
     #[case::singular_matches_null("$.nothing", None)]
+    #[case::singular_matches_array_with_null("$.with_null", Some(Value::from("[1,null]")))]
     #[case::wildcard_one_match(
         "$.one[*].id",
         Some(Value::Array(Array::String(vec!["only".into()])))
@@ -335,6 +336,7 @@ mod tests {
         let data = serde_json_bytes::json!({
             "a": "x",
             "nothing": null,
+            "with_null": [1, null],
             "codes": ["A", "B"],
             "one": [{"id": "only"}],
             "items": [{"id": 1}, {"id": 2}, {"id": 3}],
