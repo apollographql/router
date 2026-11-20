@@ -699,13 +699,7 @@ impl FetchGraph {
                 root_type.clone()
             }
             FetchGroupKind::Entity { .. } => subgraph_schema
-                .entity_type()?
-                .ok_or_else(|| {
-                    FederationError::internal(format!(
-                        "Subgraph `{}` has no entities defined",
-                        node.subgraph
-                    ))
-                })?
+                .entity_type_for_fetch(&node.subgraph)?
                 .into(),
         };
 

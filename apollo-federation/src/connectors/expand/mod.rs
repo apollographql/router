@@ -16,6 +16,8 @@ use crate::ValidFederationSubgraph;
 use crate::connectors::ConnectSpec;
 use crate::connectors::Connector;
 use crate::error::FederationError;
+use crate::error::SingleFederationError;
+use crate::error::UnsupportedFeatureKind;
 use crate::merge::merge_subgraphs;
 use crate::schema::FederationSchema;
 use crate::subgraph::Subgraph;
@@ -136,6 +138,24 @@ pub fn expand_connectors_with_options(
     let api_schema = supergraph.to_api_schema(api_schema_options.clone())?;
 
     let all_subgraphs: Vec<_> = supergraph.extract_subgraphs()?.into_iter().collect();
+    // Expansion re-merges the extracted subgraphs with the legacy merger, which knows neither
+    // lookups nor `@internal` elements: the result would lose them and give the source schema an
+    // `_entities` field it does not have.
+    if let Some((name, _)) = all_subgraphs.iter().find(|(_, subgraph)| {
+        subgraph
+            .schema
+            .subgraph_metadata()
+            .is_some_and(|metadata| metadata.is_composite_schema())
+    }) {
+        return Err(SingleFederationError::UnsupportedFeature {
+            message: format!(
+                "Subgraph `{name}` is a GraphQL Federation source schema: connectors cannot be \
+                 expanded in a supergraph with source schemas yet"
+            ),
+            kind: UnsupportedFeatureKind::Lookup,
+        }
+        .into());
+    }
     let subgraph_connect_directive_names: HashMap<String, [Name; 2]> = all_subgraphs
         .iter()
         .flat_map(|(_, sub)| {
