@@ -13,22 +13,20 @@ use tower::ServiceExt as _;
 use tracing::instrument;
 
 use crate::Context;
-use crate::batching::BatchQuery;
-use crate::batching::BatchQueryInfo;
-use crate::configuration::BatchingMode;
 use crate::error::FetchError;
 use crate::error::SubgraphBatchingError;
 use crate::graphql;
+use crate::plugins::batching::config::BatchingMode;
+use crate::plugins::batching::state::BatchQuery;
+use crate::plugins::batching::state::BatchQueryInfo;
 use crate::services::http::HttpRequest;
 use crate::services::http::HttpResponse;
 use crate::services::router;
 use crate::services::router::body::RouterBody;
 
-/// Intercept requests that are part of a batch, and batch them up together into a single request
-/// per subgraph.
+/// Layer type for [`BatchingPlugin::join_batch_requests_layer`].
 ///
-/// All subgraph requests for a batch, even for different subgraphs, are sent at the same time once
-/// the whole batch is ready.
+/// [`BatchingPlugin::join_batch_requests_layer`]: super::BatchPlugin::join_batch_requests_layer
 //
 // This layer works together with the `crate::batching::Batch` structure, which calls back into the
 // `process_batches` function declared in this file, and that's where eventually the inner service
@@ -546,11 +544,11 @@ mod tests {
 
     use super::JoinBatchRequestsLayer;
     use crate::Context;
-    use crate::batching::Batch;
-    use crate::configuration::Batching;
-    use crate::configuration::CommonBatchingConfig;
     use crate::configuration::subgraph::SubgraphConfiguration;
     use crate::graphql;
+    use crate::plugins::batching::config::BatchingConfig;
+    use crate::plugins::batching::config::CommonBatchingConfig;
+    use crate::plugins::batching::state::Batch;
     use crate::services::http::HttpRequest;
     use crate::services::http::HttpResponse;
     use crate::services::router::body;
@@ -578,7 +576,7 @@ mod tests {
             .unwrap();
 
         // Subgraph batching on for all subgraphs
-        let config = Batching {
+        let config = BatchingConfig {
             enabled: true,
             subgraph: Some(SubgraphConfiguration {
                 all: CommonBatchingConfig { enabled: true },
@@ -589,7 +587,7 @@ mod tests {
 
         let context = Context::new();
         context.extensions().with_lock(|lock| {
-            lock.insert(config);
+            lock.insert(Arc::new(config));
             lock.insert(query);
             lock.insert(query_hash);
         });

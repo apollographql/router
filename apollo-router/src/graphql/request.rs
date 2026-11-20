@@ -6,9 +6,9 @@ use serde::de::Error;
 use serde_json_bytes::ByteString;
 use serde_json_bytes::Map as JsonMap;
 
-use crate::configuration::BatchingMode;
 use crate::json_ext::Object;
 use crate::json_ext::Value;
+use crate::plugins::batching::config::BatchingMode;
 
 /// A GraphQL `Request` used to represent both supergraph and subgraph requests.
 #[derive(Clone, Debug, PartialEq, Eq, Hash, Serialize, Deserialize, Default)]

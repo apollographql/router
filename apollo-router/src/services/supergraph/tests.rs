@@ -1363,7 +1363,6 @@ async fn batching_defer_unsupported_and_incorrect_header() {
         },
     }))
     .unwrap();
-    let batching = configuration.batching.clone();
 
     let service = TestHarness::builder()
         .configuration(Arc::new(configuration))
@@ -1373,9 +1372,6 @@ async fn batching_defer_unsupported_and_incorrect_header() {
         .unwrap();
 
     let context = Context::new();
-    context.extensions().with_lock(|lock| {
-        lock.insert(batching);
-    });
 
     let request = supergraph::Request::fake_builder()
         .query("query { currentUser { id ...@defer { name } } }")
@@ -1404,7 +1400,6 @@ async fn batching_defer_unsupported_and_incorrect_variable() {
         },
     }))
     .unwrap();
-    let batching = configuration.batching.clone();
 
     let service = TestHarness::builder()
         .configuration(Arc::new(configuration))
@@ -1416,9 +1411,6 @@ async fn batching_defer_unsupported_and_incorrect_variable() {
     let context = defer_context();
     // XXX(@goto-bus-stop): not ideal but this implies that the `Accept` header was passed in
     // correctly; the router service is normally responsible for populating this context value
-    context.extensions().with_lock(|lock| {
-        lock.insert(batching);
-    });
 
     let request = supergraph::Request::fake_builder()
         .query("query($skip: Boolean!) { currentUser { id ...@defer { name @skip(if: $skip) } } }")

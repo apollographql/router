@@ -245,10 +245,6 @@ pub struct Configuration {
     #[serde(default, skip_serializing, skip_deserializing)]
     pub(crate) notify: Notify<String, graphql::Response>,
 
-    /// Batching configuration.
-    #[serde(default)]
-    pub(crate) batching: Batching,
-
     /// Type conditioned fetching configuration.
     #[serde(default)]
     pub(crate) experimental_type_conditioned_fetching: bool,
@@ -305,7 +301,6 @@ impl Configuration {
         uplink: Option<UplinkConfig>,
         experimental_type_conditioned_fetching: Option<bool>,
         experimental_hoist_orphan_errors: Option<SubgraphConfiguration<HoistOrphanErrors>>,
-        batching: Option<Batching>,
         server: Option<Server>,
     ) -> Result<Self, ConfigurationError> {
         let (apollo_plugins, plugins) = Self::plugin_sections(apollo_plugins, plugins)?;
@@ -328,7 +323,6 @@ impl Configuration {
             apollo_plugins,
             tls: tls.unwrap_or_default(),
             uplink,
-            batching: batching.unwrap_or_default(),
             experimental_type_conditioned_fetching: experimental_type_conditioned_fetching
                 .unwrap_or_default(),
             experimental_hoist_orphan_errors: experimental_hoist_orphan_errors.unwrap_or_default(),
@@ -384,7 +378,6 @@ impl Configuration {
             // Replaced once the document's subscription section, if any, has been read.
             notify: Self::notify(&ApolloPlugins::default())
                 .expect("without a subscription section there is no config to read"),
-            batching: Default::default(),
             experimental_type_conditioned_fetching: Default::default(),
             experimental_hoist_orphan_errors: Default::default(),
         }
@@ -567,7 +560,6 @@ impl Configuration {
         persisted_query: Option<PersistedQueries>,
         operation_limits: Option<limits::Config>,
         uplink: Option<UplinkConfig>,
-        batching: Option<Batching>,
         experimental_type_conditioned_fetching: Option<bool>,
         server: Option<Server>,
     ) -> Result<Self, ConfigurationError> {
@@ -592,7 +584,6 @@ impl Configuration {
             experimental_type_conditioned_fetching: experimental_type_conditioned_fetching
                 .unwrap_or_default(),
             experimental_hoist_orphan_errors: Default::default(),
-            batching: batching.unwrap_or_default(),
             raw_yaml: None,
         };
 
@@ -1736,74 +1727,6 @@ fn default_connection_shutdown_timeout() -> Duration {
 
 fn default_strict_variable_validation() -> Mode {
     Mode::Enforce
-}
-
-#[derive(Clone, Debug, Default, Error, Display, Serialize, Deserialize, JsonSchema)]
-#[serde(deny_unknown_fields, rename_all = "snake_case")]
-pub(crate) enum BatchingMode {
-    /// batch_http_link
-    #[default]
-    BatchHttpLink,
-}
-
-/// Configuration for Batching
-#[derive(Debug, Clone, Default, Deserialize, Serialize, JsonSchema)]
-#[serde(deny_unknown_fields, default)]
-pub(crate) struct Batching {
-    /// Activates Batching (disabled by default)
-    pub(crate) enabled: bool,
-
-    /// Batching mode
-    pub(crate) mode: BatchingMode,
-
-    /// Subgraph options for batching
-    pub(crate) subgraph: Option<SubgraphConfiguration<CommonBatchingConfig>>,
-
-    /// Maximum size for a batch
-    pub(crate) maximum_size: Option<usize>,
-}
-
-/// Common options for configuring subgraph batching
-#[derive(Debug, Clone, Default, Deserialize, Serialize, JsonSchema)]
-#[serde(deny_unknown_fields, default)]
-pub(crate) struct CommonBatchingConfig {
-    /// Whether this batching config should be enabled
-    pub(crate) enabled: bool,
-}
-
-impl Batching {
-    // Check if we should enable batching for a particular subgraph (service_name)
-    pub(crate) fn batch_include(&self, service_name: &str) -> bool {
-        match &self.subgraph {
-            Some(subgraph_batching_config) => {
-                // Override by checking if all is enabled
-                if subgraph_batching_config.all.enabled {
-                    // If it is, require:
-                    // - no subgraph entry OR
-                    // - an enabled subgraph entry
-                    subgraph_batching_config
-                        .subgraphs
-                        .get(service_name)
-                        .is_none_or(|x| x.enabled)
-                } else {
-                    // If it isn't, require:
-                    // - an enabled subgraph entry
-                    subgraph_batching_config
-                        .subgraphs
-                        .get(service_name)
-                        .is_some_and(|x| x.enabled)
-                }
-            }
-            None => false,
-        }
-    }
-
-    pub(crate) fn exceeds_batch_size<T>(&self, batch: &[T]) -> bool {
-        match self.maximum_size {
-            Some(maximum_size) => batch.len() > maximum_size,
-            None => false,
-        }
-    }
 }
 
 /// Per-subgraph configuration for hoisting orphan errors.

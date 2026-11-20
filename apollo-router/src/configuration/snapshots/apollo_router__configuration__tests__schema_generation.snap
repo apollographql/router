@@ -646,7 +646,7 @@ expression: "&schema"
       },
       "type": "object"
     },
-    "Batching": {
+    "BatchingConfig": {
       "additionalProperties": false,
       "description": "Configuration for Batching",
       "properties": {
@@ -12196,14 +12196,7 @@ expression: "&schema"
       "$ref": "#/$defs/AuthorizationConfig"
     },
     "batching": {
-      "$ref": "#/$defs/Batching",
-      "default": {
-        "enabled": false,
-        "maximum_size": null,
-        "mode": "batch_http_link",
-        "subgraph": null
-      },
-      "description": "Batching configuration."
+      "$ref": "#/$defs/BatchingConfig"
     },
     "circuit_breaker": {
       "$ref": "#/$defs/CircuitBreakerPluginConfig"

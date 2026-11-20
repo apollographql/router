@@ -18,9 +18,6 @@ use tower::util::BoxService;
 use super::acquire::HttpClientInputsMaps;
 use crate::Configuration;
 use crate::apollo_studio_interop::extended_references_layer::ExtendedReferencesLayer;
-use crate::batching::BatchQueryPlanAnalysisLayer;
-use crate::batching::JoinBatchRequestsLayer;
-use crate::batching::SplitBatchRequestLayer;
 use crate::cache::DeduplicatingCache;
 use crate::cache::redis::RedisCacheStorage;
 use crate::introspection;
@@ -31,6 +28,7 @@ use crate::layers::ServiceBuilderExt as _;
 use crate::layers::unconstrained_buffer::UnconstrainedBuffer;
 use crate::plugins::authorization::AuthorizationPlugin;
 use crate::plugins::authorization::extract_authorization_checks_layer::ExtractAuthorizationChecksLayer;
+use crate::plugins::batching::BatchingPlugin;
 use crate::plugins::circuit_breaker::CircuitBreaker;
 use crate::plugins::connectors::request_limit::RequestLimitLayer;
 use crate::plugins::connectors::tracing::connect_spec_version_instrument;
@@ -157,7 +155,9 @@ pub(crate) fn build_http_client_service(
     plugins: Arc<Plugins>,
 ) -> http::BoxCloneService {
     ServiceBuilder::new()
-        .layer(JoinBatchRequestsLayer::new(name))
+        .apply_required_plugin_layer(&plugins, |b: &BatchingPlugin| {
+            b.join_batch_requests_layer(name)
+        })
         .layer(SubgraphResponseSizeLimitLayer::new(name))
         .apply_plugin_layer(&plugins, Telemetry::overhead_subgraph_request_timing_layer)
         .apply_plugin_layer(&plugins, Telemetry::instrument_http_client_layer)
@@ -579,7 +579,7 @@ fn build_execution_service(
         .unwrap_or_default();
 
     ServiceBuilder::new()
-        .layer(BatchQueryPlanAnalysisLayer::new())
+        .apply_required_plugin_layer(&plugins, BatchingPlugin::query_plan_analysis_layer)
         .layer(SubscriptionExecutionLayer::new(
             configuration.notify.clone(),
         ))
@@ -664,10 +664,12 @@ pub(crate) fn build_router_service(
         // Enforce the header list limit before the plugins, so no downstream layer sees anything
         // over the limit.
         .apply_required_plugin_layer(&plugins, LimitsPlugin::router_header_list_limit_layer)
-        .rust_plugins(plugins, |plugin, service| plugin.router_service(service))
+        .rust_plugins(plugins.clone(), |plugin, service| {
+            plugin.router_service(service)
+        })
         .layer(content_negotiation::RouterContentNegotiationLayer::default())
         .layer(DisplayRouterRequestLayer)
-        .layer(SplitBatchRequestLayer::new(configuration.batching.clone()))
+        .apply_required_plugin_layer(&plugins, BatchingPlugin::split_batch_request_layer)
         .layer(RouterToSupergraphRequestLayer)
         .layer(ExpandIdsLayer::new(persisted_queries.clone()))
         .layer(APQCachingLayer::new(Arc::new(apq_expander)))
