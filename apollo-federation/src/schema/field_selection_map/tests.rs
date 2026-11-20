@@ -117,6 +117,14 @@ fn keeps_the_text_of_number_literals() {
 }
 
 #[test]
+fn decodes_unicode_escapes() {
+    assert_eq!(round_trip(r#"f(a: "\u{1F600}")"#), "f(a: \"\u{1F600}\")");
+    assert_eq!(round_trip(r#"f(a: "\uD83D\uDE00")"#), "f(a: \"\u{1F600}\")");
+    assert!(parse(r#"f(a: "\uD83D")"#).is_err());
+    assert!(parse(r#"f(a: "\uDE00\uD83D")"#).is_err());
+}
+
+#[test]
 fn parses_block_strings() {
     assert_eq!(round_trip(r#"f(a: """x\"""y""")"#), r#"f(a: "x\"\"\"y")"#);
     assert_eq!(
