@@ -1204,13 +1204,18 @@ mod tests {
 
     const H2_PREFACE_AND_SETTINGS: &[u8] = b"PRI * HTTP/2.0\r\n\r\nSM\r\n\r\n\0\0\0\x04\0\0\0\0\0";
 
+    // HTTP/2 frame types and flags (RFC 9113, section 6).
+    const HEADERS_FRAME: u8 = 0x1;
+    const GOAWAY_FRAME: u8 = 0x7;
+    const CONTINUATION_FRAME: u8 = 0x9;
+    const END_STREAM: u8 = 0x1;
+    const END_HEADERS: u8 = 0x4;
+
     /// Writes raw HTTP/2 frames after the client preface, then reads until the router closes the
     /// connection. Returns the error code of the GOAWAY the router sent, if any.
     async fn send_raw_h2c(addr: &ListenAddr, frames: &[u8]) -> Option<h2::Reason> {
         use tokio::io::AsyncReadExt;
         use tokio::io::AsyncWriteExt;
-
-        const GOAWAY_FRAME: u8 = 0x7;
 
         let (ip, port) = addr.ip_and_port().unwrap();
         let mut stream = tokio::net::TcpStream::connect((ip, port)).await.unwrap();
@@ -1239,6 +1244,19 @@ mod tests {
         frame
     }
 
+    /// Reads one HTTP/2 frame, returning its type, stream ID and payload, or `None` at EOF.
+    async fn read_h2_frame(stream: &mut tokio::net::TcpStream) -> Option<(u8, u32, Vec<u8>)> {
+        use tokio::io::AsyncReadExt;
+
+        let mut header = [0u8; 9];
+        stream.read_exact(&mut header).await.ok()?;
+        let len = u32::from_be_bytes([0, header[0], header[1], header[2]]) as usize;
+        let stream_id = u32::from_be_bytes(header[5..9].try_into().unwrap()) & 0x7fff_ffff;
+        let mut payload = vec![0u8; len];
+        stream.read_exact(&mut payload).await.ok()?;
+        Some((header[3], stream_id, payload))
+    }
+
     enum OverLimitRequest {
         Crumbs(usize),
         SingleHeader(usize),
@@ -1251,10 +1269,6 @@ mod tests {
         addr: &ListenAddr,
         request: OverLimitRequest,
     ) -> Result<StatusCode, h2::Reason> {
-        const HEADERS_FRAME: u8 = 0x1;
-        const CONTINUATION_FRAME: u8 = 0x9;
-        const END_STREAM: u8 = 0x1;
-
         let headers = match request {
             OverLimitRequest::Crumbs(size) => cookie_crumbs(size)
                 .into_iter()
@@ -1357,8 +1371,6 @@ mod tests {
     #[tokio::test]
     async fn it_does_not_count_http2_connections_the_client_closes_with_an_error() {
         async {
-            const GOAWAY_FRAME: u8 = 0x7;
-
             let (server, _) = init_with_config(
                 router::service::empty().await,
                 Arc::new(Configuration::fake_builder().build().unwrap()),
@@ -1404,19 +1416,6 @@ mod tests {
             .0
     }
 
-    /// Reads one HTTP/2 frame, returning its type, stream ID and payload, or `None` at EOF.
-    async fn read_h2_frame(stream: &mut tokio::net::TcpStream) -> Option<(u8, u32, Vec<u8>)> {
-        use tokio::io::AsyncReadExt;
-
-        let mut header = [0u8; 9];
-        stream.read_exact(&mut header).await.ok()?;
-        let len = u32::from_be_bytes([0, header[0], header[1], header[2]]) as usize;
-        let stream_id = u32::from_be_bytes(header[5..9].try_into().unwrap()) & 0x7fff_ffff;
-        let mut payload = vec![0u8; len];
-        stream.read_exact(&mut payload).await.ok()?;
-        Some((header[3], stream_id, payload))
-    }
-
     #[tokio::test]
     async fn it_does_not_count_http2_connections_closed_by_graceful_shutdown() {
         async {
@@ -1446,12 +1445,6 @@ mod tests {
     async fn it_counts_http2_connections_closed_with_an_error_during_graceful_shutdown() {
         async {
             use tokio::io::AsyncWriteExt;
-
-            const HEADERS_FRAME: u8 = 0x1;
-            const GOAWAY_FRAME: u8 = 0x7;
-            const CONTINUATION_FRAME: u8 = 0x9;
-            const END_STREAM: u8 = 0x1;
-            const END_HEADERS: u8 = 0x4;
 
             let server = init_with_custom_endpoint().await;
             let addr = server.graphql_listen_address().clone().unwrap();
