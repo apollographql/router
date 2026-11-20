@@ -1,4 +1,5 @@
 use std::collections::HashSet;
+use std::sync::Arc;
 
 use apollo_compiler::Name;
 use apollo_compiler::Node;
@@ -18,6 +19,7 @@ use crate::LinkSpecDefinition;
 use crate::ValidFederationSchema;
 use crate::bail;
 use crate::compat::coerce_and_validate_schema_values;
+use crate::composite_schemas::internal::NormalizedSourceSchema;
 use crate::composition::CompositionFailure;
 use crate::connectors::blueprint::ConnectorsBlueprint;
 use crate::connectors::spec::upgrade_connect_link_if_needed;
@@ -106,6 +108,9 @@ pub struct Validated {
     /// Only warnings live here: errors abort the transition into this state, and are carried by the
     /// [`CompositionFailure`] instead. Connectors validation is the only producer today.
     hints: Vec<CompositionHint>,
+    /// For a subgraph applying the GraphQL Federation directives, once
+    /// [`Subgraph::normalize_source_schema`] ran: what it removed from `schema`.
+    source_schema: Option<Arc<NormalizedSourceSchema>>,
 }
 
 impl Expanded {
@@ -644,6 +649,7 @@ impl Subgraph<Expanded> {
                 orphan_extension_types: self.state.orphan_extension_types,
                 metadata: self.state.metadata,
                 hints,
+                source_schema: None,
             },
         })
     }
@@ -731,6 +737,7 @@ impl Subgraph<Upgraded> {
                 orphan_extension_types: self.state.orphan_extension_types,
                 metadata,
                 hints,
+                source_schema: None,
             },
         })
     }
@@ -790,6 +797,11 @@ impl Subgraph<Validated> {
         &self.state.schema
     }
 
+    /// The GraphQL Federation directive names and removed elements of a normalized source schema.
+    pub(crate) fn source_schema(&self) -> Option<&NormalizedSourceSchema> {
+        self.state.source_schema.as_deref()
+    }
+
     /// Returns true if the given type name is an orphan type extension in this subgraph.
     /// - Orphan type implies that there is one or more extensions for the type, but no base
     ///   definition.
@@ -808,7 +820,7 @@ impl Subgraph<Validated> {
     /// when the subgraph applies no GraphQL Federation directive.
     pub(crate) fn normalize_source_schema(mut self) -> Result<Self, SubgraphError> {
         let metadata = &self.state.metadata;
-        if !metadata.uses_composite_directives() {
+        if !metadata.uses_composite_directives() || self.state.source_schema.is_some() {
             return Ok(self);
         }
         let Some(names) = crate::composite_schemas::CompositeNames::new(
@@ -829,12 +841,9 @@ impl Subgraph<Validated> {
             keys_changed = !rewritten.is_empty();
             crate::composite_schemas::normalize::apply_rewritten_keys(&mut schema, rewritten);
         }
-        let removed = crate::composite_schemas::internal::remove_internal_elements(
-            &mut schema,
-            &names.internal,
-            &names.require,
-        );
-        if keys_changed || removed {
+        let removed =
+            crate::composite_schemas::internal::remove_internal_elements(&mut schema, &names);
+        if keys_changed || removed.is_some() {
             let schema = FederationSchema::new(schema).map_err(to_error)?;
             let schema = validate_subgraph_schema(schema).map_err(to_error)?;
             let Some(metadata) = schema.subgraph_metadata().cloned() else {
@@ -845,6 +854,10 @@ impl Subgraph<Validated> {
             self.state.schema = schema;
             self.state.metadata = metadata;
         }
+        self.state.source_schema = Some(Arc::new(NormalizedSourceSchema {
+            names,
+            removed: removed.unwrap_or_default(),
+        }));
         Ok(self)
     }
 }

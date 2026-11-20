@@ -56,6 +56,9 @@ pub(crate) const JOIN_DIRECTIVE_DIRECTIVE_NAME_IN_SPEC: Name = name!("directive"
 pub(crate) const JOIN_FIELD_SET_NAME_IN_SPEC: Name = name!("FieldSet");
 pub(crate) const JOIN_DIRECTIVE_ARGUMENTS_NAME_IN_SPEC: Name = name!("DirectiveArguments");
 pub(crate) const JOIN_CONTEXT_ARGUMENT_NAME_IN_SPEC: Name = name!("ContextArgument");
+pub(crate) const JOIN_FIELD_SELECTION_MAP_NAME_IN_SPEC: Name = name!("FieldSelectionMap");
+pub(crate) const JOIN_LOOKUP_ARGUMENT_NAME_IN_SPEC: Name = name!("LookupArgument");
+pub(crate) const JOIN_REQUIRE_ARGUMENT_NAME_IN_SPEC: Name = name!("RequireArgument");
 
 pub(crate) const JOIN_NAME_ARGUMENT_NAME: Name = name!("name");
 pub(crate) const JOIN_URL_ARGUMENT_NAME: Name = name!("url");
@@ -74,6 +77,13 @@ pub(crate) const JOIN_USEROVERRIDDEN_ARGUMENT_NAME: Name = name!("usedOverridden
 pub(crate) const JOIN_INTERFACE_ARGUMENT_NAME: Name = name!("interface");
 pub(crate) const JOIN_MEMBER_ARGUMENT_NAME: Name = name!("member");
 pub(crate) const JOIN_CONTEXTARGUMENTS_ARGUMENT_NAME: Name = name!("contextArguments");
+pub(crate) const JOIN_LOOKUP_ARGUMENT_NAME: Name = name!("lookup");
+pub(crate) const JOIN_LOOKUPARGUMENTS_ARGUMENT_NAME: Name = name!("lookupArguments");
+pub(crate) const JOIN_DEFAULT_ARGUMENT_NAME: Name = name!("default");
+pub(crate) const JOIN_REQUIREARGUMENTS_ARGUMENT_NAME: Name = name!("requireArguments");
+pub(crate) const JOIN_INTERNALDEFINITIONS_ARGUMENT_NAME: Name = name!("internalDefinitions");
+/// The first join version carrying GraphQL Federation (composite schemas) metadata.
+pub(crate) const COMPOSITE_SCHEMAS_JOIN_VERSION: Version = Version { major: 0, minor: 6 };
 pub(crate) const JOIN_DIRECTIVE_ARGS_ARGUMENT_NAME: Name = name!("args");
 pub(crate) const JOIN_DIRECTIVE_GRAPHS_ARGUMENT_NAME: Name = name!("graphs");
 
@@ -510,30 +520,46 @@ impl JoinSpecDefinition {
 
     /// @join__graph
     fn graph_directive_specification(&self) -> DirectiveSpecification {
+        let mut args = vec![
+            DirectiveArgumentSpecification {
+                base_spec: ArgumentSpecification {
+                    name: JOIN_NAME_ARGUMENT_NAME,
+                    get_type: |_, _| Ok(ty!(String!)),
+                    default_value: None,
+                },
+                composition_strategy: None,
+            },
+            DirectiveArgumentSpecification {
+                base_spec: ArgumentSpecification {
+                    name: JOIN_URL_ARGUMENT_NAME,
+                    get_type: |_, _| Ok(ty!(String!)),
+                    default_value: None,
+                },
+                composition_strategy: None,
+            },
+        ];
+        if self.supports_composite_schemas() {
+            args.push(DirectiveArgumentSpecification {
+                base_spec: ArgumentSpecification {
+                    name: JOIN_INTERNALDEFINITIONS_ARGUMENT_NAME,
+                    get_type: |_, _| Ok(ty!(String)),
+                    default_value: None,
+                },
+                composition_strategy: None,
+            });
+        }
         DirectiveSpecification::new(
             JOIN_GRAPH_DIRECTIVE_NAME_IN_SPEC,
-            &[
-                DirectiveArgumentSpecification {
-                    base_spec: ArgumentSpecification {
-                        name: JOIN_NAME_ARGUMENT_NAME,
-                        get_type: |_, _| Ok(ty!(String!)),
-                        default_value: None,
-                    },
-                    composition_strategy: None,
-                },
-                DirectiveArgumentSpecification {
-                    base_spec: ArgumentSpecification {
-                        name: JOIN_URL_ARGUMENT_NAME,
-                        get_type: |_, _| Ok(ty!(String!)),
-                        default_value: None,
-                    },
-                    composition_strategy: None,
-                },
-            ],
+            &args,
             false,
             &[DirectiveLocation::EnumValue],
             None,
         )
+    }
+
+    /// Whether this version carries GraphQL Federation (composite schemas) metadata.
+    pub(crate) fn supports_composite_schemas(&self) -> bool {
+        *self.version() >= COMPOSITE_SCHEMAS_JOIN_VERSION
     }
 
     /// @join__type
@@ -789,6 +815,42 @@ impl JoinSpecDefinition {
                                 link.type_name_in_schema(&JOIN_CONTEXT_ARGUMENT_NAME_IN_SPEC)
                             });
                         Ok(Type::List(Box::new(Type::NonNullNamed(context_arg_name))))
+                    },
+                    default_value: None,
+                },
+                composition_strategy: None,
+            });
+        }
+        if self.supports_composite_schemas() {
+            args.push(DirectiveArgumentSpecification {
+                base_spec: ArgumentSpecification {
+                    name: JOIN_LOOKUP_ARGUMENT_NAME,
+                    get_type: |_, _| Ok(ty!(Boolean)),
+                    default_value: None,
+                },
+                composition_strategy: None,
+            });
+            args.push(DirectiveArgumentSpecification {
+                base_spec: ArgumentSpecification {
+                    name: JOIN_LOOKUPARGUMENTS_ARGUMENT_NAME,
+                    get_type: |_schema, link| {
+                        let name = link.map_or(JOIN_LOOKUP_ARGUMENT_NAME_IN_SPEC, |link| {
+                            link.type_name_in_schema(&JOIN_LOOKUP_ARGUMENT_NAME_IN_SPEC)
+                        });
+                        Ok(Type::List(Box::new(Type::NonNullNamed(name))))
+                    },
+                    default_value: None,
+                },
+                composition_strategy: None,
+            });
+            args.push(DirectiveArgumentSpecification {
+                base_spec: ArgumentSpecification {
+                    name: JOIN_REQUIREARGUMENTS_ARGUMENT_NAME,
+                    get_type: |_schema, link| {
+                        let name = link.map_or(JOIN_REQUIRE_ARGUMENT_NAME_IN_SPEC, |link| {
+                            link.type_name_in_schema(&JOIN_REQUIRE_ARGUMENT_NAME_IN_SPEC)
+                        });
+                        Ok(Type::List(Box::new(Type::NonNullNamed(name))))
                     },
                     default_value: None,
                 },
@@ -1124,6 +1186,16 @@ impl JoinSpecDefinition {
                     name: JOIN_URL_ARGUMENT_NAME,
                     value: Node::new(Value::String(subgraph.url.clone())),
                 }));
+                if self.supports_composite_schemas()
+                    && let Some(internal_definitions) = subgraph
+                        .source_schema()
+                        .and_then(|s| s.removed.internal_definitions.as_deref())
+                {
+                    graph_directive.arguments.push(Node::new(Argument {
+                        name: JOIN_INTERNALDEFINITIONS_ARGUMENT_NAME,
+                        value: Node::new(Value::String(internal_definitions.to_string())),
+                    }));
+                }
 
                 enum_value.directives.push(Node::new(graph_directive));
 
@@ -1232,6 +1304,57 @@ impl SpecDefinition for JoinSpecDefinition {
             }));
         }
 
+        if self.supports_composite_schemas() {
+            fn field_selection_map_type(
+                _schema: &FederationSchema,
+                link: Option<&std::sync::Arc<crate::link::Link>>,
+            ) -> Result<Type, FederationError> {
+                let name = link.map_or(JOIN_FIELD_SELECTION_MAP_NAME_IN_SPEC, |link| {
+                    link.type_name_in_schema(&JOIN_FIELD_SELECTION_MAP_NAME_IN_SPEC)
+                });
+                Ok(Type::Named(name))
+            }
+            fn argument_fields(selection_required: bool) -> Vec<ArgumentSpecification> {
+                vec![
+                    ArgumentSpecification {
+                        name: name!("name"),
+                        get_type: |_, _| Ok(ty!(String!)),
+                        default_value: None,
+                    },
+                    ArgumentSpecification {
+                        name: name!("type"),
+                        get_type: |_, _| Ok(ty!(String!)),
+                        default_value: None,
+                    },
+                    ArgumentSpecification {
+                        name: name!("selection"),
+                        get_type: if selection_required {
+                            |schema, link| Ok(field_selection_map_type(schema, link)?.non_null())
+                        } else {
+                            field_selection_map_type
+                        },
+                        default_value: None,
+                    },
+                    ArgumentSpecification {
+                        name: name!("default"),
+                        get_type: |_, _| Ok(ty!(String)),
+                        default_value: None,
+                    },
+                ]
+            }
+            specs.push(Box::new(ScalarTypeSpecification {
+                name: JOIN_FIELD_SELECTION_MAP_NAME_IN_SPEC,
+            }));
+            specs.push(Box::new(InputObjectTypeSpecification {
+                name: JOIN_LOOKUP_ARGUMENT_NAME_IN_SPEC,
+                fields: |_| argument_fields(false),
+            }));
+            specs.push(Box::new(InputObjectTypeSpecification {
+                name: JOIN_REQUIRE_ARGUMENT_NAME_IN_SPEC,
+                fields: |_| argument_fields(true),
+            }));
+        }
+
         specs
     }
 
@@ -1252,7 +1375,9 @@ impl SpecDefinition for JoinSpecDefinition {
 ///  - 0.3: adds the `isInterfaceObject` argument to `@join__type`, and make the `graph` in `@join__field` skippable.
 ///  - 0.4: adds the optional `overrideLabel` argument to `@join_field` for progressive override.
 ///  - 0.5: adds the `contextArguments` argument to `@join_field` for setting context.
-///  - 0.6: the version used with federation 3.0. Currently identical to 0.5.
+///  - 0.6: the version used with federation 3.0. Adds GraphQL Federation (composite schemas)
+///    metadata: the `lookup`, `lookupArguments` and `requireArguments` arguments to `@join__field`, and
+///    `internalDefinitions` to `@join__graph`.
 pub(crate) static JOIN_VERSIONS: LazyLock<SpecDefinitions<JoinSpecDefinition>> =
     LazyLock::new(|| {
         let mut definitions = SpecDefinitions::new(Identity::join_identity());
@@ -1277,7 +1402,7 @@ pub(crate) static JOIN_VERSIONS: LazyLock<SpecDefinitions<JoinSpecDefinition>> =
             Version { major: 2, minor: 8 },
         ));
         definitions.add(JoinSpecDefinition::new(
-            Version { major: 0, minor: 6 },
+            COMPOSITE_SCHEMAS_JOIN_VERSION,
             Version { major: 3, minor: 0 },
         ));
         definitions

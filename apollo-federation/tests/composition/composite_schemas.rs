@@ -1490,6 +1490,16 @@ mod cross_schema_validation {
     }
 }
 
+/// The supergraph SDL without the `join__Graph` enum, whose `internalDefinitions` record the
+/// `@internal` elements that the merged types leave out.
+fn merged_types_sdl(supergraph: &Supergraph<Satisfiable>) -> String {
+    print_sdl(supergraph.schema().schema())
+        .split("\n\n")
+        .filter(|block| !block.starts_with("enum join__Graph"))
+        .collect::<Vec<_>>()
+        .join("\n\n")
+}
+
 mod internal_merging {
     use super::*;
 
@@ -1510,7 +1520,7 @@ mod internal_merging {
             "#,
         )])
         .expect("composes");
-        let sdl = print_sdl(supergraph.schema().schema());
+        let sdl = merged_types_sdl(&supergraph);
         for internal in [
             "productBySku",
             "productByKey",
@@ -1546,9 +1556,11 @@ mod internal_merging {
             ),
         ])
         .expect("composes");
-        let sdl = print_sdl(supergraph.schema().schema());
+        let sdl = merged_types_sdl(&supergraph);
         assert!(
-            sdl.contains("productById(id: ID!): Product @join__field(graph: A)\n"),
+            sdl.contains(
+                "productById(id: ID!): Product @join__field(graph: A, lookup: true, lookupArguments: [{name: \"id\", type: \"ID!\"}])\n"
+            ),
             "{sdl}"
         );
     }
@@ -1578,10 +1590,12 @@ mod internal_merging {
             ),
         ])
         .expect("composes");
-        let sdl = print_sdl(supergraph.schema().schema());
-        assert!(!sdl.contains("Dimension"), "{sdl}");
+        let sdl = merged_types_sdl(&supergraph);
+        assert!(!sdl.contains("input Dimension"), "{sdl}");
         assert!(
-            sdl.contains("shipping(zip: String): Int @join__field(graph: A)"),
+            sdl.contains(
+                "shipping(zip: String): Int @join__field(graph: A, requireArguments: [{name: \"dimension\", type: \"Dimension!\", selection: \"{ width }\"}])"
+            ),
             "{sdl}"
         );
     }
@@ -1626,7 +1640,7 @@ mod internal_merging {
             ),
         ])
         .expect("composes");
-        let sdl = print_sdl(supergraph.schema().schema());
+        let sdl = merged_types_sdl(&supergraph);
         assert!(
             sdl.contains("input Dimension @join__type(graph: C) {\n  depth: Int!\n}"),
             "{sdl}"
@@ -1648,7 +1662,7 @@ mod internal_merging {
             "#,
         )])
         .expect("composes");
-        let sdl = print_sdl(supergraph.schema().schema());
+        let sdl = merged_types_sdl(&supergraph);
         assert!(!sdl.contains("ProductKey"), "{sdl}");
         assert!(!sdl.contains("OtherKey"), "{sdl}");
     }
@@ -1679,7 +1693,7 @@ mod internal_root_type {
             ),
         ])
         .expect("composes");
-        let sdl = print_sdl(supergraph.schema().schema());
+        let sdl = merged_types_sdl(&supergraph);
         assert!(!sdl.contains("productBySku"), "{sdl}");
         assert!(sdl.contains("price: Int @join__field(graph: B)"), "{sdl}");
     }
@@ -1748,6 +1762,50 @@ mod composition_output {
     use super::*;
 
     #[test]
+    fn lookups_internal_elements_and_requirements() {
+        let supergraph = compose_sources(&[
+            (
+                "products",
+                r#"
+                type Query {
+                  productById(id: ID!): Product @lookup
+                  topProducts: [Product!]!
+                }
+                type Product @key(fields: "id") @key(fields: "sku") {
+                  id: ID!
+                  sku: String!
+                  name: String!
+                  dimension: Dimension!
+                }
+                type Dimension { size: Int! weight: Int! }
+                "#,
+            ),
+            (
+                "reviews",
+                r#"
+                type Query {
+                  lookups: InternalLookups! @internal
+                }
+                type InternalLookups @internal {
+                  productBySku(key: String! @is(field: "sku")): Product @lookup
+                }
+                type Product @key(fields: "sku") {
+                  sku: String! @external
+                  reviewCount: Int!
+                  shippingEstimate(
+                    zip: String!
+                    dimension: DimensionInput! @require(field: "dimension.{ size, weight }")
+                  ): Int
+                }
+                input DimensionInput @internal { size: Int! weight: Int! }
+                "#,
+            ),
+        ])
+        .expect("composes");
+        insta::assert_snapshot!(composition_summary(&supergraph));
+    }
+
+    #[test]
     fn keys_are_inferred_from_lookups() {
         // No `@key` at all: the lookups imply `id` (via `@is`) and `upc`.
         let supergraph = compose_sources(&[(
@@ -1762,6 +1820,81 @@ mod composition_output {
         )])
         .expect("composes");
         insta::assert_snapshot!(composition_summary(&supergraph));
+    }
+
+    #[test]
+    fn abstract_and_one_of_lookups() {
+        let supergraph = compose_sources(&[(
+            "media",
+            r#"
+            type Query {
+              mediaByKey(
+                key: MediaKeyInput!
+                  @is(field: "{ isbn: <Book>.isbn } | { upc: <Movie>.upc }")
+              ): Media @lookup
+              person(by: PersonByInput! @is(field: "{ id } | { email }")): Person @lookup
+            }
+            input MediaKeyInput @oneOf { isbn: String upc: String }
+            input PersonByInput @oneOf { id: ID email: String }
+            union Media = Book | Movie
+            type Book { id: ID! isbn: String! }
+            type Movie { id: ID! upc: String! }
+            type Person { id: ID! email: String! }
+            "#,
+        )])
+        .expect("composes");
+        insta::assert_snapshot!(composition_summary(&supergraph));
+    }
+
+    #[test]
+    fn nested_public_lookup() {
+        let supergraph = compose_sources(&[(
+            "a",
+            r#"
+            type Query { lookups: Lookups! }
+            type Lookups { productById(id: ID!): Product @lookup }
+            type Product @key(fields: "id") { id: ID! }
+            "#,
+        )])
+        .expect("composes");
+        insta::assert_snapshot!(composition_summary(&supergraph));
+    }
+
+    #[test]
+    fn source_schema_selects_join_0_6() {
+        let supergraph = compose_sources(&[("products", PRODUCTS)]).expect("composes");
+        let sdl = print_sdl(supergraph.schema().schema());
+        assert!(sdl.contains("https://specs.apollo.dev/join/v0.6"), "{sdl}");
+    }
+
+    #[test]
+    fn requirement_conflicting_with_required_client_argument() {
+        assert_error_codes(
+            &[
+                (
+                    "a",
+                    r#"
+                    type Query { productById(id: ID!): Product @lookup }
+                    type Product @key(fields: "id") {
+                      id: ID!
+                      price(weight: Int! @require(field: "weight")): Int @shareable
+                    }
+                    "#,
+                ),
+                (
+                    "b",
+                    r#"
+                    type Query { productByIdInB(id: ID!): Product @lookup }
+                    type Product @key(fields: "id") {
+                      id: ID!
+                      weight: Int
+                      price(weight: Int!): Int @shareable
+                    }
+                    "#,
+                ),
+            ],
+            &["REQUIRED_ARGUMENT_MISSING_IN_SOME_SUBGRAPH"],
+        );
     }
 }
 
