@@ -317,7 +317,9 @@ When matches have different types, Router 3 returns an array of strings instead 
 
 **Upgrade step**:
 - For each of these selectors whose path uses `[*]`, `.*`, `..`, a slice, a union or a filter, check the dashboards and alerts that use its attribute: a value that was a string is now a one-element array, which starts a new metric series.
-- If you want a single value, change the path to select one, for example `$[0].extensions.code` instead of `$[*].extensions.code`.
+- Check `condition` blocks that use these selectors. An array never equals a single value, so `eq: ["NOT_FOUND", {response_errors: "$[*].extensions.code"}]` stops matching. `exists` is now false when every match is `null`.
+- Check instrument `value`s. An instrument can't use an array as its value, so the router rejects the configuration when an instrument's `value` uses one of these paths or `response_errors_field`.
+- If you want a single value, change the path to select one, for example `$[0].extensions.code` instead of `$[*].extensions.code`. `response_errors_field` gives an array whatever its path, so replace it with `response_errors` and an index, for example `response_errors: "$[0].extensions.code"`.
 
 See [Single values and arrays](/graphos/routing/observability/router-telemetry-otel/enabling-telemetry/selectors#single-values-and-arrays).
 

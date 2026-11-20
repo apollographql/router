@@ -21,6 +21,11 @@ For paths that can match several values, these values also change:
 - A match that is itself an array or object is written as one JSON string in the array. `$.*` over `{"items": [{"id": 1}, {"id": 2}]}` used to return `["{\"id\":1}", "{\"id\":2}"]` and now returns `["[{\"id\":1},{\"id\":2}]"]`.
 - `response_errors_field` adds each non-null match from each error to its array, instead of writing an error with several matches as one JSON string.
 
-If a dashboard or alert relies on one of these attributes being a single value, change its path to select one value, such as `$[0].extensions.code`.
+These arrays also reach conditions and instruments:
+
+- In a `condition`, an array never equals a single value, so `eq: ["NOT_FOUND", {response_errors: "$[*].extensions.code"}]` stops matching. `exists` is false when every match is `null`.
+- The router rejects the configuration when an instrument's `value` uses one of these paths or `response_errors_field`, because an instrument can't use an array as its value.
+
+If a dashboard, alert, condition or instrument relies on one of these selectors giving a single value, change its path to select one value, such as `$[0].extensions.code`. `response_errors_field` gives an array whatever its path, so for an instrument `value` use `response_errors` with an index instead, such as `response_errors: "$[0].extensions.code"`.
 
 By [@BrynCooke](https://github.com/BrynCooke) in https://github.com/apollographql/router/pull/10853
