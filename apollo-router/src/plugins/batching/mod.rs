@@ -43,12 +43,24 @@ impl BatchingPlugin {
         JoinBatchRequestsLayer::new(subgraph_name)
     }
 
+    /// Analyze the query plan for a batch query.
+    /// Reject the request if it contains any subscription or defer nodes, which is not
+    /// supported in batch requests.
     pub(crate) fn query_plan_analysis_layer(&self) -> BatchQueryPlanAnalysisLayer {
         BatchQueryPlanAnalysisLayer::new()
     }
 
-    pub(crate) fn split_batch_request_layer(&self) -> SplitBatchRequestLayer {
-        SplitBatchRequestLayer::new(self.config.clone())
+    /// If batching is enabled, split batch requests into multiple requests that flow
+    /// separately through the rest of the pipeline, and stitch the responses back
+    /// together as a JSON array.
+    pub(crate) fn split_batch_request_layer(
+        &self,
+    ) -> tower::util::Either<SplitBatchRequestLayer, tower::layer::util::Identity> {
+        tower::util::option_layer(
+            self.config
+                .enabled
+                .then(|| SplitBatchRequestLayer::new(self.config.clone())),
+        )
     }
 }
 

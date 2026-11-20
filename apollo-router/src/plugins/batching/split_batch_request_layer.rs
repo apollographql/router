@@ -37,12 +37,16 @@ struct TranslateError {
     extension_details: String,
 }
 
+/// Layer type for [`BatchingPlugin::split_batch_request_layer`].
+///
 /// When the batching layer receives a batch query (a POST request with a JSON array in the body),
 /// it splits the requests into multiple requests that flow separately through the rest of the
 /// pipeline, and reassembles the responses into a single JSON array response.
 ///
 /// # Telemetry
 /// Emits the `apollo.router.operations.batching.size` metric for batch requests.
+///
+/// [`BatchingPlugin::split_batch_request_layer`]: super::BatchingPlugin::split_batch_request_layer
 pub(crate) struct SplitBatchRequestLayer {
     config: Arc<BatchingConfig>,
 }
@@ -244,49 +248,41 @@ where
             return Ok(None);
         }
 
-        if self.config.enabled && matches!(self.config.mode, BatchingMode::BatchHttpLink) {
-            let result = graphql::Request::batch_from_bytes(bytes).map_err(|e| TranslateError {
-                status: StatusCode::BAD_REQUEST,
-                extension_code: "INVALID_GRAPHQL_REQUEST".to_string(),
-                extension_details: format!("failed to deserialize the request body into JSON: {e}"),
-            })?;
+        match self.config.mode {
+            BatchingMode::BatchHttpLink => {
+                let result =
+                    graphql::Request::batch_from_bytes(bytes).map_err(|e| TranslateError {
+                        status: StatusCode::BAD_REQUEST,
+                        extension_code: "INVALID_GRAPHQL_REQUEST".to_string(),
+                        extension_details: format!(
+                            "failed to deserialize the request body into JSON: {e}"
+                        ),
+                    })?;
 
-            if result.is_empty() {
-                return Err(TranslateError {
-                    status: StatusCode::BAD_REQUEST,
-                    extension_code: "INVALID_GRAPHQL_REQUEST".to_string(),
-                    extension_details:
-                        "failed to decode a valid GraphQL request from path: empty array "
-                            .to_string(),
-                });
+                if result.is_empty() {
+                    return Err(TranslateError {
+                        status: StatusCode::BAD_REQUEST,
+                        extension_code: "INVALID_GRAPHQL_REQUEST".to_string(),
+                        extension_details:
+                            "failed to decode a valid GraphQL request from path: empty array "
+                                .to_string(),
+                    });
+                }
+
+                if self.config.exceeds_batch_size(&result) {
+                    return Err(TranslateError {
+                        status: StatusCode::UNPROCESSABLE_ENTITY,
+                        extension_code: "BATCH_LIMIT_EXCEEDED".to_string(),
+                        extension_details: format!(
+                            "Batch limits exceeded: you provided a batch with {} entries, but the configured maximum router batch size is {}",
+                            result.len(),
+                            self.config.maximum_size.unwrap_or_default()
+                        ),
+                    });
+                }
+
+                Ok(Some(result))
             }
-
-            if self.config.exceeds_batch_size(&result) {
-                return Err(TranslateError {
-                    status: StatusCode::UNPROCESSABLE_ENTITY,
-                    extension_code: "BATCH_LIMIT_EXCEEDED".to_string(),
-                    extension_details: format!(
-                        "Batch limits exceeded: you provided a batch with {} entries, but the configured maximum router batch size is {}",
-                        result.len(),
-                        self.config.maximum_size.unwrap_or_default()
-                    ),
-                });
-            }
-
-            Ok(Some(result))
-        } else {
-            let extension_details = if self.config.enabled
-                && !matches!(self.config.mode, BatchingMode::BatchHttpLink)
-            {
-                format!("batching not supported for mode `{}`", self.config.mode)
-            } else {
-                "batching not enabled".to_string()
-            };
-            Err(TranslateError {
-                status: StatusCode::BAD_REQUEST,
-                extension_code: "BATCHING_NOT_ENABLED".to_string(),
-                extension_details,
-            })
         }
     }
 
@@ -464,9 +460,10 @@ mod tests {
         });
 
         let mut service = ServiceBuilder::new()
-            .layer(SplitBatchRequestLayer::new(Arc::new(
-                BatchingConfig::default(),
-            )))
+            .layer(SplitBatchRequestLayer::new(Arc::new(BatchingConfig {
+                enabled: true,
+                ..Default::default()
+            })))
             .service(mock);
 
         let response = service
@@ -485,37 +482,6 @@ mod tests {
         assert_eq!(response.response.status(), StatusCode::OK);
 
         crate::plugin::test::await_mock_driver(driver).await;
-    }
-
-    #[tokio::test]
-    async fn it_rejects_batches_when_batching_is_disabled() {
-        let (mock, handle) = tower_test::mock::pair::<RouterRequest, RouterResponse>();
-
-        let mut service = ServiceBuilder::new()
-            .layer(SplitBatchRequestLayer::new(Arc::new(
-                BatchingConfig::default(),
-            )))
-            .service(mock);
-
-        let response = service
-            .ready()
-            .await
-            .unwrap()
-            .call(
-                router::Request::fake_builder()
-                    .method(Method::POST)
-                    .body(router::body::from_bytes(
-                        r#"[{"query":"{ a }"},{"query":"{ b }"}]"#,
-                    ))
-                    .build()
-                    .unwrap(),
-            )
-            .await
-            .unwrap();
-        assert_eq!(response.response.status(), StatusCode::BAD_REQUEST);
-        assert_error_code(response, "BATCHING_NOT_ENABLED").await;
-
-        crate::plugin::test::assert_no_mock_calls(handle).await;
     }
 
     #[tokio::test]
