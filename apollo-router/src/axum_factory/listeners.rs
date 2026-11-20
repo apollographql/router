@@ -1219,26 +1219,13 @@ mod tests {
     /// Writes raw HTTP/2 frames after the client preface, then reads until the router closes the
     /// connection. Returns the error code of the GOAWAY the router sent, if any.
     async fn send_raw_h2c(addr: &ListenAddr, frames: &[u8]) -> Option<h2::Reason> {
-        use tokio::io::AsyncReadExt;
         use tokio::io::AsyncWriteExt;
 
         let (ip, port) = addr.ip_and_port().unwrap();
         let mut stream = tokio::net::TcpStream::connect((ip, port)).await.unwrap();
         stream.write_all(H2_PREFACE_AND_SETTINGS).await.unwrap();
         stream.write_all(frames).await.unwrap();
-
-        let mut go_away = None;
-        let mut header = [0u8; 9];
-        while stream.read_exact(&mut header).await.is_ok() {
-            let len = u32::from_be_bytes([0, header[0], header[1], header[2]]) as usize;
-            let mut payload = vec![0u8; len];
-            stream.read_exact(&mut payload).await.unwrap();
-            if header[3] == GOAWAY_FRAME {
-                let code = u32::from_be_bytes(payload[4..8].try_into().unwrap());
-                go_away = Some(h2::Reason::from(code));
-            }
-        }
-        go_away
+        read_until_closed(&mut stream).await
     }
 
     fn h2_frame(kind: u8, flags: u8, stream_id: u32, payload: &[u8]) -> Vec<u8> {
@@ -1247,6 +1234,16 @@ mod tests {
         frame.extend(stream_id.to_be_bytes());
         frame.extend(payload);
         frame
+    }
+
+    /// A header block that never ends: one HEADERS frame without END_HEADERS, then 100 empty
+    /// CONTINUATION frames.
+    fn continuation_flood(stream_id: u32) -> Vec<u8> {
+        let mut frames = h2_frame(HEADERS_FRAME, END_STREAM, stream_id, &[]);
+        for _ in 0..100 {
+            frames.extend(h2_frame(CONTINUATION_FRAME, 0, stream_id, &[]));
+        }
+        frames
     }
 
     /// Reads one HTTP/2 frame, returning its type, stream ID and payload, or `None` at EOF.
@@ -1260,6 +1257,23 @@ mod tests {
         let mut payload = vec![0u8; len];
         stream.read_exact(&mut payload).await.ok()?;
         Some((header[3], stream_id, payload))
+    }
+
+    /// Returns the error code in a GOAWAY frame's payload.
+    fn go_away_reason(payload: &[u8]) -> h2::Reason {
+        h2::Reason::from(u32::from_be_bytes(payload[4..8].try_into().unwrap()))
+    }
+
+    /// Reads frames until the router closes the connection. Returns the error code of the last
+    /// GOAWAY it sent, if any.
+    async fn read_until_closed(stream: &mut tokio::net::TcpStream) -> Option<h2::Reason> {
+        let mut go_away = None;
+        while let Some((kind, _, payload)) = read_h2_frame(stream).await {
+            if kind == GOAWAY_FRAME {
+                go_away = Some(go_away_reason(&payload));
+            }
+        }
+        go_away
     }
 
     enum OverLimitRequest {
@@ -1281,13 +1295,9 @@ mod tests {
                 .collect(),
             OverLimitRequest::SingleHeader(size) => vec![("x-large", "v".repeat(size))],
             OverLimitRequest::ContinuationFlood => {
-                // A header block that never ends: one HEADERS frame without END_HEADERS, then
-                // empty CONTINUATION frames.
-                let mut frames = h2_frame(HEADERS_FRAME, END_STREAM, 1, &[]);
-                for _ in 0..100 {
-                    frames.extend(h2_frame(CONTINUATION_FRAME, 0, 1, &[]));
-                }
-                return Err(send_raw_h2c(addr, &frames).await.expect("a GOAWAY"));
+                return Err(send_raw_h2c(addr, &continuation_flood(1))
+                    .await
+                    .expect("a GOAWAY"));
             }
         };
 
@@ -1497,27 +1507,18 @@ mod tests {
             loop {
                 let (kind, _, payload) = read_h2_frame(&mut stream).await.expect("a GOAWAY");
                 if kind == GOAWAY_FRAME {
-                    assert_eq!(payload[4..8], [0, 0, 0, 0], "NO_ERROR");
+                    assert_eq!(go_away_reason(&payload), h2::Reason::NO_ERROR);
                     break;
                 }
             }
 
-            let mut flood = h2_frame(HEADERS_FRAME, END_STREAM, 3, &[]);
-            for _ in 0..100 {
-                flood.extend(h2_frame(CONTINUATION_FRAME, 0, 3, &[]));
-            }
-            stream.write_all(&flood).await.unwrap();
+            stream.write_all(&continuation_flood(3)).await.unwrap();
             // On the current-thread runtime the router records the error in the same poll
             // that closes the connection, so it has been recorded once the client sees EOF.
-            let mut go_away = None;
-            while let Some((kind, _, payload)) = read_h2_frame(&mut stream).await {
-                if kind == GOAWAY_FRAME {
-                    go_away = Some(h2::Reason::from(u32::from_be_bytes(
-                        payload[4..8].try_into().unwrap(),
-                    )));
-                }
-            }
-            assert_eq!(go_away, Some(h2::Reason::ENHANCE_YOUR_CALM));
+            assert_eq!(
+                read_until_closed(&mut stream).await,
+                Some(h2::Reason::ENHANCE_YOUR_CALM)
+            );
 
             assert_counter!(
                 "apollo.router.server.connection.errors",
