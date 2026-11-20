@@ -36,23 +36,35 @@ impl BatchingPlugin {
     ///
     /// All subgraph requests for a batch, even for different subgraphs, are sent at the same time once
     /// the whole batch is ready.
+    ///
+    /// If batching is not enabled, it passes requests straight through.
     pub(crate) fn join_batch_requests_layer(
         &self,
         subgraph_name: impl Into<Arc<str>>,
-    ) -> JoinBatchRequestsLayer {
-        JoinBatchRequestsLayer::new(subgraph_name)
+    ) -> tower::util::Either<JoinBatchRequestsLayer, tower::layer::util::Identity> {
+        let subgraph_name = subgraph_name.into();
+        tower::util::option_layer(
+            (self.config.enabled && self.config.batch_include(&subgraph_name))
+                .then(|| JoinBatchRequestsLayer::new(subgraph_name)),
+        )
     }
 
     /// Analyze the query plan for a batch query.
     /// Reject the request if it contains any subscription or defer nodes, which is not
     /// supported in batch requests.
-    pub(crate) fn query_plan_analysis_layer(&self) -> BatchQueryPlanAnalysisLayer {
-        BatchQueryPlanAnalysisLayer::new()
+    ///
+    /// If batching is not enabled, it passes requests straight through.
+    pub(crate) fn query_plan_analysis_layer(
+        &self,
+    ) -> tower::util::Either<BatchQueryPlanAnalysisLayer, tower::layer::util::Identity> {
+        tower::util::option_layer(self.config.enabled.then(BatchQueryPlanAnalysisLayer::new))
     }
 
     /// If batching is enabled, split batch requests into multiple requests that flow
     /// separately through the rest of the pipeline, and stitch the responses back
     /// together as a JSON array.
+    ///
+    /// If batching is not enabled, it passes requests straight through.
     pub(crate) fn split_batch_request_layer(
         &self,
     ) -> tower::util::Either<SplitBatchRequestLayer, tower::layer::util::Identity> {
