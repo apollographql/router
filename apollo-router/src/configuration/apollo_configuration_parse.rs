@@ -425,17 +425,20 @@ impl ConfigurationParser {
                 snapshot.resolved.lock().clear();
             }
         }
-        // Migration serialization must not hide duplicate keys in the original document.
-        super::yaml::check_duplicate_keys(text)?;
         let file: Value = if text.trim().is_empty() {
             Value::Object(Default::default())
         } else {
-            serde_yaml::from_str(text).map_err(|error| {
-                ConfigurationError::InvalidConfiguration {
-                    message: "failed to parse yaml",
-                    error: error.to_string(),
-                }
-            })?
+            let invalid = |error: yaml_serde::Error| ConfigurationError::InvalidConfiguration {
+                message: "failed to parse yaml",
+                error: error.to_string(),
+            };
+            // Migration serializes from `file`, which has already collapsed duplicate keys, so
+            // they must be rejected in the original text. Only `yaml_serde::Value` rejects them,
+            // but converting it to JSON fails on non-string keys such as `200:` without a
+            // location; parsing the text straight into JSON leaves those for apollo-configuration
+            // to report with their location.
+            yaml_serde::from_str::<yaml_serde::Value>(text).map_err(invalid)?;
+            yaml_serde::from_str(text).map_err(invalid)?
         };
         let mut config = match migrate(&file) {
             Ok(None) => parse_document(text, self).map_err(|error| report_error(error, &file)),
@@ -485,7 +488,7 @@ fn serialize_if_changed(
     if migrated == *file {
         return Ok(None);
     }
-    serde_yaml::to_string(&migrated).map(Some).map_err(|error| {
+    yaml_serde::to_string(&migrated).map(Some).map_err(|error| {
         ConfigurationError::MigrationFailure {
             error: error.to_string(),
         }
@@ -770,7 +773,7 @@ mod tests {
         assert!(matches!(
             error,
             ConfigurationError::InvalidConfiguration {
-                message: "could not parse yaml",
+                message: "failed to parse yaml",
                 ..
             }
         ));
@@ -780,6 +783,27 @@ mod tests {
                 .contains("expected node content at line 2 column 1"),
             "{error}"
         );
+    }
+
+    /// apollo-configuration rejects keys that are not strings, and points at them. Reading the YAML
+    /// must not fail earlier with an error that has no location.
+    #[test]
+    fn non_string_keys_are_rejected_with_their_location() {
+        let error = parse(
+            "telemetry:\n  exporters:\n    tracing:\n      common:\n        resource:\n          200: ok\n          true: yes\n          ~: none\n",
+        )
+        .expect_err("configuration keys must be strings");
+
+        assert!(
+            matches!(error, ConfigurationError::ApolloConfiguration(_)),
+            "{error:?}"
+        );
+        let error = error.to_string();
+        assert!(
+            error.contains("non-string mapping keys are not supported"),
+            "{error}"
+        );
+        assert!(error.contains("[6:11]"), "{error}");
     }
 
     #[test]
@@ -993,7 +1017,7 @@ mod tests {
             STARTUP_MIGRATED_PLUGIN,
             include_str!("testdata/compat/plugin_config_error_after_migration.yaml"),
         ] {
-            let file: Value = serde_yaml::from_str(text).expect("test inputs are YAML");
+            let file: Value = yaml_serde::from_str(text).expect("test inputs are YAML");
             let migrated = upgrade_configuration_silently(&file, UpgradeMode::current_minor())
                 .expect("test inputs migrate")
                 .config;
@@ -1335,7 +1359,7 @@ mod tests {
     /// Configurations built with serde or the test builders go through the same rules.
     #[test]
     fn serde_and_builder_configurations_run_plugin_rules() {
-        let error = serde_yaml::from_str::<Configuration>(
+        let error = yaml_serde::from_str::<Configuration>(
             "plugins:\n  test.validated:\n    name: reserved\n",
         )
         .expect_err("the plugin's rule rejects the name")
@@ -1402,8 +1426,8 @@ mod tests {
             error.contains("this_key_does_not_exist_anywhere"),
             "{error}"
         );
-        // The key is on line 4 of the migrated copy and on line 5 of the file.
-        assert!(error.contains("[4:1]"), "{error}");
+        // The key is on line 3 of the migrated copy and on line 5 of the file.
+        assert!(error.contains("[3:1]"), "{error}");
         assert!(!error.contains("[5:1]"), "{error}");
     }
 

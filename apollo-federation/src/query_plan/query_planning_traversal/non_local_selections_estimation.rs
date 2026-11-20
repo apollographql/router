@@ -221,17 +221,13 @@ impl<'a: 'b, 'b> QueryPlanningTraversal<'a, 'b> {
                 }
             }
         }
-        if selection_set_is_non_local
+        Ok(selection_set_is_non_local
             && Self::update_count(
                 selection_set.selections.len(),
                 parent_nodes.next_nodes.len(),
                 state,
                 self.parameters.config.debug.max_non_local_selections.get(),
-            )
-        {
-            return Ok(true);
-        }
-        Ok(false)
+            ))
     }
 
     /// Updates the non-local selection set count in the state, returning true if this causes the

@@ -1256,7 +1256,7 @@ connector:
         let format = Json::new(Resource::builder_empty().build(), text_format);
         let fmt_layer = log_layers(format, &buff);
 
-        let event_config: events::Events = serde_yaml::from_str(EVENT_CONFIGURATION).unwrap();
+        let event_config: events::Events = yaml_serde::from_str(EVENT_CONFIGURATION).unwrap();
 
         ::tracing::subscriber::with_default(
             fmt::Subscriber::new()
@@ -1588,7 +1588,7 @@ connector:
             &buff,
         );
 
-        let event_config: events::Events = serde_yaml::from_str(
+        let event_config: events::Events = yaml_serde::from_str(
             r#"
 subgraph:
   request: info
@@ -1693,7 +1693,7 @@ subgraph:
         let format = Text::new(Resource::builder_empty().build(), text_format);
         let fmt_layer = log_layers(format, &buff);
 
-        let event_config: events::Events = serde_yaml::from_str(EVENT_CONFIGURATION).unwrap();
+        let event_config: events::Events = yaml_serde::from_str(EVENT_CONFIGURATION).unwrap();
 
         ::tracing::subscriber::with_default(
             fmt::Subscriber::new()

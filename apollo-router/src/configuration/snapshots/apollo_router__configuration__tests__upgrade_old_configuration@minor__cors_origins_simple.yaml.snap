@@ -1,11 +1,9 @@
 ---
 source: apollo-router/src/configuration/tests.rs
 expression: new_config
-snapshot_kind: text
----
 ---
 cors:
   policies:
-    - origins:
-        - "https://studio.apollographql.com"
-        - "https://example.com"
+  - origins:
+    - https://studio.apollographql.com
+    - https://example.com

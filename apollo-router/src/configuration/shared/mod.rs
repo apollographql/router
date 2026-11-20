@@ -18,8 +18,9 @@ pub(crate) const DEFAULT_HTTP2_KEEP_ALIVE_TIMEOUT: Duration = Duration::from_sec
 #[apollo_configuration::configuration]
 #[derive(PartialEq)]
 pub(crate) struct Client {
-    /// Use HTTP/2 to communicate with the coprocessor.
-    pub(crate) http2: Option<Http2Config>,
+    /// Whether to use HTTP/2 for coprocessor requests: `enable`, `disable` (default) or `http2only`.
+    #[config(default)]
+    pub(crate) http2: Http2Config,
 
     /// Specify a DNS resolution strategy to use when resolving the coprocessor URL.
     pub(crate) dns_resolution_strategy: Option<DnsResolutionStrategy>,
@@ -65,7 +66,7 @@ impl Client {
         experimental_http2_keep_alive_timeout: Option<Duration>,
     ) -> Self {
         Self {
-            http2,
+            http2: http2.unwrap_or_default(),
             dns_resolution_strategy,
             pool_idle_timeout: pool_idle_timeout.or_else(default_pool_idle_timeout),
             experimental_http2_keep_alive_interval,
@@ -119,13 +120,13 @@ mod tests {
         #[case] yaml: &str,
         #[case] expected: Option<Duration>,
     ) {
-        let client: Client = serde_yaml::from_str(yaml).unwrap();
+        let client: Client = yaml_serde::from_str(yaml).unwrap();
         assert_eq!(client.pool_idle_timeout, expected);
     }
 
     #[test]
     fn test_pool_idle_timeout_default_when_omitted() {
-        let client: Client = serde_yaml::from_str("{}").unwrap();
+        let client: Client = yaml_serde::from_str("{}").unwrap();
         assert_eq!(client.pool_idle_timeout, Some(DEFAULT_POOL_IDLE_TIMEOUT));
     }
 
@@ -139,13 +140,19 @@ mod tests {
     fn test_client_default_has_pool_idle_timeout() {
         let client = Client::default();
         assert_eq!(client.pool_idle_timeout, Some(DEFAULT_POOL_IDLE_TIMEOUT));
-        assert_eq!(client, serde_yaml::from_str::<Client>("{}").unwrap());
+        assert_eq!(client, yaml_serde::from_str::<Client>("{}").unwrap());
         assert_eq!(client, Client::builder().build());
     }
 
     #[test]
+    fn test_http2_default_when_omitted() {
+        let client: Client = yaml_serde::from_str("{}").unwrap();
+        assert_eq!(client.http2, Http2Config::Disable);
+    }
+
+    #[test]
     fn test_client_deny_unknown_fields() {
-        let result: Result<Client, _> = serde_yaml::from_str("bogus_field: true");
+        let result: Result<Client, _> = yaml_serde::from_str("bogus_field: true");
         assert!(result.is_err());
     }
 
@@ -164,7 +171,7 @@ mod tests {
         #[case] yaml: &str,
         #[case] expected: Option<Duration>,
     ) {
-        let client: Client = serde_yaml::from_str(yaml).unwrap();
+        let client: Client = yaml_serde::from_str(yaml).unwrap();
         assert_eq!(client.experimental_http2_keep_alive_interval, expected);
     }
 
@@ -183,7 +190,7 @@ mod tests {
         #[case] yaml: &str,
         #[case] expected: Option<Duration>,
     ) {
-        let client: Client = serde_yaml::from_str(yaml).unwrap();
+        let client: Client = yaml_serde::from_str(yaml).unwrap();
         assert_eq!(client.experimental_http2_keep_alive_timeout, expected);
     }
 }
