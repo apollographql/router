@@ -25,7 +25,6 @@ use crate::plugin::DynPlugin;
 use crate::router_factory::PipelineFactory;
 use crate::router_factory::RouterServiceFactory;
 use crate::spec::Schema;
-use crate::uplink::license_enforcement::LicenseState;
 
 /// This session id is created once when the router starts. It persists between config reloads and supergraph schema changes.
 static SESSION_ID: OnceCell<Uuid> = OnceCell::new();
@@ -100,7 +99,6 @@ impl RouterServiceFactory for OrbiterPipelineFactory {
         schema: Arc<Schema>,
         previous_router: Option<Self::RouterFactory>,
         extra_plugins: Option<Vec<(String, Box<dyn DynPlugin>)>>,
-        license: Arc<LicenseState>,
     ) -> Result<Self::RouterFactory, BoxError> {
         self.delegate
             .create_pipeline(
@@ -109,7 +107,6 @@ impl RouterServiceFactory for OrbiterPipelineFactory {
                 schema.clone(),
                 previous_router,
                 extra_plugins,
-                license,
             )
             .await
             .inspect(|factory| {

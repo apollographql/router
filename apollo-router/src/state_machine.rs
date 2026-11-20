@@ -735,7 +735,6 @@ impl<FA: RouterServiceFactory> State<FA> {
                 schema.clone(),
                 previous_router_service_factory,
                 None,
-                effective_license.clone(),
             )
             .await
             // Building the pipelines can fail for reasons that have nothing to do with
@@ -2179,7 +2178,7 @@ mod tests {
         router_factory
             .expect_create_pipeline()
             .times(1)
-            .returning(|_, _, _, _, _, _| Err(BoxError::from("Error")));
+            .returning(|_, _, _, _, _| Err(BoxError::from("Error")));
 
         let (server_factory, shutdown_receivers) = create_mock_server_factory(0);
 
@@ -2207,7 +2206,7 @@ mod tests {
             .expect_create_pipeline()
             .times(1)
             .in_sequence(&mut seq)
-            .returning(|_, _, _, _, _, _| {
+            .returning(|_, _, _, _, _| {
                 let mut router = MockMyRouterFactory::new();
                 router.expect_clone().returning(MockMyRouterFactory::new);
                 router.expect_web_endpoints().returning(MultiMap::new);
@@ -2217,7 +2216,7 @@ mod tests {
             .expect_create_pipeline()
             .times(1)
             .in_sequence(&mut seq)
-            .returning(|_, _, _, _, _, _| Err(BoxError::from("error")));
+            .returning(|_, _, _, _, _| Err(BoxError::from("error")));
 
         let (server_factory, shutdown_receivers) = create_mock_server_factory(1);
         let minimal_schema = include_str!("testdata/minimal_supergraph.graphql");
@@ -2251,7 +2250,7 @@ mod tests {
             .expect_create_pipeline()
             .times(1)
             .in_sequence(&mut seq)
-            .returning(|_, _, _, _, _, _| {
+            .returning(|_, _, _, _, _| {
                 let mut router = MockMyRouterFactory::new();
                 router.expect_clone().returning(MockMyRouterFactory::new);
                 router.expect_web_endpoints().returning(MultiMap::new);
@@ -2261,13 +2260,13 @@ mod tests {
             .expect_create_pipeline()
             .times(1)
             .in_sequence(&mut seq)
-            .returning(|_, _, _, _, _, _| Err(BoxError::from("error")));
+            .returning(|_, _, _, _, _| Err(BoxError::from("error")));
         router_factory
             .expect_create_pipeline()
             .times(1)
             .in_sequence(&mut seq)
-            .withf(|_, configuration, _, _, _, _| configuration.homepage.enabled)
-            .returning(|_, _, _, _, _, _| {
+            .withf(|_, configuration, _, _, _| configuration.homepage.enabled)
+            .returning(|_, _, _, _, _| {
                 let mut router = MockMyRouterFactory::new();
                 router.expect_clone().returning(MockMyRouterFactory::new);
                 router.expect_web_endpoints().returning(MultiMap::new);
@@ -2416,7 +2415,6 @@ mod tests {
                 schema: Arc<Schema>,
                 previous_router_service_factory: Option<MockMyRouterFactory>,
                 extra_plugins: Option<Vec<(String, Box<dyn DynPlugin>)>>,
-                license: Arc<LicenseState>
             ) -> Result<MockMyRouterFactory, BoxError>;
         }
     }
@@ -2543,7 +2541,7 @@ mod tests {
             } else {
                 expect_times_called
             })
-            .returning(move |_, _, _, _, _, _| {
+            .returning(move |_, _, _, _, _| {
                 let mut router = MockMyRouterFactory::new();
                 router.expect_clone().returning(MockMyRouterFactory::new);
                 router.expect_web_endpoints().returning(MultiMap::new);
@@ -2560,10 +2558,11 @@ mod tests {
                           _configuration: &Arc<Configuration>,
                           _,
                           previous_router_service_factory: &Option<MockMyRouterFactory>,
-                          _extra_plugins: &Option<Vec<(String, Box<dyn DynPlugin>)>>,
-                          _| { previous_router_service_factory.is_some() },
+                          _extra_plugins: &Option<Vec<(String, Box<dyn DynPlugin>)>>| {
+                        previous_router_service_factory.is_some()
+                    },
                 )
-                .returning(move |_, _, _, _, _, _| {
+                .returning(move |_, _, _, _, _| {
                     let mut router = MockMyRouterFactory::new();
                     router.expect_clone().returning(MockMyRouterFactory::new);
                     router.expect_web_endpoints().returning(MultiMap::new);
@@ -2582,7 +2581,7 @@ mod tests {
         router_factory
             .expect_create_pipeline()
             .times(expect_times_called)
-            .returning(move |_, _, _, _, _, _| {
+            .returning(move |_, _, _, _, _| {
                 let mut router = MockMyRouterFactory::new();
                 router.expect_clone().returning(MockMyRouterFactory::new);
                 router.expect_web_endpoints().returning(MultiMap::new);
@@ -2624,7 +2623,7 @@ mod tests {
                     .expect_create_pipeline()
                     .times(1)
                     .in_sequence(&mut seq)
-                    .returning(move |_, _, _, _, _, _| {
+                    .returning(move |_, _, _, _, _| {
                         if outcome.is_ok() {
                             Ok(mock_router_ok())
                         } else {

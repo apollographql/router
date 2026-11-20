@@ -25,7 +25,6 @@ async fn progressive_override() {
         Default::default(),
         None,
         |_| {},
-        None,
     )
     .await;
 

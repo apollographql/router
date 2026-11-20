@@ -95,7 +95,6 @@ async fn execute(query: &str, variables: JsonMap) -> (serde_json::Value, MockSer
         variables,
         None,
         |_| {},
-        None,
     )
     .await;
 

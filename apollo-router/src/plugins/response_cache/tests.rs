@@ -56,7 +56,6 @@ use crate::router_factory::RouterFactory;
 use crate::router_factory::RouterServiceFactory;
 use crate::services::subgraph;
 use crate::services::supergraph;
-use crate::uplink::license_enforcement::LicenseState;
 
 const SCHEMA: &str = include_str!("../../testdata/orga_supergraph_cache_key.graphql");
 const SCHEMA_CACHE_TAG: &str =
@@ -5362,7 +5361,6 @@ async fn create_connector_cache_factory_with_schema(
             Arc::new(crate::spec::Schema::parse(schema, &config).unwrap()),
             None,
             None,
-            Arc::new(LicenseState::Licensed { limits: None }),
         )
         .await
         .unwrap()

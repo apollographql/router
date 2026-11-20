@@ -37,7 +37,6 @@ use crate::router_factory::RouterFactory;
 use crate::router_factory::RouterServiceFactory;
 use crate::services::router::Request;
 use crate::services::supergraph;
-use crate::uplink::license_enforcement::LicenseState;
 
 mod connect_on_type;
 mod content_type;
@@ -82,7 +81,6 @@ async fn value_from_config() {
             }
         })),
         |_| {},
-        None,
     )
     .await;
 
@@ -122,9 +120,6 @@ async fn max_requests() {
           }
         })),
         |_| {},
-        Some(LicenseState::Licensed {
-            limits: Default::default(),
-        }),
     )
     .await;
 
@@ -194,9 +189,6 @@ async fn source_max_requests() {
           }
         })),
         |_| {},
-        Some(LicenseState::Licensed {
-            limits: Default::default(),
-        }),
     )
     .await;
 
@@ -259,7 +251,6 @@ async fn test_root_field_plus_entity_impl(
         Default::default(),
         config,
         |_| {},
-        None,
     )
     .await;
     let received = mock_server.received_requests().await.unwrap();
@@ -340,7 +331,6 @@ async fn test_root_field_plus_entity_plus_requires_impl(
         Default::default(),
         config,
         |_| {},
-        None,
     )
     .await;
     let received = mock_server.received_requests().await.unwrap();
@@ -405,7 +395,6 @@ async fn test_entity_references() {
         Default::default(),
         None,
         |_| {},
-        None,
     )
     .await;
 
@@ -479,7 +468,6 @@ async fn basic_errors() {
         Default::default(),
         None,
         |_| {},
-        None,
     )
     .await;
 
@@ -565,7 +553,6 @@ async fn basic_connection_errors() {
         Default::default(),
         None,
         |_| {},
-        None,
     )
     .await;
 
@@ -634,7 +621,6 @@ async fn test_headers() {
                 .insert("val", String::from("val-from-request-context"))
                 .unwrap();
         },
-        None,
     )
     .await;
 
@@ -753,7 +739,6 @@ async fn test_override_headers_with_config() {
                 .insert("val", String::from("val-from-request-context"))
                 .unwrap();
         },
-        None,
     )
     .await;
 
@@ -828,7 +813,6 @@ async fn should_only_send_named_header_once_when_both_config_and_schema_propagat
                 .insert("val", String::from("val-from-request-context"))
                 .unwrap();
         },
-        None,
     )
     .await;
 
@@ -912,7 +896,6 @@ async fn should_only_send_matching_header_once_when_both_config_and_schema_propa
                 .insert("val", String::from("val-from-request-context"))
                 .unwrap();
         },
-        None,
     )
     .await;
 
@@ -997,7 +980,6 @@ async fn should_remove_header_when_sdl_has_insert_and_yaml_has_remove() {
                 .insert("val", String::from("val-from-request-context"))
                 .unwrap();
         },
-        None,
     )
     .await;
 
@@ -1028,7 +1010,6 @@ async fn test_args_and_this_in_header() {
         Default::default(),
         None,
         |_| {},
-        None,
     )
     .await;
 
@@ -1137,7 +1118,6 @@ async fn test_tracing_connect_span() {
         Default::default(),
         None,
         |_| {},
-        None,
     )
     .await;
 }
@@ -1154,7 +1134,6 @@ async fn test_operation_counter() {
             Default::default(),
             None,
             |_| {},
-            None,
         )
         .await;
         // The `/users/1` and `/users/2` entity fetches run in parallel after the
@@ -1202,7 +1181,6 @@ async fn test_mutation() {
             .clone(),
         None,
         |_| {},
-        None,
     )
     .await;
 
@@ -1254,7 +1232,6 @@ async fn test_mutation_empty_body() {
             .clone(),
         None,
         |_| {},
-        None,
     )
     .await;
 
@@ -1323,7 +1300,6 @@ async fn test_selection_set() {
         .clone(),
         None,
         |_| {},
-        None,
     )
     .await;
 
@@ -1378,7 +1354,6 @@ async fn test_nullability() {
         Default::default(),
         None,
         |_| {},
-        None,
     )
     .await;
 
@@ -1420,7 +1395,6 @@ async fn test_default_argument_values() {
         Default::default(),
         None,
         |_| {},
-        None,
     )
     .await;
 
@@ -1465,7 +1439,6 @@ async fn test_default_argument_overrides() {
         Default::default(),
         None,
         |_| {},
-        None,
     )
     .await;
 
@@ -1559,7 +1532,6 @@ async fn test_form_encoding() {
         Default::default(),
         None,
         |_| {},
-        None,
     )
     .await;
 
@@ -1599,7 +1571,6 @@ async fn test_no_source() {
         Default::default(),
         None,
         |_| {},
-        None,
     )
     .await;
 
@@ -1638,7 +1609,6 @@ async fn error_not_redacted() {
             }
         })),
         |_| {},
-        None,
     )
     .await;
 
@@ -1692,7 +1662,6 @@ async fn error_redacted() {
             }
         })),
         |_| {},
-        None,
     )
     .await;
 
@@ -1778,7 +1747,6 @@ async fn test_interface_object() {
         Default::default(),
         None,
         |_| {},
-        None,
     )
     .await;
 
@@ -1885,9 +1853,6 @@ async fn test_sources_in_context() {
           }
         })),
         |_| {},
-        Some(LicenseState::Licensed {
-            limits: Default::default(),
-        }),
     )
     .await;
 
@@ -1969,9 +1934,6 @@ async fn test_variables() {
           let headers = request.router_request.headers_mut();
           headers.insert("value", "coolheader".parse().unwrap());
         },
-        Some(LicenseState::Licensed {
-            limits: Default::default(),
-        }),
     )
     .await;
 
@@ -2056,8 +2018,7 @@ async fn should_support_using_variable_in_nested_input_argument() {
         "query Query ($query: String){ complexInputType(filters: { inSpace: true, search: $query })  }",
         variables,
         None,
-        |_|{},
-        None
+        |_|{}
     )
     .await;
 
@@ -2102,7 +2063,6 @@ async fn doesnt_error_when_using_undefined_arguments() {
         variables,
         None,
         |_|{},
-          None,
     )
     .await;
 
@@ -2153,7 +2113,6 @@ mod quickstart_tests {
             variables,
             None,
             |_| {},
-            None,
         )
         .await
     }
@@ -2367,7 +2326,6 @@ async fn execute(
     variables: JsonMap,
     config: Option<serde_json_bytes::Value>,
     request_mutator: impl FnMut(&mut Request),
-    license: Option<LicenseState>,
 ) -> serde_json::Value {
     let connector_uri = format!("{uri}/");
     let subgraph_uri = format!("{uri}/graphql");
@@ -2391,7 +2349,7 @@ async fn execute(
     };
     let config: Configuration = serde_json_bytes::from_value(config).unwrap();
 
-    execute_with_configuration(schema, query, variables, config, request_mutator, license).await
+    execute_with_configuration(schema, query, variables, config, request_mutator).await
 }
 
 /// Runs `query` against `schema` with a configuration the caller has already parsed, such as one
@@ -2402,7 +2360,6 @@ async fn execute_with_configuration(
     variables: JsonMap,
     config: Configuration,
     mut request_mutator: impl FnMut(&mut Request),
-    license: Option<LicenseState>,
 ) -> serde_json::Value {
     // we cannot use Testharness because the subgraph connectors are actually extracted in PipelineFactory
     let mut factory = PipelineFactory;
@@ -2414,7 +2371,6 @@ async fn execute_with_configuration(
             Arc::new(crate::spec::Schema::parse(schema, &config).unwrap()),
             None,
             None,
-            Arc::new(license.unwrap_or_default()),
         )
         .await
         .unwrap();

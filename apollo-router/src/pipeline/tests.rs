@@ -10,7 +10,6 @@ use crate::plugins::traffic_shaping::APOLLO_TRAFFIC_SHAPING;
 use crate::services::Plugins;
 use crate::services::SupergraphRequest;
 use crate::spec::Schema;
-use crate::uplink::license_enforcement::LicenseState;
 
 mod plugin_instantiation;
 mod query_parsing;
@@ -113,9 +112,7 @@ async fn build_http_services_builds_a_client_per_subgraph() {
 async fn init_telemetry_returns_no_plugin_on_hot_reload() {
     let configuration = test_configuration();
     let schema = test_schema(&configuration);
-    let license = Arc::new(LicenseState::default());
-
-    let plugin = maybe_bootstrap_telemetry(&configuration, &schema, &license, Some(&configuration))
+    let plugin = maybe_bootstrap_telemetry(&configuration, &schema, Some(&configuration))
         .await
         .unwrap();
 
@@ -128,17 +125,9 @@ async fn create_plugins_instantiates_mandatory_plugins() {
     let schema = test_schema(&configuration);
     let (_planner, subgraph_schemas) = create_query_planner(&schema, &configuration).unwrap();
 
-    let plugins = create_plugins(
-        &configuration,
-        &schema,
-        subgraph_schemas,
-        None,
-        None,
-        Arc::new(LicenseState::default()),
-        None,
-    )
-    .await
-    .unwrap();
+    let plugins = create_plugins(&configuration, &schema, subgraph_schemas, None, None, None)
+        .await
+        .unwrap();
 
     assert!(plugins.contains_key("apollo.include_subgraph_errors"));
     assert!(plugins.contains_key("apollo.traffic_shaping"));
@@ -298,16 +287,9 @@ async fn construction_spans_form_the_documented_tree() {
 
     let configuration = test_configuration();
     let schema = test_schema(&configuration);
-    build_pipeline(
-        configuration,
-        schema,
-        None,
-        None,
-        None,
-        Arc::new(LicenseState::default()),
-    )
-    .await
-    .expect("pipeline builds");
+    build_pipeline(configuration, schema, None, None, None)
+        .await
+        .expect("pipeline builds");
 
     insta::assert_snapshot!(layer.render(&["prepare_pipeline", "activate", "apply_pipeline"]));
 }

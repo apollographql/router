@@ -1,4 +1,4 @@
-//! Construction of the router's serving pipeline from configuration, schema, and license.
+//! Construction of the router's serving pipeline from configuration and schema.
 //!
 //! A [`Pipeline`] is one immutable, fully wired instance of the router's request-handling
 //! stack, plus the pieces a hot reload needs from it (configuration, schema, plugins, and
@@ -106,7 +106,6 @@ use crate::services::router;
 use crate::services::router::pipeline_handle::PipelineHandle;
 use crate::services::supergraph;
 use crate::spec::Schema;
-use crate::uplink::license_enforcement::LicenseState;
 
 mod acquire;
 mod plugins;
@@ -114,7 +113,7 @@ mod stages;
 #[cfg(test)]
 pub(crate) mod tests;
 
-/// Builds a serving pipeline from configuration, schema, and license.
+/// Builds a serving pipeline from configuration and schema.
 ///
 /// Runs the acquire, activate, and assemble phases the module docs describe. On a hot
 /// reload, pass the previous pipeline's configuration and in-memory query-plan cache.
@@ -126,25 +125,18 @@ pub(crate) async fn build_pipeline(
     previous_config: Option<Arc<Configuration>>,
     previous_cache: Option<InMemoryQueryPlanCache>,
     extra_plugins: Option<Vec<(String, Box<dyn DynPlugin>)>>,
-    license: Arc<LicenseState>,
 ) -> Result<Pipeline, BoxError> {
     // Bootstrap telemetry before creating any spans: on first boot the global tracer
     // provider is still the no-op bootstrap provider, so a span created earlier would
     // never be exported and every span under it would arrive as an orphan.
-    let bootstrap_telemetry_plugin = maybe_bootstrap_telemetry(
-        &configuration,
-        &schema,
-        &license,
-        previous_config.as_deref(),
-    )
-    .await?;
+    let bootstrap_telemetry_plugin =
+        maybe_bootstrap_telemetry(&configuration, &schema, previous_config.as_deref()).await?;
 
     let acquired = acquire(
         &configuration,
         &schema,
         previous_config,
         extra_plugins,
-        license,
         bootstrap_telemetry_plugin,
     )
     .instrument(tracing::info_span!("prepare_pipeline"))
@@ -261,7 +253,6 @@ pub(crate) async fn build_supergraph_for_test_harness(
     configuration: Arc<Configuration>,
     schema: Arc<Schema>,
     extra_plugins: Vec<(String, Box<dyn DynPlugin>)>,
-    license: Arc<LicenseState>,
 ) -> Result<(Arc<Plugins>, supergraph::BoxCloneService), BoxError> {
     let (query_planner, subgraph_schemas) = create_query_planner(&schema, &configuration)?;
     let plugins: Arc<Plugins> = Arc::new(
@@ -271,7 +262,6 @@ pub(crate) async fn build_supergraph_for_test_harness(
             subgraph_schemas.clone(),
             None,
             Some(extra_plugins),
-            license,
             None,
         )
         .instrument(tracing::info_span!("plugins"))

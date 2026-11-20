@@ -21,7 +21,6 @@ use crate::plugins::telemetry::reload::otel::apollo_opentelemetry_initialized;
 use crate::query_planner::SubgraphSchemas;
 use crate::services::Plugins;
 use crate::spec::Schema;
-use crate::uplink::license_enforcement::LicenseState;
 
 /// Processes the plugins in the order below and returns the built instances keyed by name.
 ///
@@ -34,7 +33,6 @@ pub(crate) async fn create_plugins(
     subgraph_schemas: Arc<SubgraphSchemas>,
     initial_telemetry_plugin: Option<Box<dyn DynPlugin>>,
     extra_plugins: Option<Vec<(String, Box<dyn DynPlugin>)>>,
-    license: Arc<LicenseState>,
     previous_config: Option<Arc<Configuration>>,
 ) -> Result<Plugins, BoxError> {
     let extra = extra_plugins.unwrap_or_default();
@@ -67,7 +65,7 @@ pub(crate) async fn create_plugins(
             .subgraph_schemas(subgraph_schemas)
             .launch_id(schema.launch_id.clone())
             .notify(configuration.notify.clone())
-            .license(license)
+            .license(Default::default())
             .and_original_config_yaml(configuration.raw_yaml.clone())
             .build(),
     };

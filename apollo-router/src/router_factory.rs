@@ -12,7 +12,6 @@ use crate::services::Plugins;
 use crate::services::router;
 use crate::services::router::pipeline_handle::PipelineHandle;
 use crate::spec::Schema;
-use crate::uplink::license_enforcement::LicenseState;
 
 /// A built pipeline's serving surface: the router service, the plugin web endpoints,
 /// and the pipeline handle.
@@ -45,7 +44,6 @@ pub(crate) trait RouterServiceFactory {
         schema: Arc<Schema>,
         previous_router: Option<Self::RouterFactory>,
         extra_plugins: Option<Vec<(String, Box<dyn DynPlugin>)>>,
-        license: Arc<LicenseState>,
     ) -> Result<Self::RouterFactory, BoxError>;
 }
 
@@ -64,7 +62,6 @@ impl RouterServiceFactory for PipelineFactory {
         schema: Arc<Schema>,
         previous_router: Option<Self::RouterFactory>,
         extra_plugins: Option<Vec<(String, Box<dyn DynPlugin>)>>,
-        license: Arc<LicenseState>,
     ) -> Result<Self::RouterFactory, BoxError> {
         let previous_config: Option<Arc<Configuration>> =
             previous_router.as_ref().map(|r| r.configuration.clone());
@@ -76,7 +73,6 @@ impl RouterServiceFactory for PipelineFactory {
             previous_config,
             previous_cache,
             extra_plugins,
-            license,
         )
         .await
     }
@@ -91,14 +87,7 @@ pub async fn create_test_service_factory_from_yaml(schema: &str, configuration: 
 
     let is_telemetry_disabled = false;
     let service = PipelineFactory
-        .create_pipeline(
-            is_telemetry_disabled,
-            Arc::new(config),
-            schema,
-            None,
-            None,
-            Default::default(),
-        )
+        .create_pipeline(is_telemetry_disabled, Arc::new(config), schema, None, None)
         .await;
     assert_eq!(
         service.map(|_| ()).unwrap_err().to_string().as_str(),

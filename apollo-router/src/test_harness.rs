@@ -358,18 +358,9 @@ impl<'a> TestHarness<'a> {
         let canned_schema = include_str!("../testing_schema.graphql");
         let schema = self.schema.unwrap_or(canned_schema);
         let schema = Arc::new(Schema::parse(schema, &config)?);
-        // Default to using an unrestricted license
-        let license = self.license.unwrap_or(Arc::new(LicenseState::Licensed {
-            limits: Default::default(),
-        }));
-
-        let (plugins, supergraph_pipeline) = build_supergraph_for_test_harness(
-            config.clone(),
-            schema.clone(),
-            self.extra_plugins,
-            license,
-        )
-        .await?;
+        let (plugins, supergraph_pipeline) =
+            build_supergraph_for_test_harness(config.clone(), schema.clone(), self.extra_plugins)
+                .await?;
 
         Ok((config, schema, plugins, supergraph_pipeline))
     }

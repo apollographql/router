@@ -52,7 +52,6 @@ async fn basic_batch() {
                 .headers_mut()
                 .append("Apollo-Expose-Query-Plan", "true".parse().unwrap());
         },
-        None,
     )
     .await;
 
@@ -213,7 +212,6 @@ async fn connect_on_type() {
         Default::default(),
         None,
         |_| {},
-        None,
     )
     .await;
 
