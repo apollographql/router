@@ -33,6 +33,7 @@ use tower_service::Service;
 use crate::ListenAddr;
 use crate::axum_factory::ENDPOINT_CALLBACK;
 use crate::axum_factory::connection_handle::ConnectionHandle;
+use crate::axum_factory::connection_handle::listener_attributes;
 use crate::axum_factory::utils::ConnectionInfo;
 use crate::axum_factory::utils::InjectConnectionInfo;
 use crate::configuration::Configuration;
@@ -647,12 +648,7 @@ fn record_connection_error(
             KeyValue::new("network.protocol.name", "http"),
             KeyValue::new("network.protocol.version", "2"),
         ];
-        if let Some((ip, port)) = address.ip_and_port() {
-            attributes.push(KeyValue::new("server.address", ip.to_string()));
-            attributes.push(KeyValue::new("server.port", port.to_string()));
-        } else {
-            attributes.push(KeyValue::new("server.address", address.to_string()));
-        }
+        attributes.extend(listener_attributes(address));
         u64_counter_with_unit!(
             "apollo.router.server.connection.errors",
             "Number of client connections the router closed with a protocol error code.",
