@@ -2,9 +2,8 @@
 source: apollo-router/src/configuration/tests.rs
 expression: new_config
 ---
----
 coprocessor:
-  url: "http://example.com"
+  url: http://example.com
   router:
     request:
       context: all

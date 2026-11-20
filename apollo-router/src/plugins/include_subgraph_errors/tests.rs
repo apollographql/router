@@ -36,7 +36,7 @@ async fn build_harness(
 ) -> Result<PluginTestHarness<IncludeSubgraphErrors>, BoxError> {
     let mut config = Map::new();
     config.insert("include_subgraph_errors".to_string(), plugin_config.clone());
-    let config = serde_yaml::to_string(&config).expect("config to yaml");
+    let config = yaml_serde::to_string(&config).expect("config to yaml");
     PluginTestHarness::builder().config(&config).build().await
 }
 
@@ -93,7 +93,7 @@ async fn run_test_case(
 
     await_mock_driver(driver).await;
 
-    let config = serde_yaml::to_string(config).expect("config to yaml");
+    let config = yaml_serde::to_string(config).expect("config to yaml");
     let parsed_responses = mock_responses
         .iter()
         .map(|response| serde_json::from_str(response).expect("request"))

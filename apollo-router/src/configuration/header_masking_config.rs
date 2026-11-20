@@ -117,7 +117,7 @@ sensitive_headers:
   - x-internal-token
 "#;
 
-        let config: HeaderMaskingConfig = serde_yaml::from_str(yaml).unwrap();
+        let config: HeaderMaskingConfig = yaml_serde::from_str(yaml).unwrap();
 
         assert!(!config.enabled);
         assert_eq!(config.sensitive_headers.len(), 2);
@@ -140,7 +140,7 @@ sensitive_headers:
 enabled: false
 "#;
 
-        let config: HeaderMaskingConfig = serde_yaml::from_str(yaml).unwrap();
+        let config: HeaderMaskingConfig = yaml_serde::from_str(yaml).unwrap();
 
         assert!(!config.enabled);
         // sensitive_headers defaults to empty; replace_defaults to false.

@@ -853,7 +853,7 @@ mod test {
             "../../../../apollo-router-benchmarks/benches/fixtures/supergraph.graphql"
         );
 
-        let config: Configuration = serde_yaml::from_str(
+        let config: Configuration = yaml_serde::from_str(
             r#"
         supergraph:
             # TODO(@goto-bus-stop): need to update the mocks and remove this, #6013
@@ -960,7 +960,7 @@ mod test {
     async fn it_returns_valid_response_for_deduplicated_variables() {
         // Variable deduplication is now unconditionally enabled, so an empty
         // traffic shaping config is sufficient.
-        let config = serde_yaml::from_str::<serde_json::Value>("{}").unwrap();
+        let config = yaml_serde::from_str::<serde_json::Value>("{}").unwrap();
         // Build a traffic shaping plugin
         let plugin = get_traffic_shaping_plugin(&config).await;
         let router = build_mock_router_with_variable_dedup_optimization(plugin).await;
@@ -969,7 +969,7 @@ mod test {
 
     #[test]
     fn test_merge_config() {
-        let config = serde_yaml::from_str::<Config>(
+        let config = yaml_serde::from_str::<Config>(
             r#"
         all:
           deduplicate_query: true
@@ -999,7 +999,7 @@ mod test {
 
     #[test]
     fn test_merge_http2_all() {
-        let config = serde_yaml::from_str::<Config>(
+        let config = yaml_serde::from_str::<Config>(
             r#"
         all:
           http2: disable
@@ -1042,7 +1042,7 @@ mod test {
 
     #[tokio::test]
     async fn test_subgraph_client_config() {
-        let config = serde_yaml::from_str::<Config>(
+        let config = yaml_serde::from_str::<Config>(
             r#"
         all:
           http2: disable
@@ -1095,7 +1095,7 @@ mod test {
 
     #[tokio::test(flavor = "multi_thread")]
     async fn it_rate_limit_router_requests() {
-        let config = serde_yaml::from_str::<serde_json::Value>(
+        let config = yaml_serde::from_str::<serde_json::Value>(
             r#"
         router:
             global_rate_limit:
@@ -1168,7 +1168,7 @@ mod test {
 
     #[tokio::test(flavor = "multi_thread")]
     async fn it_timeout_router_requests() {
-        let config = serde_yaml::from_str::<serde_json::Value>(
+        let config = yaml_serde::from_str::<serde_json::Value>(
             r#"
         router:
             timeout: 1ns
@@ -1208,7 +1208,7 @@ mod test {
 
     #[tokio::test]
     async fn test_subgraph_pool_idle_timeout_override_and_fallback() {
-        let config = serde_yaml::from_str::<Config>(
+        let config = yaml_serde::from_str::<Config>(
             r#"
         all:
           pool_idle_timeout: 10s
@@ -1264,7 +1264,7 @@ mod test {
 
     #[tokio::test]
     async fn test_subgraph_pool_idle_timeout_null() {
-        let config = serde_yaml::from_str::<Config>(
+        let config = yaml_serde::from_str::<Config>(
             r#"
         all:
           pool_idle_timeout: null
@@ -1320,7 +1320,7 @@ mod test {
 
     #[tokio::test]
     async fn test_connector_pool_idle_timeout_override_and_fallback() {
-        let config = serde_yaml::from_str::<Config>(
+        let config = yaml_serde::from_str::<Config>(
             r#"
         connector:
           all:
@@ -1377,7 +1377,7 @@ mod test {
 
     #[tokio::test]
     async fn test_pool_idle_timeout_uses_default_when_not_configured() {
-        let config = serde_yaml::from_str::<Config>(
+        let config = yaml_serde::from_str::<Config>(
             r#"
         all:
           http2: disable
@@ -1402,7 +1402,7 @@ mod test {
 
     #[tokio::test]
     async fn test_pool_idle_timeout_uses_default_without_all_block() {
-        let config = serde_yaml::from_str::<Config>(
+        let config = yaml_serde::from_str::<Config>(
             r#"
         subgraphs:
           products:
@@ -1467,7 +1467,7 @@ mod test {
 
     #[tokio::test]
     async fn test_subgraph_keep_alive_override_and_fallback() {
-        let config = serde_yaml::from_str::<Config>(
+        let config = yaml_serde::from_str::<Config>(
             r#"
         all:
           experimental_http2_keep_alive_interval: 30s
@@ -1520,7 +1520,7 @@ mod test {
 
     #[tokio::test]
     async fn test_connector_keep_alive_override_and_fallback() {
-        let config = serde_yaml::from_str::<Config>(
+        let config = yaml_serde::from_str::<Config>(
             r#"
         connector:
           all:
@@ -1574,7 +1574,7 @@ mod test {
 
     #[tokio::test]
     async fn test_keep_alive_is_none_when_not_configured() {
-        let config = serde_yaml::from_str::<Config>("{}").unwrap();
+        let config = yaml_serde::from_str::<Config>("{}").unwrap();
 
         let shaping_config = TrafficShaping::new(PluginInit::fake_builder().config(config).build())
             .await
@@ -1600,7 +1600,7 @@ mod test {
     async fn it_raises_different_errors_for_timeouts_and_rate_limits() {
         // expected behavior: the first request sent will timeout, the second request will return
         // immediately due to the ratelimit
-        let config: serde_json::Value = serde_yaml::from_str(
+        let config: serde_json::Value = yaml_serde::from_str(
             r#"
         router:
             global_rate_limit:
