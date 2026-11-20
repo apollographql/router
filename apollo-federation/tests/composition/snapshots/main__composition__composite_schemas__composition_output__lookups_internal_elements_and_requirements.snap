@@ -72,13 +72,10 @@ type Product @key(fields: "id") @key(fields: "sku", resolvable: false) {
 }
 
 type Query {
-  productById(id: ID!): Product
+  productById(id: ID!): Product @federation__lookup
   topProducts: [Product!]!
-  _entities(representations: [_Any!]!): [_Entity]!
   _service: _Service!
 }
-
-union _Entity = Product
 
 # Extracted subgraph "reviews"
 
@@ -86,15 +83,27 @@ schema @link(url: "https://specs.apollo.dev/link/v1.0") @link(url: "https://spec
   query: Query
 }
 
+input DimensionInput {
+  size: Int!
+  weight: Int!
+}
+
+type InternalLookups {
+  productBySku(
+    key: String! @federation__is(field: "sku"),
+  ): Product @federation__lookup
+}
+
 type Product @key(fields: "sku") {
   sku: String! @external
   reviewCount: Int!
-  shippingEstimate(zip: String!): Int
+  shippingEstimate(
+    zip: String!,
+    dimension: DimensionInput! @federation__require(field: "dimension.{ size, weight }"),
+  ): Int
 }
 
 type Query {
-  _entities(representations: [_Any!]!): [_Entity]!
+  lookups: InternalLookups!
   _service: _Service!
 }
-
-union _Entity = Product

@@ -49,10 +49,9 @@ type Product @key(fields: "id") @key(fields: "upc") {
 }
 
 type Query {
-  productById(productId: ID!): Product
-  productByUpc(upc: String!): Product
-  _entities(representations: [_Any!]!): [_Entity]!
+  productById(
+    productId: ID! @federation__is(field: "id"),
+  ): Product @federation__lookup
+  productByUpc(upc: String!): Product @federation__lookup
   _service: _Service!
 }
-
-union _Entity = Product
