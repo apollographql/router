@@ -800,6 +800,48 @@ impl Subgraph<Validated> {
     pub fn take_hints(&mut self) -> Vec<CompositionHint> {
         std::mem::take(&mut self.state.hints)
     }
+
+    /// This subgraph without its `@internal` elements, which are local to the source schema and
+    /// are not merged (see [`crate::composite_schemas::internal`]). Unchanged when the subgraph
+    /// applies no GraphQL Federation directive.
+    pub(crate) fn without_internal_elements(self) -> Result<Self, SubgraphError> {
+        let metadata = &self.state.metadata;
+        if !metadata.uses_composite_directives() {
+            return Ok(self);
+        }
+        let Some(names) = crate::composite_schemas::CompositeNames::new(
+            &self.state.schema,
+            metadata.federation_spec_definition(),
+        ) else {
+            return Ok(self);
+        };
+        let mut schema = self.state.schema.schema().clone().into_inner();
+        if !crate::composite_schemas::internal::remove_internal_elements(
+            &mut schema,
+            &names.internal,
+            &names.require,
+        ) {
+            return Ok(self);
+        }
+        let to_error = |err| SubgraphError::new_without_locations(self.name.clone(), err);
+        let schema = FederationSchema::new(schema).map_err(to_error)?;
+        let schema = validate_subgraph_schema(schema).map_err(to_error)?;
+        let Some(metadata) = schema.subgraph_metadata().cloned() else {
+            return Err(to_error(internal_error!(
+                "Subgraph metadata is missing after removing @internal elements"
+            )));
+        };
+        Ok(Subgraph {
+            name: self.name,
+            url: self.url,
+            state: Validated {
+                schema,
+                orphan_extension_types: self.state.orphan_extension_types,
+                metadata,
+                hints: self.state.hints,
+            },
+        })
+    }
 }
 
 #[allow(private_bounds)]
