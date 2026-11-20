@@ -90,7 +90,7 @@ struct Shaping {
     #[schemars(with = "String", default)]
     /// Enable timeout for incoming requests
     timeout: Option<apollo_configuration::types::Duration>,
-    /// Enable HTTP2 for subgraphs
+    /// Whether to use HTTP/2 for subgraph requests: `enable`, `disable` (default) or `http2only`.
     http2: Option<Http2Config>,
     /// DNS resolution strategy for subgraphs
     dns_resolution_strategy: Option<DnsResolutionStrategy>,
@@ -114,10 +114,10 @@ struct Shaping {
 #[apollo_configuration::configuration]
 #[derive(PartialEq)]
 pub(crate) enum Http2Config {
-    #[config(default)]
-    /// Enable HTTP2 for subgraphs
+    /// Offer HTTP/2 and HTTP/1.1, and use HTTP/2 when the server supports it
     Enable,
-    /// Disable HTTP2 for subgraphs
+    #[config(default)]
+    /// Use HTTP/1.1 only (default)
     Disable,
     /// Only HTTP2 is active
     // The macro renames variants to snake_case; this keeps the lowercase name.
@@ -202,7 +202,7 @@ struct ConnectorShaping {
     #[schemars(with = "String", default)]
     /// Enable timeout for connectors requests
     timeout: Option<apollo_configuration::types::Duration>,
-    /// Enable HTTP2 for connectors
+    /// Whether to use HTTP/2 for connector requests: `enable`, `disable` (default) or `http2only`.
     experimental_http2: Option<Http2Config>,
     /// DNS resolution strategy for connectors
     dns_resolution_strategy: Option<DnsResolutionStrategy>,
@@ -685,7 +685,7 @@ impl TrafficShaping {
 impl From<Shaping> for crate::configuration::shared::Client {
     fn from(shaping: Shaping) -> Self {
         Self {
-            http2: shaping.http2,
+            http2: shaping.http2.unwrap_or_default(),
             dns_resolution_strategy: shaping.dns_resolution_strategy,
             pool_idle_timeout: resolve_pool_idle_timeout(shaping.pool_idle_timeout),
             experimental_http2_keep_alive_interval: shaping
@@ -703,7 +703,7 @@ impl From<Shaping> for crate::configuration::shared::Client {
 impl From<ConnectorShaping> for crate::configuration::shared::Client {
     fn from(shaping: ConnectorShaping) -> Self {
         Self {
-            http2: shaping.experimental_http2,
+            http2: shaping.experimental_http2.unwrap_or_default(),
             dns_resolution_strategy: shaping.dns_resolution_strategy,
             pool_idle_timeout: resolve_pool_idle_timeout(shaping.pool_idle_timeout),
             experimental_http2_keep_alive_interval: shaping
@@ -1067,7 +1067,7 @@ mod test {
         assert_eq!(
             shaping_config.subgraph_client_config("products"),
             crate::configuration::shared::Client {
-                http2: Some(Http2Config::Enable),
+                http2: Http2Config::Enable,
                 dns_resolution_strategy: Some(DnsResolutionStrategy::Ipv6ThenIpv4),
                 pool_idle_timeout: default_pool_idle_timeout(),
                 ..Default::default()
@@ -1076,7 +1076,7 @@ mod test {
         assert_eq!(
             shaping_config.subgraph_client_config("reviews"),
             crate::configuration::shared::Client {
-                http2: Some(Http2Config::Disable),
+                http2: Http2Config::Disable,
                 dns_resolution_strategy: Some(DnsResolutionStrategy::Ipv4Only),
                 pool_idle_timeout: default_pool_idle_timeout(),
                 ..Default::default()
@@ -1085,12 +1085,86 @@ mod test {
         assert_eq!(
             shaping_config.subgraph_client_config("this_doesnt_exist"),
             crate::configuration::shared::Client {
-                http2: Some(Http2Config::Disable),
+                http2: Http2Config::Disable,
                 dns_resolution_strategy: Some(DnsResolutionStrategy::Ipv6Only),
                 pool_idle_timeout: default_pool_idle_timeout(),
                 ..Default::default()
             },
         );
+    }
+
+    #[tokio::test]
+    async fn test_http2_omitted_inherits_from_all() {
+        let config = yaml_serde::from_str::<Config>(
+            r#"
+        all:
+          http2: enable
+        subgraphs:
+          products:
+            pool_idle_timeout: 2s
+        connector:
+          all:
+            experimental_http2: enable
+          sources:
+            my_source:
+              pool_idle_timeout: 3s
+        "#,
+        )
+        .unwrap();
+
+        let shaping_config = TrafficShaping::new(PluginInit::fake_builder().config(config).build())
+            .await
+            .unwrap();
+
+        assert_eq!(
+            shaping_config.subgraph_client_config("products").http2,
+            Http2Config::Enable,
+            "a subgraph block that omits http2 inherits it from all"
+        );
+        assert_eq!(
+            shaping_config.connector_client_config("my_source").http2,
+            Http2Config::Enable,
+            "a source block that omits experimental_http2 inherits it from all"
+        );
+    }
+
+    #[tokio::test]
+    async fn test_http2_omitted_everywhere_defaults_to_disable() {
+        let config = yaml_serde::from_str::<Config>(
+            r#"
+        all:
+          pool_idle_timeout: 20s
+        subgraphs:
+          products:
+            pool_idle_timeout: 2s
+        connector:
+          all:
+            pool_idle_timeout: 20s
+          sources:
+            my_source:
+              pool_idle_timeout: 3s
+        "#,
+        )
+        .unwrap();
+
+        let shaping_config = TrafficShaping::new(PluginInit::fake_builder().config(config).build())
+            .await
+            .unwrap();
+
+        for subgraph in ["products", "unconfigured"] {
+            assert_eq!(
+                shaping_config.subgraph_client_config(subgraph).http2,
+                Http2Config::Disable,
+                "subgraph {subgraph}"
+            );
+        }
+        for source in ["my_source", "unconfigured"] {
+            assert_eq!(
+                shaping_config.connector_client_config(source).http2,
+                Http2Config::Disable,
+                "connector source {source}"
+            );
+        }
     }
 
     #[tokio::test(flavor = "multi_thread")]

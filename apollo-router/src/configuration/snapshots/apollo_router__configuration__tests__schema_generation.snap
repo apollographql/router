@@ -1014,15 +1014,8 @@ expression: "&schema"
           ]
         },
         "http2": {
-          "anyOf": [
-            {
-              "$ref": "#/$defs/Http2Config"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "description": "Use HTTP/2 to communicate with the coprocessor."
+          "$ref": "#/$defs/Http2Config",
+          "description": "Whether to use HTTP/2 for coprocessor requests: `enable`, `disable` (default) or `http2only`."
         },
         "pool_idle_timeout": {
           "description": "Specify a timeout for idle sockets being kept-alive in the client's connection pool.\nDefaults to 15 seconds; `null` disables idle eviction.",
@@ -2798,7 +2791,7 @@ expression: "&schema"
               "type": "null"
             }
           ],
-          "description": "Enable HTTP2 for connectors"
+          "description": "Whether to use HTTP/2 for connector requests: `enable`, `disable` (default) or `http2only`."
         },
         "experimental_http2_keep_alive_interval": {
           "default": null,
@@ -5848,12 +5841,12 @@ expression: "&schema"
       "oneOf": [
         {
           "const": "enable",
-          "description": "Enable HTTP2 for subgraphs",
+          "description": "Offer HTTP/2 and HTTP/1.1, and use HTTP/2 when the server supports it",
           "type": "string"
         },
         {
           "const": "disable",
-          "description": "Disable HTTP2 for subgraphs",
+          "description": "Use HTTP/1.1 only (default)",
           "type": "string"
         },
         {
@@ -10571,7 +10564,7 @@ expression: "&schema"
               "type": "null"
             }
           ],
-          "description": "Enable HTTP2 for subgraphs"
+          "description": "Whether to use HTTP/2 for subgraph requests: `enable`, `disable` (default) or `http2only`."
         },
         "pool_idle_timeout": {
           "description": "Specify a timeout for idle sockets being kept-alive in the client's connection pool.\nDefaults to 15 seconds; `null` disables idle eviction. A `subgraphs.<name>` block that\nomits it uses the value from `all`.",
