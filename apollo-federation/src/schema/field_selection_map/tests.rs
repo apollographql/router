@@ -10,10 +10,14 @@ use super::value::is_mappable;
 
 #[track_caller]
 fn round_trip(input: &str) -> String {
-    let parsed = parse(input).unwrap_or_else(|e| panic!("failed to parse {input:?}: {e}"));
+    let parsed = parse(input).expect("map should parse");
     let printed = parsed.to_string();
     // Printing is canonical: reparsing the printed form yields the same map.
-    assert_eq!(parse(&printed).unwrap(), parsed, "reparse of {printed:?}");
+    assert_eq!(
+        parse(&printed).expect("printed map should reparse"),
+        parsed,
+        "reparse of {printed:?}"
+    );
     printed
 }
 
@@ -182,13 +186,15 @@ input PartInput { id: ID! name: String! }
 "#;
 
 fn schema() -> Schema {
-    Schema::parse(SCHEMA, "schema.graphql").unwrap()
+    Schema::parse(SCHEMA, "schema.graphql").expect("test schema should parse")
 }
 
 #[track_caller]
 fn errors(map: &str, root: &str, expected: &str) -> Vec<String> {
     let schema = schema();
-    let expected = apollo_compiler::ast::Type::Named(apollo_compiler::Name::new(expected).unwrap());
+    let expected = apollo_compiler::ast::Type::Named(
+        apollo_compiler::Name::new(expected).expect("expected type should be a valid name"),
+    );
     let expected = match expected {
         apollo_compiler::ast::Type::Named(ref n) if n.ends_with("__List") => unreachable!(),
         other => other,
@@ -202,11 +208,11 @@ fn errors_with_type(
     root: &str,
     expected: apollo_compiler::ast::Type,
 ) -> Vec<String> {
-    let parsed: SelectedValue = parse(map).unwrap();
+    let parsed: SelectedValue = parse(map).expect("map should parse");
     validate(
         &parsed,
         &SingleSchemaOutput(schema),
-        &apollo_compiler::Name::new(root).unwrap(),
+        &apollo_compiler::Name::new(root).expect("root type should be a valid name"),
         schema,
         &expected,
     )
@@ -339,7 +345,8 @@ fn validates_one_of_alternatives() {
 #[test]
 fn validates_lists() {
     let schema = schema();
-    let ty = |s: &str| apollo_compiler::ast::Type::parse(s, "t.graphql").unwrap();
+    let ty =
+        |s: &str| apollo_compiler::ast::Type::parse(s, "t.graphql").expect("type should parse");
     assert!(errors_with_type(&schema, "media[id]", "Store", ty("[ID!]!")).is_empty());
     assert!(
         errors_with_type(
@@ -365,18 +372,26 @@ fn validates_lists() {
 
 #[test]
 fn detects_arguments() {
-    assert!(!has_arguments(&parse("{ id } | address.id").unwrap()));
-    assert!(has_arguments(&parse("width(unit: IMPERIAL)").unwrap()));
-    assert!(has_arguments(
-        &parse("{ w: width(unit: IMPERIAL) }").unwrap()
+    assert!(!has_arguments(
+        &parse("{ id } | address.id").expect("map should parse")
     ));
-    assert!(has_arguments(&parse("parts[{ id(x: 1) }]").unwrap()));
+    assert!(has_arguments(
+        &parse("width(unit: IMPERIAL)").expect("map should parse")
+    ));
+    assert!(has_arguments(
+        &parse("{ w: width(unit: IMPERIAL) }").expect("map should parse")
+    ));
+    assert!(has_arguments(
+        &parse("parts[{ id(x: 1) }]").expect("map should parse")
+    ));
 }
 
 #[test]
 fn checks_mappability_per_alternative() {
     let schema = schema();
-    let mappable = |map: &str, concrete| is_mappable(&parse(map).unwrap(), &schema, &concrete);
+    let mappable = |map: &str, concrete| {
+        is_mappable(&parse(map).expect("map should parse"), &schema, &concrete)
+    };
     // A root type condition picks the alternative for each concrete type.
     assert!(mappable(
         "{ bookId: <Book>.isbn } | { movieId: <Movie>.id }",
@@ -403,10 +418,10 @@ fn checks_mappability_per_alternative() {
 #[test]
 fn checks_mappability() {
     let schema = schema();
-    let map = parse("{ bookId: <Book>.isbn } | { movieId: <Movie>.id }").unwrap();
+    let map = parse("{ bookId: <Book>.isbn } | { movieId: <Movie>.id }").expect("map should parse");
     assert!(is_mappable(&map, &schema, &name!("Book")));
     assert!(is_mappable(&map, &schema, &name!("Movie")));
-    let map = parse("{ bookId: <Book>.isbn }").unwrap();
+    let map = parse("{ bookId: <Book>.isbn }").expect("map should parse");
     assert!(!is_mappable(&map, &schema, &name!("Movie")));
     let map = SelectedValue::field(name!("isbn"));
     assert!(is_mappable(&map, &schema, &name!("Book")));
@@ -416,7 +431,9 @@ fn checks_mappability() {
 #[test]
 fn checks_mappability_of_nested_fields() {
     let schema = schema();
-    let mappable = |map: &str, concrete| is_mappable(&parse(map).unwrap(), &schema, &concrete);
+    let mappable = |map: &str, concrete| {
+        is_mappable(&parse(map).expect("map should parse"), &schema, &concrete)
+    };
     // Every level of a path must be defined, not just the root field.
     assert!(mappable("author.id", name!("Book")));
     assert!(!mappable("author.name", name!("Book")));
