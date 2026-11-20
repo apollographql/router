@@ -5416,8 +5416,8 @@ fn inc_requires_hopped_and_local_conditions_share_one_input() {
                 __typename
                 id
                 a {
-                  x
                   y
+                  x
                 }
               }
             } =>
@@ -5842,8 +5842,8 @@ fn inc_requires_conditions_merge_in_either_order() {
                 __typename
                 id
                 a {
-                  x
                   y
+                  x
                 }
               }
             } =>
@@ -7148,8 +7148,8 @@ fn inc_requires_alias_keeps_nested_key_fields() {
                       id
                     }
                     __require_1_owner: owner {
-                      tag
                       id
+                      tag
                     }
                   }
                 } =>
@@ -7187,7 +7187,164 @@ fn inc_requires_alias_keeps_nested_key_fields() {
                       id
                     }
                     __require_0_owner: owner {
+                      id
                       tag
+                    }
+                  }
+                } =>
+                {
+                  ... on T {
+                    label
+                  }
+                }
+              },
+            },
+          },
+        },
+      },
+    }
+    "###
+    );
+}
+
+/// Like `inc_requires_alias_keeps_nested_key_fields`, but S1 has no `owner`,
+/// so the key's `owner { id }` is routed from S4 when the conditions are
+/// aliased. The aliases must still carry it.
+#[test]
+fn inc_requires_alias_keeps_routed_nested_key_fields() {
+    let planner = planner!(
+        config = incremental_config(),
+        S1: r#"
+          type Query { t: T }
+          type T @key(fields: "id") { id: ID! }
+        "#,
+        S2: r#"
+          type Owner @key(fields: "id") { id: ID! tag(lang: String): String }
+        "#,
+        S3: r#"
+          type T @key(fields: "id owner { id }") {
+            id: ID!
+            owner: Owner
+            label: String @requires(fields: "owner { tag(lang: \"en\") }")
+            note: String @requires(fields: "owner { tag(lang: \"fr\") }")
+          }
+          type Owner @key(fields: "id") { id: ID! tag(lang: String): String @external }
+        "#,
+        S4: r#"
+          type T @key(fields: "id") { id: ID! owner: Owner @shareable }
+          type Owner @key(fields: "id") { id: ID! }
+        "#,
+    );
+    // validate_correctness = false: the correctness checker rejects input
+    // KeyRenamer rewrites, which this plan uses to rename an aliased
+    // @requires condition back to its field name.
+    assert_plan!(
+        validate_correctness = false,
+        &planner,
+        "{ t { label note } }",
+        @r###"
+    QueryPlan {
+      Sequence {
+        Fetch(service: "S1") {
+          {
+            t {
+              __typename
+              id
+            }
+          }
+        },
+        Flatten(path: "t") {
+          Fetch(service: "S4") {
+            {
+              ... on T {
+                __typename
+                id
+              }
+            } =>
+            {
+              ... on T {
+                __require_0_owner: owner {
+                  __typename
+                  id
+                }
+                owner {
+                  id
+                }
+                __require_1_owner: owner {
+                  __typename
+                  id
+                }
+              }
+            }
+          },
+        },
+        Parallel {
+          Sequence {
+            Flatten(path: "t.__require_1_owner") {
+              Fetch(service: "S2") {
+                {
+                  ... on Owner {
+                    __typename
+                    id
+                  }
+                } =>
+                {
+                  ... on Owner {
+                    tag(lang: "fr")
+                  }
+                }
+              },
+            },
+            Flatten(path: "t") {
+              Fetch(service: "S3") {
+                {
+                  ... on T {
+                    __typename
+                    id
+                    __require_1_owner: owner {
+                      id
+                      tag
+                    }
+                    owner {
+                      id
+                    }
+                  }
+                } =>
+                {
+                  ... on T {
+                    note
+                  }
+                }
+              },
+            },
+          },
+          Sequence {
+            Flatten(path: "t.__require_0_owner") {
+              Fetch(service: "S2") {
+                {
+                  ... on Owner {
+                    __typename
+                    id
+                  }
+                } =>
+                {
+                  ... on Owner {
+                    tag(lang: "en")
+                  }
+                }
+              },
+            },
+            Flatten(path: "t") {
+              Fetch(service: "S3") {
+                {
+                  ... on T {
+                    __typename
+                    id
+                    __require_0_owner: owner {
+                      id
+                      tag
+                    }
+                    owner {
                       id
                     }
                   }

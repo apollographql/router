@@ -1,3 +1,4 @@
+use std::collections::BTreeSet;
 use std::sync::Arc;
 
 use crate::Supergraph;
@@ -1241,7 +1242,7 @@ fn t_pending(
         .clone();
     let pending = PendingSelection::root(field_sel, t_node(space, "a"), fetch_node);
     match dependent {
-        Some(dependent) => pending.into_condition_for(dependent),
+        Some(dependent) => pending.into_condition_for(dependent, None),
         None => pending,
     }
 }
@@ -6051,8 +6052,8 @@ fn connector_requires_partly_in_shape_routes_only_missing_fields() {
               ... on Product {
                 __typename
                 id
-                weight
                 name
+                weight
               }
             } =>
             {
@@ -6107,8 +6108,8 @@ fn connector_composite_key_partly_in_shape_routes_only_missing_fields() {
             {
               ... on Product {
                 __typename
-                id
                 sku
+                id
               }
             } =>
             {
@@ -6165,8 +6166,8 @@ fn connector_resolver_composite_key_partly_in_shape_routes_only_missing_fields()
             {
               ... on Product {
                 __typename
-                id
                 sku
+                id
               }
             } =>
             {
@@ -6228,8 +6229,8 @@ fn connector_composite_key_part_fetch_gated_by_skip() {
               {
                 ... on Product {
                   __typename
-                  id
                   sku
+                  id
                 }
               } =>
               {
@@ -6303,13 +6304,13 @@ fn graphql_key_hops_with_different_conditions_merge_ungated() {
             {
               ... on Product @include(if: $b) {
                 __typename
-                id
                 sku
+                id
               }
               ... on Product @include(if: $a) {
                 __typename
-                id
                 sku
+                id
               }
             } =>
             {
@@ -6378,8 +6379,8 @@ fn connector_resolver_composite_key_part_fetch_gated_by_skip() {
               {
                 ... on Product {
                   __typename
-                  id
                   sku
+                  id
                 }
               } =>
               {
@@ -7241,17 +7242,19 @@ fn connector_key_under_match_shape_routes_missing_field() {
     "#);
 }
 
-/// A pending for `Product.reviews` under the list field `list_field`,
-/// positioned at `subgraph`'s Product node in fetch `fetch_node`.
-fn connector_reviews_pending(
+/// A pending for the Product field `selection` under the list field
+/// `list_field`, positioned at `subgraph`'s Product node in fetch
+/// `fetch_node`.
+fn product_field_pending(
     space: &FieldRoutingSearchSpace,
     list_field: &str,
+    selection: &str,
     subgraph: &str,
     fetch_node: NodeIndex,
 ) -> PendingSelection {
     let op = crate::operation::Operation::parse(
         space.supergraph_schema.clone(),
-        &format!("{{ {list_field} {{ reviews {{ body }} }} }}"),
+        &format!("{{ {list_field} {{ {selection} }} }}"),
         "op.graphql",
     )
     .expect("valid operation");
@@ -7259,20 +7262,20 @@ fn connector_reviews_pending(
         Some(Selection::Field(outer)) => outer.clone(),
         _ => panic!("expected {list_field} field"),
     };
-    let reviews = outer
+    let field = outer
         .selection_set
         .as_ref()
         .expect("list field has sub-selections")
         .selections
         .values()
         .next()
-        .expect("reviews selection")
+        .expect("product field selection")
         .clone();
     let op_path = SharedPath::from_vec(vec![Arc::new(OpPathElement::Field(outer.field.clone()))]);
     let response_path =
         SharedPath::from_vec(commit::field_response_elements(&outer.field).expect("response path"));
     PendingSelection::root(
-        reviews,
+        field,
         test_support::node_for(space, subgraph, "Product"),
         fetch_node,
     )
@@ -7348,7 +7351,7 @@ fn chained_hop_through_connector_subgraph_uses_connector_fetch() {
             },
         ),
     );
-    let pending = connector_reviews_pending(&space, "topProducts", "a", root);
+    let pending = product_field_pending(&space, "topProducts", "reviews { body }", "a", root);
     let (products_node, entry_key) = product_key_edge(&space, "a", "products");
     let (_, exit_key) = product_key_edge(&space, "products", "reviews");
     let choice = RoutingChoice::ChainedKeyHop {
@@ -7426,7 +7429,7 @@ fn circular_key_hop_from_connector_missing_key_fails_commit() {
         products.connector.clone(),
         None,
     );
-    let pending = connector_reviews_pending(&space, "products", "products", root);
+    let pending = product_field_pending(&space, "products", "reviews { body }", "products", root);
     let (_, key) = product_key_edge(&space, "products", "reviews");
     let choice = RoutingChoice::CircularKeyHop {
         edge: reviews_edge(&space, &pending),
@@ -7627,7 +7630,7 @@ fn chained_hop_through_connector_subgraph_checks_nested_exit_key() {
             },
         ),
     );
-    let pending = connector_reviews_pending(&space, "topProducts", "a", root);
+    let pending = product_field_pending(&space, "topProducts", "reviews { body }", "a", root);
     let (products_node, entry_key) = product_key_edge(&space, "a", "products");
     let (_, exit_key) = product_key_edge(&space, "products", "reviews");
     let choice = RoutingChoice::ChainedKeyHop {
@@ -7725,4 +7728,142 @@ fn connector_field_two_value_types_deep_routes_through_parent_entity() {
       },
     }
     "#);
+}
+
+const CHAINED_REQUIRES_A: &str = r#"
+    extend schema @link(url: "https://specs.apollo.dev/federation/v2.9", import: ["@key", "@shareable"])
+    type Query { topProducts: [Product] }
+    type Product @key(fields: "id") { id: ID!, f(arg: Int!): Int @shareable }
+"#;
+
+const CHAINED_REQUIRES_REVIEWS: &str = r#"
+    extend schema @link(url: "https://specs.apollo.dev/federation/v2.9", import: ["@key", "@external", "@requires"])
+    type Product @key(fields: "upc") {
+        upc: ID!
+        f(arg: Int!): Int @external
+        x: Int @requires(fields: "f(arg: 1)")
+        y: Int @requires(fields: "f(arg: 2)")
+    }
+"#;
+
+/// Commit `{ topProducts { y x } }` through a hop chained
+/// a -> products -> reviews, then route every remaining pending to
+/// `route_to`. `x` and `y` require `f` with different arguments, so `x`
+/// splits off its own reviews fetch. Returns, for each reviews fetch, the
+/// key inputs it gets and the subgraph of the fetch each comes from.
+fn chained_requires_split(
+    subgraphs: &[(&str, &str)],
+    route_to: &str,
+) -> Vec<BTreeSet<(String, String)>> {
+    let space = test_support::search_space(subgraphs);
+    let mut state = PlanState::new(vec![]);
+    let root = state.graph.get_or_create_root_group(
+        &Arc::from("a"),
+        CompositeTypeDefinitionPosition::Object(
+            crate::schema::position::ObjectTypeDefinitionPosition {
+                type_name: name!("Query"),
+            },
+        ),
+    );
+    let (products_node, entry_key) = product_key_edge(&space, "a", "products");
+    let (_, exit_key) = product_key_edge(&space, "products", "reviews");
+    for field in ["y", "x"] {
+        let pending = product_field_pending(&space, "topProducts", field, "a", root);
+        let choice = RoutingChoice::ChainedKeyHop {
+            edge: reviews_edge(&space, &pending),
+            key: key_hop_info(exit_key.clone(), false),
+            intermediate_hops: vec![routing::IntermediateKeyHop {
+                target_node: products_node,
+                entry_key: Some(entry_key.clone()),
+            }],
+        };
+        space
+            .commit_choice(&mut state, &pending, &choice)
+            .expect("chained hop commits");
+    }
+    while let Some(pending) = state.pop_pending() {
+        let options = space.cached_routing_options(&pending).expect("options");
+        let choice = options
+            .iter()
+            .find(|choice| choice.target_subgraph().as_ref() == route_to)
+            .expect("a route to the given subgraph");
+        space
+            .commit_choice(&mut state, &pending, choice)
+            .expect("pending commits");
+    }
+
+    let fetches = |subgraph: &str| -> Vec<NodeIndex> {
+        state
+            .graph
+            .node_indices()
+            .filter(|&node| state.graph.node(node).subgraph.as_ref() == subgraph)
+            .collect()
+    };
+    fetches("reviews")
+        .into_iter()
+        .map(|reviews| {
+            let mut keys = BTreeSet::new();
+            for parent in state.graph.node_indices() {
+                let Some(edge) = state.graph.find_edge(parent, reviews) else {
+                    continue;
+                };
+                for input in &state.graph.edge_weight_raw(edge).inputs {
+                    if input.rewrite_info().is_some() {
+                        let subgraph = state.graph.node(parent).subgraph.to_string();
+                        keys.insert((subgraph, input.conditions().to_string()));
+                    }
+                }
+            }
+            keys
+        })
+        .collect()
+}
+
+/// After a chained hop, the split reviews fetch enters with the key the
+/// hop's last fetch, products, selects.
+#[test]
+fn requires_split_group_after_chained_hop_takes_key_from_last_hop() {
+    let products = r#"
+        extend schema @link(url: "https://specs.apollo.dev/federation/v2.9", import: ["@key"])
+        type Product @key(fields: "id") @key(fields: "upc") { id: ID!, upc: ID! }
+    "#;
+    let keys = chained_requires_split(
+        &[
+            ("a", CHAINED_REQUIRES_A),
+            ("products", products),
+            ("reviews", CHAINED_REQUIRES_REVIEWS),
+        ],
+        "products",
+    );
+    let from_products = BTreeSet::from([("products".to_string(), "{ upc }".to_string())]);
+    assert_eq!(keys, vec![from_products.clone(), from_products]);
+}
+
+/// After a chained hop whose last fetch, products, can't select the key,
+/// the split reviews fetch also gets the key from the fetch that can,
+/// identity.
+#[test]
+fn requires_split_group_after_chained_hop_routes_missing_exit_key() {
+    let products = r#"
+        extend schema @link(url: "https://specs.apollo.dev/federation/v2.9", import: ["@key", "@external"])
+        type Product @key(fields: "id") @key(fields: "upc", resolvable: false) {
+            id: ID!
+            upc: ID! @external
+        }
+    "#;
+    let identity = r#"
+        extend schema @link(url: "https://specs.apollo.dev/federation/v2.9", import: ["@key"])
+        type Product @key(fields: "id") @key(fields: "upc") { id: ID!, upc: ID! }
+    "#;
+    let keys = chained_requires_split(
+        &[
+            ("a", CHAINED_REQUIRES_A),
+            ("products", products),
+            ("identity", identity),
+            ("reviews", CHAINED_REQUIRES_REVIEWS),
+        ],
+        "identity",
+    );
+    let from_identity = BTreeSet::from([("identity".to_string(), "{ upc }".to_string())]);
+    assert_eq!(keys, vec![from_identity.clone(), from_identity]);
 }

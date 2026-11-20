@@ -317,6 +317,7 @@ pub(super) fn handle_from_context(
                 &Arc::new(context_selection.clone()),
                 context_fetch_node,
                 &ancestor_op_path,
+                None,
             )?;
         }
 

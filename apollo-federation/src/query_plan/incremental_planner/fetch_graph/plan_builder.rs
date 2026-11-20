@@ -969,7 +969,12 @@ impl FetchGraph {
             IndexMap::default();
         let mut rewrites: Vec<Arc<FetchDataRewrite>> = Vec::new();
 
-        for edge in self.graph.edges_directed(node_idx, Direction::Incoming) {
+        let mut edges: Vec<_> = self
+            .graph
+            .edges_directed(node_idx, Direction::Incoming)
+            .collect();
+        edges.reverse();
+        for edge in edges {
             for input in &edge.weight().inputs {
                 let input_type: CompositeTypeDefinitionPosition = ctx
                     .supergraph_schema

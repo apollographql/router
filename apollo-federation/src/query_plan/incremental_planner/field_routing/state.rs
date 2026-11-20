@@ -9,6 +9,7 @@ use petgraph::graph::NodeIndex;
 
 use super::super::fetch_graph::FetchGraph;
 use super::super::fetch_graph::FetchGraphCheckpoint;
+use super::super::fetch_graph::InputContribution;
 use super::super::shared_path::SharedPath;
 use super::routing::RoutingChoice;
 use crate::operation::Selection;
@@ -28,6 +29,11 @@ pub(crate) struct ConditionScope {
     /// representation. Every group the condition selection (or its children)
     /// commits into gets an ordering edge to this dependent.
     pub(crate) dependent: NodeIndex,
+    /// The whole input the dependent declared this condition as part of, or
+    /// `None` for @fromContext data, which isn't a representation input. A
+    /// fetch the condition lands in puts its part of it on its edge to the
+    /// dependent.
+    pub(crate) input: Option<Arc<InputContribution>>,
     /// Condition-resolution nesting level. Bounds requires-of-requires
     /// chains: mutually recursive @requires would otherwise spiral forever.
     pub(crate) depth: usize,
@@ -242,8 +248,13 @@ impl PendingSelection {
     }
 
     /// Mark this selection as condition data feeding `dependent`'s entity
-    /// representation, one nesting level deeper than its anchor.
-    pub(super) fn into_condition_for(mut self, dependent: NodeIndex) -> Self {
+    /// representation as part of `input`, one nesting level deeper than its
+    /// anchor.
+    pub(super) fn into_condition_for(
+        mut self,
+        dependent: NodeIndex,
+        input: Option<Arc<InputContribution>>,
+    ) -> Self {
         let ancestry = Arc::new(ConditionSite {
             query_graph_node: self.query_graph_node,
             selection: self.selection.clone(),
@@ -251,6 +262,7 @@ impl PendingSelection {
         });
         self.condition = Some(ConditionScope {
             dependent,
+            input,
             depth: self.condition_depth() + 1,
             ancestry,
         });

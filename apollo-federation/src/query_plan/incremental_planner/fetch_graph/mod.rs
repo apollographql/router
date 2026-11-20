@@ -141,6 +141,18 @@ impl InputContribution {
         }
     }
 
+    /// This input with only `conditions`, for the part of it one parent
+    /// fetch selects. The rewrites stay, so every part can stand alone.
+    pub(crate) fn with_conditions(&self, conditions: Arc<SelectionSet>) -> Self {
+        let mut part = self.clone();
+        match &mut part {
+            Self::Key { conditions: c, .. } | Self::Requires { conditions: c, .. } => {
+                *c = conditions;
+            }
+        }
+        part
+    }
+
     pub(crate) fn rewrite_info(&self) -> Option<&InputRewriteInfo> {
         match self {
             Self::Key { rewrite_info, .. } => Some(rewrite_info),
@@ -728,7 +740,6 @@ impl FetchGraph {
 
     /// Iterator over all inputs arriving at `node` from parent fetch
     /// groups.
-    #[cfg(test)]
     pub(crate) fn incoming_inputs(
         &self,
         node: NodeIndex,
@@ -743,16 +754,20 @@ impl FetchGraph {
         &self.graph[edge]
     }
 
-    /// Whether adding `new_rewrites` to `edge` would rename two different
-    /// aliases to the same original field name.
+    /// The parent fetch of `edge`.
+    pub(crate) fn edge_source(&self, edge: EdgeIndex) -> Option<NodeIndex> {
+        self.graph.edge_endpoints(edge).map(|(source, _)| source)
+    }
+
+    /// Whether adding `new_rewrites` to `node`'s inputs would rename two
+    /// different aliases to the same original field name.
     pub(crate) fn has_conflicting_condition_rewrites(
         &self,
-        edge: EdgeIndex,
+        node: NodeIndex,
         new_rewrites: &[(Name, Name)],
     ) -> bool {
-        let existing = &self.graph[edge].inputs;
         for (alias, original) in new_rewrites {
-            for input in existing {
+            for input in self.incoming_inputs(node) {
                 if input
                     .condition_alias_rewrites()
                     .iter()
@@ -781,6 +796,23 @@ impl FetchGraph {
     pub(crate) fn add_input_to_edge(&mut self, edge: EdgeIndex, input: InputContribution) {
         self.undo_log.push(FetchGraphOp::AppendEdgeInput(edge));
         self.graph[edge].inputs.push(input);
+    }
+
+    /// Add `input`, which `parent` selects for `child`'s representation, to
+    /// the edge between them, adding the edge if there is none. Errors if the
+    /// edge would create a cycle.
+    pub(crate) fn add_input(
+        &mut self,
+        parent: NodeIndex,
+        child: NodeIndex,
+        input: InputContribution,
+    ) -> Result<(), FederationError> {
+        self.add_ordering_dependency(parent, child)?;
+        let edge = self
+            .find_edge(parent, child)
+            .ok_or_else(|| FederationError::internal("input added across a missing edge"))?;
+        self.add_input_to_edge(edge, input);
+        Ok(())
     }
 
     /// Append a selection to a node's SelectionBuilder.
