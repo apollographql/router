@@ -916,12 +916,7 @@ impl FetchDependencyGraph {
         let entity_type = self
             .federated_query_graph
             .schema_by_source(subgraph_name)?
-            .entity_type()?
-            .ok_or_else(|| {
-                FederationError::internal(format!(
-                    "Subgraph `{subgraph_name}` has no entities defined"
-                ))
-            })?;
+            .entity_type_for_fetch(subgraph_name)?;
 
         self.new_node(
             subgraph_name.clone(),
