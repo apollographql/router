@@ -1,5 +1,7 @@
 use std::sync::Arc;
 
+use opentelemetry::KeyValue;
+
 use crate::ListenAddr;
 use crate::metrics::UpDownCounterGuard;
 use crate::services::router::pipeline_handle::PipelineHandle;
@@ -58,22 +60,12 @@ impl ConnectionHandle {
         address: &ListenAddr,
         state: ConnectionState,
     ) -> UpDownCounterGuard<i64> {
-        use opentelemetry::KeyValue;
-
         let state_str = match state {
             ConnectionState::Active => "active",
             ConnectionState::Terminating => "terminating",
         };
 
-        let mut attributes = Vec::with_capacity(6);
-
-        if let Some((ip, port)) = address.ip_and_port() {
-            attributes.push(KeyValue::new("server.address", ip.to_string()));
-            attributes.push(KeyValue::new("server.port", port.to_string()));
-        } else {
-            attributes.push(KeyValue::new("server.address", address.to_string()));
-        }
-
+        let mut attributes = listener_attributes(address);
         attributes.push(KeyValue::new("schema.id", pipeline_ref.schema_id.clone()));
         attributes.push(KeyValue::new(
             "launch.id",
@@ -92,6 +84,20 @@ impl ConnectionHandle {
             1,
             attributes
         )
+    }
+}
+
+/// Returns the `server.address` and `server.port` attributes that identify the listener a
+/// connection arrived on.
+///
+/// A Unix socket has no port, so it gets `server.address` only, set to the socket path.
+pub(crate) fn listener_attributes(address: &ListenAddr) -> Vec<KeyValue> {
+    match address.ip_and_port() {
+        Some((ip, port)) => vec![
+            KeyValue::new("server.address", ip.to_string()),
+            KeyValue::new("server.port", port.to_string()),
+        ],
+        None => vec![KeyValue::new("server.address", address.to_string())],
     }
 }
 
