@@ -1093,6 +1093,80 @@ mod test {
         );
     }
 
+    #[tokio::test]
+    async fn test_http2_omitted_inherits_from_all() {
+        let config = yaml_serde::from_str::<Config>(
+            r#"
+        all:
+          http2: enable
+        subgraphs:
+          products:
+            pool_idle_timeout: 2s
+        connector:
+          all:
+            experimental_http2: enable
+          sources:
+            my_source:
+              pool_idle_timeout: 3s
+        "#,
+        )
+        .unwrap();
+
+        let shaping_config = TrafficShaping::new(PluginInit::fake_builder().config(config).build())
+            .await
+            .unwrap();
+
+        assert_eq!(
+            shaping_config.subgraph_client_config("products").http2,
+            Http2Config::Enable,
+            "a subgraph block that omits http2 inherits it from all"
+        );
+        assert_eq!(
+            shaping_config.connector_client_config("my_source").http2,
+            Http2Config::Enable,
+            "a source block that omits experimental_http2 inherits it from all"
+        );
+    }
+
+    #[tokio::test]
+    async fn test_http2_omitted_everywhere_defaults_to_disable() {
+        let config = yaml_serde::from_str::<Config>(
+            r#"
+        all:
+          pool_idle_timeout: 20s
+        subgraphs:
+          products:
+            pool_idle_timeout: 2s
+        connector:
+          all:
+            pool_idle_timeout: 20s
+          sources:
+            my_source:
+              pool_idle_timeout: 3s
+        "#,
+        )
+        .unwrap();
+
+        let shaping_config = TrafficShaping::new(PluginInit::fake_builder().config(config).build())
+            .await
+            .unwrap();
+
+        for subgraph in ["products", "unconfigured"] {
+            assert_eq!(
+                shaping_config.subgraph_client_config(subgraph).http2,
+                Http2Config::Disable,
+                "subgraph {subgraph}"
+            );
+        }
+        for source in ["my_source", "unconfigured"] {
+            assert_eq!(
+                shaping_config.connector_client_config(source).http2,
+                Http2Config::Disable,
+                "connector source {source}"
+            );
+        }
+    }
+
     #[tokio::test(flavor = "multi_thread")]
     async fn it_rate_limit_router_requests() {
         let config = yaml_serde::from_str::<serde_json::Value>(
