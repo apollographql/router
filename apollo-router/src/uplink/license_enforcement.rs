@@ -160,22 +160,23 @@ impl LicenseEnforcementReport {
         }
     }
 
+    /// The router.yaml paths and schema directives that need a feature the license lacks,
+    /// such as `subscription.enabled` or `@authenticated`.
     pub(crate) fn restricted_features_in_use(&self) -> Vec<String> {
-        let mut restricted_features_in_use = Vec::new();
-        for restricted_config_in_use in self.restricted_config_in_use.clone() {
-            restricted_features_in_use.push(restricted_config_in_use.name.to_string());
-        }
-        for restricted_schema_in_use in self.restricted_schema_in_use.clone() {
-            match restricted_schema_in_use {
-                SchemaViolation::Spec { name, .. } => {
-                    restricted_features_in_use.push(name.clone());
-                }
-                SchemaViolation::DirectiveArgument { name, .. } => {
-                    restricted_features_in_use.push(name.clone());
-                }
-            }
-        }
-        restricted_features_in_use
+        let config_paths = self
+            .restricted_config_in_use
+            .iter()
+            .map(|setting| setting.path.to_string());
+        let schema_directives =
+            self.restricted_schema_in_use
+                .iter()
+                .map(|violation| match violation {
+                    SchemaViolation::Spec { name, .. } => format!("@{name}"),
+                    SchemaViolation::DirectiveArgument { name, argument, .. } => {
+                        format!("@{name}({argument}:)")
+                    }
+                });
+        config_paths.chain(schema_directives).collect()
     }
 
     /// The settings in effect in `configuration` that need a license feature `license` lacks,
@@ -423,44 +424,44 @@ impl LicenseEnforcementReport {
             restricted_features: self.restricted_features_in_use(),
         };
 
-        match &*self.license {
-            LicenseState::Licensed { .. } => {
-                tracing::error!(
-                    "The router is using features not available for your license:\n\n{self}"
-                );
-                Err(license_violation_error())
-            }
-            LicenseState::LicensedWarn { .. } => {
-                tracing::error!(
-                    "License violation, the router is using features not available for your license:\n\n{self}\n\nThe license warning period has started. The Router will stop serving requests after the license expires. See {LICENSE_EXPIRED_URL} for more information."
-                );
-                Err(license_violation_error())
-            }
+        let connected_to_graphos = crate::services::APOLLO_KEY.lock().is_some()
+            && crate::services::APOLLO_GRAPH_REF.lock().is_some();
+        tracing::error!("{}", self.violation_message(connected_to_graphos));
 
+        match &*self.license {
             // LicensedHalt doesn't return an error, which might be surprising; rather, the middleware in the axum
             // server (`license_handler`) will check for halted licenses and send back a canned response
+            LicenseState::LicensedHalt { .. } => Ok(self.license.clone()),
+            LicenseState::Licensed { .. }
+            | LicenseState::LicensedWarn { .. }
+            | LicenseState::Unlicensed => Err(license_violation_error()),
+        }
+    }
+
+    /// What the router logs when restricted features are in use: what is wrong for this
+    /// license state and what to do, then the report.
+    ///
+    /// The opening sentences "Not connected to GraphOS.", "License not found." and "License
+    /// has expired." are quoted in the license troubleshooting docs, so keep them.
+    fn violation_message(&self, connected_to_graphos: bool) -> String {
+        let headline = match &*self.license {
+            LicenseState::Licensed { .. } => {
+                "Your license doesn't include all the features this router uses, so the router won't run with this configuration and schema."
+            }
+            LicenseState::LicensedWarn { .. } => {
+                "Your license doesn't include all the features this router uses, so the router won't run with this configuration and schema. Your license also expires soon, and the router will stop serving requests when it does."
+            }
             LicenseState::LicensedHalt { .. } => {
-                tracing::error!(
-                    "License has expired. The Router will no longer serve requests. In order to enable these features for a self-hosted instance of Apollo Router, the Router must be connected to a graph in GraphOS that provides an active license for the following features:\n\n{self}\n\nSee {LICENSE_EXPIRED_URL} for more information."
-                );
-                Ok(self.license.clone())
+                "License has expired. The router will no longer serve requests. Renew your GraphOS plan, or turn off the licensed features below."
+            }
+            LicenseState::Unlicensed if connected_to_graphos => {
+                "License not found. The router is connected to GraphOS, but the graph in APOLLO_GRAPH_REF doesn't provide a license for the features below."
             }
             LicenseState::Unlicensed => {
-                // This is OSS, so fail to reload or start.
-                if crate::services::APOLLO_KEY.lock().is_some()
-                    && crate::services::APOLLO_GRAPH_REF.lock().is_some()
-                {
-                    tracing::error!(
-                        "License not found. In order to enable these features for a self-hosted instance of Apollo Router, the Router must be connected to a graph in GraphOS that provides a license for the following features:\n\n{self}\n\nSee {LICENSE_EXPIRED_URL} for more information."
-                    );
-                } else {
-                    tracing::error!(
-                        "Not connected to GraphOS. In order to enable these features for a self-hosted instance of Apollo Router, the Router must be connected to a graph in GraphOS (using APOLLO_KEY and APOLLO_GRAPH_REF) that provides a license for the following features:\n\n{self}\n\nSee {LICENSE_EXPIRED_URL} for more information."
-                    );
-                }
-                Err(license_violation_error())
+                "Not connected to GraphOS. The features below need a GraphOS license, which the router fetches when APOLLO_KEY and APOLLO_GRAPH_REF are set."
             }
-        }
+        };
+        format!("{headline}\n\n{self}\n\nSee {LICENSE_EXPIRED_URL} for more information.")
     }
 
     /// The effective license when no restricted features are in use. Infallible by
@@ -508,32 +509,43 @@ impl LicenseEnforcementReport {
     }
 }
 
+/// Lists the router.yaml settings grouped by the license feature they need, then the schema
+/// directives, each section opening with how to fix it.
 impl Display for LicenseEnforcementReport {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        let mut sections = Vec::new();
+
         if !self.restricted_config_in_use.is_empty() {
-            let restricted_config = self
+            let by_feature = self
                 .restricted_config_in_use
                 .iter()
-                .map(|v| format!("* {}\n  .{}", v.name, v.path))
+                .map(|setting| (setting.feature.to_string(), setting.path))
+                .into_group_map();
+            let groups = by_feature
+                .into_iter()
+                .sorted()
+                .map(|(feature, paths)| {
+                    let paths = paths.iter().map(|path| format!("    {path}")).join("\n");
+                    format!("  {feature}\n{paths}")
+                })
                 .join("\n\n");
-            write!(f, "Configuration yaml:\n{restricted_config}")?;
-
-            if !self.restricted_schema_in_use.is_empty() {
-                writeln!(f)?;
-            }
+            sections.push(format!(
+                "router.yaml uses these licensed features. Remove the settings listed, or use a license that includes the features:\n\n{groups}"
+            ));
         }
 
         if !self.restricted_schema_in_use.is_empty() {
-            let restricted_schema = self
+            let directives = self
                 .restricted_schema_in_use
                 .iter()
-                .map(|v| v.to_string())
-                .join("\n\n");
-
-            write!(f, "Schema features:\n{restricted_schema}")?
+                .map(|violation| format!("  {violation}"))
+                .join("\n");
+            sections.push(format!(
+                "The supergraph schema uses these licensed directives. Remove them from your subgraph schemas and recompose, or use a license that includes them:\n\n{directives}"
+            ));
         }
 
-        Ok(())
+        write!(f, "{}", sections.join("\n\n"))
     }
 }
 
@@ -553,7 +565,7 @@ pub(crate) struct LicenseEnforcementViolation {
 
 impl From<LicenseEnforcementViolation> for ApolloRouterError {
     fn from(violation: LicenseEnforcementViolation) -> Self {
-        ApolloRouterError::LicenseViolation(violation.restricted_features)
+        ApolloRouterError::LicenseViolation(violation.restricted_features.join(", "))
     }
 }
 
@@ -635,6 +647,31 @@ impl From<&str> for AllowedFeature {
             "traffic_shaping" => Self::TrafficShaping,
             other => Self::Other(other.into()),
         }
+    }
+}
+
+/// The feature's name as operators know it, such as "Request limits".
+impl Display for AllowedFeature {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        let name = match self {
+            Self::Apq => "Automatic persisted queries",
+            Self::ApqCaching => "Distributed APQ caching",
+            Self::Authentication => "Authentication",
+            Self::Authorization => "Authorization",
+            Self::Batching => "Batching",
+            Self::Coprocessors => "Coprocessors",
+            Self::DemandControl => "Demand control",
+            Self::DistributedQueryPlanning => "Distributed query plan caching",
+            Self::ResponseCaching => "Response caching",
+            Self::Experimental => "Experimental features",
+            Self::ExtendedReferenceReporting => "Extended reference reporting",
+            Self::PersistedQueries => "Persisted queries",
+            Self::RequestLimits => "Request limits",
+            Self::Subscriptions => "Subscriptions",
+            Self::TrafficShaping => "Traffic shaping",
+            Self::Other(name) => name,
+        };
+        f.write_str(name)
     }
 }
 
@@ -869,7 +906,7 @@ impl Display for SchemaViolation {
     fn fmt(&self, f: &mut Formatter) -> std::fmt::Result {
         match self {
             SchemaViolation::Spec { name, url } => {
-                write!(f, "* @{name}\n  {url}")
+                write!(f, "@{name}  {url}")
             }
             SchemaViolation::DirectiveArgument {
                 name,
@@ -877,7 +914,7 @@ impl Display for SchemaViolation {
                 argument,
                 explanation,
             } => {
-                write!(f, "* @{name}.{argument}\n  {url}\n\n{explanation}")
+                write!(f, "@{name}({argument}:)  {url}\n    {explanation}")
             }
         }
     }
@@ -1037,7 +1074,7 @@ mod test {
 
         assert_eq!(
             violation.restricted_features,
-            vec!["Test feature".to_string()],
+            vec!["test".to_string()],
             "{license} should report the restricted feature in use"
         );
     }
@@ -1282,6 +1319,47 @@ mod test {
               enabled: false
         "};
         assert!(unlicensed_restricted_paths(yaml).is_empty());
+    }
+
+    // The whole message an operator reads for each license state, with both router.yaml
+    // settings and schema directives the license lacks.
+    #[rstest::rstest]
+    #[case("licensed", LicenseState::Licensed { limits: Some(no_features()) }, true)]
+    #[case("warn", LicenseState::LicensedWarn { limits: Some(no_features()) }, true)]
+    #[case("halt", LicenseState::LicensedHalt { limits: Some(no_features()) }, true)]
+    #[case("not_found", LicenseState::Unlicensed, true)]
+    #[case("not_connected", LicenseState::Unlicensed, false)]
+    fn test_violation_message(
+        #[case] name: &str,
+        #[case] license: LicenseState,
+        #[case] connected_to_graphos: bool,
+    ) {
+        let report = check(
+            indoc::indoc! {"
+                subscription:
+                  enabled: true
+                limits:
+                  router:
+                    max_depth: 10
+                    max_height: 20
+                coprocessor:
+                  url: http://localhost:8081
+            "},
+            include_str!("testdata/authorization.graphql"),
+            license,
+        );
+
+        assert_snapshot!(
+            format!("violation_message_{name}"),
+            report.violation_message(connected_to_graphos)
+        );
+    }
+
+    fn no_features() -> LicenseLimits {
+        LicenseLimits {
+            tps: None,
+            allowed_features: HashSet::new(),
+        }
     }
 
     #[test]

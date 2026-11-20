@@ -2,39 +2,34 @@
 source: apollo-router/src/uplink/license_enforcement.rs
 expression: report.to_string()
 ---
-Configuration yaml:
-* APQ caching
-  .apq.router.cache.redis
+router.yaml uses these licensed features. Remove the settings listed, or use a license that includes the features:
 
-* Authentication plugin
-  .authentication.router
+  Authentication
+    authentication.router
 
-* Coprocessor plugin
-  .coprocessor
+  Coprocessors
+    coprocessor
 
-* Demand control plugin
-  .demand_control.enabled
+  Demand control
+    demand_control.enabled
 
-* Operation aliases limiting
-  .limits.router.max_aliases
+  Distributed APQ caching
+    apq.router.cache.redis
 
-* Operation depth limiting
-  .limits.router.max_depth
+  Distributed query plan caching
+    supergraph.query_planning.cache.redis
 
-* Operation height limiting
-  .limits.router.max_height
+  Experimental features
+    plugins."experimental.restricted".enabled
 
-* Operation root fields limiting
-  .limits.router.max_root_fields
+  Request limits
+    limits.router.max_aliases
+    limits.router.max_depth
+    limits.router.max_height
+    limits.router.max_root_fields
 
-* Restricted
-  .plugins.['experimental.restricted'].enabled
+  Response caching
+    response_cache.enabled
 
-* Subgraph response caching
-  .response_cache.enabled
-
-* Federated subscriptions
-  .subscription.enabled
-
-* Query plan caching
-  .supergraph.query_planning.cache.redis
+  Subscriptions
+    subscription.enabled

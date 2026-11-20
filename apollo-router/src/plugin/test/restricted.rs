@@ -29,7 +29,7 @@ impl PluginPrivate for Restricted {
             vec![LicensedSetting {
                 feature: AllowedFeature::Experimental,
                 name: "Restricted",
-                path: "plugins.['experimental.restricted'].enabled",
+                path: r#"plugins."experimental.restricted".enabled"#,
             }]
         } else {
             Vec::new()
