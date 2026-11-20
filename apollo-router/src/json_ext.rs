@@ -432,9 +432,7 @@ impl ValueExt for Value {
                     value = filter_type_conditions(value, type_conditions);
                     match current_node {
                         Value::Object(o) => {
-                            current_node = o
-                                .get_mut(k.as_str())
-                                .expect("the value at that key was just inserted");
+                            current_node = o.entry(k.as_str()).or_insert(Value::default());
                         }
                         Value::Null => {
                             let mut m = Map::new();
@@ -1557,5 +1555,217 @@ mod tests {
             serde_json::to_string(&path).unwrap(),
             "[\"k\",\"... on T\",\"@\",\"arr\",3]",
         );
+    }
+}
+
+#[cfg(test)]
+mod path_insert_proptests {
+    use proptest::prelude::*;
+    use serde_json_bytes::Map;
+
+    use super::*;
+
+    /// A small scalar leaf value: never a container, so it's always safe to insert at any path.
+    fn leaf_value() -> impl Strategy<Value = Value> {
+        prop_oneof![
+            Just(Value::Null),
+            any::<bool>().prop_map(Value::Bool),
+            (-1000i64..1000).prop_map(|n| Value::Number(n.into())),
+            "[a-zA-Z0-9 ]{0,8}".prop_map(|s| Value::String(s.into())),
+        ]
+    }
+
+    /// A small, arbitrary (not necessarily compatible with any path) JSON value, for the
+    /// robustness property.
+    fn small_value() -> impl Strategy<Value = Value> {
+        leaf_value().prop_recursive(3, 20, 4, |inner| {
+            prop_oneof![
+                prop::collection::vec(inner.clone(), 0..4).prop_map(Value::Array),
+                prop::collection::vec(("[a-z][a-z0-9]{0,5}", inner), 0..4).prop_map(|entries| {
+                    let mut map = Map::new();
+                    for (key, value) in entries {
+                        map.insert(key, value);
+                    }
+                    Value::Object(map)
+                }),
+            ]
+        })
+    }
+
+    fn path_element() -> impl Strategy<Value = PathElement> {
+        prop_oneof![
+            "[a-z][a-z0-9]{0,5}".prop_map(|k| PathElement::Key(k, None)),
+            (0usize..4).prop_map(PathElement::Index),
+        ]
+    }
+
+    fn single_path_and_value() -> impl Strategy<Value = (Path, Value)> {
+        (prop::collection::vec(path_element(), 0..5), leaf_value())
+            .prop_map(|(elements, value)| (elements.into_iter().collect(), value))
+    }
+
+    /// A tree of nested objects/arrays with scalar leaves. Every node is either a leaf or a
+    /// branch, never both, so the concrete paths to its leaves are prefix-free and mutually
+    /// shape-compatible by construction: no rejection sampling needed to avoid path conflicts.
+    #[derive(Debug, Clone)]
+    enum ShapeNode {
+        Leaf(Value),
+        Object(Vec<(String, ShapeNode)>),
+        Array(Vec<ShapeNode>),
+    }
+
+    fn shape_node() -> impl Strategy<Value = ShapeNode> {
+        let leaf = leaf_value().prop_map(ShapeNode::Leaf);
+        leaf.prop_recursive(3, 20, 4, |inner| {
+            prop_oneof![
+                // `hash_map` (unlike `vec` of pairs) enforces unique sibling keys, so every path
+                // through a generated tree is guaranteed distinct: order-independence is only
+                // meaningful to assert when the generator can't produce two leaves at the same path.
+                prop::collection::hash_map("[a-z][a-z0-9]{0,5}", inner.clone(), 0..4)
+                    .prop_map(|children| ShapeNode::Object(children.into_iter().collect())),
+                prop::collection::vec(inner, 0..4).prop_map(ShapeNode::Array),
+            ]
+        })
+    }
+
+    fn collect_leaves(
+        node: &ShapeNode,
+        prefix: &mut Vec<PathElement>,
+        out: &mut Vec<(Path, Value)>,
+    ) {
+        match node {
+            ShapeNode::Leaf(value) => {
+                out.push((prefix.clone().into_iter().collect(), value.clone()));
+            }
+            ShapeNode::Object(children) => {
+                for (key, child) in children {
+                    prefix.push(PathElement::Key(key.clone(), None));
+                    collect_leaves(child, prefix, out);
+                    prefix.pop();
+                }
+            }
+            ShapeNode::Array(children) => {
+                for (index, child) in children.iter().enumerate() {
+                    prefix.push(PathElement::Index(index));
+                    collect_leaves(child, prefix, out);
+                    prefix.pop();
+                }
+            }
+        }
+    }
+
+    /// Every leaf's path in a generated shape tree, paired with its value. Paths are guaranteed
+    /// pairwise prefix-free and shape-compatible.
+    fn shape_leaves() -> impl Strategy<Value = Vec<(Path, Value)>> {
+        shape_node().prop_map(|node| {
+            let mut out = Vec::new();
+            collect_leaves(&node, &mut Vec::new(), &mut out);
+            out
+        })
+    }
+
+    /// A set of leaves alongside an independently-shuffled permutation of the same set, via
+    /// proptest's built-in `prop_shuffle` (which also shrinks toward de-shuffling, unlike a
+    /// hand-rolled seeded shuffle).
+    fn shape_leaves_and_a_permutation()
+    -> impl Strategy<Value = (Vec<(Path, Value)>, Vec<(Path, Value)>)> {
+        shape_leaves().prop_flat_map(|pairs| {
+            let shuffled = Just(pairs.clone()).prop_shuffle();
+            (Just(pairs), shuffled)
+        })
+    }
+
+    /// Minimized regression for the bug found by the properties below: inserting a second,
+    /// different field next to one that was already inserted into the same object panics,
+    /// because `insert` assumes a key must already be present once its parent is an object.
+    #[test]
+    fn insert_creates_missing_sibling_object_key() {
+        let mut value = Value::Null;
+        let path_a: Path = vec![PathElement::Key("a".to_string(), None)]
+            .into_iter()
+            .collect();
+        let path_b: Path = vec![PathElement::Key("b".to_string(), None)]
+            .into_iter()
+            .collect();
+
+        value.insert(&path_a, Value::from(0)).unwrap();
+        value.insert(&path_b, Value::from(0)).unwrap();
+
+        assert_eq!(value, serde_json_bytes::json!({"a": 0, "b": 0}));
+    }
+
+    proptest! {
+        #![proptest_config(ProptestConfig::with_cases(256))]
+
+        /// Property: for a single Key/Index-only path, inserting into an initially-null value
+        /// matches directly constructing the value at that path.
+        /// Oracle: `Value::from_path` builds the same shape from scratch, so there's no
+        /// pre-existing state for `insert` to interact with.
+        #[test]
+        fn insert_from_null_matches_from_path((path, value) in single_path_and_value()) {
+            let mut actual = Value::Null;
+            actual.insert(&path, value.clone()).unwrap();
+            let expected = Value::from_path(&path, value);
+            prop_assert_eq!(actual, expected);
+        }
+
+        /// Property: repeatedly inserting a set of mutually shape-compatible (path, value) pairs
+        /// into an initially-null value matches independently building each one with
+        /// `Value::from_path` and deep-merging them together.
+        /// Oracle: `deep_merge` is a separately-tested, general-purpose merge; folding it over
+        /// independently constructed single-path values is a much more obviously correct (if
+        /// slower) way to build the combined structure than repeated in-place `insert`.
+        #[test]
+        fn insert_many_matches_from_path_deep_merge(pairs in shape_leaves()) {
+            let mut actual = Value::Null;
+            for (path, value) in &pairs {
+                actual.insert(path, value.clone()).unwrap();
+            }
+            let expected = pairs.iter().fold(Value::Null, |mut acc, (path, value)| {
+                acc.deep_merge(Value::from_path(path, value.clone()));
+                acc
+            });
+            prop_assert_eq!(actual, expected);
+        }
+
+        /// Property: since the generated paths are prefix-free and shape-compatible, the order
+        /// they're inserted in must not affect the final result.
+        #[test]
+        fn disjoint_path_insertion_is_order_independent(
+            (pairs, shuffled) in shape_leaves_and_a_permutation(),
+        ) {
+            let mut in_order = Value::Null;
+            for (path, value) in &pairs {
+                in_order.insert(path, value.clone()).unwrap();
+            }
+
+            let mut reordered = Value::Null;
+            for (path, value) in &shuffled {
+                reordered.insert(path, value.clone()).unwrap();
+            }
+
+            prop_assert_eq!(in_order, reordered);
+        }
+
+        /// Property: `insert` must never panic, regardless of whether the path is compatible
+        /// with the existing value's shape. It must return `Ok` or the documented
+        /// `ExecutionPathNotFound` error, never anything else and never unwind.
+        /// Oracle: this is deliberately adversarial (no shape-compatibility constraint between
+        /// `start` and `path`), unlike the properties above.
+        #[test]
+        fn insert_never_panics(
+            start in small_value(),
+            path in prop::collection::vec(path_element(), 0..4),
+            value in leaf_value(),
+        ) {
+            let path: Path = path.into_iter().collect();
+            let mut v = start;
+            let result = v.insert(&path, value);
+            prop_assert!(
+                matches!(result, Ok(()) | Err(FetchError::ExecutionPathNotFound { .. })),
+                "unexpected insert result: {:?}",
+                result
+            );
+        }
     }
 }
