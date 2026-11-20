@@ -2423,3 +2423,80 @@ mod extraction {
         );
     }
 }
+
+mod unsupported {
+    use apollo_federation::query_plan::query_planner::QueryPlanner;
+    use apollo_federation::query_plan::query_planner::QueryPlannerConfig;
+
+    use super::*;
+
+    const PRODUCTS: &str = r#"
+        type Query { productById(id: ID!): Product @lookup topProducts: [Product!]! }
+        type Product @key(fields: "id") { id: ID! sku: String! name: String! }
+    "#;
+    const REVIEWS: &str = r#"
+        type Query { lookups: InternalLookups! @internal }
+        type InternalLookups @internal {
+          productBySku(key: String! @is(field: "sku")): Product @lookup
+        }
+        type Product @key(fields: "sku") { sku: String! @external reviewCount: Int! }
+    "#;
+
+    #[test]
+    fn entity_fetch_into_a_source_schema_is_unsupported() {
+        let supergraph =
+            compose_sources(&[("products", PRODUCTS), ("reviews", REVIEWS)]).expect("composes");
+        let sdl = print_sdl(supergraph.schema().schema());
+        let supergraph = apollo_federation::Supergraph::new(&sdl).expect("supergraph");
+        for incremental in [false, true] {
+            let mut config = QueryPlannerConfig::default();
+            config.incremental_planner.enabled = incremental;
+            let planner = QueryPlanner::new(&supergraph, config).expect("planner");
+            let document = apollo_compiler::ExecutableDocument::parse_and_validate(
+                planner.api_schema().schema(),
+                "{ topProducts { reviewCount } }",
+                "op.graphql",
+            )
+            .expect("valid operation");
+            let error = planner
+                .build_query_plan(&document, None, Default::default())
+                .expect_err("lookups cannot be planned yet");
+            assert_eq!(
+                error.to_string(),
+                "Subgraph `reviews` is a GraphQL Federation source schema: query planning does \
+                 not support fetching entities through @lookup fields yet",
+                "incremental: {incremental}"
+            );
+        }
+    }
+
+    #[test]
+    fn connectors_cannot_be_combined_with_source_schemas() {
+        // Satisfiability checks the supergraph with connectors expanded, and expansion re-merges
+        // the subgraphs with the legacy merger, which would lose lookups and internal elements.
+        assert_errors(
+            &[
+                ("products", PRODUCTS),
+                (
+                    "c",
+                    r#"
+                    extend schema
+                      @link(url: "https://specs.apollo.dev/federation/v2.11", import: ["@key"])
+                      @link(url: "https://specs.apollo.dev/connect/v0.1", import: ["@connect", "@source"])
+                      @source(name: "v1", http: { baseURL: "http://v1" })
+                    type Query {
+                      resources: [Resource!]!
+                        @connect(source: "v1", http: { GET: "/resources" }, selection: "id name")
+                    }
+                    type Resource { id: ID! name: String! }
+                    "#,
+                ),
+            ],
+            &[(
+                "UNSUPPORTED_FEATURE",
+                "Subgraph `products` is a GraphQL Federation source schema: connectors cannot be \
+                 expanded in a supergraph with source schemas yet",
+            )],
+        );
+    }
+}

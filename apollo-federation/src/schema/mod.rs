@@ -336,6 +336,34 @@ impl FederationSchema {
         }
     }
 
+    /// The `_Entity` type an entity fetch into this subgraph selects from. A GraphQL Federation
+    /// source schema has none, since it resolves entities through `@lookup` fields, which query
+    /// planning does not use yet.
+    pub(crate) fn entity_type_for_fetch(
+        &self,
+        subgraph_name: &str,
+    ) -> Result<UnionTypeDefinitionPosition, FederationError> {
+        if let Some(entity_type) = self.entity_type()? {
+            return Ok(entity_type);
+        }
+        if self
+            .subgraph_metadata()
+            .is_some_and(|metadata| metadata.is_composite_schema())
+        {
+            return Err(SingleFederationError::UnsupportedFeature {
+                message: format!(
+                    "Subgraph `{subgraph_name}` is a GraphQL Federation source schema: query \
+                     planning does not support fetching entities through @lookup fields yet"
+                ),
+                kind: crate::error::UnsupportedFeatureKind::Lookup,
+            }
+            .into());
+        }
+        Err(FederationError::internal(format!(
+            "Subgraph `{subgraph_name}` has no entities defined"
+        )))
+    }
+
     // PORT_NOTE: Corresponds to `FederationMetadata.serviceType` in JS
     pub(crate) fn service_type(&self) -> Result<ObjectTypeDefinitionPosition, FederationError> {
         // Note: `_Service` type name can't be renamed.
