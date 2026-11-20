@@ -2931,6 +2931,31 @@ mod tests {
             harness.finish().await;
         }
 
+        // A schema publish on its own is checked against the license too: a schema that starts
+        // linking a restricted feature is refused and the router keeps serving the previous schema.
+        #[test(tokio::test(start_paused = true))]
+        async fn schema_reload_using_unlicensed_feature_is_refused() {
+            // Only the startup build: the license check refuses the new schema before
+            // create_pipeline() runs for it.
+            let harness = Harness::new(factory(&[Ok(())]), 1);
+            harness.startup().await;
+            harness
+                .send_and_wait(UpdateSchema(SchemaState {
+                    sdl: include_str!("uplink/testdata/authorization.graphql").to_owned(),
+                    launch_id: None,
+                }))
+                .await;
+
+            let retried = harness.notify.notified();
+            tokio::time::sleep(Duration::from_secs(60)).await;
+            assert!(
+                retried.now_or_never().is_none(),
+                "a schema the license does not cover must not schedule a retry"
+            );
+
+            harness.finish().await;
+        }
+
         // Disarming the timer must not wedge the state machine. A permanent failure is
         // permanent for *those inputs* only — the next publish resets the retry budget
         // and gets an immediate attempt via the event arm.
