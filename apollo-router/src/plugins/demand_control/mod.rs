@@ -35,8 +35,8 @@ use crate::graphql;
 use crate::graphql::IntoGraphQLErrors;
 use crate::json_ext::Object;
 use crate::layers::ServiceBuilderExt;
-use crate::plugin::Plugin;
 use crate::plugin::PluginInit;
+use crate::plugin::PluginPrivate;
 use crate::plugins::demand_control::cost_calculator::CostBySubgraph;
 use crate::plugins::demand_control::cost_calculator::schema::DemandControlledSchema;
 use crate::plugins::demand_control::strategy::Strategy;
@@ -496,7 +496,7 @@ impl DemandControl {
 }
 
 #[async_trait::async_trait]
-impl Plugin for DemandControl {
+impl PluginPrivate for DemandControl {
     type Config = DemandControlConfig;
 
     async fn new(init: PluginInit<Self::Config>) -> Result<Self, BoxError> {
@@ -710,7 +710,7 @@ impl Plugin for DemandControl {
     }
 }
 
-register_plugin!("apollo", "demand_control", DemandControl);
+register_private_plugin!("apollo", "demand_control", DemandControl);
 
 #[cfg(test)]
 mod test {
@@ -1074,7 +1074,7 @@ mod test {
 
         assert_router_answers_record_nothing(
             async |subgraph| {
-                crate::plugin::Plugin::subgraph_service(&*rejecting, "products", subgraph)
+                crate::plugin::PluginPrivate::subgraph_service(&*rejecting, "products", subgraph)
             },
             || measured_by(&accepting),
             || measured_by(&rejecting),

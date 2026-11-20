@@ -1,9 +1,9 @@
 use async_trait::async_trait;
 use tower::BoxError;
 
-use crate::plugin::Plugin;
 use crate::plugin::PluginInit;
-use crate::register_plugin;
+use crate::plugin::PluginPrivate;
+use crate::register_private_plugin;
 
 /// Restricted plugin (for testing purposes only)
 #[apollo_configuration::configuration]
@@ -16,10 +16,10 @@ struct Config {
 /// Dummy plugin (for testing purposes only)
 struct Restricted;
 
-register_plugin!("experimental", "restricted", Restricted);
+register_private_plugin!("experimental", "restricted", Restricted);
 
 #[async_trait]
-impl Plugin for Restricted {
+impl PluginPrivate for Restricted {
     type Config = Config;
 
     async fn new(init: PluginInit<Self::Config>) -> Result<Self, BoxError>

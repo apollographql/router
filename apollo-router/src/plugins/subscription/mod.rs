@@ -20,8 +20,8 @@ use crate::configuration::subgraph::SubgraphConfiguration;
 use crate::graphql;
 use crate::json_ext::Object;
 use crate::layers::ServiceBuilderExt;
-use crate::plugin::Plugin;
 use crate::plugin::PluginInit;
+use crate::plugin::PluginPrivate;
 use crate::protocols::websocket::WebSocketProtocol;
 use crate::query_planner::OperationKind;
 use crate::services::SubgraphRequest;
@@ -264,7 +264,7 @@ pub(crate) fn default_listen_addr() -> ListenAddr {
 }
 
 #[async_trait::async_trait]
-impl Plugin for Subscription {
+impl PluginPrivate for Subscription {
     type Config = SubscriptionConfig;
 
     async fn new(init: PluginInit<Self::Config>) -> Result<Self, BoxError> {
@@ -1211,4 +1211,4 @@ mod tests {
     }
 }
 
-register_plugin!("apollo", "subscription", Subscription);
+register_private_plugin!("apollo", "subscription", Subscription);
