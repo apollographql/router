@@ -429,107 +429,43 @@ impl Parser<'_> {
         })
     }
 
+    /// Lex and decode string literals with apollo-parser, so a string accepted in SDL is accepted
+    /// here with the same value.
     fn string_value(&mut self) -> Result<String, FieldSelectionMapParseError> {
-        if self.rest().starts_with("\"\"\"") {
-            self.pos += 3;
-            let mut raw = String::new();
-            loop {
-                let rest = self.rest();
-                if rest.starts_with("\\\"\"\"") {
-                    raw.push_str("\"\"\"");
-                    self.pos += 4;
-                } else if rest.starts_with("\"\"\"") {
-                    self.pos += 3;
-                    return Ok(block_string_value(&raw));
-                } else if let Some(c) = rest.chars().next() {
-                    raw.push(c);
-                    self.pos += c.len_utf8();
-                } else {
-                    return Err(self.error("unterminated block string"));
-                }
+        let raw = match apollo_parser::Lexer::new(self.rest()).next() {
+            Some(Ok(token)) if token.kind() == apollo_parser::TokenKind::StringValue => {
+                token.data()
             }
-        }
-        self.pos += 1;
-        let mut value = String::new();
-        loop {
-            let Some(c) = self.peek() else {
-                return Err(self.error("unterminated string"));
-            };
-            self.pos += c.len_utf8();
-            match c {
-                '"' => return Ok(value),
-                '\n' | '\r' => return Err(self.error("unterminated string")),
-                '\\' => {
-                    let Some(escaped) = self.peek() else {
-                        return Err(self.error("unterminated string"));
-                    };
-                    self.pos += escaped.len_utf8();
-                    match escaped {
-                        '"' => value.push('"'),
-                        '\\' => value.push('\\'),
-                        '/' => value.push('/'),
-                        'b' => value.push('\u{8}'),
-                        'f' => value.push('\u{c}'),
-                        'n' => value.push('\n'),
-                        'r' => value.push('\r'),
-                        't' => value.push('\t'),
-                        'u' => {
-                            let hex = self.rest().get(..4).unwrap_or_default();
-                            let decoded = Some(hex)
-                                .filter(|hex| {
-                                    hex.len() == 4 && hex.bytes().all(|b| b.is_ascii_hexdigit())
-                                })
-                                .and_then(|hex| u32::from_str_radix(hex, 16).ok())
-                                .and_then(char::from_u32);
-                            let Some(decoded) = decoded else {
-                                return Err(self.error("invalid unicode escape"));
-                            };
-                            self.pos += 4;
-                            value.push(decoded);
-                        }
-                        other => {
-                            return Err(self.error(format!("invalid escape sequence `\\{other}`")));
-                        }
-                    }
-                }
-                c => value.push(c),
+            Some(Err(err)) => {
+                return Err(FieldSelectionMapParseError {
+                    message: err.message().to_string(),
+                    offset: self.pos + err.index(),
+                });
             }
-        }
+            _ => return Err(self.error("expected a string")),
+        };
+        // apollo-parser only decodes strings from syntax tree nodes, so wrap the literal in the
+        // smallest document that has a value position.
+        let wrapped = format!("{{f(a: {raw})}}");
+        let tree = apollo_parser::Parser::new(&wrapped).parse_selection_set();
+        let decoded = tree
+            .field_set()
+            .selections()
+            .next()
+            .and_then(|selection| match selection {
+                apollo_parser::cst::Selection::Field(field) => field.arguments(),
+                _ => None,
+            })
+            .and_then(|arguments| arguments.arguments().next())
+            .and_then(|argument| argument.value())
+            .and_then(|value| match value {
+                apollo_parser::cst::Value::StringValue(string) => Some(String::from(&string)),
+                _ => None,
+            });
+        let Some(decoded) = decoded else {
+            return Err(self.error("invalid string"));
+        };
+        self.pos += raw.len();
+        Ok(decoded)
     }
-}
-
-/// GraphQL's `BlockStringValue`: remove the common indentation of all lines but the first, and
-/// leading and trailing blank lines.
-fn block_string_value(raw: &str) -> String {
-    let lines: Vec<&str> = raw
-        .split("\r\n")
-        .flat_map(|l| l.split(['\n', '\r']))
-        .collect();
-    let indent = |line: &str| line.len() - line.trim_start_matches([' ', '\t']).len();
-    let is_blank = |line: &str| line.trim_matches([' ', '\t']).is_empty();
-    let common_indent = lines
-        .iter()
-        .skip(1)
-        .filter(|line| !is_blank(line))
-        .map(|line| indent(line))
-        .min()
-        .unwrap_or(0);
-    let mut lines: Vec<&str> = lines
-        .iter()
-        .enumerate()
-        .map(|(i, line)| {
-            if i == 0 {
-                line
-            } else {
-                line.get(common_indent..).unwrap_or("")
-            }
-        })
-        .collect();
-    while lines.first().is_some_and(|line| is_blank(line)) {
-        lines.remove(0);
-    }
-    while lines.last().is_some_and(|line| is_blank(line)) {
-        lines.pop();
-    }
-    lines.join("\n")
 }
