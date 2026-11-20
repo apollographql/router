@@ -4,12 +4,14 @@ description: batching integration configuration
 expression: changed_settings(&config)
 ---
 {
-  "/batching/enabled": true,
-  "/batching/subgraph": {
-    "all": {
-      "enabled": true
-    },
-    "subgraphs": {}
+  "/batching": {
+    "enabled": true,
+    "mode": "batch_http_link",
+    "subgraph": {
+      "all": {
+        "enabled": true
+      }
+    }
   },
   "/include_subgraph_errors": {
     "all": true

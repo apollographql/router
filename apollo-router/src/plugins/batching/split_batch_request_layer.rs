@@ -17,11 +17,11 @@ use tower::ServiceExt as _;
 use tracing::Instrument as _;
 
 use crate::Context;
-use crate::batching::Batch;
-use crate::batching::BatchQuery;
-use crate::configuration::Batching;
-use crate::configuration::BatchingMode;
 use crate::graphql;
+use crate::plugins::batching::config::BatchingConfig;
+use crate::plugins::batching::config::BatchingMode;
+use crate::plugins::batching::state::Batch;
+use crate::plugins::batching::state::BatchQuery;
 use crate::services::router;
 // FIXME(@goto-bus-stop): Ideally the batching layer shouldn't have to care about this
 use crate::services::router::ClientRequestAccepts;
@@ -44,11 +44,11 @@ struct TranslateError {
 /// # Telemetry
 /// Emits the `apollo.router.operations.batching.size` metric for batch requests.
 pub(crate) struct SplitBatchRequestLayer {
-    config: Batching,
+    config: Arc<BatchingConfig>,
 }
 
 impl SplitBatchRequestLayer {
-    pub(crate) fn new(config: Batching) -> Self {
+    pub(crate) fn new(config: Arc<BatchingConfig>) -> Self {
         Self { config }
     }
 }
@@ -67,7 +67,7 @@ impl<S> tower::Layer<S> for SplitBatchRequestLayer {
 #[derive(Clone)]
 pub(crate) struct SplitBatchRequestService<S> {
     inner: S,
-    config: Batching,
+    config: Arc<BatchingConfig>,
 }
 impl<S> Service<RouterRequest> for SplitBatchRequestService<S>
 where
@@ -422,6 +422,7 @@ where
 #[cfg(test)]
 mod tests {
     use std::num::NonZeroUsize;
+    use std::sync::Arc;
     use std::time::Duration;
 
     use http::Method;
@@ -431,10 +432,10 @@ mod tests {
     use tower::ServiceExt as _;
 
     use super::SplitBatchRequestLayer;
-    use crate::configuration::Batching;
-    use crate::configuration::BatchingMode;
     use crate::graphql;
     use crate::metrics::FutureMetricsExt as _;
+    use crate::plugins::batching::config::BatchingConfig;
+    use crate::plugins::batching::config::BatchingMode;
     use crate::services::router;
     use crate::services::router::Request as RouterRequest;
     use crate::services::router::Response as RouterResponse;
@@ -464,7 +465,9 @@ mod tests {
         });
 
         let mut service = ServiceBuilder::new()
-            .layer(SplitBatchRequestLayer::new(Batching::default()))
+            .layer(SplitBatchRequestLayer::new(Arc::new(
+                BatchingConfig::default(),
+            )))
             .service(mock);
 
         let response = service
@@ -490,7 +493,9 @@ mod tests {
         let (mock, handle) = tower_test::mock::pair::<RouterRequest, RouterResponse>();
 
         let mut service = ServiceBuilder::new()
-            .layer(SplitBatchRequestLayer::new(Batching::default()))
+            .layer(SplitBatchRequestLayer::new(Arc::new(
+                BatchingConfig::default(),
+            )))
             .service(mock);
 
         let response = service
@@ -518,13 +523,13 @@ mod tests {
     async fn it_rejects_non_json_body() {
         let (mock, handle) = tower_test::mock::pair::<RouterRequest, RouterResponse>();
 
-        let config = Batching {
+        let config = BatchingConfig {
             enabled: true,
             mode: BatchingMode::BatchHttpLink,
             ..Default::default()
         };
         let mut service = ServiceBuilder::new()
-            .layer(SplitBatchRequestLayer::new(config))
+            .layer(SplitBatchRequestLayer::new(Arc::new(config)))
             .service(mock);
 
         let response = service
@@ -550,13 +555,13 @@ mod tests {
     async fn it_rejects_empty_batch_arrays() {
         let (mock, handle) = tower_test::mock::pair::<RouterRequest, RouterResponse>();
 
-        let config = Batching {
+        let config = BatchingConfig {
             enabled: true,
             mode: BatchingMode::BatchHttpLink,
             ..Default::default()
         };
         let mut service = ServiceBuilder::new()
-            .layer(SplitBatchRequestLayer::new(config))
+            .layer(SplitBatchRequestLayer::new(Arc::new(config)))
             .service(mock);
 
         let response = service
@@ -583,13 +588,13 @@ mod tests {
     async fn it_rejects_batch_with_non_graphql_request() {
         let (mock, handle) = tower_test::mock::pair::<RouterRequest, RouterResponse>();
 
-        let config = Batching {
+        let config = BatchingConfig {
             enabled: true,
             mode: BatchingMode::BatchHttpLink,
             ..Default::default()
         };
         let mut service = ServiceBuilder::new()
-            .layer(SplitBatchRequestLayer::new(config))
+            .layer(SplitBatchRequestLayer::new(Arc::new(config)))
             .service(mock);
 
         let response = service
@@ -615,7 +620,7 @@ mod tests {
 
     #[tokio::test]
     async fn it_checks_maximum_size() {
-        let config = Batching {
+        let config = BatchingConfig {
             enabled: true,
             mode: BatchingMode::BatchHttpLink,
             maximum_size: NonZeroUsize::new(2).unwrap(),
@@ -637,7 +642,7 @@ mod tests {
                 }
             });
             let mut service = ServiceBuilder::new()
-                .layer(SplitBatchRequestLayer::new(config.clone()))
+                .layer(SplitBatchRequestLayer::new(Arc::new(config.clone())))
                 .service(mock);
 
             let response = service
@@ -663,7 +668,7 @@ mod tests {
         {
             let (mock, handle) = tower_test::mock::pair::<RouterRequest, RouterResponse>();
             let mut service = ServiceBuilder::new()
-                .layer(SplitBatchRequestLayer::new(config))
+                .layer(SplitBatchRequestLayer::new(Arc::new(config)))
                 .service(mock);
 
             let response = service
@@ -690,7 +695,7 @@ mod tests {
 
     #[tokio::test]
     async fn it_limits_batches_to_10_by_default() {
-        let config = Batching {
+        let config = BatchingConfig {
             enabled: true,
             mode: BatchingMode::BatchHttpLink,
             ..Default::default()
@@ -711,7 +716,7 @@ mod tests {
                 }
             });
             let mut service = ServiceBuilder::new()
-                .layer(SplitBatchRequestLayer::new(config.clone()))
+                .layer(SplitBatchRequestLayer::new(Arc::new(config.clone())))
                 .service(mock);
 
             let batch = vec![serde_json::json!({"query": "{ a }"}); 10];
@@ -738,7 +743,7 @@ mod tests {
         {
             let (mock, handle) = tower_test::mock::pair::<RouterRequest, RouterResponse>();
             let mut service = ServiceBuilder::new()
-                .layer(SplitBatchRequestLayer::new(config))
+                .layer(SplitBatchRequestLayer::new(Arc::new(config)))
                 .service(mock);
 
             let batch = vec![serde_json::json!({"query": "{ a }"}); 11];
@@ -781,13 +786,13 @@ mod tests {
                 }
             });
 
-            let config = Batching {
+            let config = BatchingConfig {
                 enabled: true,
                 mode: BatchingMode::BatchHttpLink,
                 ..Default::default()
             };
             let mut service = ServiceBuilder::new()
-                .layer(SplitBatchRequestLayer::new(config))
+                .layer(SplitBatchRequestLayer::new(Arc::new(config)))
                 .service(mock);
 
             let response = service
@@ -838,13 +843,13 @@ mod tests {
             }
         });
 
-        let config = Batching {
+        let config = BatchingConfig {
             enabled: true,
             mode: BatchingMode::BatchHttpLink,
             ..Default::default()
         };
         let mut service = ServiceBuilder::new()
-            .layer(SplitBatchRequestLayer::new(config))
+            .layer(SplitBatchRequestLayer::new(Arc::new(config)))
             .service(mock);
 
         let response = service

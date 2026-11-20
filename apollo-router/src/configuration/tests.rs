@@ -22,6 +22,8 @@ use super::subgraph::SubgraphConfiguration;
 use super::*;
 use crate::configuration::cors::Policy;
 use crate::error::SchemaError;
+use crate::plugins::batching::config::BatchingConfig;
+use crate::plugins::batching::config::BatchingMode;
 
 #[cfg(unix)]
 #[test]
@@ -1460,7 +1462,7 @@ fn it_processes_batching_subgraph_all_enabled_correctly() {
         }
     });
 
-    let config: Batching = serde_json::from_value(json_config).unwrap();
+    let config: BatchingConfig = serde_json::from_value(json_config).unwrap();
 
     assert!(config.batch_include("anything"));
 }
@@ -1477,7 +1479,7 @@ fn it_processes_batching_subgraph_all_disabled_correctly() {
         }
     });
 
-    let config: Batching = serde_json::from_value(json_config).unwrap();
+    let config: BatchingConfig = serde_json::from_value(json_config).unwrap();
 
     assert!(!config.batch_include("anything"));
 }
@@ -1499,7 +1501,7 @@ fn it_processes_batching_subgraph_accounts_enabled_correctly() {
         }
     });
 
-    let config: Batching = serde_json::from_value(json_config).unwrap();
+    let config: BatchingConfig = serde_json::from_value(json_config).unwrap();
 
     assert!(!config.batch_include("anything"));
     assert!(config.batch_include("accounts"));
@@ -1522,7 +1524,7 @@ fn it_processes_batching_subgraph_accounts_disabled_correctly() {
         }
     });
 
-    let config: Batching = serde_json::from_value(json_config).unwrap();
+    let config: BatchingConfig = serde_json::from_value(json_config).unwrap();
 
     assert!(!config.batch_include("anything"));
     assert!(!config.batch_include("accounts"));
@@ -1545,7 +1547,7 @@ fn it_processes_batching_subgraph_accounts_override_disabled_correctly() {
         }
     });
 
-    let config: Batching = serde_json::from_value(json_config).unwrap();
+    let config: BatchingConfig = serde_json::from_value(json_config).unwrap();
 
     assert!(config.batch_include("anything"));
     assert!(!config.batch_include("accounts"));
@@ -1568,7 +1570,7 @@ fn it_processes_batching_subgraph_accounts_override_enabled_correctly() {
         }
     });
 
-    let config: Batching = serde_json::from_value(json_config).unwrap();
+    let config: BatchingConfig = serde_json::from_value(json_config).unwrap();
 
     assert!(!config.batch_include("anything"));
     assert!(config.batch_include("accounts"));
@@ -1580,7 +1582,7 @@ fn it_processes_batching_mode_defaults_correctly() {
         "enabled": true,
     });
 
-    let config: Batching = serde_json::from_value(json_config).unwrap();
+    let config: BatchingConfig = serde_json::from_value(json_config).unwrap();
 
     assert!(matches!(config.mode, BatchingMode::BatchHttpLink));
 }
@@ -1592,7 +1594,7 @@ fn it_processes_unspecified_maximum_batch_limit_correctly() {
         "mode": "batch_http_link",
     });
 
-    let config: Batching = serde_json::from_value(json_config).unwrap();
+    let config: BatchingConfig = serde_json::from_value(json_config).unwrap();
 
     assert_eq!(config.maximum_size.get(), 10);
 }
@@ -1605,7 +1607,7 @@ fn it_processes_specified_maximum_batch_limit_correctly() {
         "maximum_size": 50
     });
 
-    let config: Batching = serde_json::from_value(json_config).unwrap();
+    let config: BatchingConfig = serde_json::from_value(json_config).unwrap();
 
     assert_eq!(config.maximum_size.get(), 50);
 }

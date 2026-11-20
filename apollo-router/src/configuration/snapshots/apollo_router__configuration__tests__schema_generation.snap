@@ -646,7 +646,7 @@ expression: "&schema"
       },
       "type": "object"
     },
-    "Batching": {
+    "BatchingConfig": {
       "additionalProperties": false,
       "description": "Configuration for Batching",
       "properties": {
@@ -686,7 +686,7 @@ expression: "&schema"
       "oneOf": [
         {
           "const": "batch_http_link",
-          "description": "batch_http_link",
+          "description": "The Batch HTTP Link mode sends multiple GraphQL operations in a JSON array.",
           "type": "string"
         }
       ]
@@ -12186,14 +12186,7 @@ expression: "&schema"
       "$ref": "#/$defs/AuthorizationConfig"
     },
     "batching": {
-      "$ref": "#/$defs/Batching",
-      "default": {
-        "enabled": false,
-        "maximum_size": 10,
-        "mode": "batch_http_link",
-        "subgraph": null
-      },
-      "description": "Batching configuration."
+      "$ref": "#/$defs/BatchingConfig"
     },
     "circuit_breaker": {
       "$ref": "#/$defs/CircuitBreakerPluginConfig"
