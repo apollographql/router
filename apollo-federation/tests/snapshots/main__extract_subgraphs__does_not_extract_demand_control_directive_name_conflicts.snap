@@ -51,7 +51,7 @@ directive @federation__cacheTag(format: String!) repeatable on OBJECT | FIELD_DE
 
 directive @federation__lookup on FIELD_DEFINITION
 
-directive @federation__internal on OBJECT | FIELD_DEFINITION
+directive @federation__internal on OBJECT | INPUT_OBJECT | FIELD_DEFINITION
 
 directive @federation__is(field: federation__FieldSelectionMap!) on ARGUMENT_DEFINITION
 
@@ -141,7 +141,7 @@ directive @federation__cacheTag(format: String!) repeatable on OBJECT | FIELD_DE
 
 directive @federation__lookup on FIELD_DEFINITION
 
-directive @federation__internal on OBJECT | FIELD_DEFINITION
+directive @federation__internal on OBJECT | INPUT_OBJECT | FIELD_DEFINITION
 
 directive @federation__is(field: federation__FieldSelectionMap!) on ARGUMENT_DEFINITION
 
