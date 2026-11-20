@@ -11,7 +11,6 @@ use http::Method;
 use http::StatusCode;
 use http::header;
 use http_body::Body as _;
-use serde::de::Error as _;
 use tower::BoxError;
 use tower::Service;
 use tower::ServiceExt as _;
@@ -30,49 +29,34 @@ use crate::services::router::ClientRequestAccepts;
 use crate::services::router::Request as RouterRequest;
 use crate::services::router::Response as RouterResponse;
 
-/// Convert Bytes into a batch of GraphQL [`graphql::Request`]s.
+/// Convert Bytes containing a JSON array into a batch of GraphQL [`graphql::Request`]s.
 ///
-/// An error will be produced in the event that the bytes array cannot be
-/// turned into a valid GraphQL `Request`.
+/// An error will be produced in the event that the bytes are not a JSON array of valid GraphQL
+/// requests.
 fn batch_from_bytes(bytes: &[u8]) -> Result<Vec<graphql::Request>, serde_json::Error> {
-    let value: Value = serde_json::from_slice(bytes).map_err(serde_json::Error::custom)?;
+    let entries: Vec<Value> = serde_json::from_slice(bytes)?;
 
-    process_batch_values(value)
-}
+    u64_histogram!(
+        "apollo.router.operations.batching.size",
+        "Number of queries contained within each query batch",
+        entries.len() as u64,
+        mode = BatchingMode::BatchHttpLink.to_string() // Only supported mode right now
+    );
 
-fn allocate_result_array(value: &Value) -> Vec<graphql::Request> {
-    match value.as_array() {
-        Some(array) => Vec::with_capacity(array.len()),
-        None => Vec::with_capacity(1),
-    }
-}
+    u64_counter!(
+        "apollo.router.operations.batching",
+        "Total requests with batched operations",
+        1,
+        mode = BatchingMode::BatchHttpLink.to_string() // Only supported mode right now
+    );
 
-fn process_batch_values(value: Value) -> Result<Vec<graphql::Request>, serde_json::Error> {
-    let mut result = allocate_result_array(&value);
-
-    if let Value::Array(entries) = value {
-        u64_histogram!(
-            "apollo.router.operations.batching.size",
-            "Number of queries contained within each query batch",
-            entries.len() as u64,
-            mode = BatchingMode::BatchHttpLink.to_string() // Only supported mode right now
-        );
-
-        u64_counter!(
-            "apollo.router.operations.batching",
-            "Total requests with batched operations",
-            1,
-            mode = BatchingMode::BatchHttpLink.to_string() // Only supported mode right now
-        );
-        for entry in entries {
-            let bytes = serde_json::to_vec(&entry)?;
-            result.push(graphql::Request::deserialize_from_bytes(&bytes.into())?);
-        }
-    } else {
-        let bytes = serde_json::to_vec(&value)?;
-        result.push(graphql::Request::deserialize_from_bytes(&bytes.into())?);
-    }
-    Ok(result)
+    entries
+        .iter()
+        .map(|entry| {
+            let bytes = serde_json::to_vec(entry)?;
+            graphql::Request::deserialize_from_bytes(&bytes.into())
+        })
+        .collect()
 }
 
 // FIXME(@goto-bus-stop): This is a copy of router::service::TranslateError. Probably should have
