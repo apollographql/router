@@ -26,9 +26,9 @@ use crate::services::router::body::RouterBody;
 
 /// Layer type for [`BatchingPlugin::join_batch_requests_layer`].
 ///
-/// [`BatchingPlugin::join_batch_requests_layer`]: super::BatchPlugin::join_batch_requests_layer
+/// [`BatchingPlugin::join_batch_requests_layer`]: super::BatchingPlugin::join_batch_requests_layer
 //
-// This layer works together with the `crate::batching::Batch` structure, which calls back into the
+// This layer works together with the `batching::state::Batch` structure, which calls back into the
 // `process_batches` function declared in this file, and that's where eventually the inner service
 // is called.
 #[derive(Clone)]
