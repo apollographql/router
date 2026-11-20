@@ -12,6 +12,7 @@ use apollo_compiler::executable::Selection;
 use apollo_compiler::executable::SelectionSet;
 use apollo_compiler::schema::ExtendedType;
 use apollo_federation::query_plan::serializable_document::SerializableDocument;
+use apollo_federation::subgraph::spec::ENTITIES_QUERY;
 use serde_json_bytes::Value;
 
 use super::CostBySubgraph;
@@ -19,16 +20,18 @@ use super::DemandControlError;
 use super::directives::IncludeDirective;
 use super::directives::SkipDirective;
 use super::schema::DemandControlledSchema;
+use super::schema::FieldDefinition;
 use super::schema::InputDefinition;
 use crate::configuration::subgraph::SubgraphConfiguration;
 use crate::graphql::Response;
 use crate::graphql::ResponseVisitor;
 use crate::json_ext::Object;
+use crate::json_ext::Path;
+use crate::json_ext::PathElement;
 use crate::plugins::demand_control::cost_calculator::directives::ListSizeDirective;
-use crate::query_planner::DeferredNode;
 use crate::query_planner::PlanNode;
-use crate::query_planner::Primary;
 use crate::query_planner::QueryPlan;
+use crate::query_planner::rewrites::DataRewrite;
 use crate::spec::TYPENAME;
 
 pub(crate) struct StaticCostCalculator {
@@ -43,6 +46,178 @@ struct ScoringContext<'a> {
     query: &'a ExecutableDocument,
     variables: &'a Object,
     should_estimate_requires: bool,
+    /// The subgraph the operation is sent to, or an empty string for a supergraph operation.
+    subgraph: &'a str,
+    /// Whether this is the operation of an entity fetch (i.e. `FetchNode.requires` is non-empty).
+    is_entity_fetch: bool,
+    /// For an entity fetch, the estimated number of representations that will be sent, if known.
+    /// Used as the `instance_count` for the `_entities` root field instead of the configured
+    /// default `list_size`.
+    entity_count_hint: Option<i32>,
+    /// Response keys the query planner aliased in this fetch's operation, mapped to the response
+    /// key the data ends up under (which is the one flatten paths use).
+    renamed_keys: HashMap<&'a str, &'a str>,
+}
+
+/// Estimated number of objects at each response path that an entity fetch targets.
+///
+/// This is a trie over the plan's flatten paths, reduced to what identifies a position in the
+/// response shape: field response keys and list (`@`) markers. Type conditions are ignored, so
+/// a count is the number of objects at a path regardless of their concrete type. Only flatten
+/// paths (and their prefixes) have nodes, so scoring a fetch's operation only tracks counts for
+/// selections that can lead to an entity fetch.
+///
+/// Response keys are borrowed from the plan's flatten paths, which outlive the scoring of the plan.
+#[derive(Default)]
+struct EntityCounts<'a> {
+    keys: HashMap<&'a str, EntityCounts<'a>>,
+    list: Option<Box<EntityCounts<'a>>>,
+    /// The largest number of objects any fetch seen so far places at this path.
+    count: Option<i32>,
+}
+
+impl<'a> EntityCounts<'a> {
+    fn is_empty(&self) -> bool {
+        self.keys.is_empty() && self.list.is_none()
+    }
+
+    /// Adds nodes for a flatten path and its prefixes.
+    fn insert(&mut self, path: &'a Path) {
+        let mut node = self;
+        for element in &path.0 {
+            node = match element {
+                PathElement::Key(key, _) => node.keys.entry(key.as_str()).or_default(),
+                PathElement::Flatten(_) => node.list.get_or_insert_default(),
+                // Flatten paths are static, so they don't contain these.
+                PathElement::Index(_) | PathElement::Fragment(_) => node,
+            };
+        }
+    }
+
+    /// How many levels below the root the node for a flatten path is: one per response key and
+    /// one per list (`@`) marker. Type conditions are part of those elements, so they don't add
+    /// levels.
+    fn depth(path: &Path) -> usize {
+        path.0
+            .iter()
+            .filter(|element| matches!(element, PathElement::Key(..) | PathElement::Flatten(_)))
+            .count()
+    }
+
+    #[cfg(test)]
+    fn node(&self, path: &Path) -> Option<&EntityCounts<'a>> {
+        let mut node = self;
+        for element in &path.0 {
+            node = match element {
+                PathElement::Key(key, _) => node.keys.get(key.as_str())?,
+                PathElement::Flatten(_) => node.list.as_deref()?,
+                PathElement::Index(_) | PathElement::Fragment(_) => node,
+            };
+        }
+        Some(node)
+    }
+
+    fn node_mut(&mut self, path: &Path) -> Option<&mut EntityCounts<'a>> {
+        let mut node = self;
+        for element in &path.0 {
+            node = match element {
+                PathElement::Key(key, _) => node.keys.get_mut(key.as_str())?,
+                PathElement::Flatten(_) => node.list.as_deref_mut()?,
+                PathElement::Index(_) | PathElement::Fragment(_) => node,
+            };
+        }
+        Some(node)
+    }
+
+    /// The estimated number of objects at a flatten path, if a fetch that produces them was seen.
+    #[cfg(test)]
+    fn count_at(&self, path: &Path) -> Option<i32> {
+        self.node(path)?.count
+    }
+
+    /// The node for the field `response_key` of type `ty` selected at this path. A list type
+    /// adds one `@` per level of list nesting, like the query planner does for flatten paths.
+    fn field_mut(&mut self, response_key: &str, ty: &ast::Type) -> Option<&mut EntityCounts<'a>> {
+        let mut node = self.keys.get_mut(response_key)?;
+        let mut ty = ty;
+        while let ast::Type::List(inner) | ast::Type::NonNullList(inner) = ty {
+            node = node.list.as_deref_mut()?;
+            ty = inner;
+        }
+        Some(node)
+    }
+
+    fn record(&mut self, count: i32) {
+        self.count = Some(self.count.map_or(count, |existing| existing.max(count)));
+    }
+}
+
+/// Where scoring is in the response while it walks a fetch's operation: the `EntityCounts` node
+/// for the current response path, and the estimated number of objects at that path.
+struct ObjectCount<'a, 'plan> {
+    counts: &'a mut EntityCounts<'plan>,
+    count: i32,
+}
+
+impl<'plan> ObjectCount<'_, 'plan> {
+    fn reborrow(&mut self) -> ObjectCount<'_, 'plan> {
+        ObjectCount {
+            counts: &mut *self.counts,
+            count: self.count,
+        }
+    }
+}
+
+/// A fetch in a query plan, with what scoring needs to know about where it sits in the plan.
+struct PlannedFetch<'a> {
+    /// The response path the fetch's data lands at, or `None` for the response root.
+    flatten_path: Option<&'a Path>,
+    subgraph: &'a str,
+    operation: &'a SerializableDocument,
+    is_entity_fetch: bool,
+    output_rewrites: &'a [DataRewrite],
+}
+
+/// How the costs of a plan's fetches combine into the cost of the plan. This has the plan's
+/// structure, with each fetch replaced by its index in the list of fetches collected with it.
+enum PlanCost {
+    Fetch(usize),
+    Sum(Vec<PlanCost>),
+    Max(Box<PlanCost>, Box<PlanCost>),
+}
+
+impl PlanCost {
+    fn total(&self, fetches: &[PlannedFetch], fetch_costs: &[f64]) -> CostBySubgraph {
+        match self {
+            PlanCost::Fetch(index) => {
+                CostBySubgraph::new(fetches[*index].subgraph, fetch_costs[*index])
+            }
+            PlanCost::Sum(nodes) => {
+                let mut sum = CostBySubgraph::default();
+                for node in nodes {
+                    sum += node.total(fetches, fetch_costs);
+                }
+                sum
+            }
+            PlanCost::Max(left, right) => CostBySubgraph::maximum(
+                left.total(fetches, fetch_costs),
+                right.total(fetches, fetch_costs),
+            ),
+        }
+    }
+}
+
+/// Sizing information on a field's output
+/// - Includes estimated instance count and the `@listSize` directive context its children inherit.
+struct OutputSizing {
+    /// The list multiplier for this field. It should be 1 for non-list fields.
+    instance_count: i32,
+    /// Size assigned to this field by an ancestor's `@listSize(sizedFields:)`, if any.
+    list_size_from_upstream: Option<i32>,
+    /// Ancestor sized-field directives descended into this field — the child's inherited directives.
+    descended_list_sizes: Vec<ListSizeDirective>,
+    /// `@listSize` directives declared on this field — the child selection set's parent directives.
+    own_list_size_directives: Vec<ListSizeDirective>,
 }
 
 fn score_argument(
@@ -166,6 +341,95 @@ impl StaticCostCalculator {
         *self.subgraph_list_sizes.get(subgraph_name)
     }
 
+    /// The size assumed for a list in `subgraph` that has no `@listSize`: the per-subgraph
+    /// configured default, then the global `list_size`.
+    fn default_list_size(&self, subgraph: &str) -> i32 {
+        let list_size = self.subgraph_list_size(subgraph).unwrap_or(self.list_size);
+        // Saturate rather than cast: a configured list size above `i32::MAX` must read as
+        // very large (expensive), never wrap to a negative value.
+        i32::try_from(list_size).unwrap_or(i32::MAX)
+    }
+
+    /// Builds the `ListSizeDirective` vector for a field from its definition.
+    fn own_list_size_directives(
+        definition: &FieldDefinition,
+        field: &Field,
+        variables: &Object,
+    ) -> Result<Vec<ListSizeDirective>, DemandControlError> {
+        definition
+            .list_size_directive_entries()
+            .iter()
+            .map(|entry| ListSizeDirective::new(entry, field, variables))
+            .collect()
+    }
+
+    /// Computes the `field`'s output size from the `@listSize` context flowing into it, plus the
+    /// directive context its children inherit. `score_field` uses the size both to cost the field
+    /// and to count the objects it returns.
+    fn output_sizing(
+        &self,
+        definition: &FieldDefinition,
+        field: &Field,
+        list_size_directives: &[ListSizeDirective],
+        inherited_list_sizes: &[ListSizeDirective],
+        subgraph: &str,
+        variables: &Object,
+    ) -> Result<OutputSizing, DemandControlError> {
+        // A size assigned to this field by a parent/ancestor `@listSize(sizedFields:)`. With
+        // repeatable @listSize, multiple directives can apply, so take the largest.
+        let list_size_from_upstream = list_size_directives
+            .iter()
+            .filter_map(|dir| dir.size_of(field))
+            .max()
+            .or_else(|| {
+                inherited_list_sizes
+                    .iter()
+                    .filter_map(|dir| dir.size_of(field))
+                    .max()
+            });
+
+        // The directives that descend into this field, sizing its nested lists (e.g. "page" under
+        // "results"). Collected from all directives that can descend to the same field.
+        let descended_list_sizes: Vec<ListSizeDirective> = list_size_directives
+            .iter()
+            .chain(inherited_list_sizes.iter())
+            .filter_map(|dir| dir.descend(field.name.as_str()))
+            .collect();
+
+        let own_list_size_directives =
+            Self::own_list_size_directives(definition, field, variables)?;
+
+        // This field's own `@listSize`, or an ancestor sizedFields size that descended onto it.
+        let effective_expected_size = own_list_size_directives
+            .iter()
+            .chain(descended_list_sizes.iter())
+            .filter_map(|dir| dir.expected_size)
+            .max();
+
+        // The list multiplier, in priority order: a size from a parent's `sizedFields`
+        // (`list_size_from_upstream`), this field's own `@listSize` (`effective_expected_size`),
+        // the per-subgraph configured default, then the global `list_size`.
+        //
+        // A list's instance count can never be negative. Guard the invariant here so no source —
+        // client slicing arguments, upstream propagation, or configured defaults — can drive the
+        // estimated cost or an entity count below zero.
+        let instance_count = if field.ty().is_list() {
+            list_size_from_upstream
+                .or(effective_expected_size)
+                .unwrap_or_else(|| self.default_list_size(subgraph))
+                .max(0)
+        } else {
+            1
+        };
+
+        Ok(OutputSizing {
+            instance_count,
+            list_size_from_upstream,
+            descended_list_sizes,
+            own_list_size_directives,
+        })
+    }
+
     /// Scores a field within a GraphQL operation, handling some expected cases where
     /// directives change how the query is fetched. In the case of the federation
     /// directive `@requires`, the cost of the required selection is added to the
@@ -184,14 +448,17 @@ impl StaticCostCalculator {
     /// This should be okay, as we don't want this implementation to have to know about
     /// any deduplication happening in the query planner, and we're estimating an upper
     /// bound for cost anyway.
+    ///
+    /// When `objects` is given, this also records how many objects the field places at its
+    /// response path, for sizing the entity fetches that extend them (see `score_plan`).
     fn score_field(
         &self,
         ctx: &ScoringContext,
         field: &Field,
         parent_type: &NamedType,
-        list_size_from_upstream: Option<i32>,
+        list_size_directives: &[ListSizeDirective],
         inherited_list_sizes: &[ListSizeDirective],
-        subgraph: &str,
+        objects: Option<ObjectCount>,
     ) -> Result<f64, DemandControlError> {
         // When we pre-process the schema, __typename isn't included. So, we short-circuit here to avoid failed lookups.
         if field.name == TYPENAME {
@@ -210,36 +477,55 @@ impl StaticCostCalculator {
                     field.name
                 ))
             })?;
-        let own_list_size_directives: Vec<ListSizeDirective> = definition
-            .list_size_directive_entries()
-            .iter()
-            .map(|entry| ListSizeDirective::new(entry, field, ctx.variables))
-            .collect::<Result<Vec<_>, _>>()?;
 
-        let effective_expected_size = own_list_size_directives
-            .iter()
-            .chain(inherited_list_sizes)
-            .filter_map(|dir| dir.expected_size)
-            .max();
+        let sizing = self.output_sizing(
+            definition,
+            field,
+            list_size_directives,
+            inherited_list_sizes,
+            ctx.subgraph,
+            ctx.variables,
+        )?;
 
-        let instance_count = if !field.ty().is_list() {
-            1
-        } else if let Some(value) = list_size_from_upstream {
-            // This is a sized field whose length is defined by the `@listSize` directive on the parent field
-            value
-        } else if let Some(expected_size) = effective_expected_size {
-            expected_size
-        } else if let Some(subgraph_list_size) = self.subgraph_list_size(subgraph) {
-            // Saturate rather than cast: a configured list size above `i32::MAX` must read as
-            // very large (expensive), never wrap to a negative value.
-            i32::try_from(subgraph_list_size).unwrap_or(i32::MAX)
+        let is_entities_field = ctx.is_entity_fetch && field.name == ENTITIES_QUERY;
+        let instance_count = if is_entities_field
+            && field.ty().is_list()
+            && sizing.list_size_from_upstream.is_none()
+            && let Some(hint) = ctx.entity_count_hint
+        {
+            // Entity fetch root field with the entity count derived from the FlattenNode path
+            // in the query plan; it is more accurate than the static `list_size` default.
+            hint.max(0)
         } else {
-            i32::try_from(self.list_size).unwrap_or(i32::MAX)
+            sizing.instance_count
         };
-        // A list's instance count can never be negative. Guard the invariant at the point of
-        // use so no source — client slicing arguments, upstream propagation, or configured
-        // defaults — can drive the estimated cost below zero.
-        let instance_count = instance_count.max(0);
+
+        // Follow the response path into this field, recording how many objects it places there.
+        let child_objects = match objects {
+            None => None,
+            // `_entities` isn't part of the response: its selections land directly at the entity
+            // fetch's flatten path, once per representation.
+            Some(objects) if is_entities_field => Some(ObjectCount {
+                counts: objects.counts,
+                count: instance_count,
+            }),
+            Some(ObjectCount { counts, count }) => {
+                let response_key = field.response_name().as_str();
+                let response_key = ctx
+                    .renamed_keys
+                    .get(response_key)
+                    .copied()
+                    .unwrap_or(response_key);
+                counts
+                    .field_mut(response_key, field.ty())
+                    .and_then(|counts| {
+                        let count = count.saturating_mul(instance_count);
+                        counts.record(count);
+                        // Stop following the path once nothing below it is an entity fetch's.
+                        (!counts.is_empty()).then_some(ObjectCount { counts, count })
+                    })
+            }
+        };
 
         // Per-call cost: the cost to resolve this field once (from @cost on the field
         // definition, plus arguments and directives). Counted once regardless of list size.
@@ -286,9 +572,9 @@ impl StaticCostCalculator {
             ctx,
             &field.selection_set,
             field.ty().inner_named_type(),
-            &own_list_size_directives,
-            inherited_list_sizes,
-            subgraph,
+            &sizing.own_list_size_directives,
+            &sizing.descended_list_sizes,
+            child_objects,
         )?;
 
         let mut requirements_cost = 0.0;
@@ -302,9 +588,9 @@ impl StaticCostCalculator {
                     ctx,
                     selection_set,
                     parent_type,
-                    &own_list_size_directives,
+                    &sizing.own_list_size_directives,
                     &[],
-                    subgraph,
+                    None,
                 )?;
             }
         }
@@ -332,7 +618,7 @@ impl StaticCostCalculator {
         fragment_spread: &FragmentSpread,
         list_size_directives: &[ListSizeDirective],
         inherited_list_sizes: &[ListSizeDirective],
-        subgraph: &str,
+        objects: Option<ObjectCount>,
     ) -> Result<f64, DemandControlError> {
         let fragment = fragment_spread.fragment_def(ctx.query).ok_or_else(|| {
             DemandControlError::QueryParseFailure(format!(
@@ -346,7 +632,7 @@ impl StaticCostCalculator {
             fragment.type_condition(),
             list_size_directives,
             inherited_list_sizes,
-            subgraph,
+            objects,
         )
     }
 
@@ -357,7 +643,7 @@ impl StaticCostCalculator {
         parent_type: &NamedType,
         list_size_directives: &[ListSizeDirective],
         inherited_list_sizes: &[ListSizeDirective],
-        subgraph: &str,
+        objects: Option<ObjectCount>,
     ) -> Result<f64, DemandControlError> {
         self.score_selection_set(
             ctx,
@@ -368,7 +654,7 @@ impl StaticCostCalculator {
                 .unwrap_or(parent_type),
             list_size_directives,
             inherited_list_sizes,
-            subgraph,
+            objects,
         )
     }
 
@@ -376,7 +662,7 @@ impl StaticCostCalculator {
         &self,
         operation: &Operation,
         ctx: &ScoringContext,
-        subgraph: &str,
+        objects: Option<ObjectCount>,
     ) -> Result<f64, DemandControlError> {
         let mut cost = operation_base_cost(operation);
 
@@ -393,7 +679,7 @@ impl StaticCostCalculator {
             root_type_name,
             &[],
             &[],
-            subgraph,
+            objects,
         )?;
 
         Ok(cost)
@@ -406,46 +692,23 @@ impl StaticCostCalculator {
         parent_type: &NamedType,
         list_size_directives: &[ListSizeDirective],
         inherited_list_sizes: &[ListSizeDirective],
-        subgraph: &str,
+        objects: Option<ObjectCount>,
     ) -> Result<f64, DemandControlError> {
         match selection {
-            Selection::Field(f) => {
-                // We need two things for scoring this field: (1) the list size to use for
-                // instance_count if this field is a list (list_size_from_upstream), and (2) the
-                // directive(s) to pass to this field's selection set so nested lists (e.g. "page"
-                // under "results") get the right sizing (descended). With repeatable @listSize,
-                // multiple directives can descend to the same field, so we collect all of them.
-                let size_from_parent = list_size_directives
-                    .iter()
-                    .filter_map(|dir| dir.size_of(f))
-                    .max();
-                let size_from_inherited = inherited_list_sizes
-                    .iter()
-                    .filter_map(|dir| dir.size_of(f))
-                    .max();
-                let list_size_from_upstream = size_from_parent.or(size_from_inherited);
-
-                let descended: Vec<ListSizeDirective> = list_size_directives
-                    .iter()
-                    .chain(inherited_list_sizes.iter())
-                    .filter_map(|dir| dir.descend(f.name.as_str()))
-                    .collect();
-
-                self.score_field(
-                    ctx,
-                    f,
-                    parent_type,
-                    list_size_from_upstream,
-                    &descended,
-                    subgraph,
-                )
-            }
+            Selection::Field(f) => self.score_field(
+                ctx,
+                f,
+                parent_type,
+                list_size_directives,
+                inherited_list_sizes,
+                objects,
+            ),
             Selection::FragmentSpread(s) => self.score_fragment_spread(
                 ctx,
                 s,
                 list_size_directives,
                 inherited_list_sizes,
-                subgraph,
+                objects,
             ),
             Selection::InlineFragment(i) => self.score_inline_fragment(
                 ctx,
@@ -453,7 +716,7 @@ impl StaticCostCalculator {
                 parent_type,
                 list_size_directives,
                 inherited_list_sizes,
-                subgraph,
+                objects,
             ),
         }
     }
@@ -465,7 +728,7 @@ impl StaticCostCalculator {
         parent_type_name: &NamedType,
         list_size_directives: &[ListSizeDirective],
         inherited_list_sizes: &[ListSizeDirective],
-        subgraph: &str,
+        mut objects: Option<ObjectCount>,
     ) -> Result<f64, DemandControlError> {
         let mut cost = 0.0;
         for selection in selection_set.selections.iter() {
@@ -475,12 +738,13 @@ impl StaticCostCalculator {
                 parent_type_name,
                 list_size_directives,
                 inherited_list_sizes,
-                subgraph,
+                objects.as_mut().map(ObjectCount::reborrow),
             )?;
         }
         Ok(cost)
     }
 
+    // TODO: Evaluate the directives using the ctx.variables.
     fn skipped_by_directives(field: &Field) -> bool {
         let include_directive = IncludeDirective::from_field(field);
         if let Ok(Some(IncludeDirective { is_included: false })) = include_directive {
@@ -495,106 +759,24 @@ impl StaticCostCalculator {
         false
     }
 
-    fn score_plan_node(
+    /// Scores the operation(s) in a document.
+    fn score_document(
         &self,
-        plan_node: &PlanNode,
-        variables: &Object,
-    ) -> Result<CostBySubgraph, DemandControlError> {
-        match plan_node {
-            PlanNode::Sequence { nodes } => self.summed_score_of_nodes(nodes, variables),
-            PlanNode::Parallel { nodes } => self.summed_score_of_nodes(nodes, variables),
-            PlanNode::Flatten(flatten_node) => self.score_plan_node(&flatten_node.node, variables),
-            PlanNode::Condition {
-                condition: _,
-                if_clause,
-                else_clause,
-            } => self.max_score_of_nodes(if_clause, else_clause, variables),
-            PlanNode::Defer { primary, deferred } => {
-                self.summed_score_of_deferred_nodes(primary, deferred, variables)
-            }
-            PlanNode::Fetch(fetch_node) => self.estimated_cost_of_operation(
-                &fetch_node.service_name,
-                &fetch_node.operation,
-                variables,
-            ),
-            PlanNode::Subscription { primary, rest: _ } => self.estimated_cost_of_operation(
-                &primary.service_name,
-                &primary.operation,
-                variables,
-            ),
+        ctx: &ScoringContext,
+        mut objects: Option<ObjectCount>,
+    ) -> Result<f64, DemandControlError> {
+        let mut cost = 0.0;
+        if let Some(op) = &ctx.query.operations.anonymous {
+            cost += self.score_operation(op, ctx, objects.as_mut().map(ObjectCount::reborrow))?;
         }
-    }
-
-    fn estimated_cost_of_operation(
-        &self,
-        subgraph: &str,
-        operation: &SerializableDocument,
-        variables: &Object,
-    ) -> Result<CostBySubgraph, DemandControlError> {
-        tracing::debug!("On subgraph {}, scoring operation: {}", subgraph, operation);
-
-        let schema = self.subgraph_schemas.get(subgraph).ok_or_else(|| {
-            DemandControlError::QueryParseFailure(format!(
-                "Query planner did not provide a schema for service {subgraph}"
-            ))
-        })?;
-
-        let operation = operation
-            .as_parsed()
-            .map_err(DemandControlError::SubgraphOperationNotInitialized)?;
-        let cost = self.estimated(operation, schema, variables, false, subgraph)?;
-        Ok(CostBySubgraph::new(subgraph, cost))
-    }
-
-    fn max_score_of_nodes(
-        &self,
-        left: &Option<Box<PlanNode>>,
-        right: &Option<Box<PlanNode>>,
-        variables: &Object,
-    ) -> Result<CostBySubgraph, DemandControlError> {
-        match (left, right) {
-            (None, None) => Ok(CostBySubgraph::default()),
-            (None, Some(right)) => self.score_plan_node(right, variables),
-            (Some(left), None) => self.score_plan_node(left, variables),
-            (Some(left), Some(right)) => {
-                let left_score = self.score_plan_node(left, variables)?;
-                let right_score = self.score_plan_node(right, variables)?;
-                Ok(CostBySubgraph::maximum(left_score, right_score))
-            }
+        for (_name, op) in ctx.query.operations.named.iter() {
+            cost += self.score_operation(op, ctx, objects.as_mut().map(ObjectCount::reborrow))?;
         }
-    }
-
-    fn summed_score_of_deferred_nodes(
-        &self,
-        primary: &Primary,
-        deferred: &Vec<DeferredNode>,
-        variables: &Object,
-    ) -> Result<CostBySubgraph, DemandControlError> {
-        let mut score = CostBySubgraph::default();
-        if let Some(node) = &primary.node {
-            score += self.score_plan_node(node, variables)?;
-        }
-        for d in deferred {
-            if let Some(node) = &d.node {
-                score += self.score_plan_node(node, variables)?;
-            }
-        }
-        Ok(score)
-    }
-
-    fn summed_score_of_nodes(
-        &self,
-        nodes: &Vec<PlanNode>,
-        variables: &Object,
-    ) -> Result<CostBySubgraph, DemandControlError> {
-        let mut sum = CostBySubgraph::default();
-        for node in nodes {
-            sum += self.score_plan_node(node, variables)?;
-        }
-        Ok(sum)
+        Ok(cost)
     }
 
     /// Determine cost for a single-subgraph operation.
+    #[cfg(test)]
     pub(crate) fn estimated(
         &self,
         query: &ExecutableDocument,
@@ -603,20 +785,17 @@ impl StaticCostCalculator {
         should_estimate_requires: bool,
         subgraph: &str,
     ) -> Result<f64, DemandControlError> {
-        let mut cost = 0.0;
         let ctx = ScoringContext {
             schema,
             query,
             variables,
             should_estimate_requires,
+            subgraph,
+            is_entity_fetch: false,
+            entity_count_hint: None,
+            renamed_keys: Default::default(),
         };
-        if let Some(op) = &query.operations.anonymous {
-            cost += self.score_operation(op, &ctx, subgraph)?;
-        }
-        for (_name, op) in query.operations.named.iter() {
-            cost += self.score_operation(op, &ctx, subgraph)?;
-        }
-        Ok(cost)
+        self.score_document(&ctx, None)
     }
 
     /// Determine cost for an operation which may span multiple subgraphs.
@@ -625,7 +804,131 @@ impl StaticCostCalculator {
         query_plan: &QueryPlan,
         variables: &Object,
     ) -> Result<CostBySubgraph, DemandControlError> {
+<<<<<<< HEAD
         self.score_plan_node(&query_plan.root, variables)
+=======
+        let Some(root) = query_plan.root.as_ref() else {
+            return Ok(CostBySubgraph::default());
+        };
+        let (cost, _) = self.score_plan(root, variables)?;
+        Ok(cost)
+    }
+
+    /// Scores the fetches of a query plan and combines their costs. Also returns the estimated
+    /// number of objects at each entity-fetch flatten path, which the scoring is based on.
+    ///
+    /// An entity fetch's `_entities` field returns one object per entity at the fetch's flatten
+    /// path. Those entities were produced by another fetch, whose lists we size when scoring it.
+    /// So as a fetch is scored, we record at each flatten path the number of objects it places
+    /// there, and an entity fetch at that path then just looks the count up; it extends those
+    /// objects with more fields without changing how many there are.
+    ///
+    /// Several fetches can select the same list, and size it differently: their subgraphs can
+    /// have different configured list sizes, or one can select the list through an interface and
+    /// another through an object type. They describe the same list in the response, so the
+    /// largest size is kept. A fetch only records counts below the path its data lands at, so
+    /// fetches are scored shallowest path first: every count is then final before a fetch at that
+    /// path reads it. (Plan order wouldn't do: it only puts a fetch after the ones it depends on,
+    /// and another fetch selecting the same list can come later or run in parallel.)
+    fn score_plan<'a>(
+        &self,
+        root: &'a PlanNode,
+        variables: &Object,
+    ) -> Result<(CostBySubgraph, EntityCounts<'a>), DemandControlError> {
+        let mut entity_counts = EntityCounts::default();
+        let mut fetches = Vec::new();
+        let plan_cost = collect_fetches(root, None, &mut entity_counts, &mut fetches);
+
+        let mut order: Vec<usize> = (0..fetches.len()).collect();
+        order.sort_by_key(|index| fetches[*index].flatten_path.map_or(0, EntityCounts::depth));
+        let mut fetch_costs = vec![0.0; fetches.len()];
+        for index in order {
+            fetch_costs[index] =
+                self.score_fetch(&fetches[index], &mut entity_counts, variables)?;
+        }
+
+        Ok((plan_cost.total(&fetches, &fetch_costs), entity_counts))
+    }
+
+    /// Scores one fetch's subgraph operation, recording in `entity_counts` the number of objects
+    /// it places at the flatten paths below its own.
+    fn score_fetch(
+        &self,
+        fetch: &PlannedFetch,
+        entity_counts: &mut EntityCounts,
+        variables: &Object,
+    ) -> Result<f64, DemandControlError> {
+        let subgraph = fetch.subgraph;
+        tracing::debug!(
+            "On subgraph {}, scoring operation: {}",
+            subgraph,
+            fetch.operation
+        );
+
+        let schema = self.subgraph_schemas.get(subgraph).ok_or_else(|| {
+            DemandControlError::QueryParseFailure(format!(
+                "Query planner did not provide a schema for service {subgraph}"
+            ))
+        })?;
+        let query = fetch
+            .operation
+            .as_parsed()
+            .map_err(DemandControlError::SubgraphOperationNotInitialized)?;
+
+        // The objects this fetch's selections land on, and how many of them there are.
+        let (objects, entity_count_hint) = match fetch.flatten_path {
+            // Root fetch: its selections land at the response root, which is one object.
+            None => (
+                Some(ObjectCount {
+                    counts: entity_counts,
+                    count: 1,
+                }),
+                None,
+            ),
+            // The objects being extended already exist at the flatten path; their count was
+            // recorded by the fetches above it. If we somehow haven't seen a producer, fall back
+            // to the size `_entities` is scored with when it has no count.
+            Some(path) => match entity_counts.node_mut(path) {
+                Some(counts) => {
+                    let recorded = counts.count;
+                    let count = recorded.unwrap_or_else(|| self.default_list_size(subgraph));
+                    (Some(ObjectCount { counts, count }), recorded)
+                }
+                None => (None, None),
+            },
+        };
+        // Don't track objects if nothing below this fetch's path is the target of an entity fetch.
+        let objects = objects.filter(|objects| !objects.counts.is_empty());
+
+        // When selections in a fetch can't be merged under one response key, the query planner
+        // aliases them and adds a rewrite that restores the original key in the fetched data.
+        // Flatten paths refer to the data after rewrites, so map the aliases back.
+        let renamed_keys = fetch
+            .output_rewrites
+            .iter()
+            .filter_map(|rewrite| match rewrite {
+                DataRewrite::KeyRenamer(renamer) => match renamer.path.0.last() {
+                    Some(PathElement::Key(alias, _)) => {
+                        Some((alias.as_str(), renamer.rename_key_to.as_str()))
+                    }
+                    _ => None,
+                },
+                DataRewrite::ValueSetter(_) => None,
+            })
+            .collect();
+
+        let ctx = ScoringContext {
+            schema,
+            query,
+            variables,
+            should_estimate_requires: false,
+            subgraph,
+            is_entity_fetch: fetch.is_entity_fetch,
+            entity_count_hint,
+            renamed_keys,
+        };
+        self.score_document(&ctx, objects)
+>>>>>>> 4a0fbb0 (fix(demand-control): size _entities fetches by the number of entities at the fetch path (#9192))
     }
 
     pub(crate) fn actual(
@@ -649,6 +952,79 @@ impl StaticCostCalculator {
 /// cost must both include it, or every mutation reports a constant delta.
 fn operation_base_cost(operation: &Operation) -> f64 {
     if operation.is_mutation() { 10.0 } else { 0.0 }
+}
+
+/// Collects the plan's fetches into `fetches`, adds every flatten path (the response paths entity
+/// fetches target) to `entity_counts`, and returns how the fetches' costs combine.
+fn collect_fetches<'a>(
+    node: &'a PlanNode,
+    flatten_path: Option<&'a Path>,
+    entity_counts: &mut EntityCounts<'a>,
+    fetches: &mut Vec<PlannedFetch<'a>>,
+) -> PlanCost {
+    let mut collect = |node| collect_fetches(node, flatten_path, entity_counts, fetches);
+    match node {
+        PlanNode::Sequence { nodes } | PlanNode::Parallel { nodes } => {
+            PlanCost::Sum(nodes.iter().map(collect).collect())
+        }
+        PlanNode::Fetch(fetch_node) => {
+            fetches.push(PlannedFetch {
+                flatten_path,
+                subgraph: &fetch_node.service_name,
+                operation: &fetch_node.operation,
+                is_entity_fetch: !fetch_node.requires.is_empty(),
+                output_rewrites: fetch_node.output_rewrites.as_deref().unwrap_or_default(),
+            });
+            PlanCost::Fetch(fetches.len() - 1)
+        }
+        PlanNode::Flatten(flatten_node) => {
+            entity_counts.insert(&flatten_node.path);
+            collect_fetches(
+                &flatten_node.node,
+                Some(&flatten_node.path),
+                entity_counts,
+                fetches,
+            )
+        }
+        // TODO: Evaluate the condition using the variables.
+        PlanNode::Condition {
+            condition: _,
+            if_clause,
+            else_clause,
+        } => match (if_clause, else_clause) {
+            (None, None) => PlanCost::Sum(Vec::new()),
+            (Some(node), None) | (None, Some(node)) => collect(node),
+            (Some(if_node), Some(else_node)) => {
+                let if_cost = collect(if_node);
+                let else_cost = collect(else_node);
+                PlanCost::Max(Box::new(if_cost), Box::new(else_cost))
+            }
+        },
+        PlanNode::Defer { primary, deferred } => PlanCost::Sum(
+            primary
+                .node
+                .iter()
+                .map(|node| &**node)
+                .chain(
+                    deferred
+                        .iter()
+                        .filter_map(|deferred| deferred.node.as_deref()),
+                )
+                .map(collect)
+                .collect(),
+        ),
+        // A subscription's follow-up fetches (`rest`) aren't scored.
+        PlanNode::Subscription { primary, rest: _ } => {
+            fetches.push(PlannedFetch {
+                flatten_path,
+                subgraph: &primary.service_name,
+                operation: &primary.operation,
+                is_entity_fetch: false,
+                output_rewrites: &[],
+            });
+            PlanCost::Fetch(fetches.len() - 1)
+        }
+    }
 }
 
 pub(crate) struct ResponseCostCalculator<'a> {
@@ -679,7 +1055,7 @@ impl<'schema> ResponseCostCalculator<'schema> {
 
         // We need to have a field definition for later processing, unless the query is an
         // `_entities` query. If the field should be there and isn't, return now.
-        let is_entities_query = parent_ty == "Query" && field.name == "_entities";
+        let is_entities_query = parent_ty == "Query" && field.name == ENTITIES_QUERY;
         if definition.is_none() && !is_entities_query {
             tracing::debug!(
                 "Failed to get schema definition for field {}.{}. The resulting response cost will be a partial result.",
@@ -775,6 +1151,7 @@ mod tests {
     use std::sync::Arc;
 
     use ahash::HashMapExt;
+    use apollo_compiler::validation::Valid;
     use apollo_federation::query_plan::query_planner::QueryPlanner;
     use bytes::Bytes;
     use test_log::test;
@@ -801,8 +1178,8 @@ mod tests {
             query_plan: &apollo_federation::query_plan::QueryPlan,
             variables: &Object,
         ) -> Result<f64, DemandControlError> {
-            let js_planner_node: PlanNode = query_plan.node.as_ref().unwrap().into();
-            Ok(self.score_plan_node(&js_planner_node, variables)?.total())
+            let planner_node: PlanNode = query_plan.node.as_ref().unwrap().into();
+            Ok(self.score_plan(&planner_node, variables)?.0.total())
         }
     }
 
@@ -1181,6 +1558,47 @@ mod tests {
         assert_eq!(planned_cost_js(schema, query, variables).await, 10400.0);
         assert_eq!(planned_cost_rust(schema, query, variables), 10400.0);
         assert_eq!(actual_cost(schema, query, variables, response), 2.0);
+    }
+
+    #[test(tokio::test)]
+    async fn entity_fetch_cardinality_uses_parent_list_size_from_listsize_directive() {
+        // When the parent list field has @listSize(assumedSize: 5) and global list_size is 100,
+        // the entity fetch for _entities should be estimated with cardinality 5, not 100.
+        let schema = include_str!("./fixtures/federated_ships_listsize_schema.graphql");
+        let query = include_str!("./fixtures/federated_ships_required_query.graphql");
+        let variables = "{}";
+
+        // Supergraph estimate uses @listSize(assumedSize: 5) from ships field:
+        // ships (5 instances) × Ship (1.0) = 5.0
+        assert_eq!(estimated_cost(schema, query, variables), 5.0);
+
+        // Planned cost: entity fetch _entities should use cardinality 5 (ships list size),
+        // not 100 (global list_size default).
+        // Fetch 1 (vehicles, ships list):       ships[5] × Ship(1.0) = 5.0
+        // Fetch 2 (vehicles, entity fetch):     _entities[5] × Ship(1.0) = 5.0
+        // Total = 10.0
+        //
+        // Before the fix: Fetch 2 would use list_size=100, giving 100.0, total = 105.0
+        assert_eq!(planned_cost_rust(schema, query, variables), 10.0);
+    }
+
+    #[test(tokio::test)]
+    async fn entity_fetch_cardinality_multiplies_for_nested_lists() {
+        // For a two-level nested list (companies[N].employees[M]), the entity fetch
+        // for employees should be estimated with cardinality N × M.
+        // With list_size = 100: cardinality = 100 companies × 100 employees = 10000.
+        //
+        // Before the fix: cardinality would be 100 (just global list_size).
+        let schema = include_str!("./fixtures/federated_nested_list_schema.graphql");
+        let query = include_str!("./fixtures/federated_nested_list_query.graphql");
+        let variables = "{}";
+
+        // Fetch 1 (companies): companies[100] × Company(1.0) + employees[100] × Employee(1.0) = 100 + 10000 = 10100.0
+        // Fetch 2 (employees, entity):  _entities[10000] × Employee(1.0) = 10000.0
+        // Total = 20100.0
+        //
+        // Before the fix: Fetch 2 = _entities[100] × 1.0 = 100.0, total = 10200.0
+        assert_eq!(planned_cost_rust(schema, query, variables), 20100.0);
     }
 
     #[test(tokio::test)]
@@ -1751,6 +2169,541 @@ mod tests {
                 }
             }
         }
+    }
+
+    /// Scores `query_str` (parsed against `schema`) while counting objects, and returns the count
+    /// recorded at `path`. Exercises the counting in `score_field` directly, without building a
+    /// full query plan.
+    fn recorded_count_for(
+        schema: &Valid<apollo_compiler::Schema>,
+        query_str: &str,
+        path: &[&str],
+        list_size: u32,
+    ) -> Option<i32> {
+        let executable =
+            ExecutableDocument::parse_and_validate(schema, query_str, "query.graphql").unwrap();
+        let dc_schema = Arc::new(DemandControlledSchema::new(Arc::new(schema.clone())).unwrap());
+        let calc =
+            StaticCostCalculator::new(dc_schema, Default::default(), Default::default(), list_size);
+
+        let target = Path::from_slice(path);
+        let mut counts = EntityCounts::default();
+        counts.insert(&target);
+        let ctx = ScoringContext {
+            schema: &calc.supergraph_schema,
+            query: &executable,
+            variables: &Object::new(),
+            should_estimate_requires: false,
+            subgraph: "",
+            is_entity_fetch: false,
+            entity_count_hint: None,
+            renamed_keys: Default::default(),
+        };
+        let objects = ObjectCount {
+            counts: &mut counts,
+            count: 1,
+        };
+        calc.score_document(&ctx, Some(objects)).unwrap();
+        counts.count_at(&target)
+    }
+
+    /// Convenience wrapper for plain (non-federated) schemas that don't need `@link` resolution.
+    fn count_test(schema_str: &str, query_str: &str, path: &[&str], list_size: u32) -> Option<i32> {
+        let schema =
+            apollo_compiler::Schema::parse_and_validate(schema_str, "schema.graphqls").unwrap();
+        recorded_count_for(&schema, query_str, path, list_size)
+    }
+
+    #[test]
+    fn count_single_list_no_directive() {
+        // ships: [Ship!]! with no @listSize → global list_size (10).
+        let schema = r#"
+            type Query { ships: [Ship!]! }
+            type Ship { id: ID! }
+        "#;
+        assert_eq!(
+            count_test(schema, "{ ships { id } }", &["ships", "@"], 10),
+            Some(10)
+        );
+    }
+
+    #[test]
+    fn count_nested_lists_multiply() {
+        // companies[10] × employees[10] = 100 at companies/@/employees/@.
+        let schema = r#"
+            type Query { companies: [Company!]! }
+            type Company { employees: [Employee!]! }
+            type Employee { id: ID! }
+        "#;
+        assert_eq!(
+            count_test(
+                schema,
+                "{ companies { employees { id } } }",
+                &["companies", "@", "employees", "@"],
+                10
+            ),
+            Some(100)
+        );
+    }
+
+    #[test]
+    fn count_object_field_does_not_multiply() {
+        // user (non-list) then orders[10] → 1 × 10 = 10 at user/orders/@.
+        let schema = r#"
+            type Query { user: User! }
+            type User { orders: [Order!]! }
+            type Order { id: ID! }
+        "#;
+        assert_eq!(
+            count_test(
+                schema,
+                "{ user { orders { id } } }",
+                &["user", "orders", "@"],
+                10
+            ),
+            Some(10)
+        );
+    }
+
+    #[test]
+    fn count_slicing_argument_from_query() {
+        // itemsByIds(ids: [...]) @listSize(slicingArguments: ["ids"]) → reads the query argument's
+        // array length (3), not the global list_size (100).
+        let schema_str = include_str!("./fixtures/custom_cost_schema.graphql");
+        let config: Configuration = Default::default();
+        let schema = crate::spec::Schema::parse(schema_str, &config).unwrap();
+        assert_eq!(
+            recorded_count_for(
+                schema.supergraph_schema(),
+                r#"{ itemsByIds(ids: ["a", "b", "c"]) { id } }"#,
+                &["itemsByIds", "@"],
+                100
+            ),
+            Some(3)
+        );
+    }
+
+    #[test]
+    fn count_type_conditions_do_not_sum() {
+        // The same response key (`toys`) is selected under two object type conditions, each a list
+        // of the global `list_size`. The recorded count is that size — the branches are merged
+        // (max), not summed.
+        let schema = r#"
+            type Query { animal: Animal }
+            interface Animal { id: ID! }
+            type Cat implements Animal { id: ID! toys: [Toy] }
+            type Dog implements Animal { id: ID! toys: [Toy] }
+            type Toy { id: ID! }
+        "#;
+        assert_eq!(
+            count_test(
+                schema,
+                "{ animal { ... on Cat { toys { id } } ... on Dog { toys { id } } } }",
+                &["animal", "toys", "@"],
+                10,
+            ),
+            Some(10)
+        );
+    }
+
+    #[test]
+    fn count_type_conditions_take_max_size() {
+        // The same response key (`toys`) resolves to a different `@listSize` depending on the
+        // concrete type — `Cat` → 3, `Dog` → 7. The recorded count is the max across the
+        // type-condition branches, regardless of the order they appear in. (Uses a cost-spec
+        // supergraph because `@listSize` needs `@link` resolution that plain SDL can't carry.)
+        let schema_str =
+            include_str!("./fixtures/federated_type_condition_listsize_schema.graphql");
+        let config: Configuration = Default::default();
+        let schema = crate::spec::Schema::parse(schema_str, &config).unwrap();
+        let supergraph = schema.supergraph_schema();
+
+        assert_eq!(
+            recorded_count_for(
+                supergraph,
+                "{ animal { ... on Cat { toys { id } } ... on Dog { toys { id } } } }",
+                &["animal", "toys", "@"],
+                100,
+            ),
+            Some(7)
+        );
+        // Swapped order: still the max, proving it is neither first- nor last-wins.
+        assert_eq!(
+            recorded_count_for(
+                supergraph,
+                "{ animal { ... on Dog { toys { id } } ... on Cat { toys { id } } } }",
+                &["animal", "toys", "@"],
+                100,
+            ),
+            Some(7)
+        );
+    }
+
+    /// Builds a rust query plan for a federated schema, along with a calculator to score it.
+    fn plan_and_calculator(
+        schema_str: &str,
+        query_str: &str,
+        list_size: u32,
+        subgraph_list_sizes: SubgraphConfiguration<Option<u32>>,
+    ) -> (PlanNode, StaticCostCalculator) {
+        let config: Arc<Configuration> = Arc::new(Default::default());
+        let (schema, query) = parse_schema_and_operation(schema_str, query_str, &config);
+
+        let planner =
+            QueryPlanner::new(schema.federation_supergraph(), Default::default()).unwrap();
+        let query_plan = planner
+            .build_query_plan(&query.executable, None, Default::default())
+            .unwrap();
+
+        let dc_schema =
+            DemandControlledSchema::new(Arc::new(schema.supergraph_schema().clone())).unwrap();
+        let mut subgraph_schemas = HashMap::new();
+        for (subgraph_name, subgraph_schema) in planner.subgraph_schemas().iter() {
+            subgraph_schemas.insert(
+                subgraph_name.to_string(),
+                DemandControlledSchema::new(Arc::new(subgraph_schema.schema().clone())).unwrap(),
+            );
+        }
+        let calculator = StaticCostCalculator::new(
+            Arc::new(dc_schema),
+            Arc::new(subgraph_schemas),
+            Arc::new(subgraph_list_sizes),
+            list_size,
+        );
+
+        (query_plan.node.as_ref().unwrap().into(), calculator)
+    }
+
+    fn parse_variables(variables_str: &str) -> Object {
+        serde_json::from_str::<Value>(variables_str)
+            .unwrap()
+            .as_object()
+            .cloned()
+            .unwrap_or_default()
+    }
+
+    /// Returns the estimated entity count recorded at `path` when scoring a rust query plan.
+    fn entity_count_at(
+        schema_str: &str,
+        query_str: &str,
+        variables_str: &str,
+        path: &[&str],
+        list_size: u32,
+    ) -> Option<i32> {
+        let (node, calculator) =
+            plan_and_calculator(schema_str, query_str, list_size, Default::default());
+        let (_, counts) = calculator
+            .score_plan(&node, &parse_variables(variables_str))
+            .unwrap();
+        counts.count_at(&Path::from_slice(path))
+    }
+
+    /// Returns the estimated cost per subgraph of a rust query plan.
+    fn planned_cost_by_subgraph(
+        schema_str: &str,
+        query_str: &str,
+        variables_str: &str,
+        list_size: u32,
+        subgraph_list_sizes: SubgraphConfiguration<Option<u32>>,
+    ) -> CostBySubgraph {
+        let (node, calculator) =
+            plan_and_calculator(schema_str, query_str, list_size, subgraph_list_sizes);
+        let (cost, _) = calculator
+            .score_plan(&node, &parse_variables(variables_str))
+            .unwrap();
+        cost
+    }
+
+    #[test]
+    fn entity_counts_single_list_uses_parent_assumed_size() {
+        // ships: [Ship!]! @listSize(assumedSize: 5). The entity fetch at /ships/@ is seeded with
+        // the 5 ships the producing fetch yields, not the global list_size (100).
+        let schema = include_str!("./fixtures/federated_ships_listsize_schema.graphql");
+        let query = include_str!("./fixtures/federated_ships_required_query.graphql");
+        assert_eq!(
+            entity_count_at(schema, query, "{}", &["ships", "@"], 100),
+            Some(5)
+        );
+    }
+
+    #[test]
+    fn entity_counts_nested_lists_multiply() {
+        // companies[100] × employees[100] = 10000 employees reach the entity-fetch path, the
+        // product recorded by the producing (companies) fetch.
+        let schema = include_str!("./fixtures/federated_nested_list_schema.graphql");
+        let query = include_str!("./fixtures/federated_nested_list_query.graphql");
+        assert_eq!(
+            entity_count_at(
+                schema,
+                query,
+                "{}",
+                &["companies", "@", "employees", "@"],
+                100
+            ),
+            Some(10000)
+        );
+    }
+
+    const ENTITY_COUNT_SCHEMA: &str =
+        include_str!("./fixtures/federated_entity_count_schema.graphql");
+
+    #[test]
+    fn entity_fetch_follows_slicing_argument_variable() {
+        // The entity fetch for `detail` extends the items returned by `itemsByIds`, whose size
+        // comes from the length of the `ids` variable rather than `list_size` (10).
+        let query = "query($ids: [ID!]!) { itemsByIds(ids: $ids) { detail { text } } }";
+        // A single value for the list-typed argument is coerced to a list of one item.
+        for (ids, count) in [
+            (r#"["a"]"#, 1.0),
+            (r#"["a","b","c"]"#, 3.0),
+            (r#""a""#, 1.0),
+            ("1000000", 1.0),
+        ] {
+            let variables = format!(r#"{{"ids": {ids}}}"#);
+            assert_eq!(
+                entity_count_at(
+                    ENTITY_COUNT_SCHEMA,
+                    query,
+                    &variables,
+                    &["itemsByIds", "@"],
+                    10
+                ),
+                Some(count as i32)
+            );
+            let cost = planned_cost_by_subgraph(
+                ENTITY_COUNT_SCHEMA,
+                query,
+                &variables,
+                10,
+                Default::default(),
+            );
+            // lists: itemsByIds[n] × Item(1)
+            assert_eq!(cost.get("lists"), Some(count));
+            // details: _entities[n] × (Item(1) + Detail(1))
+            assert_eq!(cost.get("details"), Some(count * 2.0));
+        }
+    }
+
+    #[test]
+    fn entity_fetch_follows_aliased_response_key() {
+        // Flatten paths use response keys, so an aliased field is matched by its alias.
+        let query = r#"{ mine: itemsByIds(ids: ["a", "b"]) { detail { text } } }"#;
+        assert_eq!(
+            entity_count_at(ENTITY_COUNT_SCHEMA, query, "{}", &["mine", "@"], 10),
+            Some(2)
+        );
+        assert_eq!(
+            entity_count_at(ENTITY_COUNT_SCHEMA, query, "{}", &["itemsByIds", "@"], 10),
+            None
+        );
+    }
+
+    #[test]
+    fn entity_fetch_follows_mutation_root_field() {
+        let query = r#"mutation { createItems(ids: ["a", "b", "c"]) { detail { text } } }"#;
+        assert_eq!(
+            entity_count_at(ENTITY_COUNT_SCHEMA, query, "{}", &["createItems", "@"], 10),
+            Some(3)
+        );
+    }
+
+    #[test]
+    fn entity_fetch_follows_sized_fields() {
+        // `page` sizes its `items` field through `@listSize(assumedSize: 4, sizedFields:)`.
+        let query = "{ page { items { detail { text } } } }";
+        assert_eq!(
+            entity_count_at(
+                ENTITY_COUNT_SCHEMA,
+                query,
+                "{}",
+                &["page", "items", "@"],
+                10
+            ),
+            Some(4)
+        );
+    }
+
+    #[test]
+    fn entity_fetch_follows_nested_list_type() {
+        // `grid: [[Item!]!]!` has one `@` per list level in the flatten path. Like cost scoring,
+        // the whole nested list is sized as a single list.
+        let query = "{ grid { detail { text } } }";
+        assert_eq!(
+            entity_count_at(ENTITY_COUNT_SCHEMA, query, "{}", &["grid", "@", "@"], 10),
+            Some(10)
+        );
+    }
+
+    #[test]
+    fn entity_fetch_follows_lists_from_earlier_entity_fetch() {
+        // `related` is resolved by an entity fetch at `items/@` and is itself a list (of 2), so the
+        // entity fetch at `items/@/related/@` is sized as items[10] × related[2].
+        let query = "{ items { related { name } } }";
+        assert_eq!(
+            entity_count_at(
+                ENTITY_COUNT_SCHEMA,
+                query,
+                "{}",
+                &["items", "@", "related", "@"],
+                10
+            ),
+            Some(20)
+        );
+    }
+
+    #[test]
+    fn entity_fetch_follows_key_aliased_by_query_planner() {
+        // In the `lists` subgraph, `content` has a different type in each implementation of `Box`
+        // (`[Item!]!` and `[Item!]`), so the two selections can't share a response key. The query
+        // planner aliases one of them in the subgraph operation and renames it back in the
+        // response. The flatten path uses the original response key, so the larger of the two
+        // lists (boxes[3] × content[5]) must be counted whichever selection gets the alias.
+        let small = "... on SmallBox { content { detail { text } } }";
+        let big = "... on BigBox { content { detail { text } } }";
+        for query in [
+            format!("{{ boxes {{ {small} {big} }} }}"),
+            format!("{{ boxes {{ {big} {small} }} }}"),
+        ] {
+            let (node, _) =
+                plan_and_calculator(ENTITY_COUNT_SCHEMA, &query, 10, Default::default());
+            assert!(
+                format!("{node:?}").contains("content__alias_"),
+                "expected the query planner to alias `content`"
+            );
+            assert_eq!(
+                entity_count_at(
+                    ENTITY_COUNT_SCHEMA,
+                    &query,
+                    "{}",
+                    &["boxes", "@", "content", "@"],
+                    10
+                ),
+                Some(15)
+            );
+        }
+    }
+
+    /// Reverses the children of every `Parallel` node, whose order carries no meaning.
+    fn reverse_parallel_nodes(node: &mut PlanNode) {
+        match node {
+            PlanNode::Sequence { nodes } => nodes.iter_mut().for_each(reverse_parallel_nodes),
+            PlanNode::Parallel { nodes } => {
+                nodes.reverse();
+                nodes.iter_mut().for_each(reverse_parallel_nodes);
+            }
+            _ => {}
+        }
+    }
+
+    #[test]
+    fn entity_counts_use_largest_size_whatever_the_plan_order() {
+        // `items` is selected from both `first` (list size 3) and `second` (list size 10). They
+        // are the same list in the response, so the larger size counts the items: both for the
+        // entity fetch that extends them, and for the entity fetch that extends the `reviews`
+        // nested under them (10 items × 10 reviews).
+        //
+        // The fetch to `second` and the entity fetch for `reviews` run in parallel, so the result
+        // must not depend on which of them comes first in the plan.
+        let schema = include_str!("./fixtures/federated_shared_list_schema.graphql");
+        let query = "{ shelf { items { a b reviews { author } } } }";
+        let subgraph_list_sizes = SubgraphConfiguration {
+            all: None,
+            subgraphs: [("first".to_string(), Some(3))].into_iter().collect(),
+        };
+        let (mut node, calculator) = plan_and_calculator(schema, query, 10, subgraph_list_sizes);
+        let PlanNode::Sequence { nodes } = &node else {
+            panic!("expected a sequence, got: {node:?}");
+        };
+        assert!(
+            matches!(&nodes[1], PlanNode::Parallel { nodes } if nodes.len() == 2),
+            "expected the fetches after the first to run in parallel, got: {node:?}"
+        );
+
+        for _ in 0..2 {
+            let variables = Object::new();
+            let (cost, counts) = calculator.score_plan(&node, &variables).unwrap();
+            assert_eq!(
+                counts.count_at(&Path::from_slice(&["shelf", "items", "@"])),
+                Some(10)
+            );
+            assert_eq!(
+                counts.count_at(&Path::from_slice(&["shelf", "items", "@", "reviews", "@"])),
+                Some(100)
+            );
+
+            // reviews: _entities[10] × (Item(1) + reviews[10] × Review(1))
+            assert_eq!(cost.get("reviews"), Some(110.0));
+            // authors: _entities[100] × Review(1)
+            assert_eq!(cost.get("authors"), Some(100.0));
+
+            reverse_parallel_nodes(&mut node);
+        }
+    }
+
+    #[test]
+    fn entity_counts_use_largest_size_across_interface_and_object_selections() {
+        // `first` selects `toys` through the `Animal` interface, whose `@listSize` is 3. `second`
+        // doesn't know the interface, so it selects the same list through `Cat`, whose `@listSize`
+        // is 7. They are the same list in the response, so the entity fetch to `third` that
+        // extends the toys is sized by the larger of the two.
+        let schema = include_str!("./fixtures/federated_interface_list_schema.graphql");
+        let query = "{ pet { toys { a b c } } }";
+        let (mut node, calculator) = plan_and_calculator(schema, query, 10, Default::default());
+
+        for _ in 0..2 {
+            let variables = Object::new();
+            let (cost, counts) = calculator.score_plan(&node, &variables).unwrap();
+            assert_eq!(
+                counts.count_at(&Path::from_slice(&["pet", "toys", "@"])),
+                Some(7)
+            );
+
+            // first: pet(1) + toys[3] × Toy(1), sized by `Animal.toys`
+            assert_eq!(cost.get("first"), Some(4.0));
+            // second: _entities[1] × (Cat(1) + toys[7] × Toy(1)), sized by `Cat.toys`
+            assert_eq!(cost.get("second"), Some(8.0));
+            // third: _entities[7] × Toy(1)
+            assert_eq!(cost.get("third"), Some(7.0));
+
+            reverse_parallel_nodes(&mut node);
+        }
+    }
+
+    #[test]
+    fn negative_slicing_argument_does_not_produce_negative_entity_fetch_cost() {
+        let query = "{ firstItems(first: -5) { detail { text } } }";
+        assert_eq!(
+            entity_count_at(ENTITY_COUNT_SCHEMA, query, "{}", &["firstItems", "@"], 10),
+            Some(0)
+        );
+        let cost =
+            planned_cost_by_subgraph(ENTITY_COUNT_SCHEMA, query, "{}", 10, Default::default());
+        assert_eq!(cost.get("lists"), Some(0.0));
+        assert_eq!(cost.get("details"), Some(0.0));
+    }
+
+    #[test]
+    fn entity_fetch_uses_producing_subgraph_list_size() {
+        // The items are produced by `lists`, so its configured list size (3) sizes the entity
+        // fetch sent to `details`, not the `details` list size (7) or the global one (10).
+        let subgraph_list_sizes = SubgraphConfiguration {
+            all: None,
+            subgraphs: [
+                ("lists".to_string(), Some(3)),
+                ("details".to_string(), Some(7)),
+            ]
+            .into_iter()
+            .collect(),
+        };
+        let cost = planned_cost_by_subgraph(
+            ENTITY_COUNT_SCHEMA,
+            "{ items { detail { text } } }",
+            "{}",
+            10,
+            subgraph_list_sizes,
+        );
+        assert_eq!(cost.get("lists"), Some(3.0));
+        assert_eq!(cost.get("details"), Some(6.0));
     }
 
     /// Tests for `@cost` on types: objects, interface implementations, and union members.
