@@ -193,7 +193,6 @@ impl PluginPrivate for CoprocessorPlugin<HTTPClientService> {
     fn licensed_features(_config: &Self::Config) -> Vec<LicensedSetting> {
         vec![LicensedSetting {
             feature: AllowedFeature::Coprocessors,
-            name: "Coprocessor plugin",
             path: "coprocessor",
         }]
     }

@@ -465,7 +465,6 @@ impl PluginPrivate for ResponseCache {
         if config.enabled {
             vec![LicensedSetting {
                 feature: AllowedFeature::ResponseCaching,
-                name: "Subgraph response caching",
                 path: "response_cache.enabled",
             }]
         } else {

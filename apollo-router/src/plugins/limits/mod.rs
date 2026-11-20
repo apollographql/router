@@ -285,32 +285,15 @@ impl PluginPrivate for LimitsPlugin {
         // not licensed.
         let router = &config.router;
         [
-            (
-                router.max_depth,
-                "Operation depth limiting",
-                "limits.router.max_depth",
-            ),
-            (
-                router.max_height,
-                "Operation height limiting",
-                "limits.router.max_height",
-            ),
-            (
-                router.max_root_fields,
-                "Operation root fields limiting",
-                "limits.router.max_root_fields",
-            ),
-            (
-                router.max_aliases,
-                "Operation aliases limiting",
-                "limits.router.max_aliases",
-            ),
+            (router.max_depth, "limits.router.max_depth"),
+            (router.max_height, "limits.router.max_height"),
+            (router.max_root_fields, "limits.router.max_root_fields"),
+            (router.max_aliases, "limits.router.max_aliases"),
         ]
         .into_iter()
-        .filter(|(limit, _, _)| limit.is_some())
-        .map(|(_, name, path)| LicensedSetting {
+        .filter(|(limit, _)| limit.is_some())
+        .map(|(_, path)| LicensedSetting {
             feature: AllowedFeature::RequestLimits,
-            name,
             path,
         })
         .collect()

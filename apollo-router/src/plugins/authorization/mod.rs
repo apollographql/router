@@ -544,14 +544,12 @@ impl PluginPrivate for AuthorizationPlugin {
         if config.require_authentication {
             settings.push(LicensedSetting {
                 feature: AllowedFeature::Authorization,
-                name: "Required authentication",
                 path: "authorization.require_authentication",
             });
         }
         if config.directives.enabled {
             settings.push(LicensedSetting {
                 feature: AllowedFeature::Authorization,
-                name: "Authorization directives",
                 path: "authorization.directives.enabled",
             });
         }

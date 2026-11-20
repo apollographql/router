@@ -28,7 +28,6 @@ impl PluginPrivate for Restricted {
         if config.enabled {
             vec![LicensedSetting {
                 feature: AllowedFeature::Experimental,
-                name: "Restricted",
                 path: r#"plugins."experimental.restricted".enabled"#,
             }]
         } else {

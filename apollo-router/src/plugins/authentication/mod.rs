@@ -234,27 +234,14 @@ impl PluginPrivate for AuthenticationPlugin {
 
     fn licensed_features(config: &Self::Config) -> Vec<LicensedSetting> {
         [
-            (
-                config.router.is_some(),
-                "Authentication plugin",
-                "authentication.router",
-            ),
-            (
-                config.subgraph.is_some(),
-                "Subgraph authentication",
-                "authentication.subgraph",
-            ),
-            (
-                config.connector.is_some(),
-                "Connector authentication",
-                "authentication.connector",
-            ),
+            (config.router.is_some(), "authentication.router"),
+            (config.subgraph.is_some(), "authentication.subgraph"),
+            (config.connector.is_some(), "authentication.connector"),
         ]
         .into_iter()
-        .filter(|(configured, _, _)| *configured)
-        .map(|(_, name, path)| LicensedSetting {
+        .filter(|(configured, _)| *configured)
+        .map(|(_, path)| LicensedSetting {
             feature: AllowedFeature::Authentication,
-            name,
             path,
         })
         .collect()

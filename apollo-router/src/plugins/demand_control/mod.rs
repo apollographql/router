@@ -505,7 +505,6 @@ impl PluginPrivate for DemandControl {
         if config.enabled {
             vec![LicensedSetting {
                 feature: AllowedFeature::DemandControl,
-                name: "Demand control plugin",
                 path: "demand_control.enabled",
             }]
         } else {

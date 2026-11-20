@@ -273,7 +273,6 @@ impl PluginPrivate for Subscription {
         if config.enabled {
             vec![LicensedSetting {
                 feature: AllowedFeature::Subscriptions,
-                name: "Federated subscriptions",
                 path: "subscription.enabled",
             }]
         } else {

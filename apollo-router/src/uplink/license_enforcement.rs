@@ -207,7 +207,6 @@ impl LicenseEnforcementReport {
         if configuration.apq.router.cache.redis.is_some() {
             settings.push(LicensedSetting {
                 feature: AllowedFeature::ApqCaching,
-                name: "APQ caching",
                 path: "apq.router.cache.redis",
             });
         }
@@ -220,21 +219,18 @@ impl LicenseEnforcementReport {
         {
             settings.push(LicensedSetting {
                 feature: AllowedFeature::DistributedQueryPlanning,
-                name: "Query plan caching",
                 path: "supergraph.query_planning.cache.redis",
             });
         }
         if configuration.batching.enabled {
             settings.push(LicensedSetting {
                 feature: AllowedFeature::Batching,
-                name: "Batching support",
                 path: "batching.enabled",
             });
         }
         if configuration.persisted_queries.enabled {
             settings.push(LicensedSetting {
                 feature: AllowedFeature::PersistedQueries,
-                name: "Persisted queries",
                 path: "persisted_queries.enabled",
             });
         }
@@ -843,8 +839,6 @@ impl FromStr for License {
 pub(crate) struct LicensedSetting {
     /// The license feature the setting needs.
     pub(crate) feature: AllowedFeature,
-    /// What the setting does, shown to the operator, such as "Federated subscriptions".
-    pub(crate) name: &'static str,
     /// Where the setting is in router.yaml, such as `subscription.enabled`.
     pub(crate) path: &'static str,
 }
@@ -1004,7 +998,6 @@ mod test {
         if uses_restricted_features {
             config_restrictions.push(LicensedSetting {
                 feature: AllowedFeature::Experimental,
-                name: "Test feature",
                 path: "test",
             });
         }
