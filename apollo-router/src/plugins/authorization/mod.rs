@@ -29,8 +29,8 @@ use crate::error::QueryPlannerError;
 use crate::graphql;
 use crate::json_ext::Path;
 use crate::layers::ServiceBuilderExt;
-use crate::plugin::Plugin;
 use crate::plugin::PluginInit;
+use crate::plugin::PluginPrivate;
 use crate::plugins::authentication;
 use crate::query_planner::QueryKey;
 use crate::services::execution;
@@ -534,7 +534,7 @@ impl AuthorizationPlugin {
 }
 
 #[async_trait::async_trait]
-impl Plugin for AuthorizationPlugin {
+impl PluginPrivate for AuthorizationPlugin {
     type Config = Conf;
 
     async fn new(init: PluginInit<Self::Config>) -> Result<Self, BoxError> {
@@ -631,7 +631,7 @@ impl Plugin for AuthorizationPlugin {
 //
 // In order to keep the plugin names consistent,
 // we use using the `Reverse domain name notation`
-register_plugin!("apollo", "authorization", AuthorizationPlugin);
+register_private_plugin!("apollo", "authorization", AuthorizationPlugin);
 
 #[cfg(test)]
 mod tests;
