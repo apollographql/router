@@ -18,7 +18,7 @@ pub(crate) const DEFAULT_HTTP2_KEEP_ALIVE_TIMEOUT: Duration = Duration::from_sec
 #[apollo_configuration::configuration]
 #[derive(PartialEq)]
 pub(crate) struct Client {
-    /// Use HTTP/2 to communicate with the coprocessor.
+    /// Whether to use HTTP/2 for coprocessor requests: `enable`, `disable` (default) or `http2only`.
     pub(crate) http2: Option<Http2Config>,
 
     /// Specify a DNS resolution strategy to use when resolving the coprocessor URL.

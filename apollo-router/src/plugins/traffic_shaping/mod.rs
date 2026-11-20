@@ -90,7 +90,7 @@ struct Shaping {
     #[schemars(with = "String", default)]
     /// Enable timeout for incoming requests
     timeout: Option<apollo_configuration::types::Duration>,
-    /// Enable HTTP2 for subgraphs
+    /// Whether to use HTTP/2 for subgraph requests: `enable`, `disable` (default) or `http2only`.
     http2: Option<Http2Config>,
     /// DNS resolution strategy for subgraphs
     dns_resolution_strategy: Option<DnsResolutionStrategy>,
@@ -114,10 +114,10 @@ struct Shaping {
 #[apollo_configuration::configuration]
 #[derive(PartialEq)]
 pub(crate) enum Http2Config {
-    #[config(default)]
-    /// Enable HTTP2 for subgraphs
+    /// Offer HTTP/2 and HTTP/1.1, and use HTTP/2 when the server supports it
     Enable,
-    /// Disable HTTP2 for subgraphs
+    #[config(default)]
+    /// Use HTTP/1.1 only (default)
     Disable,
     /// Only HTTP2 is active
     // The macro renames variants to snake_case; this keeps the lowercase name.
@@ -202,7 +202,7 @@ struct ConnectorShaping {
     #[schemars(with = "String", default)]
     /// Enable timeout for connectors requests
     timeout: Option<apollo_configuration::types::Duration>,
-    /// Enable HTTP2 for connectors
+    /// Whether to use HTTP/2 for connector requests: `enable`, `disable` (default) or `http2only`.
     experimental_http2: Option<Http2Config>,
     /// DNS resolution strategy for connectors
     dns_resolution_strategy: Option<DnsResolutionStrategy>,

@@ -1385,6 +1385,18 @@ mod alpn_negotiation {
     ServiceKind::Connector,
     ExpectedAlpn::Http2,
 )]
+    #[case::unset_subgraph_does_not_offer_h2(
+    vec![alpn::H2.to_vec(), alpn::HTTP_1_1.to_vec()],
+    None,
+    ServiceKind::Subgraph,
+    ExpectedAlpn::Http1OrNone,
+)]
+    #[case::unset_connector_does_not_offer_h2(
+    vec![alpn::H2.to_vec(), alpn::HTTP_1_1.to_vec()],
+    None,
+    ServiceKind::Connector,
+    ExpectedAlpn::Http1OrNone,
+)]
     #[tokio::test(flavor = "multi_thread")]
     async fn test_alpn_negotiation(
         #[case] server_alpn: Vec<Vec<u8>>,
@@ -1441,6 +1453,7 @@ mod http_version_negotiation {
     #[case::http2_only(Some(Http2Config::Http2Only), ExpectedVersion::Http2)]
     #[case::http2_enabled(Some(Http2Config::Enable), ExpectedVersion::Any)]
     #[case::http2_disabled(Some(Http2Config::Disable), ExpectedVersion::Http11)]
+    #[case::http2_unset(None, ExpectedVersion::Http11)]
     #[tokio::test(flavor = "multi_thread")]
     async fn test_unix_socket_http_version(
         #[case] http2_config: Option<Http2Config>,
