@@ -189,7 +189,7 @@ async fn subscription_coprocessors_enabled_when_allowed_features_contains_both_f
  * THEN
  *  - router should start successfully
  *  NB: this behavior will change once allowed_features claim is contained in all licenses
-*/
+ */
 #[tokio::test(flavor = "multi_thread")]
 async fn oss_feature_apq_enabled_when_allowed_features_empty() {
     let mut env = HashMap::new();
@@ -267,7 +267,7 @@ async fn router_starts_when_allowed_features_contains_feature_undefined_in_route
  * THEN
  *  - router should start successfully
  *  NB: this behavior will change once allowed_features claim is contained in all licenses
-*/
+ */
 #[tokio::test(flavor = "multi_thread")]
 async fn subscription_coprocessors_enabled_when_allowed_features_none() {
     let mut env = HashMap::new();

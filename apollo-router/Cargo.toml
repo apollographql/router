@@ -8,7 +8,7 @@ description = "A configurable, high-performance routing runtime for Apollo Feder
 license = "Elastic-2.0"
 
 # renovate-automation: rustc version
-rust-version = "1.99.1"
+rust-version = "1.100.0"
 edition = "2024"
 build = "build/main.rs"
 default-run = "router"
@@ -76,7 +76,6 @@ async-compression = { version = "0.4.6", features = [
 async-trait.workspace = true
 axum = { version = "0.8.1", features = ["http2"] }
 base64 = "0.23.0"
-bloomfilter = "3.0.0"
 buildstructor = "0.6.0"
 bytes = "1.6.0"
 clap = { version = "4.5.8", default-features = false, features = [
@@ -389,7 +388,6 @@ hyperlocal = { version = "0.9.1", default-features = false, features = [
 
 [build-dependencies]
 tonic-prost-build = "0.14.0"
-serde_json.workspace = true
 
 [package.metadata.cargo-machete]
 ignored = [
@@ -442,7 +440,6 @@ unexpected_cfgs = { level = "warn", check-cfg = ['cfg(tracing_unstable)'] }
 
 # Compatibility with the 2024 edition, remove after switching to it:
 boxed_slice_into_iter = "warn"
-dependency_on_unit_never_type_fallback = "warn"
 deprecated_safe_2024 = "warn"
 impl_trait_overcaptures = "warn"
 keyword_idents_2024 = "warn"
