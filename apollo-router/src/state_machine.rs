@@ -1039,7 +1039,6 @@ mod tests {
     use tower::BoxError;
 
     use super::*;
-    use crate::AllowedFeature;
     use crate::axum_factory::Endpoint;
     use crate::configuration::Homepage;
     use crate::http_server_factory::Listener;
@@ -1050,6 +1049,7 @@ mod tests {
     use crate::services::Plugins;
     use crate::services::router;
     use crate::services::router::pipeline_handle::PipelineHandle;
+    use crate::uplink::license_enforcement::AllowedFeature;
     use crate::uplink::license_enforcement::LicenseLimits;
     use crate::uplink::schema::SchemaState;
 

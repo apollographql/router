@@ -65,7 +65,6 @@ use crate::services::execution;
 use crate::services::router;
 use crate::services::subgraph;
 use crate::services::supergraph;
-use crate::uplink::license_enforcement::LicenseState;
 use crate::uplink::license_enforcement::LicensedSetting;
 
 type ConfigFactory = for<'de> fn(
@@ -145,9 +144,6 @@ pub struct PluginInit<T> {
 
     pub(crate) notify: Notify<String, graphql::Response>,
 
-    /// User's license's state, including any limits of use
-    pub(crate) license: Arc<LicenseState>,
-
     /// The full router configuration json for use by the telemetry plugin ONLY.
     /// NEVER use this in any other plugin. Plugins should only ever access their pre-defined
     /// configuration subset.
@@ -177,7 +173,6 @@ where
             .supergraph_schema(supergraph_schema)
             .launch_id(Arc::new("launch_id".to_string()))
             .notify(Notify::for_tests())
-            .license(Arc::new(LicenseState::default()))
             .build()
     }
 }
@@ -201,7 +196,6 @@ where
         subgraph_schemas: Option<Arc<crate::query_planner::SubgraphSchemas>>,
         launch_id: Option<Option<Arc<String>>>,
         notify: Notify<String, graphql::Response>,
-        license: Arc<LicenseState>,
         full_config: Option<Value>,
         original_config_yaml: Option<Arc<str>>,
     ) -> Self {
@@ -214,7 +208,6 @@ where
             subgraph_schemas: subgraph_schemas.unwrap_or_default(),
             launch_id: launch_id.flatten(),
             notify,
-            license,
             full_config,
             raw_yaml: original_config_yaml,
         }
@@ -234,7 +227,6 @@ where
         subgraph_schemas: Option<Arc<crate::query_planner::SubgraphSchemas>>,
         launch_id: Option<Arc<String>>,
         notify: Notify<String, graphql::Response>,
-        license: Arc<LicenseState>,
         full_config: Option<Value>,
         original_config_yaml: Option<Arc<str>>,
     ) -> Result<Self, BoxError> {
@@ -249,7 +241,6 @@ where
             subgraph_schemas: subgraph_schemas.unwrap_or_default(),
             launch_id,
             notify,
-            license,
             full_config,
             raw_yaml: original_config_yaml,
         })
@@ -266,7 +257,6 @@ where
         subgraph_schemas: Option<Arc<crate::query_planner::SubgraphSchemas>>,
         launch_id: Option<Arc<String>>,
         notify: Option<Notify<String, graphql::Response>>,
-        license: Option<Arc<LicenseState>>,
         full_config: Option<Value>,
         original_config_yaml: Option<Arc<str>>,
     ) -> Self {
@@ -280,7 +270,6 @@ where
             subgraph_schemas: subgraph_schemas.unwrap_or_default(),
             launch_id,
             notify: notify.unwrap_or_else(Notify::for_tests),
-            license: license.unwrap_or_default(),
             full_config,
             raw_yaml: original_config_yaml,
         }
@@ -301,7 +290,6 @@ impl PluginInit<serde_json::Value> {
             .supergraph_sdl(self.supergraph_sdl)
             .subgraph_schemas(self.subgraph_schemas)
             .notify(self.notify.clone())
-            .license(self.license)
             .and_full_config(self.full_config)
             .and_original_config_yaml(self.raw_yaml)
             .build()
@@ -320,7 +308,6 @@ impl<T> PluginInit<T> {
             subgraph_schemas: self.subgraph_schemas.clone(),
             launch_id: self.launch_id.clone(),
             notify: self.notify.clone(),
-            license: self.license.clone(),
             full_config: self.full_config.clone(),
             raw_yaml: self.raw_yaml.clone(),
         }
@@ -339,7 +326,6 @@ impl<T> PluginInit<T> {
             subgraph_schemas: self.subgraph_schemas,
             launch_id: self.launch_id,
             notify: self.notify,
-            license: self.license,
             full_config: self.full_config,
             raw_yaml: self.raw_yaml,
         })

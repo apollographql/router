@@ -361,7 +361,6 @@ impl PluginPrivate for Subscription {
 #[cfg(test)]
 mod tests {
     use std::str::FromStr;
-    use std::sync::Arc;
 
     use futures::StreamExt;
     use http::HeaderName;
@@ -382,7 +381,6 @@ mod tests {
     use crate::services::SubgraphResponse;
     use crate::services::router;
     use crate::services::router::body;
-    use crate::uplink::license_enforcement::LicenseState;
 
     #[tokio::test(flavor = "multi_thread")]
     async fn it_test_callback_endpoint() {
@@ -554,7 +552,6 @@ mod tests {
                         .unwrap(),
                     )
                     .notify(notify.clone())
-                    .license(Arc::new(LicenseState::default()))
                     .build(),
             )
             .await
@@ -646,7 +643,6 @@ mod tests {
                         .unwrap(),
                     )
                     .notify(notify.clone())
-                    .license(Arc::new(LicenseState::default()))
                     .build(),
             )
             .await

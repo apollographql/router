@@ -580,7 +580,7 @@ pub(crate) struct TpsLimit {
 /// Allowed features for a License, representing what's available to a particular pricing tier
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Hash, EnumIter)]
 #[serde(rename_all = "snake_case")]
-pub enum AllowedFeature {
+pub(crate) enum AllowedFeature {
     /// Automated persisted queries
     Apq,
     /// APQ caching
@@ -668,7 +668,7 @@ impl<'de> Deserialize<'de> for AllowedFeature {
 /// might have a certain tier be limited in its capacity for transactions over a certain duration,
 /// as an example
 #[derive(Debug, Builder, Clone, Eq, PartialEq)]
-pub struct LicenseLimits {
+pub(crate) struct LicenseLimits {
     /// Transaction Per Second limits. If none are found in the License's claims, there are no
     /// limits to apply
     pub(crate) tps: Option<TpsLimit>,
@@ -687,7 +687,7 @@ impl Default for LicenseLimits {
 
 /// Licenses are converted into a stream of license states by the expander
 #[derive(Debug, Clone, Eq, PartialEq, Default, Display)]
-pub enum LicenseState {
+pub(crate) enum LicenseState {
     /// licensed
     Licensed { limits: Option<LicenseLimits> },
     /// warn
@@ -916,9 +916,9 @@ mod test {
     use insta::assert_snapshot;
     use serde_json::json;
 
-    use crate::AllowedFeature;
     use crate::Configuration;
     use crate::spec::Schema;
+    use crate::uplink::license_enforcement::AllowedFeature;
     use crate::uplink::license_enforcement::Audience;
     use crate::uplink::license_enforcement::Claims;
     use crate::uplink::license_enforcement::License;

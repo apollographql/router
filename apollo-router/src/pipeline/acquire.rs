@@ -125,7 +125,6 @@ pub(super) async fn maybe_bootstrap_telemetry(
             .supergraph_schema_id(schema.schema_id.clone().into_inner())
             .supergraph_schema(Arc::new(schema.supergraph_schema().clone()))
             .notify(configuration.notify.clone())
-            .license(Default::default())
             .full_config(configuration.validated_yaml.clone())
             .and_original_config_yaml(configuration.raw_yaml.clone())
             .build()

@@ -65,7 +65,6 @@ pub(crate) async fn create_plugins(
             .subgraph_schemas(subgraph_schemas)
             .launch_id(schema.launch_id.clone())
             .notify(configuration.notify.clone())
-            .license(Default::default())
             .and_original_config_yaml(configuration.raw_yaml.clone())
             .build(),
     };

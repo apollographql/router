@@ -139,7 +139,6 @@ impl<T: Into<Box<dyn DynPlugin + 'static>> + 'static> PluginTestHarness<T> {
             .supergraph_schema(Arc::new(parsed_schema))
             .subgraph_schemas(subgraph_schemas)
             .notify(Notify::default())
-            .license(Default::default())
             .full_config(full_config)
             .build();
 
