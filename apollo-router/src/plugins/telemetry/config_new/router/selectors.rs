@@ -9,6 +9,7 @@ use crate::context::CONTAINS_GRAPHQL_ERROR;
 use crate::context::OPERATION_NAME;
 use crate::plugins::telemetry::config::AttributeValue;
 use crate::plugins::telemetry::config::TraceIdFormat;
+use crate::plugins::telemetry::config_new::ArrayJsonPath;
 use crate::plugins::telemetry::config_new::Selector;
 use crate::plugins::telemetry::config_new::Stage;
 use crate::plugins::telemetry::config_new::ToOtelValue;
@@ -629,6 +630,20 @@ impl Selector for RouterSelector {
                     | RouterSelector::ContextId { .. }
             ),
             Stage::Drop => matches!(self, RouterSelector::StaticField { .. }),
+        }
+    }
+
+    fn array_json_path(&self) -> Option<ArrayJsonPath<'_>> {
+        match self {
+            RouterSelector::ResponseErrors { response_errors }
+                if !response_errors.is_singular() =>
+            {
+                Some(ArrayJsonPath::Path(response_errors))
+            }
+            RouterSelector::ResponseErrorsField {
+                response_errors_field,
+            } => Some(ArrayJsonPath::ResponseErrorsField(response_errors_field)),
+            _ => None,
         }
     }
 }
@@ -1378,6 +1393,27 @@ mod test {
             response_errors: SelectorJsonPath::from_str("$[0].extensions.code").unwrap(),
         };
         assert_eq!(selector.on_response(&two), Some("NOT_FOUND".into()));
+    }
+
+    #[test]
+    fn router_response_errors_eq_compares_the_array() {
+        use crate::plugins::telemetry::config::AttributeValue;
+        use crate::plugins::telemetry::config_new::conditions::Condition;
+        use crate::plugins::telemetry::config_new::conditions::SelectorOrValue;
+
+        let eq_not_found = |path: &str| {
+            Condition::Eq([
+                SelectorOrValue::Value(AttributeValue::String("NOT_FOUND".to_string())),
+                SelectorOrValue::Selector(RouterSelector::ResponseErrors {
+                    response_errors: SelectorJsonPath::from_str(path).unwrap(),
+                }),
+            ])
+        };
+        let one = router_response_with_errors(vec![graphql_error("NOT_FOUND", &[1])]);
+
+        // `["NOT_FOUND"]` is not equal to `"NOT_FOUND"`.
+        assert!(!eq_not_found("$[*].extensions.code").evaluate_response(&one));
+        assert!(eq_not_found("$[0].extensions.code").evaluate_response(&one));
     }
 
     #[test]

@@ -162,6 +162,11 @@ pub(crate) struct SelectorJsonPath {
 }
 
 impl SelectorJsonPath {
+    /// Whether the path can match at most one value: see [`SelectorJsonPath`].
+    pub(crate) fn is_singular(&self) -> bool {
+        self.singular
+    }
+
     /// Every value the path matches in `value`, in document order.
     pub(crate) fn select<'a>(&'a self, value: &'a Value) -> impl Iterator<Item = Cow<'a, Value>> {
         self.path.select(value)

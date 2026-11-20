@@ -121,6 +121,25 @@ pub(crate) trait Selector: std::fmt::Debug {
     }
 
     fn is_active(&self, stage: Stage) -> bool;
+
+    /// Why this selector always gives an array, or `None` when it can give a single value.
+    ///
+    /// Configuration validation rejects an instrument whose `value` returns `Some`, because an
+    /// instrument value must be a single number. A JSON path selector returns
+    /// [`ArrayJsonPath::Path`] when its path can match several values, and `response_errors_field`
+    /// returns [`ArrayJsonPath::ResponseErrorsField`] for any path.
+    fn array_json_path(&self) -> Option<ArrayJsonPath<'_>> {
+        None
+    }
+}
+
+/// A selector that always gives an array, as reported by [`Selector::array_json_path`].
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub(crate) enum ArrayJsonPath<'a> {
+    /// A JSON path that can match several values, such as `$[*].extensions.code`.
+    Path(&'a selectors::SelectorJsonPath),
+    /// `response_errors_field`, which collects matches from every error whatever its path.
+    ResponseErrorsField(&'a selectors::SelectorJsonPath),
 }
 
 pub(crate) trait DefaultForLevel {

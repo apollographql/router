@@ -9,6 +9,7 @@ use crate::context::OPERATION_NAME;
 use crate::plugins::limits::operation_limits::OperationLimits;
 use crate::plugins::response_cache;
 use crate::plugins::telemetry::config::AttributeValue;
+use crate::plugins::telemetry::config_new::ArrayJsonPath;
 use crate::plugins::telemetry::config_new::Selector;
 use crate::plugins::telemetry::config_new::Stage;
 use crate::plugins::telemetry::config_new::ToOtelValue;
@@ -842,6 +843,21 @@ impl Selector for SubgraphSelector {
             ),
             Stage::Drop => matches!(self, SubgraphSelector::StaticField { .. }),
         }
+    }
+
+    fn array_json_path(&self) -> Option<ArrayJsonPath<'_>> {
+        let path = match self {
+            SubgraphSelector::SubgraphResponseData {
+                subgraph_response_data,
+                ..
+            } => subgraph_response_data,
+            SubgraphSelector::SubgraphResponseErrors {
+                subgraph_response_errors,
+                ..
+            } => subgraph_response_errors,
+            _ => return None,
+        };
+        (!path.is_singular()).then_some(ArrayJsonPath::Path(path))
     }
 }
 

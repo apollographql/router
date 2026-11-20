@@ -8,6 +8,7 @@ use crate::context::OPERATION_KIND;
 use crate::context::OPERATION_NAME;
 use crate::plugins::limits::operation_limits::OperationLimits;
 use crate::plugins::telemetry::config::AttributeValue;
+use crate::plugins::telemetry::config_new::ArrayJsonPath;
 use crate::plugins::telemetry::config_new::Selector;
 use crate::plugins::telemetry::config_new::Stage;
 use crate::plugins::telemetry::config_new::ToOtelValue;
@@ -639,6 +640,17 @@ impl Selector for SupergraphSelector {
             ),
             Stage::Drop => matches!(self, SupergraphSelector::StaticField { .. }),
         }
+    }
+
+    fn array_json_path(&self) -> Option<ArrayJsonPath<'_>> {
+        let path = match self {
+            SupergraphSelector::ResponseData { response_data, .. } => response_data,
+            SupergraphSelector::ResponseErrors {
+                response_errors, ..
+            } => response_errors,
+            _ => return None,
+        };
+        (!path.is_singular()).then_some(ArrayJsonPath::Path(path))
     }
 }
 
