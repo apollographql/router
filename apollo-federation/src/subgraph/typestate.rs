@@ -815,10 +815,12 @@ impl Subgraph<Validated> {
         std::mem::take(&mut self.state.hints)
     }
 
-    /// This subgraph without its `@internal` elements, which are local to the source schema and
-    /// are not merged (see [`crate::composite_schemas::internal`]). Unchanged when the subgraph
-    /// applies no GraphQL Federation directive.
-    pub(crate) fn without_internal_elements(self) -> Result<Self, SubgraphError> {
+    /// Rewrite a subgraph applying the GraphQL Federation directives into the shape the merger
+    /// expects: derive `@key` resolvability from lookups (see
+    /// [`crate::composite_schemas::normalize`]), then remove `@internal` elements and `@require`
+    /// arguments, which are not merged (see [`crate::composite_schemas::internal`]). Unchanged
+    /// when the subgraph applies no GraphQL Federation directive.
+    pub(crate) fn normalize_source_schema(mut self) -> Result<Self, SubgraphError> {
         let metadata = &self.state.metadata;
         if !metadata.uses_composite_directives() {
             return Ok(self);
@@ -829,33 +831,36 @@ impl Subgraph<Validated> {
         ) else {
             return Ok(self);
         };
+        let to_error = |err| SubgraphError::new_without_locations(self.name.clone(), err);
         let mut schema = self.state.schema.schema().clone().into_inner();
-        if !crate::composite_schemas::internal::remove_internal_elements(
+        let mut keys_changed = false;
+        if metadata.is_composite_schema() {
+            let rewritten = crate::composite_schemas::normalize::derive_key_resolvability(
+                &self.state.schema,
+                &names,
+            )
+            .map_err(to_error)?;
+            keys_changed = !rewritten.is_empty();
+            crate::composite_schemas::normalize::apply_rewritten_keys(&mut schema, rewritten);
+        }
+        let removed = crate::composite_schemas::internal::remove_internal_elements(
             &mut schema,
             &names.internal,
             &names.require,
-        ) {
-            return Ok(self);
+        );
+        if keys_changed || removed {
+            let schema = validate_without_internal_elements(&self.name, schema)?;
+            let schema = FederationSchema::new(schema).map_err(to_error)?;
+            let schema = validate_subgraph_schema(schema).map_err(to_error)?;
+            let Some(metadata) = schema.subgraph_metadata().cloned() else {
+                return Err(to_error(internal_error!(
+                    "Subgraph metadata is missing after normalizing the source schema"
+                )));
+            };
+            self.state.schema = schema;
+            self.state.metadata = metadata;
         }
-        let schema = validate_without_internal_elements(&self.name, schema)?;
-        let to_error = |err| SubgraphError::new_without_locations(self.name.clone(), err);
-        let schema = FederationSchema::new(schema).map_err(to_error)?;
-        let schema = validate_subgraph_schema(schema).map_err(to_error)?;
-        let Some(metadata) = schema.subgraph_metadata().cloned() else {
-            return Err(to_error(internal_error!(
-                "Subgraph metadata is missing after removing @internal elements"
-            )));
-        };
-        Ok(Subgraph {
-            name: self.name,
-            url: self.url,
-            state: Validated {
-                schema,
-                orphan_extension_types: self.state.orphan_extension_types,
-                metadata,
-                hints: self.state.hints,
-            },
-        })
+        Ok(self)
     }
 }
 

@@ -1,10 +1,13 @@
 //! Analysis of a `FieldSelectionMap` against one concrete root type.
 //!
 //! Used by `LOOKUP_KEY_MISSING_FOR_TYPE` ([`is_mappable`]) to check that a lookup argument maps to
-//! fields of every possible type.
+//! fields of every possible type, and by composition ([`selections_for_type`]) to turn a lookup's
+//! arguments into the _stable key_ it recalls the entity by.
 
 use apollo_compiler::Name;
+use apollo_compiler::Node;
 use apollo_compiler::Schema;
+use apollo_compiler::ast;
 use apollo_compiler::schema::ExtendedType;
 
 use super::Path;
@@ -126,7 +129,7 @@ impl Mappability<'_> {
         &self,
         type_name: &Name,
         field: &Name,
-    ) -> Result<&apollo_compiler::Node<apollo_compiler::schema::FieldDefinition>, Unmappable> {
+    ) -> Result<&Node<apollo_compiler::schema::FieldDefinition>, Unmappable> {
         field_in_schema(self.schema, type_name, field).ok_or_else(|| Unmappable::MissingField {
             type_name: type_name.clone(),
             field: field.clone(),
@@ -151,4 +154,130 @@ impl Mappability<'_> {
             SelectedListValue::List(inner) => self.list(inner, ty),
         }
     }
+}
+
+/// Collects the fields a selection map reads for one concrete root type, as field-set text.
+struct Collector<'a> {
+    schema: &'a Schema,
+    concrete: &'a Name,
+}
+
+impl Collector<'_> {
+    fn admits(&self, type_condition: &Name) -> bool {
+        possible_types(self.schema, type_condition).contains(self.concrete)
+    }
+
+    /// At the root, type conditions select among alternatives, so only the first applicable one
+    /// is read. Below a path the runtime type is unknown statically, so every alternative is read.
+    /// `None` when no root alternative applies.
+    fn value(&self, value: &SelectedValue, at_root: bool) -> Option<String> {
+        if at_root {
+            return value
+                .alternatives
+                .iter()
+                .find_map(|entry| self.entry(entry, true));
+        }
+        let fields: Vec<String> = value
+            .alternatives
+            .iter()
+            .filter_map(|entry| self.entry(entry, false))
+            .collect();
+        Some(fields.join(" "))
+    }
+
+    fn entry(&self, entry: &SelectedValueEntry, at_root: bool) -> Option<String> {
+        match entry {
+            SelectedValueEntry::Path(path) => self.path(path, at_root, None),
+            SelectedValueEntry::PathObject(path, object) => {
+                let object = self.object(object, false)?;
+                self.path(path, at_root, Some(object))
+            }
+            SelectedValueEntry::PathList(path, list) => {
+                self.path(path, at_root, Some(self.list(list)))
+            }
+            SelectedValueEntry::Object(object) => self.object(object, at_root),
+        }
+    }
+
+    /// The fields of `path`, with `selection` selected under its last segment. `None` when a root
+    /// type condition excludes the concrete type.
+    fn path(&self, path: &Path, at_root: bool, selection: Option<String>) -> Option<String> {
+        let mut text = selection;
+        for segment in path.segments.iter().rev() {
+            if let Some(type_condition) = &segment.type_condition {
+                text = Some(inline_fragment(type_condition, text.as_deref()));
+            }
+            let field = field(&segment.field, &segment.arguments);
+            text = Some(match text {
+                Some(selection) => format!("{field} {{ {selection} }}"),
+                None => field,
+            });
+        }
+        match &path.type_condition {
+            Some(type_condition) if at_root => self.admits(type_condition).then_some(text?),
+            Some(type_condition) => Some(inline_fragment(type_condition, text.as_deref())),
+            None => text,
+        }
+    }
+
+    fn object(&self, object: &SelectedObjectValue, at_root: bool) -> Option<String> {
+        let fields = object
+            .fields
+            .iter()
+            .map(|selected| match selected {
+                SelectedObjectField::Labeled(_, value) => self.value(value, at_root),
+                SelectedObjectField::Shorthand(name, arguments) => Some(field(name, arguments)),
+            })
+            .collect::<Option<Vec<String>>>()?;
+        Some(fields.join(" "))
+    }
+
+    fn list(&self, list: &SelectedListValue) -> String {
+        match list {
+            SelectedListValue::Value(value) => self.value(value, false).unwrap_or_default(),
+            SelectedListValue::List(inner) => self.list(inner),
+        }
+    }
+}
+
+fn field(name: &Name, arguments: &[Node<ast::Argument>]) -> String {
+    if arguments.is_empty() {
+        return name.to_string();
+    }
+    let arguments: Vec<String> = arguments
+        .iter()
+        .map(|argument| {
+            format!(
+                "{}: {}",
+                argument.name,
+                argument.value.serialize().no_indent()
+            )
+        })
+        .collect();
+    format!("{name}({})", arguments.join(", "))
+}
+
+fn inline_fragment(type_condition: &Name, selection: Option<&str>) -> String {
+    format!(
+        "... on {type_condition} {{ {} }}",
+        selection.unwrap_or_default()
+    )
+}
+
+/// The output fields `value` reads when the root object has the concrete type `concrete`, as
+/// field-set text, one per applicable top-level alternative. Empty when no alternative applies.
+///
+/// Each top-level alternative of an argument is a distinct way to recall the entity (for a
+/// `@oneOf` input, a distinct _stable key_), hence one field set each.
+pub(crate) fn selections_for_type(
+    value: &SelectedValue,
+    schema: &Schema,
+    concrete: &Name,
+) -> Vec<String> {
+    let collector = Collector { schema, concrete };
+    value
+        .alternatives
+        .iter()
+        .filter_map(|entry| collector.entry(entry, true))
+        .collect()
 }
