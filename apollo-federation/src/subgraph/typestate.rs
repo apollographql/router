@@ -628,9 +628,13 @@ impl Subgraph<Expanded> {
         tracing::debug!("Subgraph<Expanded>: validate `{}`", self.name);
         // Connectors first: it is defined against the expanded-but-unvalidated schema, and its
         // diagnostics are more actionable than the GraphQL ones for a subgraph author.
-        let hints = ConnectorsBlueprint::on_validation(&self)?;
+        let mut hints = ConnectorsBlueprint::on_validation(&self)?;
         let schema = validate_subgraph_schema(self.state.schema)
             .map_err(|err| SubgraphError::new_without_locations(self.name.clone(), err))?;
+        hints.extend(
+            crate::composite_schemas::validation::validate_source_schema(&schema)
+                .map_err(|err| SubgraphError::new_without_locations(self.name.clone(), err))?,
+        );
 
         Ok(Subgraph {
             name: self.name,
@@ -701,9 +705,13 @@ impl Subgraph<Upgraded> {
         // See the note in `Subgraph::<Expanded>::validate`. A connectors subgraph is necessarily
         // fed2, so it only reaches this state when it is upgraded to fed3; running here keeps the
         // two paths into `Validated` equivalent.
-        let hints = ConnectorsBlueprint::on_validation(&self)?;
+        let mut hints = ConnectorsBlueprint::on_validation(&self)?;
         let schema = validate_subgraph_schema(self.state.schema)
             .map_err(|err| SubgraphError::new_without_locations(self.name.clone(), err))?;
+        hints.extend(
+            crate::composite_schemas::validation::validate_source_schema(&schema)
+                .map_err(|err| SubgraphError::new_without_locations(self.name.clone(), err))?,
+        );
         let Some(metadata) = schema.subgraph_metadata().cloned() else {
             return Err(SubgraphError::new_without_locations(
                 self.name.clone(),
