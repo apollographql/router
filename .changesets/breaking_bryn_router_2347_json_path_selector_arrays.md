@@ -13,9 +13,13 @@ response_errors: "$[*].extensions.code"
 response_errors: "$[0].extensions.code"
 ```
 
-For these paths, `null` matches are now left out. `$[*].x` over `[{"x": null}, {"x": "a"}]` used to return the JSON string `"[null,\"a\"]"` and now returns `["a"]`. If every match is `null`, the attribute is omitted and `default` applies, where it used to be a string such as `"[null,null]"`. Matches of different types now give an array of strings instead of one JSON string. A match that is itself an array or object is written as one JSON string in the array: `$.*` over `{"items": [{"id": 1}, {"id": 2}]}` used to return `["{\"id\":1}", "{\"id\":2}"]` and now returns `["[{\"id\":1},{\"id\":2}]"]`.
+For paths that can match several values, these values also change:
 
-With such a path, `response_errors_field` now adds each non-null match from each error to its array, instead of writing an error with several matches as one JSON string.
+- `null` matches are left out. `$[*].x` over `[{"x": null}, {"x": "a"}]` used to return the JSON string `"[null,\"a\"]"` and now returns `["a"]`.
+- If every match is `null`, the attribute is omitted and `default` applies. It used to be a string such as `"[null,null]"`.
+- Matches of different types give an array of strings instead of one JSON string.
+- A match that is itself an array or object is written as one JSON string in the array. `$.*` over `{"items": [{"id": 1}, {"id": 2}]}` used to return `["{\"id\":1}", "{\"id\":2}"]` and now returns `["[{\"id\":1},{\"id\":2}]"]`.
+- `response_errors_field` adds each non-null match from each error to its array, instead of writing an error with several matches as one JSON string.
 
 If a dashboard or alert relies on one of these attributes being a single value, change its path to select one value, such as `$[0].extensions.code`.
 
