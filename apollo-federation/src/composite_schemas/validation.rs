@@ -229,8 +229,8 @@ impl SourceSchemaValidator<'_> {
                     continue;
                 }
                 // `REFERENCE_TO_INTERNAL_TYPE`: an internal type (annotated, or with only internal
-                // fields) is not part of the composite schema, so a public field cannot return it.
-                // Root operation types always are.
+                // fields) is not merged (see `super::internal`), so a public field cannot return
+                // it. Root operation types are always merged.
                 let return_type = field.ty.inner_named_type();
                 let is_root = self
                     .schema
