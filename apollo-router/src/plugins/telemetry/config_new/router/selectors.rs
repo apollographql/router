@@ -23,6 +23,7 @@ use crate::plugins::telemetry::config_new::selectors::ErrorRepr;
 use crate::plugins::telemetry::config_new::selectors::OperationName;
 use crate::plugins::telemetry::config_new::selectors::ResponseStatus;
 use crate::plugins::telemetry::config_new::selectors::SelectorJsonPath;
+use crate::plugins::telemetry::config_new::selectors::match_to_string;
 use crate::plugins::telemetry::config_new::trace_id;
 use crate::query_planner::APOLLO_OPERATION_ID;
 use crate::services::router;
@@ -361,8 +362,6 @@ impl Selector for RouterSelector {
                         .and_then(|body_json| {
                             let errors = body_json.get("errors")?.as_array()?;
 
-                            // Each match in each error becomes one string: a string as is,
-                            // any other value as JSON.
                             let extracted: Vec<String> = errors
                                 .iter()
                                 .filter_map(|error| serde_json_bytes::to_value(error).ok())
@@ -370,10 +369,7 @@ impl Selector for RouterSelector {
                                     response_errors_field
                                         .select(&error)
                                         .filter(|matched| !matched.is_null())
-                                        .map(|matched| match matched.as_str() {
-                                            Some(s) => s.to_string(),
-                                            None => matched.to_string(),
-                                        })
+                                        .map(|matched| match_to_string(&matched))
                                         .collect::<Vec<_>>()
                                 })
                                 .collect();

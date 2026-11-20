@@ -188,14 +188,19 @@ impl SelectorJsonPath {
                 opentelemetry::Array::String(
                     matches
                         .iter()
-                        .map(|matched| match matched.as_str() {
-                            Some(string) => string.to_string().into(),
-                            None => matched.to_string().into(),
-                        })
+                        .map(|matched| match_to_string(matched).into())
                         .collect(),
                 )
             });
         Some(opentelemetry::Value::Array(array))
+    }
+}
+
+/// A match as one element of an array of strings: a string as is, any other value as JSON.
+pub(crate) fn match_to_string(matched: &Value) -> String {
+    match matched.as_str() {
+        Some(string) => string.to_string(),
+        None => matched.to_string(),
     }
 }
 
