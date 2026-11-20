@@ -188,13 +188,14 @@ pub fn merge_subgraphs(
             return Err(CompositionFailure::from_errors(errors));
         }
     }
-    // `@internal` elements are local to their source schema and are not merged.
+    // `@internal` elements and `@require` arguments are local to their source schema and are not
+    // merged.
     let mut errors = Vec::new();
     let subgraphs: Vec<Subgraph<Validated>> = subgraphs
         .into_iter()
         .filter_map(|subgraph| {
             subgraph
-                .without_internal_elements()
+                .normalize_source_schema()
                 .map_err(|e| errors.extend(e.to_composition_errors()))
                 .ok()
         })

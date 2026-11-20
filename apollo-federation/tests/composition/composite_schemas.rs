@@ -1705,3 +1705,175 @@ mod internal_root_type {
         );
     }
 }
+
+/// The printed supergraph, API schema and extracted subgraph schemas, with the boilerplate
+/// definitions (link, join and federation directive definitions and scalars) left out so the
+/// snapshots show what the test is about.
+fn composition_summary(supergraph: &Supergraph<Satisfiable>) -> String {
+    fn strip(sdl: &str) -> String {
+        let mut out = Vec::new();
+        for block in sdl.split("\n\n") {
+            let first = block.trim_start();
+            let boilerplate = first.starts_with("directive @")
+                || first.starts_with("scalar ")
+                || first.starts_with("enum link__Purpose")
+                || first.starts_with("input join__ContextArgument")
+                || first.starts_with("input join__LookupArgument")
+                || first.starts_with("input join__RequireArgument")
+                || first.starts_with("type _Service");
+            if !boilerplate {
+                out.push(block.trim_end().to_string());
+            }
+        }
+        out.join("\n\n")
+    }
+    let mut summary = String::new();
+    summary.push_str("# Supergraph\n\n");
+    summary.push_str(&strip(&print_sdl(supergraph.schema().schema())));
+    let api = supergraph
+        .to_api_schema(Default::default())
+        .expect("api schema");
+    summary.push_str("\n\n# API schema\n\n");
+    summary.push_str(&strip(&print_sdl(api.schema())));
+    let extracted = super::test_helpers::extract_subgraphs_from_supergraph_result(supergraph)
+        .expect("extracts");
+    for (name, subgraph) in extracted {
+        summary.push_str(&format!("\n\n# Extracted subgraph \"{name}\"\n\n"));
+        summary.push_str(&strip(&print_sdl(subgraph.schema.schema())));
+    }
+    summary
+}
+
+mod composition_output {
+    use super::*;
+
+    #[test]
+    fn keys_are_inferred_from_lookups() {
+        // No `@key` at all: the lookups imply `id` (via `@is`) and `upc`.
+        let supergraph = compose_sources(&[(
+            "a",
+            r#"
+            type Query {
+              productById(productId: ID! @is(field: "id")): Product @lookup
+              productByUpc(upc: String!): Product @lookup
+            }
+            type Product { id: ID! upc: String! name: String }
+            "#,
+        )])
+        .expect("composes");
+        insta::assert_snapshot!(composition_summary(&supergraph));
+    }
+}
+
+/// The `@join__type` applications on `type_name` in the supergraph.
+fn join_types(supergraph: &Supergraph<Satisfiable>, type_name: &str) -> Vec<String> {
+    supergraph
+        .schema()
+        .schema()
+        .types
+        .get(type_name)
+        .expect("type is in the supergraph")
+        .directives()
+        .get_all("join__type")
+        .map(|directive| directive.to_string())
+        .collect()
+}
+
+mod key_resolvability {
+    use super::*;
+
+    #[test]
+    fn declared_key_written_differently_is_recalled() {
+        let supergraph = compose_sources(&[(
+            "a",
+            r#"
+            type Query { product(id: ID!, sku: String!): Product @lookup }
+            type Product @key(fields: "sku id") { id: ID! sku: String! }
+            "#,
+        )])
+        .expect("composes");
+        assert_eq!(
+            join_types(&supergraph, "Product"),
+            [r#"@join__type(graph: A, key: "sku id")"#]
+        );
+    }
+
+    #[test]
+    fn declared_key_larger_than_the_lookup_key_is_not_recalled() {
+        let supergraph = compose_sources(&[(
+            "a",
+            r#"
+            type Query { productById(id: ID!): Product @lookup }
+            type Product @key(fields: "id sku") { id: ID! sku: String! }
+            "#,
+        )])
+        .expect("composes");
+        assert_eq!(
+            join_types(&supergraph, "Product"),
+            [
+                r#"@join__type(graph: A, key: "id sku", resolvable: false)"#,
+                r#"@join__type(graph: A, key: "id")"#,
+            ]
+        );
+    }
+
+    #[test]
+    fn interface_key_is_recalled_when_every_implementation_is() {
+        let supergraph = compose_sources(&[(
+            "a",
+            r#"
+            type Query { node(id: ID!): Node @lookup }
+            interface Node @key(fields: "id") { id: ID! }
+            type Product implements Node @key(fields: "id") { id: ID! }
+            type Review implements Node @key(fields: "id") { id: ID! }
+            "#,
+        )])
+        .expect("composes");
+        assert_eq!(
+            join_types(&supergraph, "Node"),
+            [r#"@join__type(graph: A, key: "id")"#]
+        );
+    }
+
+    #[test]
+    fn interface_key_is_not_recalled_when_an_implementation_is_not() {
+        let supergraph = compose_sources(&[(
+            "a",
+            r#"
+            type Query { productById(id: ID!): Product @lookup nodes: [Node] }
+            interface Node @key(fields: "id") { id: ID! }
+            type Product implements Node @key(fields: "id") { id: ID! }
+            type Review implements Node @key(fields: "id") { id: ID! }
+            "#,
+        )])
+        .expect("composes");
+        assert_eq!(
+            join_types(&supergraph, "Node"),
+            [r#"@join__type(graph: A, key: "id", resolvable: false)"#]
+        );
+        assert_eq!(
+            join_types(&supergraph, "Review"),
+            [r#"@join__type(graph: A, key: "id", resolvable: false)"#]
+        );
+    }
+
+    #[test]
+    fn nested_key_is_inferred_from_a_lookup() {
+        let supergraph = compose_sources(&[(
+            "a",
+            r#"
+            type Query {
+              product(key: ProductKey! @is(field: "{ id, w: dimension.width, h: dimension.height }")): Product @lookup
+            }
+            input ProductKey { id: ID! w: Int! h: Int! }
+            type Product { id: ID! dimension: Dimension! }
+            type Dimension { width: Int! height: Int! }
+            "#,
+        )])
+        .expect("composes");
+        assert_eq!(
+            join_types(&supergraph, "Product"),
+            [r#"@join__type(graph: A, key: "id dimension { width height }")"#]
+        );
+    }
+}
