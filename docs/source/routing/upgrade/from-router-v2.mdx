@@ -350,6 +350,12 @@ Previously the default was `false`, which caused requests to continue running in
 
 To restore the previous behavior (e.g. to preserve telemetry for canceled requests), set `early_cancel: false` in your router config.
 
+### Client batches are limited to 10 operations by default
+
+When [query batching](/graphos/routing/performance/query-batching) is enabled, `batching.maximum_size` now defaults to `10` and can no longer be turned off. Router v2.x accepted batches of any size unless you set a limit.
+
+If your clients send larger batches, check the [`apollo.router.operations.batching.size`](/graphos/routing/performance/query-batching#metrics-for-query-batching) metric and set `maximum_size` a little above the largest batch you see.
+
 ### Stabilized `supergraph.log_on_broken_pipe`
 
 The `supergraph.experimental_log_on_broken_pipe` option is now named `supergraph.log_on_broken_pipe`.
