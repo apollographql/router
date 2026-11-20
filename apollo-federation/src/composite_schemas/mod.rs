@@ -8,6 +8,7 @@
 pub(crate) mod detection;
 #[cfg(test)]
 mod tests;
+pub(crate) mod validation;
 
 /// Whether composition may merge subgraphs that apply the GraphQL Federation directives.
 ///
@@ -33,7 +34,14 @@ thread_local! {
 
 use apollo_compiler::Name;
 
+use crate::link::federation_spec_definition::FEDERATION_CONTEXT_DIRECTIVE_NAME_IN_SPEC;
+use crate::link::federation_spec_definition::FEDERATION_FROM_CONTEXT_DIRECTIVE_NAME_IN_SPEC;
+use crate::link::federation_spec_definition::FEDERATION_INTERNAL_DIRECTIVE_NAME_IN_SPEC;
+use crate::link::federation_spec_definition::FEDERATION_IS_DIRECTIVE_NAME_IN_SPEC;
+use crate::link::federation_spec_definition::FEDERATION_KEY_DIRECTIVE_NAME_IN_SPEC;
 use crate::link::federation_spec_definition::FEDERATION_LOOKUP_DIRECTIVE_NAME_IN_SPEC;
+use crate::link::federation_spec_definition::FEDERATION_REQUIRE_DIRECTIVE_NAME_IN_SPEC;
+use crate::link::federation_spec_definition::FEDERATION_REQUIRES_DIRECTIVE_NAME_IN_SPEC;
 use crate::link::federation_spec_definition::FederationSpecDefinition;
 use crate::link::spec_definition::SpecDefinition;
 use crate::schema::FederationSchema;
@@ -86,4 +94,47 @@ pub(crate) fn uses_composite_directives(
 /// Whether `schema` applies any of `names`.
 fn applies_any(schema: &FederationSchema, names: &[Name]) -> bool {
     detection::applied_directive_names(schema.schema()).any(|name| names.contains(name))
+}
+
+/// The names, in one subgraph schema, of the directives composite-schemas logic reads.
+#[derive(Debug, Clone)]
+pub(crate) struct CompositeNames {
+    pub(crate) lookup: Name,
+    pub(crate) internal: Name,
+    pub(crate) is: Name,
+    pub(crate) require: Name,
+    pub(crate) key: Name,
+    pub(crate) requires: Option<Name>,
+    pub(crate) context: Option<Name>,
+    pub(crate) from_context: Option<Name>,
+}
+
+impl CompositeNames {
+    pub(crate) fn new(
+        schema: &FederationSchema,
+        federation_spec: &FederationSpecDefinition,
+    ) -> Option<Self> {
+        if !federation_spec.supports_composite_schemas() {
+            return None;
+        }
+        let link = federation_spec.link_in_schema(schema)?;
+        let name = |n: &Name| link.directive_name_in_schema(n);
+        let defined = |n: Name| {
+            schema
+                .schema()
+                .directive_definitions
+                .contains_key(&n)
+                .then_some(n)
+        };
+        Some(Self {
+            lookup: name(&FEDERATION_LOOKUP_DIRECTIVE_NAME_IN_SPEC),
+            internal: name(&FEDERATION_INTERNAL_DIRECTIVE_NAME_IN_SPEC),
+            is: name(&FEDERATION_IS_DIRECTIVE_NAME_IN_SPEC),
+            require: name(&FEDERATION_REQUIRE_DIRECTIVE_NAME_IN_SPEC),
+            key: name(&FEDERATION_KEY_DIRECTIVE_NAME_IN_SPEC),
+            requires: defined(name(&FEDERATION_REQUIRES_DIRECTIVE_NAME_IN_SPEC)),
+            context: defined(name(&FEDERATION_CONTEXT_DIRECTIVE_NAME_IN_SPEC)),
+            from_context: defined(name(&FEDERATION_FROM_CONTEXT_DIRECTIVE_NAME_IN_SPEC)),
+        })
+    }
 }
