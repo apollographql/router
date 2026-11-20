@@ -1017,14 +1017,7 @@ expression: "&schema"
           ]
         },
         "http2": {
-          "anyOf": [
-            {
-              "$ref": "#/$defs/Http2Config"
-            },
-            {
-              "type": "null"
-            }
-          ],
+          "$ref": "#/$defs/Http2Config",
           "description": "Whether to use HTTP/2 for coprocessor requests: `enable`, `disable` (default) or `http2only`."
         },
         "pool_idle_timeout": {

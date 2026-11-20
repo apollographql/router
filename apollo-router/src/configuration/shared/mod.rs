@@ -19,7 +19,8 @@ pub(crate) const DEFAULT_HTTP2_KEEP_ALIVE_TIMEOUT: Duration = Duration::from_sec
 #[derive(PartialEq)]
 pub(crate) struct Client {
     /// Whether to use HTTP/2 for coprocessor requests: `enable`, `disable` (default) or `http2only`.
-    pub(crate) http2: Option<Http2Config>,
+    #[config(default)]
+    pub(crate) http2: Http2Config,
 
     /// Specify a DNS resolution strategy to use when resolving the coprocessor URL.
     pub(crate) dns_resolution_strategy: Option<DnsResolutionStrategy>,
@@ -65,7 +66,7 @@ impl Client {
         experimental_http2_keep_alive_timeout: Option<Duration>,
     ) -> Self {
         Self {
-            http2,
+            http2: http2.unwrap_or_default(),
             dns_resolution_strategy,
             pool_idle_timeout: pool_idle_timeout.or_else(default_pool_idle_timeout),
             experimental_http2_keep_alive_interval,
@@ -141,6 +142,12 @@ mod tests {
         assert_eq!(client.pool_idle_timeout, Some(DEFAULT_POOL_IDLE_TIMEOUT));
         assert_eq!(client, yaml_serde::from_str::<Client>("{}").unwrap());
         assert_eq!(client, Client::builder().build());
+    }
+
+    #[test]
+    fn test_http2_default_when_omitted() {
+        let client: Client = yaml_serde::from_str("{}").unwrap();
+        assert_eq!(client.http2, Http2Config::Disable);
     }
 
     #[test]

@@ -685,7 +685,7 @@ impl TrafficShaping {
 impl From<Shaping> for crate::configuration::shared::Client {
     fn from(shaping: Shaping) -> Self {
         Self {
-            http2: shaping.http2,
+            http2: shaping.http2.unwrap_or_default(),
             dns_resolution_strategy: shaping.dns_resolution_strategy,
             pool_idle_timeout: resolve_pool_idle_timeout(shaping.pool_idle_timeout),
             experimental_http2_keep_alive_interval: shaping
@@ -703,7 +703,7 @@ impl From<Shaping> for crate::configuration::shared::Client {
 impl From<ConnectorShaping> for crate::configuration::shared::Client {
     fn from(shaping: ConnectorShaping) -> Self {
         Self {
-            http2: shaping.experimental_http2,
+            http2: shaping.experimental_http2.unwrap_or_default(),
             dns_resolution_strategy: shaping.dns_resolution_strategy,
             pool_idle_timeout: resolve_pool_idle_timeout(shaping.pool_idle_timeout),
             experimental_http2_keep_alive_interval: shaping
@@ -1067,7 +1067,7 @@ mod test {
         assert_eq!(
             shaping_config.subgraph_client_config("products"),
             crate::configuration::shared::Client {
-                http2: Some(Http2Config::Enable),
+                http2: Http2Config::Enable,
                 dns_resolution_strategy: Some(DnsResolutionStrategy::Ipv6ThenIpv4),
                 pool_idle_timeout: default_pool_idle_timeout(),
                 ..Default::default()
@@ -1076,7 +1076,7 @@ mod test {
         assert_eq!(
             shaping_config.subgraph_client_config("reviews"),
             crate::configuration::shared::Client {
-                http2: Some(Http2Config::Disable),
+                http2: Http2Config::Disable,
                 dns_resolution_strategy: Some(DnsResolutionStrategy::Ipv4Only),
                 pool_idle_timeout: default_pool_idle_timeout(),
                 ..Default::default()
@@ -1085,7 +1085,7 @@ mod test {
         assert_eq!(
             shaping_config.subgraph_client_config("this_doesnt_exist"),
             crate::configuration::shared::Client {
-                http2: Some(Http2Config::Disable),
+                http2: Http2Config::Disable,
                 dns_resolution_strategy: Some(DnsResolutionStrategy::Ipv6Only),
                 pool_idle_timeout: default_pool_idle_timeout(),
                 ..Default::default()
