@@ -371,6 +371,14 @@ coprocessor:
     http2: enable
 ```
 
+### Client batches are limited to 10 operations by default
+
+When [query batching](/graphos/routing/performance/query-batching) is enabled, `batching.maximum_size` now defaults to `10` and can no longer be turned off. Router v2.x accepted batches of any size unless you set a limit.
+
+Batches exceeding the maximum size are rejected with an HTTP 422 status code and a `BATCH_LIMIT_EXCEEDED` error code.
+
+If your clients send larger batches, check the [`apollo.router.operations.batching.size`](/graphos/routing/performance/query-batching#metrics-for-query-batching) metric and set `maximum_size` a little above the largest batch you see.
+
 ### Stabilized `supergraph.log_on_broken_pipe`
 
 The `supergraph.experimental_log_on_broken_pipe` option is now named `supergraph.log_on_broken_pipe`.

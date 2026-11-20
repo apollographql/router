@@ -656,14 +656,11 @@ expression: "&schema"
           "type": "boolean"
         },
         "maximum_size": {
-          "default": null,
-          "description": "Maximum size for a batch",
+          "default": 10,
+          "description": "Maximum number of operations in a client batch. Larger batches are rejected with\n`BATCH_LIMIT_EXCEEDED`.",
           "format": "uint",
-          "minimum": 0,
-          "type": [
-            "integer",
-            "null"
-          ]
+          "minimum": 1,
+          "type": "integer"
         },
         "mode": {
           "$ref": "#/$defs/BatchingMode",
@@ -12192,7 +12189,7 @@ expression: "&schema"
       "$ref": "#/$defs/Batching",
       "default": {
         "enabled": false,
-        "maximum_size": null,
+        "maximum_size": 10,
         "mode": "batch_http_link",
         "subgraph": null
       },

@@ -1746,7 +1746,7 @@ pub(crate) enum BatchingMode {
 }
 
 /// Configuration for Batching
-#[derive(Debug, Clone, Default, Deserialize, Serialize, JsonSchema)]
+#[derive(Debug, Clone, Deserialize, Serialize, JsonSchema)]
 #[serde(deny_unknown_fields, default)]
 pub(crate) struct Batching {
     /// Activates Batching (disabled by default)
@@ -1758,8 +1758,20 @@ pub(crate) struct Batching {
     /// Subgraph options for batching
     pub(crate) subgraph: Option<SubgraphConfiguration<CommonBatchingConfig>>,
 
-    /// Maximum size for a batch
-    pub(crate) maximum_size: Option<usize>,
+    /// Maximum number of operations in a client batch. Larger batches are rejected with
+    /// `BATCH_LIMIT_EXCEEDED`.
+    pub(crate) maximum_size: NonZeroUsize,
+}
+
+impl Default for Batching {
+    fn default() -> Self {
+        Self {
+            enabled: false,
+            mode: BatchingMode::default(),
+            subgraph: None,
+            maximum_size: NonZeroUsize::new(10).unwrap(),
+        }
+    }
 }
 
 /// Common options for configuring subgraph batching
@@ -1798,10 +1810,7 @@ impl Batching {
     }
 
     pub(crate) fn exceeds_batch_size<T>(&self, batch: &[T]) -> bool {
-        match self.maximum_size {
-            Some(maximum_size) => batch.len() > maximum_size,
-            None => false,
-        }
+        batch.len() > self.maximum_size.get()
     }
 }
 

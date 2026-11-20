@@ -1594,7 +1594,7 @@ fn it_processes_unspecified_maximum_batch_limit_correctly() {
 
     let config: Batching = serde_json::from_value(json_config).unwrap();
 
-    assert_eq!(config.maximum_size, None);
+    assert_eq!(config.maximum_size.get(), 10);
 }
 
 #[test]
@@ -1602,12 +1602,12 @@ fn it_processes_specified_maximum_batch_limit_correctly() {
     let json_config = json!({
         "enabled": true,
         "mode": "batch_http_link",
-        "maximum_size": 10
+        "maximum_size": 50
     });
 
     let config: Batching = serde_json::from_value(json_config).unwrap();
 
-    assert_eq!(config.maximum_size, Some(10));
+    assert_eq!(config.maximum_size.get(), 50);
 }
 
 #[test]

@@ -268,7 +268,7 @@ where
                     extension_details: format!(
                         "Batch limits exceeded: you provided a batch with {} entries, but the configured maximum router batch size is {}",
                         result.len(),
-                        self.config.maximum_size.unwrap_or_default()
+                        self.config.maximum_size
                     ),
                 });
             }
@@ -421,6 +421,7 @@ where
 
 #[cfg(test)]
 mod tests {
+    use std::num::NonZeroUsize;
     use std::time::Duration;
 
     use http::Method;
@@ -617,7 +618,7 @@ mod tests {
         let config = Batching {
             enabled: true,
             mode: BatchingMode::BatchHttpLink,
-            maximum_size: Some(2),
+            maximum_size: NonZeroUsize::new(2).unwrap(),
             ..Default::default()
         };
 
@@ -674,6 +675,82 @@ mod tests {
                         .method(Method::POST)
                         .body(router::body::from_bytes(
                             r#"[{"query":"{ a }"},{"query":"{ b }"},{"query":"{ c }"}]"#,
+                        ))
+                        .build()
+                        .unwrap(),
+                )
+                .await
+                .unwrap();
+            assert_eq!(response.response.status(), StatusCode::UNPROCESSABLE_ENTITY);
+            assert_error_code(response, "BATCH_LIMIT_EXCEEDED").await;
+
+            crate::plugin::test::assert_no_mock_calls(handle).await;
+        }
+    }
+
+    #[tokio::test]
+    async fn it_limits_batches_to_10_by_default() {
+        let config = Batching {
+            enabled: true,
+            mode: BatchingMode::BatchHttpLink,
+            ..Default::default()
+        };
+
+        // 10 requests should be fine
+        {
+            let (mock, mut handle) = tower_test::mock::pair::<RouterRequest, RouterResponse>();
+            let driver = tokio::task::spawn(async move {
+                for _ in 0..10 {
+                    let (_request, responder) = handle.next_request().await.unwrap();
+                    responder.send_response(
+                        RouterResponse::fake_builder()
+                            .data(serde_json_bytes::json!({"a": true}))
+                            .build()
+                            .unwrap(),
+                    );
+                }
+            });
+            let mut service = ServiceBuilder::new()
+                .layer(SplitBatchRequestLayer::new(config.clone()))
+                .service(mock);
+
+            let batch = vec![serde_json::json!({"query": "{ a }"}); 10];
+            let response = service
+                .ready()
+                .await
+                .unwrap()
+                .call(
+                    router::Request::fake_builder()
+                        .method(Method::POST)
+                        .body(router::body::from_bytes(
+                            serde_json::to_string(&batch).unwrap(),
+                        ))
+                        .build()
+                        .unwrap(),
+                )
+                .await
+                .unwrap();
+            assert_eq!(response.response.status(), StatusCode::OK);
+            crate::plugin::test::await_mock_driver(driver).await;
+        }
+
+        // 11 requests should not be fine
+        {
+            let (mock, handle) = tower_test::mock::pair::<RouterRequest, RouterResponse>();
+            let mut service = ServiceBuilder::new()
+                .layer(SplitBatchRequestLayer::new(config))
+                .service(mock);
+
+            let batch = vec![serde_json::json!({"query": "{ a }"}); 11];
+            let response = service
+                .ready()
+                .await
+                .unwrap()
+                .call(
+                    router::Request::fake_builder()
+                        .method(Method::POST)
+                        .body(router::body::from_bytes(
+                            serde_json::to_string(&batch).unwrap(),
                         ))
                         .build()
                         .unwrap(),
