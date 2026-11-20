@@ -13,6 +13,7 @@ mod compose_type_merging;
 mod compose_types;
 mod compose_upgrade_subgraphs;
 mod compose_validation;
+mod composite_schemas;
 mod connectors;
 mod demand_control;
 mod directive_argument_merge_strategies;

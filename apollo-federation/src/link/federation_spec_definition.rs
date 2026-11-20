@@ -60,6 +60,7 @@ pub(crate) const FEDERATION_TAG_DIRECTIVE_NAME_IN_SPEC: Name = name!("tag");
 pub(crate) const FEDERATION_COMPOSEDIRECTIVE_DIRECTIVE_NAME_IN_SPEC: Name =
     name!("composeDirective");
 // GraphQL Federation (composite schemas) source-schema directives, added in federation v3.0.
+pub(crate) const COMPOSITE_SCHEMAS_FEDERATION_VERSION: Version = Version { major: 3, minor: 0 };
 pub(crate) const FEDERATION_LOOKUP_DIRECTIVE_NAME_IN_SPEC: Name = name!("lookup");
 pub(crate) const FEDERATION_INTERNAL_DIRECTIVE_NAME_IN_SPEC: Name = name!("internal");
 pub(crate) const FEDERATION_IS_DIRECTIVE_NAME_IN_SPEC: Name = name!("is");
@@ -959,7 +960,7 @@ impl FederationSpecDefinition {
         )
     }
 
-    /// `directive @internal on OBJECT | FIELD_DEFINITION`
+    /// `directive @internal on OBJECT | INPUT_OBJECT | FIELD_DEFINITION`
     fn internal_directive_specification() -> DirectiveSpecification {
         DirectiveSpecification::new(
             FEDERATION_INTERNAL_DIRECTIVE_NAME_IN_SPEC,
@@ -967,6 +968,7 @@ impl FederationSpecDefinition {
             false,
             &[
                 DirectiveLocation::Object,
+                DirectiveLocation::InputObject,
                 DirectiveLocation::FieldDefinition,
             ],
             None,
@@ -990,6 +992,11 @@ impl FederationSpecDefinition {
             &[DirectiveLocation::ArgumentDefinition],
             None,
         )
+    }
+
+    /// Whether this version defines the GraphQL Federation source-schema directives.
+    pub(crate) fn supports_composite_schemas(&self) -> bool {
+        *self.version() >= COMPOSITE_SCHEMAS_FEDERATION_VERSION
     }
 
     fn cache_tag_directive_specification() -> DirectiveSpecification {

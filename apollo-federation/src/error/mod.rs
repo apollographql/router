@@ -907,6 +907,8 @@ pub enum SingleFederationError {
     #[error("Context name \"{name}\" is invalid. It should have only alphanumeric characters.")]
     ContextNameInvalid { name: String },
     #[error("{message}")]
+    GraphQLFederationNotEnabled { message: String },
+    #[error("{message}")]
     ContextNotSet { message: String },
     #[error("{message}")]
     NoContextReferenced { message: String },
@@ -1155,6 +1157,9 @@ impl SingleFederationError {
                 ErrorCode::ContextNameContainsUnderscore
             }
             SingleFederationError::ContextNameInvalid { .. } => ErrorCode::ContextNameInvalid,
+            SingleFederationError::GraphQLFederationNotEnabled { .. } => {
+                ErrorCode::GraphQLFederationNotEnabled
+            }
             SingleFederationError::ContextNotSet { .. } => ErrorCode::ContextNotSet,
             SingleFederationError::NoContextReferenced { .. } => ErrorCode::NoContextReferenced,
             SingleFederationError::NoSelectionForContext { .. } => ErrorCode::NoSelectionForContext,
@@ -2457,6 +2462,17 @@ static CONTEXT_NAME_INVALID: LazyLock<ErrorCodeDefinition> = LazyLock::new(|| {
     )
 });
 
+static GRAPHQL_FEDERATION_NOT_ENABLED: LazyLock<ErrorCodeDefinition> = LazyLock::new(|| {
+    ErrorCodeDefinition::new(
+        "GRAPHQL_FEDERATION_NOT_ENABLED".to_owned(),
+        "A subgraph applies the GraphQL Federation directives (`@lookup`, `@internal`, `@is`, `@require`), which composition does not support yet.".to_owned(),
+        Some(ErrorCodeMetadata {
+            added_in: "3.0.0",
+            replaces: &[],
+        }),
+    )
+});
+
 static CONTEXT_NOT_SET: LazyLock<ErrorCodeDefinition> = LazyLock::new(|| {
     ErrorCodeDefinition::new(
         "CONTEXT_NOT_SET".to_owned(),
@@ -2737,6 +2753,7 @@ pub enum ErrorCode {
     ListSizeInvalidAssumedSize,
     ListSizeInvalidSlicingArgument,
     ListSizeInvalidSizedField,
+    GraphQLFederationNotEnabled,
     ContextNameInvalid,
     ContextNameContainsUnderscore,
     ContextNotSet,
@@ -2868,6 +2885,7 @@ impl ErrorCode {
             ErrorCode::ListSizeInvalidSizedField => &LIST_SIZE_INVALID_SIZED_FIELD,
             ErrorCode::ContextNameContainsUnderscore => &CONTEXT_NAME_CONTAINS_UNDERSCORE,
             ErrorCode::ContextNameInvalid => &CONTEXT_NAME_INVALID,
+            ErrorCode::GraphQLFederationNotEnabled => &GRAPHQL_FEDERATION_NOT_ENABLED,
             ErrorCode::ContextNotSet => &CONTEXT_NOT_SET,
             ErrorCode::NoContextReferenced => &NO_CONTEXT_REFERENCED,
             ErrorCode::NoSelectionForContext => &NO_SELECTION_FOR_CONTEXT,
