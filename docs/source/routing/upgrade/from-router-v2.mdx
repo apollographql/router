@@ -295,6 +295,32 @@ The `telemetry.instrumentation.spans.mode` option is removed. The `spec_complian
 **Upgrade step**:
 - Remove the `telemetry.instrumentation.spans.mode` field from your configuration.
 
+### JSON path selectors return an array for any path that can match several values
+
+In GraphOS Router v2.x, the `response_data`, `response_errors`, `subgraph_response_data` and `subgraph_response_errors` selectors returned a single value when their JSON path matched one value, and an array when it matched several. The same configuration could produce a string for one response and an array for the next.
+
+Starting in Router 3, the shape of the path decides. A path made only of field names and single indexes, such as `$[0].extensions.code`, returns the matched value. Any other path, such as one with `[*]`, `.*`, `..`, a slice, a union or a filter, always returns an array, even when it matches one value. For example, with `$[*].extensions.code`:
+
+| Errors in the response | v2.x | v3 |
+| --- | --- | --- |
+| One `NOT_FOUND` error | `"NOT_FOUND"` | `["NOT_FOUND"]` |
+| `NOT_FOUND` and `FORBIDDEN` errors | `["NOT_FOUND", "FORBIDDEN"]` | `["NOT_FOUND", "FORBIDDEN"]` |
+
+For these paths, Router 3 also leaves `null` matches out:
+
+| Path and data | v2.x | v3 |
+| --- | --- | --- |
+| `$[*].x` over `[{"x": null}, {"x": "a"}]` | `"[null,\"a\"]"` | `["a"]` |
+| `$[*].x` over `[{"x": null}, {"x": null}]` | `"[null,null]"` | No attribute; `default` applies |
+
+When matches have different types, Router 3 returns an array of strings instead of one JSON string. A match that is itself an array or object is written as one JSON string in the array: `$.*` over `{"items": [{"id": 1}, {"id": 2}]}` returned `["{\"id\":1}", "{\"id\":2}"]` in v2.x and returns `["[{\"id\":1},{\"id\":2}]"]` in Router 3. With such a path, the `response_errors_field` selector now adds each non-null match from each error to its array, instead of writing an error with several matches as one JSON string.
+
+**Upgrade step**:
+- For each of these selectors whose path uses `[*]`, `.*`, `..`, a slice, a union or a filter, check the dashboards and alerts that use its attribute: a value that was a string is now a one-element array, which starts a new metric series.
+- If you want a single value, change the path to select one, for example `$[0].extensions.code` instead of `$[*].extensions.code`.
+
+See [Single values and arrays](/graphos/routing/observability/router-telemetry-otel/enabling-telemetry/selectors#single-values-and-arrays).
+
 ## Configuration changes
 
 The following describes changes to router configuration, including renamed options and changed default values.

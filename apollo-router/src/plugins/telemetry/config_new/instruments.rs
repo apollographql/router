@@ -3992,19 +3992,38 @@ mod tests {
             assert_counter!(
                 "acme.request.on_graphql_error",
                 1.0,
-                response_errors = "{\"message\":\"nope\",\"extensions\":{\"code\":\"NOPE\"}}"
+                response_errors = opentelemetry::Value::Array(
+                    vec![opentelemetry::StringValue::from(
+                        "{\"message\":\"nope\",\"extensions\":{\"code\":\"NOPE\"}}"
+                    )]
+                    .into()
+                )
             );
             assert_counter!(
                 "acme.request.on_graphql_error_selector",
                 1.0,
-                response_errors = "{\"message\":\"nope\",\"extensions\":{\"code\":\"NOPE\"}}"
+                response_errors = opentelemetry::Value::Array(
+                    vec![opentelemetry::StringValue::from(
+                        "{\"message\":\"nope\",\"extensions\":{\"code\":\"NOPE\"}}"
+                    )]
+                    .into()
+                )
             );
             assert_histogram_sum!(
                 "acme.request.on_graphql_error_histo",
                 1.0,
-                response_errors = "{\"message\":\"nope\",\"extensions\":{\"code\":\"NOPE\"}}"
+                response_errors = opentelemetry::Value::Array(
+                    vec![opentelemetry::StringValue::from(
+                        "{\"message\":\"nope\",\"extensions\":{\"code\":\"NOPE\"}}"
+                    )]
+                    .into()
+                )
             );
-            assert_counter!("acme.request.on_graphql_data", 500.0, response.data = 500);
+            assert_counter!(
+                "acme.request.on_graphql_data",
+                500.0,
+                response.data = opentelemetry::Value::Array(vec![500i64].into())
+            );
 
             let custom_instruments = SupergraphCustomInstruments::new(
                 &config.supergraph.custom,
@@ -4053,19 +4072,38 @@ mod tests {
             assert_counter!(
                 "acme.request.on_graphql_error",
                 2.0,
-                response_errors = "{\"message\":\"nope\",\"extensions\":{\"code\":\"NOPE\"}}"
+                response_errors = opentelemetry::Value::Array(
+                    vec![opentelemetry::StringValue::from(
+                        "{\"message\":\"nope\",\"extensions\":{\"code\":\"NOPE\"}}"
+                    )]
+                    .into()
+                )
             );
             assert_counter!(
                 "acme.request.on_graphql_error_selector",
                 2.0,
-                response_errors = "{\"message\":\"nope\",\"extensions\":{\"code\":\"NOPE\"}}"
+                response_errors = opentelemetry::Value::Array(
+                    vec![opentelemetry::StringValue::from(
+                        "{\"message\":\"nope\",\"extensions\":{\"code\":\"NOPE\"}}"
+                    )]
+                    .into()
+                )
             );
             assert_histogram_sum!(
                 "acme.request.on_graphql_error_histo",
                 2.0,
-                response_errors = "{\"message\":\"nope\",\"extensions\":{\"code\":\"NOPE\"}}"
+                response_errors = opentelemetry::Value::Array(
+                    vec![opentelemetry::StringValue::from(
+                        "{\"message\":\"nope\",\"extensions\":{\"code\":\"NOPE\"}}"
+                    )]
+                    .into()
+                )
             );
-            assert_counter!("acme.request.on_graphql_data", 1000.0, response.data = 500);
+            assert_counter!(
+                "acme.request.on_graphql_data",
+                1000.0,
+                response.data = opentelemetry::Value::Array(vec![500i64].into())
+            );
 
             let custom_instruments = SupergraphCustomInstruments::new(
                 &config.supergraph.custom,
@@ -4100,19 +4138,38 @@ mod tests {
             assert_counter!(
                 "acme.request.on_graphql_error",
                 2.0,
-                response_errors = "{\"message\":\"nope\",\"extensions\":{\"code\":\"NOPE\"}}"
+                response_errors = opentelemetry::Value::Array(
+                    vec![opentelemetry::StringValue::from(
+                        "{\"message\":\"nope\",\"extensions\":{\"code\":\"NOPE\"}}"
+                    )]
+                    .into()
+                )
             );
             assert_counter!(
                 "acme.request.on_graphql_error_selector",
                 2.0,
-                response_errors = "{\"message\":\"nope\",\"extensions\":{\"code\":\"NOPE\"}}"
+                response_errors = opentelemetry::Value::Array(
+                    vec![opentelemetry::StringValue::from(
+                        "{\"message\":\"nope\",\"extensions\":{\"code\":\"NOPE\"}}"
+                    )]
+                    .into()
+                )
             );
             assert_histogram_sum!(
                 "acme.request.on_graphql_error_histo",
                 2.0,
-                response_errors = "{\"message\":\"nope\",\"extensions\":{\"code\":\"NOPE\"}}"
+                response_errors = opentelemetry::Value::Array(
+                    vec![opentelemetry::StringValue::from(
+                        "{\"message\":\"nope\",\"extensions\":{\"code\":\"NOPE\"}}"
+                    )]
+                    .into()
+                )
             );
-            assert_counter!("acme.request.on_graphql_data", 1000.0, response.data = 500);
+            assert_counter!(
+                "acme.request.on_graphql_data",
+                1000.0,
+                response.data = opentelemetry::Value::Array(vec![500i64].into())
+            );
         }
         .with_metrics()
         .await;
