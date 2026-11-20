@@ -66,6 +66,7 @@ use crate::services::router;
 use crate::services::subgraph;
 use crate::services::supergraph;
 use crate::uplink::license_enforcement::LicenseState;
+use crate::uplink::license_enforcement::LicensedSetting;
 
 type ConfigFactory = for<'de> fn(
     &mut dyn erased_serde::Deserializer<'de>,
@@ -75,6 +76,8 @@ type InstanceFactory =
     fn(PluginInit<PluginConfig>) -> BoxFuture<'static, Result<Box<dyn DynPlugin>, BoxError>>;
 
 type SchemaFactory = fn(&mut SchemaGenerator) -> schemars::Schema;
+
+type LicensedFeaturesFactory = fn(&PluginConfig) -> Vec<LicensedSetting>;
 
 /// A plugin's config, deserialized when the router configuration is parsed. It validates
 /// itself, so the configuration can run every plugin's rules without knowing their types.
@@ -351,6 +354,7 @@ pub struct PluginFactory {
     config_factory: ConfigFactory,
     instance_factory: InstanceFactory,
     schema_factory: SchemaFactory,
+    licensed_features_factory: LicensedFeaturesFactory,
     pub(crate) type_id: TypeId,
 }
 
@@ -396,6 +400,13 @@ impl PluginFactory {
                 })
             },
             schema_factory: |generator| generator.subschema_for::<<P as PluginPrivate>::Config>(),
+            // Panics rather than reporting no settings, which would pass the licence check.
+            licensed_features_factory: |config| {
+                let config = config
+                    .downcast_ref::<P::Config>()
+                    .expect("a plugin's section is always parsed or built as its own Config type");
+                P::licensed_features(config)
+            },
             type_id: TypeId::of::<P>(),
         }
     }
@@ -452,6 +463,12 @@ impl PluginFactory {
 
     pub(crate) fn create_schema(&self, generator: &mut SchemaGenerator) -> schemars::Schema {
         (self.schema_factory)(generator)
+    }
+
+    /// The settings in `config`, parsed by [`Self::parse_config`], that need a licence.
+    /// See [`PluginPrivate::licensed_features`].
+    pub(crate) fn licensed_features(&self, config: &PluginConfig) -> Vec<LicensedSetting> {
+        (self.licensed_features_factory)(config)
     }
 }
 
@@ -749,6 +766,16 @@ pub(crate) trait PluginPrivate: Send + Sync + 'static {
     type Config: Configuration + Clone + Send + Sync + 'static;
 
     const HIDDEN_FROM_CONFIG_JSON_SCHEMA: bool = false;
+
+    /// The settings in `config` that need a licence feature.
+    ///
+    /// The startup licence check calls this for every plugin with a section in the router
+    /// configuration, and refuses to start or reload when the licence lacks the feature a
+    /// returned setting needs. Return only settings that are in effect: a section that turns a
+    /// licensed feature off needs no licence. The default returns nothing.
+    fn licensed_features(_config: &Self::Config) -> Vec<LicensedSetting> {
+        Vec::new()
+    }
 
     /// This is invoked once after the router starts and compiled-in
     /// plugins are registered.

@@ -909,6 +909,17 @@ impl FromStr for License {
     }
 }
 
+/// A router configuration setting that is only allowed when the licence has `feature`.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(crate) struct LicensedSetting {
+    /// The licence feature the setting needs.
+    pub(crate) feature: AllowedFeature,
+    /// What the setting does, shown to the operator, such as "Federated subscriptions".
+    pub(crate) name: &'static str,
+    /// Where the setting is in router.yaml, such as `subscription.enabled`.
+    pub(crate) path: &'static str,
+}
+
 /// An individual check for the router.yaml.
 #[derive(Builder, Clone, Debug, Serialize, Deserialize)]
 pub(crate) struct ConfigurationRestriction {
