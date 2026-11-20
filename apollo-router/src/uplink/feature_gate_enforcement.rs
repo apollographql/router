@@ -5,10 +5,10 @@ use std::fmt::Formatter;
 use itertools::Itertools;
 use serde::Deserialize;
 use serde::Serialize;
-use serde_json::Value;
 
 use super::parsed_link_spec::ParsedLinkSpec;
 use crate::Configuration;
+use crate::plugins::connectors::configuration::ConnectorsConfig;
 use crate::spec::LINK_DIRECTIVE_NAME;
 use crate::spec::Schema;
 
@@ -59,29 +59,18 @@ impl FeatureGateEnforcementReport {
         let mut schema_violations: Vec<FeatureGateViolation> = Vec::new();
 
         for restriction in schema_restrictions {
-            let mut selector = jsonpath_lib::selector(
-                configuration
-                    .validated_yaml
-                    .as_ref()
-                    .unwrap_or(&Value::Null),
-            );
-
             match restriction {
                 FeatureRestriction::SpecInJoinDirective {
                     spec_url,
                     name,
                     version_req,
-                    feature_gate_configuration_path,
-                    expected_value,
+                    is_enabled,
                     to_enable,
                     warning,
                 } => {
                     if let Some(link_spec) = link_specs_in_join_directive.get(spec_url) {
                         let relevant = version_req.matches(&link_spec.version);
-                        let enabled = selector(feature_gate_configuration_path)
-                            .expect("path on restriction was not valid")
-                            .first()
-                            .is_some_and(|config_value| *config_value == expected_value);
+                        let enabled = is_enabled(configuration);
 
                         if relevant && enabled && warning.is_some() {
                             tracing::warn!("{}", warning.as_ref().unwrap_or(&"".to_string()));
@@ -118,8 +107,13 @@ impl FeatureGateEnforcementReport {
                     pre: semver::Prerelease::EMPTY,
                 }],
             },
-            feature_gate_configuration_path: "$.connectors.preview_connect_v0_5".to_string(),
-            expected_value: Value::Bool(true),
+            is_enabled: |configuration| {
+                configuration
+                    .plugin_config("apollo.connectors")
+                    .and_then(|config| config.downcast_ref::<ConnectorsConfig>())
+                    .and_then(|config| config.preview_connect_v0_5)
+                    == Some(true)
+            },
             to_enable: "  connectors:
     preview_connect_v0_5: true"
                 .to_string(),
@@ -151,8 +145,8 @@ pub(crate) enum FeatureRestriction {
         spec_url: String,
         name: String,
         version_req: semver::VersionReq,
-        feature_gate_configuration_path: String,
-        expected_value: Value,
+        /// Whether the configuration turns the feature gate on.
+        is_enabled: fn(&Configuration) -> bool,
         to_enable: String,
         warning: Option<String>,
     },
