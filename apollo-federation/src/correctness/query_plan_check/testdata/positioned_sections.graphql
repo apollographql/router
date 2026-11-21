@@ -1,0 +1,140 @@
+# A `Section` is a `SectionA` or a `SectionB`, each holding a `card` whose `item` is a `Thing`. `one`
+# serves the sections and a `SectionA`'s `card`, and implements `Thing` as `X` alone; `two` resolves a
+# `SectionB` by `id` and serves its `card`, implementing `Thing` as `X` and `Y`.
+#
+# Composed with `apollo_federation::composition::compose` from the two subgraphs below. Recompose it
+# when they change.
+#
+# Subgraph `one`:
+#
+#   extend schema @link(url: "https://specs.apollo.dev/federation/v2.7", import: ["@key", "@shareable", "@interfaceObject"])
+#
+#   type Query {
+#     sections: [Section]
+#   }
+#
+#   interface Section {
+#     id: ID!
+#   }
+#
+#   type SectionA implements Section @key(fields: "id") {
+#     id: ID!
+#     card: Card
+#   }
+#
+#   type SectionB implements Section @key(fields: "id") {
+#     id: ID!
+#   }
+#
+#   type Card @shareable {
+#     item: Thing
+#   }
+#
+#   interface Thing {
+#     id: ID!
+#   }
+#
+#   type X implements Thing @shareable {
+#     id: ID!
+#   }
+#
+# Subgraph `two`:
+#
+#   extend schema @link(url: "https://specs.apollo.dev/federation/v2.7", import: ["@key", "@shareable", "@interfaceObject"])
+#
+#   type SectionB @key(fields: "id") {
+#     id: ID!
+#     card: Card
+#   }
+#
+#   type Card @shareable {
+#     item: Thing
+#   }
+#
+#   interface Thing {
+#     id: ID!
+#   }
+#
+#   type X implements Thing @shareable {
+#     id: ID!
+#   }
+#
+#   type Y implements Thing @shareable {
+#     id: ID!
+#   }
+
+schema @link(url: "https://specs.apollo.dev/link/v1.0") @link(url: "https://specs.apollo.dev/join/v0.4", for: EXECUTION) {
+  query: Query
+}
+
+directive @link(url: String, as: String, for: link__Purpose, import: [link__Import]) repeatable on SCHEMA
+
+directive @join__graph(name: String!, url: String!) on ENUM_VALUE
+
+directive @join__type(graph: join__Graph!, key: join__FieldSet, extension: Boolean! = false, resolvable: Boolean! = true, isInterfaceObject: Boolean! = false) repeatable on OBJECT | INTERFACE | UNION | ENUM | INPUT_OBJECT | SCALAR
+
+directive @join__field(graph: join__Graph, requires: join__FieldSet, provides: join__FieldSet, type: String, external: Boolean, override: String, usedOverridden: Boolean, overrideLabel: String) repeatable on FIELD_DEFINITION | INPUT_FIELD_DEFINITION
+
+directive @join__implements(graph: join__Graph!, interface: String!) repeatable on OBJECT | INTERFACE
+
+directive @join__unionMember(graph: join__Graph!, member: String!) repeatable on UNION
+
+directive @join__enumValue(graph: join__Graph!) repeatable on ENUM_VALUE
+
+directive @join__directive(graphs: [join__Graph!], name: String!, args: join__DirectiveArguments) repeatable on SCHEMA | OBJECT | INTERFACE | FIELD_DEFINITION
+
+enum link__Purpose {
+  """
+  `SECURITY` features provide metadata necessary to securely resolve fields.
+  """
+  SECURITY
+  """
+  `EXECUTION` features provide metadata necessary for operation execution.
+  """
+  EXECUTION
+}
+
+scalar link__Import
+
+enum join__Graph {
+  ONE @join__graph(name: "one", url: "http://one")
+  TWO @join__graph(name: "two", url: "http://two")
+}
+
+scalar join__FieldSet
+
+scalar join__DirectiveArguments
+
+type Query @join__type(graph: ONE) @join__type(graph: TWO) {
+  sections: [Section] @join__field(graph: ONE)
+}
+
+interface Section @join__type(graph: ONE) {
+  id: ID!
+}
+
+type SectionA implements Section @join__implements(graph: ONE, interface: "Section") @join__type(graph: ONE, key: "id") {
+  id: ID!
+  card: Card
+}
+
+type SectionB implements Section @join__implements(graph: ONE, interface: "Section") @join__type(graph: ONE, key: "id") @join__type(graph: TWO, key: "id") {
+  id: ID!
+  card: Card @join__field(graph: TWO)
+}
+
+type Card @join__type(graph: ONE) @join__type(graph: TWO) {
+  item: Thing
+}
+
+interface Thing @join__type(graph: ONE) @join__type(graph: TWO) {
+  id: ID!
+}
+
+type X implements Thing @join__implements(graph: ONE, interface: "Thing") @join__implements(graph: TWO, interface: "Thing") @join__type(graph: ONE) @join__type(graph: TWO) {
+  id: ID!
+}
+
+type Y implements Thing @join__implements(graph: TWO, interface: "Thing") @join__type(graph: TWO) {
+  id: ID!
+}

@@ -134,10 +134,28 @@ pub(crate) fn remove_non_semantic_directives(schema: &mut Schema) {
 // Just a boolean with a `?` operator
 type CoerceResult = Result<(), ()>;
 
-#[derive(Default)]
+#[derive(Clone, Copy, Default)]
 struct CoerceOptions {
     coerce_non_list_values_for_list_types: bool,
+    /// Rewrite an `Int` or `Float` literal given for the `Float` type as the `Float` its number
+    /// prints as, and an `Int` literal given for the `ID` type as its decimal string, so literals
+    /// input coercion makes one value are spelled alike. Only the correctness checker sets this:
+    /// the planner sends literals to subgraphs as the client wrote them.
+    canonicalize_numbers: bool,
 }
+
+/// The options operations are coerced with for the planner.
+const OPERATION_COERCE_OPTIONS: CoerceOptions = CoerceOptions {
+    coerce_non_list_values_for_list_types: true,
+    canonicalize_numbers: false,
+};
+
+/// The options operations are coerced with before the correctness checker compares them.
+#[cfg(feature = "correctness")]
+const COMPARISON_COERCE_OPTIONS: CoerceOptions = CoerceOptions {
+    coerce_non_list_values_for_list_types: true,
+    canonicalize_numbers: true,
+};
 
 /// This function, when passed a GraphQL value from a schema or operation, will:
 /// 1. Coerce enum values for the String type and string values for enum types. This is not a
@@ -267,6 +285,12 @@ fn coerce_value(
                                     // A non-integer, non-float value is invalid for the Float type.
                                     return Err(());
                                 }
+                                if options.canonicalize_numbers
+                                    && let Some(number) =
+                                        target.to_f64().filter(|number| number.is_finite())
+                                {
+                                    *target.make_mut() = Value::Float(number.into());
+                                }
                                 // As mentioned above, we don't validate the float value is a finite
                                 // IEEE 754 value for backward compatibility with JS logic.
                             }
@@ -292,6 +316,11 @@ fn coerce_value(
                                 if !matches!(target.as_ref(), Value::Int(_) | Value::String(_)) {
                                     // A non-integer, non-string value is invalid for the ID type.
                                     return Err(());
+                                }
+                                if options.canonicalize_numbers
+                                    && let Value::Int(int) = target.as_ref()
+                                {
+                                    *target.make_mut() = Value::String(int.as_str().to_string());
                                 }
                             }
                             _ => {
@@ -573,6 +602,7 @@ pub fn coerce_and_validate_schema_values(schema: &mut Schema) -> Result<(), Fede
 fn coerce_directive_application_values(
     schema: &Valid<Schema>,
     directives: &mut executable::DirectiveList,
+    options: CoerceOptions,
 ) {
     for directive in directives {
         let Some(definition) = schema.directive_definitions.get(&directive.name) else {
@@ -587,14 +617,7 @@ fn coerce_directive_application_values(
             // Note that GraphQL spec validation will catch invalidities in directive application
             // argument values but with nicer error messaging, so if coerce_value() fails validation
             // here we just ignore it.
-            _ = coerce_value(
-                &schema.types,
-                &mut arg.value,
-                &definition.ty,
-                &CoerceOptions {
-                    coerce_non_list_values_for_list_types: true,
-                },
-            );
+            _ = coerce_value(&schema.types, &mut arg.value, &definition.ty, &options);
         }
     }
 }
@@ -650,6 +673,7 @@ fn coerce_argument_directive_application_values(
 fn coerce_selection_set_values(
     schema: &Valid<Schema>,
     selection_set: &mut executable::SelectionSet,
+    options: CoerceOptions,
 ) {
     for selection in &mut selection_set.selections {
         match selection {
@@ -664,32 +688,29 @@ fn coerce_selection_set_values(
                     // values but with nicer error messaging, so if coerce_value() fails validation
                     // here we just ignore it.
                     let arg = arg.make_mut();
-                    _ = coerce_value(
-                        &schema.types,
-                        &mut arg.value,
-                        &definition.ty,
-                        &CoerceOptions {
-                            coerce_non_list_values_for_list_types: true,
-                        },
-                    );
+                    _ = coerce_value(&schema.types, &mut arg.value, &definition.ty, &options);
                 }
-                coerce_directive_application_values(schema, &mut field.directives);
-                coerce_selection_set_values(schema, &mut field.selection_set);
+                coerce_directive_application_values(schema, &mut field.directives, options);
+                coerce_selection_set_values(schema, &mut field.selection_set, options);
             }
             executable::Selection::FragmentSpread(frag) => {
                 let frag = frag.make_mut();
-                coerce_directive_application_values(schema, &mut frag.directives);
+                coerce_directive_application_values(schema, &mut frag.directives, options);
             }
             executable::Selection::InlineFragment(frag) => {
                 let frag = frag.make_mut();
-                coerce_directive_application_values(schema, &mut frag.directives);
-                coerce_selection_set_values(schema, &mut frag.selection_set);
+                coerce_directive_application_values(schema, &mut frag.directives, options);
+                coerce_selection_set_values(schema, &mut frag.selection_set, options);
             }
         }
     }
 }
 
-fn coerce_operation_values(schema: &Valid<Schema>, operation: &mut Node<executable::Operation>) {
+fn coerce_operation_values(
+    schema: &Valid<Schema>,
+    operation: &mut Node<executable::Operation>,
+    options: CoerceOptions,
+) {
     let operation = operation.make_mut();
 
     for variable in &mut operation.variables {
@@ -701,30 +722,51 @@ fn coerce_operation_values(schema: &Valid<Schema>, operation: &mut Node<executab
         // Note that GraphQL spec validation will catch invalidities in variable definition default
         // values but with nicer error messaging, so if coerce_value() fails validation here we just
         // ignore it.
-        _ = coerce_value(
-            &schema.types,
-            default_value,
-            &variable.ty,
-            &CoerceOptions {
-                coerce_non_list_values_for_list_types: true,
-            },
-        );
+        _ = coerce_value(&schema.types, default_value, &variable.ty, &options);
     }
 
-    coerce_selection_set_values(schema, &mut operation.selection_set);
+    coerce_selection_set_values(schema, &mut operation.selection_set, options);
 }
 
 pub(crate) fn coerce_executable_values(schema: &Valid<Schema>, document: &mut ExecutableDocument) {
+    coerce_executable_values_with(schema, document, OPERATION_COERCE_OPTIONS);
+}
+
+/// [`coerce_executable_values`], also spelling alike the `Float` and `ID` literals input coercion
+/// makes one value, so that two documents can be compared literal by literal. For the
+/// correctness checker only; see `CoerceOptions::canonicalize_numbers`.
+#[cfg(feature = "correctness")]
+pub(crate) fn coerce_executable_values_for_comparison(
+    schema: &Valid<Schema>,
+    document: &mut ExecutableDocument,
+) {
+    coerce_executable_values_with(schema, document, COMPARISON_COERCE_OPTIONS);
+}
+
+/// [`coerce_executable_values_for_comparison`], for a selection set, such as a field set's.
+#[cfg(feature = "correctness")]
+pub(crate) fn coerce_selection_set_values_for_comparison(
+    schema: &Valid<Schema>,
+    selection_set: &mut executable::SelectionSet,
+) {
+    coerce_selection_set_values(schema, selection_set, COMPARISON_COERCE_OPTIONS);
+}
+
+fn coerce_executable_values_with(
+    schema: &Valid<Schema>,
+    document: &mut ExecutableDocument,
+    options: CoerceOptions,
+) {
     if let Some(operation) = &mut document.operations.anonymous {
-        coerce_operation_values(schema, operation);
+        coerce_operation_values(schema, operation, options);
     }
     for operation in document.operations.named.values_mut() {
-        coerce_operation_values(schema, operation);
+        coerce_operation_values(schema, operation, options);
     }
     for fragment in document.fragments.values_mut() {
         let fragment = fragment.make_mut();
-        coerce_directive_application_values(schema, &mut fragment.directives);
-        coerce_selection_set_values(schema, &mut fragment.selection_set);
+        coerce_directive_application_values(schema, &mut fragment.directives, options);
+        coerce_selection_set_values(schema, &mut fragment.selection_set, options);
     }
 }
 
@@ -883,5 +925,58 @@ mod tests {
           get(bools: [true])
         }
         ");
+    }
+
+    #[cfg(feature = "correctness")]
+    fn parse_and_coerce_for_comparison(schema: &Valid<Schema>, input: &str) -> String {
+        let mut document = ExecutableDocument::parse(schema, input, "test.graphql").unwrap();
+        super::coerce_executable_values_for_comparison(schema, &mut document);
+        document.to_string()
+    }
+
+    #[cfg(feature = "correctness")]
+    #[test]
+    fn spells_float_and_id_literals_alike_for_comparison() {
+        let schema = Schema::parse_and_validate(
+            r#"
+        scalar Instant
+        input Filter { min: Float, ids: [ID!] }
+        directive @tint(x: Float!) on FIELD
+        type Query {
+          test(
+            float: Float,
+            floats: [Float],
+            id: ID,
+            filter: Filter,
+            custom: Instant,
+            int: Int,
+          ): Int
+        }
+        "#,
+            "schema.graphql",
+        )
+        .unwrap();
+
+        let operation = r#"
+        {
+          test(float: 1, floats: 1.50, id: 4, filter: { min: 2, ids: 5 }, custom: 1, int: 1) @tint(x: 3)
+        }
+        "#;
+
+        // An `Int` or a `Float` given for a `Float` becomes the `Float` its number prints as, and an
+        // `Int` given for an `ID` its string, inside lists, input objects and directives too. A custom
+        // scalar's and an `Int`'s literals keep their spelling.
+        insta::assert_snapshot!(parse_and_coerce_for_comparison(&schema, operation), @r#"
+        {
+          test(float: 1.0, floats: [1.5], id: "4", filter: {min: 2.0, ids: ["5"]}, custom: 1, int: 1) @tint(x: 3.0)
+        }
+        "#);
+
+        // The planner's coercion leaves them as written.
+        insta::assert_snapshot!(parse_and_coerce(&schema, operation), @r#"
+        {
+          test(float: 1, floats: [1.50], id: 4, filter: {min: 2, ids: [5]}, custom: 1, int: 1) @tint(x: 3)
+        }
+        "#);
     }
 }

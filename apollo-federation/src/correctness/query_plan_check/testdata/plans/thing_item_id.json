@@ -1,0 +1,13 @@
+{
+  "Fetch": {
+    "subgraph_name": "a",
+    "id": null,
+    "variable_usages": [],
+    "operation_document": "{ thing { __typename } }",
+    "operation_name": null,
+    "operation_kind": "query",
+    "input_rewrites": [],
+    "output_rewrites": [],
+    "context_rewrites": []
+  }
+}

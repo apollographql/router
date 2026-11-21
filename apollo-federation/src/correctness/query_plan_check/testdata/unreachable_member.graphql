@@ -1,0 +1,93 @@
+# The supergraph for the unreachable-path tests in `tests.rs`, composed with `composition::compose`
+# from the two subgraphs below, each of which also links federation v2.3 importing `@shareable`.
+# Recompose it when they change.
+#
+# `two` adds `A` to `U1`, so the supergraph's `U1` admits it, but only `one` resolves `u1`, and
+# there `U1` is `B | C`.
+#
+# Subgraph `one`:
+#
+#   type Query {
+#     u1: U1
+#   }
+#
+#   union U1 = B | C
+#   union U2 = A | B | C
+#
+#   type A {
+#     v: Int @shareable
+#   }
+#
+#   type B {
+#     v: Int
+#   }
+#
+#   type C {
+#     v: Int
+#   }
+#
+# Subgraph `two`:
+#
+#   union U1 = A
+#
+#   type A {
+#     v: Int @shareable
+#   }
+
+schema @link(url: "https://specs.apollo.dev/link/v1.0") @link(url: "https://specs.apollo.dev/join/v0.3", for: EXECUTION) {
+  query: Query
+}
+
+directive @link(url: String, as: String, for: link__Purpose, import: [link__Import]) repeatable on SCHEMA
+
+directive @join__graph(name: String!, url: String!) on ENUM_VALUE
+
+directive @join__type(graph: join__Graph!, key: join__FieldSet, extension: Boolean! = false, resolvable: Boolean! = true, isInterfaceObject: Boolean! = false) repeatable on OBJECT | INTERFACE | UNION | ENUM | INPUT_OBJECT | SCALAR
+
+directive @join__field(graph: join__Graph, requires: join__FieldSet, provides: join__FieldSet, type: String, external: Boolean, override: String, usedOverridden: Boolean) repeatable on FIELD_DEFINITION | INPUT_FIELD_DEFINITION
+
+directive @join__implements(graph: join__Graph!, interface: String!) repeatable on OBJECT | INTERFACE
+
+directive @join__unionMember(graph: join__Graph!, member: String!) repeatable on UNION
+
+directive @join__enumValue(graph: join__Graph!) repeatable on ENUM_VALUE
+
+enum link__Purpose {
+  """
+  `SECURITY` features provide metadata necessary to securely resolve fields.
+  """
+  SECURITY
+  """
+  `EXECUTION` features provide metadata necessary for operation execution.
+  """
+  EXECUTION
+}
+
+scalar link__Import
+
+enum join__Graph {
+  ONE @join__graph(name: "one", url: "http://one")
+  TWO @join__graph(name: "two", url: "http://two")
+}
+
+scalar join__FieldSet
+
+type Query @join__type(graph: ONE) @join__type(graph: TWO) {
+  u1: U1 @join__field(graph: ONE)
+}
+
+union U1 @join__type(graph: ONE) @join__type(graph: TWO) @join__unionMember(graph: ONE, member: "B") @join__unionMember(graph: ONE, member: "C") @join__unionMember(graph: TWO, member: "A") = B | C | A
+
+union U2 @join__type(graph: ONE) @join__unionMember(graph: ONE, member: "A") @join__unionMember(graph: ONE, member: "B") @join__unionMember(graph: ONE, member: "C") = A | B | C
+
+type A @join__type(graph: ONE) @join__type(graph: TWO) {
+  v: Int
+}
+
+type B @join__type(graph: ONE) {
+  v: Int
+}
+
+type C @join__type(graph: ONE) {
+  v: Int
+}

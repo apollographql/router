@@ -1,0 +1,88 @@
+# A child's `result` resolved from its `seed`: `first` serves `parent` with its `child` and the
+# child's `seed`, and `consumer` resolves a `Child`'s `result` by `id`, requiring `seed`.
+#
+# Composed with `apollo_federation::composition::compose` from the two subgraphs below. Recompose it
+# when they change.
+#
+# Subgraph `consumer`:
+#
+#   extend schema @link(url: "https://specs.apollo.dev/federation/v2.7", import: ["@key", "@shareable", "@external", "@requires", "@provides", "@override", "@interfaceObject"])
+#
+#   type Child @key(fields: "id") {
+#     id: ID!
+#     seed: String @external
+#     result: String @requires(fields: "seed")
+#   }
+#
+# Subgraph `first`:
+#
+#   extend schema @link(url: "https://specs.apollo.dev/federation/v2.7", import: ["@key", "@shareable", "@external", "@requires", "@provides", "@override", "@interfaceObject"])
+#
+#   type Query {
+#     parent: Parent
+#   }
+#
+#   type Parent {
+#     child: Child
+#   }
+#
+#   type Child @key(fields: "id") {
+#     id: ID!
+#     seed: String
+#   }
+
+schema @link(url: "https://specs.apollo.dev/link/v1.0") @link(url: "https://specs.apollo.dev/join/v0.4", for: EXECUTION) {
+  query: Query
+}
+
+directive @link(url: String, as: String, for: link__Purpose, import: [link__Import]) repeatable on SCHEMA
+
+directive @join__graph(name: String!, url: String!) on ENUM_VALUE
+
+directive @join__type(graph: join__Graph!, key: join__FieldSet, extension: Boolean! = false, resolvable: Boolean! = true, isInterfaceObject: Boolean! = false) repeatable on OBJECT | INTERFACE | UNION | ENUM | INPUT_OBJECT | SCALAR
+
+directive @join__field(graph: join__Graph, requires: join__FieldSet, provides: join__FieldSet, type: String, external: Boolean, override: String, usedOverridden: Boolean, overrideLabel: String) repeatable on FIELD_DEFINITION | INPUT_FIELD_DEFINITION
+
+directive @join__implements(graph: join__Graph!, interface: String!) repeatable on OBJECT | INTERFACE
+
+directive @join__unionMember(graph: join__Graph!, member: String!) repeatable on UNION
+
+directive @join__enumValue(graph: join__Graph!) repeatable on ENUM_VALUE
+
+directive @join__directive(graphs: [join__Graph!], name: String!, args: join__DirectiveArguments) repeatable on SCHEMA | OBJECT | INTERFACE | FIELD_DEFINITION
+
+enum link__Purpose {
+  """
+  `SECURITY` features provide metadata necessary to securely resolve fields.
+  """
+  SECURITY
+  """
+  `EXECUTION` features provide metadata necessary for operation execution.
+  """
+  EXECUTION
+}
+
+scalar link__Import
+
+enum join__Graph {
+  CONSUMER @join__graph(name: "consumer", url: "http://consumer")
+  FIRST @join__graph(name: "first", url: "http://first")
+}
+
+scalar join__FieldSet
+
+scalar join__DirectiveArguments
+
+type Child @join__type(graph: CONSUMER, key: "id") @join__type(graph: FIRST, key: "id") {
+  id: ID!
+  seed: String @join__field(graph: CONSUMER, external: true) @join__field(graph: FIRST)
+  result: String @join__field(graph: CONSUMER, requires: "seed")
+}
+
+type Query @join__type(graph: CONSUMER) @join__type(graph: FIRST) {
+  parent: Parent @join__field(graph: FIRST)
+}
+
+type Parent @join__type(graph: FIRST) {
+  child: Child
+}

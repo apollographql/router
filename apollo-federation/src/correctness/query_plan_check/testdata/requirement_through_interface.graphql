@@ -1,0 +1,133 @@
+# The supergraph for the requirement-through-interface tests in `tests/returned_types.rs`, composed
+# with `composition::compose` from the three subgraphs below, each of which also links federation
+# v2.3 importing `@key`, `@shareable`, `@external`, `@requires` and `@provides`. Recompose it when
+# they change.
+#
+# `summaries` resolves a `Location`'s `summary` from its `media { id }`. `locations` and
+# `galleries` both serve the location and its media; `locations` declares `Photo` alone,
+# `galleries` `Video` too. The model varies one subgraph's declaration; this has a subgraph per
+# variant.
+#
+# Subgraph `locations`:
+#
+#   type Query {
+#     location: Location @shareable
+#   }
+#
+#   type Location @key(fields: "id") {
+#     id: ID!
+#     media: Media @shareable
+#   }
+#
+#   interface Media {
+#     id: ID
+#   }
+#
+#   type Photo implements Media @shareable {
+#     id: ID
+#   }
+#
+# Subgraph `galleries`:
+#
+#   type Query {
+#     location: Location @shareable
+#   }
+#
+#   type Location @key(fields: "id") {
+#     id: ID!
+#     media: Media @shareable
+#   }
+#
+#   interface Media {
+#     id: ID
+#   }
+#
+#   type Photo implements Media @shareable {
+#     id: ID
+#   }
+#
+#   type Video implements Media @shareable {
+#     id: ID
+#   }
+#
+# Subgraph `summaries`:
+#
+#   type Location @key(fields: "id") {
+#     id: ID!
+#     media: Media @external
+#     summary: String @requires(fields: "media { id }")
+#   }
+#
+#   interface Media {
+#     id: ID
+#   }
+#
+#   type Photo implements Media @shareable {
+#     id: ID
+#   }
+#
+#   type Video implements Media @shareable {
+#     id: ID
+#   }
+
+
+schema @link(url: "https://specs.apollo.dev/link/v1.0") @link(url: "https://specs.apollo.dev/join/v0.3", for: EXECUTION) {
+  query: Query
+}
+
+directive @link(url: String, as: String, for: link__Purpose, import: [link__Import]) repeatable on SCHEMA
+
+directive @join__graph(name: String!, url: String!) on ENUM_VALUE
+
+directive @join__type(graph: join__Graph!, key: join__FieldSet, extension: Boolean! = false, resolvable: Boolean! = true, isInterfaceObject: Boolean! = false) repeatable on OBJECT | INTERFACE | UNION | ENUM | INPUT_OBJECT | SCALAR
+
+directive @join__field(graph: join__Graph, requires: join__FieldSet, provides: join__FieldSet, type: String, external: Boolean, override: String, usedOverridden: Boolean) repeatable on FIELD_DEFINITION | INPUT_FIELD_DEFINITION
+
+directive @join__implements(graph: join__Graph!, interface: String!) repeatable on OBJECT | INTERFACE
+
+directive @join__unionMember(graph: join__Graph!, member: String!) repeatable on UNION
+
+directive @join__enumValue(graph: join__Graph!) repeatable on ENUM_VALUE
+
+enum link__Purpose {
+  """
+  `SECURITY` features provide metadata necessary to securely resolve fields.
+  """
+  SECURITY
+  """
+  `EXECUTION` features provide metadata necessary for operation execution.
+  """
+  EXECUTION
+}
+
+scalar link__Import
+
+enum join__Graph {
+  GALLERIES @join__graph(name: "galleries", url: "http://galleries")
+  LOCATIONS @join__graph(name: "locations", url: "http://locations")
+  SUMMARIES @join__graph(name: "summaries", url: "http://summaries")
+}
+
+scalar join__FieldSet
+
+type Query @join__type(graph: GALLERIES) @join__type(graph: LOCATIONS) @join__type(graph: SUMMARIES) {
+  location: Location @join__field(graph: GALLERIES) @join__field(graph: LOCATIONS)
+}
+
+type Location @join__type(graph: GALLERIES, key: "id") @join__type(graph: LOCATIONS, key: "id") @join__type(graph: SUMMARIES, key: "id") {
+  id: ID!
+  media: Media @join__field(graph: GALLERIES) @join__field(graph: LOCATIONS) @join__field(graph: SUMMARIES, external: true)
+  summary: String @join__field(graph: SUMMARIES, requires: "media { id }")
+}
+
+interface Media @join__type(graph: GALLERIES) @join__type(graph: LOCATIONS) @join__type(graph: SUMMARIES) {
+  id: ID
+}
+
+type Photo implements Media @join__implements(graph: GALLERIES, interface: "Media") @join__implements(graph: LOCATIONS, interface: "Media") @join__implements(graph: SUMMARIES, interface: "Media") @join__type(graph: GALLERIES) @join__type(graph: LOCATIONS) @join__type(graph: SUMMARIES) {
+  id: ID
+}
+
+type Video implements Media @join__implements(graph: GALLERIES, interface: "Media") @join__implements(graph: SUMMARIES, interface: "Media") @join__type(graph: GALLERIES) @join__type(graph: SUMMARIES) {
+  id: ID
+}

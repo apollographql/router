@@ -1,0 +1,73 @@
+# The supergraph for the producer-type tests in `tests/returned_types.rs`, composed with
+# `composition::compose` from the one subgraphs below, each of which also links federation v2.3
+# importing `@key`, `@shareable`, `@external`, `@requires` and `@provides`. Recompose it when they
+# change.
+#
+# `empty` of `producer_types.graphql`, declaring `Item`: the model varies `empty`'s declaration,
+# and composition cannot hold both in one supergraph.
+#
+# Subgraph `empty`:
+#
+#   type Query {
+#     thing: Named
+#     ping: String
+#   }
+#
+#   interface Named {
+#     id: ID
+#   }
+#
+#   type Item implements Named {
+#     id: ID
+#   }
+
+
+schema @link(url: "https://specs.apollo.dev/link/v1.0") @link(url: "https://specs.apollo.dev/join/v0.3", for: EXECUTION) {
+  query: Query
+}
+
+directive @link(url: String, as: String, for: link__Purpose, import: [link__Import]) repeatable on SCHEMA
+
+directive @join__graph(name: String!, url: String!) on ENUM_VALUE
+
+directive @join__type(graph: join__Graph!, key: join__FieldSet, extension: Boolean! = false, resolvable: Boolean! = true, isInterfaceObject: Boolean! = false) repeatable on OBJECT | INTERFACE | UNION | ENUM | INPUT_OBJECT | SCALAR
+
+directive @join__field(graph: join__Graph, requires: join__FieldSet, provides: join__FieldSet, type: String, external: Boolean, override: String, usedOverridden: Boolean) repeatable on FIELD_DEFINITION | INPUT_FIELD_DEFINITION
+
+directive @join__implements(graph: join__Graph!, interface: String!) repeatable on OBJECT | INTERFACE
+
+directive @join__unionMember(graph: join__Graph!, member: String!) repeatable on UNION
+
+directive @join__enumValue(graph: join__Graph!) repeatable on ENUM_VALUE
+
+enum link__Purpose {
+  """
+  `SECURITY` features provide metadata necessary to securely resolve fields.
+  """
+  SECURITY
+  """
+  `EXECUTION` features provide metadata necessary for operation execution.
+  """
+  EXECUTION
+}
+
+scalar link__Import
+
+enum join__Graph {
+  EMPTY @join__graph(name: "empty", url: "http://empty")
+}
+
+scalar join__FieldSet
+
+type Query @join__type(graph: EMPTY) {
+  thing: Named
+  ping: String
+}
+
+interface Named @join__type(graph: EMPTY) {
+  id: ID
+}
+
+type Item implements Named @join__implements(graph: EMPTY, interface: "Named") @join__type(graph: EMPTY) {
+  id: ID
+}
