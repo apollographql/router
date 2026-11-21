@@ -5,3 +5,8 @@ fed = "run -p apollo-federation-cli --"
 [profile.profiling]
 inherits = "release"
 debug = true
+
+[env]
+# jemalloc fixes its page size at build time and refuses to start on a kernel with larger pages.
+# arm64 Linux kernels use 4K, 16K or 64K pages, so build for 64K (2^16), which runs on all three.
+AARCH64_UNKNOWN_LINUX_GNU_JEMALLOC_SYS_WITH_LG_PAGE = "16"
