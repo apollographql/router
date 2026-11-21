@@ -5,7 +5,11 @@ use shape::ShapeCase;
 use shape::location::Location;
 
 use crate::connectors::ApplyToError;
+use crate::connectors::json_selection::ApplyToInternal;
+use crate::connectors::json_selection::MethodArgs;
 use crate::connectors::json_selection::ShapeContext;
+use crate::connectors::json_selection::VarsWithPathsMap;
+use crate::connectors::json_selection::helpers::json_type_name;
 use crate::connectors::json_selection::helpers::missing_element_as_null;
 use crate::connectors::json_selection::immutable::InputPath;
 use crate::connectors::json_selection::location::Ranged;
@@ -333,6 +337,161 @@ pub(crate) fn number_value_as_float(
             ))
         }
     }
+}
+
+/// The codecs understood by `->encode` and `->decode`. JSON has no byte type,
+/// so the base64 codecs map UTF-8 strings to strings.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum Codec {
+    /// RFC 4648 §4 standard alphabet, padded when encoding.
+    Base64,
+    /// RFC 4648 §5 URL- and filename-safe alphabet, unpadded when encoding.
+    Base64Url,
+    /// Same as `->jsonStringify` (encode) and `->jsonParse` (decode).
+    Json,
+}
+
+impl Codec {
+    const EXPECTED: &'static str = r#""base64", "base64url", or "json""#;
+
+    fn from_name(name: &str) -> Option<Self> {
+        match name {
+            "base64" => Some(Self::Base64),
+            "base64url" => Some(Self::Base64Url),
+            "json" => Some(Self::Json),
+            _ => None,
+        }
+    }
+}
+
+/// Evaluates the single codec argument shared by `->encode` and `->decode`.
+/// Like most methods, they produce no value, without an error, when the
+/// argument has none.
+pub(crate) fn codec_arg(
+    method_name: &WithRange<String>,
+    method_args: Option<&MethodArgs>,
+    data: &JSON,
+    vars: &VarsWithPathsMap,
+    input_path: &InputPath<JSON>,
+    spec: ConnectSpec,
+) -> (Option<Codec>, Vec<ApplyToError>) {
+    let error = |message: String| {
+        ApplyToError::new(message, input_path.to_vec(), method_name.range(), spec)
+    };
+
+    let args = method_args.map_or(&[][..], |args| args.args.as_slice());
+    let [arg] = args else {
+        return (
+            None,
+            vec![error(codec_arg_count_message(method_name, args.len()))],
+        );
+    };
+
+    let (value_opt, mut errors) = arg.apply_to_path(data, vars, input_path, spec);
+    let codec = match value_opt {
+        Some(JSON::String(name)) => {
+            let codec = Codec::from_name(name.as_str());
+            if codec.is_none() {
+                errors.push(error(unsupported_codec_message(method_name, name.as_str())));
+            }
+            codec
+        }
+        Some(other) => {
+            errors.push(error(format!(
+                "Method ->{} requires a string codec argument, got {}",
+                method_name.as_ref(),
+                json_type_name(&other)
+            )));
+            None
+        }
+        None => None,
+    };
+    (codec, errors)
+}
+
+/// Shape-checks the codec argument of `->encode` and `->decode`. Returns the
+/// codec when the argument is a string literal, or `None` when it is only known
+/// at runtime, along with whether the argument may be missing (see
+/// [`or_missing`]). Returns the shape for the method to return instead when
+/// the argument is always missing, or is statically not a supported codec.
+pub(crate) fn codec_arg_shape(
+    context: &ShapeContext,
+    method_name: &WithRange<String>,
+    method_args: Option<&MethodArgs>,
+    input_shape: &Shape,
+    dollar_shape: &Shape,
+) -> Result<(Option<Codec>, bool), Shape> {
+    let location = method_name.shape_location(context.source_id());
+
+    let args = method_args.map_or(&[][..], |args| args.args.as_slice());
+    let [arg] = args else {
+        return Err(Shape::error(
+            codec_arg_count_message(method_name, args.len()),
+            location,
+        ));
+    };
+
+    let arg_shape = arg.compute_output_shape(context, input_shape.clone(), dollar_shape.clone());
+    let maybe_missing = may_be_missing(&arg_shape);
+    let Some(arg_shape) = present_arg(context, &arg_shape) else {
+        // The method produces no value when its codec argument has none.
+        return Err(Shape::none());
+    };
+    match arg_shape.case() {
+        ShapeCase::String(Some(name)) => Codec::from_name(name)
+            .map(|codec| (Some(codec), maybe_missing))
+            .ok_or_else(|| Shape::error(unsupported_codec_message(method_name, name), location)),
+        _ if could_satisfy(&Shape::string([]), &arg_shape) => Ok((None, maybe_missing)),
+        _ => Err(Shape::error(
+            format!(
+                "Method ->{} requires a string codec argument",
+                method_name.as_ref()
+            ),
+            location,
+        )),
+    }
+}
+
+/// The error shape for a codec that needs a string input, if `input_shape` is
+/// statically known and is not a string.
+pub(crate) fn string_input_shape_error(
+    context: &ShapeContext,
+    method_name: &WithRange<String>,
+    input_shape: &Shape,
+) -> Option<Shape> {
+    if could_satisfy(&Shape::string([]), input_shape) {
+        return None;
+    }
+    Some(Shape::error(
+        format!("Method ->{} requires a string input", method_name.as_ref()),
+        input_shape
+            .locations()
+            .cloned()
+            .chain(method_name.shape_location(context.source_id())),
+    ))
+}
+
+fn codec_arg_count_message(method_name: &WithRange<String>, count: usize) -> String {
+    if count == 0 {
+        format!(
+            "Method ->{} requires a codec argument ({})",
+            method_name.as_ref(),
+            Codec::EXPECTED
+        )
+    } else {
+        format!(
+            "Method ->{} accepts exactly 1 argument (codec), got {count}",
+            method_name.as_ref()
+        )
+    }
+}
+
+fn unsupported_codec_message(method_name: &WithRange<String>, name: &str) -> String {
+    format!(
+        "Method ->{} does not support codec \"{name}\", expected {}",
+        method_name.as_ref(),
+        Codec::EXPECTED
+    )
 }
 
 #[cfg(test)]
@@ -701,5 +860,233 @@ mod tests {
             .map(|error| error.message.clone())
             .collect();
         (messages, shape)
+    }
+}
+
+#[cfg(test)]
+mod codec_shape_tests {
+    use serde_json::Number;
+    use shape::location::Location;
+    use shape::location::SourceId;
+
+    use super::*;
+    use crate::connectors::Key;
+    use crate::connectors::PathSelection;
+    use crate::connectors::json_selection::PathList;
+    use crate::connectors::json_selection::known_var::KnownVariable;
+    use crate::connectors::json_selection::lit_expr::LitExpr;
+
+    fn get_location() -> Location {
+        Location {
+            source_id: SourceId::new("test".to_string()),
+            span: 0..6,
+        }
+    }
+
+    fn get_codec(
+        args: Option<Vec<LitExpr>>,
+        dollar_shape: Shape,
+    ) -> Result<(Option<Codec>, bool), Shape> {
+        let location = get_location();
+        let method_args = args.map(|args| MethodArgs {
+            args: args
+                .into_iter()
+                .map(|arg| WithRange::new(arg, None))
+                .collect(),
+            range: None,
+        });
+        codec_arg_shape(
+            &ShapeContext::new(location.source_id),
+            &WithRange::new("encode".to_string(), Some(location.span)),
+            method_args.as_ref(),
+            &Shape::string([]),
+            &dollar_shape,
+        )
+    }
+
+    // Shape equality ignores errors, so errors are compared as rendered shapes.
+    fn get_codec_error(args: Option<Vec<LitExpr>>, dollar_shape: Shape) -> String {
+        get_codec(args, dollar_shape)
+            .expect_err("expected an error shape")
+            .pretty_print()
+    }
+
+    fn string_arg(value: &str) -> Option<Vec<LitExpr>> {
+        Some(vec![LitExpr::String(value.to_string())])
+    }
+
+    fn codec_path_arg() -> Option<Vec<LitExpr>> {
+        Some(vec![LitExpr::Path(PathSelection {
+            path: PathList::Key(
+                Key::field("codec").into_with_range(),
+                PathList::Empty.into_with_range(),
+            )
+            .into_with_range(),
+        })])
+    }
+
+    #[rstest::rstest]
+    #[case("base64", Codec::Base64)]
+    #[case("base64url", Codec::Base64Url)]
+    #[case("json", Codec::Json)]
+    fn codec_arg_shape_resolves_literal_codecs(#[case] name: &str, #[case] codec: Codec) {
+        assert_eq!(
+            get_codec(string_arg(name), Shape::none()),
+            Ok((Some(codec), false))
+        );
+    }
+
+    #[rstest::rstest]
+    #[case("hex")]
+    #[case("url")]
+    #[case("Base64")]
+    #[case("")]
+    fn codec_arg_shape_rejects_unsupported_literal_codecs(#[case] name: &str) {
+        assert_eq!(
+            get_codec_error(string_arg(name), Shape::none()),
+            format!(
+                r#"Unknown (err "Method ->encode does not support codec \"{name}\", expected \"base64\", \"base64url\", or \"json\"")"#
+            )
+        );
+    }
+
+    #[rstest::rstest]
+    #[case(None)]
+    #[case(Some(vec![]))]
+    fn codec_arg_shape_requires_an_argument(#[case] args: Option<Vec<LitExpr>>) {
+        assert_eq!(
+            get_codec_error(args, Shape::none()),
+            r#"Unknown (err "Method ->encode requires a codec argument (\"base64\", \"base64url\", or \"json\")")"#
+        );
+    }
+
+    #[test]
+    fn codec_arg_shape_rejects_extra_arguments() {
+        assert_eq!(
+            get_codec_error(
+                Some(vec![
+                    LitExpr::String("base64".to_string()),
+                    LitExpr::String("json".to_string()),
+                ]),
+                Shape::none()
+            ),
+            r#"Unknown (err "Method ->encode accepts exactly 1 argument (codec), got 2")"#
+        );
+    }
+
+    #[test]
+    fn codec_arg_shape_rejects_non_string_literal() {
+        assert_eq!(
+            get_codec_error(Some(vec![LitExpr::Number(Number::from(64))]), Shape::none()),
+            r#"Unknown (err "Method ->encode requires a string codec argument")"#
+        );
+    }
+
+    fn codec_record(codec: Shape) -> Shape {
+        Shape::closed_record([("codec".to_string(), codec)].into(), [])
+    }
+
+    #[rstest::rstest]
+    #[case(codec_record(Shape::string([])))]
+    #[case(codec_record(Shape::name("$args.codec", [])))]
+    #[case(Shape::unknown([]))]
+    fn codec_arg_shape_defers_dynamic_codecs_to_runtime(#[case] dollar_shape: Shape) {
+        assert_eq!(get_codec(codec_path_arg(), dollar_shape), Ok((None, false)));
+    }
+
+    // A codec that may have no value is still accepted, and reported as maybe
+    // missing so the method can add `None` to its result.
+    #[test]
+    fn codec_arg_shape_accepts_codec_that_may_be_missing() {
+        let maybe = |codec: Shape| codec_record(Shape::one([codec, Shape::none()], []));
+        assert_eq!(
+            get_codec(codec_path_arg(), maybe(Shape::string([]))),
+            Ok((None, true))
+        );
+        assert_eq!(
+            get_codec(codec_path_arg(), maybe(Shape::string_value("json", []))),
+            Ok((Some(Codec::Json), true))
+        );
+        assert_eq!(
+            get_codec_error(codec_path_arg(), maybe(Shape::int([]))),
+            r#"Unknown (err "Method ->encode requires a string codec argument")"#
+        );
+    }
+
+    // Before connect/v0.5, an always-missing argument is accepted as `Unknown`
+    // so the result shape stays what it was.
+    #[rstest::rstest]
+    #[case(ConnectSpec::V0_4, Ok((None, true)))]
+    #[case(ConnectSpec::V0_5, Err(Shape::none()))]
+    fn codec_arg_shape_handles_codec_that_is_always_missing(
+        #[case] spec: ConnectSpec,
+        #[case] expected: Result<(Option<Codec>, bool), Shape>,
+    ) {
+        let location = get_location();
+        let dollar_path = WithRange::new(
+            LitExpr::Path(PathSelection {
+                path: PathList::Var(
+                    KnownVariable::Dollar.into_with_range(),
+                    PathList::Empty.into_with_range(),
+                )
+                .into_with_range(),
+            }),
+            None,
+        );
+        assert_eq!(
+            codec_arg_shape(
+                &ShapeContext::new(location.source_id).with_spec(spec),
+                &WithRange::new("encode".to_string(), Some(location.span)),
+                Some(&MethodArgs {
+                    args: vec![dollar_path],
+                    range: None
+                }),
+                &Shape::string([]),
+                &Shape::none(),
+            ),
+            expected
+        );
+    }
+
+    fn input_error(input: Shape) -> Option<String> {
+        let location = get_location();
+        string_input_shape_error(
+            &ShapeContext::new(location.source_id),
+            &WithRange::new("encode".to_string(), Some(location.span)),
+            &input,
+        )
+        .map(|error| error.pretty_print())
+    }
+
+    #[rstest::rstest]
+    #[case::string(Shape::string([]))]
+    #[case::string_literal(Shape::string_value("abc", []))]
+    #[case::unknown(Shape::unknown([]))]
+    #[case::named(Shape::name("$args.s", []))]
+    #[case::maybe_missing(Shape::one([Shape::string([]), Shape::none()], []))]
+    #[case::string_or_int(Shape::one([Shape::string([]), Shape::int([])], []))]
+    #[case::string_or_named(Shape::one([Shape::string([]), Shape::name("$args.s", [])], []))]
+    fn string_input_shape_error_accepts_possible_strings(#[case] input: Shape) {
+        assert_eq!(input_error(input), None);
+    }
+
+    #[rstest::rstest]
+    #[case::int(Shape::int([]))]
+    #[case::none(Shape::none())]
+    #[case::list(Shape::list(Shape::string([]), []))]
+    #[case::int_or_bool(Shape::one([Shape::int([]), Shape::bool([])], []))]
+    fn string_input_shape_error_rejects_non_strings(#[case] input: Shape) {
+        assert_eq!(
+            input_error(input).as_deref(),
+            Some(r#"Unknown (err "Method ->encode requires a string input")"#)
+        );
+    }
+
+    #[test]
+    fn codec_arg_shape_rejects_dynamic_non_string_codec() {
+        assert_eq!(
+            get_codec_error(codec_path_arg(), codec_record(Shape::int([]))),
+            r#"Unknown (err "Method ->encode requires a string codec argument")"#
+        );
     }
 }
