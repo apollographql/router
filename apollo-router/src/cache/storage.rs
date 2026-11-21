@@ -147,6 +147,7 @@ where
         storage
     }
 
+    #[cfg(test)]
     pub(crate) fn new_in_memory(max_capacity: NonZeroUsize, caller: &'static str) -> Self {
         Self::new(max_capacity, None, caller)
     }
