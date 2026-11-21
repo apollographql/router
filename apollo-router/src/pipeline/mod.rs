@@ -204,7 +204,8 @@ fn assemble(
         query_plan_cache.clone(),
     );
     let apq_expander = build_apq_expander(&configuration, apq_redis);
-    let query_parsing_service = build_query_parsing_service(schema.clone(), configuration.clone());
+    let query_parsing_service =
+        build_query_parsing_service(schema.clone(), configuration.clone(), &plugins);
 
     let supergraph_service = tracing::info_span!("supergraph_creation").in_scope(|| {
         let (subgraph_http_services, connector_http_services) =
@@ -396,7 +397,8 @@ pub(crate) async fn from_supergraph_mock_with_configuration(
         .build_common()
         .await
         .unwrap();
-    let query_parsing_service = build_query_parsing_service(schema.clone(), configuration.clone());
+    let query_parsing_service =
+        build_query_parsing_service(schema.clone(), configuration.clone(), &plugins);
 
     let apq_expander = build_apq_expander(
         &configuration,

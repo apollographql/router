@@ -30,6 +30,7 @@ use sha2::Sha256;
 use crate::Configuration;
 use crate::error::ParseErrors;
 use crate::error::SchemaError;
+use crate::plugins::authorization::AuthorizationDirectives;
 use crate::plugins::connectors::configuration::apply_config;
 use crate::query_planner::OperationKind;
 #[cfg(unix)]
@@ -42,6 +43,7 @@ pub(crate) struct Schema {
     supergraph: Supergraph,
     subgraphs: HashMap<String, Uri>,
     pub(crate) implementers_map: apollo_compiler::collections::HashMap<Name, Implementers>,
+    pub(crate) authorization_directives: AuthorizationDirectives,
     api_schema: ApiSchema,
     pub(crate) schema_id: SchemaHash,
     pub(crate) connectors: Option<Connectors>,
@@ -204,6 +206,7 @@ impl Schema {
         );
 
         let implementers_map = definitions.implementers_map();
+        let authorization_directives = AuthorizationDirectives::from_schema(&definitions);
         let supergraph =
             Supergraph::from_schema(definitions, Some(&router_supported_supergraph_specs()))?;
 
@@ -227,6 +230,7 @@ impl Schema {
             supergraph,
             subgraphs,
             implementers_map,
+            authorization_directives,
             api_schema: ApiSchema(api_schema),
             schema_id,
             connectors,
@@ -350,24 +354,6 @@ impl Schema {
         None
     }
 
-    /// This function assumes `@link` usage is valid in the schema, and will return `false` if not.
-    pub(crate) fn has_spec(&self, spec_identity: &Identity, expected_version_range: &str) -> bool {
-        let Ok(Some(metadata)) = LinksMetadata::from_schema(self.supergraph_schema()) else {
-            return false;
-        };
-        let Some(link) = metadata.for_identity(spec_identity) else {
-            return false;
-        };
-        let Some(semver_version) = Version::parse(format!("{}.0", link.url.version).as_str()).ok()
-        else {
-            return false;
-        };
-        let Some(version_range) = VersionReq::parse(expected_version_range).ok() else {
-            return false;
-        };
-        version_range.matches(&semver_version)
-    }
-
     /// This function assumes `@link` usage is valid in the schema, and will return `None` if not.
     pub(crate) fn directive_name(
         schema: &apollo_compiler::schema::Schema,
@@ -376,6 +362,16 @@ impl Schema {
         default: &Name,
     ) -> Option<String> {
         let metadata = LinksMetadata::from_schema(schema).ok()??;
+        Self::directive_name_in_links(&metadata, spec_identity, expected_version_range, default)
+    }
+
+    /// Like [`Self::directive_name`], over `@link` metadata the caller has already parsed.
+    pub(crate) fn directive_name_in_links(
+        metadata: &LinksMetadata,
+        spec_identity: &Identity,
+        expected_version_range: &str,
+        default: &Name,
+    ) -> Option<String> {
         let link = metadata.for_identity(spec_identity)?;
         let semver_version = Version::parse(format!("{}.0", link.url.version).as_str()).ok()?;
         let version_range = VersionReq::parse(expected_version_range).ok()?;
@@ -393,6 +389,7 @@ impl std::fmt::Debug for Schema {
             supergraph: _, // skip
             subgraphs,
             implementers_map,
+            authorization_directives: _,
             api_schema: _, // skip
             schema_id: _,
             connectors: _,

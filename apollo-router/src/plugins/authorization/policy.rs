@@ -16,12 +16,10 @@ use apollo_compiler::executable;
 use apollo_compiler::name;
 use apollo_compiler::schema;
 use apollo_compiler::schema::Implementers;
-use apollo_federation::link::spec::Identity;
 use tower::BoxError;
 
 use crate::json_ext::Path;
 use crate::json_ext::PathElement;
-use crate::spec::Schema;
 use crate::spec::TYPENAME;
 use crate::spec::query::transform;
 use crate::spec::query::transform::TransformState;
@@ -31,7 +29,7 @@ pub(crate) struct PolicyExtractionVisitor<'a> {
     schema: &'a schema::Schema,
     fragments: HashMap<&'a Name, &'a Node<executable::Fragment>>,
     pub(crate) extracted_policies: HashSet<String>,
-    policy_directive_name: String,
+    policy_directive_name: &'a str,
     entity_query: bool,
 }
 
@@ -44,24 +42,20 @@ impl<'a> PolicyExtractionVisitor<'a> {
         schema: &'a schema::Schema,
         executable: &'a executable::ExecutableDocument,
         entity_query: bool,
-    ) -> Option<Self> {
-        Some(Self {
+        policy_directive_name: &'a str,
+    ) -> Self {
+        Self {
             schema,
             entity_query,
             fragments: executable.fragments.iter().collect(),
             extracted_policies: HashSet::new(),
-            policy_directive_name: Schema::directive_name(
-                schema,
-                &Identity::policy_identity(),
-                POLICY_SPEC_VERSION_RANGE,
-                &POLICY_DIRECTIVE_NAME,
-            )?,
-        })
+            policy_directive_name,
+        }
     }
 
     fn get_policies_from_field(&mut self, field: &schema::FieldDefinition) {
         self.extracted_policies.extend(policy_argument(
-            field.directives.get(&self.policy_directive_name),
+            field.directives.get(self.policy_directive_name),
         ));
 
         if let Some(ty) = self.schema.types.get(field.ty.inner_named_type()) {
@@ -71,7 +65,7 @@ impl<'a> PolicyExtractionVisitor<'a> {
 
     fn get_policies_from_type(&mut self, ty: &schema::ExtendedType) {
         self.extracted_policies.extend(policy_argument(
-            ty.directives().get(&self.policy_directive_name),
+            ty.directives().get(self.policy_directive_name),
         ));
     }
 
@@ -127,7 +121,7 @@ impl traverse::Visitor for PolicyExtractionVisitor<'_> {
     fn operation(&mut self, root_type: &str, node: &executable::Operation) -> Result<(), BoxError> {
         if let Some(ty) = self.schema.types.get(root_type) {
             self.extracted_policies.extend(policy_argument(
-                ty.directives().get(&self.policy_directive_name),
+                ty.directives().get(self.policy_directive_name),
             ));
         }
 
@@ -198,7 +192,7 @@ pub(crate) struct PolicyFilteringVisitor<'a> {
     // the point of application
     fragments_unauthorized_paths: HashMap<String, Vec<Path>>,
     current_path: Path,
-    policy_directive_name: String,
+    policy_directive_name: &'a str,
 }
 
 fn policies_sets_argument(
@@ -226,8 +220,9 @@ impl<'a> PolicyFilteringVisitor<'a> {
         implementers_map: &'a apollo_compiler::collections::HashMap<Name, Implementers>,
         successful_policies: HashSet<String>,
         dry_run: bool,
-    ) -> Option<Self> {
-        Some(Self {
+        policy_directive_name: &'a str,
+    ) -> Self {
+        Self {
             schema,
             state: TransformState::new(),
             implementers_map,
@@ -237,17 +232,12 @@ impl<'a> PolicyFilteringVisitor<'a> {
             unauthorized_paths: vec![],
             fragments_unauthorized_paths: HashMap::new(),
             current_path: Path::default(),
-            policy_directive_name: Schema::directive_name(
-                schema,
-                &Identity::policy_identity(),
-                POLICY_SPEC_VERSION_RANGE,
-                &POLICY_DIRECTIVE_NAME,
-            )?,
-        })
+            policy_directive_name,
+        }
     }
 
     fn is_field_authorized(&self, field: &schema::FieldDefinition) -> bool {
-        if let Some(directive) = field.directives.get(&self.policy_directive_name) {
+        if let Some(directive) = field.directives.get(self.policy_directive_name) {
             let mut field_policies_sets = policies_sets_argument(directive);
 
             // The outer array acts like a logical OR: if any of the inner arrays of policies matches, the field
@@ -271,7 +261,7 @@ impl<'a> PolicyFilteringVisitor<'a> {
     }
 
     fn is_type_authorized(&self, ty: &schema::ExtendedType) -> bool {
-        match ty.directives().get(&self.policy_directive_name) {
+        match ty.directives().get(self.policy_directive_name) {
             None => true,
             Some(directive) => {
                 let mut type_policies_sets = policies_sets_argument(directive);
@@ -378,7 +368,7 @@ impl transform::Visitor for PolicyFilteringVisitor<'_> {
         node: &ast::OperationDefinition,
     ) -> Result<Option<ast::OperationDefinition>, BoxError> {
         let is_authorized = if let Some(ty) = self.schema.get_object(root_type) {
-            match ty.directives.get(&self.policy_directive_name) {
+            match ty.directives.get(self.policy_directive_name) {
                 None => true,
                 Some(directive) => {
                     let mut type_policies_sets = policies_sets_argument(directive);
@@ -602,6 +592,7 @@ mod tests {
     use apollo_compiler::ast::Document;
 
     use crate::json_ext::Path;
+    use crate::plugins::authorization::AuthorizationDirectives;
     use crate::plugins::authorization::policy::PolicyExtractionVisitor;
     use crate::plugins::authorization::policy::PolicyFilteringVisitor;
     use crate::spec::query::transform;
@@ -671,7 +662,13 @@ mod tests {
     fn extract(schema: &str, query: &str) -> BTreeSet<String> {
         let schema = Schema::parse_and_validate(schema, "schema.graphql").unwrap();
         let doc = ExecutableDocument::parse(&schema, query, "query.graphql").unwrap();
-        let mut visitor = PolicyExtractionVisitor::new(&schema, &doc, false).unwrap();
+        let directives = AuthorizationDirectives::from_schema(&schema);
+        let mut visitor = PolicyExtractionVisitor::new(
+            &schema,
+            &doc,
+            false,
+            directives.policy.as_deref().unwrap(),
+        );
         traverse::document(&mut visitor, &doc, None).unwrap();
 
         visitor.extracted_policies.into_iter().collect()
@@ -702,7 +699,14 @@ mod tests {
         let doc = ast::Document::parse(query, "query.graphql").unwrap();
         doc.to_executable_validate(&schema).unwrap();
         let map = schema.implementers_map();
-        let mut visitor = PolicyFilteringVisitor::new(&schema, &map, policies, false).unwrap();
+        let directives = AuthorizationDirectives::from_schema(&schema);
+        let mut visitor = PolicyFilteringVisitor::new(
+            &schema,
+            &map,
+            policies,
+            false,
+            directives.policy.as_deref().unwrap(),
+        );
         (
             transform::document(&mut visitor, &doc).unwrap(),
             visitor.unauthorized_paths,
