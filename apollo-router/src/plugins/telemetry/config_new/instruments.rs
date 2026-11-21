@@ -43,6 +43,7 @@ use crate::Context;
 use crate::metrics;
 use crate::plugins::subscription::SUBSCRIPTION_SUBGRAPH_NAME_CONTEXT_KEY;
 use crate::plugins::telemetry::CLIENT_NAME;
+use crate::plugins::telemetry::config_new::ArrayJsonPath;
 use crate::plugins::telemetry::config_new::Selectors;
 use crate::plugins::telemetry::config_new::apollo::instruments::ApolloConnectorInstruments;
 use crate::plugins::telemetry::config_new::apollo::instruments::ApolloSubgraphInstruments;
@@ -1447,7 +1448,7 @@ where
 impl<A, E, V> apollo_configuration::Validate for Instrument<A, E, V>
 where
     A: Default + Debug + apollo_configuration::Validate,
-    E: Debug + apollo_configuration::Validate,
+    E: Selector + apollo_configuration::Validate,
     V: apollo_configuration::Validate,
     for<'a> &'a V: Into<InstrumentValue<E>>,
 {
@@ -1462,6 +1463,21 @@ where
         } = self;
         ty.validate(errors.nest("type"));
         value.validate(errors.nest("value"));
+        match value.into().selector().and_then(E::array_json_path) {
+            Some(ArrayJsonPath::Path(path)) => errors.nest("value").report_simple(format_args!(
+                "the JSON path {path:?} gives an array, but an instrument value must be a single \
+                 number; select one value instead, for example with an index such as `[0]` in \
+                 place of `[*]`"
+            )),
+            Some(ArrayJsonPath::ResponseErrorsField(path)) => {
+                errors.nest("value").report_simple(format_args!(
+                    "`response_errors_field` gives an array whatever its path ({path:?}), but an \
+                     instrument value must be a single number; use `response_errors` with an \
+                     index instead, for example `$[0].extensions.code`"
+                ))
+            }
+            None => {}
+        }
         description.validate(errors.nest("description"));
         unit.validate(errors.nest("unit"));
         attributes.validate(errors.nest("attributes"));
@@ -1489,6 +1505,20 @@ pub(crate) enum InstrumentValue<T> {
     Chunked(Event<T>),
     Field(Field<T>),
     Custom(T),
+}
+
+impl<T> InstrumentValue<T> {
+    /// The selector that supplies the value, or `None` for a standard value.
+    fn selector(&self) -> Option<&T> {
+        match self {
+            InstrumentValue::Custom(selector)
+            | InstrumentValue::Chunked(Event::Custom(selector))
+            | InstrumentValue::Field(Field::Custom(selector)) => Some(selector),
+            InstrumentValue::Standard(_)
+            | InstrumentValue::Chunked(Event::Duration | Event::Unit)
+            | InstrumentValue::Field(Field::Unit) => None,
+        }
+    }
 }
 
 #[apollo_configuration::configuration]
@@ -3992,19 +4022,38 @@ mod tests {
             assert_counter!(
                 "acme.request.on_graphql_error",
                 1.0,
-                response_errors = "{\"message\":\"nope\",\"extensions\":{\"code\":\"NOPE\"}}"
+                response_errors = opentelemetry::Value::Array(
+                    vec![opentelemetry::StringValue::from(
+                        "{\"message\":\"nope\",\"extensions\":{\"code\":\"NOPE\"}}"
+                    )]
+                    .into()
+                )
             );
             assert_counter!(
                 "acme.request.on_graphql_error_selector",
                 1.0,
-                response_errors = "{\"message\":\"nope\",\"extensions\":{\"code\":\"NOPE\"}}"
+                response_errors = opentelemetry::Value::Array(
+                    vec![opentelemetry::StringValue::from(
+                        "{\"message\":\"nope\",\"extensions\":{\"code\":\"NOPE\"}}"
+                    )]
+                    .into()
+                )
             );
             assert_histogram_sum!(
                 "acme.request.on_graphql_error_histo",
                 1.0,
-                response_errors = "{\"message\":\"nope\",\"extensions\":{\"code\":\"NOPE\"}}"
+                response_errors = opentelemetry::Value::Array(
+                    vec![opentelemetry::StringValue::from(
+                        "{\"message\":\"nope\",\"extensions\":{\"code\":\"NOPE\"}}"
+                    )]
+                    .into()
+                )
             );
-            assert_counter!("acme.request.on_graphql_data", 500.0, response.data = 500);
+            assert_counter!(
+                "acme.request.on_graphql_data",
+                500.0,
+                response.data = opentelemetry::Value::Array(vec![500i64].into())
+            );
 
             let custom_instruments = SupergraphCustomInstruments::new(
                 &config.supergraph.custom,
@@ -4053,19 +4102,38 @@ mod tests {
             assert_counter!(
                 "acme.request.on_graphql_error",
                 2.0,
-                response_errors = "{\"message\":\"nope\",\"extensions\":{\"code\":\"NOPE\"}}"
+                response_errors = opentelemetry::Value::Array(
+                    vec![opentelemetry::StringValue::from(
+                        "{\"message\":\"nope\",\"extensions\":{\"code\":\"NOPE\"}}"
+                    )]
+                    .into()
+                )
             );
             assert_counter!(
                 "acme.request.on_graphql_error_selector",
                 2.0,
-                response_errors = "{\"message\":\"nope\",\"extensions\":{\"code\":\"NOPE\"}}"
+                response_errors = opentelemetry::Value::Array(
+                    vec![opentelemetry::StringValue::from(
+                        "{\"message\":\"nope\",\"extensions\":{\"code\":\"NOPE\"}}"
+                    )]
+                    .into()
+                )
             );
             assert_histogram_sum!(
                 "acme.request.on_graphql_error_histo",
                 2.0,
-                response_errors = "{\"message\":\"nope\",\"extensions\":{\"code\":\"NOPE\"}}"
+                response_errors = opentelemetry::Value::Array(
+                    vec![opentelemetry::StringValue::from(
+                        "{\"message\":\"nope\",\"extensions\":{\"code\":\"NOPE\"}}"
+                    )]
+                    .into()
+                )
             );
-            assert_counter!("acme.request.on_graphql_data", 1000.0, response.data = 500);
+            assert_counter!(
+                "acme.request.on_graphql_data",
+                1000.0,
+                response.data = opentelemetry::Value::Array(vec![500i64].into())
+            );
 
             let custom_instruments = SupergraphCustomInstruments::new(
                 &config.supergraph.custom,
@@ -4100,19 +4168,38 @@ mod tests {
             assert_counter!(
                 "acme.request.on_graphql_error",
                 2.0,
-                response_errors = "{\"message\":\"nope\",\"extensions\":{\"code\":\"NOPE\"}}"
+                response_errors = opentelemetry::Value::Array(
+                    vec![opentelemetry::StringValue::from(
+                        "{\"message\":\"nope\",\"extensions\":{\"code\":\"NOPE\"}}"
+                    )]
+                    .into()
+                )
             );
             assert_counter!(
                 "acme.request.on_graphql_error_selector",
                 2.0,
-                response_errors = "{\"message\":\"nope\",\"extensions\":{\"code\":\"NOPE\"}}"
+                response_errors = opentelemetry::Value::Array(
+                    vec![opentelemetry::StringValue::from(
+                        "{\"message\":\"nope\",\"extensions\":{\"code\":\"NOPE\"}}"
+                    )]
+                    .into()
+                )
             );
             assert_histogram_sum!(
                 "acme.request.on_graphql_error_histo",
                 2.0,
-                response_errors = "{\"message\":\"nope\",\"extensions\":{\"code\":\"NOPE\"}}"
+                response_errors = opentelemetry::Value::Array(
+                    vec![opentelemetry::StringValue::from(
+                        "{\"message\":\"nope\",\"extensions\":{\"code\":\"NOPE\"}}"
+                    )]
+                    .into()
+                )
             );
-            assert_counter!("acme.request.on_graphql_data", 1000.0, response.data = 500);
+            assert_counter!(
+                "acme.request.on_graphql_data",
+                1000.0,
+                response.data = opentelemetry::Value::Array(vec![500i64].into())
+            );
         }
         .with_metrics()
         .await;
@@ -4156,6 +4243,58 @@ mod tests {
         let duration = std::time::Duration::from_micros(1500);
         // When unit is "ms", 1500us should be 1.5 milliseconds
         assert_eq!(duration_to_f64(duration, "ms"), 1.5);
+    }
+
+    const USE_AN_INDEX: Option<&str> = Some("an index such as `[0]` in place of `[*]`");
+
+    #[rstest::rstest]
+    #[case::router_wildcard("router", r#"{response_errors: "$[*].extensions.code"}"#, USE_AN_INDEX)]
+    #[case::router_index("router", r#"{response_errors: "$[0].extensions.code"}"#, None)]
+    #[case::router_errors_field(
+        "router",
+        r#"{response_errors_field: "$.extensions.code"}"#,
+        Some("use `response_errors` with an index")
+    )]
+    #[case::supergraph_wildcard(
+        "supergraph",
+        r#"{response_data: "$.products[*].price"}"#,
+        USE_AN_INDEX
+    )]
+    #[case::supergraph_event_custom(
+        "supergraph",
+        r#"{event_custom: {response_data: "$.products[*].price"}}"#,
+        USE_AN_INDEX
+    )]
+    #[case::supergraph_index("supergraph", r#"{response_data: "$.products[0].price"}"#, None)]
+    #[case::subgraph_wildcard(
+        "subgraph",
+        r#"{subgraph_response_data: "$.products[*].price"}"#,
+        USE_AN_INDEX
+    )]
+    #[case::subgraph_index("subgraph", r#"{subgraph_response_data: "$.products[0].price"}"#, None)]
+    fn custom_instrument_value_rejects_array_json_path(
+        #[case] stage: &str,
+        #[case] value: &str,
+        #[case] expected_advice: Option<&str>,
+    ) {
+        let yaml = format!(
+            "{stage}:\n  test.instrument:\n    type: counter\n    value: {value}\n    \
+             description: test\n    unit: unit\n"
+        );
+        let result = apollo_configuration::ConfigParser::<InstrumentsConfig>::builder()
+            .build()
+            .unwrap()
+            .parse_yaml(&yaml);
+        match (result, expected_advice) {
+            (Ok(_), None) => {}
+            (Ok(_), Some(_)) => panic!("expected {value} to be rejected"),
+            (Err(err), None) => panic!("expected {value} to be accepted: {err:?}"),
+            (Err(err), Some(advice)) => {
+                let err = format!("{err:?}");
+                assert!(err.contains("gives an array"), "unexpected error: {err}");
+                assert!(err.contains(advice), "expected {advice:?} in: {err}");
+            }
+        }
     }
 
     /// Verify that the `RouterInstruments::on_response` dispatch to `subscriptions_terminated`

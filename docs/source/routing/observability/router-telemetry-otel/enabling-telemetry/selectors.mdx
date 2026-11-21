@@ -254,11 +254,43 @@ telemetry:
           description: my description
           condition:
             exists:
-              response_errors: "$.[0].extensions.code"
+              response_errors: "$[0].extensions.code"
           attributes:
             response_errors:
-              response_errors: "$.[0].extensions.code"
+              response_errors: "$[0].extensions.code"
 ```
+
+#### Single values and arrays
+
+The shape of the JSON path decides whether the attribute is a single value or an array. The number of values the path matches in a particular response doesn't change it.
+
+| Path | Example | Attribute |
+| --- | --- | --- |
+| Field names and single indexes only, optionally ending in `length()` | `$.price`, `$[0].extensions.code`, `$.items.length()` | The matched value, such as `"NOT_FOUND"` |
+| Anything else: `[*]`, `.*`, `..`, slices such as `[0:2]`, unions such as `[0,1]`, or filters such as `[?(@.code == 'X')]` | `$[*].extensions.code` | An array of every non-null match, even when there is only one, such as `["NOT_FOUND"]` |
+
+A `length()` after anything else, such as `$[*].length()`, gives one length per match, so it returns an array.
+
+When the attribute is omitted, the selector's `default` is used if you set one. The attribute is omitted when the path matches nothing, and also when it matches only `null`, because a `null` match counts as no value:
+
+- A path that can match only one value omits the attribute when its match is `null`.
+- A path that can match several values leaves `null` matches out of the array, and omits the attribute when every match is `null`.
+
+For example, with two errors:
+
+| Path | `extensions.code` of each error | Attribute |
+| --- | --- | --- |
+| `$[0].extensions.code` | `null`, `"NOT_FOUND"` | Omitted; `default` applies |
+| `$[*].extensions.code` | `null`, `"NOT_FOUND"` | `["NOT_FOUND"]` |
+| `$[*].extensions.code` | `null`, `null` | Omitted; `default` applies |
+
+A `null` inside a matched array or object is kept, because that match is written as JSON: `$.items` over `{"items": [1, null]}` gives `"[1,null]"`.
+
+For a path that can match several values, if the matches have different types, for example a number and a string, each match is written as a string, with values that aren't strings written as JSON. A match that is itself an array or object is written as JSON.
+
+An array never equals a single value, so in a condition `eq: ["NOT_FOUND", {response_errors: "$[*].extensions.code"}]` is never true. An instrument can't use an array as its `value`, so the router rejects the configuration when an instrument's `value` uses a path that can match several values, or uses `response_errors_field`.
+
+To get a single value from a list, index into it instead of using a wildcard: use `$[0].extensions.code` for the first error's code. `response_errors_field` gives an array whatever its path, so for an instrument `value` use `response_errors: "$[0].extensions.code"` instead.
 
 ### Capturing the Router Response body
 
@@ -289,12 +321,12 @@ telemetry:
         router.error:
           attributes:
             "my_attribute":
-              response_errors: "$.[0]"
+              response_errors: "$[0]"
 
               # Other examples:
-              # response_errors: "$.[0].message"
-              # response_errors: "$.[0].locations"
-              # response_errors: "$.[0].extensions"
+              # response_errors: "$[0].message"
+              # response_errors: "$[0].locations"
+              # response_errors: "$[0].extensions"
 ```
 
 ### Counting router response errors with `response_errors_count`
@@ -327,7 +359,7 @@ telemetry:
 
 ### Extracting fields from each router error with `response_errors_field`
 
-The `response_errors_field` selector runs a JSONPath on each error object and collects the results into an array of strings (non-string values are serialized as JSON). If no values are extracted, the attribute is omitted.
+The `response_errors_field` selector runs a JSONPath on each error object and collects every non-null match into one array of strings (non-string values are serialized as JSON). An error whose match is `null` adds nothing to the array. If no error adds a value, the attribute is omitted.
 
 Typical use: structured logs or span attributes with every error message or extension code in one attribute.
 
