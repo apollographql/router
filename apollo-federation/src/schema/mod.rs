@@ -74,9 +74,9 @@ pub(crate) mod blueprint;
 pub(crate) mod definitions;
 pub(crate) mod directive_location;
 pub(crate) mod fed3_upgrader;
-// Not used yet: the GraphQL Federation `@is`/`@require` validation rules that use it come in
-// follow-ups.
-#[allow(dead_code, unused_imports)]
+// Not all of it is used yet: validating selection maps across subgraphs (`IS_INVALID_FIELDS`,
+// `REQUIRE_INVALID_FIELDS`) comes in a follow-up.
+#[allow(dead_code)]
 pub(crate) mod field_selection_map;
 pub(crate) mod field_set;
 pub(crate) mod locations;
