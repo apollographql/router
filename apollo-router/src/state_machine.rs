@@ -1036,7 +1036,6 @@ mod tests {
     use multimap::MultiMap;
     use parking_lot::Mutex;
     use rstest::rstest;
-    use serde_json::json;
     use test_log::test;
     use tower::BoxError;
 
@@ -1163,53 +1162,62 @@ mod tests {
         );
     }
 
+    fn config_from_yaml(yaml: &str) -> Arc<Configuration> {
+        Arc::new(Configuration::from_str(yaml).expect("test configuration must parse"))
+    }
     fn test_config_restricted() -> Arc<Configuration> {
-        let mut config = Configuration::builder().build().unwrap();
-        config.validated_yaml =
-            Some(json!({"plugins":{"experimental.restricted":{"enabled":true}}}));
-        Arc::new(config)
+        config_from_yaml(indoc::indoc! {"
+                plugins:
+                  experimental.restricted:
+                    enabled: true
+            "})
     }
     fn test_config_with_apq_caching() -> Arc<Configuration> {
-        let mut config = Configuration::builder().build().unwrap();
-        config.validated_yaml = Some(json!({"apq":{"router":{"cache":{"redis":{"pool_size":1}}}}}));
-        Arc::new(config)
+        config_from_yaml(indoc::indoc! {r#"
+                apq:
+                  router:
+                    cache:
+                      redis:
+                        urls: ["redis://localhost:6379"]
+                        pool_size: 1
+            "#})
     }
     fn test_config_with_subscriptions() -> Arc<Configuration> {
-        let mut config = Configuration::builder().build().unwrap();
-        config.validated_yaml = Some(json!({"subscription":{"enabled":true}}));
-        Arc::new(config)
+        config_from_yaml(indoc::indoc! {"
+                subscription:
+                  enabled: true
+            "})
     }
     fn test_config_with_demand_control() -> Arc<Configuration> {
-        let mut config = Configuration::builder().build().unwrap();
-        config.validated_yaml = Some(json!({"demand_control":{"enabled":true}}));
-        Arc::new(config)
+        config_from_yaml(indoc::indoc! {"
+                demand_control:
+                  enabled: true
+                  mode: measure
+                  strategy:
+                    static_estimated:
+                      list_size: 30
+                      max: 256
+            "})
     }
     fn test_config_with_request_limits() -> Arc<Configuration> {
-        let mut config = Configuration::builder().build().unwrap();
-        config.validated_yaml = Some(json!({
-            "limits": {
-                "router": {
-                    "max_height": 100,
-                    "max_aliases": 100,
-                    "max_depth": 20
-                }
-            }
-        }));
-        Arc::new(config)
+        config_from_yaml(indoc::indoc! {"
+                limits:
+                  router:
+                    max_height: 100
+                    max_aliases: 100
+                    max_depth: 20
+            "})
     }
     fn test_config_with_auth() -> Arc<Configuration> {
-        let mut config = Configuration::builder().build().unwrap();
-        config.validated_yaml = Some(json!({
-            "authentication": {
-                "router": {
-                    "sources": {}
-                }
-            },
-            "authorization": {
-                "require_authentication": true
-            }
-        }));
-        Arc::new(config)
+        config_from_yaml(indoc::indoc! {"
+                authentication:
+                  router:
+                    jwt:
+                      jwks:
+                        - url: https://example.com
+                authorization:
+                  require_authentication: true
+            "})
     }
 
     #[test(tokio::test)]
@@ -2918,6 +2926,31 @@ mod tests {
             assert!(
                 retried.now_or_never().is_none(),
                 "a permanent license violation must not schedule a retry"
+            );
+
+            harness.finish().await;
+        }
+
+        // A schema publish on its own is checked against the licence too: plugins are not
+        // rebuilt, but a schema that starts linking a restricted feature is refused and the
+        // router keeps serving the previous schema.
+        #[test(tokio::test(start_paused = true))]
+        async fn schema_reload_using_unlicensed_feature_is_refused() {
+            // Only the startup build: the refused schema never reaches create_pipeline().
+            let harness = Harness::new(factory(&[Ok(())]), 1);
+            harness.startup().await;
+            harness
+                .send_and_wait(UpdateSchema(SchemaState {
+                    sdl: include_str!("uplink/testdata/authorization.graphql").to_owned(),
+                    launch_id: None,
+                }))
+                .await;
+
+            let retried = harness.notify.notified();
+            tokio::time::sleep(Duration::from_secs(60)).await;
+            assert!(
+                retried.now_or_never().is_none(),
+                "a schema the licence does not cover must not schedule a retry"
             );
 
             harness.finish().await;

@@ -803,7 +803,7 @@ fn rate_limit_settings_are_applied() {
     }
 }
 
-/// Licence enforcement reads `validated_yaml` and flags every restricted feature the commercial
+/// Licence enforcement flags every restricted feature the commercial
 /// fixture enables, so an unlicensed router refuses it.
 #[test]
 fn licence_enforcement_flags_the_commercial_configuration() {

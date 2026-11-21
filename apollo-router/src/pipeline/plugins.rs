@@ -1,5 +1,5 @@
 //! Plugin instantiation for the acquire phase of
-//! [`build_pipeline`](super::build_pipeline): ordering, license gating, and construction
+//! [`build_pipeline`](super::build_pipeline): ordering and construction
 //! of every Apollo and user plugin.
 
 use std::collections::HashMap;
@@ -10,7 +10,6 @@ use serde_json::Value;
 use tower::BoxError;
 use tracing::Instrument;
 
-use crate::AllowedFeature;
 use crate::configuration::APOLLO_PLUGIN_PREFIX;
 use crate::configuration::Configuration;
 use crate::configuration::ConfigurationError;
@@ -27,10 +26,8 @@ use crate::uplink::license_enforcement::LicenseState;
 /// Processes the plugins in the order below and returns the built instances keyed by name.
 ///
 /// Mandatory plugins are instantiated even with no user config for them; optional
-/// plugins only when configured. A plugin that maps to a license-restricted feature is
-/// skipped, with a warning, when the license does not allow that feature. A
-/// pre-activated telemetry instance is spliced in directly instead of being built a
-/// second time.
+/// plugins only when configured. A pre-activated telemetry instance is spliced in directly
+/// instead of being built a second time.
 pub(crate) async fn create_plugins(
     configuration: &Configuration,
     schema: &Schema,
@@ -246,9 +243,8 @@ impl PluginRegistrar<'_> {
     }
 
     /// Instantiates the Apollo plugin named `apollo.<name>` when the configuration has a
-    /// section for it. When the plugin maps to a license-restricted feature and the
-    /// license does not allow that feature, the method skips the plugin and logs a
-    /// warning.
+    /// section for it. The license is not checked here: the startup license check has
+    /// already refused any setting the license doesn't cover.
     async fn add_optional(&mut self, name: &str) {
         let full_name = format!("apollo.{name}");
         let span = Self::plugin_span(&full_name);
@@ -257,24 +253,9 @@ impl PluginRegistrar<'_> {
             let Some(plugin_config) = self.configuration.plugin_config(&full_name).cloned() else {
                 return;
             };
-            // A plugin whose name maps to no restricted feature is not license-gated.
-            let allowed = match AllowedFeature::from_plugin_name(name) {
-                Some(feature) => self
-                    .context
-                    .license
-                    .get_allowed_features()
-                    .contains(&feature),
-                None => true,
-            };
-            if allowed {
-                let previous_config = self.previous_apollo_config(&full_name);
-                self.add_plugin(full_name, factory, plugin_config, previous_config, None)
-                    .await;
-            } else {
-                tracing::warn!(
-                    "{full_name} plugin is not registered, {full_name} is a restricted feature that requires a license"
-                );
-            }
+            let previous_config = self.previous_apollo_config(&full_name);
+            self.add_plugin(full_name, factory, plugin_config, previous_config, None)
+                .await;
         }
         .instrument(span)
         .await;

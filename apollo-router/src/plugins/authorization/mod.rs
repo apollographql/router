@@ -29,8 +29,8 @@ use crate::error::QueryPlannerError;
 use crate::graphql;
 use crate::json_ext::Path;
 use crate::layers::ServiceBuilderExt;
-use crate::plugin::Plugin;
 use crate::plugin::PluginInit;
+use crate::plugin::PluginPrivate;
 use crate::plugins::authentication;
 use crate::query_planner::QueryKey;
 use crate::services::execution;
@@ -39,6 +39,8 @@ use crate::spec::Schema;
 use crate::spec::SpecError;
 use crate::spec::query::transform;
 use crate::spec::query::traverse;
+use crate::uplink::license_enforcement::AllowedFeature;
+use crate::uplink::license_enforcement::LicensedSetting;
 
 pub(crate) mod authenticated;
 pub(crate) mod extract_authorization_checks_layer;
@@ -534,8 +536,27 @@ impl AuthorizationPlugin {
 }
 
 #[async_trait::async_trait]
-impl Plugin for AuthorizationPlugin {
+impl PluginPrivate for AuthorizationPlugin {
     type Config = Conf;
+
+    fn licensed_features(config: &Self::Config) -> Vec<LicensedSetting> {
+        let mut settings = Vec::new();
+        if config.require_authentication {
+            settings.push(LicensedSetting {
+                feature: AllowedFeature::Authorization,
+                name: "Required authentication",
+                path: "authorization.require_authentication",
+            });
+        }
+        if config.directives.enabled {
+            settings.push(LicensedSetting {
+                feature: AllowedFeature::Authorization,
+                name: "Authorization directives",
+                path: "authorization.directives.enabled",
+            });
+        }
+        settings
+    }
 
     async fn new(init: PluginInit<Self::Config>) -> Result<Self, BoxError> {
         Ok(AuthorizationPlugin {
@@ -631,7 +652,7 @@ impl Plugin for AuthorizationPlugin {
 //
 // In order to keep the plugin names consistent,
 // we use using the `Reverse domain name notation`
-register_plugin!("apollo", "authorization", AuthorizationPlugin);
+register_private_plugin!("apollo", "authorization", AuthorizationPlugin);
 
 #[cfg(test)]
 mod tests;

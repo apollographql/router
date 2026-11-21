@@ -179,6 +179,10 @@ impl<'a> TestHarness<'a> {
 
     /// Specifies the (static) license.
     ///
+    /// The harness builds every configured plugin, including one whose feature this licence
+    /// lacks: it doesn't run the router's startup licence check, which would refuse that
+    /// configuration.
+    ///
     /// Panics if called more than once.
     ///
     /// If this isn't called, the default license is used.

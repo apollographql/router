@@ -1,9 +1,11 @@
 use async_trait::async_trait;
 use tower::BoxError;
 
-use crate::plugin::Plugin;
 use crate::plugin::PluginInit;
-use crate::register_plugin;
+use crate::plugin::PluginPrivate;
+use crate::register_private_plugin;
+use crate::uplink::license_enforcement::AllowedFeature;
+use crate::uplink::license_enforcement::LicensedSetting;
 
 /// Restricted plugin (for testing purposes only)
 #[apollo_configuration::configuration]
@@ -16,11 +18,23 @@ struct Config {
 /// Dummy plugin (for testing purposes only)
 struct Restricted;
 
-register_plugin!("experimental", "restricted", Restricted);
+register_private_plugin!("experimental", "restricted", Restricted);
 
 #[async_trait]
-impl Plugin for Restricted {
+impl PluginPrivate for Restricted {
     type Config = Config;
+
+    fn licensed_features(config: &Self::Config) -> Vec<LicensedSetting> {
+        if config.enabled {
+            vec![LicensedSetting {
+                feature: AllowedFeature::Experimental,
+                name: "Restricted",
+                path: "plugins.['experimental.restricted'].enabled",
+            }]
+        } else {
+            Vec::new()
+        }
+    }
 
     async fn new(init: PluginInit<Self::Config>) -> Result<Self, BoxError>
     where

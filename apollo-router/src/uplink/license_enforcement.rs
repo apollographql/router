@@ -27,7 +27,6 @@ use serde::Deserialize;
 use serde::Deserializer;
 use serde::Serialize;
 use serde::de::Visitor;
-use serde_json::Value;
 use strum::EnumIter;
 use strum::IntoEnumIterator;
 use thiserror::Error;
@@ -133,7 +132,7 @@ where
 
 #[derive(Debug)]
 pub(crate) struct LicenseEnforcementReport {
-    restricted_config_in_use: Vec<ConfigurationRestriction>,
+    restricted_config_in_use: Vec<LicensedSetting>,
     restricted_schema_in_use: Vec<SchemaViolation>,
     /// The license the restrictions above were derived from. Held so that `enforce`
     /// cannot be handed a *different* license than the one the report was built
@@ -152,10 +151,7 @@ impl LicenseEnforcementReport {
         license: Arc<LicenseState>,
     ) -> LicenseEnforcementReport {
         LicenseEnforcementReport {
-            restricted_config_in_use: Self::validate_configuration(
-                configuration,
-                &Self::configuration_restrictions(&license),
-            ),
+            restricted_config_in_use: Self::validate_configuration(configuration, &license),
             restricted_schema_in_use: Self::validate_schema(
                 schema,
                 &Self::schema_restrictions(&license),
@@ -167,7 +163,7 @@ impl LicenseEnforcementReport {
     pub(crate) fn restricted_features_in_use(&self) -> Vec<String> {
         let mut restricted_features_in_use = Vec::new();
         for restricted_config_in_use in self.restricted_config_in_use.clone() {
-            restricted_features_in_use.push(restricted_config_in_use.name.clone());
+            restricted_features_in_use.push(restricted_config_in_use.name.to_string());
         }
         for restricted_schema_in_use in self.restricted_schema_in_use.clone() {
             match restricted_schema_in_use {
@@ -182,32 +178,66 @@ impl LicenseEnforcementReport {
         restricted_features_in_use
     }
 
+    /// The settings in effect in `configuration` that need a licence feature `license` lacks,
+    /// ordered by path.
     fn validate_configuration(
         configuration: &Configuration,
-        configuration_restrictions: &Vec<ConfigurationRestriction>,
-    ) -> Vec<ConfigurationRestriction> {
-        let mut selector = jsonpath_lib::selector(
-            configuration
-                .validated_yaml
-                .as_ref()
-                .unwrap_or(&Value::Null),
-        );
-        let mut configuration_violations = Vec::new();
-        for restriction in configuration_restrictions {
-            if let Some(value) = selector(&restriction.path)
-                .expect("path on restriction was not valid")
-                .first()
-            {
-                if let Some(restriction_value) = &restriction.value {
-                    if *value == restriction_value {
-                        configuration_violations.push(restriction.clone());
-                    }
-                } else {
-                    configuration_violations.push(restriction.clone());
-                }
-            }
+        license: &LicenseState,
+    ) -> Vec<LicensedSetting> {
+        let allowed_features = license.get_allowed_features();
+        let plugins = configuration
+            .apollo_plugins
+            .iter()
+            .chain(configuration.plugins.iter())
+            .map(|(_, parsed)| parsed);
+        let mut violations: Vec<LicensedSetting> = plugins
+            .flat_map(|parsed| parsed.factory.licensed_features(&parsed.config))
+            .chain(Self::licensed_top_level_settings(configuration))
+            .filter(|setting| !allowed_features.contains(&setting.feature))
+            .collect();
+        violations.sort_by_key(|setting| setting.path);
+        violations
+    }
+
+    /// The licensed settings in effect outside plugin sections, which have no plugin to
+    /// declare them.
+    fn licensed_top_level_settings(configuration: &Configuration) -> Vec<LicensedSetting> {
+        let mut settings = Vec::new();
+        if configuration.apq.router.cache.redis.is_some() {
+            settings.push(LicensedSetting {
+                feature: AllowedFeature::ApqCaching,
+                name: "APQ caching",
+                path: "apq.router.cache.redis",
+            });
         }
-        configuration_violations
+        if configuration
+            .supergraph
+            .query_planning
+            .cache
+            .redis
+            .is_some()
+        {
+            settings.push(LicensedSetting {
+                feature: AllowedFeature::DistributedQueryPlanning,
+                name: "Query plan caching",
+                path: "supergraph.query_planning.cache.redis",
+            });
+        }
+        if configuration.batching.enabled {
+            settings.push(LicensedSetting {
+                feature: AllowedFeature::Batching,
+                name: "Batching support",
+                path: "batching.enabled",
+            });
+        }
+        if configuration.persisted_queries.enabled {
+            settings.push(LicensedSetting {
+                feature: AllowedFeature::PersistedQueries,
+                name: "Persisted queries",
+                path: "persisted_queries.enabled",
+            });
+        }
+        settings
     }
 
     fn validate_schema(
@@ -328,127 +358,6 @@ impl LicenseEnforcementReport {
         }
 
         schema_violations
-    }
-
-    fn configuration_restrictions(license: &LicenseState) -> Vec<ConfigurationRestriction> {
-        let mut configuration_restrictions = vec![];
-
-        let allowed_features = license.get_allowed_features();
-        if !allowed_features.contains(&AllowedFeature::ApqCaching) {
-            configuration_restrictions.push(
-                ConfigurationRestriction::builder()
-                    .path("$.apq.router.cache.redis")
-                    .name("APQ caching")
-                    .build(),
-            )
-        }
-        if !allowed_features.contains(&AllowedFeature::Authentication) {
-            configuration_restrictions.push(
-                ConfigurationRestriction::builder()
-                    .path("$.authentication.router")
-                    .name("Authentication plugin")
-                    .build(),
-            );
-        }
-        if !allowed_features.contains(&AllowedFeature::Authorization) {
-            configuration_restrictions.push(
-                ConfigurationRestriction::builder()
-                    .path("$.authorization.directives")
-                    .name("Authorization directives")
-                    .build(),
-            );
-        }
-        if !allowed_features.contains(&AllowedFeature::Batching) {
-            configuration_restrictions.push(
-                ConfigurationRestriction::builder()
-                    .path("$.batching")
-                    .name("Batching support")
-                    .build(),
-            );
-        }
-        if !allowed_features.contains(&AllowedFeature::ResponseCaching) {
-            configuration_restrictions.push(
-                ConfigurationRestriction::builder()
-                    .path("$.response_cache.enabled")
-                    .value(true)
-                    .name("Subgraph response caching")
-                    .build(),
-            );
-        }
-        if !allowed_features.contains(&AllowedFeature::PersistedQueries) {
-            configuration_restrictions.push(
-                ConfigurationRestriction::builder()
-                    .path("$.persisted_queries")
-                    .name("Persisted queries")
-                    .build(),
-            );
-        }
-        if !allowed_features.contains(&AllowedFeature::Subscriptions) {
-            configuration_restrictions.push(
-                ConfigurationRestriction::builder()
-                    .path("$.subscription.enabled")
-                    .value(true)
-                    .name("Federated subscriptions")
-                    .build(),
-            );
-        }
-        if !allowed_features.contains(&AllowedFeature::Coprocessors) {
-            configuration_restrictions.push(
-                ConfigurationRestriction::builder()
-                    .path("$.coprocessor")
-                    .name("Coprocessor plugin")
-                    .build(),
-            )
-        }
-        if !allowed_features.contains(&AllowedFeature::DistributedQueryPlanning) {
-            configuration_restrictions.push(
-                ConfigurationRestriction::builder()
-                    .path("$.supergraph.query_planning.cache.redis")
-                    .name("Query plan caching")
-                    .build(),
-            )
-        }
-        if !allowed_features.contains(&AllowedFeature::DemandControl) {
-            configuration_restrictions.push(
-                ConfigurationRestriction::builder()
-                    .path("$.demand_control")
-                    .name("Demand control plugin")
-                    .build(),
-            );
-        }
-        if !allowed_features.contains(&AllowedFeature::Experimental) {
-            configuration_restrictions.push(
-                ConfigurationRestriction::builder()
-                    .path("$.plugins.['experimental.restricted'].enabled")
-                    .value(true)
-                    .name("Restricted")
-                    .build(),
-            );
-        }
-        // Per-operation limits are restricted but parser limits like `parser_max_recursion`
-        // where the Router only configures apollo-rs are not.
-        if !allowed_features.contains(&AllowedFeature::RequestLimits) {
-            configuration_restrictions.extend(vec![
-                ConfigurationRestriction::builder()
-                    .path("$.limits.router.max_depth")
-                    .name("Operation depth limiting")
-                    .build(),
-                ConfigurationRestriction::builder()
-                    .path("$.limits.router.max_height")
-                    .name("Operation height limiting")
-                    .build(),
-                ConfigurationRestriction::builder()
-                    .path("$.limits.router.max_root_fields")
-                    .name("Operation root fields limiting")
-                    .build(),
-                ConfigurationRestriction::builder()
-                    .path("$.limits.router.max_aliases")
-                    .name("Operation aliases limiting")
-                    .build(),
-            ]);
-        }
-
-        configuration_restrictions
     }
 
     fn schema_restrictions(license: &LicenseState) -> Vec<SchemaRestriction> {
@@ -605,7 +514,7 @@ impl Display for LicenseEnforcementReport {
             let restricted_config = self
                 .restricted_config_in_use
                 .iter()
-                .map(|v| format!("* {}\n  {}", v.name, v.path.replace("$.", ".")))
+                .map(|v| format!("* {}\n  .{}", v.name, v.path))
                 .join("\n\n");
             write!(f, "Configuration yaml:\n{restricted_config}")?;
 
@@ -725,23 +634,6 @@ impl From<&str> for AllowedFeature {
             "subscriptions" => Self::Subscriptions,
             "traffic_shaping" => Self::TrafficShaping,
             other => Self::Other(other.into()),
-        }
-    }
-}
-
-impl AllowedFeature {
-    /// Creates an allowed feature from a plugin name
-    pub fn from_plugin_name(plugin_name: &str) -> Option<AllowedFeature> {
-        match plugin_name {
-            "traffic_shaping" => Some(AllowedFeature::TrafficShaping),
-            "limits" => Some(AllowedFeature::RequestLimits),
-            "subscription" => Some(AllowedFeature::Subscriptions),
-            "authorization" => Some(AllowedFeature::Authorization),
-            "authentication" => Some(AllowedFeature::Authentication),
-            "response_cache" => Some(AllowedFeature::ResponseCaching),
-            "demand_control" => Some(AllowedFeature::DemandControl),
-            "coprocessor" => Some(AllowedFeature::Coprocessors),
-            _other => None,
         }
     }
 }
@@ -909,12 +801,15 @@ impl FromStr for License {
     }
 }
 
-/// An individual check for the router.yaml.
-#[derive(Builder, Clone, Debug, Serialize, Deserialize)]
-pub(crate) struct ConfigurationRestriction {
-    name: String,
-    path: String,
-    value: Option<Value>,
+/// A router configuration setting that is only allowed when the licence has `feature`.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(crate) struct LicensedSetting {
+    /// The licence feature the setting needs.
+    pub(crate) feature: AllowedFeature,
+    /// What the setting does, shown to the operator, such as "Federated subscriptions".
+    pub(crate) name: &'static str,
+    /// Where the setting is in router.yaml, such as `subscription.enabled`.
+    pub(crate) path: &'static str,
 }
 
 // An individual check for the supergraph schema
@@ -1026,11 +921,11 @@ mod test {
     use crate::spec::Schema;
     use crate::uplink::license_enforcement::Audience;
     use crate::uplink::license_enforcement::Claims;
-    use crate::uplink::license_enforcement::ConfigurationRestriction;
     use crate::uplink::license_enforcement::License;
     use crate::uplink::license_enforcement::LicenseEnforcementReport;
     use crate::uplink::license_enforcement::LicenseLimits;
     use crate::uplink::license_enforcement::LicenseState;
+    use crate::uplink::license_enforcement::LicensedSetting;
     use crate::uplink::license_enforcement::OneOrMany;
 
     #[test]
@@ -1070,12 +965,11 @@ mod test {
     ) -> LicenseEnforcementReport {
         let mut config_restrictions = Vec::new();
         if uses_restricted_features {
-            config_restrictions.push(
-                ConfigurationRestriction::builder()
-                    .name("Test feature")
-                    .path("$.test")
-                    .build(),
-            );
+            config_restrictions.push(LicensedSetting {
+                feature: AllowedFeature::Experimental,
+                name: "Test feature",
+                path: "test",
+            });
         }
 
         LicenseEnforcementReport {
@@ -1273,6 +1167,114 @@ mod test {
             "should have found restricted features"
         );
         assert_snapshot!(report.to_string());
+    }
+
+    /// The paths of the settings in `router_yaml` that an unlicensed router refuses.
+    #[track_caller]
+    fn unlicensed_restricted_paths(router_yaml: &str) -> Vec<&'static str> {
+        check(
+            router_yaml,
+            include_str!("testdata/oss.graphql"),
+            LicenseState::Unlicensed,
+        )
+        .restricted_config_in_use
+        .iter()
+        .map(|setting| setting.path)
+        .collect()
+    }
+
+    #[test]
+    fn test_subscription_section_without_enabled_is_restricted() {
+        // `enabled` defaults to true, so a section that leaves it out turns subscriptions on.
+        let yaml = indoc::indoc! {"
+            subscription:
+              mode:
+                passthrough:
+                  all:
+                    path: /ws
+        "};
+        assert_eq!(unlicensed_restricted_paths(yaml), ["subscription.enabled"]);
+    }
+
+    #[test]
+    fn test_authorization_section_with_default_directives_is_restricted() {
+        // Directives are on by default, so any `authorization:` section turns them on.
+        let yaml = indoc::indoc! {"
+            authorization:
+              directives:
+                dry_run: true
+        "};
+        assert_eq!(
+            unlicensed_restricted_paths(yaml),
+            ["authorization.directives.enabled"]
+        );
+    }
+
+    #[test]
+    fn test_require_authentication_is_restricted() {
+        let yaml = indoc::indoc! {"
+            authorization:
+              require_authentication: true
+              directives:
+                enabled: false
+        "};
+        assert_eq!(
+            unlicensed_restricted_paths(yaml),
+            ["authorization.require_authentication"]
+        );
+    }
+
+    #[test]
+    fn test_subgraph_authentication_is_restricted() {
+        let yaml = indoc::indoc! {r#"
+            authentication:
+              subgraph:
+                all:
+                  aws_sig_v4:
+                    default_chain:
+                      service_name: "Foo"
+                      region: "us-east-1"
+        "#};
+        assert_eq!(
+            unlicensed_restricted_paths(yaml),
+            ["authentication.subgraph"]
+        );
+    }
+
+    #[test]
+    fn test_connector_authentication_is_restricted() {
+        let yaml = indoc::indoc! {r#"
+            authentication:
+              connector:
+                sources:
+                  subgraph.ec2:
+                    aws_sig_v4:
+                      default_chain:
+                        region: "eu-north-1"
+                        service_name: "ec2"
+        "#};
+        assert_eq!(
+            unlicensed_restricted_paths(yaml),
+            ["authentication.connector"]
+        );
+    }
+
+    #[test]
+    fn test_disabled_sections_are_not_restricted() {
+        let yaml = indoc::indoc! {"
+            authorization:
+              directives:
+                enabled: false
+            batching:
+              enabled: false
+            persisted_queries:
+              enabled: false
+            response_cache:
+              enabled: false
+            subscription:
+              enabled: false
+        "};
+        assert!(unlicensed_restricted_paths(yaml).is_empty());
     }
 
     #[test]
