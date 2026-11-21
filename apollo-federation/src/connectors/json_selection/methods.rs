@@ -34,6 +34,7 @@ pub(super) enum ArrowMethod {
     Map,
     Match,
     First,
+    Flatten,
     Last,
     Slice,
     Size,
@@ -166,6 +167,7 @@ impl std::ops::Deref for ArrowMethod {
             Self::Map => &public::MapMethod,
             Self::Match => &public::MatchMethod,
             Self::First => &public::FirstMethod,
+            Self::Flatten => &public::FlattenMethod,
             Self::Last => &public::LastMethod,
             Self::Slice => &public::SliceMethod,
             Self::Size => &public::SizeMethod,
@@ -235,6 +237,7 @@ impl ArrowMethod {
             "div" => Some(Self::Div),
             "mod" => Some(Self::Mod),
             "first" => Some(Self::First),
+            "flatten" => Some(Self::Flatten),
             "last" => Some(Self::Last),
             "slice" => Some(Self::Slice),
             "size" => Some(Self::Size),
@@ -288,6 +291,7 @@ impl ArrowMethod {
                 | Self::Map
                 | Self::Match
                 | Self::First
+                | Self::Flatten
                 | Self::Last
                 | Self::Slice
                 | Self::Size

@@ -1,0 +1,49 @@
+extend schema
+@link(
+    url: "https://specs.apollo.dev/connect/v0.4"
+    import: ["@connect", "@source"]
+)
+@source(name: "api", http: { baseURL: "http://127.0.0.1" })
+
+# INVALID: `flatten_shape` returns a `Shape::error` for a depth that is not an
+# integer and for more than one argument, and the selection walker reports a
+# field whose shape is an error as `InvalidSelection`, located at the method
+# name. Without a failing case a passing selection (`flatten_method_v0_4.graphql`)
+# could be passing for the wrong reason, for example because the shape of
+# `->flatten` collapsed to `Unknown`.
+type Query {
+    nonIntegerDepth: T
+    @connect(
+        source: "api"
+        http: { GET: "/t" }
+        selection: """
+        id
+        tags: sections->map(@.tags)->flatten("x")
+        """
+    )
+
+    fractionalDepth: T
+    @connect(
+        source: "api"
+        http: { GET: "/t" }
+        selection: """
+        id
+        tags: sections->map(@.tags)->flatten(1.5)
+        """
+    )
+
+    tooManyArguments: T
+    @connect(
+        source: "api"
+        http: { GET: "/t" }
+        selection: """
+        id
+        tags: sections->map(@.tags)->flatten(1, 2)
+        """
+    )
+}
+
+type T {
+    id: ID!
+    tags: [String]
+}

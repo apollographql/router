@@ -1,0 +1,28 @@
+---
+source: apollo-federation/src/connectors/validation/mod.rs
+expression: errors
+input_file: apollo-federation/src/connectors/validation/test_data/flatten_method_invalid_v0_4.graphql
+---
+[
+    Message {
+        code: InvalidSelection,
+        message: "`@connect(selection:)` on `Query.nonIntegerDepth` contains an invalid mapping for field `tags`: ->flatten depth must be an integer",
+        locations: [
+            21:38..21:45,
+        ],
+    },
+    Message {
+        code: InvalidSelection,
+        message: "`@connect(selection:)` on `Query.fractionalDepth` contains an invalid mapping for field `tags`: ->flatten depth must be an integer",
+        locations: [
+            31:38..31:45,
+        ],
+    },
+    Message {
+        code: InvalidSelection,
+        message: "`@connect(selection:)` on `Query.tooManyArguments` contains an invalid mapping for field `tags`: Method ->flatten requires at most one argument, but 2 were provided",
+        locations: [
+            41:38..41:45,
+        ],
+    },
+]
