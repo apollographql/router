@@ -54,6 +54,12 @@ pub enum SchemaSource {
 
     #[display("Registry")]
     OCI(OciConfig),
+
+    /// The graph artifact declared in the configuration's `registry` section. Its events are
+    /// produced from the configuration stream (see `router::event::registry`), so a change to
+    /// the section restarts the poller. EXPERIMENTAL and not subject to semver.
+    #[display("Registry")]
+    FromRegistryConfiguration,
 }
 
 impl From<&'_ str> for SchemaSource {
@@ -67,6 +73,11 @@ impl From<&'_ str> for SchemaSource {
 impl SchemaSource {
     /// Convert this schema into a stream regardless of if is static or not. Allows for unified handling later.
     pub(crate) fn into_stream(self) -> impl Stream<Item = Event> {
+        if let SchemaSource::FromRegistryConfiguration = self {
+            // Driven by the configuration stream instead; and no `NoMoreSchema`, which that
+            // driver emits itself when the section names no graph artifact at startup.
+            return stream::empty().boxed();
+        }
         match self {
             SchemaSource::Static { schema_sdl: schema } => {
                 let update_schema = UpdateSchema(SchemaState {
@@ -157,6 +168,8 @@ impl SchemaSource {
                 .filter_map(|s| async move { s.map(Event::UpdateSchema) })
                 .boxed()
             }
+            // Handled by the early return above.
+            SchemaSource::FromRegistryConfiguration => stream::empty().boxed(),
             SchemaSource::OCI(oci_config) => {
                 tracing::debug!("using oci as schema source");
                 match create_oci_schema_stream(oci_config) {

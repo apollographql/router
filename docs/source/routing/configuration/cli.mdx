@@ -191,7 +191,9 @@ An OCI reference to a graph artifact that contains the supergraph schema for the
 The reference can use a SHA256 digest or a [tag](/graphos/platform/schema-management/delivery/graph-artifacts/tags). Tag references require `--hot-reload`. Digest references can't be used with `--hot-reload`.<br/><br/>
 
 When you set this option, the router uses the schema from the specified graph artifact instead of Apollo Uplink.
-The router also fetches its entitlement from the same registry when the graph artifact manifest carries an entitlement identifier; persisted queries still come from Uplink.<br/><br/>
+The router also fetches its entitlement from the same registry when the graph artifact manifest carries an entitlement identifier; persisted queries still come from Uplink unless the [`registry` section](/graphos/routing/configuration/yaml#registry) of `router.yaml` names a persisted-queries artifact.<br/><br/>
+
+This option overrides `registry.artifacts.graph` in `router.yaml` and must name the same registry as that section's `host`. The `registry` section can declare the graph artifact on its own, with no environment variable, and is the only way to declare the persisted-queries artifact.<br/><br/>
 
 </td>
 </tr>

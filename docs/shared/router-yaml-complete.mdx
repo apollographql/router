@@ -266,6 +266,18 @@ preview_file_uploads:
         max_files: 0
       mode: stream
 progressive_override: {}
+registry:
+  host: artifact.api.apollographql.com
+  prefix: null
+  auth: auto
+  poll_interval: 30s
+  insecure: false
+  artifacts:
+    graph:
+      reference: my-graph:production
+    persisted_queries:
+      reference: persistedqueries/my-graph:production
+    entitlement: null
 reload:
   max_retries: 5
   retry_delay: 10s
