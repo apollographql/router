@@ -1,0 +1,18 @@
+---
+source: apollo-federation/tests/composition/connectors.rs
+expression: plan
+---
+QueryPlan {
+  Subscription {
+    Primary: {
+      Fetch(service: "streams_Subscription_prices_0") {
+        {
+          prices(symbol: "APOL") {
+            symbol
+            amount
+          }
+        }
+      },
+    },
+  },
+}

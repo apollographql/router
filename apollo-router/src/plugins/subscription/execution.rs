@@ -27,6 +27,8 @@ use crate::context::OPERATION_NAME;
 use crate::graphql;
 use crate::graphql::Response;
 use crate::plugins::authentication::APOLLO_AUTHENTICATION_JWT_CLAIMS;
+use crate::plugins::connectors::declared_errors::CONNECTOR_ERRORS_EXTENSION_KEY;
+use crate::plugins::connectors::declared_errors::ConnectorDeclaredErrors;
 use crate::plugins::subscription::Notify;
 use crate::plugins::subscription::SUBSCRIPTION_ERROR_EXTENSION_KEY;
 use crate::plugins::subscription::SubscriptionConfig;
@@ -146,6 +148,21 @@ pub struct SubscriptionTaskParams {
     pub(crate) subscription_handle: SubscriptionHandle,
     pub(crate) subscription_config: SubscriptionConfig,
     pub(crate) stream_rx: ReceiverStream<BoxGqlStream>,
+}
+
+/// Reports in this payload's `extensions.connectorErrors` every error a connector mapping declared
+/// with `->withError` while producing it: those in its own `errors`, from a connector-backed
+/// subscription's event, and those its execution's connector fetches left in the context.
+///
+/// Done per payload, here, because the connectors plugin drains the context only as each chunk
+/// reaches the client, by which time the next event's fetches may already have added theirs.
+fn attach_connector_errors(context: &Context, response: &mut Response) {
+    ConnectorDeclaredErrors::take_marked(context, &mut response.errors);
+    if let Some(errors) = ConnectorDeclaredErrors::drain(context) {
+        response
+            .extensions
+            .insert(CONNECTOR_ERRORS_EXTENSION_KEY, errors);
+    }
 }
 
 fn subscription_fatal_error(message: impl Into<String>, extension_code: &str) -> Response {
@@ -347,7 +364,7 @@ async fn dispatch_subscription_event(
             let execution_request = ExecutionRequest::internal_builder()
                 .supergraph_request(cloned_supergraph_req)
                 .query_plan(query_plan.clone())
-                .context(context)
+                .context(context.clone())
                 .source_stream_value(val.data.take().unwrap_or_default())
                 .build()
                 .await;
@@ -372,6 +389,7 @@ async fn dispatch_subscription_event(
                 next_response.subscribed = val.subscribed;
                 val.errors.append(&mut next_response.errors);
                 next_response.errors = val.errors;
+                attach_connector_errors(&context, &mut next_response);
 
                 sender
                     .send(next_response)
@@ -381,10 +399,13 @@ async fn dispatch_subscription_event(
                 Ok(())
             }
         }
-        None => sender
-            .send(val)
-            .await
-            .map_err(|SendError(unboxed)| SendError(Box::new(unboxed))),
+        None => {
+            attach_connector_errors(&context, &mut val);
+            sender
+                .send(val)
+                .await
+                .map_err(|SendError(unboxed)| SendError(Box::new(unboxed)))
+        }
     };
     span.record(
         APOLLO_PRIVATE_DURATION_NS,

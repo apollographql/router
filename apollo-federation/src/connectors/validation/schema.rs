@@ -88,7 +88,11 @@ fn check_for_disallowed_type_definitions(schema: &SchemaInfo) -> impl Iterator<I
                         .collect(),
                 })
             }
-            ExtendedType::Object(obj) if subscription_name.is_some_and(|name| name == &obj.name) => {
+            // Subscription root fields are backed by streamed responses from connect/v0.5
+            ExtendedType::Object(obj)
+                if spec < ConnectSpec::V0_5
+                    && subscription_name.is_some_and(|name| name == &obj.name) =>
+            {
                     Some(Message {
                         code: Code::SubscriptionInConnectors,
                         message: format!(

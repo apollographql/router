@@ -74,6 +74,7 @@ expression: "&connectors"
                 connect_path: None,
                 connect_query_params: None,
                 stream: None,
+                subscription: false,
             },
         ),
         selection: JSONSelection {
@@ -358,6 +359,7 @@ expression: "&connectors"
                 connect_path: None,
                 connect_query_params: None,
                 stream: None,
+                subscription: false,
             },
         ),
         selection: JSONSelection {
