@@ -186,6 +186,14 @@ pub struct Opt {
     #[clap(long, env = "APOLLO_GRAPH_ARTIFACT_REFERENCE", action = ArgAction::Append)]
     graph_artifact_reference: Option<String>,
 
+    /// An OCI reference to the persisted-queries artifact for the router to serve its persisted
+    /// query manifest from. Fetched and polled independently of the graph artifact schema image.
+    /// A tag reference is polled and the manifest hot-swaps when the tag moves; a digest
+    /// reference is fetched once and pinned. This does not depend on --hot-reload, so a
+    /// digest-pinned schema can be combined with a polled persisted-queries tag.
+    #[clap(long, env = "APOLLO_PQ_ARTIFACT_REFERENCE", action = ArgAction::Append)]
+    pq_artifact_reference: Option<String>,
+
     /// Disable the router's fully anonymous usage ping. Doesn't affect usage reporting to Apollo
     /// Studio for graphs configured with APOLLO_KEY and APOLLO_GRAPH_REF.
     #[clap(long, env = "APOLLO_TELEMETRY_DISABLED", value_parser = FalseyValueParser::new())]
@@ -252,7 +260,21 @@ impl Opt {
             .graph_artifact_reference
             .clone()
             .ok_or(Self::err_require_opt("APOLLO_GRAPH_ARTIFACT_REFERENCE"))?;
-        let (validated_reference, _) = validate_oci_reference(&graph_artifact_reference)?;
+        self.oci_config_for_reference(&graph_artifact_reference)
+    }
+
+    /// The persisted-queries artifact: its own reference, polled independently of the schema
+    /// image. Same key, poll interval, and TLS handling as the schema's OCI config.
+    pub(crate) fn pq_oci_config(&self) -> Result<OciConfig, anyhow::Error> {
+        let pq_artifact_reference = self
+            .pq_artifact_reference
+            .clone()
+            .ok_or(Self::err_require_opt("APOLLO_PQ_ARTIFACT_REFERENCE"))?;
+        self.oci_config_for_reference(&pq_artifact_reference)
+    }
+
+    fn oci_config_for_reference(&self, reference: &str) -> Result<OciConfig, anyhow::Error> {
+        let (validated_reference, _) = validate_oci_reference(reference)?;
 
         // Allow test-only override of poll interval via TEST_APOLLO_OCI_POLL_INTERVAL environment variable
         let poll_interval = std::env::var("TEST_APOLLO_OCI_POLL_INTERVAL")
@@ -809,6 +831,7 @@ impl Executable {
             .is_telemetry_disabled(opt.anonymous_telemetry_disabled)
             .and_configuration(configuration)
             .and_uplink(uplink_config)
+            .and_pq_oci(opt.pq_oci_config().ok())
             .schema(schema_source)
             .license(license)
             .shutdown(shutdown.unwrap_or(ShutdownSource::CtrlC))
@@ -1032,6 +1055,7 @@ mod tests {
                 graph_artifact_reference: Some(
                     "registry.apollographql.com/my-graph@sha256:1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef".to_string(),
                 ),
+                pq_artifact_reference: None,
                 anonymous_telemetry_disabled: true,
                 apollo_uplink_timeout: Duration::from_secs(30),
                 listen_address: None,
@@ -1060,6 +1084,7 @@ mod tests {
                 apollo_plugins: Default::default(),
                 notify: Default::default(),
                 uplink: None,
+                pq_oci: None,
                 validated_yaml: None,
                 raw_yaml: None,
             }));
@@ -1114,6 +1139,7 @@ mod tests {
                 graph_artifact_reference: Some(
                     "registry.apollographql.com/my-graph@sha256:1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef".to_string(),
                 ),
+                pq_artifact_reference: None,
                 anonymous_telemetry_disabled: true,
                 apollo_uplink_timeout: Duration::from_secs(30),
                 listen_address: None,
@@ -1142,6 +1168,7 @@ mod tests {
                 apollo_plugins: Default::default(),
                 notify: Default::default(),
                 uplink: None,
+                pq_oci: None,
                 validated_yaml: None,
                 raw_yaml: None,
             }));
@@ -1192,6 +1219,7 @@ mod tests {
                 apollo_router_license: None,
                 apollo_router_license_path: None,
                 apollo_uplink_endpoints: None,
+                pq_artifact_reference: None,
                 graph_artifact_reference: Some(":bad".to_string()),
                 anonymous_telemetry_disabled: true,
                 apollo_uplink_timeout: Duration::from_secs(30),
@@ -1243,6 +1271,7 @@ mod tests {
                 apollo_router_license: None,
                 apollo_router_license_path: None,
                 apollo_uplink_endpoints: None,
+                pq_artifact_reference: None,
                 graph_artifact_reference: Some(graph_artifact_reference),
                 anonymous_telemetry_disabled: true,
                 apollo_uplink_timeout: Duration::from_secs(30),
@@ -1308,6 +1337,7 @@ mod tests {
                 apollo_router_license: None,
                 apollo_router_license_path: None,
                 apollo_uplink_endpoints: None,
+                pq_artifact_reference: None,
                 graph_artifact_reference: None,
                 anonymous_telemetry_disabled: true,
                 apollo_uplink_timeout: Duration::from_secs(30),
@@ -1323,6 +1353,7 @@ mod tests {
             let opt = Opt {
                 apollo_key: Some("test-key".to_string()),
                 apollo_graph_ref: Some("test-graph@current".to_string()),
+                pq_artifact_reference: None,
                 graph_artifact_reference: Some(
                     "registry.apollographql.com/my-graph@sha256:1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef".to_string(),
                 ),
@@ -1347,6 +1378,7 @@ mod tests {
             let opt = Opt {
                 apollo_key: Some("registry-token".to_string()),
                 apollo_graph_ref: None,
+                pq_artifact_reference: None,
                 graph_artifact_reference: Some(
                     "my-registry.example.com/my-graph@sha256:1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef".to_string(),
                 ),
@@ -1368,6 +1400,7 @@ mod tests {
             let opt = Opt {
                 apollo_key: None,
                 apollo_graph_ref: Some("test-graph@current".to_string()),
+                pq_artifact_reference: None,
                 graph_artifact_reference: Some(
                     "my-registry.example.com/my-graph@sha256:1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef".to_string(),
                 ),
@@ -1389,6 +1422,7 @@ mod tests {
             let opt = Opt {
                 apollo_key: Some("test-key".to_string()),
                 apollo_graph_ref: Some("test-graph@current".to_string()),
+                pq_artifact_reference: None,
                 graph_artifact_reference: None,
                 ..base_opt()
             };
@@ -1421,6 +1455,7 @@ mod tests {
             // fast instead of silently picking one.
             let opt = Opt {
                 apollo_router_license_path: Some(std::path::PathBuf::from("license.jwt")),
+                pq_artifact_reference: None,
                 graph_artifact_reference: Some(
                     "registry.apollographql.com/my-graph@sha256:1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef".to_string(),
                 ),
@@ -1445,6 +1480,7 @@ mod tests {
             // APOLLO_ROUTER_LICENSE env value instead of a license file path.
             let opt = Opt {
                 apollo_router_license: Some("test-license".to_string()),
+                pq_artifact_reference: None,
                 graph_artifact_reference: Some(
                     "registry.apollographql.com/my-graph@sha256:1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef".to_string(),
                 ),
@@ -1471,6 +1507,7 @@ mod tests {
             // documented precedence order, the explicit license wins.
             let opt = Opt {
                 apollo_router_license_path: Some(std::path::PathBuf::from("license.jwt")),
+                pq_artifact_reference: None,
                 graph_artifact_reference: Some(
                     "my-registry.example.com/my-graph@sha256:1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef".to_string(),
                 ),
@@ -1492,6 +1529,7 @@ mod tests {
             // Same as above, but for the literal APOLLO_ROUTER_LICENSE env value.
             let opt = Opt {
                 apollo_router_license: Some("test-license".to_string()),
+                pq_artifact_reference: None,
                 graph_artifact_reference: Some(
                     "my-registry.example.com/my-graph@sha256:1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef".to_string(),
                 ),

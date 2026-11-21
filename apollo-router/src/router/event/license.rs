@@ -91,6 +91,7 @@ fn oci_error_reason(e: &OciError) -> &'static str {
         OciError::Distribution(_) => "http_error",
         OciError::Parse(_) | OciError::LayerParse(_) => "parse_error",
         OciError::LicenseParse(e) => parse_error_reason(e.is_version_incompatible()),
+        OciError::ChunkDecompress(_) => "parse_error",
     }
 }
 
