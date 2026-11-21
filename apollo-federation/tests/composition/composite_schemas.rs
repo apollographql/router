@@ -262,6 +262,26 @@ mod detection {
     }
 
     #[test]
+    fn user_lookup_directive_with_non_spec_shape_is_not_detected() {
+        // Fed 1 schemas with their own argument-less `@lookup` that differs from the spec only
+        // in repeatability or locations are not source schemas.
+        for sdl in [
+            r#"
+            directive @lookup on FIELD_DEFINITION | OBJECT
+            type Query { t: T @lookup }
+            type T @key(fields: "id") @lookup { id: ID! }
+            "#,
+            r#"
+            directive @lookup repeatable on FIELD_DEFINITION
+            type Query { t: T @lookup @lookup }
+            type T @key(fields: "id") { id: ID! }
+            "#,
+        ] {
+            compose_sources(&[("a", sdl)]).expect("composes");
+        }
+    }
+
+    #[test]
     fn unrelated_user_lookup_directive_is_not_detected() {
         // A Fed 1 schema with its own `@lookup(table:)` directive is not a source schema.
         compose_sources(&[(

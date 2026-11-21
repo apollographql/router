@@ -10,6 +10,7 @@ use apollo_compiler::Name;
 use apollo_compiler::Node;
 use apollo_compiler::Schema;
 use apollo_compiler::ast;
+use apollo_compiler::ast::DirectiveLocation;
 use apollo_compiler::ast::Value;
 use apollo_compiler::name;
 use apollo_compiler::schema::Directive;
@@ -101,9 +102,30 @@ fn is_spec_shaped_definition(schema: &Schema, name: &Name) -> bool {
         .iter()
         .map(|a| a.name.as_str())
         .collect();
+    // The composite directives also have to match on repeatability and locations. Otherwise a
+    // Fed 1 schema with its own argument-less `@lookup` would be read as a source schema.
+    // Locations only need to be a subset, so a copy of an older spec draft still matches.
+    let fits = |allowed: &[DirectiveLocation]| {
+        !definition.repeatable
+            && definition
+                .locations
+                .iter()
+                .all(|location| allowed.contains(location))
+    };
     match name.as_str() {
-        "lookup" | "internal" | "shareable" | "inaccessible" => argument_names.is_empty(),
-        "is" | "require" => argument_names == ["field"],
+        "lookup" => argument_names.is_empty() && fits(&[DirectiveLocation::FieldDefinition]),
+        "internal" => {
+            argument_names.is_empty()
+                && fits(&[
+                    DirectiveLocation::Object,
+                    DirectiveLocation::InputObject,
+                    DirectiveLocation::FieldDefinition,
+                ])
+        }
+        "is" | "require" => {
+            argument_names == ["field"] && fits(&[DirectiveLocation::ArgumentDefinition])
+        }
+        "shareable" | "inaccessible" => argument_names.is_empty(),
         "key" | "provides" => argument_names == ["fields"],
         "external" => argument_names.is_empty() || argument_names == ["reason"],
         "override" => argument_names.first() == Some(&"from"),
