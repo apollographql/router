@@ -1,3 +1,5 @@
+use std::str::FromStr;
+
 use apollo_compiler::Name;
 use apollo_compiler::Node;
 use apollo_compiler::Schema;
@@ -11,11 +13,13 @@ use super::errors::ErrorsArguments;
 use super::http::HTTP_ARGUMENT_NAME;
 use super::http::PATH_ARGUMENT_NAME;
 use super::http::QUERY_PARAMS_ARGUMENT_NAME;
+use super::http::STREAM_ARGUMENT_NAME;
 use crate::connectors::ConnectSpec;
 use crate::connectors::ConnectorPosition;
 use crate::connectors::ObjectFieldDefinitionPosition;
 use crate::connectors::OriginatingDirective;
 use crate::connectors::SourceName;
+use crate::connectors::StreamMode;
 use crate::connectors::id::ObjectTypeDefinitionDirectivePosition;
 use crate::connectors::json_selection::JSONSelection;
 use crate::connectors::models::Header;
@@ -313,6 +317,9 @@ pub struct ConnectHTTPArguments {
     pub(crate) path: Option<JSONSelection>,
     /// A [`JSONSelection`] that should resolve to an object to convert to query params.
     pub(crate) query_params: Option<JSONSelection>,
+
+    /// How to fold a response that may be a stream of events, from v0.5.
+    pub(crate) stream: Option<StreamMode>,
 }
 
 impl TryFrom<(&ObjectNode, &Name, ConnectSpec)> for ConnectHTTPArguments {
@@ -334,6 +341,7 @@ impl TryFrom<(&ObjectNode, &Name, ConnectSpec)> for ConnectHTTPArguments {
                 .map_err(|err| FederationError::internal(err.to_string()))?;
         let mut path = None;
         let mut query_params = None;
+        let mut stream = None;
         for (name, value) in values {
             let name = name.as_str();
 
@@ -385,6 +393,13 @@ impl TryFrom<(&ObjectNode, &Name, ConnectSpec)> for ConnectHTTPArguments {
                     JSONSelection::parse_with_spec(value, connect_spec)
                         .map_err(|e| FederationError::internal(e.message))?,
                 );
+            } else if name == STREAM_ARGUMENT_NAME.as_str() {
+                let value = value.as_str().ok_or_else(|| {
+                    FederationError::internal(format!(
+                        "`{STREAM_ARGUMENT_NAME}` field in `@{directive_name}` directive's `http` field is not a string"
+                    ))
+                })?;
+                stream = Some(StreamMode::from_str(value).map_err(FederationError::internal)?);
             }
         }
 
@@ -398,6 +413,7 @@ impl TryFrom<(&ObjectNode, &Name, ConnectSpec)> for ConnectHTTPArguments {
             headers,
             path,
             query_params,
+            stream,
         })
     }
 }
@@ -538,6 +554,7 @@ mod tests {
                         headers: [],
                         path: None,
                         query_params: None,
+                        stream: None,
                     },
                 ),
                 selection: JSONSelection {
@@ -648,6 +665,7 @@ mod tests {
                         headers: [],
                         path: None,
                         query_params: None,
+                        stream: None,
                     },
                 ),
                 selection: JSONSelection {

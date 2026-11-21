@@ -89,9 +89,23 @@ impl<'schema> Selection<'schema> {
         })
     }
 
+    /// The shape of what the selection produces when `$` has the given shape.
+    pub(super) fn output_shape(&self, input_shape: Shape) -> Shape {
+        SelectionAnalysis::new(self.parsed.clone())
+            .with_input_shape(input_shape)
+            .output_shape()
+    }
+
     /// Type check the selection using the visitor pattern, returning a list of seen fields as
     /// (ObjectName, FieldName) pairs.
-    pub(super) fn type_check(self, schema: &SchemaInfo) -> Result<Vec<(Name, Name)>, Message> {
+    ///
+    /// `input_shape` is what's known about `$`, such as that a streamed response is a list of
+    /// events. With `None`, nothing is assumed.
+    pub(super) fn type_check(
+        self,
+        schema: &SchemaInfo,
+        input_shape: Option<Shape>,
+    ) -> Result<Vec<(Name, Name)>, Message> {
         let coordinate = self.coordinate.connect;
         let context = VariableContext::new(&coordinate.element, Phase::Response, Target::Body);
         validate_selection_variables(
@@ -122,15 +136,21 @@ impl<'schema> Selection<'schema> {
             self.type_check_legacy(schema)
         } else {
             // Modern path for v0.3+
-            self.type_check_shape_based(schema)
+            self.type_check_shape_based(schema, input_shape)
         }
     }
 
     /// Shape-based type checking for v0.3+ (actively maintained)
-    fn type_check_shape_based(self, schema: &SchemaInfo) -> Result<Vec<(Name, Name)>, Message> {
+    fn type_check_shape_based(
+        self,
+        schema: &SchemaInfo,
+        input_shape: Option<Shape>,
+    ) -> Result<Vec<(Name, Name)>, Message> {
         let coordinate = self.coordinate.connect;
-        // Add shape() method to the selection
-        let shape = self.parsed.shape();
+        let shape = match input_shape {
+            Some(input_shape) => self.output_shape(input_shape),
+            None => self.parsed.shape(),
+        };
 
         match coordinate.element {
             ConnectedElement::Field {
