@@ -1,0 +1,17 @@
+telemetry:
+  instrumentation:
+    instruments:
+      default_requirement_level: none
+      subgraph:
+        "with_response_header":
+          description: "histogram of responses with x-outcome"
+          type: histogram
+          unit: "unit"
+          value: unit
+          attributes:
+            subgraph.name: true
+            outcome:
+              subgraph_response_header: "x-outcome"
+          condition:
+            exists:
+              subgraph_response_header: "x-outcome"

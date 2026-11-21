@@ -1,0 +1,47 @@
+---
+source: apollo-router/src/plugins/telemetry/config_new/instruments.rs
+description: Custom histogram conditions are evaluated when a coprocessor call fails at the subgraph stage
+expression: "&metrics.all()"
+info:
+  telemetry:
+    instrumentation:
+      instruments:
+        default_requirement_level: none
+        subgraph:
+          with_response_header:
+            description: histogram of responses with x-outcome
+            type: histogram
+            unit: unit
+            value: unit
+            attributes:
+              subgraph.name: true
+              outcome:
+                subgraph_response_header: x-outcome
+            condition:
+              exists:
+                subgraph_response_header: x-outcome
+---
+- name: apollo.router.operations.fetch.duration
+  description: Duration of a subgraph fetch.
+  unit: s
+  data:
+    datapoints:
+      - sum: 0.1
+        count: 1
+        attributes:
+          has_errors: false
+          subgraph.name: products
+      - sum: 0.1
+        count: 1
+        attributes:
+          subgraph.name: products
+- name: with_response_header
+  description: histogram of responses with x-outcome
+  unit: unit
+  data:
+    datapoints:
+      - sum: 1
+        count: 1
+        attributes:
+          outcome: match
+          subgraph.name: products

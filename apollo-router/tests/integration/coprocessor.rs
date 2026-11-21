@@ -1709,6 +1709,41 @@ async fn test_coprocessor_metrics_logged_on_timeout() -> Result<(), BoxError> {
 }
 
 #[tokio::test(flavor = "multi_thread")]
+async fn test_failed_coprocessor_call_respects_instrument_conditions() -> Result<(), BoxError> {
+    if !graph_os_enabled() {
+        return Ok(());
+    }
+
+    let mut router = IntegrationTest::builder()
+        .config(include_str!(
+            "fixtures/coprocessor_failure_instrument_conditions.router.yaml"
+        ))
+        .build()
+        .await;
+
+    router.start().await;
+    router.assert_started().await;
+
+    router.execute_default_query().await;
+
+    // The failed coprocessor call reaches the instruments as an error...
+    router
+        .assert_metrics_contains(
+            r#"coprocessor_failures_total{subgraph_name="products",otel_scope_name="apollo/router"} 1"#,
+            None,
+        )
+        .await;
+    // ...and has no response, so an instrument conditioned on a response header ignores it.
+    router
+        .assert_metrics_does_not_contain("responses_with_outcome")
+        .await;
+
+    router.graceful_shutdown().await;
+
+    Ok(())
+}
+
+#[tokio::test(flavor = "multi_thread")]
 async fn test_connector_coprocessor_request_response() -> Result<(), BoxError> {
     if !graph_os_enabled() {
         return Ok(());

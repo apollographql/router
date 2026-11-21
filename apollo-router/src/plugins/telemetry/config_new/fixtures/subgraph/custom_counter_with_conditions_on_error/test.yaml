@@ -1,0 +1,47 @@
+description: Custom counter conditions are evaluated when a coprocessor call fails at the subgraph stage
+events:
+  - - subgraph_request:
+        query: "query { hello }"
+        operation_name: "Products"
+        operation_kind: query
+        subgraph_name: "products"
+    - subgraph_response:
+        status: 200
+        data:
+          hello: "world"
+        headers:
+          x-outcome: match
+  - - subgraph_request:
+        query: "query { hello }"
+        operation_name: "Products"
+        operation_kind: query
+        subgraph_name: "products"
+    - subgraph_response:
+        status: 200
+        data:
+          hello: "world"
+  - - subgraph_request:
+        query: "query { hello }"
+        operation_name: "Products"
+        operation_kind: query
+        subgraph_name: "products"
+    - subgraph_error:
+        error: "HTTP fetch failed: tcp connect error"
+  - - subgraph_request:
+        query: "query { hello }"
+        operation_name: "Products"
+        operation_kind: query
+        subgraph_name: "products"
+    - subgraph_error:
+        error: request timed out
+  - - subgraph_request:
+        query: "query { hello }"
+        operation_name: "Products"
+        operation_kind: query
+        subgraph_name: "products"
+    - subgraph_response:
+        status: 504
+        errors:
+          - message: "Your request has been timed out"
+            extensions:
+              code: GATEWAY_TIMEOUT

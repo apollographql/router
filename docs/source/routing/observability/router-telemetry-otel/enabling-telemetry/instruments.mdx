@@ -546,8 +546,8 @@ telemetry:
             subgraph.name: true
           condition:
             eq:
-              - "request timed out"
-              - error: reason
+              - 504
+              - subgraph_response_status: code
 
       graphql:
         acme.graphql.list.lengths:
