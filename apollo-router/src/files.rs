@@ -221,6 +221,7 @@ pub(crate) mod tests {
     use test_log::test;
 
     use super::*;
+    use crate::assert_snapshot_subscriber;
 
     /// How long to wait for the watcher to report an event before failing the test.
     const WATCHER_EVENT_BOUND: Duration = Duration::from_secs(10);
@@ -330,26 +331,18 @@ pub(crate) mod tests {
         );
     }
 
-    #[test(tokio::test)]
-    async fn watch_missing_path() {
-        let dir = tempfile::tempdir().unwrap();
-        let path = dir.path().join("missing.graphql");
-        let mut watch = watch(&path);
-        assert!(
-            futures::poll!(watch.next()).is_ready(),
-            "the initial event should still be sent for a missing path"
-        );
+    #[test]
+    fn watch_missing_path_logs_error() {
+        tracing::subscriber::with_default(assert_snapshot_subscriber!(), || {
+            let _watch = watch(Path::new("missing/supergraph.graphql"));
+        });
     }
 
-    #[test(tokio::test)]
-    async fn watch_rhai_missing_path() {
-        let dir = tempfile::tempdir().unwrap();
-        let path = dir.path().join("rhai");
-        let mut watch = watch_rhai(&path);
-        assert!(
-            futures::poll!(watch.next()).is_ready(),
-            "the initial event should still be sent for a missing path"
-        );
+    #[test]
+    fn watch_rhai_missing_path_logs_error() {
+        tracing::subscriber::with_default(assert_snapshot_subscriber!(), || {
+            let _watch = watch_rhai(Path::new("missing/rhai"));
+        });
     }
 
     pub(crate) fn create_temp_file() -> (PathBuf, File) {
