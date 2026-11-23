@@ -94,7 +94,7 @@ fn collect_fetches(plan: &crate::query_plan::QueryPlan) -> Vec<&crate::query_pla
             PlanNode::Fetch(fetch) => out.push(fetch),
             PlanNode::Sequence(seq) => seq.nodes.iter().for_each(|n| walk(n, out)),
             PlanNode::Parallel(par) => par.nodes.iter().for_each(|n| walk(n, out)),
-            PlanNode::Flatten(flat) => walk(&flat.node, out),
+            PlanNode::Flatten(flat) => out.extend(flat.members.iter().map(|m| &m.fetch)),
             PlanNode::Defer(defer) => {
                 if let Some(n) = &defer.primary.node {
                     walk(n, out);
@@ -121,7 +121,7 @@ fn collect_fetches(plan: &crate::query_plan::QueryPlan) -> Vec<&crate::query_pla
         Some(TopLevelPlanNode::Subscription(sub)) => out.push(&sub.primary),
         Some(TopLevelPlanNode::Sequence(seq)) => seq.nodes.iter().for_each(|n| walk(n, &mut out)),
         Some(TopLevelPlanNode::Parallel(par)) => par.nodes.iter().for_each(|n| walk(n, &mut out)),
-        Some(TopLevelPlanNode::Flatten(flat)) => walk(&flat.node, &mut out),
+        Some(TopLevelPlanNode::Flatten(flat)) => out.extend(flat.members.iter().map(|m| &m.fetch)),
         Some(TopLevelPlanNode::Defer(defer)) => {
             if let Some(n) = &defer.primary.node {
                 walk(n, &mut out);

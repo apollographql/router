@@ -31,6 +31,8 @@ use crate::json_ext::PathElement;
 use crate::plugins::demand_control::cost_calculator::directives::ListSizeDirective;
 use crate::query_planner::PlanNode;
 use crate::query_planner::QueryPlan;
+use crate::query_planner::fetch::FetchKind;
+use crate::query_planner::fetch::FetchNode;
 use crate::query_planner::rewrites::DataRewrite;
 use crate::spec::TYPENAME;
 
@@ -963,25 +965,20 @@ fn collect_fetches<'a>(
         PlanNode::Sequence { nodes } | PlanNode::Parallel { nodes } => {
             PlanCost::Sum(nodes.iter().map(collect).collect())
         }
-        PlanNode::Fetch(fetch_node) => {
-            fetches.push(PlannedFetch {
-                flatten_path,
-                subgraph: &fetch_node.service_name,
-                operation: &fetch_node.operation,
-                is_entity_fetch: !fetch_node.requires.is_empty(),
-                output_rewrites: fetch_node.output_rewrites.as_deref().unwrap_or_default(),
-            });
-            PlanCost::Fetch(fetches.len() - 1)
-        }
-        PlanNode::Flatten(flatten_node) => {
-            entity_counts.insert(&flatten_node.path);
-            collect_fetches(
-                &flatten_node.node,
-                Some(&flatten_node.path),
-                entity_counts,
-                fetches,
-            )
-        }
+        PlanNode::Fetch(fetch_node) => collect_fetch(fetch_node, flatten_path, fetches),
+        // A member fetched at several paths gets its representations from all of them, so it is
+        // scored once per path, each with the entity count at that path.
+        PlanNode::Flatten(flatten_node) => PlanCost::Sum(
+            flatten_node
+                .members
+                .iter()
+                .flat_map(|member| member.paths.iter().map(|path| (path, &member.fetch)))
+                .map(|(path, fetch_node)| {
+                    entity_counts.insert(path);
+                    collect_fetch(fetch_node, Some(path), fetches)
+                })
+                .collect(),
+        ),
         // TODO: Evaluate the condition using the variables.
         PlanNode::Condition {
             condition: _,
@@ -1021,6 +1018,21 @@ fn collect_fetches<'a>(
             PlanCost::Fetch(fetches.len() - 1)
         }
     }
+}
+
+fn collect_fetch<'a>(
+    fetch_node: &'a FetchNode,
+    flatten_path: Option<&'a Path>,
+    fetches: &mut Vec<PlannedFetch<'a>>,
+) -> PlanCost {
+    fetches.push(PlannedFetch {
+        flatten_path,
+        subgraph: &fetch_node.service_name,
+        operation: &fetch_node.operation,
+        is_entity_fetch: matches!(fetch_node.kind, FetchKind::Entities(_)),
+        output_rewrites: fetch_node.output_rewrites.as_deref().unwrap_or_default(),
+    });
+    PlanCost::Fetch(fetches.len() - 1)
 }
 
 pub(crate) struct ResponseCostCalculator<'a> {

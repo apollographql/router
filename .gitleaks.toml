@@ -28,6 +28,9 @@
             "ba0b7f734eab8c1230fa29d5b70cebf40d632e46",
             # Cache keys, not secret keys
             "165156910be987f1d28b0c0013fe45ce2ccd23c6",
+            # Context argument names in KeyRenamer rewrites, not keys
+            "5be7764997f783c2a5bcb4b500c2a5733a840168",
+            "554ab47628a11f39c925f7466f51bfe099a0791e",
         ]
 
         paths = [

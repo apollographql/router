@@ -590,7 +590,8 @@ pub(super) fn check_context_rewrites(
     readable: &[Selection],
     fetch: &FetchNode,
 ) -> Result<(), ComparisonError> {
-    let mut variables = context_variables(&fetch.context_rewrites);
+    let context_rewrites = fetch.kind.context_rewrites();
+    let mut variables = context_variables(context_rewrites);
     // Several rewrites can bind one variable; the check is the same for each, so ask it once.
     variables.dedup();
     if variables.is_empty() {
@@ -600,7 +601,7 @@ pub(super) fn check_context_rewrites(
     // it can read. The two differ only inside a deferred block.
     let positions = path_conditions(schema, root_type, available, path);
     for variable in &variables {
-        let shared = context_shared_levels(path, &fetch.context_rewrites, variable);
+        let shared = context_shared_levels(path, context_rewrites, variable);
         for fetch_condition in &positions {
             for runtime_types in runtime_combinations(shared, &fetch_condition.type_levels()) {
                 let covers = context_value_clauses(
@@ -608,7 +609,7 @@ pub(super) fn check_context_rewrites(
                     root_type,
                     path,
                     readable,
-                    &fetch.context_rewrites,
+                    context_rewrites,
                     &runtime_types,
                     variable,
                 );

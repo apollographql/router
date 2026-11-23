@@ -3,11 +3,12 @@
     "subgraph_name": "locations",
     "id": null,
     "variable_usages": [],
+    "fetch_kind": {
+      "kind": "Root"
+    },
     "operation_document": "{ locations { id } }",
     "operation_name": null,
     "operation_kind": "query",
-    "input_rewrites": [],
-    "output_rewrites": [],
-    "context_rewrites": []
+    "output_rewrites": []
   }
 }

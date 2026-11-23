@@ -164,13 +164,22 @@ fn plan_node_query_hashes(
                     new_targets.extend(nodes);
                 }
                 PlanNode::Fetch(node) => {
-                    // If requires.is_empty() we may be able to batch it!
-                    if node.requires.is_empty() && batching_config.batch_include(&node.service_name)
+                    // A root fetch may be batched!
+                    if !node.kind.is_entities() && batching_config.batch_include(&node.service_name)
                     {
                         query_hashes.push(node.schema_aware_hash.clone());
                     }
                 }
-                PlanNode::Flatten(node) => new_targets.push(&node.node),
+                PlanNode::Flatten(node) => {
+                    for member in &node.members {
+                        let fetch = &member.fetch;
+                        if !fetch.kind.is_entities()
+                            && batching_config.batch_include(&fetch.service_name)
+                        {
+                            query_hashes.push(fetch.schema_aware_hash.clone());
+                        }
+                    }
+                }
                 PlanNode::Defer { .. } | PlanNode::Subscription { .. } => {
                     return Err(BatchingUnsupportedError);
                 }

@@ -15,7 +15,9 @@ use apollo_compiler::name;
 use apollo_compiler::schema::Schema;
 
 use super::*;
+use crate::query_plan::EntitySelection;
 use crate::query_plan::FetchDataKeyRenamer;
+use crate::query_plan::FetchKind;
 use crate::query_plan::serializable_document::SerializableDocument;
 
 const SCHEMA_STR: &str = r#"
@@ -204,13 +206,15 @@ fn context_met(
         subgraph_name: "s".into(),
         id: None,
         variable_usages: Vec::new(),
-        requires: Vec::new(),
+        kind: FetchKind::Entities(EntitySelection {
+            requires: Vec::new(),
+            input_rewrites: Default::default(),
+            context_rewrites: rewrites,
+        }),
         operation_document: SerializableDocument::from_string(""),
         operation_name: None,
         operation_kind: executable::OperationType::Query,
-        input_rewrites: Default::default(),
         output_rewrites: Vec::new(),
-        context_rewrites: rewrites,
         protocol: Default::default(),
     };
     // Outside a deferred block, what a fetch can read is everything fetched before it.
