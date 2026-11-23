@@ -1,6 +1,5 @@
 [tools]
 # renovate-automation: rustc version
-<<<<<<< HEAD
 rust = { version = "1.95.0", profile = "default" }
 "aqua:cargo-bins/cargo-binstall" = "1.19.1"
 "cargo:cargo-nextest" = "0.9.70"
@@ -9,15 +8,6 @@ rust = { version = "1.95.0", profile = "default" }
 "cargo:cargo-about" = "0.9.0"
 "cargo:cargo-insta" = "1.38.0"
 "cargo:htmlq" = "0.4.0"
-=======
-rust = { version = "1.99.1", profile = "default" }
-"aqua:cargo-bins/cargo-binstall" = "1.27.0"
-"cargo:cargo-nextest" = "0.9.152"
-"cargo:cargo-deny" = "0.20.2"
-"cargo:cargo-edit" = "0.13.14"
-"cargo:cargo-about" = "0.9.3"
-"cargo:cargo-insta" = "1.49.0"
->>>>>>> 2ea5ae1 (ci: improve mise reliability and debuggability (#10827))
 "cargo:cargo-watch" = "8.5.3"
 "cargo:cargo-machete" = "0.9.0"
 "cargo:cargo-llvm-cov" = "0.8.7"

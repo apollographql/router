@@ -420,7 +420,13 @@ Start following the steps below to start a release PR.  The process is **not ful
     gh --repo "${APOLLO_ROUTER_RELEASE_GITHUB_REPO}" release edit v"${APOLLO_ROUTER_RELEASE_VERSION}" -F ./this_release.md
     ```
 
-15. Proceed to [Reconciling `main` back to `dev`](#reconciling-main-back-to-dev) to bring the release's version bumps and CHANGELOG updates back into `dev`.
+15. (Optional) To have a "social banner" for this release, run [this `htmlq` command](https://crates.io/crates/htmlq) (`cargo install htmlq`, or on MacOS `brew install htmlq`; its `jq` for HTML), open the link it produces, copy the image to your clipboard:
+
+    ```
+    curl -s "https://github.com/apollographql/router/releases/tag/v${APOLLO_ROUTER_RELEASE_VERSION}" | htmlq 'meta[property="og:image"]' --attribute content
+    ```
+
+16. Proceed to [Reconciling `main` back to `dev`](#reconciling-main-back-to-dev) to bring the release's version bumps and CHANGELOG updates back into `dev`.
 
 ### Reconciling `main` back to `dev`
 
