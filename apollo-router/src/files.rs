@@ -193,7 +193,7 @@ where
     .unwrap_or_else(|_| panic!("could not create watch on: {rhai_source_path:?}"));
     if let Err(err) = watcher.watch(&rhai_source_path, RecursiveMode::Recursive) {
         tracing::error!(
-            "Could not watch {config_file_path:?}: {err}. Changes won't be reloaded until the router restarts."
+            "Could not watch {rhai_source_path:?}: {err}. Changes won't be reloaded until the router restarts."
         );
     }
     // Tell watchers once they should read the file once,
