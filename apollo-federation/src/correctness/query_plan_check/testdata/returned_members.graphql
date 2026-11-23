@@ -1,0 +1,100 @@
+# The supergraph for the returned-types tests in `tests/returned_types.rs`, composed with
+# `composition::compose` from the two subgraphs below, each of which also links federation v2.3
+# importing `@key`, `@shareable`, `@external`, `@requires` and `@provides`. Recompose it when they
+# change.
+#
+# `source` declares no `B`, so there `Choice` is `A` alone and `item` never returns a `B`; `other`
+# declares `B`, and that it implements `I`.
+#
+# Subgraph `source`:
+#
+#   type Query {
+#     item: Choice @shareable
+#   }
+#
+#   union Choice = A
+#
+#   interface I {
+#     value: String
+#   }
+#
+#   type A implements I @shareable {
+#     value: String
+#   }
+#
+# Subgraph `other`:
+#
+#   type Query {
+#     item: Choice @shareable
+#   }
+#
+#   union Choice = A | B
+#
+#   interface I {
+#     value: String
+#   }
+#
+#   type A implements I @shareable {
+#     value: String
+#   }
+#
+#   type B implements I @shareable {
+#     value: String
+#   }
+
+
+schema @link(url: "https://specs.apollo.dev/link/v1.0") @link(url: "https://specs.apollo.dev/join/v0.3", for: EXECUTION) {
+  query: Query
+}
+
+directive @link(url: String, as: String, for: link__Purpose, import: [link__Import]) repeatable on SCHEMA
+
+directive @join__graph(name: String!, url: String!) on ENUM_VALUE
+
+directive @join__type(graph: join__Graph!, key: join__FieldSet, extension: Boolean! = false, resolvable: Boolean! = true, isInterfaceObject: Boolean! = false) repeatable on OBJECT | INTERFACE | UNION | ENUM | INPUT_OBJECT | SCALAR
+
+directive @join__field(graph: join__Graph, requires: join__FieldSet, provides: join__FieldSet, type: String, external: Boolean, override: String, usedOverridden: Boolean) repeatable on FIELD_DEFINITION | INPUT_FIELD_DEFINITION
+
+directive @join__implements(graph: join__Graph!, interface: String!) repeatable on OBJECT | INTERFACE
+
+directive @join__unionMember(graph: join__Graph!, member: String!) repeatable on UNION
+
+directive @join__enumValue(graph: join__Graph!) repeatable on ENUM_VALUE
+
+enum link__Purpose {
+  """
+  `SECURITY` features provide metadata necessary to securely resolve fields.
+  """
+  SECURITY
+  """
+  `EXECUTION` features provide metadata necessary for operation execution.
+  """
+  EXECUTION
+}
+
+scalar link__Import
+
+enum join__Graph {
+  OTHER @join__graph(name: "other", url: "http://other")
+  SOURCE @join__graph(name: "source", url: "http://source")
+}
+
+scalar join__FieldSet
+
+type Query @join__type(graph: OTHER) @join__type(graph: SOURCE) {
+  item: Choice
+}
+
+union Choice @join__type(graph: OTHER) @join__type(graph: SOURCE) @join__unionMember(graph: OTHER, member: "A") @join__unionMember(graph: SOURCE, member: "A") @join__unionMember(graph: OTHER, member: "B") = A | B
+
+interface I @join__type(graph: OTHER) @join__type(graph: SOURCE) {
+  value: String
+}
+
+type A implements I @join__implements(graph: OTHER, interface: "I") @join__implements(graph: SOURCE, interface: "I") @join__type(graph: OTHER) @join__type(graph: SOURCE) {
+  value: String
+}
+
+type B implements I @join__implements(graph: OTHER, interface: "I") @join__type(graph: OTHER) {
+  value: String
+}

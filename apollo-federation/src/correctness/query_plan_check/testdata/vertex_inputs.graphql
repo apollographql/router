@@ -1,0 +1,114 @@
+# The supergraph for the vertex-input tests in `tests/returned_types.rs`, composed with
+# `composition::compose` from the three subgraphs below, each of which also links federation v2.3
+# importing `@key`, `@shareable`, `@external`, `@requires` and `@provides`. Recompose it when they
+# change.
+#
+# `root` serves an `Edge` and its vertices, `extra` resolves an `Edge` by `id` and serves them too,
+# and `consumer` serves `result`, requiring `v { x y }`, and `span`, requiring the same of `from`
+# and `to`. The model varies one field's `@requires`; this has a field per variant.
+#
+# Subgraph `root`:
+#
+#   type Query {
+#     edge: Edge
+#   }
+#
+#   type Edge @key(fields: "id") {
+#     id: ID!
+#     from: Vertex @shareable
+#     to: Vertex @shareable
+#     v: Vertex @shareable
+#   }
+#
+#   type Vertex @shareable {
+#     x: String
+#     y: String
+#   }
+#
+# Subgraph `extra`:
+#
+#   type Edge @key(fields: "id") {
+#     id: ID!
+#     from: Vertex @shareable
+#     to: Vertex @shareable
+#     v: Vertex @shareable
+#   }
+#
+#   type Vertex @shareable {
+#     x: String
+#     y: String
+#   }
+#
+# Subgraph `consumer`:
+#
+#   type Edge @key(fields: "id") {
+#     id: ID!
+#     from: Vertex @external
+#     to: Vertex @external
+#     v: Vertex @external
+#     result: String @requires(fields: "v { x y }")
+#     span: String @requires(fields: "from { x y } to { x y }")
+#   }
+#
+#   type Vertex @shareable {
+#     x: String
+#     y: String
+#   }
+
+
+schema @link(url: "https://specs.apollo.dev/link/v1.0") @link(url: "https://specs.apollo.dev/join/v0.3", for: EXECUTION) {
+  query: Query
+}
+
+directive @link(url: String, as: String, for: link__Purpose, import: [link__Import]) repeatable on SCHEMA
+
+directive @join__graph(name: String!, url: String!) on ENUM_VALUE
+
+directive @join__type(graph: join__Graph!, key: join__FieldSet, extension: Boolean! = false, resolvable: Boolean! = true, isInterfaceObject: Boolean! = false) repeatable on OBJECT | INTERFACE | UNION | ENUM | INPUT_OBJECT | SCALAR
+
+directive @join__field(graph: join__Graph, requires: join__FieldSet, provides: join__FieldSet, type: String, external: Boolean, override: String, usedOverridden: Boolean) repeatable on FIELD_DEFINITION | INPUT_FIELD_DEFINITION
+
+directive @join__implements(graph: join__Graph!, interface: String!) repeatable on OBJECT | INTERFACE
+
+directive @join__unionMember(graph: join__Graph!, member: String!) repeatable on UNION
+
+directive @join__enumValue(graph: join__Graph!) repeatable on ENUM_VALUE
+
+enum link__Purpose {
+  """
+  `SECURITY` features provide metadata necessary to securely resolve fields.
+  """
+  SECURITY
+  """
+  `EXECUTION` features provide metadata necessary for operation execution.
+  """
+  EXECUTION
+}
+
+scalar link__Import
+
+enum join__Graph {
+  CONSUMER @join__graph(name: "consumer", url: "http://consumer")
+  EXTRA @join__graph(name: "extra", url: "http://extra")
+  ROOT @join__graph(name: "root", url: "http://root")
+}
+
+scalar join__FieldSet
+
+type Edge @join__type(graph: CONSUMER, key: "id") @join__type(graph: EXTRA, key: "id") @join__type(graph: ROOT, key: "id") {
+  id: ID!
+  from: Vertex @join__field(graph: CONSUMER, external: true) @join__field(graph: EXTRA) @join__field(graph: ROOT)
+  to: Vertex @join__field(graph: CONSUMER, external: true) @join__field(graph: EXTRA) @join__field(graph: ROOT)
+  v: Vertex @join__field(graph: CONSUMER, external: true) @join__field(graph: EXTRA) @join__field(graph: ROOT)
+  result: String @join__field(graph: CONSUMER, requires: "v { x y }")
+  span: String @join__field(graph: CONSUMER, requires: "from { x y } to { x y }")
+}
+
+type Vertex @join__type(graph: CONSUMER) @join__type(graph: EXTRA) @join__type(graph: ROOT) {
+  x: String
+  y: String
+}
+
+type Query @join__type(graph: CONSUMER) @join__type(graph: EXTRA) @join__type(graph: ROOT) {
+  edge: Edge @join__field(graph: ROOT)
+}

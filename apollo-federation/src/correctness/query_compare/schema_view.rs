@@ -104,10 +104,9 @@ impl<'schema> SchemaView<'schema> {
         parent_type: &Name,
         field_name: &Name,
     ) -> Option<&ast::FieldDefinition> {
-        // `__typename` is selectable on every composite type and declared by none of them. The
-        // model has no introspection at all, so this is the one meta-field the port adds; which
-        // introspection fields a *query plan* need not fetch is a policy that lives with the plan
-        // checker, not here.
+        // `__typename` is selectable on every composite type and declared by none of them, so it
+        // is supplied here, as the model's `lookupField` supplies it. Which introspection fields a
+        // *query plan* need not fetch is a policy that lives with the plan checker, not here.
         if field_name == INTROSPECTION_TYPENAME_FIELD_NAME.as_str() {
             return self
                 .is_composite_type(parent_type)

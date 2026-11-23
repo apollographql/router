@@ -1,0 +1,149 @@
+# One key written by two fields: in `source`, a `Parent`'s `child` is an `X` and its `y` a `Y`,
+# which a fetch can alias to `child`, where `wide` declares `child` either member of `Choice`.
+# `values` resolves an `X`'s `xval` and a `Y`'s `yval` by `id`, and `consumer` a `Parent`'s `score`,
+# requiring its child's `id` where the child is a `Y`.
+#
+# Composed with `apollo_federation::composition::compose` from the four subgraphs below. Recompose
+# it when they change.
+#
+# Subgraph `consumer`:
+#
+#   extend schema @link(url: "https://specs.apollo.dev/federation/v2.7", import: ["@key", "@external", "@requires"])
+#
+#   type Parent @key(fields: "id") {
+#     id: ID!
+#     child: Choice @external
+#     score: Int @requires(fields: "child { ... on Y { id } }")
+#   }
+#
+#   union Choice = X | Y
+#
+#   type X @key(fields: "id") {
+#     id: ID!
+#   }
+#
+#   type Y @key(fields: "id") {
+#     id: ID!
+#   }
+#
+# Subgraph `source`:
+#
+#   extend schema @link(url: "https://specs.apollo.dev/federation/v2.7", import: ["@key", "@shareable"])
+#
+#   type Query {
+#     parent: Parent
+#   }
+#
+#   type Parent @key(fields: "id") {
+#     id: ID!
+#     child: X @shareable
+#     y: Y
+#   }
+#
+#   type X @key(fields: "id") {
+#     id: ID!
+#   }
+#
+#   type Y @key(fields: "id") {
+#     id: ID!
+#   }
+#
+# Subgraph `values`:
+#
+#   extend schema @link(url: "https://specs.apollo.dev/federation/v2.7", import: ["@key"])
+#
+#   type X @key(fields: "id") {
+#     id: ID!
+#     xval: Int
+#   }
+#
+#   type Y @key(fields: "id") {
+#     id: ID!
+#     yval: Int
+#   }
+#
+# Subgraph `wide`:
+#
+#   extend schema @link(url: "https://specs.apollo.dev/federation/v2.7", import: ["@key", "@shareable"])
+#
+#   type Parent @key(fields: "id") {
+#     id: ID!
+#     child: Choice @shareable
+#   }
+#
+#   union Choice = X | Y
+#
+#   type X @key(fields: "id") {
+#     id: ID!
+#   }
+#
+#   type Y @key(fields: "id") {
+#     id: ID!
+#   }
+
+schema @link(url: "https://specs.apollo.dev/link/v1.0") @link(url: "https://specs.apollo.dev/join/v0.4", for: EXECUTION) {
+  query: Query
+}
+
+directive @link(url: String, as: String, for: link__Purpose, import: [link__Import]) repeatable on SCHEMA
+
+directive @join__graph(name: String!, url: String!) on ENUM_VALUE
+
+directive @join__type(graph: join__Graph!, key: join__FieldSet, extension: Boolean! = false, resolvable: Boolean! = true, isInterfaceObject: Boolean! = false) repeatable on OBJECT | INTERFACE | UNION | ENUM | INPUT_OBJECT | SCALAR
+
+directive @join__field(graph: join__Graph, requires: join__FieldSet, provides: join__FieldSet, type: String, external: Boolean, override: String, usedOverridden: Boolean, overrideLabel: String) repeatable on FIELD_DEFINITION | INPUT_FIELD_DEFINITION
+
+directive @join__implements(graph: join__Graph!, interface: String!) repeatable on OBJECT | INTERFACE
+
+directive @join__unionMember(graph: join__Graph!, member: String!) repeatable on UNION
+
+directive @join__enumValue(graph: join__Graph!) repeatable on ENUM_VALUE
+
+directive @join__directive(graphs: [join__Graph!], name: String!, args: join__DirectiveArguments) repeatable on SCHEMA | OBJECT | INTERFACE | FIELD_DEFINITION
+
+enum link__Purpose {
+  """
+  `SECURITY` features provide metadata necessary to securely resolve fields.
+  """
+  SECURITY
+  """
+  `EXECUTION` features provide metadata necessary for operation execution.
+  """
+  EXECUTION
+}
+
+scalar link__Import
+
+enum join__Graph {
+  CONSUMER @join__graph(name: "consumer", url: "http://consumer")
+  SOURCE @join__graph(name: "source", url: "http://source")
+  VALUES @join__graph(name: "values", url: "http://values")
+  WIDE @join__graph(name: "wide", url: "http://wide")
+}
+
+scalar join__FieldSet
+
+scalar join__DirectiveArguments
+
+type Parent @join__type(graph: CONSUMER, key: "id") @join__type(graph: SOURCE, key: "id") @join__type(graph: WIDE, key: "id") {
+  id: ID!
+  child: Choice @join__field(graph: CONSUMER, external: true, type: "Choice") @join__field(graph: SOURCE, type: "X") @join__field(graph: WIDE, type: "Choice")
+  score: Int @join__field(graph: CONSUMER, requires: "child { ... on Y { id } }")
+  y: Y @join__field(graph: SOURCE)
+}
+
+union Choice @join__type(graph: CONSUMER) @join__type(graph: WIDE) @join__unionMember(graph: CONSUMER, member: "X") @join__unionMember(graph: WIDE, member: "X") @join__unionMember(graph: CONSUMER, member: "Y") @join__unionMember(graph: WIDE, member: "Y") = X | Y
+
+type X @join__type(graph: CONSUMER, key: "id") @join__type(graph: SOURCE, key: "id") @join__type(graph: VALUES, key: "id") @join__type(graph: WIDE, key: "id") {
+  id: ID!
+  xval: Int @join__field(graph: VALUES)
+}
+
+type Y @join__type(graph: CONSUMER, key: "id") @join__type(graph: SOURCE, key: "id") @join__type(graph: VALUES, key: "id") @join__type(graph: WIDE, key: "id") {
+  id: ID!
+  yval: Int @join__field(graph: VALUES)
+}
+
+type Query @join__type(graph: CONSUMER) @join__type(graph: SOURCE) @join__type(graph: VALUES) @join__type(graph: WIDE) {
+  parent: Parent @join__field(graph: SOURCE)
+}

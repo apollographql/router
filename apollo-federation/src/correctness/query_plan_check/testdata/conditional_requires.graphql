@@ -1,0 +1,138 @@
+# The supergraph for the conditional-`requires` tests in `tests/conditional_requires.rs`, composed
+# with `composition::compose` from the four subgraphs below, each of which also links federation
+# v2.3 importing `@key`, `@shareable`, `@external` and `@requires`. Recompose it when they change.
+#
+# `one` fetches what `t` holds. The other three resolve a `T` by key: `two` by `id`, its `b`, `d`
+# and `both` requiring `a`, `e` and `u { left right }`; `twokeys` by `id` or `id2`; and
+# `projections` by `id`, its `b` and `d` requiring `u { right }` and `u { left }`.
+#
+# Subgraph `one`:
+#
+#   type Query {
+#     t: T
+#   }
+#
+#   interface I {
+#     id: ID!
+#     a: Int
+#   }
+#
+#   type T implements I @key(fields: "id") @key(fields: "id2") {
+#     id: ID!
+#     id2: ID!
+#     a: Int
+#     e: Int
+#     u: U
+#   }
+#
+#   type U @shareable {
+#     left: Int
+#     right: Int
+#   }
+#
+# Subgraph `two`:
+#
+#   type T @key(fields: "id") {
+#     id: ID!
+#     a: Int @external
+#     e: Int @external
+#     u: U @external
+#     b: Int @shareable @requires(fields: "a")
+#     c: Int @shareable
+#     d: Int @shareable @requires(fields: "e")
+#     both: Int @requires(fields: "u { left right }")
+#   }
+#
+#   type U @shareable {
+#     left: Int
+#     right: Int
+#   }
+#
+# Subgraph `twokeys`:
+#
+#   type T @key(fields: "id") @key(fields: "id2") {
+#     id: ID!
+#     id2: ID!
+#     c: Int @shareable
+#   }
+#
+# Subgraph `projections`:
+#
+#   type T @key(fields: "id") {
+#     id: ID!
+#     u: U @external
+#     b: Int @shareable @requires(fields: "u { right }")
+#     c: Int @shareable
+#     d: Int @shareable @requires(fields: "u { left }")
+#   }
+#
+#   type U @shareable {
+#     left: Int
+#     right: Int
+#   }
+
+schema @link(url: "https://specs.apollo.dev/link/v1.0") @link(url: "https://specs.apollo.dev/join/v0.3", for: EXECUTION) {
+  query: Query
+}
+
+directive @link(url: String, as: String, for: link__Purpose, import: [link__Import]) repeatable on SCHEMA
+
+directive @join__graph(name: String!, url: String!) on ENUM_VALUE
+
+directive @join__type(graph: join__Graph!, key: join__FieldSet, extension: Boolean! = false, resolvable: Boolean! = true, isInterfaceObject: Boolean! = false) repeatable on OBJECT | INTERFACE | UNION | ENUM | INPUT_OBJECT | SCALAR
+
+directive @join__field(graph: join__Graph, requires: join__FieldSet, provides: join__FieldSet, type: String, external: Boolean, override: String, usedOverridden: Boolean) repeatable on FIELD_DEFINITION | INPUT_FIELD_DEFINITION
+
+directive @join__implements(graph: join__Graph!, interface: String!) repeatable on OBJECT | INTERFACE
+
+directive @join__unionMember(graph: join__Graph!, member: String!) repeatable on UNION
+
+directive @join__enumValue(graph: join__Graph!) repeatable on ENUM_VALUE
+
+enum link__Purpose {
+  """
+  `SECURITY` features provide metadata necessary to securely resolve fields.
+  """
+  SECURITY
+  """
+  `EXECUTION` features provide metadata necessary for operation execution.
+  """
+  EXECUTION
+}
+
+scalar link__Import
+
+enum join__Graph {
+  ONE @join__graph(name: "one", url: "http://one")
+  PROJECTIONS @join__graph(name: "projections", url: "http://projections")
+  TWO @join__graph(name: "two", url: "http://two")
+  TWOKEYS @join__graph(name: "twokeys", url: "http://twokeys")
+}
+
+scalar join__FieldSet
+
+type Query @join__type(graph: ONE) @join__type(graph: PROJECTIONS) @join__type(graph: TWO) @join__type(graph: TWOKEYS) {
+  t: T @join__field(graph: ONE)
+}
+
+interface I @join__type(graph: ONE) {
+  id: ID!
+  a: Int
+}
+
+type T implements I @join__implements(graph: ONE, interface: "I") @join__type(graph: ONE, key: "id") @join__type(graph: ONE, key: "id2") @join__type(graph: PROJECTIONS, key: "id") @join__type(graph: TWO, key: "id") @join__type(graph: TWOKEYS, key: "id") @join__type(graph: TWOKEYS, key: "id2") {
+  id: ID!
+  id2: ID! @join__field(graph: ONE) @join__field(graph: TWOKEYS)
+  a: Int @join__field(graph: ONE) @join__field(graph: TWO, external: true)
+  e: Int @join__field(graph: ONE) @join__field(graph: TWO, external: true)
+  u: U @join__field(graph: ONE) @join__field(graph: PROJECTIONS, external: true) @join__field(graph: TWO, external: true)
+  b: Int @join__field(graph: PROJECTIONS, requires: "u { right }") @join__field(graph: TWO, requires: "a")
+  c: Int @join__field(graph: PROJECTIONS) @join__field(graph: TWO) @join__field(graph: TWOKEYS)
+  d: Int @join__field(graph: PROJECTIONS, requires: "u { left }") @join__field(graph: TWO, requires: "e")
+  both: Int @join__field(graph: TWO, requires: "u { left right }")
+}
+
+type U @join__type(graph: ONE) @join__type(graph: PROJECTIONS) @join__type(graph: TWO) {
+  left: Int
+  right: Int
+}

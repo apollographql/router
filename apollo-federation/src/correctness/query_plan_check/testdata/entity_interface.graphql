@@ -1,0 +1,153 @@
+# The supergraph for the entity-interface tests in `tests/entries.rs`, composed with
+# `composition::compose` from the subgraphs below, each of which also links federation v2.3
+# importing `@key`, `@external`, `@requires`, `@shareable` and `@interfaceObject`. Recompose it when
+# they change.
+#
+# `catalog` serves the feed. `reviews` declares `Item` an entity interface, its `Book.blurb`
+# requiring `isbn`; `ratings` the same with `Item`'s key not resolvable, its `Book.rating`
+# requiring `isbn`. `shelves` and `racks` declare `Item` a plain interface, which `Book` implements
+# in `shelves` and not in `racks`.
+#
+# Subgraph `catalog`:
+#
+#   type Query {
+#     feed: [Item!]!
+#   }
+#
+#   interface Item @key(fields: "id") {
+#     id: ID!
+#     isbn: String!
+#   }
+#
+#   type Book implements Item @key(fields: "id") {
+#     id: ID!
+#     isbn: String!
+#   }
+#
+#   type Film implements Item @key(fields: "id") {
+#     id: ID!
+#     isbn: String!
+#   }
+#
+# Subgraph `reviews`:
+#
+#   interface Item @key(fields: "id") {
+#     id: ID!
+#   }
+#
+#   type Book implements Item @key(fields: "id") {
+#     id: ID!
+#     isbn: String! @external
+#     blurb: String! @requires(fields: "isbn")
+#   }
+#
+#   type Film implements Item @key(fields: "id") {
+#     id: ID!
+#   }
+#
+# Subgraph `ratings`:
+#
+#   interface Item @key(fields: "id", resolvable: false) {
+#     id: ID!
+#   }
+#
+#   type Book implements Item @key(fields: "id") {
+#     id: ID!
+#     isbn: String! @external
+#     rating: Int! @requires(fields: "isbn")
+#   }
+#
+#   type Film implements Item @key(fields: "id") {
+#     id: ID!
+#   }
+#
+# Subgraph `shelves`:
+#
+#   interface Item {
+#     id: ID!
+#   }
+#
+#   type Book implements Item @key(fields: "id") {
+#     id: ID!
+#   }
+#
+#   type Film implements Item @key(fields: "id") {
+#     id: ID!
+#   }
+#
+# Subgraph `racks`:
+#
+#   interface Item {
+#     id: ID!
+#   }
+#
+#   type Book @key(fields: "id") {
+#     id: ID!
+#   }
+#
+#   type Film implements Item @key(fields: "id") {
+#     id: ID!
+#   }
+
+schema @link(url: "https://specs.apollo.dev/link/v1.0") @link(url: "https://specs.apollo.dev/join/v0.3", for: EXECUTION) {
+  query: Query
+}
+
+directive @link(url: String, as: String, for: link__Purpose, import: [link__Import]) repeatable on SCHEMA
+
+directive @join__graph(name: String!, url: String!) on ENUM_VALUE
+
+directive @join__type(graph: join__Graph!, key: join__FieldSet, extension: Boolean! = false, resolvable: Boolean! = true, isInterfaceObject: Boolean! = false) repeatable on OBJECT | INTERFACE | UNION | ENUM | INPUT_OBJECT | SCALAR
+
+directive @join__field(graph: join__Graph, requires: join__FieldSet, provides: join__FieldSet, type: String, external: Boolean, override: String, usedOverridden: Boolean) repeatable on FIELD_DEFINITION | INPUT_FIELD_DEFINITION
+
+directive @join__implements(graph: join__Graph!, interface: String!) repeatable on OBJECT | INTERFACE
+
+directive @join__unionMember(graph: join__Graph!, member: String!) repeatable on UNION
+
+directive @join__enumValue(graph: join__Graph!) repeatable on ENUM_VALUE
+
+enum link__Purpose {
+  """
+  `SECURITY` features provide metadata necessary to securely resolve fields.
+  """
+  SECURITY
+  """
+  `EXECUTION` features provide metadata necessary for operation execution.
+  """
+  EXECUTION
+}
+
+scalar link__Import
+
+enum join__Graph {
+  CATALOG @join__graph(name: "catalog", url: "none")
+  RACKS @join__graph(name: "racks", url: "none")
+  RATINGS @join__graph(name: "ratings", url: "none")
+  REVIEWS @join__graph(name: "reviews", url: "none")
+  SHELVES @join__graph(name: "shelves", url: "none")
+}
+
+scalar join__FieldSet
+
+type Query @join__type(graph: CATALOG) @join__type(graph: RACKS) @join__type(graph: RATINGS) @join__type(graph: REVIEWS) @join__type(graph: SHELVES) {
+  feed: [Item!]! @join__field(graph: CATALOG)
+}
+
+interface Item @join__type(graph: CATALOG, key: "id") @join__type(graph: RACKS) @join__type(graph: RATINGS, key: "id", resolvable: false) @join__type(graph: REVIEWS, key: "id") @join__type(graph: SHELVES) {
+  id: ID!
+  isbn: String! @join__field(graph: CATALOG)
+}
+
+type Book implements Item @join__implements(graph: CATALOG, interface: "Item") @join__implements(graph: RATINGS, interface: "Item") @join__implements(graph: REVIEWS, interface: "Item") @join__implements(graph: SHELVES, interface: "Item") @join__type(graph: CATALOG, key: "id") @join__type(graph: RACKS, key: "id") @join__type(graph: RATINGS, key: "id") @join__type(graph: REVIEWS, key: "id") @join__type(graph: SHELVES, key: "id") {
+  id: ID!
+  isbn: String! @join__field(graph: CATALOG) @join__field(graph: RATINGS, external: true) @join__field(graph: REVIEWS, external: true)
+  rating: Int! @join__field(graph: RATINGS, requires: "isbn")
+  blurb: String! @join__field(graph: REVIEWS, requires: "isbn")
+}
+
+type Film implements Item @join__implements(graph: CATALOG, interface: "Item") @join__implements(graph: RACKS, interface: "Item") @join__implements(graph: RATINGS, interface: "Item") @join__implements(graph: REVIEWS, interface: "Item") @join__implements(graph: SHELVES, interface: "Item") @join__type(graph: CATALOG, key: "id") @join__type(graph: RACKS, key: "id") @join__type(graph: RATINGS, key: "id") @join__type(graph: REVIEWS, key: "id") @join__type(graph: SHELVES, key: "id") {
+  id: ID!
+  isbn: String! @join__field(graph: CATALOG)
+}
+
