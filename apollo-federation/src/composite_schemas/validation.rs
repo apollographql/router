@@ -528,7 +528,21 @@ impl SourceSchemaValidator<'_> {
                 locations: Vec::new(),
             });
         }
-        if !reachable.contains(type_name) {
+        // An interface is never a lookup path type, but "not reachable" would not tell the author
+        // that the directive itself is misplaced.
+        if matches!(
+            self.schema.types.get(type_name),
+            Some(ExtendedType::Interface(_))
+        ) {
+            self.error(SingleFederationError::LookupNotReachable {
+                message: format!(
+                    "The @lookup field \"{coordinate}\" is declared by the interface type \
+                     \"{type_name}\", but @lookup is only valid on fields of object types. An \
+                     implementing field is a lookup field only if it is annotated with @lookup \
+                     itself."
+                ),
+            });
+        } else if !reachable.contains(type_name) {
             self.error(SingleFederationError::LookupNotReachable {
                 message: format!(
                     "The @lookup field \"{coordinate}\" is not reachable from the query root: a \

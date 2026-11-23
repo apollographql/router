@@ -514,6 +514,30 @@ mod lookup_validation {
         );
     }
 
+    #[test]
+    fn lookup_on_interface_field_is_rejected() {
+        // The implementing type is reachable and declares its own lookup, so the directive on the
+        // interface field is the only error.
+        assert_errors(
+            &[(
+                "a",
+                r#"
+                type Query { productLookups: ProductLookups! }
+                interface Lookups { productById(id: ID!): Product @lookup }
+                type ProductLookups implements Lookups {
+                  productById(id: ID!): Product @lookup
+                }
+                type Product @key(fields: "id") { id: ID! }
+                "#,
+            )],
+            &[(
+                "LOOKUP_NOT_REACHABLE",
+                "[a] The @lookup field \"Lookups.productById\" is declared by the interface type \
+                 \"Lookups\", but @lookup is only valid on fields of object types. An implementing \
+                 field is a lookup field only if it is annotated with @lookup itself.",
+            )],
+        );
+    }
 }
 
 mod is_validation {
