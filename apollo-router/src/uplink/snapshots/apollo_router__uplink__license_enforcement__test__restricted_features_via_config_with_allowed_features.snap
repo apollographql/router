@@ -2,7 +2,7 @@
 source: apollo-router/src/uplink/license_enforcement.rs
 expression: report.to_string()
 ---
-router.yaml uses these licensed features. Remove the settings listed, or use a license that includes the features:
+Your configuration uses these licensed features. Remove the settings listed, or use a license that includes the features:
 
   Coprocessors
     coprocessor

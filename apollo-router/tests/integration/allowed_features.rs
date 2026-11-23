@@ -11,7 +11,7 @@ use crate::integration::common::TEST_JWKS_ENDPOINT;
 use crate::integration::common::mint_license_jwt;
 
 const LICENSE_ALLOWED_FEATURES_DOES_NOT_INCLUDE_FEATURE_MSG: &str =
-    "the configuration or schema uses features the license doesn't include";
+    "the configuration or schema uses features not allowed by the license";
 const LICENSE_EXPIRED_MESSAGE: &str =
     "License has expired. The Router will no longer serve requests.";
 const LICENSE_EXPIRED_WITH_RESTRICTED_FEATURES_MESSAGE: &str =

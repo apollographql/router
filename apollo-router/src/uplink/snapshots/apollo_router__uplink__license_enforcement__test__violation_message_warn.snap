@@ -2,9 +2,9 @@
 source: apollo-router/src/uplink/license_enforcement.rs
 expression: report.violation_message(connected_to_graphos)
 ---
-Your license doesn't include all the features this router uses, so the router won't run with this configuration and schema. Your license also expires soon, and the router will stop serving requests when it does.
+The router can't run with this configuration and schema, because your license doesn't include all the features they require. Your license also expires soon, and the router will stop serving requests when it does.
 
-router.yaml uses these licensed features. Remove the settings listed, or use a license that includes the features:
+Your configuration uses these licensed features. Remove the settings listed, or use a license that includes the features:
 
   Coprocessors
     coprocessor

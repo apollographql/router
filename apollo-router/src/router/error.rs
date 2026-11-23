@@ -23,7 +23,7 @@ pub enum ApolloRouterError {
     /// no valid license was supplied
     NoLicense,
 
-    /// the configuration or schema uses features the license doesn't include: {0}
+    /// the configuration or schema uses features not allowed by the license: {0}
     LicenseViolation(String),
 
     /// could not create router: {0}

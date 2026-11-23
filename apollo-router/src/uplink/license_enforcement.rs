@@ -447,10 +447,10 @@ impl LicenseEnforcementReport {
     fn violation_message(&self, connected_to_graphos: bool) -> String {
         let headline = match &*self.license {
             LicenseState::Licensed { .. } => {
-                "Your license doesn't include all the features this router uses, so the router won't run with this configuration and schema."
+                "The router can't run with this configuration and schema, because your license doesn't include all the features they require."
             }
             LicenseState::LicensedWarn { .. } => {
-                "Your license doesn't include all the features this router uses, so the router won't run with this configuration and schema. Your license also expires soon, and the router will stop serving requests when it does."
+                "The router can't run with this configuration and schema, because your license doesn't include all the features they require. Your license also expires soon, and the router will stop serving requests when it does."
             }
             LicenseState::LicensedHalt { .. } => {
                 "License has expired. The router will no longer serve requests. Renew your GraphOS plan, or turn off the licensed features below."
@@ -531,7 +531,7 @@ impl Display for LicenseEnforcementReport {
                 })
                 .join("\n\n");
             sections.push(format!(
-                "router.yaml uses these licensed features. Remove the settings listed, or use a license that includes the features:\n\n{groups}"
+                "Your configuration uses these licensed features. Remove the settings listed, or use a license that includes the features:\n\n{groups}"
             ));
         }
 
