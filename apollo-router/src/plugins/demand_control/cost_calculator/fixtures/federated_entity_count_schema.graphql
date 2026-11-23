@@ -1,0 +1,93 @@
+schema
+  @link(url: "https://specs.apollo.dev/link/v1.0")
+  @link(url: "https://specs.apollo.dev/join/v0.3", for: EXECUTION)
+  @link(url: "https://specs.apollo.dev/cost/v0.1", import: ["@listSize"])
+{
+  query: Query
+  mutation: Mutation
+}
+
+directive @join__enumValue(graph: join__Graph!) repeatable on ENUM_VALUE
+directive @join__field(graph: join__Graph, requires: join__FieldSet, provides: join__FieldSet, type: String, external: Boolean, override: String, usedOverridden: Boolean) repeatable on FIELD_DEFINITION | INPUT_FIELD_DEFINITION
+directive @join__graph(name: String!, url: String!) on ENUM_VALUE
+directive @join__implements(graph: join__Graph!, interface: String!) repeatable on OBJECT | INTERFACE
+directive @join__type(graph: join__Graph!, key: join__FieldSet, extension: Boolean! = false, resolvable: Boolean! = true, isInterfaceObject: Boolean! = false) repeatable on OBJECT | INTERFACE | UNION | ENUM | INPUT_OBJECT | SCALAR
+directive @join__unionMember(graph: join__Graph!, member: String!) repeatable on UNION
+directive @link(url: String, as: String, for: link__Purpose, import: [link__Import]) repeatable on SCHEMA
+directive @listSize(assumedSize: Int, slicingArguments: [String!], sizedFields: [String!], requireOneSlicingArgument: Boolean = true) on FIELD_DEFINITION
+
+scalar join__FieldSet
+scalar link__Import
+
+enum link__Purpose {
+  SECURITY
+  EXECUTION
+}
+
+enum join__Graph {
+  LISTS @join__graph(name: "lists", url: "http://localhost:4001")
+  DETAILS @join__graph(name: "details", url: "http://localhost:4002")
+}
+
+type Query
+  @join__type(graph: LISTS)
+  @join__type(graph: DETAILS)
+{
+  items: [Item!]! @join__field(graph: LISTS)
+  itemsByIds(ids: [ID!]!): [Item!]! @join__field(graph: LISTS) @listSize(slicingArguments: ["ids"], requireOneSlicingArgument: false)
+  firstItems(first: Int): [Item!]! @join__field(graph: LISTS) @listSize(slicingArguments: ["first"], requireOneSlicingArgument: false)
+  grid: [[Item!]!]! @join__field(graph: LISTS)
+  page: ItemPage! @join__field(graph: LISTS) @listSize(assumedSize: 4, sizedFields: ["items"])
+  boxes: [Box!]! @join__field(graph: LISTS) @listSize(assumedSize: 3)
+}
+
+type Mutation
+  @join__type(graph: LISTS)
+{
+  createItems(ids: [ID!]!): [Item!]! @join__field(graph: LISTS) @listSize(slicingArguments: ["ids"], requireOneSlicingArgument: false)
+}
+
+type ItemPage
+  @join__type(graph: LISTS)
+{
+  items: [Item!]!
+}
+
+interface Box
+  @join__type(graph: LISTS)
+{
+  id: ID!
+}
+
+type SmallBox implements Box
+  @join__implements(graph: LISTS, interface: "Box")
+  @join__type(graph: LISTS)
+  @join__type(graph: DETAILS)
+{
+  id: ID!
+  content: [Item!] @join__field(graph: LISTS, type: "[Item!]!") @join__field(graph: DETAILS, type: "[Item!]") @listSize(assumedSize: 5)
+}
+
+type BigBox implements Box
+  @join__implements(graph: LISTS, interface: "Box")
+  @join__type(graph: LISTS)
+{
+  id: ID!
+  content: [Item!] @listSize(assumedSize: 2)
+}
+
+type Item
+  @join__type(graph: LISTS, key: "id")
+  @join__type(graph: DETAILS, key: "id")
+{
+  id: ID!
+  name: String @join__field(graph: LISTS)
+  detail: Detail @join__field(graph: DETAILS)
+  related: [Item!]! @join__field(graph: DETAILS) @listSize(assumedSize: 2)
+}
+
+type Detail
+  @join__type(graph: DETAILS)
+{
+  text: String
+}

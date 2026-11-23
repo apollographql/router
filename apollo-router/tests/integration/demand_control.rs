@@ -589,3 +589,76 @@ async fn coprocessor_can_access_and_mutate_costs() -> Result<(), BoxError> {
     insta::assert_json_snapshot!(parse_result_for_snapshot(response).await);
     Ok(())
 }
+
+#[tokio::test(flavor = "multi_thread")]
+async fn entity_fetch_is_sized_by_parent_lists_for_enforcement() -> Result<(), BoxError> {
+    // With list_size=10 the old estimator would compute:
+    //   _entities[10] × Employee(1.0) = 10  →  total ≈ 120 → under max of 200 → accepted
+    //
+    // With the fix, the estimator computes:
+    //   _entities[100] × Employee(1.0) = 100  →  total ≈ 210 → exceeds max of 200 → rejected
+    let test_parameters = TestSetupParameters {
+        name: "federated_nested_list",
+        query: include_str!(
+            "../../src/plugins/demand_control/cost_calculator/fixtures/federated_nested_list_query.graphql"
+        ),
+        schema: include_str!(
+            "../../src/plugins/demand_control/cost_calculator/fixtures/federated_nested_list_schema.graphql"
+        ),
+        subgraphs: serde_json::json!({
+            "companies": {
+                "query": {
+                    "companies": [
+                        {"__typename": "Company", "id": "1", "name": "Acme",
+                         "employees": [{"__typename": "Employee", "id": "e1"}, {"__typename": "Employee", "id": "e2"}]},
+                        {"__typename": "Company", "id": "2", "name": "Globex",
+                         "employees": [{"__typename": "Employee", "id": "e3"}]},
+                    ],
+                },
+            },
+            "employees": {
+                "entities": [
+                    {"__typename": "Employee", "id": "e1", "salary": 90000.0},
+                    {"__typename": "Employee", "id": "e2", "salary": 85000.0},
+                    {"__typename": "Employee", "id": "e3", "salary": 95000.0},
+                ],
+            }
+        }),
+    };
+
+    let demand_control = serde_json::json!({
+        "enabled": true,
+        "mode": "enforce",
+        "strategy": {
+            "static_estimated": {
+                "list_size": 10,
+                "max": 200.0,
+                "subgraph": {
+                    "all": {
+                        "max": MAX_COST
+                    }
+                }
+            }
+        }
+    });
+
+    let response = query_supergraph_service(test_parameters, demand_control).await?;
+    let result = parse_result_for_snapshot(response).await;
+
+    // Should be rejected (cost exceeds max) because the entity fetch for employees
+    // now correctly estimates 10×10=100 entities instead of just 10.
+    assert_eq!(
+        result["apollo::demand_control::result"], "COST_ESTIMATED_TOO_EXPENSIVE",
+        "expected demand control to reject the query, got: {result:?}"
+    );
+    assert_eq!(
+        result["body"]["errors"][0]["extensions"]["code"], "COST_ESTIMATED_TOO_EXPENSIVE",
+        "expected demand control to reject the query, got: {result:?}"
+    );
+    assert_eq!(
+        result["apollo::demand_control::estimated_cost_by_subgraph"]["employees"],
+        100.0
+    );
+
+    Ok(())
+}

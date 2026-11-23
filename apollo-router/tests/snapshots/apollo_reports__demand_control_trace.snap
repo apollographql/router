@@ -603,7 +603,7 @@ traces_per_query:
         limits:
           result: COST_OK
           strategy: static_estimated
-          cost_estimated: 230
+          cost_estimated: 320
           cost_actual: 18
           depth: 4
           height: 7
