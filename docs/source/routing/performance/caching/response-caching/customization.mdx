@@ -487,7 +487,7 @@ response_cache:
 
 ## Suppressing the `Cache-Control` client response header
 
-By default, router includes a `Cache-Control` header in the supergraph response sent to clients, reflecting the computed cache policy—for example, `Cache-Control: max-age=300, public`.
+By default, router includes a `Cache-Control` header in the supergraph response sent to clients, reflecting the computed cache policy—for example, `Cache-Control: max-age=300, public`. With `response_cache.enabled: false`, router doesn't add this header, whatever `include_cache_control_header_on_router_response` is set to.
 
 Set `include_cache_control_header_on_router_response: false` to suppress this header when:
 
