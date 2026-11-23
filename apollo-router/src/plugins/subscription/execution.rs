@@ -266,7 +266,10 @@ async fn subscription_task(
 
     loop {
         tokio::select! {
-            // We prefer to specify the order of checks within the select
+            // Every branch that ends the subscription is checked before the event branch. When the
+            // subgraph always has another event ready, the event branch would otherwise win every
+            // pass and the subscription would never see a close, an expiry or a reload. Those
+            // branches end the loop when they fire, so they cannot starve events.
             biased;
             _ = subscription_handle.closed_signal.recv() => {
                 break;
@@ -279,9 +282,6 @@ async fn subscription_task(
                 let _ = sender.send(subscription_fatal_error("subscription closed because the maximum lifetime has been reached", SUBSCRIPTION_MAX_LIFETIME_EXTENSION_CODE)).await;
                 break;
             },
-            // Reloads come before events: when the subgraph always has another event ready, the
-            // event branch would otherwise win every pass and the reload would never be seen.
-            // Each reload stream yields once per reload, so this cannot starve events.
             Some(_new_schema) = schema_updated_rx.next() => {
                 let _ = sender
                     .send(subscription_fatal_error("subscription has been closed due to a schema reload", SUBSCRIPTION_SCHEMA_RELOAD_EXTENSION_CODE))
