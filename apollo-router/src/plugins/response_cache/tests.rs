@@ -1365,6 +1365,64 @@ async fn no_cache_control() {
     "#);
 }
 
+/// With `enabled: false` the plugin adds nothing to the client response, even though it is built
+/// because the `response_cache` section is present. With `enabled: true` and no subgraph cached,
+/// it still merges the subgraphs' `Cache-Control` into the client response.
+#[rstest]
+#[case::enabled(true, true)]
+#[case::disabled(false, false)]
+#[tokio::test]
+async fn client_cache_control_header_follows_enabled(
+    #[case] enabled: bool,
+    #[case] expect_header: bool,
+) {
+    let subgraphs = serde_json::json!({
+        "user": {
+            "query": {
+                "currentUser": {
+                    "activeOrganization": {
+                        "__typename": "Organization",
+                        "id": "1",
+                    }
+                }
+            },
+            "headers": {"cache-control": "public, max-age=60"},
+        },
+        "orga": {
+            "entities": [
+                {
+                    "__typename": "Organization",
+                    "id": "1",
+                    "creatorUser": {
+                        "__typename": "User",
+                        "id": 2
+                    }
+                }
+            ],
+            "headers": {"cache-control": "public, max-age=60"},
+        },
+    });
+
+    let service = TestHarness::builder()
+        .configuration_json(serde_json::json!({
+            "experimental_mock_subgraphs": subgraphs,
+            "response_cache": { "enabled": enabled },
+        }))
+        .unwrap()
+        .schema(SCHEMA)
+        .build_supergraph()
+        .await
+        .unwrap();
+
+    let request = supergraph::Request::fake_builder()
+        .query("query { currentUser { activeOrganization { id creatorUser { __typename id } } } }")
+        .build()
+        .unwrap();
+    let response = service.oneshot(request).await.unwrap();
+
+    assert_eq!(get_cache_control_header(&response).is_some(), expect_header);
+}
+
 #[tokio::test]
 async fn no_store_from_request() {
     let valid_schema = Arc::new(Schema::parse_and_validate(SCHEMA, "test.graphql").unwrap());
