@@ -14,6 +14,8 @@ const LICENSE_ALLOWED_FEATURES_DOES_NOT_INCLUDE_FEATURE_MSG: &str =
     "the configuration or schema uses features the license doesn't include";
 const LICENSE_EXPIRED_MESSAGE: &str =
     "License has expired. The Router will no longer serve requests.";
+const LICENSE_EXPIRED_WITH_RESTRICTED_FEATURES_MESSAGE: &str =
+    "License has expired. The router will no longer serve requests.";
 
 // The license JWTs below are minted at runtime with `warnAt`/`haltAt` relative
 // to now, so they can never silently expire the way pinned tokens used to.
@@ -514,7 +516,7 @@ async fn canned_response_when_license_halted_with_restricted_config_and_valid_sc
      * */
     router.start().await;
     router
-        .assert_error_log_contained(LICENSE_EXPIRED_MESSAGE)
+        .assert_error_log_contained(LICENSE_EXPIRED_WITH_RESTRICTED_FEATURES_MESSAGE)
         .await;
 
     let (_, response) = router.execute_default_query().await;
@@ -553,7 +555,7 @@ async fn canned_response_when_license_halted_with_valid_config_and_invalid_schem
      * */
     router.start().await;
     router
-        .assert_error_log_contained(LICENSE_EXPIRED_MESSAGE)
+        .assert_error_log_contained(LICENSE_EXPIRED_WITH_RESTRICTED_FEATURES_MESSAGE)
         .await;
 
     let (_, response) = router.execute_default_query().await;
