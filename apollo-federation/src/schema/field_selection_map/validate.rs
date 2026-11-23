@@ -26,13 +26,15 @@ use super::SelectedValueEntry;
 /// The output side of a selection map: where selected fields are looked up. It may span several
 /// schemas (e.g. every source schema other than the one declaring a `@require`).
 pub(crate) trait OutputSchema {
-    /// The definition of `type_name.field_name`, if selectable, with the schema defining it (used
-    /// to coerce literal arguments) and that schema's name for `@require`, if any.
-    fn field(
+    /// Every definition of `type_name.field_name` that is selectable, each with the schema
+    /// defining it (used to coerce literal arguments) and that schema's name for `@require`, if
+    /// any. Several schemas can define the same field, and all of them merge into one, so arguments
+    /// are checked against each definition.
+    fn fields(
         &self,
         type_name: &Name,
         field_name: &Name,
-    ) -> Option<(&Node<FieldDefinition>, &Schema, Option<&Name>)>;
+    ) -> Vec<(&Node<FieldDefinition>, &Schema, Option<&Name>)>;
     /// Whether `type_name` is an object, interface or union type.
     fn is_composite(&self, type_name: &Name) -> bool;
     /// Whether `type_name` is a scalar or enum type.
@@ -47,12 +49,15 @@ pub(crate) struct SingleSchemaOutput<'a>(pub(crate) &'a Schema);
 
 #[cfg(test)]
 impl OutputSchema for SingleSchemaOutput<'_> {
-    fn field(
+    fn fields(
         &self,
         type_name: &Name,
         field_name: &Name,
-    ) -> Option<(&Node<FieldDefinition>, &Schema, Option<&Name>)> {
-        field_in_schema(self.0, type_name, field_name).map(|f| (f, self.0, None))
+    ) -> Vec<(&Node<FieldDefinition>, &Schema, Option<&Name>)> {
+        field_in_schema(self.0, type_name, field_name)
+            .map(|f| (f, self.0, None))
+            .into_iter()
+            .collect()
     }
 
     fn is_composite(&self, type_name: &Name) -> bool {
@@ -257,15 +262,23 @@ impl Validator<'_> {
         let last = path.segments.len().saturating_sub(1);
         let mut selected = None;
         for (i, segment) in path.segments.iter().enumerate() {
-            let Some((field, field_schema, require)) = self.output.field(&current, &segment.field)
-            else {
+            let definitions = self.output.fields(&current, &segment.field);
+            let Some((field, _, _)) = definitions.first().copied() else {
                 self.error(format!(
                     "field \"{}\" is not defined on type \"{current}\"",
                     segment.field
                 ));
                 return None;
             };
-            self.arguments(field_schema, require, &current, field, &segment.arguments);
+            for (definition, field_schema, require) in definitions {
+                self.arguments(
+                    field_schema,
+                    require,
+                    &current,
+                    definition,
+                    &segment.arguments,
+                );
+            }
             let ty = field.ty.clone();
             let mut named = ty.inner_named_type().clone();
             if let Some(type_condition) = &segment.type_condition {

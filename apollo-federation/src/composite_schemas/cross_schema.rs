@@ -113,10 +113,10 @@ impl Member<'_> {
 }
 
 /// The fields a selection map selects directly on its root type: the first segment of each root
-/// path and the fields of each root selected object. Paths with a root type condition (`<T>.f`)
-/// select from another type and are not included.
-fn root_fields(value: &SelectedValue) -> IndexSet<Name> {
-    fn collect(value: &SelectedValue, fields: &mut IndexSet<Name>) {
+/// path and the fields of each root selected object. A path with a root type condition (`<T>.f`)
+/// selects `f` from `T`, which is the first element of its pair. Other fields have no type.
+fn root_fields(value: &SelectedValue) -> IndexSet<(Option<Name>, Name)> {
+    fn collect(value: &SelectedValue, fields: &mut IndexSet<(Option<Name>, Name)>) {
         for entry in &value.alternatives {
             let path = match entry {
                 SelectedValueEntry::Path(path)
@@ -126,7 +126,7 @@ fn root_fields(value: &SelectedValue) -> IndexSet<Name> {
                     for field in &object.fields {
                         match field {
                             SelectedObjectField::Shorthand(name, _) => {
-                                fields.insert(name.clone());
+                                fields.insert((None, name.clone()));
                             }
                             SelectedObjectField::Labeled(_, value) => collect(value, fields),
                         }
@@ -134,10 +134,8 @@ fn root_fields(value: &SelectedValue) -> IndexSet<Name> {
                     continue;
                 }
             };
-            if path.type_condition.is_none()
-                && let Some(first) = path.segments.first()
-            {
-                fields.insert(first.field.clone());
+            if let Some(first) = path.segments.first() {
+                fields.insert((path.type_condition.clone(), first.field.clone()));
             }
         }
     }
@@ -165,19 +163,21 @@ impl<'a> SubgraphsOutput<'a> {
             .filter(move |member| Some(member.name) != skip)
     }
 
-    /// `type_name.field_name` as declared directly by one of the selectable subgraphs.
-    fn declared_field(
+    /// `type_name.field_name` as declared directly by each of the selectable subgraphs.
+    fn declared_fields(
         &self,
         type_name: &Name,
         field_name: &Name,
-    ) -> Option<(&'a Node<FieldDefinition>, &'a Schema, Option<&'a Name>)> {
-        self.members().find_map(|member| {
-            let field = field_in_schema(member.schema, type_name, field_name)?;
-            let hidden = member.marks(&member.internal, type_name, Some(field))
-                || (self.exclude_external
-                    && member.marks(&member.external, type_name, Some(field)));
-            (!hidden).then_some((field, member.schema, member.require.as_ref()))
-        })
+    ) -> Vec<(&'a Node<FieldDefinition>, &'a Schema, Option<&'a Name>)> {
+        self.members()
+            .filter_map(|member| {
+                let field = field_in_schema(member.schema, type_name, field_name)?;
+                let hidden = member.marks(&member.internal, type_name, Some(field))
+                    || (self.exclude_external
+                        && member.marks(&member.external, type_name, Some(field)));
+                (!hidden).then_some((field, member.schema, member.require.as_ref()))
+            })
+            .collect()
     }
 
     /// `type_name.field_name` as declared by an `@interfaceObject` stand-in, in one of the
@@ -218,13 +218,18 @@ impl<'a> SubgraphsOutput<'a> {
 }
 
 impl OutputSchema for SubgraphsOutput<'_> {
-    fn field(
+    fn fields(
         &self,
         type_name: &Name,
         field_name: &Name,
-    ) -> Option<(&Node<FieldDefinition>, &Schema, Option<&Name>)> {
-        self.declared_field(type_name, field_name)
-            .or_else(|| self.interface_object_field(type_name, field_name))
+    ) -> Vec<(&Node<FieldDefinition>, &Schema, Option<&Name>)> {
+        let declared = self.declared_fields(type_name, field_name);
+        if !declared.is_empty() {
+            return declared;
+        }
+        self.interface_object_field(type_name, field_name)
+            .into_iter()
+            .collect()
     }
 
     fn is_composite(&self, type_name: &Name) -> bool {
@@ -346,15 +351,18 @@ pub(crate) fn validate_selection_maps(subgraphs: &[Subgraph<Validated>]) -> Vec<
                         };
                         // A field this subgraph declares itself is reported as such, rather than
                         // as one the other subgraphs may not resolve.
-                        let locally_declared: Vec<Name> = root_fields(&map)
+                        let locally_declared: Vec<(Name, Name)> = root_fields(&map)
                             .into_iter()
-                            .filter(|field_name| own.declares(type_name, field_name, &members))
+                            .map(|(condition, field_name)| {
+                                (condition.unwrap_or_else(|| type_name.clone()), field_name)
+                            })
+                            .filter(|(owner, field_name)| own.declares(owner, field_name, &members))
                             .collect();
-                        for field_name in &locally_declared {
+                        for (owner, field_name) in &locally_declared {
                             report(SingleFederationError::RequireInvalidFields {
                                 message: format!(
                                     "The @require directive on \"{coordinate}\" selects \
-                                     \"{field_name}\", which \"{type_name}\" already declares in \
+                                     \"{field_name}\", which \"{owner}\" already declares in \
                                      this subgraph: require only fields resolved by another \
                                      subgraph."
                                 ),
