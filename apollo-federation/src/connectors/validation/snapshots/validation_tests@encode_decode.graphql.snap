@@ -1,0 +1,35 @@
+---
+source: apollo-federation/src/connectors/validation/mod.rs
+expression: errors
+input_file: apollo-federation/src/connectors/validation/test_data/encode_decode.graphql
+---
+[
+    Message {
+        code: InvalidSelection,
+        message: "`@connect(selection:)` on `Query.misspelledEncodeCodec` contains an invalid mapping for field `status`: Method ->encode does not support codec \"base46\", expected \"base64\", \"base64url\", or \"json\"",
+        locations: [
+            28:23..28:29,
+        ],
+    },
+    Message {
+        code: InvalidSelection,
+        message: "`@connect(selection:)` on `Query.unsupportedDecodeCodec` contains an invalid mapping for field `status`: Method ->decode does not support codec \"hex\", expected \"base64\", \"base64url\", or \"json\"",
+        locations: [
+            39:23..39:29,
+        ],
+    },
+    Message {
+        code: InvalidUrl,
+        message: "In `GET` in `@connect(http:)` on `Query.misspelledCodecInUrl`: Method ->encode does not support codec \"base46\", expected \"base64\", \"base64url\", or \"json\"",
+        locations: [
+            47:37..47:43,
+        ],
+    },
+    Message {
+        code: InvalidBody,
+        message: "In `@connect(http: {body:})` on `Query.misspelledCodecInBody`: Method ->encode does not support codec \"base46\", expected \"base64\", \"base64url\", or \"json\"",
+        locations: [
+            55:50..55:56,
+        ],
+    },
+]

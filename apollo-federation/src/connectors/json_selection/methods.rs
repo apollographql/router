@@ -38,6 +38,8 @@ pub(super) enum ArrowMethod {
     Slice,
     Size,
     Entries,
+    Encode,
+    Decode,
     JsonParse,
     JsonStringify,
     JoinNotNull,
@@ -170,6 +172,8 @@ impl std::ops::Deref for ArrowMethod {
             Self::Slice => &public::SliceMethod,
             Self::Size => &public::SizeMethod,
             Self::Entries => &public::EntriesMethod,
+            Self::Encode => &public::EncodeMethod,
+            Self::Decode => &public::DecodeMethod,
             Self::JsonParse => &public::JsonParseMethod,
             Self::JsonStringify => &public::JsonStringifyMethod,
             Self::JoinNotNull => &public::JoinNotNullMethod,
@@ -246,6 +250,8 @@ impl ArrowMethod {
             "not" => Some(Self::Not),
             "or" => Some(Self::Or),
             "and" => Some(Self::And),
+            "encode" => Some(Self::Encode),
+            "decode" => Some(Self::Decode),
             "jsonParse" => Some(Self::JsonParse),
             "jsonStringify" => Some(Self::JsonStringify),
             "joinNotNull" => Some(Self::JoinNotNull),
@@ -292,6 +298,8 @@ impl ArrowMethod {
                 | Self::Slice
                 | Self::Size
                 | Self::Entries
+                | Self::Encode
+                | Self::Decode
                 | Self::JsonParse
                 | Self::JsonStringify
                 | Self::JoinNotNull

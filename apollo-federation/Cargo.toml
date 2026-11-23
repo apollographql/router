@@ -25,6 +25,7 @@ connect-migrate = ["dep:clap", "dep:apollo-parser", "time/formatting"]
 ahash.workspace = true
 apollo-compiler.workspace = true
 apollo-parser = { workspace = true, optional = true }
+base64 = "0.23.0"
 clap = { version = "4", features = ["derive"], optional = true }
 time = { version = "0.3.34", default-features = false, features = [
   "local-offset",
