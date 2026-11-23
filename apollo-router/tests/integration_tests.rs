@@ -1586,7 +1586,7 @@ async fn defer_under_type_condition_with_typename_in_mixed_list() {
 
 /// A null deferred non-null field nulls its element in a nullable list (say that 10 times fast!).
 /// Such a case in a deferred selection returns a value completion error in the
-/// incremental response. 
+/// incremental response.
 #[tokio::test(flavor = "multi_thread")]
 async fn defer_under_type_condition_null_in_mixed_list() {
     let subgraphs = mixed_list_subgraphs(
