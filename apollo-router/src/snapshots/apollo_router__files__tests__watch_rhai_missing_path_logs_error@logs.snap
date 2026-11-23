@@ -2,6 +2,7 @@
 source: apollo-router/src/files.rs
 expression: yaml
 ---
-- fields: {}
+- fields:
+    error: "No path was found. about [\"missing/rhai\"]"
   level: ERROR
-  message: "Could not watch \"missing/rhai\": No path was found. about [\"missing/rhai\"]. Changes won't be reloaded until the router restarts."
+  message: "Could not watch \"missing/rhai\". Changes won't be reloaded until the router restarts."
