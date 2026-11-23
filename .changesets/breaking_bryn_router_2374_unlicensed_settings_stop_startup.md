@@ -11,7 +11,11 @@ If your license doesn't include the feature, these settings now stop startup:
 | `authentication.subgraph` or `authentication.connector` | Authentication |
 | A `subscription:` section without `enabled: false` | Subscriptions |
 
-These sections no longer stop startup, because they turn nothing on: `batching` and `persisted_queries` sections that don't set `enabled: true`, a `demand_control` section with `enabled: false`, and an `authorization` section with `directives.enabled: false` and no `require_authentication`.
+These sections no longer stop startup, because they turn nothing on:
+
+- `batching` and `persisted_queries` sections that don't set `enabled: true`
+- a `demand_control` section with `enabled: false`
+- an `authorization` section with `directives.enabled: false` and no `require_authentication`
 
 To migrate, remove each setting the error names, set `enabled: false` where the table says so, or get a license that includes the feature.
 

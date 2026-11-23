@@ -430,8 +430,8 @@ impl LicenseEnforcementReport {
         tracing::error!("{}", self.violation_message(connected_to_graphos));
 
         match &*self.license {
-            // LicensedHalt doesn't return an error, which might be surprising; rather, the middleware in the axum
-            // server (`license_handler`) will check for halted licenses and send back a canned response
+            // LicensedHalt doesn't return an error, which might be surprising; rather, the router
+            // will reject all incoming HTTP requests with a canned error response
             LicenseState::LicensedHalt { .. } => Ok(self.license.clone()),
             LicenseState::Licensed { .. }
             | LicenseState::LicensedWarn { .. }
@@ -483,8 +483,8 @@ impl LicenseEnforcementReport {
                 );
                 limits
             }
-            // LicensedHalt doesn't return an error, which might be surprising; rather, the middleware in the axum
-            // server (`license_handler`) will check for halted licenses and send back a canned response
+            // LicensedHalt doesn't return an error, which might be surprising; rather, the router
+            // will reject all incoming HTTP requests with a canned error response
             LicenseState::LicensedHalt { limits } => {
                 tracing::error!(
                     "License has expired. The Router will no longer serve requests. In order to enable these features for a self-hosted instance of Apollo Router, the Router must be connected to a graph in GraphOS that provides an active license for the following features:\n\n{:?}\n\nSee {LICENSE_EXPIRED_URL} for more information.",
