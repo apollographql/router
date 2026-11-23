@@ -1363,32 +1363,44 @@ mod alpn_negotiation {
     #[rstest]
     #[case::both_support_h2_subgraph(
     vec![alpn::H2.to_vec(), alpn::HTTP_1_1.to_vec()],
-    Http2Config::Enable,
+    Some(Http2Config::Enable),
     ServiceKind::Subgraph,
     ExpectedAlpn::Http2,
 )]
     #[case::server_only_http1_subgraph(
     vec![alpn::HTTP_1_1.to_vec()],
-    Http2Config::Enable,
+    Some(Http2Config::Enable),
     ServiceKind::Subgraph,
     ExpectedAlpn::Http1,
 )]
     #[case::client_disables_h2_subgraph(
     vec![alpn::HTTP_1_1.to_vec()],
-    Http2Config::Disable,
+    Some(Http2Config::Disable),
     ServiceKind::Subgraph,
     ExpectedAlpn::Http1OrNone,
 )]
     #[case::both_support_h2_connector(
     vec![alpn::H2.to_vec(), alpn::HTTP_1_1.to_vec()],
-    Http2Config::Enable,
+    Some(Http2Config::Enable),
     ServiceKind::Connector,
     ExpectedAlpn::Http2,
+)]
+    #[case::unset_subgraph_does_not_offer_h2(
+    vec![alpn::H2.to_vec(), alpn::HTTP_1_1.to_vec()],
+    None,
+    ServiceKind::Subgraph,
+    ExpectedAlpn::Http1OrNone,
+)]
+    #[case::unset_connector_does_not_offer_h2(
+    vec![alpn::H2.to_vec(), alpn::HTTP_1_1.to_vec()],
+    None,
+    ServiceKind::Connector,
+    ExpectedAlpn::Http1OrNone,
 )]
     #[tokio::test(flavor = "multi_thread")]
     async fn test_alpn_negotiation(
         #[case] server_alpn: Vec<Vec<u8>>,
-        #[case] http2_config: Http2Config,
+        #[case] http2_config: Option<Http2Config>,
         #[case] kind: ServiceKind,
         #[case] expected: ExpectedAlpn,
     ) {
@@ -1421,7 +1433,7 @@ mod alpn_negotiation {
             kind,
             &config,
             crate::configuration::shared::Client::builder()
-                .http2(http2_config)
+                .and_http2(http2_config)
                 .build(),
         );
 
@@ -1438,12 +1450,13 @@ mod http_version_negotiation {
 
     #[cfg(unix)]
     #[rstest]
-    #[case::http2_only(Http2Config::Http2Only, ExpectedVersion::Http2)]
-    #[case::http2_enabled(Http2Config::Enable, ExpectedVersion::Any)]
-    #[case::http2_disabled(Http2Config::Disable, ExpectedVersion::Http11)]
+    #[case::http2_only(Some(Http2Config::Http2Only), ExpectedVersion::Http2)]
+    #[case::http2_enabled(Some(Http2Config::Enable), ExpectedVersion::Any)]
+    #[case::http2_disabled(Some(Http2Config::Disable), ExpectedVersion::Http11)]
+    #[case::http2_unset_is_not_http2_only(None, ExpectedVersion::Http11)]
     #[tokio::test(flavor = "multi_thread")]
     async fn test_unix_socket_http_version(
-        #[case] http2_config: Http2Config,
+        #[case] http2_config: Option<Http2Config>,
         #[case] expected: ExpectedVersion,
     ) {
         let dir = tempfile::tempdir().unwrap();
@@ -1468,7 +1481,7 @@ mod http_version_negotiation {
             &Configuration::default(),
             &rustls::RootCertStore::empty(),
             crate::configuration::shared::Client::builder()
-                .http2(http2_config)
+                .and_http2(http2_config)
                 .build(),
         )
         .expect("created http client");

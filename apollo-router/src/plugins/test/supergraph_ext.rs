@@ -91,9 +91,9 @@ impl RequestTestExt<supergraph::Request, supergraph::Response> for SupergraphReq
         T: for<'de> Deserialize<'de> + Eq + PartialEq + Debug + Serialize,
     {
         pretty_assertions::assert_eq!(
-            serde_yaml::to_string(&self.supergraph_request.body_mut())
+            yaml_serde::to_string(&self.supergraph_request.body_mut())
                 .expect("could not serialize"),
-            serde_yaml::to_string(&value).expect("could not serialize")
+            yaml_serde::to_string(&value).expect("could not serialize")
         );
     }
 
@@ -143,8 +143,8 @@ impl ResponseTestExt for SupergraphResponse {
         let response_stream = self.response.body_mut();
         let responses: Vec<_> = response_stream.collect().await;
         pretty_assertions::assert_eq!(
-            serde_yaml::to_string(&responses).expect("could not serialize"),
-            serde_yaml::to_string(&value).expect("could not serialize")
+            yaml_serde::to_string(&responses).expect("could not serialize"),
+            yaml_serde::to_string(&value).expect("could not serialize")
         );
     }
 
@@ -163,8 +163,8 @@ impl ResponseTestExt for SupergraphResponse {
         if !errors.iter().contains(error) {
             panic!(
                 "Expected error {}\nActual errors\n{}",
-                serde_yaml::to_string(error).expect("error"),
-                serde_yaml::to_string(&errors).expect("errors")
+                yaml_serde::to_string(error).expect("error"),
+                yaml_serde::to_string(&errors).expect("errors")
             )
         }
     }

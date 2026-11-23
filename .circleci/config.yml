@@ -11,20 +11,20 @@ orbs:
 executors:
   amd_linux_build: &amd_linux_build_executor
     docker:
-      - image: ghcr.io/apollographql/ci-utility-docker-images/apollo-rust-builder:0.30.12
+      - image: ghcr.io/apollographql/ci-utility-docker-images/apollo-rust-builder:0.30.16
     resource_class: xlarge.gen2
     environment:
       CARGO_BUILD_JOBS: 4
       MISE_ENV: ci
   amd_linux_helm: &amd_linux_helm_executor
     docker:
-      - image: ghcr.io/apollographql/ci-utility-docker-images/apollo-rust-builder:0.30.12
+      - image: ghcr.io/apollographql/ci-utility-docker-images/apollo-rust-builder:0.30.16
     resource_class: small
     environment:
       MISE_ENV: ci
   amd_linux_test: &amd_linux_test_executor
     docker:
-      - image: ghcr.io/apollographql/ci-utility-docker-images/apollo-rust-builder:0.30.12
+      - image: ghcr.io/apollographql/ci-utility-docker-images/apollo-rust-builder:0.30.16
       - image: cimg/redis:7.4.12
       - image: ghcr.io/datadog/dd-apm-test-agent/ddapm-test-agent:v1.50.0
       # redis cluster - 3 primaries, 3 replicas
@@ -55,14 +55,14 @@ executors:
       CARGO_BUILD_JOBS: 4
   arm_linux_build: &arm_linux_build_executor
     docker:
-      - image: ghcr.io/apollographql/ci-utility-docker-images/apollo-rust-builder:0.30.12
+      - image: ghcr.io/apollographql/ci-utility-docker-images/apollo-rust-builder:0.30.16
     resource_class: arm.xlarge
     environment:
       MISE_ENV: ci
       CARGO_BUILD_JOBS: 4
   arm_linux_test: &arm_linux_test_executor
     docker:
-      - image: ghcr.io/apollographql/ci-utility-docker-images/apollo-rust-builder:0.30.12
+      - image: ghcr.io/apollographql/ci-utility-docker-images/apollo-rust-builder:0.30.16
     resource_class: arm.xlarge
     environment:
       MISE_ENV: ci
@@ -143,7 +143,7 @@ common_job_environment: &common_job_environment
   CARGO_NET_GIT_FETCH_WITH_CLI: "true"
   RUST_BACKTRACE: full
   CARGO_INCREMENTAL: 0
-  MISE_VERSION: v2026.9.18
+  MISE_VERSION: v2026.11.9
 commands:
   setup_environment:
     parameters:
@@ -225,7 +225,7 @@ commands:
                   echo 'alias find=/bin/find' >> "$BASH_ENV"
                   echo 'alias sort=/bin/sort' >> "$BASH_ENV"
                   echo 'export EXECUTABLE_SUFFIX=".exe"' >> "$BASH_ENV"
-                  echo 'export PATH="$HOME/AppData/Local/mise/shims:$HOME/scoop/apps/mise/current/bin:$HOME/scoop/shims:$PATH"' >> "$BASH_ENV"
+                  echo 'export PATH="$HOME/AppData/Local/mise/shims:$PATH"' >> "$BASH_ENV"
             - run:
                 name: Write arch
                 command: |
@@ -267,19 +267,8 @@ commands:
             - run:
                 name: Install mise
                 command: |
-                  curl https://mise.jdx.dev/install.sh | sh
+                  curl -fsSL https://mise.run | sh
                   mise activate bash >> "$BASH_ENV"
-                  for i in 1 2 3; do
-                    if mise install --yes --quiet; then
-                      break
-                    fi
-                    if [ $i -eq 3 ]; then
-                      echo "mise install failed after 3 attempts"
-                      exit 1
-                    fi
-                    echo "mise install failed (attempt $i/3), retrying in $((i*5))s..."
-                    sleep $((i*5))
-                  done
       - when:
           condition:
             or:
@@ -287,36 +276,30 @@ commands:
               - equal: [*windows_test_executor, << parameters.platform >>]
           steps:
             - run:
-                name: Install scoop
-                shell: powershell.exe -ExecutionPolicy Bypass
-                command: |
-                  iex "& {$(irm get.scoop.sh)} -RunAsAdmin"
-            - run:
                 name: Install mise
-                no_output_timeout: 20m
+                shell: powershell.exe
                 command: |
-                  for i in 1 2 3; do
-                    if scoop install mise@${MISE_VERSION#v}; then
-                      break
-                    fi
-                    if [ $i -eq 3 ]; then
-                      echo "scoop install mise failed after 3 attempts"
-                      exit 1
-                    fi
-                    echo "scoop install mise failed (attempt $i/3), retrying in $((i*5))s..."
-                    sleep $((i*5))
-                  done
-                  for i in 1 2 3; do
-                    if mise install --yes --quiet; then
-                      break
-                    fi
-                    if [ $i -eq 3 ]; then
-                      echo "mise install failed after 3 attempts"
-                      exit 1
-                    fi
-                    echo "mise install failed (attempt $i/3), retrying in $((i*5))s..."
-                    sleep $((i*5))
-                  done
+                  irm https://mise.run/powershell | iex
+
+      - run:
+          name: Install mise tools
+          command: |
+            for i in 1 2 3; do
+              # Using perl instead of `timeout` here is portable across linux/macos/windows
+              if perl -e 'alarm shift; exec @ARGV' 600 mise install --yes --verbose; then
+                break
+              fi
+              if [ $i -eq 3 ]; then
+                echo "mise install failed after 3 attempts"
+                exit 1
+              fi
+              echo "mise install failed (attempt $i/3), retrying in $((i*5))s..."
+              sleep $((i*5))
+            done
+      - run:
+          name: Verify mise installation
+          when: always
+          command: mise doctor
   fetch_dependencies:
     steps:
       - run:
@@ -473,7 +456,7 @@ commands:
       - run:
           name: Delete large files from cache
           command: |
-            find target/debug/deps -type f -size +50M -delete
+            find target/debug/build -type f -size +50M -print -delete
             rm target/debug/router*
       - when:
           condition:
@@ -1008,7 +991,7 @@ jobs:
 
   publish_github_release:
     docker:
-      - image: ghcr.io/apollographql/ci-utility-docker-images/apollo-rust-builder:0.30.12
+      - image: ghcr.io/apollographql/ci-utility-docker-images/apollo-rust-builder:0.30.16
     resource_class: xlarge
     environment:
       <<: *common_job_environment

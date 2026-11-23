@@ -29,7 +29,7 @@ traffic_shaping:
         capacity: 10
         interval: 5s # Must not be greater than 18_446_744_073_709_551_615 milliseconds and not less than 0 milliseconds
       timeout: 50s # If a request to the subgraph 'products' takes more than 50secs then cancel the request (30 sec by default)
-      http2: enable # Configures HTTP/2 usage. Can be 'enable' (default), 'disable' or 'http2only'
+      http2: enable # Configures HTTP/2 usage. Can be 'enable', 'disable' (default) or 'http2only'
 ```
 
 ### Preset values
@@ -37,7 +37,7 @@ traffic_shaping:
 The preset values of `traffic_shaping` that's enabled by default:
 
 - `timeout: 30s` for all timeouts
-- `http2: enable`
+- `http2: disable`
 
 ## Client side traffic shaping
 
@@ -252,13 +252,14 @@ Both options apply under `all`, per-subgraph under `subgraphs`, and per-source u
 ```yaml title="router.yaml"
 traffic_shaping:
   all:
+    http2: enable # Keep-alive pings need HTTP/2
     experimental_http2_keep_alive_interval: 30s # Send a PING every 30s on idle connections
     experimental_http2_keep_alive_timeout: 10s  # Close the connection if no PONG within 10s
 ```
 
 <Note>
 
-Keep-alive pings require HTTP/2 to be active. Setting `http2: disable` will prevent pings from being sent regardless of these settings.
+Keep-alive pings are sent only over HTTP/2. Set `http2: enable` or `http2: http2only` (for connector sources, `experimental_http2`). With the default, `disable`, the router sends no pings.
 
 </Note>
 

@@ -2,9 +2,8 @@
 source: apollo-router/src/configuration/tests.rs
 expression: new_config
 ---
----
 telemetry:
   apollo:
-    otlp_endpoint: "https://custom.example.com/otlp"
+    otlp_endpoint: https://custom.example.com/otlp
     otlp_tracing_protocol: grpc
     otlp_metrics_protocol: http

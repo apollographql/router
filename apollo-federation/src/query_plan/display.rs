@@ -82,13 +82,11 @@ impl FetchNode {
             protocol: _,
             id,
             variable_usages: _,
-            requires,
+            kind,
             operation_document,
             operation_name: _,
             operation_kind: _,
-            input_rewrites: _,
             output_rewrites: _,
-            context_rewrites: _,
         } = self;
         state.write(format_args!("Fetch(service: {subgraph_name:?}"))?;
         if let Some(id) = id {
@@ -97,7 +95,7 @@ impl FetchNode {
         state.write(") {")?;
         state.indent()?;
 
-        if !requires.is_empty() {
+        if let FetchKind::Entities(EntitySelection { requires, .. }) = kind {
             write_requires_selections(state, requires)?;
             state.write(" =>")?;
             state.new_line()?;
@@ -136,23 +134,49 @@ impl ParallelNode {
 
 impl FlattenNode {
     fn write_indented(&self, state: &mut State<'_, '_>) -> fmt::Result {
-        let Self { path, node } = self;
-        state.write("Flatten(path: \"")?;
-        if let Some((first, rest)) = path.split_first() {
-            state.write(first)?;
-            for element in rest {
-                state.write(".")?;
-                state.write(element)?;
-            }
+        if let Some((path, fetch)) = self.single() {
+            state.write("Flatten(path: \"")?;
+            write_path(state, path)?;
+            state.write("\") {")?;
+            state.indent()?;
+            fetch.write_indented(state)?;
+            state.dedent()?;
+            return state.write("},");
         }
-        state.write("\") {")?;
-        state.indent()?;
-
-        node.write_indented(state)?;
-
-        state.dedent()?;
+        state.write("Flatten {")?;
+        write_indented_lines(state, &self.members, |state, member| {
+            member.write_indented(state)
+        })?;
         state.write("},")
     }
+}
+
+impl FlattenMember {
+    /// Each of the member's paths, then its fetch.
+    fn write_indented(&self, state: &mut State<'_, '_>) -> fmt::Result {
+        let Self { paths, fetch } = self;
+        for (index, path) in paths.iter().enumerate() {
+            if index > 0 {
+                state.write(", ")?;
+            }
+            state.write("\"")?;
+            write_path(state, path)?;
+            state.write("\"")?;
+        }
+        state.write(" => ")?;
+        fetch.write_indented(state)
+    }
+}
+
+fn write_path(state: &mut State<'_, '_>, path: &[FetchDataPathElement]) -> fmt::Result {
+    if let Some((first, rest)) = path.split_first() {
+        state.write(first)?;
+        for element in rest {
+            state.write(".")?;
+            state.write(element)?;
+        }
+    }
+    Ok(())
 }
 
 impl ConditionNode {

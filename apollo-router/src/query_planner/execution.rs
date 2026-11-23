@@ -33,7 +33,6 @@ use crate::query_planner::DEFER_DEFERRED_SPAN_NAME;
 use crate::query_planner::DEFER_PRIMARY_SPAN_NAME;
 use crate::query_planner::DEFER_SPAN_NAME;
 use crate::query_planner::FLATTEN_SPAN_NAME;
-use crate::query_planner::FlattenNode;
 use crate::query_planner::PARALLEL_SPAN_NAME;
 use crate::query_planner::Primary;
 use crate::query_planner::SEQUENCE_SPAN_NAME;
@@ -211,25 +210,29 @@ impl PlanNode {
                     ))
                     .await
                 }
-                PlanNode::Flatten(FlattenNode { path, node }) => {
+                PlanNode::Flatten(flatten) => {
+                    // Sending several fetches in one request is not implemented yet.
+                    let Some((path, fetch_node)) = flatten.single() else {
+                        value = Value::default();
+                        errors = vec![
+                            Error::builder()
+                                .message("query plan sends fetches together, which this router cannot execute")
+                                .extension_code("UNSUPPORTED_QUERY_PLAN")
+                                .build(),
+                        ];
+                        return (value, errors);
+                    };
                     // Note that the span must be `info` as we need to pick this up in apollo tracing
+                    // this is the only command that actually changes the "current dir"
                     let current_dir = current_dir.join(path.remove_empty_key_root());
-                    let (v, err) = node
-                        .execute_recursively(
-                            parameters,
-                            // this is the only command that actually changes the "current dir"
-                            &current_dir,
-                            parent_value,
-                            sender,
-                        )
+                    (value, errors) = fetch_node
+                        .execute(parameters, &current_dir, parent_value)
                         .instrument(tracing::info_span!(
                             FLATTEN_SPAN_NAME,
                             "graphql.path" = %current_dir,
                             "otel.kind" = "INTERNAL"
                         ))
                         .await;
-                    value = v;
-                    errors = err;
                 }
                 PlanNode::Subscription {
                     primary: subscription_node,
@@ -291,89 +294,9 @@ impl PlanNode {
                     }
                 }
                 PlanNode::Fetch(fetch_node) => {
-                    // The client closed the connection, we are still executing the request pipeline,
-                    // but we won't send unused trafic to subgraph
-                    if parameters
-                        .context
-                        .extensions()
-                        .with_lock(|lock| lock.get::<CanceledRequest>().is_some())
-                    {
-                        value = Value::Object(Object::default());
-                        errors = Vec::new();
-                    } else {
-                        match Variables::new(
-                            &fetch_node.requires,
-                            &fetch_node.variable_usages,
-                            parent_value,
-                            current_dir,
-                            parameters.supergraph_request,
-                            parameters.query,
-                            parameters.schema.as_ref(),
-                            &fetch_node.input_rewrites,
-                            &fetch_node.context_rewrites,
-                        ) {
-                            Some(variables) => {
-                                let paths = variables.inverted_paths.clone();
-                                let service = parameters.service.clone();
-                                let request = fetch::Request::Fetch(
-                                    FetchRequest::builder()
-                                        .context(parameters.context.clone())
-                                        .fetch_node(fetch_node.clone())
-                                        .supergraph_request(parameters.supergraph_request.clone())
-                                        .variables(variables)
-                                        .current_dir(current_dir.clone())
-                                        .is_deferred(parameters.is_deferred)
-                                        .build(),
-                                );
-                                let raw_errors;
-                                (value, raw_errors) =
-                                    match service.oneshot(request).await.map_to_graphql_error(
-                                        fetch_node.service_name.to_string(),
-                                        current_dir,
-                                    ) {
-                                        Ok(r) => r,
-                                        Err(e) => (Value::default(), vec![e]),
-                                    };
-
-                                // When a subgraph returns an unexpected response (ie not a body with
-                                // at least one of errors or data), the errors surfaced by the router
-                                // include an @ in the path. This indicates the error should be applied
-                                // to all elements in the array.
-                                errors = Vec::default();
-                                for err in raw_errors {
-                                    if let Some(err_path) = err.path.as_ref()
-                                        && err_path
-                                            .iter()
-                                            .any(|elem| matches!(elem, PathElement::Flatten(_)))
-                                    {
-                                        for path in paths.iter().flatten() {
-                                            if err_path.equal_if_flattened(path) {
-                                                let mut err = err.clone();
-                                                err.path = Some(path.clone());
-                                                errors.push(err);
-                                            }
-                                        }
-
-                                        continue;
-                                    }
-
-                                    errors.push(err);
-                                }
-
-                                FetchNode::deferred_fetches(
-                                    current_dir,
-                                    &fetch_node.id,
-                                    parameters.deferred_fetches,
-                                    &value,
-                                    &errors,
-                                );
-                            }
-                            None => {
-                                value = Value::Object(Object::default());
-                                errors = Vec::new();
-                            }
-                        };
-                    }
+                    (value, errors) = fetch_node
+                        .execute(parameters, current_dir, parent_value)
+                        .await;
                 }
                 PlanNode::Defer {
                     primary: Primary { node, .. },
@@ -529,6 +452,95 @@ impl PlanNode {
     }
 }
 
+impl FetchNode {
+    async fn execute(
+        &self,
+        parameters: &ExecutionParameters<'_>,
+        current_dir: &Path,
+        parent_value: &Value,
+    ) -> (Value, Vec<Error>) {
+        // The client closed the connection, we are still executing the request pipeline,
+        // but we won't send unused trafic to subgraph
+        if parameters
+            .context
+            .extensions()
+            .with_lock(|lock| lock.get::<CanceledRequest>().is_some())
+        {
+            return (Value::Object(Object::default()), Vec::new());
+        }
+
+        let Some(variables) = Variables::new(
+            self.kind.requires(),
+            &self.variable_usages,
+            parent_value,
+            current_dir,
+            parameters.supergraph_request,
+            parameters.query,
+            parameters.schema.as_ref(),
+            self.kind.input_rewrites(),
+            self.kind.context_rewrites(),
+        ) else {
+            return (Value::Object(Object::default()), Vec::new());
+        };
+
+        let paths = variables.inverted_paths.clone();
+        let service = parameters.service.clone();
+        let request = fetch::Request::Fetch(
+            FetchRequest::builder()
+                .context(parameters.context.clone())
+                .fetch_node(self.clone())
+                .supergraph_request(parameters.supergraph_request.clone())
+                .variables(variables)
+                .current_dir(current_dir.clone())
+                .is_deferred(parameters.is_deferred)
+                .build(),
+        );
+        let (value, raw_errors) = match service
+            .oneshot(request)
+            .await
+            .map_to_graphql_error(self.service_name.to_string(), current_dir)
+        {
+            Ok(response) => response,
+            Err(error) => (Value::default(), vec![error]),
+        };
+
+        // When a subgraph returns an unexpected response (ie not a body with
+        // at least one of errors or data), the errors surfaced by the router
+        // include an @ in the path. This indicates the error should be applied
+        // to all elements in the array.
+        let mut errors = Vec::new();
+        for err in raw_errors {
+            if let Some(err_path) = err.path.as_ref()
+                && err_path
+                    .iter()
+                    .any(|elem| matches!(elem, PathElement::Flatten(_)))
+            {
+                for path in paths.iter().flatten() {
+                    if err_path.equal_if_flattened(path) {
+                        let mut err = err.clone();
+                        err.path = Some(path.clone());
+                        errors.push(err);
+                    }
+                }
+
+                continue;
+            }
+
+            errors.push(err);
+        }
+
+        Self::deferred_fetches(
+            current_dir,
+            &self.id,
+            parameters.deferred_fetches,
+            &value,
+            &errors,
+        );
+
+        (value, errors)
+    }
+}
+
 impl DeferredNode {
     fn execute<'a>(
         &self,
@@ -649,10 +661,8 @@ impl DeferredNode {
                     )
                     .await
                 {
-                    tracing::error!(
-                        "error sending deferred response at path {}: {:?}",
-                        deferred_path,
-                        e
+                    tracing::debug!(
+                        "could not send deferred response at path {deferred_path}: {e}"
                     );
                 };
                 drop(tx);
@@ -673,10 +683,8 @@ impl DeferredNode {
                     )
                     .await
                 {
-                    tracing::error!(
-                        "error sending deferred response at path {}: {:?}",
-                        deferred_path,
-                        e
+                    tracing::debug!(
+                        "could not send deferred response at path {deferred_path}: {e}"
                     );
                 }
                 drop(tx);

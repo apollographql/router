@@ -531,6 +531,9 @@ mod test {
     use std::sync::atomic::AtomicUsize;
     use std::sync::atomic::Ordering;
 
+    use apollo_configuration::ConfigError;
+    use apollo_configuration::ConfigParser;
+    use apollo_configuration::Configuration;
     use http::header::CONTENT_LENGTH;
     use http::header::CONTENT_TYPE;
     use http::header::HOST;
@@ -600,9 +603,13 @@ mod test {
         );
     }
 
+    fn parse_yaml<T: Configuration>(text: &str) -> Result<T, ConfigError> {
+        ConfigParser::builder().build()?.parse_yaml(text)
+    }
+
     #[test]
     fn test_all_aws_sig_v4_hardcoded_config() {
-        serde_yaml::from_str::<Config>(
+        parse_yaml::<Config>(
             r#"
         all:
           aws_sig_v4:
@@ -618,7 +625,7 @@ mod test {
 
     #[test]
     fn test_subgraph_aws_sig_v4_hardcoded_config() {
-        serde_yaml::from_str::<Config>(
+        parse_yaml::<Config>(
             r#"
         subgraphs:
           products:
@@ -635,7 +642,7 @@ mod test {
 
     #[test]
     fn test_aws_sig_v4_default_chain_assume_role_config() {
-        serde_yaml::from_str::<Config>(
+        parse_yaml::<Config>(
             r#"
         all:
             aws_sig_v4:

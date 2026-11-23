@@ -841,13 +841,13 @@ fn upgrade_old_configuration() {
                 .expect("expected utf8")
                 .to_string();
             let new_config = crate::configuration::upgrade::upgrade_configuration(
-                &serde_yaml::from_str(&input).expect("config must be valid yaml"),
+                &yaml_serde::from_str(&input).expect("config must be valid yaml"),
                 true,
                 upgrade::UpgradeMode::Major,
             )
             .expect("configuration could not be updated");
             let new_config =
-                serde_yaml::to_string(&new_config).expect("must be able to serialize config");
+                yaml_serde::to_string(&new_config).expect("must be able to serialize config");
 
             let result = parse_without_inputs(&new_config, Migration::None);
 
@@ -913,13 +913,13 @@ fn upgrade_old_minor_configuration() {
                 .expect("expected utf8")
                 .to_string();
             let new_config = crate::configuration::upgrade::upgrade_configuration(
-                &serde_yaml::from_str(&input).expect("config must be valid yaml"),
+                &yaml_serde::from_str(&input).expect("config must be valid yaml"),
                 true,
                 upgrade::UpgradeMode::Minor(2),
             )
             .expect("configuration could not be updated");
             let new_config =
-                serde_yaml::to_string(&new_config).expect("must be able to serialize config");
+                yaml_serde::to_string(&new_config).expect("must be able to serialize config");
 
             let result = parse_without_inputs(&new_config, Migration::None);
 
@@ -1001,14 +1001,14 @@ fn empty_config_validates() {
     parse_without_inputs("", Migration::None).expect("should be valid configuration");
 }
 
-fn visit_schema(path: &str, schema: &Value, errors: &mut Vec<String>) {
+fn visit_schema(path: &str, schema: &serde_json::Value, errors: &mut Vec<String>) {
     match schema {
-        Value::Array(arr) => {
+        serde_json::Value::Array(arr) => {
             for element in arr {
                 visit_schema(path, element, errors)
             }
         }
-        Value::Object(o) => {
+        serde_json::Value::Object(o) => {
             for (k, v) in o {
                 if k.as_str() == "properties" {
                     let properties = v.as_object().expect("properties must be an object");
@@ -1594,7 +1594,7 @@ fn it_processes_unspecified_maximum_batch_limit_correctly() {
 
     let config: Batching = serde_json::from_value(json_config).unwrap();
 
-    assert_eq!(config.maximum_size, None);
+    assert_eq!(config.maximum_size.get(), 10);
 }
 
 #[test]
@@ -1602,12 +1602,12 @@ fn it_processes_specified_maximum_batch_limit_correctly() {
     let json_config = json!({
         "enabled": true,
         "mode": "batch_http_link",
-        "maximum_size": 10
+        "maximum_size": 50
     });
 
     let config: Batching = serde_json::from_value(json_config).unwrap();
 
-    assert_eq!(config.maximum_size, Some(10));
+    assert_eq!(config.maximum_size.get(), 50);
 }
 
 #[test]

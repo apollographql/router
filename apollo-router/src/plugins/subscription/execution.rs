@@ -266,7 +266,10 @@ async fn subscription_task(
 
     loop {
         tokio::select! {
-            // We prefer to specify the order of checks within the select
+            // Every branch that ends the subscription is checked before the event branch. When the
+            // subgraph always has another event ready, the event branch would otherwise win every
+            // pass and the subscription would never see a close, an expiry or a reload. Those
+            // branches end the loop when they fire, so they cannot starve events.
             biased;
             _ = subscription_handle.closed_signal.recv() => {
                 break;
@@ -279,6 +282,20 @@ async fn subscription_task(
                 let _ = sender.send(subscription_fatal_error("subscription closed because the maximum lifetime has been reached", SUBSCRIPTION_MAX_LIFETIME_EXTENSION_CODE)).await;
                 break;
             },
+            Some(_new_schema) = schema_updated_rx.next() => {
+                let _ = sender
+                    .send(subscription_fatal_error("subscription has been closed due to a schema reload", SUBSCRIPTION_SCHEMA_RELOAD_EXTENSION_CODE))
+                    .await;
+
+                break;
+            }
+            Some(_new_configuration) = configuration_updated_rx.next() => {
+                let _ = sender
+                    .send(subscription_fatal_error("subscription has been closed due to a configuration reload", SUBSCRIPTION_CONFIG_RELOAD_EXTENSION_CODE))
+                    .await;
+
+                break;
+            }
             message = receiver.next() => {
                 match message {
                     Some(mut val) => {
@@ -305,18 +322,6 @@ async fn subscription_task(
                     }
                     None => break,
                 }
-            }
-            Some(_new_configuration) = configuration_updated_rx.next() => {
-                let _ = sender
-                    .send(subscription_fatal_error("subscription has been closed due to a configuration reload", SUBSCRIPTION_CONFIG_RELOAD_EXTENSION_CODE))
-                    .await;
-            }
-            Some(_new_schema) = schema_updated_rx.next() => {
-                let _ = sender
-                    .send(subscription_fatal_error("subscription has been closed due to a schema reload", SUBSCRIPTION_SCHEMA_RELOAD_EXTENSION_CODE))
-                    .await;
-
-                break;
             }
         }
     }
@@ -392,4 +397,333 @@ async fn dispatch_subscription_event(
     );
 
     res
+}
+
+#[cfg(test)]
+mod tests {
+    use std::time::Duration;
+    use std::time::SystemTime;
+    use std::time::UNIX_EPOCH;
+
+    use apollo_federation::query_plan::serializable_document::SerializableDocument;
+    use serde_json_bytes::json;
+    use tokio::sync::broadcast;
+    use tokio::task::JoinHandle;
+    use tower_test::mock;
+
+    use super::*;
+    use crate::query_planner::OperationKind;
+    use crate::query_planner::PlanNode;
+    use crate::query_planner::subscription::SubscriptionNode;
+
+    /// How many events a test reads while waiting for a close before deciding the task never
+    /// noticed the signal. With an event always ready, a starved task would otherwise run forever.
+    const MAX_EVENTS_BEFORE_CLOSE: u64 = 100;
+
+    type ExecutionHandle = mock::Handle<ExecutionRequest, execution::Response>;
+
+    /// Drives `subscription_task` with a subgraph stream that always has another event ready.
+    ///
+    /// The client channel holds a single response, so each event's dispatch waits until the test
+    /// reads the previous one, like a slow consumer.
+    struct Harness {
+        client_rx: mpsc::Receiver<Response>,
+        configuration_tx: mpsc::Sender<Weak<Configuration>>,
+        schema_tx: mpsc::Sender<Arc<Schema>>,
+        _closed_tx: broadcast::Sender<()>,
+        task: JoinHandle<()>,
+    }
+
+    impl Harness {
+        /// A subscription whose plan has no fetches after it, so each event goes straight to the
+        /// client, as with passthrough subscriptions.
+        fn start(context: Context, subscription_config: SubscriptionConfig) -> Self {
+            let execution_service = tower::service_fn(|_: ExecutionRequest| async {
+                Err::<execution::Response, tower::BoxError>(
+                    "a plan without fetches after the subscription does not execute".into(),
+                )
+            });
+            Self::spawn(context, subscription_config, execution_service, None)
+        }
+
+        /// A subscription whose plan has fetches after it, so each event is executed by the
+        /// returned mock execution service, which waits until the test answers each call. This is
+        /// how a slow execution coprocessor holds up an event.
+        fn start_with_execution() -> (Self, ExecutionHandle) {
+            let (execution_service, execution) = mock::pair();
+            // The mock never runs the plan, so any node will do.
+            let rest = PlanNode::Sequence { nodes: Vec::new() };
+            let harness = Self::spawn(
+                Context::new(),
+                SubscriptionConfig::default(),
+                execution_service,
+                Some(Box::new(rest)),
+            );
+            (harness, execution)
+        }
+
+        fn spawn<S>(
+            context: Context,
+            subscription_config: SubscriptionConfig,
+            execution_service: S,
+            rest: Option<Box<PlanNode>>,
+        ) -> Self
+        where
+            S: Service<ExecutionRequest, Response = execution::Response, Error = tower::BoxError>
+                + Clone
+                + Send
+                + 'static,
+            S::Future: Send,
+        {
+            let query_plan = Arc::new(
+                QueryPlan::fake_builder()
+                    .root(PlanNode::Subscription {
+                        primary: SubscriptionNode {
+                            service_name: Arc::from("subgraph"),
+                            variable_usages: Vec::new(),
+                            operation: SerializableDocument::from_string(
+                                "subscription { onEvent { n } }",
+                            ),
+                            operation_name: None,
+                            operation_kind: OperationKind::Subscription,
+                            input_rewrites: None,
+                            output_rewrites: None,
+                        },
+                        rest,
+                    })
+                    .build(),
+            );
+            let supergraph_request = http::Request::builder()
+                .body(graphql::Request::builder().build())
+                .unwrap();
+
+            let events: BoxGqlStream = Box::pin(
+                futures::stream::iter(1u64..)
+                    .map(|n| graphql::Response::builder().data(json!({ "n": n })).build()),
+            );
+            let (stream_tx, stream_rx) = mpsc::channel(1);
+            stream_tx.try_send(events).unwrap();
+
+            let (client_tx, client_rx) = mpsc::channel(1);
+            let (closed_tx, closed_rx) = broadcast::channel(1);
+            let (params_tx, params_rx) = mpsc::channel(1);
+            params_tx
+                .try_send(SubscriptionTaskParams {
+                    client_sender: client_tx,
+                    subscription_handle: SubscriptionHandle::new(closed_rx, None),
+                    subscription_config,
+                    stream_rx: ReceiverStream::new(stream_rx),
+                })
+                .unwrap_or_else(|_| panic!("the params channel has room"));
+
+            let (configuration_tx, configuration_rx) = mpsc::channel(1);
+            let (schema_tx, schema_rx) = mpsc::channel(1);
+
+            let task = tokio::spawn(subscription_task(
+                execution_service,
+                context,
+                query_plan,
+                params_rx,
+                supergraph_request,
+                Box::pin(ReceiverStream::new(configuration_rx)),
+                Box::pin(ReceiverStream::new(schema_rx)),
+            ));
+
+            Self {
+                client_rx,
+                configuration_tx,
+                schema_tx,
+                _closed_tx: closed_tx,
+                task,
+            }
+        }
+
+        /// Reads `count` events and checks they continue the sequence from `first`.
+        async fn expect_events(&mut self, first: u64, count: u64) {
+            for n in first..first + count {
+                let response = self.client_rx.recv().await.expect("an event");
+                assert!(response.errors.is_empty(), "{response:?}");
+                assert_eq!(response.data, Some(json!({ "n": n })));
+            }
+        }
+
+        /// Reads events until the subscription is closed, and returns the close's error code.
+        async fn expect_close(&mut self) -> String {
+            for _ in 0..MAX_EVENTS_BEFORE_CLOSE {
+                let response = self
+                    .client_rx
+                    .recv()
+                    .await
+                    .expect("the subscription sends an error before it ends");
+                if let Some(error) = response.errors.first() {
+                    return error.extension_code().expect("an error code");
+                }
+            }
+            panic!("received {MAX_EVENTS_BEFORE_CLOSE} events after the close signal and no close");
+        }
+
+        /// Checks that nothing follows the close and the task has finished.
+        async fn expect_ended(mut self) {
+            if let Some(response) = self.client_rx.recv().await {
+                panic!("received a response after the subscription closed: {response:?}");
+            }
+            self.task.await.unwrap();
+        }
+
+        /// Reads the next response, which must close the subscription before another event
+        /// reaches the execution service, and returns the close's error code.
+        async fn expect_close_before_next_execution(
+            &mut self,
+            execution: &mut ExecutionHandle,
+        ) -> String {
+            tokio::select! {
+                response = self.client_rx.recv() => {
+                    let response = response.expect("the subscription sends an error before it ends");
+                    response.errors.first().and_then(|error| error.extension_code()).unwrap_or_else(|| panic!("expected the subscription to close, received {response:?}"))
+                }
+                Some((request, _)) = execution.next_request() => {
+                    panic!("an event reached the execution service after the close signal: {:?}", request.source_stream_value);
+                }
+            }
+        }
+    }
+
+    /// Waits for event `n` to reach the execution service, and returns the handle that answers it.
+    async fn expect_execution(
+        execution: &mut ExecutionHandle,
+        n: u64,
+    ) -> mock::SendResponse<execution::Response> {
+        let (request, response) = execution.next_request().await.expect("an execution call");
+        assert_eq!(request.source_stream_value, Some(json!({ "n": n })));
+        response
+    }
+
+    fn executed_event(n: u64) -> execution::Response {
+        execution::Response::fake_builder()
+            .data(json!({ "n": n }))
+            .build()
+            .unwrap()
+    }
+
+    fn test_schema() -> Arc<Schema> {
+        Arc::new(
+            Schema::parse(
+                include_str!("../../testdata/minimal_supergraph.graphql"),
+                &Default::default(),
+            )
+            .unwrap(),
+        )
+    }
+
+    #[tokio::test]
+    async fn delivers_events_in_order() {
+        let mut harness = Harness::start(Context::new(), SubscriptionConfig::default());
+
+        harness.expect_events(1, 50).await;
+    }
+
+    #[tokio::test]
+    async fn schema_reload_closes_subscription_while_events_keep_arriving() {
+        let mut harness = Harness::start(Context::new(), SubscriptionConfig::default());
+        harness.expect_events(1, 3).await;
+
+        harness.schema_tx.send(test_schema()).await.unwrap();
+
+        assert_eq!(
+            harness.expect_close().await,
+            SUBSCRIPTION_SCHEMA_RELOAD_EXTENSION_CODE
+        );
+        harness.expect_ended().await;
+    }
+
+    #[tokio::test]
+    async fn schema_reload_while_an_event_is_executing() {
+        let (mut harness, mut execution) = Harness::start_with_execution();
+        let event = expect_execution(&mut execution, 1).await;
+
+        harness.schema_tx.send(test_schema()).await.unwrap();
+        event.send_response(executed_event(1));
+
+        harness.expect_events(1, 1).await;
+        assert_eq!(
+            harness
+                .expect_close_before_next_execution(&mut execution)
+                .await,
+            SUBSCRIPTION_SCHEMA_RELOAD_EXTENSION_CODE
+        );
+        assert!(execution.next_request().await.is_none());
+        harness.expect_ended().await;
+    }
+
+    #[tokio::test]
+    async fn configuration_reload_closes_subscription_while_events_keep_arriving() {
+        let mut harness = Harness::start(Context::new(), SubscriptionConfig::default());
+        harness.expect_events(1, 3).await;
+
+        harness.configuration_tx.send(Weak::new()).await.unwrap();
+
+        assert_eq!(
+            harness.expect_close().await,
+            SUBSCRIPTION_CONFIG_RELOAD_EXTENSION_CODE
+        );
+        harness.expect_ended().await;
+    }
+
+    #[tokio::test]
+    async fn configuration_reload_while_an_event_is_executing() {
+        let (mut harness, mut execution) = Harness::start_with_execution();
+        let event = expect_execution(&mut execution, 1).await;
+
+        harness.configuration_tx.send(Weak::new()).await.unwrap();
+        event.send_response(executed_event(1));
+
+        harness.expect_events(1, 1).await;
+        assert_eq!(
+            harness
+                .expect_close_before_next_execution(&mut execution)
+                .await,
+            SUBSCRIPTION_CONFIG_RELOAD_EXTENSION_CODE
+        );
+        assert!(execution.next_request().await.is_none());
+        harness.expect_ended().await;
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn jwt_expiry_closes_subscription_while_events_keep_arriving() {
+        let context = Context::new();
+        let expires_at =
+            SystemTime::now().duration_since(UNIX_EPOCH).unwrap() + Duration::from_secs(60);
+        context.insert_json_value(
+            APOLLO_AUTHENTICATION_JWT_CLAIMS,
+            json!({ "exp": expires_at.as_secs() }),
+        );
+        let mut harness = Harness::start(context, SubscriptionConfig::default());
+        harness.expect_events(1, 3).await;
+
+        tokio::time::advance(Duration::from_secs(61)).await;
+
+        assert_eq!(
+            harness.expect_close().await,
+            SUBSCRIPTION_JWT_EXPIRED_EXTENSION_CODE
+        );
+        harness.expect_ended().await;
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn max_lifetime_closes_subscription_while_events_keep_arriving() {
+        let subscription_config = SubscriptionConfig {
+            max_lifetime: Some(Duration::from_secs(60).into()),
+            ..Default::default()
+        };
+        let mut harness = Harness::start(Context::new(), subscription_config);
+        harness.expect_events(1, 3).await;
+
+        tokio::time::advance(Duration::from_secs(61)).await;
+
+        assert_eq!(
+            harness.expect_close().await,
+            SUBSCRIPTION_MAX_LIFETIME_EXTENSION_CODE
+        );
+        harness.expect_ended().await;
+    }
 }

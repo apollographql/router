@@ -121,6 +121,25 @@ pub(crate) trait Selector: std::fmt::Debug {
     }
 
     fn is_active(&self, stage: Stage) -> bool;
+
+    /// Why this selector always gives an array, or `None` when it can give a single value.
+    ///
+    /// Configuration validation rejects an instrument whose `value` returns `Some`, because an
+    /// instrument value must be a single number. A JSON path selector returns
+    /// [`ArrayJsonPath::Path`] when its path can match several values, and `response_errors_field`
+    /// returns [`ArrayJsonPath::ResponseErrorsField`] for any path.
+    fn array_json_path(&self) -> Option<ArrayJsonPath<'_>> {
+        None
+    }
+}
+
+/// A selector that always gives an array, as reported by [`Selector::array_json_path`].
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub(crate) enum ArrayJsonPath<'a> {
+    /// A JSON path that can match several values, such as `$[*].extensions.code`.
+    Path(&'a selectors::SelectorJsonPath),
+    /// `response_errors_field`, which collects matches from every error whatever its path.
+    ResponseErrorsField(&'a selectors::SelectorJsonPath),
 }
 
 pub(crate) trait DefaultForLevel {
@@ -187,9 +206,57 @@ impl ToOtelValue for &Option<AttributeValue> {
     }
 }
 
+/// Converts a list of JSON values to an OpenTelemetry array of a single element type.
+pub(crate) trait ToOtelArray: Sized {
+    /// Returns a typed array when every value is an integer, every value a float, every value a
+    /// boolean, every value an object (each written as JSON) or every value a string, and `None`
+    /// when the values are mixed. An empty list gives an empty integer array.
+    fn maybe_to_otel_array<'a>(
+        values: impl Iterator<Item = &'a Self> + Clone,
+    ) -> Option<opentelemetry::Array>
+    where
+        Self: 'a;
+}
+
 macro_rules! impl_to_otel_value {
     ($type:ty) => {
         paste! {
+            impl ToOtelArray for $type {
+                fn maybe_to_otel_array<'a>(
+                    values: impl Iterator<Item = &'a Self> + Clone,
+                ) -> Option<opentelemetry::Array>
+                where
+                    Self: 'a,
+                {
+                    if values.clone().all(|v| v.is_i64()) {
+                        Some(opentelemetry::Array::I64(
+                            values.filter_map(|v| v.as_i64()).collect(),
+                        ))
+                    } else if values.clone().all(|v| v.is_f64()) {
+                        Some(opentelemetry::Array::F64(
+                            values.filter_map(|v| v.as_f64()).collect(),
+                        ))
+                    } else if values.clone().all(|v| v.is_boolean()) {
+                        Some(opentelemetry::Array::Bool(
+                            values.filter_map(|v| v.as_bool()).collect(),
+                        ))
+                    } else if values.clone().all(|v| v.is_object()) {
+                        Some(opentelemetry::Array::String(
+                            values.map(|v| v.to_string().into()).collect(),
+                        ))
+                    } else if values.clone().all(|v| v.is_string()) {
+                        Some(opentelemetry::Array::String(
+                            values
+                                .filter_map(|v| v.as_str())
+                                .map(|v| v.to_string().into())
+                                .collect(),
+                        ))
+                    } else {
+                        None
+                    }
+                }
+            }
+
             impl ToOtelValue for $type {
                 fn maybe_to_otel_value(&self) -> Option<opentelemetry::Value> {
                     match self {
@@ -201,36 +268,10 @@ macro_rules! impl_to_otel_value {
                             value.as_i64().map(opentelemetry::Value::from)
                         }
                         $type::String(value) => Some(value.as_str().to_string().into()),
-                        $type::Array(value) => {
-                            // Arrays must be uniform in value
-                            if value.iter().all(|v| v.is_i64()) {
-                                Some(opentelemetry::Value::Array(opentelemetry::Array::I64(
-                                    value.iter().filter_map(|v| v.as_i64()).collect(),
-                                )))
-                            } else if value.iter().all(|v| v.is_f64()) {
-                                Some(opentelemetry::Value::Array(opentelemetry::Array::F64(
-                                    value.iter().filter_map(|v| v.as_f64()).collect(),
-                                )))
-                            } else if value.iter().all(|v| v.is_boolean()) {
-                                Some(opentelemetry::Value::Array(opentelemetry::Array::Bool(
-                                    value.iter().filter_map(|v| v.as_bool()).collect(),
-                                )))
-                            } else if value.iter().all(|v| v.is_object()) {
-                                Some(opentelemetry::Value::Array(opentelemetry::Array::String(
-                                    value.iter().map(|v| v.to_string().into()).collect(),
-                                )))
-                            } else if value.iter().all(|v| v.is_string()) {
-                                Some(opentelemetry::Value::Array(opentelemetry::Array::String(
-                                    value
-                                        .iter()
-                                        .filter_map(|v| v.as_str())
-                                        .map(|v| v.to_string().into())
-                                        .collect(),
-                                )))
-                            } else {
-                                Some(serde_json::to_string(value).ok()?.into())
-                            }
-                        }
+                        $type::Array(value) => match Self::maybe_to_otel_array(value.iter()) {
+                            Some(array) => Some(opentelemetry::Value::Array(array)),
+                            None => Some(serde_json::to_string(value).ok()?.into()),
+                        },
                         $type::Object(value) => Some(serde_json::to_string(value).ok()?.into()),
                         _ => None
                     }

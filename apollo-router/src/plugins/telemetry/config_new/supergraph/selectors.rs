@@ -8,6 +8,7 @@ use crate::context::OPERATION_KIND;
 use crate::context::OPERATION_NAME;
 use crate::plugins::limits::operation_limits::OperationLimits;
 use crate::plugins::telemetry::config::AttributeValue;
+use crate::plugins::telemetry::config_new::ArrayJsonPath;
 use crate::plugins::telemetry::config_new::Selector;
 use crate::plugins::telemetry::config_new::Stage;
 use crate::plugins::telemetry::config_new::ToOtelValue;
@@ -425,13 +426,11 @@ impl Selector for SupergraphSelector {
                 response_data,
                 default,
                 ..
-            } => if let Some(data) = &response.data {
-                let val = response_data.find(data);
-                val.maybe_to_otel_value()
-            } else {
-                None
-            }
-            .or_else(|| default.maybe_to_otel_value()),
+            } => response
+                .data
+                .as_ref()
+                .and_then(|data| response_data.evaluate(data))
+                .or_else(|| default.maybe_to_otel_value()),
             SupergraphSelector::ResponseErrors {
                 response_errors,
                 default,
@@ -439,9 +438,7 @@ impl Selector for SupergraphSelector {
             } => {
                 let errors = response.errors.clone();
                 let data: serde_json_bytes::Value = serde_json_bytes::to_value(errors).ok()?;
-                let val = response_errors.find(&data);
-
-                val.maybe_to_otel_value()
+                response_errors.evaluate(&data)
             }
             .or_else(|| default.maybe_to_otel_value()),
             SupergraphSelector::Cost { cost } => match cost {
@@ -643,6 +640,17 @@ impl Selector for SupergraphSelector {
             ),
             Stage::Drop => matches!(self, SupergraphSelector::StaticField { .. }),
         }
+    }
+
+    fn array_json_path(&self) -> Option<ArrayJsonPath<'_>> {
+        let path = match self {
+            SupergraphSelector::ResponseData { response_data, .. } => response_data,
+            SupergraphSelector::ResponseErrors {
+                response_errors, ..
+            } => response_errors,
+            _ => return None,
+        };
+        (!path.is_singular()).then_some(ArrayJsonPath::Path(path))
     }
 }
 
@@ -1596,6 +1604,58 @@ mod test {
         assert_eq!(
             selector_false.on_response_event(&chunk_with_errors, &crate::Context::default()),
             Some(opentelemetry::Value::Bool(false))
+        );
+    }
+
+    #[test]
+    fn supergraph_response_non_singular_paths_are_always_arrays() {
+        let context = crate::Context::new();
+        let response = crate::graphql::Response::builder()
+            .data(serde_json_bytes::json!({"products": [{"id": "a"}]}))
+            .errors(vec![
+                crate::graphql::Error::builder()
+                    .message("not found")
+                    .extension_code("NOT_FOUND")
+                    .build(),
+            ])
+            .build();
+
+        let selector = SupergraphSelector::ResponseData {
+            response_data: "$.products[*].id".parse().unwrap(),
+            default: None,
+        };
+        assert_eq!(
+            selector.on_response_event(&response, &context),
+            Some(opentelemetry::Value::Array(
+                vec![opentelemetry::StringValue::from("a")].into()
+            ))
+        );
+        let selector = SupergraphSelector::ResponseData {
+            response_data: "$.products[0].id".parse().unwrap(),
+            default: None,
+        };
+        assert_eq!(
+            selector.on_response_event(&response, &context),
+            Some("a".into())
+        );
+
+        let selector = SupergraphSelector::ResponseErrors {
+            response_errors: "$[*].extensions.code".parse().unwrap(),
+            default: None,
+        };
+        assert_eq!(
+            selector.on_response_event(&response, &context),
+            Some(opentelemetry::Value::Array(
+                vec![opentelemetry::StringValue::from("NOT_FOUND")].into()
+            ))
+        );
+        let selector = SupergraphSelector::ResponseErrors {
+            response_errors: "$[*].extensions.missing".parse().unwrap(),
+            default: Some("none".into()),
+        };
+        assert_eq!(
+            selector.on_response_event(&response, &context),
+            Some("none".into())
         );
     }
 }

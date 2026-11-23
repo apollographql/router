@@ -2,14 +2,13 @@
 source: apollo-router/src/configuration/tests.rs
 expression: new_config
 ---
----
 response_cache:
   enabled: true
   subgraph:
     all:
       redis:
         urls:
-          - "redis://test"
+        - redis://test
         required_to_start: true
       enabled: true
       invalidation:

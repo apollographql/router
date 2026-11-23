@@ -32,6 +32,9 @@ use crate::error::FederationError;
 use crate::error::MultipleFederationErrors;
 use crate::error::SingleFederationError;
 use crate::link::Link;
+use crate::link::federation_spec_definition::FEDERATION_FIELDSET_TYPE_NAME_IN_SPEC;
+use crate::link::federation_spec_definition::FIELD_SELECTION_SET_TYPE_NAME;
+use crate::link::spec::Identity;
 use crate::link::spec::Version;
 use crate::link::spec_definition::SpecDefinition;
 use crate::schema::FederationSchema;
@@ -883,6 +886,37 @@ fn is_valid_input_type_redefinition(
     is_custom_scalar(expected_type, schema) && !is_custom_scalar(actual_type, schema)
 }
 
+/// A hint for a definition using the subgraph's own `FieldSelectionSet` where federation's
+/// `FieldSet` is expected, on a federation v3.0+ schema that doesn't import `FieldSet`. Importing
+/// `FieldSelectionSet` makes it federation's `FieldSet` under that name (see
+/// `normalize_field_selection_set_imports`).
+fn field_selection_set_import_hint(
+    expected_type: &Type,
+    actual_type: &Type,
+    schema: &FederationSchema,
+) -> &'static str {
+    if *actual_type.inner_named_type() != FIELD_SELECTION_SET_TYPE_NAME {
+        return "";
+    }
+    let Some(link) = schema
+        .metadata()
+        .and_then(|metadata| metadata.for_identity(&Identity::federation_identity()))
+    else {
+        return "";
+    };
+    let field_set_is_imported = link.imports.iter().any(|import| {
+        !import.is_directive && import.element == FEDERATION_FIELDSET_TYPE_NAME_IN_SPEC
+    });
+    if link.url.version < (Version { major: 3, minor: 0 })
+        || field_set_is_imported
+        || *expected_type.inner_named_type()
+            != link.type_name_in_schema(&FEDERATION_FIELDSET_TYPE_NAME_IN_SPEC)
+    {
+        return "";
+    }
+    r#". If "FieldSelectionSet" is meant to be federation's "FieldSet", add "FieldSelectionSet" to the `import` argument of the @link to the federation specification."#
+}
+
 fn default_value_message(value: Option<&Value>) -> String {
     match value {
         None => "no default value".to_string(),
@@ -930,8 +964,9 @@ fn ensure_same_arguments(
         {
             let arg_name = &expected_arg.name;
             let expected_type = &expected_arg.ty;
+            let hint = field_selection_set_import_hint(expected_type, &actual_type, schema);
             errors.push(generate_error(&format!(
-                    r#"Invalid definition for {what}: argument "{arg_name}" should have type "{expected_type}" but found type "{actual_type}""#
+                    r#"Invalid definition for {what}: argument "{arg_name}" should have type "{expected_type}" but found type "{actual_type}"{hint}"#
                 )));
         } else if !actual_arg.ty.is_non_null() // we mutate actual_type above, so we need to check against the original
             && expected_arg.default_value.as_ref() != actual_arg.default_value.as_deref()

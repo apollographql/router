@@ -863,7 +863,7 @@ mod indexes_tests {
     fn subgraph_invalidation_config_yaml_default_round_trip() {
         // Omitting the `indexes` block from YAML should default to all three indexes enabled.
         let yaml = "enabled: true\nshared_key: secret\n";
-        let cfg: SubgraphInvalidationConfig = serde_yaml::from_str(yaml).unwrap();
+        let cfg: SubgraphInvalidationConfig = yaml_serde::from_str(yaml).unwrap();
         assert!(cfg.indexes.subgraph);
         assert!(cfg.indexes.r#type);
         assert!(cfg.indexes.cache_tag);
@@ -879,7 +879,7 @@ indexes:
   subgraph: false
   type: false
 ";
-        let cfg: SubgraphInvalidationConfig = serde_yaml::from_str(yaml).unwrap();
+        let cfg: SubgraphInvalidationConfig = yaml_serde::from_str(yaml).unwrap();
         assert!(!cfg.indexes.subgraph);
         assert!(!cfg.indexes.r#type);
         assert!(cfg.indexes.cache_tag, "cache_tag should default to true");
@@ -895,7 +895,7 @@ indexes:
   type: false
   cache_tag: false
 ";
-        let cfg: SubgraphInvalidationConfig = serde_yaml::from_str(yaml).unwrap();
+        let cfg: SubgraphInvalidationConfig = yaml_serde::from_str(yaml).unwrap();
         assert!(!cfg.indexes.subgraph);
         assert!(!cfg.indexes.r#type);
         assert!(!cfg.indexes.cache_tag);

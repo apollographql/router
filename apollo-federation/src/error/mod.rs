@@ -928,6 +928,8 @@ pub enum SingleFederationError {
     ListSizeInvalidSizedField { message: String },
     #[error("{message}")]
     InvalidTagName { message: String },
+    #[error("{message}")]
+    FieldSelectionSetConflict { message: String },
     /// `@cacheTag` directive validation errors (subgraph)
     #[error("cacheTag format is invalid: {message}")]
     CacheTagInvalidFormat { message: String },
@@ -1180,6 +1182,9 @@ impl SingleFederationError {
             #[allow(unused)]
             SingleFederationError::InvalidFieldSharing { .. } => ErrorCode::InvalidFieldSharing,
             SingleFederationError::InvalidTagName { .. } => ErrorCode::InvalidTagName,
+            SingleFederationError::FieldSelectionSetConflict { .. } => {
+                ErrorCode::FieldSelectionSetConflict
+            }
             SingleFederationError::CacheTagInvalidFormat { .. } => ErrorCode::CacheTagInvalidFormat,
             SingleFederationError::CacheTagAppliedToNonRootField { .. } => {
                 ErrorCode::CacheTagAppliedToNonRootField
@@ -2519,6 +2524,17 @@ static INVALID_TAG_NAME: LazyLock<ErrorCodeDefinition> = LazyLock::new(|| {
     )
 });
 
+static FIELD_SELECTION_SET_CONFLICT: LazyLock<ErrorCodeDefinition> = LazyLock::new(|| {
+    ErrorCodeDefinition::new(
+        "FIELD_SELECTION_SET_CONFLICT".to_owned(),
+        "A `@link` to the federation specification imports both `FieldSet` and `FieldSelectionSet`, which are two names for the same federation type.".to_owned(),
+        Some(ErrorCodeMetadata {
+            added_in: "3.0.0",
+            replaces: &[],
+        }),
+    )
+});
+
 static CACHE_TAG_INVALID_FORMAT: LazyLock<ErrorCodeDefinition> = LazyLock::new(|| {
     ErrorCodeDefinition::new(
         "CACHE_TAG_INVALID_FORMAT".to_owned(),
@@ -2729,6 +2745,7 @@ pub enum ErrorCode {
     ContextNoResolvableKey,
     ContextSelectionInvalid,
     InvalidTagName,
+    FieldSelectionSetConflict,
     CacheTagInvalidFormat,
     CacheTagAppliedToNonRootField,
     CacheTagInvalidFormatArgumentOnRootField,
@@ -2857,6 +2874,7 @@ impl ErrorCode {
             ErrorCode::ContextNoResolvableKey => &CONTEXT_NO_RESOLVABLE_KEY,
             ErrorCode::ContextSelectionInvalid => &CONTEXT_SELECTION_INVALID,
             ErrorCode::InvalidTagName => &INVALID_TAG_NAME,
+            ErrorCode::FieldSelectionSetConflict => &FIELD_SELECTION_SET_CONFLICT,
             ErrorCode::CacheTagInvalidFormat => &CACHE_TAG_INVALID_FORMAT,
             ErrorCode::CacheTagAppliedToNonRootField => &CACHE_TAG_APPLIED_TO_NON_ROOT_FIELD,
             ErrorCode::CacheTagInvalidFormatArgumentOnRootField => {
