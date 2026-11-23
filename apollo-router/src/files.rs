@@ -100,9 +100,13 @@ where
         config,
     )
     .unwrap_or_else(|_| panic!("could not create watch on: {config_file_path:?}"));
-    watcher
-        .watch(&config_file_path, RecursiveMode::NonRecursive)
-        .unwrap_or_else(|_| panic!("could not watch: {config_file_path:?}"));
+    // Callers read the path on the initial event and report a missing file themselves, so a
+    // path that can't be watched mustn't stop them.
+    if let Err(err) = watcher.watch(&config_file_path, RecursiveMode::NonRecursive) {
+        tracing::error!(
+            "could not watch {config_file_path:?}, so changes to it won't be reloaded until the router restarts: {err}"
+        );
+    }
     // Tell watchers once they should read the file once,
     // then listen to fs events.
     stream::once(future::ready(()))
@@ -189,9 +193,11 @@ where
         config,
     )
     .unwrap_or_else(|_| panic!("could not create watch on: {rhai_source_path:?}"));
-    watcher
-        .watch(&rhai_source_path, RecursiveMode::Recursive)
-        .unwrap_or_else(|_| panic!("could not watch: {rhai_source_path:?}"));
+    if let Err(err) = watcher.watch(&rhai_source_path, RecursiveMode::Recursive) {
+        tracing::error!(
+            "could not watch {rhai_source_path:?}, so changes to it won't be reloaded until the router restarts: {err}"
+        );
+    }
     // Tell watchers once they should read the file once,
     // then listen to fs events.
     stream::once(future::ready(()))
@@ -323,6 +329,28 @@ pub(crate) mod tests {
         assert!(
             !futures::poll!(watch.next()).is_ready(),
             "should only have one event for multiple updates"
+        );
+    }
+
+    #[test(tokio::test)]
+    async fn watch_missing_path() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("missing.graphql");
+        let mut watch = watch(&path);
+        assert!(
+            futures::poll!(watch.next()).is_ready(),
+            "the initial event should still be sent for a missing path"
+        );
+    }
+
+    #[test(tokio::test)]
+    async fn watch_rhai_missing_path() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("rhai");
+        let mut watch = watch_rhai(&path);
+        assert!(
+            futures::poll!(watch.next()).is_ready(),
+            "the initial event should still be sent for a missing path"
         );
     }
 
