@@ -6,6 +6,7 @@ use tracing::instrument;
 
 pub use crate::composition::satisfiability::validate_satisfiability;
 use crate::error::CompositionError;
+use crate::error::SingleFederationError;
 use crate::merger::merge::Merger;
 pub use crate::schema::schema_upgrader::upgrade_subgraphs_if_necessary;
 use crate::schema::validators::connectors::validate_override_on_connector;
@@ -162,6 +163,26 @@ pub fn merge_subgraphs(
     subgraphs: Vec<Subgraph<Validated>>,
     options: &CompositionOptions,
 ) -> Result<Supergraph<Merged>, CompositionFailure> {
+    // Checked here rather than in `compose`, so that callers running the stages one by one get the
+    // same gate.
+    if !crate::composite_schemas::graphql_federation_enabled() {
+        let errors: Vec<CompositionError> = subgraphs
+            .iter()
+            .filter(|subgraph| subgraph.metadata().uses_composite_directives())
+            .map(|subgraph| CompositionError::SubgraphError {
+                subgraph: subgraph.name.clone(),
+                error: SingleFederationError::GraphQLFederationNotEnabled {
+                    message: "The subgraph applies GraphQL Federation directives (@lookup, \
+                              @internal, @is, @require), which composition does not support yet."
+                        .to_string(),
+                },
+                locations: Vec::new(),
+            })
+            .collect();
+        if !errors.is_empty() {
+            return Err(CompositionFailure::from_errors(errors));
+        }
+    }
     let merger = Merger::new(subgraphs, options.clone()).map_err(|e| {
         CompositionFailure::from_errors(vec![CompositionError::InternalError {
             message: e.to_string(),

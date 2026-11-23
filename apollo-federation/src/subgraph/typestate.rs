@@ -386,7 +386,13 @@ impl Subgraph<Initial> {
     }
 
     fn expand_links_internal(self) -> Result<Subgraph<Expanded>, FederationError> {
-        let schema = expand_schema(self.state.schema)?;
+        let mut schema = self.state.schema;
+        // A GraphQL Federation source schema carries no `@link`; stamp the implicit federation
+        // link before expansion, or it would be expanded as a Fed 1 schema.
+        if crate::composite_schemas::detection::is_composite_source_schema(&schema) {
+            crate::composite_schemas::detection::stamp_federation_link(&mut schema);
+        }
+        let schema = expand_schema(schema)?;
         let orphan_extension_types = self.state.orphan_extension_types;
         let Some(metadata) = schema.subgraph_metadata().cloned() else {
             bail!(
@@ -1159,9 +1165,18 @@ impl FederationSchema {
         //            (https://github.com/apollographql/federation/blob/e17173bf9e7b3fdee42a9ee0ac4bd269de67e374/internals-js/src/federation.ts#L2505)
         //            Many corpus subgraphs have `_Entity` definitions that do not exactly match
         //            the one computed by composition. Reporting error here will break them.
-        _ = ANY_TYPE_SPEC.check_or_add(self, None);
+        // A GraphQL Federation source schema resolves entities through its `@lookup` fields, not
+        // through `_entities`, so it gets neither `_entities` nor the `_Entity` and `_Any` types.
+        let is_source_schema = self
+            .subgraph_metadata()
+            .is_some_and(|metadata| metadata.is_composite_schema());
+        if !is_source_schema {
+            _ = ANY_TYPE_SPEC.check_or_add(self, None);
+        }
         _ = SERVICE_TYPE_SPEC.check_or_add(self, None);
-        _ = self.entity_type_spec()?.check_or_add(self, None);
+        if !is_source_schema {
+            _ = self.entity_type_spec()?.check_or_add(self, None);
+        }
 
         // Add the root `Query` Type (if not already present) and get the actual name in the schema.
         let query_root_pos = SchemaRootDefinitionPosition {
