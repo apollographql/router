@@ -279,21 +279,6 @@ commands:
           steps:
             - run:
                 name: Install mise
-<<<<<<< HEAD
-                command: |
-                  scoop install mise@${MISE_VERSION#v}
-                  for i in 1 2 3; do
-                    if mise install --yes --quiet; then
-                      break
-                    fi
-                    if [ $i -eq 3 ]; then
-                      echo "mise install failed after 3 attempts"
-                      exit 1
-                    fi
-                    echo "mise install failed (attempt $i/3), retrying in $((i*5))s..."
-                    sleep $((i*5))
-                  done
-=======
                 shell: powershell.exe
                 command: |
                   irm https://mise.run/powershell | iex
@@ -317,7 +302,6 @@ commands:
           name: Verify mise installation
           when: always
           command: mise doctor
->>>>>>> 2ea5ae1 (ci: improve mise reliability and debuggability (#10827))
   fetch_dependencies:
     steps:
       - run:
