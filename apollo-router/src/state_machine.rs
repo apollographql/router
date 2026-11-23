@@ -735,7 +735,6 @@ impl<FA: RouterServiceFactory> State<FA> {
                 schema.clone(),
                 previous_router_service_factory,
                 None,
-                effective_license.clone(),
             )
             .await
             // Building the pipelines can fail for reasons that have nothing to do with
@@ -1036,12 +1035,10 @@ mod tests {
     use multimap::MultiMap;
     use parking_lot::Mutex;
     use rstest::rstest;
-    use serde_json::json;
     use test_log::test;
     use tower::BoxError;
 
     use super::*;
-    use crate::AllowedFeature;
     use crate::axum_factory::Endpoint;
     use crate::configuration::Homepage;
     use crate::http_server_factory::Listener;
@@ -1052,6 +1049,7 @@ mod tests {
     use crate::services::Plugins;
     use crate::services::router;
     use crate::services::router::pipeline_handle::PipelineHandle;
+    use crate::uplink::license_enforcement::AllowedFeature;
     use crate::uplink::license_enforcement::LicenseLimits;
     use crate::uplink::schema::SchemaState;
 
@@ -1163,53 +1161,62 @@ mod tests {
         );
     }
 
+    fn config_from_yaml(yaml: &str) -> Arc<Configuration> {
+        Arc::new(Configuration::from_str(yaml).expect("test configuration must parse"))
+    }
     fn test_config_restricted() -> Arc<Configuration> {
-        let mut config = Configuration::builder().build().unwrap();
-        config.validated_yaml =
-            Some(json!({"plugins":{"experimental.restricted":{"enabled":true}}}));
-        Arc::new(config)
+        config_from_yaml(indoc::indoc! {"
+                plugins:
+                  experimental.restricted:
+                    enabled: true
+            "})
     }
     fn test_config_with_apq_caching() -> Arc<Configuration> {
-        let mut config = Configuration::builder().build().unwrap();
-        config.validated_yaml = Some(json!({"apq":{"router":{"cache":{"redis":{"pool_size":1}}}}}));
-        Arc::new(config)
+        config_from_yaml(indoc::indoc! {r#"
+                apq:
+                  router:
+                    cache:
+                      redis:
+                        urls: ["redis://localhost:6379"]
+                        pool_size: 1
+            "#})
     }
     fn test_config_with_subscriptions() -> Arc<Configuration> {
-        let mut config = Configuration::builder().build().unwrap();
-        config.validated_yaml = Some(json!({"subscription":{"enabled":true}}));
-        Arc::new(config)
+        config_from_yaml(indoc::indoc! {"
+                subscription:
+                  enabled: true
+            "})
     }
     fn test_config_with_demand_control() -> Arc<Configuration> {
-        let mut config = Configuration::builder().build().unwrap();
-        config.validated_yaml = Some(json!({"demand_control":{"enabled":true}}));
-        Arc::new(config)
+        config_from_yaml(indoc::indoc! {"
+                demand_control:
+                  enabled: true
+                  mode: measure
+                  strategy:
+                    static_estimated:
+                      list_size: 30
+                      max: 256
+            "})
     }
     fn test_config_with_request_limits() -> Arc<Configuration> {
-        let mut config = Configuration::builder().build().unwrap();
-        config.validated_yaml = Some(json!({
-            "limits": {
-                "router": {
-                    "max_height": 100,
-                    "max_aliases": 100,
-                    "max_depth": 20
-                }
-            }
-        }));
-        Arc::new(config)
+        config_from_yaml(indoc::indoc! {"
+                limits:
+                  router:
+                    max_height: 100
+                    max_aliases: 100
+                    max_depth: 20
+            "})
     }
     fn test_config_with_auth() -> Arc<Configuration> {
-        let mut config = Configuration::builder().build().unwrap();
-        config.validated_yaml = Some(json!({
-            "authentication": {
-                "router": {
-                    "sources": {}
-                }
-            },
-            "authorization": {
-                "require_authentication": true
-            }
-        }));
-        Arc::new(config)
+        config_from_yaml(indoc::indoc! {"
+                authentication:
+                  router:
+                    jwt:
+                      jwks:
+                        - url: https://example.com
+                authorization:
+                  require_authentication: true
+            "})
     }
 
     #[test(tokio::test)]
@@ -2171,7 +2178,7 @@ mod tests {
         router_factory
             .expect_create_pipeline()
             .times(1)
-            .returning(|_, _, _, _, _, _| Err(BoxError::from("Error")));
+            .returning(|_, _, _, _, _| Err(BoxError::from("Error")));
 
         let (server_factory, shutdown_receivers) = create_mock_server_factory(0);
 
@@ -2199,7 +2206,7 @@ mod tests {
             .expect_create_pipeline()
             .times(1)
             .in_sequence(&mut seq)
-            .returning(|_, _, _, _, _, _| {
+            .returning(|_, _, _, _, _| {
                 let mut router = MockMyRouterFactory::new();
                 router.expect_clone().returning(MockMyRouterFactory::new);
                 router.expect_web_endpoints().returning(MultiMap::new);
@@ -2209,7 +2216,7 @@ mod tests {
             .expect_create_pipeline()
             .times(1)
             .in_sequence(&mut seq)
-            .returning(|_, _, _, _, _, _| Err(BoxError::from("error")));
+            .returning(|_, _, _, _, _| Err(BoxError::from("error")));
 
         let (server_factory, shutdown_receivers) = create_mock_server_factory(1);
         let minimal_schema = include_str!("testdata/minimal_supergraph.graphql");
@@ -2243,7 +2250,7 @@ mod tests {
             .expect_create_pipeline()
             .times(1)
             .in_sequence(&mut seq)
-            .returning(|_, _, _, _, _, _| {
+            .returning(|_, _, _, _, _| {
                 let mut router = MockMyRouterFactory::new();
                 router.expect_clone().returning(MockMyRouterFactory::new);
                 router.expect_web_endpoints().returning(MultiMap::new);
@@ -2253,13 +2260,13 @@ mod tests {
             .expect_create_pipeline()
             .times(1)
             .in_sequence(&mut seq)
-            .returning(|_, _, _, _, _, _| Err(BoxError::from("error")));
+            .returning(|_, _, _, _, _| Err(BoxError::from("error")));
         router_factory
             .expect_create_pipeline()
             .times(1)
             .in_sequence(&mut seq)
-            .withf(|_, configuration, _, _, _, _| configuration.homepage.enabled)
-            .returning(|_, _, _, _, _, _| {
+            .withf(|_, configuration, _, _, _| configuration.homepage.enabled)
+            .returning(|_, _, _, _, _| {
                 let mut router = MockMyRouterFactory::new();
                 router.expect_clone().returning(MockMyRouterFactory::new);
                 router.expect_web_endpoints().returning(MultiMap::new);
@@ -2408,7 +2415,6 @@ mod tests {
                 schema: Arc<Schema>,
                 previous_router_service_factory: Option<MockMyRouterFactory>,
                 extra_plugins: Option<Vec<(String, Box<dyn DynPlugin>)>>,
-                license: Arc<LicenseState>
             ) -> Result<MockMyRouterFactory, BoxError>;
         }
     }
@@ -2535,7 +2541,7 @@ mod tests {
             } else {
                 expect_times_called
             })
-            .returning(move |_, _, _, _, _, _| {
+            .returning(move |_, _, _, _, _| {
                 let mut router = MockMyRouterFactory::new();
                 router.expect_clone().returning(MockMyRouterFactory::new);
                 router.expect_web_endpoints().returning(MultiMap::new);
@@ -2552,10 +2558,11 @@ mod tests {
                           _configuration: &Arc<Configuration>,
                           _,
                           previous_router_service_factory: &Option<MockMyRouterFactory>,
-                          _extra_plugins: &Option<Vec<(String, Box<dyn DynPlugin>)>>,
-                          _| { previous_router_service_factory.is_some() },
+                          _extra_plugins: &Option<Vec<(String, Box<dyn DynPlugin>)>>| {
+                        previous_router_service_factory.is_some()
+                    },
                 )
-                .returning(move |_, _, _, _, _, _| {
+                .returning(move |_, _, _, _, _| {
                     let mut router = MockMyRouterFactory::new();
                     router.expect_clone().returning(MockMyRouterFactory::new);
                     router.expect_web_endpoints().returning(MultiMap::new);
@@ -2574,7 +2581,7 @@ mod tests {
         router_factory
             .expect_create_pipeline()
             .times(expect_times_called)
-            .returning(move |_, _, _, _, _, _| {
+            .returning(move |_, _, _, _, _| {
                 let mut router = MockMyRouterFactory::new();
                 router.expect_clone().returning(MockMyRouterFactory::new);
                 router.expect_web_endpoints().returning(MultiMap::new);
@@ -2616,7 +2623,7 @@ mod tests {
                     .expect_create_pipeline()
                     .times(1)
                     .in_sequence(&mut seq)
-                    .returning(move |_, _, _, _, _, _| {
+                    .returning(move |_, _, _, _, _| {
                         if outcome.is_ok() {
                             Ok(mock_router_ok())
                         } else {
@@ -2918,6 +2925,31 @@ mod tests {
             assert!(
                 retried.now_or_never().is_none(),
                 "a permanent license violation must not schedule a retry"
+            );
+
+            harness.finish().await;
+        }
+
+        // A schema publish on its own is checked against the license too: a schema that starts
+        // linking a restricted feature is refused and the router keeps serving the previous schema.
+        #[test(tokio::test(start_paused = true))]
+        async fn schema_reload_using_unlicensed_feature_is_refused() {
+            // Only the startup build: the license check refuses the new schema before
+            // create_pipeline() runs for it.
+            let harness = Harness::new(factory(&[Ok(())]), 1);
+            harness.startup().await;
+            harness
+                .send_and_wait(UpdateSchema(SchemaState {
+                    sdl: include_str!("uplink/testdata/authorization.graphql").to_owned(),
+                    launch_id: None,
+                }))
+                .await;
+
+            let retried = harness.notify.notified();
+            tokio::time::sleep(Duration::from_secs(60)).await;
+            assert!(
+                retried.now_or_never().is_none(),
+                "a schema the license does not cover must not schedule a retry"
             );
 
             harness.finish().await;

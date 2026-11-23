@@ -344,7 +344,6 @@ mod test {
     use crate::configuration::ExternalValues;
     use crate::configuration::expansion::Expansion;
     use crate::context::OPERATION_KIND;
-    use crate::plugin::Plugin;
     use crate::plugin::PluginInit;
     use crate::plugin::PluginPrivate;
     use crate::plugins::subscription;
@@ -734,7 +733,7 @@ mod test {
         }
         TestHarness::builder()
             .extra_private_plugin(plugin)
-            .extra_plugin(create_subscription_plugin().await?)
+            .extra_private_plugin(create_subscription_plugin().await?)
             .build_router()
             .await?
             .oneshot(request_builder.build()?.try_into().unwrap())
@@ -802,7 +801,7 @@ mod test {
     }
 
     async fn create_subscription_plugin() -> Result<subscription::Subscription, BoxError> {
-        <subscription::Subscription as Plugin>::new(PluginInit::fake_new(
+        <subscription::Subscription as PluginPrivate>::new(PluginInit::fake_new(
             subscription::SubscriptionConfig::default(),
             Default::default(),
         ))

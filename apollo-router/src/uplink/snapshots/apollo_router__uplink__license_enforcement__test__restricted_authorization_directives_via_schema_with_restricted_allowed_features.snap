@@ -2,9 +2,7 @@
 source: apollo-router/src/uplink/license_enforcement.rs
 expression: report.to_string()
 ---
-Schema features:
-* @authenticated
-  https://specs.apollo.dev/authenticated/v0.1
+The supergraph schema uses these licensed directives. Remove them from your subgraph schemas and recompose, or use a license that includes them:
 
-* @requiresScopes
-  https://specs.apollo.dev/requiresScopes/v0.1
+  @authenticated  https://specs.apollo.dev/authenticated/v0.1
+  @requiresScopes  https://specs.apollo.dev/requiresScopes/v0.1

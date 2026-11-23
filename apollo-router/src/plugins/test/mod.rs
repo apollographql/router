@@ -35,7 +35,6 @@ use crate::services::router;
 use crate::services::subgraph;
 use crate::services::supergraph;
 use crate::spec::Schema;
-use crate::uplink::license_enforcement::LicenseState;
 
 /// Test harness for plugins
 /// The difference between this and the regular TestHarness is that this is more suited for unit testing.
@@ -94,7 +93,6 @@ impl<T: Into<Box<dyn DynPlugin + 'static>> + 'static> PluginTestHarness<T> {
     pub(crate) async fn new<'a, 'b>(
         config: Option<&'b str>,
         schema: Option<&'a str>,
-        license: Option<LicenseState>,
     ) -> Result<Self, BoxError> {
         let factory = crate::plugin::plugins()
             .find(|factory| factory.type_id == TypeId::of::<T>())
@@ -141,7 +139,6 @@ impl<T: Into<Box<dyn DynPlugin + 'static>> + 'static> PluginTestHarness<T> {
             .supergraph_schema(Arc::new(parsed_schema))
             .subgraph_schemas(subgraph_schemas)
             .notify(Notify::default())
-            .license(Arc::new(license.unwrap_or_default()))
             .full_config(full_config)
             .build();
 

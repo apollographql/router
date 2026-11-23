@@ -1,0 +1,24 @@
+---
+source: apollo-router/src/uplink/license_enforcement.rs
+expression: report.violation_message(connected_to_graphos)
+---
+The router can't run with this configuration and schema, because your license doesn't include all the features they require. Your license also expires soon, and the router will stop serving requests when it does.
+
+Your configuration uses these licensed features. Remove the settings listed, or use a license that includes the features:
+
+  Coprocessors
+    coprocessor
+
+  Request limits
+    limits.router.max_depth
+    limits.router.max_height
+
+  Subscriptions
+    subscription.enabled
+
+The supergraph schema uses these licensed directives. Remove them from your subgraph schemas and recompose, or use a license that includes them:
+
+  @authenticated  https://specs.apollo.dev/authenticated/v0.1
+  @requiresScopes  https://specs.apollo.dev/requiresScopes/v0.1
+
+See https://go.apollo.dev/o/elp for more information.

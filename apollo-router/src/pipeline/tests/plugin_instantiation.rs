@@ -1,24 +1,20 @@
-//! Which plugins a built pipeline instantiates: mandatory plugins always, OSS plugins
-//! whenever configured regardless of license, optional plugins gated by the license's
-//! allowed features.
+//! Which plugins a built pipeline instantiates: mandatory plugins always, and every other
+//! plugin whenever it is configured.
 
-use std::collections::HashSet;
 use std::sync::Arc;
 
 use rstest::rstest;
 use serde_json::json;
 use tower_http::BoxError;
 
-use crate::AllowedFeature;
 use crate::configuration::Configuration;
 use crate::pipeline::plugins::create_plugins;
 use crate::plugin::Plugin;
 use crate::plugin::PluginInit;
 use crate::router_factory::PipelineFactory;
 use crate::router_factory::RouterServiceFactory;
+use crate::services::supergraph::service::Plugins;
 use crate::spec::Schema;
-use crate::uplink::license_enforcement::LicenseLimits;
-use crate::uplink::license_enforcement::LicenseState;
 
 const MANDATORY_PLUGINS: &[&str] = &[
     "apollo.include_subgraph_errors",
@@ -121,7 +117,6 @@ async fn create_service(config: Configuration) -> Result<(), BoxError> {
             Arc::new(schema),
             None,
             None,
-            Arc::new(LicenseState::default()),
         )
         .await;
     service.map(|_| ())
@@ -184,7 +179,6 @@ async fn plugins_receive_their_previous_config_on_reload() {
         Default::default(),
         None,
         None,
-        Default::default(),
         Some(Arc::new(previous)),
     )
     .await
@@ -342,32 +336,10 @@ fn get_plugin_config(plugin: &str) -> &str {
     }
 }
 
-#[tokio::test]
-#[rstest]
-#[case::empty_allowed_features_set(HashSet::new())]
-#[case::nonempty_allowed_features_set(HashSet::from_iter(vec![AllowedFeature::Coprocessors]))]
-async fn test_mandatory_plugins_added(#[case] allowed_features: HashSet<AllowedFeature>) {
-    /*
-     * GIVEN
-     *  - a valid license
-     *  - a valid config
-     *  - a valid schema
-     * */
-    let license = LicenseState::Licensed {
-        limits: Some(LicenseLimits {
-            tps: None,
-            allowed_features,
-        }),
-    };
-
-    let router_config = Configuration::builder().build().unwrap();
+async fn build_pipeline_plugins(router_config: Configuration) -> Arc<Plugins> {
     let schema = include_str!("../../testdata/supergraph.graphql");
     let schema = Schema::parse(schema, &router_config).unwrap();
 
-    /*
-     * WHEN
-     *  - the router factory runs (including the plugin inits gated by the license)
-     * */
     let is_telemetry_disabled = false;
     let service = PipelineFactory
         .create_pipeline(
@@ -376,349 +348,52 @@ async fn test_mandatory_plugins_added(#[case] allowed_features: HashSet<AllowedF
             Arc::new(schema),
             None,
             None,
-            Arc::new(license),
         )
         .await
         .unwrap();
+    service.plugins
+}
 
-    /*
-     * THEN
-     *  - the mandatory plugins are added
-     * */
+fn plugin_config(plugin: &str) -> serde_json::Value {
+    yaml_serde::from_str::<serde_json::Value>(get_plugin_config(plugin)).unwrap()
+}
+
+#[tokio::test]
+async fn test_mandatory_plugins_added() {
+    let plugins = build_pipeline_plugins(Configuration::builder().build().unwrap()).await;
+
     assert!(
         MANDATORY_PLUGINS
             .iter()
-            .all(|plugin| { service.plugins.contains_key(*plugin) })
+            .all(|plugin| { plugins.contains_key(*plugin) })
     );
 }
 
 #[tokio::test]
-#[rstest]
-#[case::allowed_features_empty(HashSet::new())]
-#[case::allowed_features_nonempty(HashSet::from_iter(vec![
-    AllowedFeature::Coprocessors,
-    AllowedFeature::DemandControl
-]))]
-async fn test_oss_plugins_added(#[case] allowed_features: HashSet<AllowedFeature>) {
-    /*
-     * GIVEN
-     *  - a valid license
-     *  - a valid config that contains configuration for oss plugins
-     *  - a valid schema
-     * */
-    let license = LicenseState::Licensed {
-        limits: Some(LicenseLimits {
-            tps: None,
-            allowed_features,
-        }),
-    };
-
-    // Create config for oss plugins
-    let forbid_mutations_config =
-        yaml_serde::from_str::<serde_json::Value>(get_plugin_config("forbid_mutations")).unwrap();
-    let override_subgraph_url_config =
-        yaml_serde::from_str::<serde_json::Value>(get_plugin_config("override_subgraph_url"))
-            .unwrap();
-    let connectors_config =
-        yaml_serde::from_str::<serde_json::Value>(get_plugin_config("connectors")).unwrap();
-
+async fn test_oss_plugins_added() {
     let router_config = Configuration::builder()
-        .apollo_plugin("forbid_mutations", forbid_mutations_config)
-        .apollo_plugin("override_subgraph_url", override_subgraph_url_config)
-        .apollo_plugin("connectors", connectors_config)
+        .apollo_plugin("forbid_mutations", plugin_config("forbid_mutations"))
+        .apollo_plugin(
+            "override_subgraph_url",
+            plugin_config("override_subgraph_url"),
+        )
+        .apollo_plugin("connectors", plugin_config("connectors"))
         .build()
         .unwrap();
 
-    let schema = include_str!("../../testdata/supergraph.graphql");
-    let schema = Schema::parse(schema, &router_config).unwrap();
+    let plugins = build_pipeline_plugins(router_config).await;
 
-    /*
-     * WHEN
-     *  - the router factory runs (including the plugin inits gated by the license)
-     * */
-    let is_telemetry_disabled = false;
-    let service = PipelineFactory
-        .create_pipeline(
-            is_telemetry_disabled,
-            Arc::new(router_config),
-            Arc::new(schema),
-            None,
-            None,
-            Arc::new(license),
-        )
-        .await
-        .unwrap();
-
-    /*
-     * THEN
-     *  - all oss plugins should have been added
-     * */
     assert!(
         OSS_PLUGINS
             .iter()
-            .all(|plugin| { service.plugins.contains_key(*plugin) })
+            .all(|plugin| { plugins.contains_key(*plugin) })
     );
 }
 
+/// Building the pipeline doesn't check the license: the startup license check has already
+/// refused any setting the license doesn't cover, so every configured plugin is built.
 #[tokio::test]
 #[rstest]
-#[case::subscripions(
-    "subscription",
-    HashSet::from_iter(vec![AllowedFeature::DemandControl, AllowedFeature::Subscriptions]))
-]
-#[case::authorization(
-    "authorization",
-    HashSet::from_iter(vec![AllowedFeature::Authorization, AllowedFeature::Subscriptions]))
-]
-#[case::authentication(
-    "authentication",
-    HashSet::from_iter(vec![AllowedFeature::DemandControl, AllowedFeature::Authentication, AllowedFeature::Subscriptions]))
-]
-#[case::response_cache(
-    "response_cache",
-    HashSet::from_iter(vec![AllowedFeature::DemandControl, AllowedFeature::ResponseCaching]))
-]
-#[case::authorization(
-    "demand_control",
-    HashSet::from_iter(vec![AllowedFeature::Authorization, AllowedFeature::Subscriptions, AllowedFeature::DemandControl]))
-]
-#[case::coprocessor(
-    "coprocessor",
-    HashSet::from_iter(vec![AllowedFeature::Coprocessors, AllowedFeature::DemandControl]))
-]
-async fn test_optional_plugin_added_with_restricted_allowed_features(
-    #[case] plugin: &str,
-    #[case] allowed_features: HashSet<AllowedFeature>,
-) {
-    /*
-     * GIVEN
-     *  - a restricted license with allowed feature set containing the given `plugin`
-     *  - a valid config including valid config for the given `plugin`
-     *  - a valid schema
-     * */
-    let license = LicenseState::Licensed {
-        limits: Some(LicenseLimits {
-            tps: None,
-            allowed_features,
-        }),
-    };
-
-    let plugin_config =
-        yaml_serde::from_str::<serde_json::Value>(get_plugin_config(plugin)).unwrap();
-    dbg!(&plugin_config);
-    let router_config = Configuration::builder()
-        .apollo_plugin(plugin, plugin_config)
-        .build()
-        .unwrap();
-
-    let schema = include_str!("../../testdata/supergraph.graphql");
-    let schema = Schema::parse(schema, &router_config).unwrap();
-
-    /*
-     * WHEN
-     *  - the router factory runs (including the plugin inits gated by the license)
-     * */
-    let is_telemetry_disabled = false;
-    let service = PipelineFactory
-        .create_pipeline(
-            is_telemetry_disabled,
-            Arc::new(router_config),
-            Arc::new(schema),
-            None,
-            None,
-            Arc::new(license),
-        )
-        .await
-        .unwrap();
-
-    /*
-     * THEN
-     *  - since the plugin is part of the `allowed_features` set
-     *    the plugin should have been added.
-     * - mandatory plugins should have been added.
-     * */
-    assert!(
-        service.plugins.contains_key(&format!("apollo.{plugin}")),
-        "Plugin {plugin} should have been added"
-    );
-    assert!(
-        MANDATORY_PLUGINS
-            .iter()
-            .all(|plugin| { service.plugins.contains_key(*plugin) })
-    );
-}
-
-#[tokio::test]
-#[rstest]
-#[case::subscripions(
-    "subscription",
-    HashSet::from_iter(vec![]))
-]
-#[case::authorization(
-    "authorization",
-    HashSet::from_iter(vec![AllowedFeature::Authentication, AllowedFeature::Subscriptions]))
-]
-#[case::authentication(
-    "authentication",
-    HashSet::from_iter(vec![AllowedFeature::DemandControl,AllowedFeature::Subscriptions]))
-]
-#[case::response_cache(
-    "response_cache",
-    HashSet::from_iter(vec![AllowedFeature::Authentication]))
-]
-#[case::authorization(
-    "demand_control",
-    HashSet::from_iter(vec![AllowedFeature::Authorization, AllowedFeature::Subscriptions, AllowedFeature::Experimental]))
-]
-#[case::coprocessor(
-    "coprocessor",
-    HashSet::from_iter(vec![AllowedFeature::DemandControl]))
-]
-async fn test_optional_plugin_not_added_with_restricted_allowed_features(
-    #[case] plugin: &str,
-    #[case] allowed_features: HashSet<AllowedFeature>,
-) {
-    /*
-     * GIVEN
-     *  - a restricted license whose allowed feature set does not contain the given `plugin`
-     *  - a valid config including valid config for the given `plugin`
-     *  - a valid schema
-     * */
-    let license = LicenseState::Licensed {
-        limits: Some(LicenseLimits {
-            tps: None,
-            allowed_features,
-        }),
-    };
-
-    let plugin_config =
-        yaml_serde::from_str::<serde_json::Value>(get_plugin_config(plugin)).unwrap();
-    let router_config = Configuration::builder()
-        .apollo_plugin(plugin, plugin_config)
-        .build()
-        .unwrap();
-
-    let schema = include_str!("../../testdata/supergraph.graphql");
-    let schema = Schema::parse(schema, &router_config).unwrap();
-
-    /*
-     * WHEN
-     *  - the router factory runs (including the plugin inits gated by the license)
-     * */
-    let is_telemetry_disabled = false;
-    let service = PipelineFactory
-        .create_pipeline(
-            is_telemetry_disabled,
-            Arc::new(router_config),
-            Arc::new(schema),
-            None,
-            None,
-            Arc::new(license),
-        )
-        .await
-        .unwrap();
-
-    /*
-     * THEN
-     *  - since the plugin is not part of the `allowed_features` set
-     *    the plugin should not have been added.
-     * - mandatory plugins should have been added.
-     * */
-    assert!(
-        !service.plugins.contains_key(&format!("apollo.{plugin}")),
-        "Plugin {plugin} should not have been added"
-    );
-    assert!(
-        MANDATORY_PLUGINS
-            .iter()
-            .all(|plugin| { service.plugins.contains_key(*plugin) })
-    );
-}
-
-#[tokio::test]
-#[rstest]
-#[case::mock_subgraphs_non_empty_allowed_features(
-    "experimental_mock_subgraphs",
-    HashSet::from_iter(vec![AllowedFeature::DemandControl])
-)]
-#[case::mock_subgraphs_empty_allowed_features(
-    "experimental_mock_subgraphs",
-    HashSet::from_iter(vec![])
-)]
-async fn test_optional_plugin_that_does_not_map_to_an_allowed_feature_is_added(
-    #[case] plugin: &str,
-    #[case] allowed_features: HashSet<AllowedFeature>,
-) {
-    /*
-     * GIVEN
-     *  - a valid license
-     *  - a valid config including valid config for the optional plugin that does
-     *    not map to an allowed feature
-     *  - a valid schema
-     * */
-    let license = LicenseState::Licensed {
-        limits: Some(LicenseLimits {
-            tps: None,
-            allowed_features,
-        }),
-    };
-
-    let plugin_config =
-        yaml_serde::from_str::<serde_json::Value>(get_plugin_config(plugin)).unwrap();
-    let router_config = Configuration::builder()
-        .apollo_plugin(plugin, plugin_config)
-        .build()
-        .unwrap();
-
-    let schema = include_str!("../../testdata/supergraph.graphql");
-    let schema = Schema::parse(schema, &router_config).unwrap();
-
-    /*
-     * WHEN
-     *  - the router factory runs (including the plugin inits gated by the license)
-     * */
-    let is_telemetry_disabled = false;
-    let service = PipelineFactory
-        .create_pipeline(
-            is_telemetry_disabled,
-            Arc::new(router_config),
-            Arc::new(schema),
-            None,
-            None,
-            Arc::new(license),
-        )
-        .await
-        .unwrap();
-
-    /*
-     * THEN
-     * - the plugin should be added
-     * - mandatory plugins should have been added.
-     * - coprocessors and subscritions (both gated features) should not have been added.
-     * */
-    assert!(
-        service.plugins.contains_key(&format!("apollo.{plugin}")),
-        "Plugin {plugin} should have been added"
-    );
-    assert!(
-        MANDATORY_PLUGINS
-            .iter()
-            .all(|plugin| { service.plugins.contains_key(*plugin) })
-    );
-    // These gated features should not have been added
-    assert!(
-        !service.plugins.contains_key("apollo.subscription"),
-        "Plugin {plugin} should not have been added"
-    );
-    assert!(
-        !service.plugins.contains_key("apollo.coprocessor"),
-        "Plugin {plugin} should not have been added"
-    );
-}
-
-#[tokio::test]
-#[rstest]
-// NB: this is temporary behavior and will change once the `allowed_features` claim is in all licenses
 #[case::forbid_mutations("forbid_mutations")]
 #[case::subscriptions("subscription")]
 #[case::override_subgraph_url("override_subgraph_url")]
@@ -730,62 +405,43 @@ async fn test_optional_plugin_that_does_not_map_to_an_allowed_feature_is_added(
 #[case::connectors("connectors")]
 #[case::coprocessor("coprocessor")]
 #[case::mock_subgraphs("experimental_mock_subgraphs")]
-async fn test_optional_plugin_with_unrestricted_allowed_features(#[case] plugin: &str) {
-    /*
-     * GIVEN
-     *  - a license with unrestricted limits (includes allowing all features)
-     *  - a valid config including valid config for the given `plugin`
-     *  - a valid schema
-     * */
-    let license = LicenseState::Licensed {
-        limits: Default::default(),
-    };
-
-    let plugin_config =
-        yaml_serde::from_str::<serde_json::Value>(get_plugin_config(plugin)).unwrap();
+async fn test_configured_optional_plugin_added(#[case] plugin: &str) {
     let router_config = Configuration::builder()
-        .apollo_plugin(plugin, plugin_config)
+        .apollo_plugin(plugin, plugin_config(plugin))
         .build()
         .unwrap();
 
-    let schema = include_str!("../../testdata/supergraph.graphql");
-    let schema = Schema::parse(schema, &router_config).unwrap();
+    let plugins = build_pipeline_plugins(router_config).await;
 
-    /*
-     * WHEN
-     *  - the router factory runs (including the plugin inits gated by the license)
-     * */
-    let is_telemetry_disabled = false;
-    let service = PipelineFactory
-        .create_pipeline(
-            is_telemetry_disabled,
-            Arc::new(router_config),
-            Arc::new(schema),
-            None,
-            None,
-            Arc::new(license),
-        )
-        .await
-        .unwrap();
-
-    /*
-     * THEN
-     *  - since `allowed_features` is unrestricted plugin should have been added.
-     * */
     assert!(
-        service.plugins.contains_key(&format!("apollo.{plugin}")),
+        plugins.contains_key(&format!("apollo.{plugin}")),
         "Plugin {plugin} should have been added"
     );
     assert!(
         MANDATORY_PLUGINS
             .iter()
-            .all(|plugin| { service.plugins.contains_key(*plugin) })
+            .all(|plugin| { plugins.contains_key(*plugin) })
     );
 }
 
 #[tokio::test]
+async fn test_unconfigured_optional_plugins_not_added() {
+    let router_config = Configuration::builder()
+        .apollo_plugin(
+            "experimental_mock_subgraphs",
+            plugin_config("experimental_mock_subgraphs"),
+        )
+        .build()
+        .unwrap();
+
+    let plugins = build_pipeline_plugins(router_config).await;
+
+    assert!(!plugins.contains_key("apollo.subscription"));
+    assert!(!plugins.contains_key("apollo.coprocessor"));
+}
+
+#[tokio::test]
 #[rstest]
-// NB: this is temporary behavior and will change once the `allowed_features` claim is in all licenses
 #[case::forbid_mutations("forbid_mutations")]
 #[case::subscriptions("subscription")]
 #[case::override_subgraph_url("override_subgraph_url")]
@@ -797,81 +453,33 @@ async fn test_optional_plugin_with_unrestricted_allowed_features(#[case] plugin:
 #[case::connectors("connectors")]
 #[case::coprocessor("coprocessor")]
 #[case::mock_subgraphs("experimental_mock_subgraphs")]
-async fn test_optional_plugin_with_default_license_limits(#[case] plugin: &str) {
-    /*
-     * GIVEN
-     *  - a license with license limits None
-     *  - a valid config including valid config for the given `plugin`
-     *  - a valid schema
-     * */
-    let license = LicenseState::Licensed {
-        limits: Default::default(),
-    };
-
-    // Create config for the given `plugin`
-    let plugin_config =
-        yaml_serde::from_str::<serde_json::Value>(get_plugin_config(plugin)).unwrap();
-
-    // Create config for oss plugins
-    let forbid_mutations_config =
-        yaml_serde::from_str::<serde_json::Value>(get_plugin_config("forbid_mutations")).unwrap();
-    let override_subgraph_url_config =
-        yaml_serde::from_str::<serde_json::Value>(get_plugin_config("override_subgraph_url"))
-            .unwrap();
-    let connectors_config =
-        yaml_serde::from_str::<serde_json::Value>(get_plugin_config("connectors")).unwrap();
-    let response_cache_config =
-        yaml_serde::from_str::<serde_json::Value>(get_plugin_config("response_cache")).unwrap();
-
+async fn test_optional_plugin_added_alongside_oss_plugins(#[case] plugin: &str) {
     let router_config = Configuration::builder()
-        .apollo_plugin("forbid_mutations", forbid_mutations_config)
-        .apollo_plugin("override_subgraph_url", override_subgraph_url_config)
-        .apollo_plugin("connectors", connectors_config)
-        .apollo_plugin("response_cache", response_cache_config)
-        .apollo_plugin(plugin, plugin_config)
+        .apollo_plugin("forbid_mutations", plugin_config("forbid_mutations"))
+        .apollo_plugin(
+            "override_subgraph_url",
+            plugin_config("override_subgraph_url"),
+        )
+        .apollo_plugin("connectors", plugin_config("connectors"))
+        .apollo_plugin("response_cache", plugin_config("response_cache"))
+        .apollo_plugin(plugin, plugin_config(plugin))
         .build()
         .unwrap();
 
-    let schema = include_str!("../../testdata/supergraph.graphql");
-    let schema = Schema::parse(schema, &router_config).unwrap();
+    let plugins = build_pipeline_plugins(router_config).await;
 
-    /*
-     * WHEN
-     *  - the router factory runs (including the plugin inits gated by the license)
-     * */
-    let is_telemetry_disabled = false;
-    let service = PipelineFactory
-        .create_pipeline(
-            is_telemetry_disabled,
-            Arc::new(router_config),
-            Arc::new(schema),
-            None,
-            None,
-            Arc::new(license),
-        )
-        .await
-        .unwrap();
-
-    /*
-     * THEN
-     *  // NB: this behavior may change once all licenses have an `allowed_features` claim
-     *  - when license limits are None we default to unrestricted allowed features
-     *  - the given `plugin` should have been added
-     *  - all mandatory plugins should have been added
-     *  - all oss plugins in the config should have been added
-     * */
     assert!(
-        service.plugins.contains_key(&format!("apollo.{plugin}")),
+        plugins.contains_key(&format!("apollo.{plugin}")),
         "Plugin {plugin} should have been added"
     );
     assert!(
         MANDATORY_PLUGINS
             .iter()
-            .all(|plugin| { service.plugins.contains_key(*plugin) })
+            .all(|plugin| { plugins.contains_key(*plugin) })
     );
     assert!(
         OSS_PLUGINS
             .iter()
-            .all(|plugin| { service.plugins.contains_key(*plugin) })
+            .all(|plugin| { plugins.contains_key(*plugin) })
     );
 }

@@ -27,10 +27,10 @@ use tokio_util::time::DelayQueue;
 
 use super::license_enforcement::LicenseLimits;
 use super::license_enforcement::TpsLimit;
-use crate::AllowedFeature;
 use crate::router::Event;
 use crate::uplink::UplinkRequest;
 use crate::uplink::UplinkResponse;
+use crate::uplink::license_enforcement::AllowedFeature;
 use crate::uplink::license_enforcement::Audience;
 use crate::uplink::license_enforcement::Claims;
 use crate::uplink::license_enforcement::License;

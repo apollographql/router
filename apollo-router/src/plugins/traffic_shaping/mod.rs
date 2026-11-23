@@ -890,7 +890,6 @@ mod test {
                         })),
                     ),
                 ]),
-                Default::default(),
                 None,
             )
             .await

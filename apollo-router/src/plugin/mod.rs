@@ -65,7 +65,7 @@ use crate::services::execution;
 use crate::services::router;
 use crate::services::subgraph;
 use crate::services::supergraph;
-use crate::uplink::license_enforcement::LicenseState;
+use crate::uplink::license_enforcement::LicensedSetting;
 
 type ConfigFactory = for<'de> fn(
     &mut dyn erased_serde::Deserializer<'de>,
@@ -75,6 +75,8 @@ type InstanceFactory =
     fn(PluginInit<PluginConfig>) -> BoxFuture<'static, Result<Box<dyn DynPlugin>, BoxError>>;
 
 type SchemaFactory = fn(&mut SchemaGenerator) -> schemars::Schema;
+
+type LicensedFeaturesFactory = fn(&PluginConfig, &Schema) -> Vec<LicensedSetting>;
 
 /// A plugin's config, deserialized when the router configuration is parsed. It validates
 /// itself, so the configuration can run every plugin's rules without knowing their types.
@@ -142,9 +144,6 @@ pub struct PluginInit<T> {
 
     pub(crate) notify: Notify<String, graphql::Response>,
 
-    /// User's license's state, including any limits of use
-    pub(crate) license: Arc<LicenseState>,
-
     /// The full router configuration json for use by the telemetry plugin ONLY.
     /// NEVER use this in any other plugin. Plugins should only ever access their pre-defined
     /// configuration subset.
@@ -174,7 +173,6 @@ where
             .supergraph_schema(supergraph_schema)
             .launch_id(Arc::new("launch_id".to_string()))
             .notify(Notify::for_tests())
-            .license(Arc::new(LicenseState::default()))
             .build()
     }
 }
@@ -198,7 +196,6 @@ where
         subgraph_schemas: Option<Arc<crate::query_planner::SubgraphSchemas>>,
         launch_id: Option<Option<Arc<String>>>,
         notify: Notify<String, graphql::Response>,
-        license: Arc<LicenseState>,
         full_config: Option<Value>,
         original_config_yaml: Option<Arc<str>>,
     ) -> Self {
@@ -211,7 +208,6 @@ where
             subgraph_schemas: subgraph_schemas.unwrap_or_default(),
             launch_id: launch_id.flatten(),
             notify,
-            license,
             full_config,
             raw_yaml: original_config_yaml,
         }
@@ -231,7 +227,6 @@ where
         subgraph_schemas: Option<Arc<crate::query_planner::SubgraphSchemas>>,
         launch_id: Option<Arc<String>>,
         notify: Notify<String, graphql::Response>,
-        license: Arc<LicenseState>,
         full_config: Option<Value>,
         original_config_yaml: Option<Arc<str>>,
     ) -> Result<Self, BoxError> {
@@ -246,7 +241,6 @@ where
             subgraph_schemas: subgraph_schemas.unwrap_or_default(),
             launch_id,
             notify,
-            license,
             full_config,
             raw_yaml: original_config_yaml,
         })
@@ -263,7 +257,6 @@ where
         subgraph_schemas: Option<Arc<crate::query_planner::SubgraphSchemas>>,
         launch_id: Option<Arc<String>>,
         notify: Option<Notify<String, graphql::Response>>,
-        license: Option<Arc<LicenseState>>,
         full_config: Option<Value>,
         original_config_yaml: Option<Arc<str>>,
     ) -> Self {
@@ -277,7 +270,6 @@ where
             subgraph_schemas: subgraph_schemas.unwrap_or_default(),
             launch_id,
             notify: notify.unwrap_or_else(Notify::for_tests),
-            license: license.unwrap_or_default(),
             full_config,
             raw_yaml: original_config_yaml,
         }
@@ -298,7 +290,6 @@ impl PluginInit<serde_json::Value> {
             .supergraph_sdl(self.supergraph_sdl)
             .subgraph_schemas(self.subgraph_schemas)
             .notify(self.notify.clone())
-            .license(self.license)
             .and_full_config(self.full_config)
             .and_original_config_yaml(self.raw_yaml)
             .build()
@@ -317,7 +308,6 @@ impl<T> PluginInit<T> {
             subgraph_schemas: self.subgraph_schemas.clone(),
             launch_id: self.launch_id.clone(),
             notify: self.notify.clone(),
-            license: self.license.clone(),
             full_config: self.full_config.clone(),
             raw_yaml: self.raw_yaml.clone(),
         }
@@ -336,7 +326,6 @@ impl<T> PluginInit<T> {
             subgraph_schemas: self.subgraph_schemas,
             launch_id: self.launch_id,
             notify: self.notify,
-            license: self.license,
             full_config: self.full_config,
             raw_yaml: self.raw_yaml,
         })
@@ -351,6 +340,7 @@ pub struct PluginFactory {
     config_factory: ConfigFactory,
     instance_factory: InstanceFactory,
     schema_factory: SchemaFactory,
+    licensed_features_factory: LicensedFeaturesFactory,
     pub(crate) type_id: TypeId,
 }
 
@@ -396,6 +386,13 @@ impl PluginFactory {
                 })
             },
             schema_factory: |generator| generator.subschema_for::<<P as PluginPrivate>::Config>(),
+            // Panics rather than reporting no settings, which would pass the license check.
+            licensed_features_factory: |config, supergraph| {
+                let config = config
+                    .downcast_ref::<P::Config>()
+                    .expect("a plugin's section is always parsed or built as its own Config type");
+                P::licensed_features(config, supergraph)
+            },
             type_id: TypeId::of::<P>(),
         }
     }
@@ -452,6 +449,16 @@ impl PluginFactory {
 
     pub(crate) fn create_schema(&self, generator: &mut SchemaGenerator) -> schemars::Schema {
         (self.schema_factory)(generator)
+    }
+
+    /// The settings in `config`, parsed by [`Self::parse_config`], that need a license.
+    /// See [`PluginPrivate::licensed_features`].
+    pub(crate) fn licensed_features(
+        &self,
+        config: &PluginConfig,
+        supergraph: &Schema,
+    ) -> Vec<LicensedSetting> {
+        (self.licensed_features_factory)(config, supergraph)
     }
 }
 
@@ -749,6 +756,18 @@ pub(crate) trait PluginPrivate: Send + Sync + 'static {
     type Config: Configuration + Clone + Send + Sync + 'static;
 
     const HIDDEN_FROM_CONFIG_JSON_SCHEMA: bool = false;
+
+    /// The settings in `config` that need a license feature, when the router serves
+    /// `supergraph`.
+    ///
+    /// The startup license check calls this for every plugin with a section in the router
+    /// configuration, and refuses to start or reload when the license lacks the feature a
+    /// returned setting needs. Return only settings that are in effect: a section that turns a
+    /// licensed feature off, or whose feature `supergraph` doesn't use, needs no license. The
+    /// default returns nothing.
+    fn licensed_features(_config: &Self::Config, _supergraph: &Schema) -> Vec<LicensedSetting> {
+        Vec::new()
+    }
 
     /// This is invoked once after the router starts and compiled-in
     /// plugins are registered.
