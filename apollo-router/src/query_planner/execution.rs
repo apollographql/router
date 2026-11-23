@@ -650,9 +650,7 @@ impl DeferredNode {
                     .await
                 {
                     tracing::debug!(
-                        "error sending deferred response at path {}: {:?}",
-                        deferred_path,
-                        e
+                        "could not send deferred response at path {deferred_path}: {e}"
                     );
                 };
                 drop(tx);
@@ -674,9 +672,7 @@ impl DeferredNode {
                     .await
                 {
                     tracing::debug!(
-                        "error sending deferred response at path {}: {:?}",
-                        deferred_path,
-                        e
+                        "could not send deferred response at path {deferred_path}: {e}"
                     );
                 }
                 drop(tx);
