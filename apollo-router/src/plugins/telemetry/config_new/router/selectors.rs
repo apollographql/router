@@ -9,6 +9,7 @@ use crate::context::CONTAINS_GRAPHQL_ERROR;
 use crate::context::OPERATION_NAME;
 use crate::plugins::telemetry::config::AttributeValue;
 use crate::plugins::telemetry::config::TraceIdFormat;
+use crate::plugins::telemetry::config_new::ArrayJsonPath;
 use crate::plugins::telemetry::config_new::Selector;
 use crate::plugins::telemetry::config_new::Stage;
 use crate::plugins::telemetry::config_new::ToOtelValue;
@@ -23,6 +24,7 @@ use crate::plugins::telemetry::config_new::selectors::ErrorRepr;
 use crate::plugins::telemetry::config_new::selectors::OperationName;
 use crate::plugins::telemetry::config_new::selectors::ResponseStatus;
 use crate::plugins::telemetry::config_new::selectors::SelectorJsonPath;
+use crate::plugins::telemetry::config_new::selectors::match_to_string;
 use crate::plugins::telemetry::config_new::trace_id;
 use crate::query_planner::APOLLO_OPERATION_ID;
 use crate::services::router;
@@ -327,9 +329,7 @@ impl Selector for RouterSelector {
                             let data: serde_json_bytes::Value =
                                 serde_json_bytes::to_value(errors).ok()?;
 
-                            let val = response_errors.find(&data);
-
-                            val.maybe_to_otel_value()
+                            response_errors.evaluate(&data)
                         })
                 }),
             RouterSelector::ResponseErrorsCount {
@@ -363,23 +363,15 @@ impl Selector for RouterSelector {
                         .and_then(|body_json| {
                             let errors = body_json.get("errors")?.as_array()?;
 
-                            // Extract the specified field from each error
                             let extracted: Vec<String> = errors
                                 .iter()
-                                .filter_map(|error| {
-                                    let error_bytes: serde_json_bytes::Value =
-                                        serde_json_bytes::to_value(error).ok()?;
-                                    let result = response_errors_field.find(&error_bytes);
-
-                                    // Convert the result to a string representation
-                                    if result.is_null() {
-                                        None
-                                    } else if let Some(s) = result.as_str() {
-                                        Some(s.to_string())
-                                    } else {
-                                        // For non-string values, serialize to JSON string
-                                        Some(result.to_string())
-                                    }
+                                .filter_map(|error| serde_json_bytes::to_value(error).ok())
+                                .flat_map(|error| {
+                                    response_errors_field
+                                        .select(&error)
+                                        .filter(|matched| !matched.is_null())
+                                        .map(|matched| match_to_string(&matched))
+                                        .collect::<Vec<_>>()
                                 })
                                 .collect();
 
@@ -638,6 +630,20 @@ impl Selector for RouterSelector {
                     | RouterSelector::ContextId { .. }
             ),
             Stage::Drop => matches!(self, RouterSelector::StaticField { .. }),
+        }
+    }
+
+    fn array_json_path(&self) -> Option<ArrayJsonPath<'_>> {
+        match self {
+            RouterSelector::ResponseErrors { response_errors }
+                if !response_errors.is_singular() =>
+            {
+                Some(ArrayJsonPath::Path(response_errors))
+            }
+            RouterSelector::ResponseErrorsField {
+                response_errors_field,
+            } => Some(ArrayJsonPath::ResponseErrorsField(response_errors_field)),
+            _ => None,
         }
     }
 }
@@ -1332,6 +1338,141 @@ mod test {
         assert_eq!(
             selector.on_response(res).unwrap().as_str(),
             r#"{"message":"Something went wrong","locations":[{"line":1,"column":1}],"extensions":{"code":"GRAPHQL_VALIDATION_FAILED"}}"#
+        );
+    }
+
+    fn router_response_with_errors(errors: Vec<crate::graphql::Error>) -> RouterResponse {
+        crate::services::RouterResponse::fake_builder()
+            .status_code(StatusCode::BAD_REQUEST)
+            .errors(errors)
+            .build()
+            .unwrap()
+    }
+
+    fn graphql_error(code: &str, lines: &[u32]) -> crate::graphql::Error {
+        crate::graphql::Error::builder()
+            .message("Something went wrong")
+            .locations(
+                lines
+                    .iter()
+                    .map(|&line| crate::graphql::Location { line, column: 1 })
+                    .collect(),
+            )
+            .extension_code(code)
+            .build()
+    }
+
+    #[test]
+    fn router_response_errors_non_singular_path_is_always_an_array() {
+        let selector = RouterSelector::ResponseErrors {
+            response_errors: SelectorJsonPath::from_str("$[*].extensions.code").unwrap(),
+        };
+        let one = router_response_with_errors(vec![graphql_error("NOT_FOUND", &[1])]);
+        assert_eq!(
+            selector.on_response(&one),
+            Some(opentelemetry::Value::Array(
+                vec![opentelemetry::StringValue::from("NOT_FOUND")].into()
+            ))
+        );
+        let two = router_response_with_errors(vec![
+            graphql_error("NOT_FOUND", &[1]),
+            graphql_error("FORBIDDEN", &[1]),
+        ]);
+        assert_eq!(
+            selector.on_response(&two),
+            Some(opentelemetry::Value::Array(
+                vec![
+                    opentelemetry::StringValue::from("NOT_FOUND"),
+                    opentelemetry::StringValue::from("FORBIDDEN"),
+                ]
+                .into()
+            ))
+        );
+
+        let selector = RouterSelector::ResponseErrors {
+            response_errors: SelectorJsonPath::from_str("$[0].extensions.code").unwrap(),
+        };
+        assert_eq!(selector.on_response(&two), Some("NOT_FOUND".into()));
+    }
+
+    #[test]
+    fn router_response_errors_eq_compares_the_array() {
+        use crate::plugins::telemetry::config::AttributeValue;
+        use crate::plugins::telemetry::config_new::conditions::Condition;
+        use crate::plugins::telemetry::config_new::conditions::SelectorOrValue;
+
+        let eq_not_found = |path: &str| {
+            Condition::Eq([
+                SelectorOrValue::Value(AttributeValue::String("NOT_FOUND".to_string())),
+                SelectorOrValue::Selector(RouterSelector::ResponseErrors {
+                    response_errors: SelectorJsonPath::from_str(path).unwrap(),
+                }),
+            ])
+        };
+        let one = router_response_with_errors(vec![graphql_error("NOT_FOUND", &[1])]);
+
+        // `["NOT_FOUND"]` is not equal to `"NOT_FOUND"`.
+        assert!(!eq_not_found("$[*].extensions.code").evaluate_response(&one));
+        assert!(eq_not_found("$[0].extensions.code").evaluate_response(&one));
+    }
+
+    #[test]
+    fn router_response_errors_field_lists_each_match() {
+        let selector = RouterSelector::ResponseErrorsField {
+            response_errors_field: SelectorJsonPath::from_str("$.locations[*].line").unwrap(),
+        };
+        let response = router_response_with_errors(vec![
+            graphql_error("NOT_FOUND", &[1, 2]),
+            graphql_error("FORBIDDEN", &[3]),
+            graphql_error("FORBIDDEN", &[]),
+        ]);
+        assert_eq!(
+            selector.on_response(&response),
+            Some(opentelemetry::Value::Array(
+                vec![
+                    opentelemetry::StringValue::from("1"),
+                    opentelemetry::StringValue::from("2"),
+                    opentelemetry::StringValue::from("3"),
+                ]
+                .into()
+            ))
+        );
+
+        let selector = RouterSelector::ResponseErrorsField {
+            response_errors_field: SelectorJsonPath::from_str("$.extensions.code").unwrap(),
+        };
+        assert_eq!(
+            selector.on_response(&response),
+            Some(opentelemetry::Value::Array(
+                vec![
+                    opentelemetry::StringValue::from("NOT_FOUND"),
+                    opentelemetry::StringValue::from("FORBIDDEN"),
+                    opentelemetry::StringValue::from("FORBIDDEN"),
+                ]
+                .into()
+            ))
+        );
+
+        let selector = RouterSelector::ResponseErrorsField {
+            response_errors_field: SelectorJsonPath::from_str("$.extensions.reason").unwrap(),
+        };
+        let response = router_response_with_errors(vec![
+            crate::graphql::Error::builder()
+                .message("Something went wrong")
+                .extension_code("NOT_FOUND")
+                .extension("reason", serde_json_bytes::Value::Null)
+                .build(),
+            crate::graphql::Error::builder()
+                .message("Something went wrong")
+                .extension_code("FORBIDDEN")
+                .extension("reason", "expired")
+                .build(),
+        ]);
+        assert_eq!(
+            selector.on_response(&response),
+            Some(opentelemetry::Value::Array(
+                vec![opentelemetry::StringValue::from("expired")].into()
+            ))
         );
     }
 

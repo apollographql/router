@@ -156,7 +156,7 @@ mime = "0.3.17"
 multer = "3.1.0"
 multimap = "0.10.0" # Warning: part of the public API
 # To avoid tokio issues
-notify = { version = "8.0.0", default-features = false, features = [
+notify = { version = "9.0.0", default-features = false, features = [
     "macos_kqueue",
 ] }
 nu-ansi-term = "0.50"
@@ -323,7 +323,7 @@ fred = { version = "10.1.0", features = [
 ] }
 futures-test = "0.3.30"
 insta.workspace = true
-jsonschema = { version = "0.61.0", default-features = false }
+jsonschema = { version = "0.63.0", default-features = false }
 maplit = "1.0.2"
 brotli = "9.0.0"
 memchr = { version = "2.7.4", default-features = false }
@@ -370,7 +370,7 @@ tracing-mock = "0.1.0-beta.1"
 walkdir = "2.5.0"
 wiremock = "0.6"
 libtest-mimic = "0.8.0"
-rstest = "0.28.0"
+rstest = "0.29.0"
 indoc = "2.0.7"
 
 [target.'cfg(tracing_unstable)'.dev-dependencies]

@@ -1,0 +1,8 @@
+---
+source: apollo-router/src/files.rs
+expression: yaml
+---
+- fields:
+    error: "No path was found. about [\"missing/supergraph.graphql\"]"
+  level: ERROR
+  message: "Could not watch \"missing/supergraph.graphql\". Changes won't be reloaded until the router restarts."

@@ -100,9 +100,12 @@ where
         config,
     )
     .unwrap_or_else(|_| panic!("could not create watch on: {config_file_path:?}"));
-    watcher
-        .watch(&config_file_path, RecursiveMode::NonRecursive)
-        .unwrap_or_else(|_| panic!("could not watch: {config_file_path:?}"));
+    if let Err(err) = watcher.watch(&config_file_path, RecursiveMode::NonRecursive) {
+        tracing::error!(
+            error = %err,
+            "Could not watch {config_file_path:?}. Changes won't be reloaded until the router restarts."
+        );
+    }
     // Tell watchers once they should read the file once,
     // then listen to fs events.
     stream::once(future::ready(()))
@@ -189,9 +192,12 @@ where
         config,
     )
     .unwrap_or_else(|_| panic!("could not create watch on: {rhai_source_path:?}"));
-    watcher
-        .watch(&rhai_source_path, RecursiveMode::Recursive)
-        .unwrap_or_else(|_| panic!("could not watch: {rhai_source_path:?}"));
+    if let Err(err) = watcher.watch(&rhai_source_path, RecursiveMode::Recursive) {
+        tracing::error!(
+            error = %err,
+            "Could not watch {rhai_source_path:?}. Changes won't be reloaded until the router restarts."
+        );
+    }
     // Tell watchers once they should read the file once,
     // then listen to fs events.
     stream::once(future::ready(()))
@@ -217,6 +223,7 @@ pub(crate) mod tests {
     use test_log::test;
 
     use super::*;
+    use crate::assert_snapshot_subscriber;
 
     /// How long to wait for the watcher to report an event before failing the test.
     const WATCHER_EVENT_BOUND: Duration = Duration::from_secs(10);
@@ -324,6 +331,20 @@ pub(crate) mod tests {
             !futures::poll!(watch.next()).is_ready(),
             "should only have one event for multiple updates"
         );
+    }
+
+    #[test]
+    fn watch_missing_path_logs_error() {
+        tracing::subscriber::with_default(assert_snapshot_subscriber!(), || {
+            let _watch = watch(Path::new("missing/supergraph.graphql"));
+        });
+    }
+
+    #[test]
+    fn watch_rhai_missing_path_logs_error() {
+        tracing::subscriber::with_default(assert_snapshot_subscriber!(), || {
+            let _watch = watch_rhai(Path::new("missing/rhai"));
+        });
     }
 
     pub(crate) fn create_temp_file() -> (PathBuf, File) {
