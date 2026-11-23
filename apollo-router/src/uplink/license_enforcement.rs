@@ -476,21 +476,15 @@ impl LicenseEnforcementReport {
             }
             LicenseState::LicensedWarn { limits } => {
                 tracing::warn!(
-                    "License warning period has started. The Router will stop serving requests after the license expires. In order to continue using these features for a self-hosted instance of Apollo Router, the Router must be connected to a graph in GraphOS that provides an active license for the following features:\n\n{:?}\n\nSee {LICENSE_EXPIRED_URL} for more information.",
-                    // The report does not contain any features because they are contained within the allowedFeatures claim,
-                    // therefore we output all of the allowed features that the user's license enables them to use.
-                    self.license.get_allowed_features()
+                    "License warning period has started. The router keeps serving requests, because your license includes every licensed feature this configuration and schema use. Renew your GraphOS plan; until you do, the router won't start or reload with a licensed feature your license doesn't include.\n\nSee {LICENSE_EXPIRED_URL} for more information."
                 );
                 limits
             }
-            // LicensedHalt doesn't return an error, which might be surprising; rather, the router
-            // will reject all incoming HTTP requests with a canned error response
+            // An expired license keeps its allowed features, so with nothing outside them in
+            // use the router keeps serving.
             LicenseState::LicensedHalt { limits } => {
                 tracing::error!(
-                    "License has expired. The Router will no longer serve requests. In order to enable these features for a self-hosted instance of Apollo Router, the Router must be connected to a graph in GraphOS that provides an active license for the following features:\n\n{:?}\n\nSee {LICENSE_EXPIRED_URL} for more information.",
-                    // The report does not contain any features because they are contained within the allowedFeatures claim,
-                    // therefore we output all of the allowed features that the user's license enables them to use.
-                    self.license.get_allowed_features()
+                    "License has expired. The router keeps serving requests, because your license includes every licensed feature this configuration and schema use. Renew your GraphOS plan; until you do, the router stops serving requests if its configuration or schema starts using a licensed feature your license doesn't include.\n\nSee {LICENSE_EXPIRED_URL} for more information."
                 );
                 limits
             }

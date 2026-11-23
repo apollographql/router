@@ -12,8 +12,7 @@ use crate::integration::common::mint_license_jwt;
 
 const LICENSE_ALLOWED_FEATURES_DOES_NOT_INCLUDE_FEATURE_MSG: &str =
     "the configuration or schema uses features not allowed by the license";
-const LICENSE_EXPIRED_MESSAGE: &str =
-    "License has expired. The Router will no longer serve requests.";
+const LICENSE_EXPIRED_MESSAGE: &str = "License has expired. The router keeps serving requests, because your license includes every licensed feature";
 const LICENSE_EXPIRED_WITH_RESTRICTED_FEATURES_MESSAGE: &str =
     "License has expired. The router will no longer serve requests.";
 
@@ -446,11 +445,11 @@ async fn feature_violation_when_allowed_features_with_coprocessor_only_with_subs
 }
 
 #[tokio::test(flavor = "multi_thread")]
-async fn canned_response_when_license_halted_with_valid_config_and_schema() {
+async fn router_keeps_serving_when_license_halted_and_includes_features_in_use() {
     /*
      * GIVEN
-     *  - an expired license
-     *  - a valid config
+     *  - an expired license whose allowedFeatures claim includes subscriptions
+     *  - a config that enables subscriptions
      *  - a valid schema
      * */
 
@@ -460,26 +459,25 @@ async fn canned_response_when_license_halted_with_valid_config_and_schema() {
         TEST_JWKS_ENDPOINT.as_os_str().into(),
     );
     let mut router = IntegrationTest::builder()
-        .supergraph("tests/integration/subscriptions/fixtures/supergraph.graphql")
-        .config(SUBSCRIPTION_COPROCESSOR_CONFIG)
-        .env(with_service_urls(env))
+        .config("subscription:\n  enabled: true\n")
+        .env(env)
         .jwt(JWT_PAST_EXPIRY_WITH_COPROCESSORS_ENTITY_CACHING_TRAFFIC_SHAPING_SUBSCRIPTIONS_IN_ALLOWED_FEATURES.to_string())
         .build()
         .await;
 
     /*
      * THEN
-     *  - since the license is expired and using restricted features the router should start but
-     *    the LicenseLayer should return a 500
+     *  - an expired license keeps its allowed features, so the router logs that the license
+     *    has expired but keeps serving requests
      * */
     router.start().await;
+    router.assert_started().await;
     router
         .assert_error_log_contained(LICENSE_EXPIRED_MESSAGE)
         .await;
 
     let (_, response) = router.execute_default_query().await;
-    // We expect the axum middleware for handling halted licenses to return a server error
-    assert_eq!(response.status(), StatusCode::INTERNAL_SERVER_ERROR);
+    assert_eq!(response.status(), StatusCode::OK);
 }
 
 #[tokio::test(flavor = "multi_thread")]
