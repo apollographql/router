@@ -216,6 +216,15 @@ impl SourceSchemaValidator<'_> {
                 let field_is_internal =
                     type_is_internal || field.directives.has(&self.names.internal);
                 self.validate_require_consistency(type_name, field, &interface_type_names);
+                if field_is_internal && field.directives.has(&self.names.override_) {
+                    self.error(SingleFederationError::InternalOverrideCollision {
+                        message: format!(
+                            "The field \"{type_name}.{}\" is @internal, directly or through its \
+                             type, and cannot also use @{}.",
+                            field.name, self.names.override_
+                        ),
+                    });
+                }
                 if field_is_internal {
                     continue;
                 }
@@ -379,6 +388,13 @@ impl SourceSchemaValidator<'_> {
                 ),
             });
         }
+        // `@external` on a type applies to every field of the type.
+        let field_is_external = field.directives.has(&self.names.external)
+            || self
+                .schema
+                .types
+                .get(type_name)
+                .is_some_and(|ty| ty.directives().has(&self.names.external));
         let is_lookup = field.directives.has(&self.names.lookup);
         if is_lookup {
             self.validate_lookup(type_name, field, reachable);
@@ -439,6 +455,15 @@ impl SourceSchemaValidator<'_> {
                 Some(SelectedValue::field(argument.name.clone()))
             };
             if let Some(require) = argument.directives.get(&self.names.require) {
+                if field_is_external {
+                    self.error(SingleFederationError::ExternalRequireCollision {
+                        message: format!(
+                            "The @{} directive on \"{argument_coordinate}\" is not allowed: \
+                             the field \"{coordinate}\" is @{}, directly or through its type.",
+                            self.names.require, self.names.external
+                        ),
+                    });
+                }
                 if is_lookup {
                     self.error(SingleFederationError::RequireInvalidUsage {
                         message: format!(

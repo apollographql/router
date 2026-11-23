@@ -937,6 +937,10 @@ pub enum SingleFederationError {
     #[error("{message}")]
     ReferenceToInternalType { message: String },
     #[error("{message}")]
+    ExternalRequireCollision { message: String },
+    #[error("{message}")]
+    InternalOverrideCollision { message: String },
+    #[error("{message}")]
     RequiresInSourceSchema { message: String },
     #[error("{message}")]
     KeyResolvableInSourceSchema { message: String },
@@ -1219,6 +1223,12 @@ impl SingleFederationError {
                 ErrorCode::RequireInconsistentOnImplementation
             }
             SingleFederationError::RequireInvalidFields { .. } => ErrorCode::RequireInvalidFields,
+            SingleFederationError::ExternalRequireCollision { .. } => {
+                ErrorCode::ExternalRequireCollision
+            }
+            SingleFederationError::InternalOverrideCollision { .. } => {
+                ErrorCode::InternalOverrideCollision
+            }
             SingleFederationError::ReferenceToInternalType { .. } => {
                 ErrorCode::ReferenceToInternalType
             }
@@ -2699,6 +2709,29 @@ static REQUIRE_INVALID_FIELDS: LazyLock<ErrorCodeDefinition> = LazyLock::new(|| 
     )
 });
 
+static EXTERNAL_REQUIRE_COLLISION: LazyLock<ErrorCodeDefinition> = LazyLock::new(|| {
+    ErrorCodeDefinition::new(
+        "EXTERNAL_REQUIRE_COLLISION".to_owned(),
+        "An argument of an `@external` field has a `@require` directive.".to_owned(),
+        Some(ErrorCodeMetadata {
+            added_in: "3.0.0",
+            replaces: &[],
+        }),
+    )
+});
+
+static INTERNAL_OVERRIDE_COLLISION: LazyLock<ErrorCodeDefinition> = LazyLock::new(|| {
+    ErrorCodeDefinition::new(
+        "INTERNAL_OVERRIDE_COLLISION".to_owned(),
+        "An `@internal` field, or a field of an `@internal` type, has an `@override` directive."
+            .to_owned(),
+        Some(ErrorCodeMetadata {
+            added_in: "3.0.0",
+            replaces: &[],
+        }),
+    )
+});
+
 static REFERENCE_TO_INTERNAL_TYPE: LazyLock<ErrorCodeDefinition> = LazyLock::new(|| {
     ErrorCodeDefinition::new(
         "REFERENCE_TO_INTERNAL_TYPE".to_owned(),
@@ -3073,6 +3106,8 @@ pub enum ErrorCode {
     RequireInconsistentOnImplementation,
     RequireInvalidFields,
     ReferenceToInternalType,
+    ExternalRequireCollision,
+    InternalOverrideCollision,
     RequiresInSourceSchema,
     KeyResolvableInSourceSchema,
     ContextInSourceSchemaUnsupported,
@@ -3227,6 +3262,8 @@ impl ErrorCode {
             }
             ErrorCode::RequireInvalidFields => &REQUIRE_INVALID_FIELDS,
             ErrorCode::ReferenceToInternalType => &REFERENCE_TO_INTERNAL_TYPE,
+            ErrorCode::ExternalRequireCollision => &EXTERNAL_REQUIRE_COLLISION,
+            ErrorCode::InternalOverrideCollision => &INTERNAL_OVERRIDE_COLLISION,
             ErrorCode::RequiresInSourceSchema => &REQUIRES_IN_SOURCE_SCHEMA,
             ErrorCode::KeyResolvableInSourceSchema => &KEY_RESOLVABLE_IN_SOURCE_SCHEMA,
             ErrorCode::ContextInSourceSchemaUnsupported => &CONTEXT_IN_SOURCE_SCHEMA_UNSUPPORTED,

@@ -513,6 +513,7 @@ mod lookup_validation {
             &["LOOKUP_NOT_REACHABLE"],
         );
     }
+
 }
 
 mod is_validation {
@@ -656,10 +657,141 @@ mod require_validation {
             &["REQUIRE_INCONSISTENT_ON_IMPLEMENTATION"],
         );
     }
+
+    #[test]
+    fn external_require_collision() {
+        assert_error_codes(
+            &[
+                (
+                    "a",
+                    r#"
+                    interface Titled {
+                      title(suffix: String @require(field: "subtitle")): String
+                      subtitle: String
+                    }
+                    type Query { bookById(id: ID!): Book @lookup }
+                    type Book implements Titled @key(fields: "id") {
+                      id: ID!
+                      title(suffix: String @require(field: "subtitle")): String @external
+                      subtitle: String
+                    }
+                    "#,
+                ),
+                (
+                    "b",
+                    r#"type Book @key(fields: "id") { id: ID! title(suffix: String): String }"#,
+                ),
+            ],
+            &["EXTERNAL_REQUIRE_COLLISION"],
+        );
+    }
+
+    #[test]
+    fn external_require_collision_on_external_type() {
+        assert_error_codes(
+            &[
+                (
+                    "a",
+                    r#"
+                    interface Titled {
+                      title(suffix: String @require(field: "subtitle")): String
+                      subtitle: String
+                    }
+                    type Query { bookById(id: ID!): Book @lookup }
+                    type Book implements Titled @key(fields: "id") @external {
+                      id: ID!
+                      title(suffix: String @require(field: "subtitle")): String
+                      subtitle: String
+                    }
+                    "#,
+                ),
+                (
+                    "b",
+                    r#"
+                    type Book @key(fields: "id") {
+                      id: ID!
+                      title(suffix: String): String
+                      subtitle: String
+                    }
+                    "#,
+                ),
+            ],
+            &["EXTERNAL_REQUIRE_COLLISION"],
+        );
+    }
+
+    #[test]
+    fn require_on_non_external_field_is_not_a_collision() {
+        compose_sources(&[
+            (
+                "a",
+                r#"
+                type Query { bookById(id: ID!): Book @lookup }
+                type Book @key(fields: "id") {
+                  id: ID!
+                  title(suffix: String @require(field: "subtitle")): String
+                  subtitle: String
+                }
+                "#,
+            ),
+            ("b", r#"type Book @key(fields: "id") { id: ID! }"#),
+        ])
+        .expect("composes");
+    }
 }
 
 mod internal_validation {
     use super::*;
+
+    #[test]
+    fn internal_override_collision_on_field() {
+        assert_error_codes(
+            &[
+                (
+                    "a",
+                    r#"
+                    type Query {
+                      productById(id: ID!): Product @lookup @internal @override(from: "b")
+                    }
+                    type Product @key(fields: "id") { id: ID! }
+                    "#,
+                ),
+                (
+                    "b",
+                    r#"
+                    type Query { productById(id: ID!): Product @lookup }
+                    type Product @key(fields: "id") { id: ID! }
+                    "#,
+                ),
+            ],
+            &["INTERNAL_OVERRIDE_COLLISION"],
+        );
+    }
+
+    #[test]
+    fn internal_override_collision_on_internal_type() {
+        assert_error_codes(
+            &[
+                (
+                    "a",
+                    r#"
+                    type Query @internal {
+                      productById(id: ID!): Product @lookup @override(from: "b")
+                    }
+                    type Product @key(fields: "id") { id: ID! }
+                    "#,
+                ),
+                (
+                    "b",
+                    r#"
+                    type Query { productById(id: ID!): Product @lookup }
+                    type Product @key(fields: "id") { id: ID! }
+                    "#,
+                ),
+            ],
+            &["INTERNAL_OVERRIDE_COLLISION"],
+        );
+    }
 
     #[test]
     fn reference_to_internal_type() {

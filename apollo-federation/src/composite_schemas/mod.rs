@@ -35,11 +35,13 @@ thread_local! {
 use apollo_compiler::Name;
 
 use crate::link::federation_spec_definition::FEDERATION_CONTEXT_DIRECTIVE_NAME_IN_SPEC;
+use crate::link::federation_spec_definition::FEDERATION_EXTERNAL_DIRECTIVE_NAME_IN_SPEC;
 use crate::link::federation_spec_definition::FEDERATION_FROM_CONTEXT_DIRECTIVE_NAME_IN_SPEC;
 use crate::link::federation_spec_definition::FEDERATION_INTERNAL_DIRECTIVE_NAME_IN_SPEC;
 use crate::link::federation_spec_definition::FEDERATION_IS_DIRECTIVE_NAME_IN_SPEC;
 use crate::link::federation_spec_definition::FEDERATION_KEY_DIRECTIVE_NAME_IN_SPEC;
 use crate::link::federation_spec_definition::FEDERATION_LOOKUP_DIRECTIVE_NAME_IN_SPEC;
+use crate::link::federation_spec_definition::FEDERATION_OVERRIDE_DIRECTIVE_NAME_IN_SPEC;
 use crate::link::federation_spec_definition::FEDERATION_REQUIRE_DIRECTIVE_NAME_IN_SPEC;
 use crate::link::federation_spec_definition::FEDERATION_REQUIRES_DIRECTIVE_NAME_IN_SPEC;
 use crate::link::federation_spec_definition::FederationSpecDefinition;
@@ -104,6 +106,8 @@ pub(crate) struct CompositeNames {
     pub(crate) is: Name,
     pub(crate) require: Name,
     pub(crate) key: Name,
+    pub(crate) external: Name,
+    pub(crate) override_: Name,
     pub(crate) requires: Option<Name>,
     pub(crate) context: Option<Name>,
     pub(crate) from_context: Option<Name>,
@@ -132,6 +136,8 @@ impl CompositeNames {
             is: name(&FEDERATION_IS_DIRECTIVE_NAME_IN_SPEC),
             require: name(&FEDERATION_REQUIRE_DIRECTIVE_NAME_IN_SPEC),
             key: name(&FEDERATION_KEY_DIRECTIVE_NAME_IN_SPEC),
+            external: name(&FEDERATION_EXTERNAL_DIRECTIVE_NAME_IN_SPEC),
+            override_: name(&FEDERATION_OVERRIDE_DIRECTIVE_NAME_IN_SPEC),
             requires: defined(name(&FEDERATION_REQUIRES_DIRECTIVE_NAME_IN_SPEC)),
             context: defined(name(&FEDERATION_CONTEXT_DIRECTIVE_NAME_IN_SPEC)),
             from_context: defined(name(&FEDERATION_FROM_CONTEXT_DIRECTIVE_NAME_IN_SPEC)),
