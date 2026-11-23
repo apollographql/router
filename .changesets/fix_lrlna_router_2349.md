@@ -9,15 +9,6 @@ Here is an example of a schema where both `Item` and `Other` implements `Compone
 
 ```graphql
 type Query {
-  page: Page
-}
-
-type Page {
-  mixed: [Container!]!
-}
-
-interface Container {
-  id: ID!
   children: [Component!]!
 }
 
@@ -40,15 +31,10 @@ And this operation:
 
 ```graphql
 {
-  page {
-    mixed {
-      id
-      children {
-        id
-        ... on Item {
-          ... @defer(label: "d") { title }
-        }
-      }
+  children {
+    id
+    ... on Item {
+      ... @defer(label: "d") { title }
     }
   }
 }
@@ -66,7 +52,7 @@ It now delivers `title` for the `Item` in the list:
 {
   "hasNext": false,
   "incremental": [
-    {"label": "d", "data": {"title": "Item 2"}, "path": ["page", "mixed", 1, "children", 0]}
+    {"label": "d", "data": {"title": "Item 2"}, "path": ["children", 1]}
   ]
 }
 ```

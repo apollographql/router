@@ -28,14 +28,6 @@ interface Component
   id: ID!
 }
 
-interface Container
-  @join__type(graph: UI)
-{
-  id: ID!
-  children: [Component!]!
-  optionalChildren: [Component]
-}
-
 type Item implements Component
   @join__implements(graph: UI, interface: "Component")
   @join__type(graph: UI, key: "id")
@@ -81,23 +73,8 @@ type Other implements Component
   label: String!
 }
 
-type Page
-  @join__type(graph: UI)
-{
-  mixed: [Container!]!
-}
-
 type Query
   @join__type(graph: UI)
 {
-  page: Page
-}
-
-type StaticContainer implements Container
-  @join__implements(graph: UI, interface: "Container")
-  @join__type(graph: UI)
-{
-  id: ID!
   children: [Component!]!
-  optionalChildren: [Component]
 }

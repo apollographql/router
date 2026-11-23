@@ -1215,24 +1215,21 @@ async fn defer_empty_primary_response() {
 }
 
 fn mixed_list_subgraphs(
-    list_field: &str,
     primary_query: &str,
     entities_query: &str,
     entities: serde_json::Value,
 ) -> MockedSubgraphs {
-    let container = |id: &str, child: serde_json::Value| serde_json::json!({"__typename": "StaticContainer", "id": id, list_field: [child]});
-    let other = |id: &str| serde_json::json!({"__typename": "Other", "id": id, "label": id});
     let mut subgraphs = MockedSubgraphs::default();
     subgraphs.insert(
         "ui",
         MockSubgraph::builder()
             .with_json(
                 serde_json::json!({"query": primary_query}),
-                serde_json::json!({"data": {"page": {"mixed": [
-                    container("m1", other("o1")),
-                    container("m2", serde_json::json!({"__typename": "Item", "id": "2"})),
-                    container("m3", other("o3")),
-                ]}}}),
+                serde_json::json!({"data": {"children": [
+                    {"__typename": "Other", "id": "o1", "label": "o1"},
+                    {"__typename": "Item", "id": "2"},
+                    {"__typename": "Other", "id": "o3", "label": "o3"},
+                ]}}),
             )
             .with_json(
                 serde_json::json!({
@@ -1312,19 +1309,18 @@ async fn run_mixed_list_defer_with_config(
 }
 
 const MIXED_LIST_PRIMARY_QUERY: &str =
-    "{ page { mixed { __typename id children { __typename id ... on Item { __typename id } } } } }";
+    "{ children { __typename id ... on Item { __typename id } } }";
 const MIXED_LIST_TITLE_QUERY: &str = "query($representations: [_Any!]!) { _entities(representations: $representations) { ... on Item { title } } }";
 
 #[tokio::test(flavor = "multi_thread")]
 async fn defer_under_type_condition_in_mixed_list() {
     let subgraphs = mixed_list_subgraphs(
-        "children",
         MIXED_LIST_PRIMARY_QUERY,
         MIXED_LIST_TITLE_QUERY,
         serde_json::json!({"data": {"_entities": [{"title": "Item 2"}]}}),
     );
     let (primary, incremental) = run_mixed_list_defer(
-        r#"{ page { mixed { id children { id ... on Item { ... @defer(label: "d") { title } } } } } }"#,
+        r#"{ children { id ... on Item { ... @defer(label: "d") { title } } } }"#,
         subgraphs,
     )
     .await;
@@ -1334,7 +1330,7 @@ async fn defer_under_type_condition_in_mixed_list() {
         vec![serde_json::json!({
             "label": "d",
             "data": {"title": "Item 2"},
-            "path": ["page", "mixed", 1, "children", 0],
+            "path": ["children", 1],
         })]
     );
 }
@@ -1342,13 +1338,12 @@ async fn defer_under_type_condition_in_mixed_list() {
 #[tokio::test(flavor = "multi_thread")]
 async fn defer_on_type_conditioned_fragment_in_mixed_list() {
     let subgraphs = mixed_list_subgraphs(
-        "children",
         MIXED_LIST_PRIMARY_QUERY,
         MIXED_LIST_TITLE_QUERY,
         serde_json::json!({"data": {"_entities": [{"title": "Item 2"}]}}),
     );
     let (primary, incremental) = run_mixed_list_defer(
-        r#"{ page { mixed { id children { id ... on Item @defer(label: "d") { title } } } } }"#,
+        r#"{ children { id ... on Item @defer(label: "d") { title } } }"#,
         subgraphs,
     )
     .await;
@@ -1358,7 +1353,7 @@ async fn defer_on_type_conditioned_fragment_in_mixed_list() {
         vec![serde_json::json!({
             "label": "d",
             "data": {"title": "Item 2"},
-            "path": ["page", "mixed", 1, "children", 0],
+            "path": ["children", 1],
         })]
     );
 }
@@ -1366,14 +1361,13 @@ async fn defer_on_type_conditioned_fragment_in_mixed_list() {
 #[tokio::test(flavor = "multi_thread")]
 async fn defer_fragment_spread_in_mixed_list() {
     let subgraphs = mixed_list_subgraphs(
-        "children",
         MIXED_LIST_PRIMARY_QUERY,
         MIXED_LIST_TITLE_QUERY,
         serde_json::json!({"data": {"_entities": [{"title": "Item 2"}]}}),
     );
     let (primary, incremental) = run_mixed_list_defer(
         r#"
-        { page { mixed { id children { id ...ItemTitle @defer(label: "d") } } } }
+        { children { id ...ItemTitle @defer(label: "d") } }
         fragment ItemTitle on Item { title }
         "#,
         subgraphs,
@@ -1385,7 +1379,7 @@ async fn defer_fragment_spread_in_mixed_list() {
         vec![serde_json::json!({
             "label": "d",
             "data": {"title": "Item 2"},
-            "path": ["page", "mixed", 1, "children", 0],
+            "path": ["children", 1],
         })]
     );
 }
@@ -1395,34 +1389,29 @@ async fn defer_fragment_spread_in_mixed_list() {
 #[tokio::test(flavor = "multi_thread")]
 async fn defer_on_sibling_type_conditions_in_mixed_list() {
     let subgraphs = mixed_list_subgraphs(
-        "children",
-        "{ page { mixed { __typename id children { __typename id ... on Item { __typename id } ... on Other { label } } } } }",
+        "{ children { __typename id ... on Item { __typename id } ... on Other { label } } }",
         MIXED_LIST_TITLE_QUERY,
         serde_json::json!({"data": {"_entities": [{"title": "Item 2"}]}}),
     );
     let (primary, incremental) = run_mixed_list_defer(
-        r#"{ page { mixed { id children { id
+        r#"{ children { id
             ... on Item { ... @defer { title } }
             ... on Other { ... @defer { label } }
-        } } } }"#,
+        } }"#,
         subgraphs,
     )
     .await;
     assert_eq!(primary.errors, vec![], "{primary:?}");
     assert_eq!(
         json!(primary.data),
-        json!({"page": {"mixed": [
-            {"id": "m1", "children": [{"id": "o1"}]},
-            {"id": "m2", "children": [{"id": "2"}]},
-            {"id": "m3", "children": [{"id": "o3"}]},
-        ]}})
+        json!({"children": [{"id": "o1"}, {"id": "2"}, {"id": "o3"}]})
     );
     assert_eq!(
         incremental,
         vec![
-            serde_json::json!({"data": {"label": "o1"}, "path": ["page", "mixed", 0, "children", 0]}),
-            serde_json::json!({"data": {"label": "o3"}, "path": ["page", "mixed", 2, "children", 0]}),
-            serde_json::json!({"data": {"title": "Item 2"}, "path": ["page", "mixed", 1, "children", 0]}),
+            serde_json::json!({"data": {"label": "o1"}, "path": ["children", 0]}),
+            serde_json::json!({"data": {"label": "o3"}, "path": ["children", 2]}),
+            serde_json::json!({"data": {"title": "Item 2"}, "path": ["children", 1]}),
         ]
     );
 }
@@ -1432,34 +1421,29 @@ async fn defer_on_sibling_type_conditions_in_mixed_list() {
 #[tokio::test(flavor = "multi_thread")]
 async fn defer_on_sibling_type_conditioned_fragments_in_mixed_list() {
     let subgraphs = mixed_list_subgraphs(
-        "children",
-        "{ page { mixed { __typename id children { __typename id ... on Item { __typename id } ... on Other { label } } } } }",
+        "{ children { __typename id ... on Item { __typename id } ... on Other { label } } }",
         MIXED_LIST_TITLE_QUERY,
         serde_json::json!({"data": {"_entities": [{"title": "Item 2"}]}}),
     );
     let (primary, incremental) = run_mixed_list_defer(
-        r#"{ page { mixed { id children { id
+        r#"{ children { id
             ... on Item @defer { title }
             ... on Other @defer { label }
-        } } } }"#,
+        } }"#,
         subgraphs,
     )
     .await;
     assert_eq!(primary.errors, vec![], "{primary:?}");
     assert_eq!(
         json!(primary.data),
-        json!({"page": {"mixed": [
-            {"id": "m1", "children": [{"id": "o1"}]},
-            {"id": "m2", "children": [{"id": "2"}]},
-            {"id": "m3", "children": [{"id": "o3"}]},
-        ]}})
+        json!({"children": [{"id": "o1"}, {"id": "2"}, {"id": "o3"}]})
     );
     assert_eq!(
         incremental,
         vec![
-            serde_json::json!({"data": {"label": "o1"}, "path": ["page", "mixed", 0, "children", 0]}),
-            serde_json::json!({"data": {"label": "o3"}, "path": ["page", "mixed", 2, "children", 0]}),
-            serde_json::json!({"data": {"title": "Item 2"}, "path": ["page", "mixed", 1, "children", 0]}),
+            serde_json::json!({"data": {"label": "o1"}, "path": ["children", 0]}),
+            serde_json::json!({"data": {"label": "o3"}, "path": ["children", 2]}),
+            serde_json::json!({"data": {"title": "Item 2"}, "path": ["children", 1]}),
         ]
     );
 }
@@ -1469,17 +1453,16 @@ async fn defer_on_sibling_type_conditioned_fragments_in_mixed_list() {
 #[tokio::test(flavor = "multi_thread")]
 async fn defer_in_fragment_spread_under_sibling_type_conditions_in_mixed_list() {
     let subgraphs = mixed_list_subgraphs(
-        "children",
-        "{ page { mixed { __typename id children { __typename ... on Item { id } ... on Other { id } } } } }",
+        "{ children { __typename ... on Item { id } ... on Other { id } } }",
         MIXED_LIST_TITLE_QUERY,
         serde_json::json!({"data": {"_entities": [{"title": "Item 2"}]}}),
     );
     let (primary, incremental) = run_mixed_list_defer(
         r#"
-        { page { mixed { id children {
+        { children {
             ... on Item { ...Deferred }
             ... on Other { ...Deferred }
-        } } } }
+        } }
         fragment Deferred on Component { ... @defer(label: "d") { id } }
         "#,
         subgraphs,
@@ -1489,9 +1472,9 @@ async fn defer_in_fragment_spread_under_sibling_type_conditions_in_mixed_list() 
     assert_eq!(
         incremental,
         vec![
-            serde_json::json!({"label": "d", "data": {"id": "2"}, "path": ["page", "mixed", 1, "children", 0]}),
-            serde_json::json!({"label": "d", "data": {"id": "o1"}, "path": ["page", "mixed", 0, "children", 0]}),
-            serde_json::json!({"label": "d", "data": {"id": "o3"}, "path": ["page", "mixed", 2, "children", 0]}),
+            serde_json::json!({"label": "d", "data": {"id": "2"}, "path": ["children", 1]}),
+            serde_json::json!({"label": "d", "data": {"id": "o1"}, "path": ["children", 0]}),
+            serde_json::json!({"label": "d", "data": {"id": "o3"}, "path": ["children", 2]}),
         ]
     );
 }
@@ -1501,17 +1484,16 @@ async fn defer_in_fragment_spread_under_sibling_type_conditions_in_mixed_list() 
 #[tokio::test(flavor = "multi_thread")]
 async fn defer_in_fragment_spread_under_sibling_type_conditions_with_entity_fetch_in_mixed_list() {
     let subgraphs = mixed_list_subgraphs(
-        "children",
-        "{ page { mixed { __typename id children { __typename ... on Item { __typename id } ... on Other { label } } } } }",
+        "{ children { __typename ... on Item { __typename id } ... on Other { label } } }",
         MIXED_LIST_TITLE_QUERY,
         serde_json::json!({"data": {"_entities": [{"title": "Item 2"}]}}),
     );
     let (primary, incremental) = run_mixed_list_defer(
         r#"
-        { page { mixed { id children {
+        { children {
             ... on Item { ...Deferred }
             ... on Other { ...Deferred }
-        } } } }
+        } }
         fragment Deferred on Component {
             ... @defer(label: "d") { ... on Item { title } ... on Other { label } }
         }
@@ -1523,9 +1505,9 @@ async fn defer_in_fragment_spread_under_sibling_type_conditions_with_entity_fetc
     assert_eq!(
         incremental,
         vec![
-            serde_json::json!({"label": "d", "data": {"label": "o1"}, "path": ["page", "mixed", 0, "children", 0]}),
-            serde_json::json!({"label": "d", "data": {"label": "o3"}, "path": ["page", "mixed", 2, "children", 0]}),
-            serde_json::json!({"label": "d", "data": {"title": "Item 2"}, "path": ["page", "mixed", 1, "children", 0]}),
+            serde_json::json!({"label": "d", "data": {"label": "o1"}, "path": ["children", 0]}),
+            serde_json::json!({"label": "d", "data": {"label": "o3"}, "path": ["children", 2]}),
+            serde_json::json!({"label": "d", "data": {"title": "Item 2"}, "path": ["children", 1]}),
         ]
     );
 }
@@ -1534,35 +1516,38 @@ async fn defer_in_fragment_spread_under_sibling_type_conditions_with_entity_fetc
 #[tokio::test(flavor = "multi_thread")]
 async fn defer_twice_at_same_path_in_mixed_list() {
     let subgraphs = mixed_list_subgraphs(
-        "children",
-        "{ page { mixed { __typename id children { __typename id ... on Other { label } } } } }",
+        "{ children { __typename id ... on Other { label } } }",
         MIXED_LIST_TITLE_QUERY,
         serde_json::json!({"data": {"_entities": [{"title": "Item 2"}]}}),
     );
     let (primary, incremental) = run_mixed_list_defer(
-        r#"{ page { mixed { id
-            ... @defer { children { id } }
-            ... @defer { children { ... on Other { label } } }
-        } } }"#,
+        r#"{ children { __typename
+            ... @defer { id }
+            ... @defer { ... on Other { label } }
+        } }"#,
         subgraphs,
     )
     .await;
     assert_eq!(primary.errors, vec![], "{primary:?}");
     assert_eq!(
         json!(primary.data),
-        json!({"page": {"mixed": [{"id": "m1"}, {"id": "m2"}, {"id": "m3"}]}})
+        json!({"children": [
+            {"__typename": "Other"},
+            {"__typename": "Item"},
+            {"__typename": "Other"},
+        ]})
     );
     assert_eq!(
         incremental,
         vec![
-            serde_json::json!({"data": {"children": [{"id": "2"}]}, "path": ["page", "mixed", 1]}),
-            serde_json::json!({"data": {"children": [{"id": "o1"}]}, "path": ["page", "mixed", 0]}),
-            serde_json::json!({"data": {"children": [{"id": "o3"}]}, "path": ["page", "mixed", 2]}),
-            serde_json::json!({"data": {"children": [{"label": "o1"}]}, "path": ["page", "mixed", 0]}),
-            serde_json::json!({"data": {"children": [{"label": "o3"}]}, "path": ["page", "mixed", 2]}),
-            // The deferred fragment applies to every container, and `... on Other` selects
-            // nothing on an `Item`.
-            serde_json::json!({"data": {"children": [{}]}, "path": ["page", "mixed", 1]}),
+            serde_json::json!({"data": {"id": "2"}, "path": ["children", 1]}),
+            serde_json::json!({"data": {"id": "o1"}, "path": ["children", 0]}),
+            serde_json::json!({"data": {"id": "o3"}, "path": ["children", 2]}),
+            serde_json::json!({"data": {"label": "o1"}, "path": ["children", 0]}),
+            serde_json::json!({"data": {"label": "o3"}, "path": ["children", 2]}),
+            // The deferred fragment applies to every child, and `... on Other` selects nothing
+            // on an `Item`.
+            serde_json::json!({"data": {}, "path": ["children", 1]}),
         ]
     );
 }
@@ -1571,31 +1556,30 @@ async fn defer_twice_at_same_path_in_mixed_list() {
 #[tokio::test(flavor = "multi_thread")]
 async fn defer_under_type_condition_with_typename_in_mixed_list() {
     let subgraphs = mixed_list_subgraphs(
-        "children",
         MIXED_LIST_PRIMARY_QUERY,
         MIXED_LIST_TITLE_QUERY,
         serde_json::json!({"data": {"_entities": [{"title": "Item 2"}]}}),
     );
     let (primary, incremental) = run_mixed_list_defer(
-        r#"{ page { mixed { id children { __typename id ... on Item { ... @defer(label: "d") { title } } } } } }"#,
+        r#"{ children { __typename id ... on Item { ... @defer(label: "d") { title } } } }"#,
         subgraphs,
     )
     .await;
     assert_eq!(primary.errors, vec![], "{primary:?}");
     assert_eq!(
         json!(primary.data),
-        json!({"page": {"mixed": [
-            {"id": "m1", "children": [{"__typename": "Other", "id": "o1"}]},
-            {"id": "m2", "children": [{"__typename": "Item", "id": "2"}]},
-            {"id": "m3", "children": [{"__typename": "Other", "id": "o3"}]},
-        ]}})
+        json!({"children": [
+            {"__typename": "Other", "id": "o1"},
+            {"__typename": "Item", "id": "2"},
+            {"__typename": "Other", "id": "o3"},
+        ]})
     );
     assert_eq!(
         incremental,
         vec![serde_json::json!({
             "label": "d",
             "data": {"title": "Item 2"},
-            "path": ["page", "mixed", 1, "children", 0],
+            "path": ["children", 1],
         })]
     );
 }
@@ -1604,15 +1588,14 @@ async fn defer_under_type_condition_with_typename_in_mixed_list() {
 /// Such a case in a deferred selection returns a value completion error in the
 /// incremental response. 
 #[tokio::test(flavor = "multi_thread")]
-async fn defer_under_type_condition_null_in_nullable_list() {
+async fn defer_under_type_condition_null_in_mixed_list() {
     let subgraphs = mixed_list_subgraphs(
-        "optionalChildren",
-        "{ page { mixed { __typename id optionalChildren { __typename id ... on Item { __typename id } } } } }",
+        MIXED_LIST_PRIMARY_QUERY,
         MIXED_LIST_TITLE_QUERY,
         serde_json::json!({"data": {"_entities": [{"title": null}]}}),
     );
     let (primary, incremental) = run_mixed_list_defer(
-        r#"{ page { mixed { id optionalChildren { id ... on Item { ... @defer(label: "d") { title } } } } } }"#,
+        r#"{ children { id ... on Item { ... @defer(label: "d") { title } } } }"#,
         subgraphs,
     )
     .await;
@@ -1621,10 +1604,10 @@ async fn defer_under_type_condition_null_in_nullable_list() {
         incremental,
         vec![serde_json::json!({
             "label": "d",
-            "path": ["page", "mixed", 1, "optionalChildren", 0],
+            "path": ["children", 1],
             "extensions": {"valueCompletion": [{
                 "message": "Null value found for non-nullable type String",
-                "path": ["page", "mixed", 1, "optionalChildren", 0, "title"],
+                "path": ["children", 1, "title"],
             }]},
         })]
     );
@@ -1633,7 +1616,6 @@ async fn defer_under_type_condition_null_in_nullable_list() {
 #[tokio::test(flavor = "multi_thread")]
 async fn defer_authenticated_field_under_type_condition_in_mixed_list() {
     let subgraphs = mixed_list_subgraphs(
-        "children",
         MIXED_LIST_PRIMARY_QUERY,
         // `secret` is filtered out of the query plan, so the entity fetch only asks for `title`.
         MIXED_LIST_TITLE_QUERY,
@@ -1641,7 +1623,7 @@ async fn defer_authenticated_field_under_type_condition_in_mixed_list() {
         serde_json::json!({"data": {"_entities": [{"title": "Item 2", "secret": "leaked"}]}}),
     );
     let (primary, incremental) = run_mixed_list_defer_with_config(
-        r#"{ page { mixed { id children { id ... on Item { ... @defer(label: "d") { title secret } } } } } }"#,
+        r#"{ children { id ... on Item { ... @defer(label: "d") { title secret } } } }"#,
         subgraphs,
         serde_json::json!({
             "include_subgraph_errors": {
@@ -1657,19 +1639,12 @@ async fn defer_authenticated_field_under_type_condition_in_mixed_list() {
     .await;
     assert_eq!(
         json!(primary.data),
-        json!({"page": {"mixed": [
-            {"id": "m1", "children": [{"id": "o1"}]},
-            {"id": "m2", "children": [{"id": "2"}]},
-            {"id": "m3", "children": [{"id": "o3"}]},
-        ]}})
+        json!({"children": [{"id": "o1"}, {"id": "2"}, {"id": "o3"}]})
     );
     assert_eq!(incremental.len(), 1, "{incremental:?}");
     let item = &incremental[0];
     assert_eq!(item["label"], "d");
-    assert_eq!(
-        item["path"],
-        serde_json::json!(["page", "mixed", 1, "children", 0])
-    );
+    assert_eq!(item["path"], serde_json::json!(["children", 1]));
     assert_eq!(
         item["data"],
         serde_json::json!({"title": "Item 2", "secret": null})
