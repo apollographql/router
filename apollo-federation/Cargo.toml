@@ -18,13 +18,13 @@ snapshot_tracing = ["ron"]
 # `correctness` feature enables the `correctness` module.
 correctness = []
 # Builds the `connect-migrate` binary in `connectors/migration/`.
-# Pulls in clap + apollo-parser only when the binary is being built.
-connect-migrate = ["dep:clap", "dep:apollo-parser", "time/formatting"]
+# Pulls in clap only when the binary is being built.
+connect-migrate = ["dep:clap", "time/formatting"]
 
 [dependencies]
 ahash.workspace = true
 apollo-compiler.workspace = true
-apollo-parser = { workspace = true, optional = true }
+apollo-parser.workspace = true
 clap = { version = "4", features = ["derive"], optional = true }
 time = { version = "0.3.34", default-features = false, features = [
   "local-offset",
