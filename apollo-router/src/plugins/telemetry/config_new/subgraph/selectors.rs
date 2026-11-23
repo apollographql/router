@@ -9,6 +9,7 @@ use crate::context::OPERATION_NAME;
 use crate::plugins::limits::operation_limits::OperationLimits;
 use crate::plugins::response_cache;
 use crate::plugins::telemetry::config::AttributeValue;
+use crate::plugins::telemetry::config_new::ArrayJsonPath;
 use crate::plugins::telemetry::config_new::Selector;
 use crate::plugins::telemetry::config_new::Stage;
 use crate::plugins::telemetry::config_new::ToOtelValue;
@@ -571,14 +572,13 @@ impl Selector for SubgraphSelector {
                 subgraph_response_data,
                 default,
                 ..
-            } => if let Some(data) = &response.response.body().data {
-                let val = subgraph_response_data.find(data);
-
-                val.maybe_to_otel_value()
-            } else {
-                None
-            }
-            .or_else(|| default.maybe_to_otel_value()),
+            } => response
+                .response
+                .body()
+                .data
+                .as_ref()
+                .and_then(|data| subgraph_response_data.evaluate(data))
+                .or_else(|| default.maybe_to_otel_value()),
             SubgraphSelector::SubgraphResponseErrors {
                 subgraph_response_errors: subgraph_response_error,
                 default,
@@ -587,9 +587,7 @@ impl Selector for SubgraphSelector {
                 let errors = response.response.body().errors.clone();
                 let data: serde_json_bytes::Value = serde_json_bytes::to_value(errors).ok()?;
 
-                let val = subgraph_response_error.find(&data);
-
-                val.maybe_to_otel_value()
+                subgraph_response_error.evaluate(&data)
             }
             .or_else(|| default.maybe_to_otel_value()),
             SubgraphSelector::ResponseContext {
@@ -845,6 +843,21 @@ impl Selector for SubgraphSelector {
             ),
             Stage::Drop => matches!(self, SubgraphSelector::StaticField { .. }),
         }
+    }
+
+    fn array_json_path(&self) -> Option<ArrayJsonPath<'_>> {
+        let path = match self {
+            SubgraphSelector::SubgraphResponseData {
+                subgraph_response_data,
+                ..
+            } => subgraph_response_data,
+            SubgraphSelector::SubgraphResponseErrors {
+                subgraph_response_errors,
+                ..
+            } => subgraph_response_errors,
+            _ => return None,
+        };
+        (!path.is_singular()).then_some(ArrayJsonPath::Path(path))
     }
 }
 
@@ -2135,6 +2148,49 @@ mod test {
                 ]
                 .into()
             )
+        );
+    }
+
+    #[test]
+    fn subgraph_response_non_singular_paths_are_always_arrays() {
+        let selector = SubgraphSelector::SubgraphResponseData {
+            subgraph_response_data: SelectorJsonPath::from_str("$.products[*].id").unwrap(),
+            default: Some("none".into()),
+        };
+        let response = |data| {
+            crate::services::SubgraphResponse::fake_builder()
+                .data(data)
+                .build()
+        };
+        assert_eq!(
+            selector.on_response(&response(
+                serde_json_bytes::json!({"products": [{"id": 1}]})
+            )),
+            Some(opentelemetry::Value::Array(vec![1i64].into()))
+        );
+        assert_eq!(
+            selector.on_response(&response(serde_json_bytes::json!({"products": []}))),
+            Some("none".into())
+        );
+
+        let selector = SubgraphSelector::SubgraphResponseErrors {
+            subgraph_response_errors: SelectorJsonPath::from_str("$[*].message").unwrap(),
+            default: None,
+        };
+        assert_eq!(
+            selector.on_response(
+                &crate::services::SubgraphResponse::fake_builder()
+                    .errors(vec![
+                        crate::graphql::Error::builder()
+                            .message("not found")
+                            .extension_code("NOT_FOUND")
+                            .build()
+                    ])
+                    .build()
+            ),
+            Some(opentelemetry::Value::Array(
+                vec![StringValue::from("not found")].into()
+            ))
         );
     }
 
