@@ -1690,3 +1690,64 @@ mod internal_root_type {
         );
     }
 }
+
+mod cross_schema_order {
+    use super::*;
+
+    const A: &str = r#"
+        type Query { productById(id: ID!): Product @lookup }
+        type Product @key(fields: "id") {
+          id: ID!
+          shippingCost(weight: Float @require(field: "weight")): Float
+        }
+    "#;
+    const REQUIRED: &str = r#"
+        enum WeightUnit { KG LB }
+        type Query { productByIdB(id: ID!): Product @lookup }
+        type Product @key(fields: "id") { id: ID! weight(unit: WeightUnit!): Float @shareable }
+    "#;
+    const OPTIONAL: &str = r#"
+        enum WeightUnit { KG LB }
+        type Query { productByIdC(id: ID!): Product @lookup }
+        type Product @key(fields: "id") { id: ID! weight(unit: WeightUnit): Float @shareable }
+    "#;
+
+    #[test]
+    fn require_argument_check_does_not_depend_on_subgraph_order() {
+        assert_error_codes(
+            &[("a", A), ("b", REQUIRED), ("c", OPTIONAL)],
+            &["REQUIRE_INVALID_FIELDS"],
+        );
+        assert_error_codes(
+            &[("a", A), ("b", OPTIONAL), ("c", REQUIRED)],
+            &["REQUIRE_INVALID_FIELDS"],
+        );
+    }
+
+    #[test]
+    fn require_own_field_with_type_condition_is_reported() {
+        assert_error_codes(
+            &[
+                (
+                    "a",
+                    r#"
+                    type Query { bookById(id: ID!): Book @lookup }
+                    type Book @key(fields: "id") {
+                      id: ID!
+                      size: Int @shareable
+                      pages(pageSize: Int @require(field: "<Book>.size")): Int
+                    }
+                    "#,
+                ),
+                (
+                    "b",
+                    r#"
+                    type Query { bookByIdInB(id: ID!): Book @lookup }
+                    type Book @key(fields: "id") { id: ID! size: Int @shareable }
+                    "#,
+                ),
+            ],
+            &["REQUIRE_INVALID_FIELDS"],
+        );
+    }
+}
