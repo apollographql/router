@@ -1601,7 +1601,8 @@ async fn defer_under_type_condition_with_typename_in_mixed_list() {
 }
 
 /// A null deferred non-null field nulls its element in a nullable list (say that 10 times fast!).
-/// The incremental response is still sent with `data: null`, carrying the error.
+/// Such a case in a deferred selection returns a value completion error in the
+/// incremental response. 
 #[tokio::test(flavor = "multi_thread")]
 async fn defer_under_type_condition_null_in_nullable_list() {
     let subgraphs = mixed_list_subgraphs(
@@ -1636,7 +1637,7 @@ async fn defer_authenticated_field_under_type_condition_in_mixed_list() {
         MIXED_LIST_PRIMARY_QUERY,
         // `secret` is filtered out of the query plan, so the entity fetch only asks for `title`.
         MIXED_LIST_TITLE_QUERY,
-        // Authorization filtering keeps `secret` from reaching the client, since the subgraph still returns it. 
+        // Authorization filtering keeps `secret` from reaching the client, since the subgraph still returns it.
         serde_json::json!({"data": {"_entities": [{"title": "Item 2", "secret": "leaked"}]}}),
     );
     let (primary, incremental) = run_mixed_list_defer_with_config(
