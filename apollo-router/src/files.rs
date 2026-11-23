@@ -100,11 +100,9 @@ where
         config,
     )
     .unwrap_or_else(|_| panic!("could not create watch on: {config_file_path:?}"));
-    // Callers read the path on the initial event and report a missing file themselves, so a
-    // path that can't be watched mustn't stop them.
     if let Err(err) = watcher.watch(&config_file_path, RecursiveMode::NonRecursive) {
         tracing::error!(
-            "could not watch {config_file_path:?}, so changes to it won't be reloaded until the router restarts: {err}"
+            "Could not watch {config_file_path:?}: {err}. Changes won't be reloaded until the router restarts."
         );
     }
     // Tell watchers once they should read the file once,
@@ -195,7 +193,7 @@ where
     .unwrap_or_else(|_| panic!("could not create watch on: {rhai_source_path:?}"));
     if let Err(err) = watcher.watch(&rhai_source_path, RecursiveMode::Recursive) {
         tracing::error!(
-            "could not watch {rhai_source_path:?}, so changes to it won't be reloaded until the router restarts: {err}"
+            "Could not watch {config_file_path:?}: {err}. Changes won't be reloaded until the router restarts."
         );
     }
     // Tell watchers once they should read the file once,
