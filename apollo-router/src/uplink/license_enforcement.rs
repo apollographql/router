@@ -151,7 +151,7 @@ impl LicenseEnforcementReport {
         license: Arc<LicenseState>,
     ) -> LicenseEnforcementReport {
         LicenseEnforcementReport {
-            restricted_config_in_use: Self::validate_configuration(configuration, &license),
+            restricted_config_in_use: Self::validate_configuration(configuration, schema, &license),
             restricted_schema_in_use: Self::validate_schema(
                 schema,
                 &Self::schema_restrictions(&license),
@@ -179,10 +179,11 @@ impl LicenseEnforcementReport {
         config_paths.chain(schema_directives).collect()
     }
 
-    /// The settings in effect in `configuration` that need a license feature `license` lacks,
-    /// ordered by path.
+    /// The settings in effect in `configuration`, served with `schema`, that need a license
+    /// feature `license` lacks, ordered by path.
     fn validate_configuration(
         configuration: &Configuration,
+        schema: &Schema,
         license: &LicenseState,
     ) -> Vec<LicensedSetting> {
         let allowed_features = license.get_allowed_features();
@@ -192,7 +193,11 @@ impl LicenseEnforcementReport {
             .chain(configuration.plugins.iter())
             .map(|(_, parsed)| parsed);
         let mut violations: Vec<LicensedSetting> = plugins
-            .flat_map(|parsed| parsed.factory.licensed_features(&parsed.config))
+            .flat_map(|parsed| {
+                parsed
+                    .factory
+                    .licensed_features(&parsed.config, schema.supergraph_schema())
+            })
             .chain(Self::licensed_top_level_settings(configuration))
             .filter(|setting| !allowed_features.contains(&setting.feature))
             .collect();

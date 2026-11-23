@@ -76,7 +76,7 @@ type InstanceFactory =
 
 type SchemaFactory = fn(&mut SchemaGenerator) -> schemars::Schema;
 
-type LicensedFeaturesFactory = fn(&PluginConfig) -> Vec<LicensedSetting>;
+type LicensedFeaturesFactory = fn(&PluginConfig, &Schema) -> Vec<LicensedSetting>;
 
 /// A plugin's config, deserialized when the router configuration is parsed. It validates
 /// itself, so the configuration can run every plugin's rules without knowing their types.
@@ -387,11 +387,11 @@ impl PluginFactory {
             },
             schema_factory: |generator| generator.subschema_for::<<P as PluginPrivate>::Config>(),
             // Panics rather than reporting no settings, which would pass the license check.
-            licensed_features_factory: |config| {
+            licensed_features_factory: |config, supergraph| {
                 let config = config
                     .downcast_ref::<P::Config>()
                     .expect("a plugin's section is always parsed or built as its own Config type");
-                P::licensed_features(config)
+                P::licensed_features(config, supergraph)
             },
             type_id: TypeId::of::<P>(),
         }
@@ -453,8 +453,12 @@ impl PluginFactory {
 
     /// The settings in `config`, parsed by [`Self::parse_config`], that need a license.
     /// See [`PluginPrivate::licensed_features`].
-    pub(crate) fn licensed_features(&self, config: &PluginConfig) -> Vec<LicensedSetting> {
-        (self.licensed_features_factory)(config)
+    pub(crate) fn licensed_features(
+        &self,
+        config: &PluginConfig,
+        supergraph: &Schema,
+    ) -> Vec<LicensedSetting> {
+        (self.licensed_features_factory)(config, supergraph)
     }
 }
 
@@ -753,13 +757,15 @@ pub(crate) trait PluginPrivate: Send + Sync + 'static {
 
     const HIDDEN_FROM_CONFIG_JSON_SCHEMA: bool = false;
 
-    /// The settings in `config` that need a license feature.
+    /// The settings in `config` that need a license feature, when the router serves
+    /// `supergraph`.
     ///
     /// The startup license check calls this for every plugin with a section in the router
     /// configuration, and refuses to start or reload when the license lacks the feature a
     /// returned setting needs. Return only settings that are in effect: a section that turns a
-    /// licensed feature off needs no license. The default returns nothing.
-    fn licensed_features(_config: &Self::Config) -> Vec<LicensedSetting> {
+    /// licensed feature off, or whose feature `supergraph` doesn't use, needs no license. The
+    /// default returns nothing.
+    fn licensed_features(_config: &Self::Config, _supergraph: &Schema) -> Vec<LicensedSetting> {
         Vec::new()
     }
 

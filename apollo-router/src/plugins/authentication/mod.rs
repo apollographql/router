@@ -232,7 +232,10 @@ fn default_poll_interval() -> Duration {
 impl PluginPrivate for AuthenticationPlugin {
     type Config = Conf;
 
-    fn licensed_features(config: &Self::Config) -> Vec<LicensedSetting> {
+    fn licensed_features(
+        config: &Self::Config,
+        _supergraph: &apollo_compiler::Schema,
+    ) -> Vec<LicensedSetting> {
         [
             (config.router.is_some(), "authentication.router"),
             (config.subgraph.is_some(), "authentication.subgraph"),

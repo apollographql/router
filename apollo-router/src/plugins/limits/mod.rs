@@ -280,7 +280,10 @@ impl LimitsPlugin {
 impl PluginPrivate for LimitsPlugin {
     type Config = Config;
 
-    fn licensed_features(config: &Self::Config) -> Vec<LicensedSetting> {
+    fn licensed_features(
+        config: &Self::Config,
+        _supergraph: &apollo_compiler::Schema,
+    ) -> Vec<LicensedSetting> {
         // Parser limits such as `parser_max_recursion` only configure the GraphQL parser and are
         // not licensed.
         let router = &config.router;

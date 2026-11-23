@@ -24,7 +24,10 @@ register_private_plugin!("experimental", "restricted", Restricted);
 impl PluginPrivate for Restricted {
     type Config = Config;
 
-    fn licensed_features(config: &Self::Config) -> Vec<LicensedSetting> {
+    fn licensed_features(
+        config: &Self::Config,
+        _supergraph: &apollo_compiler::Schema,
+    ) -> Vec<LicensedSetting> {
         if config.enabled {
             vec![LicensedSetting {
                 feature: AllowedFeature::Experimental,

@@ -190,7 +190,10 @@ type HTTPClientService = tower::timeout::Timeout<crate::services::http::HttpClie
 impl PluginPrivate for CoprocessorPlugin<HTTPClientService> {
     type Config = Conf;
 
-    fn licensed_features(_config: &Self::Config) -> Vec<LicensedSetting> {
+    fn licensed_features(
+        _config: &Self::Config,
+        _supergraph: &apollo_compiler::Schema,
+    ) -> Vec<LicensedSetting> {
         vec![LicensedSetting {
             feature: AllowedFeature::Coprocessors,
             path: "coprocessor",

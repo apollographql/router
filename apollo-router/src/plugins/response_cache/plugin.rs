@@ -461,7 +461,10 @@ impl PluginPrivate for ResponseCache {
     const HIDDEN_FROM_CONFIG_JSON_SCHEMA: bool = true;
     type Config = Config;
 
-    fn licensed_features(config: &Self::Config) -> Vec<LicensedSetting> {
+    fn licensed_features(
+        config: &Self::Config,
+        _supergraph: &apollo_compiler::Schema,
+    ) -> Vec<LicensedSetting> {
         if config.enabled {
             vec![LicensedSetting {
                 feature: AllowedFeature::ResponseCaching,

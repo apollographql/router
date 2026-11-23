@@ -269,7 +269,10 @@ pub(crate) fn default_listen_addr() -> ListenAddr {
 impl PluginPrivate for Subscription {
     type Config = SubscriptionConfig;
 
-    fn licensed_features(config: &Self::Config) -> Vec<LicensedSetting> {
+    fn licensed_features(
+        config: &Self::Config,
+        _supergraph: &apollo_compiler::Schema,
+    ) -> Vec<LicensedSetting> {
         if config.enabled {
             vec![LicensedSetting {
                 feature: AllowedFeature::Subscriptions,
