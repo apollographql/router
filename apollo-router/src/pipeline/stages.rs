@@ -509,9 +509,10 @@ pub(crate) fn build_query_parsing_service(
 
     ServiceBuilder::new()
         .layer(QueryParsingCacheLayer::new(cache_config))
-        .apply_required_plugin_layer(plugins, |a: &AuthorizationPlugin| {
-            tower::util::option_layer(a.authorization_requirements_layer())
-        })
+        .apply_required_plugin_layer(
+            plugins,
+            AuthorizationPlugin::authorization_requirements_layer,
+        )
         .layer(LimitRecursiveSelectionLayer::new(
             max_recursive_selections,
             warn_only,
@@ -684,9 +685,10 @@ pub(crate) fn build_router_service(
             query_parsing_service,
             configuration.supergraph.redact_query_validation_errors,
         ))
-        .apply_required_plugin_layer(&plugins, |a: &AuthorizationPlugin| {
-            tower::util::option_layer(a.extract_authorization_checks_layer())
-        })
+        .apply_required_plugin_layer(
+            &plugins,
+            AuthorizationPlugin::extract_authorization_checks_layer,
+        )
         .option_layer(extended_references.then(|| ExtendedReferencesLayer::new(schema)))
         .layer(EnforceSafelistLayer::new(persisted_queries))
         .service(supergraph_service)

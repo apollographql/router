@@ -16,6 +16,7 @@ use serde_json_bytes::Value;
 use tower::BoxError;
 use tower::ServiceBuilder;
 use tower::ServiceExt;
+use tower::util::option_layer;
 
 use self::authenticated::AUTHENTICATED_DIRECTIVE_NAME;
 use self::authenticated::AUTHENTICATED_SPEC_VERSION_RANGE;
@@ -36,6 +37,7 @@ use crate::Context;
 use crate::error::QueryPlannerError;
 use crate::graphql;
 use crate::json_ext::Path;
+use crate::layers::OptionLayer;
 use crate::layers::ServiceBuilderExt;
 use crate::plugin::PluginInit;
 use crate::plugin::PluginPrivate;
@@ -262,27 +264,29 @@ impl AuthorizationPlugin {
     }
 
     /// Returns a layer for the query parsing service that stores each parsed operation's
-    /// authorization requirements on its document, or `None` when authorization directives
-    /// are disabled or the supergraph links none of them.
+    /// authorization requirements on its document. It does nothing when authorization
+    /// directives are disabled or the supergraph links none of them.
     pub(crate) fn authorization_requirements_layer(
         &self,
-    ) -> Option<AuthorizationRequirementsLayer> {
-        self.directives_in_effect().then(|| {
+    ) -> OptionLayer<AuthorizationRequirementsLayer> {
+        option_layer(self.directives_in_effect().then(|| {
             AuthorizationRequirementsLayer::new(
                 self.supergraph_schema.clone(),
                 self.directives.clone(),
             )
-        })
+        }))
     }
 
     /// Returns the router-service layer that writes each operation's authorization
-    /// requirements into the request context, or `None` when authorization directives are
-    /// disabled or the supergraph links none of them.
+    /// requirements into the request context. It does nothing when authorization directives
+    /// are disabled or the supergraph links none of them.
     pub(crate) fn extract_authorization_checks_layer(
         &self,
-    ) -> Option<ExtractAuthorizationChecksLayer> {
-        self.directives_in_effect()
-            .then_some(ExtractAuthorizationChecksLayer)
+    ) -> OptionLayer<ExtractAuthorizationChecksLayer> {
+        option_layer(
+            self.directives_in_effect()
+                .then_some(ExtractAuthorizationChecksLayer),
+        )
     }
 
     /// Whether directives are enabled and the supergraph links at least one of them. Both
