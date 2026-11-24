@@ -98,25 +98,15 @@ where
                 .extensions()
                 .with_lock(|lock| lock.get::<ParsedDocument>().cloned());
 
-            let doc = match doc {
-                Some(doc) => doc,
-                None => {
-                    // We shouldn't ever reach here unless the pipeline was set up improperly
-                    // (i.e. programmer error: this layer must run after `ParseQueryLayer`), but
-                    // do something better than panicking just in case.
-                    let errors = vec![
-                        Error::builder()
-                            .message("Cannot find executable document".to_string())
-                            .extension_code("MISSING_EXECUTABLE_DOCUMENT")
-                            .build(),
-                    ];
-                    return Ok(supergraph::Response::builder()
-                        .errors(errors)
-                        .status_code(StatusCode::INTERNAL_SERVER_ERROR)
-                        .context(req.context)
-                        .build()
-                        .expect("response is valid"));
-                }
+            // We shouldn't ever reach here unless the pipeline was set up improperly (i.e.
+            // programmer error: this layer must run after `ParseQueryLayer`), but do something
+            // better than panicking just in case.
+            let Some(doc) = doc else {
+                return Ok(internal_error(
+                    req,
+                    "Cannot find executable document",
+                    "MISSING_EXECUTABLE_DOCUMENT",
+                ));
             };
 
             // Requirements are stored on the document only when the authorization plugin is
@@ -149,6 +139,20 @@ where
             inner.call(req).await
         })
     }
+}
+
+fn internal_error(req: supergraph::Request, message: &str, code: &str) -> supergraph::Response {
+    supergraph::Response::builder()
+        .errors(vec![
+            Error::builder()
+                .message(message.to_string())
+                .extension_code(code)
+                .build(),
+        ])
+        .status_code(StatusCode::INTERNAL_SERVER_ERROR)
+        .context(req.context)
+        .build()
+        .expect("response is valid")
 }
 
 #[cfg(test)]
