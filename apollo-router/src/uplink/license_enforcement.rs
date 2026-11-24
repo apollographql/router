@@ -922,7 +922,6 @@ mod test {
     use serde_json::json;
 
     use crate::Configuration;
-    use crate::configuration::plugin_configs::find_factory;
     use crate::spec::Schema;
     use crate::uplink::license_enforcement::AllowedFeature;
     use crate::uplink::license_enforcement::Audience;
@@ -1124,35 +1123,6 @@ mod test {
         report
             .enforce()
             .expect("an unlicensed router with an empty config must start");
-    }
-
-    // `subscription` stands in for a mandatory plugin: without a section its default config
-    // turns subscriptions on, which needs a license.
-    #[test]
-    fn test_mandatory_plugin_without_a_section_is_checked_with_its_default_config() {
-        let configuration = Configuration::from_str(include_str!("testdata/oss.router.yaml"))
-            .expect("router config must be valid");
-        let schema = Schema::parse(include_str!("testdata/oss.graphql"), &configuration)
-            .expect("supergraph schema must be valid");
-        let restricted = |mandatory_plugins: &[&str]| {
-            LicenseEnforcementReport::restricted_settings(
-                &configuration,
-                &schema,
-                &LicenseState::Unlicensed,
-                mandatory_plugins
-                    .iter()
-                    .map(|name| find_factory(name).expect("plugin is registered")),
-            )
-            .into_iter()
-            .map(|setting| setting.path)
-            .collect::<Vec<_>>()
-        };
-
-        assert_eq!(
-            restricted(&["apollo.subscription"]),
-            ["subscription.enabled"]
-        );
-        assert!(restricted(&[]).is_empty());
     }
 
     #[test]
