@@ -10,6 +10,8 @@ use apollo_federation::query_plan::query_planner::QueryPlanIncrementalDeliveryCo
 use apollo_federation::query_plan::query_planner::QueryPlanOptions;
 use apollo_federation::query_plan::query_planner::QueryPlannerConfig;
 
+use crate::query_plan::build_query_plan_support::find_fetch_nodes_for_subgraph;
+
 fn incremental_config() -> QueryPlannerConfig {
     incremental_config_with_fuel(100_000)
 }
@@ -7095,7 +7097,7 @@ fn inc_requires_alias_keeps_nested_key_fields() {
     // validate_correctness = false: the correctness checker rejects input
     // KeyRenamer rewrites, which this plan uses to rename an aliased
     // @requires condition back to its field name.
-    assert_plan!(
+    let plan = assert_plan!(
         validate_correctness = false,
         &planner,
         "{ t { label note } }",
@@ -7205,6 +7207,11 @@ fn inc_requires_alias_keeps_nested_key_fields() {
     }
     "###
     );
+    // The rename rides on both parts of each split input but applies once.
+    for fetch in find_fetch_nodes_for_subgraph("S3", &plan) {
+        let selection = fetch.kind.entity_selection().expect("an entity fetch");
+        assert_eq!(selection.input_rewrites.len(), 1);
+    }
 }
 
 /// Like `inc_requires_alias_keeps_nested_key_fields`, but S1 has no `owner`,

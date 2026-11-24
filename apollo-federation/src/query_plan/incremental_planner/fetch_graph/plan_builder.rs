@@ -1043,7 +1043,14 @@ impl FetchGraph {
             type_position: parent_type.clone(),
             selections: Arc::new(merged_selections),
         };
-        Ok((result, rewrites))
+        // An input split between parents carries its rewrites on each part.
+        let mut unique_rewrites: Vec<Arc<FetchDataRewrite>> = Vec::with_capacity(rewrites.len());
+        for rewrite in rewrites {
+            if !unique_rewrites.contains(&rewrite) {
+                unique_rewrites.push(rewrite);
+            }
+        }
+        Ok((result, unique_rewrites))
     }
 
     /// Filter the operation's variable definitions to those actually
