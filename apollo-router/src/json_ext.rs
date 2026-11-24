@@ -114,7 +114,7 @@ pub(crate) trait ValueExt {
     #[track_caller]
     fn from_path(path: &Path, value: Value) -> Value;
 
-    /// Insert a `Value` at a `Path`
+    /// Insert a `Value` at a `Path`, merging it into any value already there.
     #[track_caller]
     fn insert(&mut self, path: &Path, value: Value) -> Result<(), FetchError>;
 
@@ -436,9 +436,7 @@ impl ValueExt for Value {
                     value = filter_type_conditions(value, type_conditions);
                     match current_node {
                         Value::Object(o) => {
-                            current_node = o
-                                .get_mut(k.as_str())
-                                .expect("the value at that key was just inserted");
+                            current_node = o.entry(k.as_str()).or_insert(Value::Null);
                         }
                         Value::Null => {
                             let mut m = Map::new();
@@ -462,7 +460,13 @@ impl ValueExt for Value {
             }
         }
 
-        *current_node = value;
+        // Entities merged at a path and at a path below it can arrive in either order, so the
+        // outer one merges into what is already there rather than replacing it.
+        if current_node.is_null() {
+            *current_node = value;
+        } else {
+            current_node.deep_merge(value);
+        }
         Ok(())
     }
 
@@ -1560,6 +1564,36 @@ mod tests {
         assert_eq!(
             serde_json::to_string(&path).unwrap(),
             "[\"k\",\"... on T\",\"@\",\"arr\",3]",
+        );
+    }
+
+    #[test]
+    fn insert_at_a_key_missing_from_an_existing_object() {
+        let mut value = Value::default();
+        value
+            .insert(&Path::from("second/item"), json!({ "pages": 10 }))
+            .expect("insert into an empty value");
+        value
+            .insert(&Path::from("first/item"), json!({ "pages": 10 }))
+            .expect("insert beside an existing key");
+        assert_eq!(
+            value,
+            json!({ "second": { "item": { "pages": 10 } }, "first": { "item": { "pages": 10 } } })
+        );
+    }
+
+    #[test]
+    fn insert_merges_into_a_value_already_there() {
+        let mut value = Value::default();
+        value
+            .insert(&Path::from("item/owner"), json!({ "name": "Ada" }))
+            .expect("insert below the item");
+        value
+            .insert(&Path::from("item"), json!({ "pages": 10 }))
+            .expect("insert at the item");
+        assert_eq!(
+            value,
+            json!({ "item": { "owner": { "name": "Ada" }, "pages": 10 } })
         );
     }
 }
