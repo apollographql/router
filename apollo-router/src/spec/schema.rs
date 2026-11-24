@@ -376,6 +376,16 @@ impl Schema {
         default: &Name,
     ) -> Option<String> {
         let metadata = LinksMetadata::from_schema(schema).ok()??;
+        Self::directive_name_in_links(&metadata, spec_identity, expected_version_range, default)
+    }
+
+    /// Like [`Self::directive_name`], over `@link` metadata the caller has already parsed.
+    pub(crate) fn directive_name_in_links(
+        metadata: &LinksMetadata,
+        spec_identity: &Identity,
+        expected_version_range: &str,
+        default: &Name,
+    ) -> Option<String> {
         let link = metadata.for_identity(spec_identity)?;
         let semver_version = Version::parse(format!("{}.0", link.url.version).as_str()).ok()?;
         let version_range = VersionReq::parse(expected_version_range).ok()?;
