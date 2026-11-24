@@ -30,6 +30,7 @@ use sha2::Sha256;
 use crate::Configuration;
 use crate::error::ParseErrors;
 use crate::error::SchemaError;
+use crate::plugins::authorization::AuthorizationDirectives;
 use crate::plugins::connectors::configuration::apply_config;
 use crate::query_planner::OperationKind;
 #[cfg(unix)]
@@ -42,6 +43,7 @@ pub(crate) struct Schema {
     supergraph: Supergraph,
     subgraphs: HashMap<String, Uri>,
     pub(crate) implementers_map: apollo_compiler::collections::HashMap<Name, Implementers>,
+    pub(crate) authorization_directives: AuthorizationDirectives,
     api_schema: ApiSchema,
     pub(crate) schema_id: SchemaHash,
     pub(crate) connectors: Option<Connectors>,
@@ -204,6 +206,7 @@ impl Schema {
         );
 
         let implementers_map = definitions.implementers_map();
+        let authorization_directives = AuthorizationDirectives::from_schema(&definitions);
         let supergraph =
             Supergraph::from_schema(definitions, Some(&router_supported_supergraph_specs()))?;
 
@@ -227,6 +230,7 @@ impl Schema {
             supergraph,
             subgraphs,
             implementers_map,
+            authorization_directives,
             api_schema: ApiSchema(api_schema),
             schema_id,
             connectors,
@@ -403,6 +407,7 @@ impl std::fmt::Debug for Schema {
             supergraph: _, // skip
             subgraphs,
             implementers_map,
+            authorization_directives: _,
             api_schema: _, // skip
             schema_id: _,
             connectors: _,
