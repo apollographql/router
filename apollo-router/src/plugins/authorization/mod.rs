@@ -276,12 +276,8 @@ impl AuthorizationPlugin {
     pub(crate) fn extract_authorization_checks_layer(
         &self,
     ) -> Option<ExtractAuthorizationChecksLayer> {
-        self.directives_in_effect().then(|| {
-            ExtractAuthorizationChecksLayer::new(
-                self.supergraph_schema.clone(),
-                self.directives.clone(),
-            )
-        })
+        self.directives_in_effect()
+            .then_some(ExtractAuthorizationChecksLayer)
     }
 
     /// Whether directives are enabled and the supergraph links at least one of them. Both

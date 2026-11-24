@@ -2,10 +2,7 @@
 //! the request context.
 
 use std::collections::HashMap;
-use std::sync::Arc;
 
-use apollo_compiler::Schema;
-use apollo_compiler::validation::Valid;
 use futures::future::BoxFuture;
 use http::StatusCode;
 use tower::BoxError;
@@ -13,58 +10,37 @@ use tower::Service;
 
 use crate::graphql::Error;
 use crate::plugins::authorization::AUTHENTICATION_REQUIRED_KEY;
-use crate::plugins::authorization::AuthorizationDirectives;
 use crate::plugins::authorization::CacheKeyMetadata;
 use crate::plugins::authorization::REQUIRED_POLICIES_KEY;
 use crate::plugins::authorization::REQUIRED_SCOPES_KEY;
 use crate::services::query_parsing::ParsedDocument;
-use crate::services::query_parsing::authorization_requirements::operation_requirements;
 use crate::services::supergraph;
 
 /// Extract the use of `@authenticated`, `@requiredScopes` and `@policy` fields in a GraphQL query.
 ///
 /// # Context
 /// Requires context key:
-/// - [`ParsedDocument`] - If absent, short-circuits with an error response
+/// - [`ParsedDocument`], carrying the requirements the query parsing service stored on it. If
+///   either is absent, short-circuits with an internal server error.
 ///
 /// Populates context keys:
 /// - "apollo::authorization::authentication_required"
 /// - "apollo::authorization::required_scopes"
 /// - "apollo::authorization::required_policies"
-pub(crate) struct ExtractAuthorizationChecksLayer {
-    supergraph_schema: Arc<Valid<Schema>>,
-    directives: Arc<AuthorizationDirectives>,
-}
-
-impl ExtractAuthorizationChecksLayer {
-    pub(crate) fn new(
-        supergraph_schema: Arc<Valid<Schema>>,
-        directives: AuthorizationDirectives,
-    ) -> Self {
-        Self {
-            supergraph_schema,
-            directives: Arc::new(directives),
-        }
-    }
-}
+#[derive(Clone, Default)]
+pub(crate) struct ExtractAuthorizationChecksLayer;
 
 impl<S> tower::Layer<S> for ExtractAuthorizationChecksLayer {
     type Service = ExtractAuthorizationChecksService<S>;
 
     fn layer(&self, inner: S) -> Self::Service {
-        ExtractAuthorizationChecksService {
-            inner,
-            supergraph_schema: self.supergraph_schema.clone(),
-            directives: self.directives.clone(),
-        }
+        ExtractAuthorizationChecksService { inner }
     }
 }
 
 #[derive(Clone)]
 pub(crate) struct ExtractAuthorizationChecksService<S> {
     inner: S,
-    supergraph_schema: Arc<Valid<Schema>>,
-    directives: Arc<AuthorizationDirectives>,
 }
 
 impl<S> Service<supergraph::Request> for ExtractAuthorizationChecksService<S>
@@ -89,8 +65,6 @@ where
     fn call(&mut self, req: supergraph::Request) -> Self::Future {
         let inner = self.inner.clone();
         let mut inner = std::mem::replace(&mut self.inner, inner);
-        let supergraph_schema = self.supergraph_schema.clone();
-        let directives = self.directives.clone();
 
         Box::pin(async move {
             let doc = req
@@ -98,9 +72,11 @@ where
                 .extensions()
                 .with_lock(|lock| lock.get::<ParsedDocument>().cloned());
 
-            // We shouldn't ever reach here unless the pipeline was set up improperly (i.e.
-            // programmer error: this layer must run after `ParseQueryLayer`), but do something
-            // better than panicking just in case.
+            // Neither should ever be missing unless the pipeline was set up improperly (i.e.
+            // programmer error: this layer must run after `ParseQueryLayer`, and the
+            // authorization plugin provides it only together with the layer that stores the
+            // requirements), but do something better than panicking just in case. A missing
+            // value never means the operation requires nothing.
             let Some(doc) = doc else {
                 return Ok(internal_error(
                     req,
@@ -108,18 +84,18 @@ where
                     "MISSING_EXECUTABLE_DOCUMENT",
                 ));
             };
-
-            // Requirements are stored on the document only when the authorization plugin is
-            // installed. Without them, work them out here: a missing value never means the
-            // operation requires nothing.
+            let Some(requirements) = doc.authorization.get() else {
+                return Ok(internal_error(
+                    req,
+                    "Cannot find the operation's authorization requirements",
+                    "MISSING_AUTHORIZATION_REQUIREMENTS",
+                ));
+            };
             let CacheKeyMetadata {
                 is_authenticated,
                 scopes,
                 policies,
-            } = match doc.authorization.get() {
-                Some(requirements) => requirements.clone(),
-                None => operation_requirements(&doc, &supergraph_schema, &directives),
-            };
+            } = requirements.clone();
             if is_authenticated {
                 req.context
                     .insert(AUTHENTICATION_REQUIRED_KEY, true)
@@ -167,16 +143,22 @@ mod tests {
     use crate::Configuration;
     use crate::Context;
     use crate::plugins::authorization::REQUIRED_SCOPES_KEY;
+    use crate::services::query_parsing::authorization_requirements::operation_requirements;
     use crate::spec::Query;
     use crate::spec::Schema;
 
-    /// The layer for `schema`, built from the same supergraph and directive names the
-    /// authorization plugin uses.
-    fn layer(schema: &Schema) -> ExtractAuthorizationChecksLayer {
-        ExtractAuthorizationChecksLayer::new(
-            Arc::new(schema.supergraph_schema().clone()),
-            schema.authorization_directives.clone(),
-        )
+    /// Parses `query` and stores its requirements on the document, as the query parsing
+    /// service does.
+    fn parse(query: &str, schema: &Schema, config: &Configuration) -> ParsedDocument {
+        let doc = Query::parse_document(query, None, schema, config).unwrap();
+        doc.authorization
+            .set(operation_requirements(
+                &doc,
+                schema.supergraph_schema(),
+                &schema.authorization_directives,
+            ))
+            .unwrap();
+        doc
     }
 
     const REQUIRES_SCOPES_SCHEMA: &str =
@@ -191,7 +173,7 @@ mod tests {
         let query = "query { me { id name } }";
         let config = Configuration::default();
         let schema = Arc::new(Schema::parse(REQUIRES_SCOPES_SCHEMA, &config).unwrap());
-        let doc = Query::parse_document(query, None, &schema, &config).unwrap();
+        let doc = parse(query, &schema, &config);
 
         let (mock, mut handle) =
             tower_test::mock::pair::<supergraph::Request, supergraph::Response>();
@@ -205,7 +187,9 @@ mod tests {
             );
         });
 
-        let mut service = ServiceBuilder::new().layer(layer(&schema)).service(mock);
+        let mut service = ServiceBuilder::new()
+            .layer(ExtractAuthorizationChecksLayer)
+            .service(mock);
 
         let context = Context::new();
         context
@@ -240,7 +224,7 @@ mod tests {
         let query = "query { products(limit: 1) { price } }";
         let config = Configuration::default();
         let schema = Arc::new(Schema::parse(AUTHENTICATED_SCHEMA, &config).unwrap());
-        let doc = Query::parse_document(query, None, &schema, &config).unwrap();
+        let doc = parse(query, &schema, &config);
 
         let (mock, mut handle) =
             tower_test::mock::pair::<supergraph::Request, supergraph::Response>();
@@ -254,7 +238,9 @@ mod tests {
             );
         });
 
-        let mut service = ServiceBuilder::new().layer(layer(&schema)).service(mock);
+        let mut service = ServiceBuilder::new()
+            .layer(ExtractAuthorizationChecksLayer)
+            .service(mock);
 
         let context = Context::new();
         context
@@ -285,12 +271,7 @@ mod tests {
         let query = "query { private { id } }";
         let config = Configuration::default();
         let schema = Arc::new(Schema::parse(POLICY_SCHEMA, &config).unwrap());
-        let doc = Query::parse_document(query, None, &schema, &config).unwrap();
-        assert_eq!(
-            doc.authorization.get(),
-            None,
-            "a document parsed outside the query parsing service has no stored requirements"
-        );
+        let doc = parse(query, &schema, &config);
 
         let (mock, mut handle) =
             tower_test::mock::pair::<supergraph::Request, supergraph::Response>();
@@ -304,7 +285,9 @@ mod tests {
             );
         });
 
-        let mut service = ServiceBuilder::new().layer(layer(&schema)).service(mock);
+        let mut service = ServiceBuilder::new()
+            .layer(ExtractAuthorizationChecksLayer)
+            .service(mock);
 
         let context = Context::new();
         context
@@ -329,7 +312,7 @@ mod tests {
     }
 
     /// Runs the layer for one request carrying `doc`, and returns the request's context.
-    async fn extract(schema: Arc<Schema>, doc: ParsedDocument) -> Context {
+    async fn extract(doc: ParsedDocument) -> Context {
         let (mock, mut handle) =
             tower_test::mock::pair::<supergraph::Request, supergraph::Response>();
         let driver = tokio::spawn(async move {
@@ -341,7 +324,9 @@ mod tests {
                     .unwrap(),
             );
         });
-        let service = ServiceBuilder::new().layer(layer(&schema)).service(mock);
+        let service = ServiceBuilder::new()
+            .layer(ExtractAuthorizationChecksLayer)
+            .service(mock);
 
         let context = Context::new();
         context
@@ -371,7 +356,7 @@ mod tests {
             })
             .unwrap();
 
-        let context = extract(schema, doc).await;
+        let context = extract(doc).await;
 
         assert_eq!(
             context.get_json_value(REQUIRED_POLICIES_KEY).unwrap(),
@@ -392,7 +377,7 @@ mod tests {
             })
             .unwrap();
 
-        let first = extract(schema.clone(), doc.clone()).await;
+        let first = extract(doc.clone()).await;
         // What a coprocessor or Rhai script does once it has evaluated the policy.
         first
             .insert(
@@ -400,7 +385,7 @@ mod tests {
                 HashMap::from([("admin".to_string(), Some(true))]),
             )
             .unwrap();
-        let second = extract(schema, doc).await;
+        let second = extract(doc).await;
 
         assert_eq!(
             second.get_json_value(REQUIRED_POLICIES_KEY).unwrap(),
@@ -408,36 +393,51 @@ mod tests {
         );
     }
 
-    #[tokio::test]
-    async fn errors_without_document() {
-        let config = Configuration::default();
-        let schema = Arc::new(Schema::parse(REQUIRES_SCOPES_SCHEMA, &config).unwrap());
-
-        // Inner service is never reached — the layer errors out before calling it.
+    /// Sends `req` through the layer, checks that it answered with an internal server error
+    /// carrying `code`, and that the inner service was never reached.
+    async fn assert_internal_error(req: supergraph::Request, code: &str) {
         let (mock, handle) = tower_test::mock::pair::<supergraph::Request, supergraph::Response>();
+        let service = ServiceBuilder::new()
+            .layer(ExtractAuthorizationChecksLayer)
+            .service(mock);
 
-        let mut service = ServiceBuilder::new().layer(layer(&schema)).service(mock);
-
-        let mut response = service
-            .ready()
-            .await
-            .unwrap()
-            .call(
-                supergraph::Request::fake_builder()
-                    .query("query { me { id name } }")
-                    .build()
-                    .unwrap(),
-            )
-            .await
-            .unwrap();
+        let mut response = service.oneshot(req).await.unwrap();
 
         assert_eq!(
             StatusCode::INTERNAL_SERVER_ERROR,
             response.response.status()
         );
         let graphql_response = response.next_response().await.unwrap();
-        assert!(graphql_response.contains_error_code("MISSING_EXECUTABLE_DOCUMENT"));
-
+        assert!(graphql_response.contains_error_code(code));
         crate::plugin::test::assert_no_mock_calls(handle).await;
+    }
+
+    #[tokio::test]
+    async fn errors_without_document() {
+        let req = supergraph::Request::fake_builder()
+            .query("query { me { id name } }")
+            .build()
+            .unwrap();
+
+        assert_internal_error(req, "MISSING_EXECUTABLE_DOCUMENT").await;
+    }
+
+    #[tokio::test]
+    async fn errors_without_stored_requirements() {
+        let query = "query { private { id } }";
+        let config = Configuration::default();
+        let schema = Schema::parse(POLICY_SCHEMA, &config).unwrap();
+        let doc = Query::parse_document(query, None, &schema, &config).unwrap();
+        let context = Context::new();
+        context
+            .extensions()
+            .with_lock(|lock| lock.insert::<ParsedDocument>(doc));
+        let req = supergraph::Request::fake_builder()
+            .query(query)
+            .context(context)
+            .build()
+            .unwrap();
+
+        assert_internal_error(req, "MISSING_AUTHORIZATION_REQUIREMENTS").await;
     }
 }
