@@ -7,7 +7,8 @@
 //! - other root fields are aliased `_r{i}_{field}`,
 //! - fragments are renamed `{fragment}__{i}`.
 //!
-//! A request joins the pieces of the members it sends, so nothing is parsed per request. The
+//! A request joins the pieces of the members it sends into one document, so nothing is parsed
+//! per request. The
 //! pieces live beside the plan's nodes, in [`BatchOperations`], so the plan itself only says
 //! which fetches go out together.
 
@@ -21,6 +22,7 @@ use apollo_compiler::ast;
 use apollo_compiler::executable;
 use apollo_compiler::executable::Selection;
 use apollo_compiler::executable::SelectionSet;
+use apollo_compiler::validation::Valid;
 use indexmap::IndexMap;
 use indexmap::IndexSet;
 
@@ -45,17 +47,17 @@ pub(crate) struct BatchOperation {
 /// One member's piece of the operation its flatten shares.
 #[derive(Debug, Clone, PartialEq)]
 pub(crate) struct MemberPiece {
-    /// The operation type and name, as the fetch's own operation has them.
-    head: String,
-    /// The fetch's operation directives.
-    directives: String,
+    /// The operation type, name and directives, as the fetch's own operation has them.
+    operation_type: executable::OperationType,
+    name: Option<Name>,
+    directives: executable::DirectiveList,
     /// The keys at the top of the fetch's response.
     pub(crate) keys: Vec<Renamed>,
     /// The fetch's variables, and their definitions in the shared operation.
     pub(crate) variables: Vec<Renamed>,
-    definitions: Vec<String>,
-    selections: String,
-    fragments: Vec<String>,
+    definitions: Vec<Node<executable::VariableDefinition>>,
+    selection_set: SelectionSet,
+    fragments: Vec<Node<executable::Fragment>>,
 }
 
 /// The operations of a plan's flattens whose members go out together, by what the members are.
@@ -169,40 +171,45 @@ impl BatchOperation {
 #[allow(dead_code, reason = "sent once flatten members execute")]
 pub(crate) fn join<'a>(
     pieces: impl IntoIterator<Item = &'a MemberPiece>,
-) -> (String, Vec<&'a str>) {
-    let fetches: Vec<&MemberPiece> = pieces.into_iter().collect();
+) -> (Valid<ExecutableDocument>, Vec<&'a str>) {
+    let pieces: Vec<&MemberPiece> = pieces.into_iter().collect();
+    let mut document = ExecutableDocument::new();
+    let Some(first) = pieces.first() else {
+        return (Valid::assume_valid(document), Vec::new());
+    };
     // Members pass a client's variables through under the same name and definition, so each is
     // defined once.
-    let mut definitions: IndexMap<&str, &str> = IndexMap::default();
-    for fetch in &fetches {
-        for (variable, definition) in fetch.variables.iter().zip(&fetch.definitions) {
+    let mut definitions: IndexMap<&str, &Node<executable::VariableDefinition>> =
+        IndexMap::default();
+    let mut selection_set = SelectionSet::new(first.selection_set.ty.clone());
+    for piece in &pieces {
+        for (variable, definition) in piece.variables.iter().zip(&piece.definitions) {
             definitions.entry(&variable.shared).or_insert(definition);
         }
+        selection_set.extend(piece.selection_set.selections.iter().cloned());
+        for fragment in &piece.fragments {
+            document
+                .fragments
+                .insert(fragment.name.clone(), fragment.clone());
+        }
     }
-
-    let mut operation = String::new();
-    if let Some(first) = fetches.first() {
-        operation.push_str(&first.head);
-    }
-    if !definitions.is_empty() {
-        let definitions: Vec<&str> = definitions.values().copied().collect();
-        operation.push_str(&format!("({})", definitions.join(", ")));
-    }
-    if let Some(first) = fetches.first().filter(|first| !first.directives.is_empty()) {
-        operation.push(' ');
-        operation.push_str(&first.directives);
-    }
-    operation.push_str(" {");
-    for fetch in &fetches {
-        operation.push(' ');
-        operation.push_str(&fetch.selections);
-    }
-    operation.push_str(" }");
-    for fragment in fetches.iter().flat_map(|fetch| &fetch.fragments) {
-        operation.push(' ');
-        operation.push_str(fragment);
-    }
-    (operation, definitions.into_keys().collect())
+    document.operations.insert(executable::Operation {
+        description: None,
+        operation_type: first.operation_type,
+        name: first.name.clone(),
+        variables: definitions
+            .values()
+            .map(|&definition| definition.clone())
+            .collect(),
+        directives: first.directives.clone(),
+        selection_set,
+    });
+    // Each piece is a valid operation of the subgraph with its names changed, so no two pieces
+    // collide and together they are valid too.
+    (
+        Valid::assume_valid(document),
+        definitions.into_keys().collect(),
+    )
 }
 
 impl MemberPiece {
@@ -230,7 +237,7 @@ impl MemberPiece {
             let fragment_mut = fragment.make_mut();
             fragment_mut.name = renames.fragments[&fragment_mut.name].clone();
             renames.selection_set(&mut fragment_mut.selection_set);
-            fragments.push(fragment.serialize().no_indent().to_string());
+            fragments.push(fragment);
         }
         renames.selection_set(&mut selection_set);
 
@@ -240,7 +247,7 @@ impl MemberPiece {
             let shared = renames.variable(&definition.name);
             let mut renamed = definition.clone();
             renamed.make_mut().name = shared.clone();
-            definitions.push(renamed.serialize().no_indent().to_string());
+            definitions.push(renamed);
             variables.push(Renamed {
                 own: definition.name.as_str().into(),
                 shared: shared.as_str().into(),
@@ -248,15 +255,13 @@ impl MemberPiece {
         }
 
         Some(Self {
-            head: match &operation.name {
-                Some(name) => format!("{} {name}", operation.operation_type),
-                None => operation.operation_type.to_string(),
-            },
-            directives: operation.directives.serialize().no_indent().to_string(),
+            operation_type: operation.operation_type,
+            name: operation.name.clone(),
+            directives: operation.directives.clone(),
             keys,
             variables,
             definitions,
-            selections: serialize_selections(&selection_set),
+            selection_set,
             fragments,
         })
     }
@@ -482,15 +487,6 @@ fn spread_fragments(selection_set: &SelectionSet, document: &ExecutableDocument)
     spread
 }
 
-fn serialize_selections(selection_set: &SelectionSet) -> String {
-    let selections: Vec<String> = selection_set
-        .selections
-        .iter()
-        .map(|selection| selection.serialize().no_indent().to_string())
-        .collect();
-    selections.join(" ")
-}
-
 #[cfg(test)]
 mod tests {
     use apollo_compiler::Schema;
@@ -555,6 +551,7 @@ mod tests {
     /// indented to read.
     fn joined(pieces: &[&Arc<MemberPiece>]) -> String {
         let (operation, _) = join(pieces.iter().map(|piece| &***piece));
+        let operation = operation.serialize().no_indent().to_string();
         ExecutableDocument::parse_and_validate(&schema(), &operation, "joined.graphql")
             .expect("the joined operation is valid")
             .to_string()
@@ -705,6 +702,7 @@ mod tests {
         let pieces = BatchOperation::new(&members).expect("one subgraph").pieces;
 
         let (operation, _) = join([&*pieces[1], &*pieces[0]]);
+        let operation = operation.serialize().no_indent().to_string();
         assert!(operation.starts_with("query Second {"), "{operation}");
     }
 }

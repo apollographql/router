@@ -891,7 +891,10 @@ fn a_plan_prepares_the_operation_its_flattens_share() {
         .expect("the members share an operation");
     let (operation, _) =
         query_planner::batch_operation::join(operation.pieces.iter().map(|piece| &**piece));
-    assert_eq!(operation, "query { _r0_a: a _r1_b: b }");
+    assert_eq!(
+        operation.serialize().no_indent().to_string(),
+        "{ _r0_a: a _r1_b: b }"
+    );
 
     // A copy of the flatten, such as one in a plan cloned node by node, finds the same operation.
     let copy = flatten.clone();
