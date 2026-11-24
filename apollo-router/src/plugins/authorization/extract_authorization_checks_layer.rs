@@ -4,6 +4,8 @@
 use std::collections::HashMap;
 use std::sync::Arc;
 
+use apollo_compiler::Schema;
+use apollo_compiler::validation::Valid;
 use futures::future::BoxFuture;
 use http::StatusCode;
 use tower::BoxError;
@@ -11,13 +13,13 @@ use tower::Service;
 
 use crate::graphql::Error;
 use crate::plugins::authorization::AUTHENTICATION_REQUIRED_KEY;
+use crate::plugins::authorization::AuthorizationDirectives;
 use crate::plugins::authorization::CacheKeyMetadata;
 use crate::plugins::authorization::REQUIRED_POLICIES_KEY;
 use crate::plugins::authorization::REQUIRED_SCOPES_KEY;
 use crate::services::query_parsing::ParsedDocument;
 use crate::services::query_parsing::authorization_requirements::operation_requirements;
 use crate::services::supergraph;
-use crate::spec::Schema;
 
 /// Extract the use of `@authenticated`, `@requiredScopes` and `@policy` fields in a GraphQL query.
 ///
@@ -30,12 +32,19 @@ use crate::spec::Schema;
 /// - "apollo::authorization::required_scopes"
 /// - "apollo::authorization::required_policies"
 pub(crate) struct ExtractAuthorizationChecksLayer {
-    schema: Arc<Schema>,
+    supergraph_schema: Arc<Valid<Schema>>,
+    directives: Arc<AuthorizationDirectives>,
 }
 
 impl ExtractAuthorizationChecksLayer {
-    pub(crate) fn new(schema: Arc<Schema>) -> Self {
-        Self { schema }
+    pub(crate) fn new(
+        supergraph_schema: Arc<Valid<Schema>>,
+        directives: AuthorizationDirectives,
+    ) -> Self {
+        Self {
+            supergraph_schema,
+            directives: Arc::new(directives),
+        }
     }
 }
 
@@ -45,7 +54,8 @@ impl<S> tower::Layer<S> for ExtractAuthorizationChecksLayer {
     fn layer(&self, inner: S) -> Self::Service {
         ExtractAuthorizationChecksService {
             inner,
-            schema: self.schema.clone(),
+            supergraph_schema: self.supergraph_schema.clone(),
+            directives: self.directives.clone(),
         }
     }
 }
@@ -53,7 +63,8 @@ impl<S> tower::Layer<S> for ExtractAuthorizationChecksLayer {
 #[derive(Clone)]
 pub(crate) struct ExtractAuthorizationChecksService<S> {
     inner: S,
-    schema: Arc<Schema>,
+    supergraph_schema: Arc<Valid<Schema>>,
+    directives: Arc<AuthorizationDirectives>,
 }
 
 impl<S> Service<supergraph::Request> for ExtractAuthorizationChecksService<S>
@@ -78,7 +89,8 @@ where
     fn call(&mut self, req: supergraph::Request) -> Self::Future {
         let inner = self.inner.clone();
         let mut inner = std::mem::replace(&mut self.inner, inner);
-        let schema = self.schema.clone();
+        let supergraph_schema = self.supergraph_schema.clone();
+        let directives = self.directives.clone();
 
         Box::pin(async move {
             let doc = req
@@ -116,11 +128,7 @@ where
                 policies,
             } = match doc.authorization.get() {
                 Some(requirements) => requirements.clone(),
-                None => operation_requirements(
-                    &doc,
-                    schema.supergraph_schema(),
-                    &schema.authorization_directives,
-                ),
+                None => operation_requirements(&doc, &supergraph_schema, &directives),
             };
             if is_authenticated {
                 req.context
@@ -156,6 +164,16 @@ mod tests {
     use crate::Context;
     use crate::plugins::authorization::REQUIRED_SCOPES_KEY;
     use crate::spec::Query;
+    use crate::spec::Schema;
+
+    /// The layer for `schema`, built from the same supergraph and directive names the
+    /// authorization plugin uses.
+    fn layer(schema: &Schema) -> ExtractAuthorizationChecksLayer {
+        ExtractAuthorizationChecksLayer::new(
+            Arc::new(schema.supergraph_schema().clone()),
+            schema.authorization_directives.clone(),
+        )
+    }
 
     const REQUIRES_SCOPES_SCHEMA: &str =
         include_str!("../../../tests/fixtures/supergraph-auth.graphql");
@@ -183,9 +201,7 @@ mod tests {
             );
         });
 
-        let mut service = ServiceBuilder::new()
-            .layer(ExtractAuthorizationChecksLayer::new(schema))
-            .service(mock);
+        let mut service = ServiceBuilder::new().layer(layer(&schema)).service(mock);
 
         let context = Context::new();
         context
@@ -234,9 +250,7 @@ mod tests {
             );
         });
 
-        let mut service = ServiceBuilder::new()
-            .layer(ExtractAuthorizationChecksLayer::new(schema))
-            .service(mock);
+        let mut service = ServiceBuilder::new().layer(layer(&schema)).service(mock);
 
         let context = Context::new();
         context
@@ -286,9 +300,7 @@ mod tests {
             );
         });
 
-        let mut service = ServiceBuilder::new()
-            .layer(ExtractAuthorizationChecksLayer::new(schema))
-            .service(mock);
+        let mut service = ServiceBuilder::new().layer(layer(&schema)).service(mock);
 
         let context = Context::new();
         context
@@ -325,9 +337,7 @@ mod tests {
                     .unwrap(),
             );
         });
-        let service = ServiceBuilder::new()
-            .layer(ExtractAuthorizationChecksLayer::new(schema))
-            .service(mock);
+        let service = ServiceBuilder::new().layer(layer(&schema)).service(mock);
 
         let context = Context::new();
         context
@@ -402,9 +412,7 @@ mod tests {
         // Inner service is never reached — the layer errors out before calling it.
         let (mock, handle) = tower_test::mock::pair::<supergraph::Request, supergraph::Response>();
 
-        let mut service = ServiceBuilder::new()
-            .layer(ExtractAuthorizationChecksLayer::new(schema))
-            .service(mock);
+        let mut service = ServiceBuilder::new().layer(layer(&schema)).service(mock);
 
         let mut response = service
             .ready()

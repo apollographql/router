@@ -21,6 +21,7 @@ use self::authenticated::AUTHENTICATED_DIRECTIVE_NAME;
 use self::authenticated::AUTHENTICATED_SPEC_VERSION_RANGE;
 use self::authenticated::AuthenticatedCheckVisitor;
 use self::authenticated::AuthenticatedVisitor;
+use self::extract_authorization_checks_layer::ExtractAuthorizationChecksLayer;
 use self::policy::POLICY_DIRECTIVE_NAME;
 use self::policy::POLICY_SPEC_VERSION_RANGE;
 use self::policy::PolicyExtractionVisitor;
@@ -261,12 +262,33 @@ impl AuthorizationPlugin {
     pub(crate) fn authorization_requirements_layer(
         &self,
     ) -> Option<AuthorizationRequirementsLayer> {
-        (self.directives_enabled && self.directives.any_linked()).then(|| {
+        self.directives_in_effect().then(|| {
             AuthorizationRequirementsLayer::new(
                 self.supergraph_schema.clone(),
                 self.directives.clone(),
             )
         })
+    }
+
+    /// Returns the router-service layer that writes each operation's authorization
+    /// requirements into the request context, or `None` when authorization directives are
+    /// disabled or the supergraph links none of them.
+    pub(crate) fn extract_authorization_checks_layer(
+        &self,
+    ) -> Option<ExtractAuthorizationChecksLayer> {
+        self.directives_in_effect().then(|| {
+            ExtractAuthorizationChecksLayer::new(
+                self.supergraph_schema.clone(),
+                self.directives.clone(),
+            )
+        })
+    }
+
+    /// Whether directives are enabled and the supergraph links at least one of them. Both
+    /// layers above are provided under this one condition, so a document reaching the
+    /// router-service layer always went through the requirements layer.
+    fn directives_in_effect(&self) -> bool {
+        self.directives_enabled && self.directives.any_linked()
     }
 
     pub(crate) fn configuration(configuration: &Configuration) -> Conf {

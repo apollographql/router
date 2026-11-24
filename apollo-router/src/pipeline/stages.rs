@@ -30,7 +30,6 @@ use crate::layers::InternalServiceBuilderExt as _;
 use crate::layers::ServiceBuilderExt as _;
 use crate::layers::unconstrained_buffer::UnconstrainedBuffer;
 use crate::plugins::authorization::AuthorizationPlugin;
-use crate::plugins::authorization::extract_authorization_checks_layer::ExtractAuthorizationChecksLayer;
 use crate::plugins::circuit_breaker::CircuitBreaker;
 use crate::plugins::connectors::request_limit::RequestLimitLayer;
 use crate::plugins::connectors::tracing::connect_spec_version_instrument;
@@ -659,8 +658,6 @@ pub(crate) fn build_router_service(
     configuration: &Configuration,
     plugins: Arc<Plugins>,
 ) -> router::BoxCloneService {
-    let enable_authorization_directives =
-        AuthorizationPlugin::enable_directives(configuration, &schema);
     let extended_references = matches!(
         TelemetryConfig::metrics_reference_mode(configuration),
         ApolloMetricsReferenceMode::Extended
@@ -674,7 +671,9 @@ pub(crate) fn build_router_service(
         // Enforce the header list limit before the plugins, so no downstream layer sees anything
         // over the limit.
         .apply_required_plugin_layer(&plugins, LimitsPlugin::router_header_list_limit_layer)
-        .rust_plugins(plugins, |plugin, service| plugin.router_service(service))
+        .rust_plugins(plugins.clone(), |plugin, service| {
+            plugin.router_service(service)
+        })
         .layer(content_negotiation::RouterContentNegotiationLayer::default())
         .layer(DisplayRouterRequestLayer)
         .layer(SplitBatchRequestLayer::new(configuration.batching.clone()))
@@ -685,10 +684,9 @@ pub(crate) fn build_router_service(
             query_parsing_service,
             configuration.supergraph.redact_query_validation_errors,
         ))
-        .option_layer(
-            enable_authorization_directives
-                .then(|| ExtractAuthorizationChecksLayer::new(schema.clone())),
-        )
+        .apply_required_plugin_layer(&plugins, |a: &AuthorizationPlugin| {
+            tower::util::option_layer(a.extract_authorization_checks_layer())
+        })
         .option_layer(extended_references.then(|| ExtendedReferencesLayer::new(schema)))
         .layer(EnforceSafelistLayer::new(persisted_queries))
         .service(supergraph_service)
