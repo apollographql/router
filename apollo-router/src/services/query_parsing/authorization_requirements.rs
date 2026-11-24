@@ -199,7 +199,7 @@ mod tests {
     async fn cached_documents_keep_their_requirements() {
         let configuration = Arc::new(Configuration::default());
         let schema = schema(POLICY_SCHEMA, &configuration);
-        let service = build_query_parsing_service(schema, configuration);
+        let service = build_query_parsing_service(schema, configuration, &Default::default());
 
         let first = parse(service.clone(), "{ private { id } }").await;
         let second = parse(service, "{ private { id } }").await;
@@ -221,7 +221,7 @@ mod tests {
         let schema = schema(POLICY_SCHEMA, &configuration);
 
         let doc = parse(
-            build_query_parsing_service(schema, configuration),
+            build_query_parsing_service(schema, configuration, &Default::default()),
             "{ private { id } }",
         )
         .await;
@@ -235,7 +235,7 @@ mod tests {
         let schema = schema(NO_AUTHORIZATION_SCHEMA, &configuration);
 
         let doc = parse(
-            build_query_parsing_service(schema, configuration),
+            build_query_parsing_service(schema, configuration, &Default::default()),
             "{ me { id } }",
         )
         .await;

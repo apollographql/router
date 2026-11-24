@@ -611,8 +611,11 @@ mod tests {
                 Schema::parse(include_str!("testdata/schema.graphql"), &configuration).unwrap(),
             );
 
-            let query_parsing_service =
-                crate::pipeline::build_query_parsing_service(schema, configuration);
+            let query_parsing_service = crate::pipeline::build_query_parsing_service(
+                schema,
+                configuration,
+                &Default::default(),
+            );
 
             let mut service = ServiceBuilder::new()
                 .layer(WarmupParseQueryLayer::new(query_parsing_service))
@@ -660,8 +663,11 @@ mod tests {
                 Schema::parse(include_str!("testdata/schema.graphql"), &configuration).unwrap(),
             );
 
-            let query_parsing_service =
-                crate::pipeline::build_query_parsing_service(schema, configuration);
+            let query_parsing_service = crate::pipeline::build_query_parsing_service(
+                schema,
+                configuration,
+                &Default::default(),
+            );
 
             let mut service = ServiceBuilder::new()
                 .layer(WarmupParseQueryLayer::new(query_parsing_service))
@@ -765,8 +771,11 @@ mod tests {
                 Schema::parse(include_str!("testdata/schema.graphql"), &configuration).unwrap(),
             );
 
-            let query_parsing_service =
-                crate::pipeline::build_query_parsing_service(schema, configuration);
+            let query_parsing_service = crate::pipeline::build_query_parsing_service(
+                schema,
+                configuration,
+                &Default::default(),
+            );
 
             let mut service = ServiceBuilder::new()
                 .layer(WarmupParseQueryLayer::new(query_parsing_service))

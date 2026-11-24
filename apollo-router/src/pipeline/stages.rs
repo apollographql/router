@@ -490,6 +490,7 @@ fn subscription_plugin_config(plugins: &Plugins) -> Option<SubscriptionConfig> {
 pub(crate) fn build_query_parsing_service(
     schema: Arc<Schema>,
     configuration: Arc<Configuration>,
+    _plugins: &Plugins,
 ) -> query_parsing::BoxCloneService {
     let cache_limit = configuration
         .supergraph
