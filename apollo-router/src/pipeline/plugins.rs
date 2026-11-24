@@ -5,7 +5,6 @@
 use std::collections::HashMap;
 use std::sync::Arc;
 
-use serde_json::Map;
 use serde_json::Value;
 use tower::BoxError;
 use tracing::Instrument;
@@ -207,10 +206,14 @@ impl PluginRegistrar<'_> {
         let span = Self::plugin_span(&full_name);
         async {
             let factory = self.take_factory(&full_name);
+            debug_assert!(
+                factory.mandatory,
+                "{full_name} is built as mandatory but not registered as mandatory"
+            );
             let plugin_config = match self.configuration.plugin_config(&full_name) {
                 Some(config) => config.clone(),
                 // Without a section, the plugin runs with its default config.
-                None => match factory.parse_config_value(Value::Object(Map::new())) {
+                None => match factory.default_config() {
                     Ok(config) => config,
                     Err(error) => {
                         self.errors.push(ConfigurationError::PluginConfiguration {
@@ -247,6 +250,10 @@ impl PluginRegistrar<'_> {
         let span = Self::plugin_span(&full_name);
         async {
             let factory = self.take_factory(&full_name);
+            debug_assert!(
+                !factory.mandatory,
+                "{full_name} is registered as mandatory but built as optional"
+            );
             let Some(plugin_config) = self.configuration.plugin_config(&full_name).cloned() else {
                 return;
             };

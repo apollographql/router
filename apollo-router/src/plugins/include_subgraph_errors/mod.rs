@@ -29,7 +29,12 @@ use crate::services::supergraph;
 
 static REDACTED_ERROR_MESSAGE: &str = "Subgraph errors redacted";
 
-register_plugin!("apollo", "include_subgraph_errors", IncludeSubgraphErrors);
+register_private_plugin!(
+    "apollo",
+    "include_subgraph_errors",
+    IncludeSubgraphErrors,
+    mandatory
+);
 
 /// `config` with every subgraph's errors included, as `--dev` sets `all: true`. Without a
 /// config, starts from the plugin's defaults.

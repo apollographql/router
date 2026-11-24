@@ -272,7 +272,12 @@ fn hash_operation(operation: &Option<String>, operation_name: &Option<String>) -
     hex::encode(digest.finalize().as_slice())
 }
 
-register_plugin!("apollo", "progressive_override", ProgressiveOverridePlugin);
+register_private_plugin!(
+    "apollo",
+    "progressive_override",
+    ProgressiveOverridePlugin,
+    mandatory
+);
 
 #[cfg(test)]
 mod tests;

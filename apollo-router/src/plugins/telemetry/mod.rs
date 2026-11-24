@@ -686,7 +686,7 @@ fn convert(
     }
 }
 
-register_private_plugin!("apollo", "telemetry", Telemetry);
+register_private_plugin!("apollo", "telemetry", Telemetry, mandatory);
 
 /// CustomTraceIdPropagator to set custom trace_id for our tracing system
 /// coming from headers

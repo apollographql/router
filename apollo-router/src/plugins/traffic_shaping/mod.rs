@@ -745,7 +745,7 @@ fn rate_limit_error() -> graphql::Error {
         .build()
 }
 
-register_private_plugin!("apollo", "traffic_shaping", TrafficShaping);
+register_private_plugin!("apollo", "traffic_shaping", TrafficShaping, mandatory);
 
 #[cfg(test)]
 mod test {

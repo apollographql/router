@@ -433,7 +433,7 @@ impl RequestSizeLimitError {
     }
 }
 
-register_private_plugin!("apollo", "limits", LimitsPlugin);
+register_private_plugin!("apollo", "limits", LimitsPlugin, mandatory);
 
 #[cfg(test)]
 impl From<SubgraphConfiguration<SubgraphLimits>> for Config {
