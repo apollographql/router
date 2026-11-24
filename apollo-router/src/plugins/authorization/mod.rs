@@ -80,6 +80,10 @@ pub(crate) struct AuthorizationDirectives {
 
 impl AuthorizationDirectives {
     /// Whether the supergraph links at least one of the directives at a supported version.
+    ///
+    /// This checks the `@link`, not whether any type or field applies the directive.
+    /// Composition links a directive's spec in the supergraph only when some subgraph
+    /// applies the directive, so in a composed supergraph a linked directive is in use.
     pub(crate) fn any_linked(&self) -> bool {
         self.authenticated.is_some() || self.requires_scopes.is_some() || self.policy.is_some()
     }
