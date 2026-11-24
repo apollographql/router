@@ -1001,4 +1001,57 @@ mod tests {
         let expected = ReferencedEnums::from([("ItemStatus".to_string(), statuses)]);
         assert_eq!(referenced_enums, Some(expected));
     }
+
+    /// A null in one `@defer` doesn't drop the payload of another `@defer` on the same object.
+    #[test]
+    fn null_in_a_defer_does_not_drop_its_sibling() {
+        let configuration = Configuration::default();
+        let sdl = include_str!("../../../tests/fixtures/defer_mixed_list_supergraph.graphql");
+        let schema = Arc::new(Schema::parse(sdl, &configuration).unwrap());
+        let operation = r#"{ children { ... on Item {
+            ... @defer(label: "title") { title }
+            ... @defer(label: "status") { status }
+        } } }"#;
+        let mut query = Query::parse(operation, None, &schema, &configuration).unwrap();
+        query.subselections = collect_subselections(
+            &configuration,
+            &query.operation,
+            &query.fragments.map,
+            &query.defer_stats,
+        )
+        .unwrap();
+        let query = Arc::new(query);
+
+        let context = crate::Context::new();
+        let mut nullified_paths = Vec::new();
+        let mut process = |label: &str, data: Value| {
+            let response = Response::builder()
+                .label(label.to_string())
+                .path(Path::from("children"))
+                .data(data)
+                .build();
+            ExecutionService::process_graphql_response(
+                &query,
+                &Object::new(),
+                true,
+                &schema,
+                &mut nullified_paths,
+                ApolloMetricsReferenceMode::Standard,
+                &context,
+                false,
+                response,
+            )
+            .unwrap()
+        };
+        process("title", json!({"children": [{"title": null}]}));
+        let status = process("status", json!({"children": [{"status": "ACTIVE"}]}));
+
+        // The `title` payload nulled the item, but the `status` payload is still sent for it.
+        assert_eq!(nullified_paths, vec![Path::from("children/0")]);
+        assert_eq!(status.incremental.len(), 1);
+        assert_eq!(
+            status.incremental[0].data,
+            Some(json!({"status": "ACTIVE"}))
+        );
+    }
 }

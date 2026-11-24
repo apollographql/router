@@ -1219,17 +1219,31 @@ fn mixed_list_subgraphs(
     entities_query: &str,
     entities: serde_json::Value,
 ) -> MockedSubgraphs {
+    mixed_list_subgraphs_with_data(
+        primary_query,
+        serde_json::json!({"children": [
+            {"__typename": "Other", "id": "o1", "label": "o1"},
+            {"__typename": "Item", "id": "2"},
+            {"__typename": "Other", "id": "o3", "label": "o3"},
+        ]}),
+        entities_query,
+        entities,
+    )
+}
+
+fn mixed_list_subgraphs_with_data(
+    primary_query: &str,
+    data: serde_json::Value,
+    entities_query: &str,
+    entities: serde_json::Value,
+) -> MockedSubgraphs {
     let mut subgraphs = MockedSubgraphs::default();
     subgraphs.insert(
         "ui",
         MockSubgraph::builder()
             .with_json(
                 serde_json::json!({"query": primary_query}),
-                serde_json::json!({"data": {"children": [
-                    {"__typename": "Other", "id": "o1", "label": "o1"},
-                    {"__typename": "Item", "id": "2"},
-                    {"__typename": "Other", "id": "o3", "label": "o3"},
-                ]}}),
+                serde_json::json!({"data": data}),
             )
             .with_json(
                 serde_json::json!({
@@ -1656,6 +1670,119 @@ async fn defer_authenticated_field_under_type_condition_in_mixed_list() {
     // because the error's path has an `... on Item` element, which does not
     // match a response path, so the error is dropped.
     // An error should be asserted on once this bug is fixed.
+}
+
+/// An alias above the `@defer` is kept in the deferred response's path.
+#[tokio::test(flavor = "multi_thread")]
+async fn defer_under_aliased_field_in_mixed_list() {
+    let subgraphs = mixed_list_subgraphs_with_data(
+        "{ kids: children { __typename id ... on Item { __typename id } } }",
+        serde_json::json!({"kids": [
+            {"__typename": "Other", "id": "o1"},
+            {"__typename": "Item", "id": "2"},
+            {"__typename": "Other", "id": "o3"},
+        ]}),
+        MIXED_LIST_TITLE_QUERY,
+        serde_json::json!({"data": {"_entities": [{"title": "Item 2"}]}}),
+    );
+    let (primary, incremental) = run_mixed_list_defer(
+        r#"{ kids: children { id ... on Item { ... @defer(label: "d") { title } } } }"#,
+        subgraphs,
+    )
+    .await;
+    assert_eq!(primary.errors, vec![], "{primary:?}");
+    assert_eq!(
+        incremental,
+        vec![serde_json::json!({
+            "label": "d",
+            "data": {"title": "Item 2"},
+            "path": ["kids", 1],
+        })]
+    );
+}
+
+/// A `@defer` on a union applies to each of its members.
+#[tokio::test(flavor = "multi_thread")]
+async fn defer_on_union_in_mixed_list() {
+    let subgraphs = mixed_list_subgraphs_with_data(
+        "{ unionChildren { __typename ... on Item { title } } }",
+        serde_json::json!({"unionChildren": [
+            {"__typename": "Other"},
+            {"__typename": "Item", "title": "Item 2"},
+            {"__typename": "Other"},
+        ]}),
+        MIXED_LIST_TITLE_QUERY,
+        serde_json::json!({"data": {"_entities": [{"title": "Item 2"}]}}),
+    );
+    let (primary, incremental) = run_mixed_list_defer(
+        r#"{ unionChildren { __typename ... @defer(label: "d") { ... on Item { title } } } }"#,
+        subgraphs,
+    )
+    .await;
+    assert_eq!(primary.errors, vec![], "{primary:?}");
+    assert_eq!(
+        incremental,
+        vec![
+            serde_json::json!({"label": "d", "data": {"title": "Item 2"}, "path": ["unionChildren", 1]}),
+            serde_json::json!({"label": "d", "data": {}, "path": ["unionChildren", 0]}),
+            serde_json::json!({"label": "d", "data": {}, "path": ["unionChildren", 2]}),
+        ]
+    );
+}
+
+/// A `@defer` under a type condition in a list of lists.
+#[tokio::test(flavor = "multi_thread")]
+async fn defer_under_type_condition_in_nested_list() {
+    let subgraphs = mixed_list_subgraphs_with_data(
+        "{ nestedChildren { __typename id ... on Item { __typename id } } }",
+        serde_json::json!({"nestedChildren": [
+            [{"__typename": "Other", "id": "o1"}, {"__typename": "Item", "id": "2"}],
+            [{"__typename": "Other", "id": "o3"}],
+        ]}),
+        MIXED_LIST_TITLE_QUERY,
+        serde_json::json!({"data": {"_entities": [{"title": "Item 2"}]}}),
+    );
+    let (primary, incremental) = run_mixed_list_defer(
+        r#"{ nestedChildren { id ... on Item { ... @defer(label: "d") { title } } } }"#,
+        subgraphs,
+    )
+    .await;
+    assert_eq!(primary.errors, vec![], "{primary:?}");
+    assert_eq!(
+        incremental,
+        vec![serde_json::json!({
+            "label": "d",
+            "data": {"title": "Item 2"},
+            "path": ["nestedChildren", 0, 1],
+        })]
+    );
+}
+
+/// No deferred response should be sent under an item the primary response nulled.
+#[tokio::test(flavor = "multi_thread")]
+#[ignore = "pre-existing: a deferred response is sent under an item the primary nulled ROUTER-2386"]
+async fn defer_under_item_nulled_by_primary_in_mixed_list() {
+    let subgraphs = mixed_list_subgraphs_with_data(
+        "{ children { __typename id ... on Item { __typename status id } } }",
+        serde_json::json!({"children": [
+            {"__typename": "Other", "id": "o1"},
+            {"__typename": "Item", "id": "2", "status": null},
+            {"__typename": "Other", "id": "o3"},
+        ]}),
+        MIXED_LIST_TITLE_QUERY,
+        serde_json::json!({"data": {"_entities": [{"title": "Item 2"}]}}),
+    );
+    let (primary, incremental) = run_mixed_list_defer(
+        r#"{ children { id ... on Item { status ... @defer(label: "d") { title } } } }"#,
+        subgraphs,
+    )
+    .await;
+    assert_eq!(
+        json!(primary.data),
+        json!({"children": [{"id": "o1"}, null, {"id": "o3"}]}),
+        "{primary:?}"
+    );
+    assert_eq!(incremental, Vec::<serde_json::Value>::new());
 }
 
 #[tokio::test(flavor = "multi_thread")]

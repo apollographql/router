@@ -38,6 +38,12 @@ type Item implements Component
   secret: String @authenticated
 }
 
+union ItemOrOther
+  @join__type(graph: UI)
+  @join__unionMember(graph: UI, member: "Item")
+  @join__unionMember(graph: UI, member: "Other")
+ = Item | Other
+
 enum ItemStatus
   @join__type(graph: UI)
 {
@@ -76,5 +82,7 @@ type Other implements Component
 type Query
   @join__type(graph: UI)
 {
-  children: [Component!]!
+  children: [Component]!
+  nestedChildren: [[Component!]!]!
+  unionChildren: [ItemOrOther!]!
 }
