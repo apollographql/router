@@ -143,7 +143,7 @@ mod tests {
     use crate::Configuration;
     use crate::Context;
     use crate::plugins::authorization::REQUIRED_SCOPES_KEY;
-    use crate::services::query_parsing::authorization_requirements::operation_requirements;
+    use crate::plugins::authorization::authorization_requirements::operation_requirements;
     use crate::spec::Query;
     use crate::spec::Schema;
 

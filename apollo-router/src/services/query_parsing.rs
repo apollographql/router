@@ -18,7 +18,6 @@ use crate::plugins::authorization::CacheKeyMetadata;
 use crate::spec::QueryHash;
 use crate::spec::SpecError;
 
-pub(crate) mod authorization_requirements;
 pub(crate) mod cache;
 pub(crate) mod recursive_selections_limit;
 pub(crate) mod service;
@@ -77,7 +76,7 @@ pub(crate) struct ParsedDocumentInner {
     pub(crate) hash: Arc<QueryHash>,
     pub(crate) operation: Node<Operation>,
     /// The authorization requirements of `operation`, set by
-    /// [`authorization_requirements::AuthorizationRequirementsLayer`] when the authorization
+    /// [`AuthorizationRequirementsLayer`](crate::plugins::authorization::authorization_requirements::AuthorizationRequirementsLayer) when the authorization
     /// plugin is installed with directives enabled and the schema links one of them. Otherwise,
     /// and for documents built elsewhere, it is unset.
     pub(crate) authorization: OnceLock<CacheKeyMetadata>,
