@@ -138,8 +138,8 @@ fn widen_aliases_with_keys<'a>(
 
 /// The keys a @requires hop enters its entity with: the hop's own key, whose
 /// routed fields may not have reached the edge yet, and the key inputs already
-/// on the edge from the same source type. A chained hop's edge enters from an
-/// intermediate type, so it has none.
+/// on the edge from the same source type. A chained hop's own key is its exit
+/// key, which its last edge may carry only part of.
 fn entering_keys<'a>(
     graph: &'a super::super::fetch_graph::FetchGraph,
     choice: &'a super::routing::RoutingChoice,
@@ -149,11 +149,7 @@ fn entering_keys<'a>(
     let Some(edge) = edge else {
         return Vec::new();
     };
-    let own_key = choice
-        .key()
-        .ok()
-        .filter(|_| choice.intermediate_hops().is_empty())
-        .map(|key| key.key_conditions.as_ref());
+    let own_key = choice.key().ok().map(|key| key.key_conditions.as_ref());
     let edge_keys = graph
         .edge_weight_raw(edge)
         .inputs

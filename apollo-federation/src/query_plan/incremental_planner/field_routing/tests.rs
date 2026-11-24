@@ -7746,14 +7746,16 @@ const CHAINED_REQUIRES_REVIEWS: &str = r#"
     }
 "#;
 
-/// Commit `{ topProducts { y x } }` through a hop chained
-/// a -> products -> reviews, then route every remaining pending to
-/// `route_to`. `x` and `y` require `f` with different arguments, so `x`
-/// splits off its own reviews fetch. Returns, for each reviews fetch, the
-/// key inputs it gets and the subgraph of the fetch each comes from.
+/// Commit `fields` of `topProducts` through a hop chained
+/// a -> products -> reviews, then commit every remaining pending, preferring
+/// routes to `route_to`. The fields require conflicting inputs, so the
+/// second splits off its own reviews fetch. Returns, for each reviews fetch,
+/// the `kept` inputs it gets and the subgraph of the fetch each comes from.
 fn chained_requires_split(
     subgraphs: &[(&str, &str)],
-    route_to: &str,
+    fields: [&str; 2],
+    route_to: &[&str],
+    kept: fn(&super::super::fetch_graph::InputContribution) -> bool,
 ) -> Vec<BTreeSet<(String, String)>> {
     let space = test_support::search_space(subgraphs);
     let mut state = PlanState::new(vec![]);
@@ -7767,7 +7769,7 @@ fn chained_requires_split(
     );
     let (products_node, entry_key) = product_key_edge(&space, "a", "products");
     let (_, exit_key) = product_key_edge(&space, "products", "reviews");
-    for field in ["y", "x"] {
+    for field in fields {
         let pending = product_field_pending(&space, "topProducts", field, "a", root);
         let choice = RoutingChoice::ChainedKeyHop {
             edge: reviews_edge(&space, &pending),
@@ -7783,13 +7785,17 @@ fn chained_requires_split(
     }
     while let Some(pending) = state.pop_pending() {
         let options = space.cached_routing_options(&pending).expect("options");
-        let choice = options
-            .iter()
-            .find(|choice| choice.target_subgraph().as_ref() == route_to)
-            .expect("a route to the given subgraph");
-        space
-            .commit_choice(&mut state, &pending, choice)
-            .expect("pending commits");
+        let mut options: Vec<_> = options.iter().collect();
+        options.sort_by_key(|choice| !route_to.contains(&choice.target_subgraph().as_ref()));
+        let committed = options.into_iter().any(|choice| {
+            let checkpoint = state.checkpoint();
+            let ok = space.commit_choice(&mut state, &pending, choice).is_ok();
+            if !ok {
+                state.rollback(checkpoint);
+            }
+            ok
+        });
+        assert!(committed, "pending commits");
     }
 
     let fetches = |subgraph: &str| -> Vec<NodeIndex> {
@@ -7808,7 +7814,7 @@ fn chained_requires_split(
                     continue;
                 };
                 for input in &state.graph.edge_weight_raw(edge).inputs {
-                    if input.rewrite_info().is_some() {
+                    if kept(input) {
                         let subgraph = state.graph.node(parent).subgraph.to_string();
                         keys.insert((subgraph, input.conditions().to_string()));
                     }
@@ -7833,10 +7839,64 @@ fn requires_split_group_after_chained_hop_takes_key_from_last_hop() {
             ("products", products),
             ("reviews", CHAINED_REQUIRES_REVIEWS),
         ],
-        "products",
+        ["y", "x"],
+        &["products"],
+        |input| input.rewrite_info().is_some(),
     );
     let from_products = BTreeSet::from([("products".to_string(), "{ upc }".to_string())]);
     assert_eq!(keys, vec![from_products.clone(), from_products]);
+}
+
+/// After a chained hop, the conditions aliased onto `owner` still carry the
+/// exit key's `owner { id }`, which s4 selects rather than the hop's fetches.
+#[test]
+fn requires_alias_after_chained_hop_keeps_routed_key_fields() {
+    let products = r#"
+        extend schema @link(url: "https://specs.apollo.dev/federation/v2.9", import: ["@key"])
+        type Product @key(fields: "id") @key(fields: "upc") { id: ID!, upc: ID! }
+    "#;
+    let s4 = r#"
+        extend schema @link(url: "https://specs.apollo.dev/federation/v2.9", import: ["@key", "@shareable"])
+        type Product @key(fields: "id") { id: ID!, owner: Owner @shareable }
+        type Owner @key(fields: "id") { id: ID! }
+    "#;
+    let s2 = r#"
+        extend schema @link(url: "https://specs.apollo.dev/federation/v2.9", import: ["@key"])
+        type Owner @key(fields: "id") { id: ID!, tag(lang: String): String }
+    "#;
+    let reviews = r#"
+        extend schema @link(url: "https://specs.apollo.dev/federation/v2.9", import: ["@key", "@external", "@requires"])
+        type Product @key(fields: "upc owner { id }") {
+            upc: ID!
+            owner: Owner
+            label: String @requires(fields: "owner { tag(lang: \"en\") }")
+            note: String @requires(fields: "owner { tag(lang: \"fr\") }")
+        }
+        type Owner @key(fields: "id") { id: ID!, tag(lang: String): String @external }
+    "#;
+    let inputs = chained_requires_split(
+        &[
+            ("a", CHAINED_REQUIRES_A),
+            ("products", products),
+            ("s4", s4),
+            ("s2", s2),
+            ("reviews", reviews),
+        ],
+        ["label", "note"],
+        &["s4", "s2"],
+        |input| input.rewrite_info().is_none(),
+    );
+    let requires = |lang: &str, alias: &str| {
+        let conditions = format!("{{ {alias}: owner {{ tag(lang: \"{lang}\") id }} }}");
+        BTreeSet::from([("a".to_string(), conditions)])
+    };
+    assert_eq!(
+        inputs,
+        vec![
+            requires("en", "__require_0_owner"),
+            requires("fr", "__require_1_owner"),
+        ]
+    );
 }
 
 /// After a chained hop whose last fetch, products, can't select the key,
@@ -7862,7 +7922,9 @@ fn requires_split_group_after_chained_hop_routes_missing_exit_key() {
             ("identity", identity),
             ("reviews", CHAINED_REQUIRES_REVIEWS),
         ],
-        "identity",
+        ["y", "x"],
+        &["identity"],
+        |input| input.rewrite_info().is_some(),
     );
     let from_identity = BTreeSet::from([("identity".to_string(), "{ upc }".to_string())]);
     assert_eq!(keys, vec![from_identity.clone(), from_identity]);
