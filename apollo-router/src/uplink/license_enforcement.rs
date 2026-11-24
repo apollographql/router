@@ -34,7 +34,6 @@ use thiserror::Error;
 use super::parsed_link_spec::ParsedLinkSpec;
 use crate::ApolloRouterError;
 use crate::Configuration;
-use crate::plugin::PluginFactory;
 use crate::plugin::plugins;
 use crate::spec::LINK_DIRECTIVE_NAME;
 use crate::spec::Schema;
@@ -181,27 +180,12 @@ impl LicenseEnforcementReport {
         config_paths.chain(schema_directives).collect()
     }
 
-    /// The settings in effect in `configuration`, served with `schema`, that need a license
-    /// feature `license` lacks, ordered by path.
+    /// The settings of every plugin that will be built with `configuration` and `schema`, and
+    /// the top-level settings, that need a license feature `license` lacks, ordered by path.
     fn validate_configuration(
         configuration: &Configuration,
         schema: &Schema,
         license: &LicenseState,
-    ) -> Vec<LicensedSetting> {
-        let mandatory_plugins = plugins()
-            .map(|factory| &**factory)
-            .filter(|factory| factory.mandatory);
-        Self::restricted_settings(configuration, schema, license, mandatory_plugins)
-    }
-
-    /// The settings of every plugin that will be built, and the top-level settings, that need a
-    /// license feature `license` lacks, ordered by path. `mandatory_plugins` are the plugins
-    /// built even when `configuration` has no section for them.
-    fn restricted_settings(
-        configuration: &Configuration,
-        schema: &Schema,
-        license: &LicenseState,
-        mandatory_plugins: impl IntoIterator<Item = &'static PluginFactory>,
     ) -> Vec<LicensedSetting> {
         let allowed_features = license.get_allowed_features();
         let supergraph = schema.supergraph_schema();
@@ -212,8 +196,8 @@ impl LicenseEnforcementReport {
             .flat_map(|(_, parsed)| parsed.factory.licensed_features(&parsed.config, supergraph));
         // A mandatory plugin without a section runs with its default config, so that is the
         // config to check. If the default doesn't parse, building the plugin fails anyway.
-        let unconfigured = mandatory_plugins
-            .into_iter()
+        let unconfigured = plugins()
+            .filter(|factory| factory.mandatory)
             .filter(|factory| configuration.plugin_config(&factory.name).is_none())
             .filter_map(|factory| {
                 let config = factory.default_config().ok()?;
