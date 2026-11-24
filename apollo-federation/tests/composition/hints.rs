@@ -356,6 +356,65 @@ mod value_type_fields {
     }
 
     #[test]
+    fn no_hint_on_inaccessible_object_field_missing_from_some_subgraphs() {
+        let subgraph1 = ServiceDefinition {
+            name: "Subgraph1",
+            type_defs: r#"
+                type Query {
+                    a: Int
+                }
+
+                type T @shareable {
+                    a: Int
+                    b: Int @inaccessible
+                }
+            "#,
+        };
+
+        let subgraph2 = ServiceDefinition {
+            name: "Subgraph2",
+            type_defs: r#"
+                type T @shareable {
+                    a: Int
+                }
+            "#,
+        };
+
+        let result = compose_as_fed2_subgraphs(&[subgraph1, subgraph2]).expect("composes");
+        assert_no_hints(&result);
+    }
+
+    #[test]
+    fn no_hint_on_object_field_missing_from_some_subgraphs_when_type_is_inaccessible() {
+        let subgraph1 = ServiceDefinition {
+            name: "Subgraph1",
+            type_defs: r#"
+                type Query {
+                    a: Int
+                }
+
+                type T @shareable {
+                    a: Int
+                    b: Int
+                }
+            "#,
+        };
+
+        // @inaccessible on the type in a subgraph that lacks the field still hides the field.
+        let subgraph2 = ServiceDefinition {
+            name: "Subgraph2",
+            type_defs: r#"
+                type T @shareable @inaccessible {
+                    a: Int
+                }
+            "#,
+        };
+
+        let result = compose_as_fed2_subgraphs(&[subgraph1, subgraph2]).expect("composes");
+        assert_no_hints(&result);
+    }
+
+    #[test]
     fn hints_on_value_type_field_emits_single_hint_when_multiple_subgraphs_missing_field() {
         // Regression test: before the fix, hint_on_inconsistent_value_type_field was missing
         // a break after emitting the hint. Since report_mismatch_hint already examines all
@@ -484,6 +543,35 @@ mod value_type_fields {
             "INCONSISTENT_INTERFACE_VALUE_TYPE_FIELD",
             r#"Field "T.b" of interface type "T" is defined in some but not all subgraphs that define "T": "T.b" is defined in subgraph "Subgraph1" but not in subgraph "Subgraph2"."#,
         );
+    }
+
+    #[test]
+    fn no_hint_on_inaccessible_interface_field_missing_from_some_subgraphs() {
+        let subgraph1 = ServiceDefinition {
+            name: "Subgraph1",
+            type_defs: r#"
+                type Query {
+                    a: Int
+                }
+
+                interface T {
+                    a: Int
+                    b: Int @inaccessible
+                }
+            "#,
+        };
+
+        let subgraph2 = ServiceDefinition {
+            name: "Subgraph2",
+            type_defs: r#"
+                interface T {
+                    a: Int
+                }
+            "#,
+        };
+
+        let result = compose_as_fed2_subgraphs(&[subgraph1, subgraph2]).expect("composes");
+        assert_no_hints(&result);
     }
 
     #[test]
@@ -642,6 +730,78 @@ mod union_member_inconsistencies {
             "INCONSISTENT_UNION_MEMBER",
             r#"Union type "T" includes member type "B" in some but not all defining subgraphs: "B" is defined in subgraph "Subgraph1" but not in subgraph "Subgraph2"."#,
         );
+    }
+
+    #[test]
+    fn no_hint_on_inaccessible_union_member_missing_from_some_subgraphs() {
+        let subgraph1 = ServiceDefinition {
+            name: "Subgraph1",
+            type_defs: r#"
+                type Query {
+                    a: Int
+                }
+
+                union T = A | B
+
+                type A @shareable {
+                    a: Int
+                }
+
+                type B @inaccessible {
+                    b: Int
+                }
+            "#,
+        };
+
+        let subgraph2 = ServiceDefinition {
+            name: "Subgraph2",
+            type_defs: r#"
+                union T = A
+
+                type A @shareable {
+                    a: Int
+                }
+            "#,
+        };
+
+        let result = compose_as_fed2_subgraphs(&[subgraph1, subgraph2]).expect("composes");
+        assert_no_hints(&result);
+    }
+
+    #[test]
+    fn no_hint_on_union_member_missing_from_some_subgraphs_when_union_is_inaccessible() {
+        let subgraph1 = ServiceDefinition {
+            name: "Subgraph1",
+            type_defs: r#"
+                type Query {
+                    a: Int
+                }
+
+                union T @inaccessible = A | B
+
+                type A @shareable {
+                    a: Int
+                }
+
+                type B {
+                    b: Int
+                }
+            "#,
+        };
+
+        let subgraph2 = ServiceDefinition {
+            name: "Subgraph2",
+            type_defs: r#"
+                union T = A
+
+                type A @shareable {
+                    a: Int
+                }
+            "#,
+        };
+
+        let result = compose_as_fed2_subgraphs(&[subgraph1, subgraph2]).expect("composes");
+        assert_no_hints(&result);
     }
 }
 
@@ -831,6 +991,65 @@ mod enum_hints {
             "INCONSISTENT_ENUM_VALUE_FOR_OUTPUT_ENUM",
             "Value \"V2\" of enum type \"T\" has been added to the supergraph but is only defined in a subset of the subgraphs defining \"T\": \"V2\" is defined in subgraph \"Subgraph1\" but not in subgraph \"Subgraph2\".",
         );
+    }
+
+    #[test]
+    fn no_hint_on_inaccessible_enum_value_of_output_enum_type_not_being_in_all_subgraphs() {
+        let subgraph1 = ServiceDefinition {
+            name: "Subgraph1",
+            type_defs: r#"
+                type Query {
+                    t: T
+                }
+
+                enum T {
+                    V1
+                    V2 @inaccessible
+                }
+            "#,
+        };
+
+        let subgraph2 = ServiceDefinition {
+            name: "Subgraph2",
+            type_defs: r#"
+                enum T {
+                    V1
+                }
+            "#,
+        };
+
+        let result = compose_as_fed2_subgraphs(&[subgraph1, subgraph2]).expect("composes");
+        assert_no_hints(&result);
+    }
+
+    #[test]
+    fn no_hint_on_inaccessible_enum_value_of_unused_enum_type_not_being_in_all_subgraphs() {
+        let subgraph1 = ServiceDefinition {
+            name: "Subgraph1",
+            type_defs: r#"
+                type Query {
+                    a: Int
+                }
+
+                enum T {
+                    V1
+                    V2 @inaccessible
+                }
+            "#,
+        };
+
+        let subgraph2 = ServiceDefinition {
+            name: "Subgraph2",
+            type_defs: r#"
+                enum T {
+                    V1
+                }
+            "#,
+        };
+
+        let result = compose_as_fed2_subgraphs(&[subgraph1, subgraph2]).expect("composes");
+        let codes: Vec<&str> = result.hints().iter().map(|h| h.code()).collect();
+        assert_eq!(codes, vec!["UNUSED_ENUM_TYPE"]);
     }
 
     #[test]

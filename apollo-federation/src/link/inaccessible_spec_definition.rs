@@ -641,6 +641,30 @@ impl IsInaccessibleExt for ObjectFieldArgumentDefinitionPosition {
                 .is_inaccessible(schema, inaccessible_directive)?)
     }
 }
+impl IsInaccessibleExt for position::ObjectOrInterfaceTypeDefinitionPosition {
+    fn is_inaccessible(
+        &self,
+        schema: &FederationSchema,
+        inaccessible_directive: &Name,
+    ) -> Result<bool, FederationError> {
+        match self {
+            Self::Object(pos) => pos.is_inaccessible(schema, inaccessible_directive),
+            Self::Interface(pos) => pos.is_inaccessible(schema, inaccessible_directive),
+        }
+    }
+}
+impl IsInaccessibleExt for position::ObjectOrInterfaceFieldDefinitionPosition {
+    fn is_inaccessible(
+        &self,
+        schema: &FederationSchema,
+        inaccessible_directive: &Name,
+    ) -> Result<bool, FederationError> {
+        match self {
+            Self::Object(pos) => pos.is_inaccessible(schema, inaccessible_directive),
+            Self::Interface(pos) => pos.is_inaccessible(schema, inaccessible_directive),
+        }
+    }
+}
 impl IsInaccessibleExt for position::InterfaceTypeDefinitionPosition {
     fn is_inaccessible(
         &self,
