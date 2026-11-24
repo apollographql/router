@@ -202,6 +202,7 @@ async fn subscription_task(
                 formatted_query_plan: query_plan.formatted_query_plan.clone(),
                 query: query_plan.query.clone(),
                 estimated_size: Default::default(),
+                batch_operations: Default::default(),
             })
         }),
         _ => {

@@ -1,4 +1,5 @@
 use std::sync::Arc;
+use std::sync::OnceLock;
 use std::sync::atomic::AtomicUsize;
 use std::sync::atomic::Ordering;
 
@@ -8,6 +9,7 @@ use serde::Deserialize;
 use serde::Serialize;
 
 pub(crate) use self::fetch::OperationKind;
+use super::batch_operation::BatchOperations;
 use super::fetch;
 use super::subscription::SubscriptionNode;
 use crate::apollo_studio_interop::UsageReporting;
@@ -48,6 +50,11 @@ pub struct QueryPlan {
     /// The estimated size in bytes of the query plan
     #[serde(default)]
     pub(crate) estimated_size: Arc<AtomicUsize>,
+
+    /// The operations flattens with several members share, prepared from `root` the first time
+    /// they are asked for.
+    #[serde(skip)]
+    pub(crate) batch_operations: OnceLock<Arc<BatchOperations>>,
 }
 
 /// This default impl is useful for test users
@@ -67,11 +74,19 @@ impl QueryPlan {
             formatted_query_plan: Default::default(),
             query: Arc::new(Query::empty_for_tests()),
             estimated_size: Default::default(),
+            batch_operations: Default::default(),
         }
     }
 }
 
 impl QueryPlan {
+    /// The operations this plan's flattens share when their members go out together.
+    #[allow(dead_code, reason = "sent once flatten members execute")]
+    pub(crate) fn batch_operations(&self) -> &Arc<BatchOperations> {
+        self.batch_operations
+            .get_or_init(|| Arc::new(BatchOperations::prepare(self.root.as_deref())))
+    }
+
     pub(crate) fn is_deferred(&self, variables: &Object) -> bool {
         self.root
             .as_ref()
