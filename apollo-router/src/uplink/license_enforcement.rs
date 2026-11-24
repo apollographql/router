@@ -163,7 +163,7 @@ impl LicenseEnforcementReport {
     }
 
     /// The router.yaml paths and schema directives that need a feature the license lacks,
-    /// such as `subscription.enabled` or `@authenticated`.
+    /// such as `subscription.enabled`.
     pub(crate) fn restricted_features_in_use(&self) -> Vec<String> {
         let config_paths = self
             .restricted_config_in_use
@@ -386,40 +386,10 @@ impl LicenseEnforcementReport {
         schema_violations
     }
 
-    fn schema_restrictions(license: &LicenseState) -> Vec<SchemaRestriction> {
-        let mut schema_restrictions = vec![];
-        let allowed_features = license.get_allowed_features();
-
-        if !allowed_features.contains(&AllowedFeature::Authentication) {
-            schema_restrictions.push(SchemaRestriction::Spec {
-                name: "authenticated".to_string(),
-                spec_url: "https://specs.apollo.dev/authenticated".to_string(),
-                version_req: semver::VersionReq {
-                    comparators: vec![semver::Comparator {
-                        op: semver::Op::Exact,
-                        major: 0,
-                        minor: 1.into(),
-                        patch: 0.into(),
-                        pre: semver::Prerelease::EMPTY,
-                    }],
-                },
-            });
-            schema_restrictions.push(SchemaRestriction::Spec {
-                name: "requiresScopes".to_string(),
-                spec_url: "https://specs.apollo.dev/requiresScopes".to_string(),
-                version_req: semver::VersionReq {
-                    comparators: vec![semver::Comparator {
-                        op: semver::Op::Exact,
-                        major: 0,
-                        minor: 1.into(),
-                        patch: 0.into(),
-                        pre: semver::Prerelease::EMPTY,
-                    }],
-                },
-            });
-        }
-
-        schema_restrictions
+    /// The schema features `license` lacks. None today: the plugins that enforce licensed
+    /// directives declare them through their licensed settings, which see the supergraph.
+    fn schema_restrictions(_license: &LicenseState) -> Vec<SchemaRestriction> {
+        Vec::new()
     }
 
     /// Applies license enforcement, returning the *effective* license the router
@@ -876,6 +846,10 @@ pub(crate) struct LicensedSetting {
 /// An individual check for the supergraph schema
 #[derive(Clone, Debug)]
 pub(crate) enum SchemaRestriction {
+    // Note: this restriction is currently unused. It was used for the authorization directives
+    // before their plugin declared them as a licensed setting. Leaving it here for now in case
+    // other directives become gated by subscription tier
+    #[allow(dead_code)]
     Spec {
         spec_url: String,
         name: String,
@@ -1290,6 +1264,106 @@ mod test {
         assert!(unlicensed_restricted_paths(yaml).is_empty());
     }
 
+    /// A supergraph whose `Query.field` uses the directive `usage`, defined by `definition` and
+    /// linked from the spec at `spec_url`.
+    fn supergraph_using(spec_url: &str, definition: &str, usage: &str) -> String {
+        format!(
+            r#"
+            schema
+              @link(url: "https://specs.apollo.dev/link/v1.0")
+              @link(url: "https://specs.apollo.dev/join/v0.3", for: EXECUTION)
+              @link(url: "{spec_url}", for: SECURITY)
+            {{
+              query: Query
+            }}
+
+            directive @link(url: String, as: String, for: link__Purpose, import: [link__Import]) repeatable on SCHEMA
+            directive @join__graph(name: String!, url: String!) on ENUM_VALUE
+            directive @join__type(graph: join__Graph!, key: join__FieldSet, extension: Boolean! = false, resolvable: Boolean! = true, isInterfaceObject: Boolean! = false) repeatable on OBJECT | INTERFACE | UNION | ENUM | INPUT_OBJECT | SCALAR
+            directive @join__field(graph: join__Graph, requires: join__FieldSet, provides: join__FieldSet, type: String, external: Boolean, override: String, usedOverridden: Boolean) repeatable on FIELD_DEFINITION | INPUT_FIELD_DEFINITION
+            {definition}
+
+            scalar link__Import
+            scalar join__FieldSet
+            enum link__Purpose {{ SECURITY EXECUTION }}
+            enum join__Graph {{
+              MAIN @join__graph(name: "main", url: "http://localhost:4001/")
+            }}
+
+            type Query @join__type(graph: MAIN) {{
+              field: String {usage}
+            }}
+            "#
+        )
+    }
+
+    fn authenticated_supergraph() -> String {
+        supergraph_using(
+            "https://specs.apollo.dev/authenticated/v0.1",
+            "directive @authenticated on FIELD_DEFINITION | OBJECT | INTERFACE | SCALAR | ENUM",
+            "@authenticated",
+        )
+    }
+
+    fn requires_scopes_supergraph() -> String {
+        supergraph_using(
+            "https://specs.apollo.dev/requiresScopes/v0.1",
+            "scalar federation__Scope\ndirective @requiresScopes(scopes: [[federation__Scope!]!]!) on OBJECT | FIELD_DEFINITION | INTERFACE | SCALAR | ENUM",
+            r#"@requiresScopes(scopes: [["read"]])"#,
+        )
+    }
+
+    fn policy_supergraph() -> String {
+        supergraph_using(
+            "https://specs.apollo.dev/policy/v0.1",
+            "directive @policy(policies: [[String]]) on OBJECT | FIELD_DEFINITION | INTERFACE | SCALAR | ENUM",
+            r#"@policy(policies: [["admin"]])"#,
+        )
+    }
+
+    fn license_with(features: impl IntoIterator<Item = AllowedFeature>) -> LicenseState {
+        LicenseState::Licensed {
+            limits: Some(LicenseLimits {
+                tps: None,
+                allowed_features: HashSet::from_iter(features),
+            }),
+        }
+    }
+
+    // The authorization plugin is built with its defaults when router.yaml has no
+    // `authorization:` section, so the directives need Authorization with or without one.
+    #[rstest::rstest]
+    fn test_authorization_directives_need_authorization(
+        #[values(
+            authenticated_supergraph(),
+            requires_scopes_supergraph(),
+            policy_supergraph()
+        )]
+        supergraph: String,
+        #[values("", "authorization:\n  directives:\n    dry_run: true\n")] router_yaml: &str,
+    ) {
+        let restricted =
+            |license| check(router_yaml, &supergraph, license).restricted_features_in_use();
+        let expected = ["authorization.directives.enabled"];
+
+        assert_eq!(
+            restricted(license_with([AllowedFeature::Authentication])),
+            expected
+        );
+        assert_eq!(restricted(LicenseState::Unlicensed), expected);
+        assert!(restricted(license_with([AllowedFeature::Authorization])).is_empty());
+    }
+
+    #[test]
+    fn test_disabled_authorization_directives_are_not_restricted() {
+        let report = check(
+            "authorization:\n  directives:\n    enabled: false\n",
+            &policy_supergraph(),
+            LicenseState::Unlicensed,
+        );
+        assert!(!report.uses_restricted_features());
+    }
+
     #[test]
     fn test_require_authentication_is_restricted() {
         let yaml = indoc::indoc! {"
@@ -1364,8 +1438,8 @@ mod test {
         assert!(unlicensed_restricted_paths(yaml).is_empty());
     }
 
-    // The whole message an operator reads for each license state, with both router.yaml
-    // settings and schema directives the license lacks.
+    // The whole message an operator reads for each license state, with the router.yaml
+    // settings the license lacks.
     #[rstest::rstest]
     #[case("licensed", LicenseState::Licensed { limits: Some(no_features()) }, true)]
     #[case("warn", LicenseState::LicensedWarn { limits: Some(no_features()) }, true)]
@@ -1406,7 +1480,7 @@ mod test {
     }
 
     #[test]
-    fn test_restricted_authorization_directives_via_schema_unlicensed() {
+    fn test_authorization_directives_unlicensed() {
         let report = check(
             include_str!("testdata/oss.router.yaml"),
             include_str!("testdata/authorization.graphql"),
@@ -1414,16 +1488,16 @@ mod test {
         );
 
         assert!(
-            !report.restricted_schema_in_use.is_empty(),
+            report.uses_restricted_features(),
             "should have found restricted features"
         );
         assert_snapshot!(report.to_string());
     }
 
     #[test]
-    fn test_restricted_authorization_directives_via_schema_with_restricted_allowed_features() {
+    fn test_authorization_directives_with_restricted_allowed_features() {
         // When auth is contained within the allowed features set
-        // we should not find any schema violations in the report
+        // the directives are allowed
         let report = check(
             include_str!("testdata/oss.router.yaml"),
             include_str!("testdata/authorization.graphql"),
@@ -1438,12 +1512,12 @@ mod test {
             },
         );
         assert!(
-            report.restricted_schema_in_use.is_empty(),
+            !report.uses_restricted_features(),
             "should have not found restricted features"
         );
 
         // When auth is not contained within the allowed features set
-        // we should find schema violations in the report
+        // the directives are refused
         let report = check(
             include_str!("testdata/oss.router.yaml"),
             include_str!("testdata/authorization.graphql"),
@@ -1455,7 +1529,7 @@ mod test {
             },
         );
         assert!(
-            !report.restricted_schema_in_use.is_empty(),
+            report.uses_restricted_features(),
             "should have found restricted features"
         );
         assert_snapshot!(report.to_string());
@@ -1463,7 +1537,7 @@ mod test {
 
     // NB: this behavior will change once all licenses have an `allowed_features` claim
     #[test]
-    fn test_restricted_authorization_directives_via_schema_with_default_license_limits() {
+    fn test_authorization_directives_with_default_license_limits() {
         let report = check(
             include_str!("testdata/oss.router.yaml"),
             include_str!("testdata/authorization.graphql"),
@@ -1473,7 +1547,7 @@ mod test {
         );
 
         assert!(
-            report.restricted_schema_in_use.is_empty(),
+            !report.uses_restricted_features(),
             "should have not found restricted features"
         );
     }
@@ -1659,7 +1733,7 @@ mod test {
         );
 
         assert!(
-            !report.restricted_schema_in_use.is_empty(),
+            report.uses_restricted_features(),
             "should have found restricted features"
         );
         assert_snapshot!(report.to_string());
@@ -1674,7 +1748,7 @@ mod test {
         );
 
         assert!(
-            report.restricted_schema_in_use.is_empty(),
+            !report.uses_restricted_features(),
             "shouldn't have found restricted features"
         );
     }
