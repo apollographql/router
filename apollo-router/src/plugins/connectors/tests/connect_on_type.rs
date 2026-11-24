@@ -50,7 +50,6 @@ async fn basic_batch() {
         Default::default(),
         None,
         |_| {},
-        None,
     )
     .await;
 
@@ -129,7 +128,6 @@ async fn basic_batch_query_params() {
         Default::default(),
         None,
         |_| {},
-        None,
     )
     .await;
 
@@ -206,7 +204,6 @@ async fn batch_missing_items() {
         Default::default(),
         None,
         |_| {},
-        None,
     )
     .await;
 
@@ -300,7 +297,6 @@ async fn connect_on_type() {
         Default::default(),
         None,
         |_| {},
-        None,
     )
     .await;
 
@@ -401,7 +397,6 @@ async fn connect_on_interface_object() {
         Default::default(),
         None,
         |_| {},
-        None,
     )
     .await;
 
@@ -479,7 +474,6 @@ async fn batch_with_max_size_under_batch_size() {
         Default::default(),
         None,
         |_| {},
-        None,
     )
     .await;
 
@@ -593,7 +587,6 @@ async fn batch_with_max_size_over_batch_size() {
         Default::default(),
         None,
         |_| {},
-        None,
     )
     .await;
 
@@ -704,7 +697,6 @@ async fn batch_dedupes_repeated_representations() {
         Default::default(),
         None,
         |_| {},
-        None,
     )
     .await;
 
@@ -808,7 +800,6 @@ async fn batch_dedupes_before_max_size_chunking() {
         Default::default(),
         None,
         |_| {},
-        None,
     )
     .await;
 
@@ -934,7 +925,6 @@ async fn batch_compound_key_keeps_representations_that_share_a_scalar() {
         Default::default(),
         None,
         |_| {},
-        None,
     )
     .await;
 
@@ -1014,7 +1004,6 @@ async fn batch_response_matched_by_key_not_position() {
         Default::default(),
         None,
         |_| {},
-        None,
     )
     .await;
 
@@ -1097,7 +1086,6 @@ async fn batch_query_params_request_only_distinct_keys() {
         Default::default(),
         None,
         |_| {},
-        None,
     )
     .await;
 

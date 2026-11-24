@@ -23,7 +23,6 @@ async fn url_properties() {
         Default::default(),
         None,
         |_| {},
-        None,
     )
     .await;
 

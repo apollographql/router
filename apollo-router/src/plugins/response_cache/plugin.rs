@@ -98,6 +98,8 @@ use crate::services::subgraph::SubgraphRequestId;
 use crate::services::supergraph;
 use crate::spec::QueryHash;
 use crate::spec::TYPENAME;
+use crate::uplink::license_enforcement::AllowedFeature;
+use crate::uplink::license_enforcement::LicensedSetting;
 
 /// Change this key if you introduce a breaking change in response caching algorithm to make sure it won't take the previous entries
 pub(crate) const RESPONSE_CACHE_VERSION: &str = "1.2";
@@ -459,6 +461,20 @@ impl PluginPrivate for ResponseCache {
     const HIDDEN_FROM_CONFIG_JSON_SCHEMA: bool = true;
     type Config = Config;
 
+    fn licensed_features(
+        config: &Self::Config,
+        _supergraph: &apollo_compiler::Schema,
+    ) -> Vec<LicensedSetting> {
+        if config.enabled {
+            vec![LicensedSetting {
+                feature: AllowedFeature::ResponseCaching,
+                path: "response_cache.enabled",
+            }]
+        } else {
+            Vec::new()
+        }
+    }
+
     async fn new(init: PluginInit<Self::Config>) -> Result<Self, BoxError>
     where
         Self: Sized,
@@ -695,6 +711,11 @@ impl PluginPrivate for ResponseCache {
         &self,
         service: supergraph::BoxCloneService,
     ) -> supergraph::BoxCloneService {
+        // `enabled: false` turns off every client-visible effect of the plugin: the merged
+        // `Cache-Control` header, the CDN invalidation header and the cache debugger.
+        if !self.enabled {
+            return service;
+        }
         let debug = self.debug;
         let include_cache_control_header_on_router_response =
             self.include_cache_control_header_on_router_response;
@@ -811,6 +832,9 @@ impl PluginPrivate for ResponseCache {
         name: &str,
         service: subgraph::BoxCloneService,
     ) -> subgraph::BoxCloneService {
+        if !self.enabled {
+            return service;
+        }
         let subgraph_ttl = self
             .subgraph_ttl(name)
             .unwrap_or_else(|| Duration::from_secs(60 * 60 * 24)); // The unwrap should not happen because it's checked when creating the plugin (except for tests)
@@ -906,6 +930,9 @@ impl PluginPrivate for ResponseCache {
         service: crate::services::connector::request_service::BoxCloneService,
         source_name: String,
     ) -> crate::services::connector::request_service::BoxCloneService {
+        if !self.enabled {
+            return service;
+        }
         if !self
             .connectors
             .is_source_enabled(self.enabled, &source_name)

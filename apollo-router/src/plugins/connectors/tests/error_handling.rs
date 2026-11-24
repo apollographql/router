@@ -50,7 +50,6 @@ async fn only_source_no_error() {
         Default::default(),
         Some(override_config.into()),
         |_| {},
-        None,
     )
     .await;
 
@@ -114,7 +113,6 @@ async fn only_source_with_error() {
         Default::default(),
         Some(override_config.into()),
         |_| {},
-        None,
     )
     .await;
 
@@ -190,7 +188,6 @@ async fn only_connect_no_error() {
         Default::default(),
         Some(override_config.into()),
         |_| {},
-        None,
     )
     .await;
 
@@ -254,7 +251,6 @@ async fn only_connect_with_error() {
         Default::default(),
         Some(override_config.into()),
         |_| {},
-        None,
     )
     .await;
 
@@ -329,7 +325,6 @@ async fn both_source_and_connect_no_error() {
         Default::default(),
         Some(override_config.into()),
         |_| {},
-        None,
     )
     .await;
 
@@ -393,7 +388,6 @@ async fn both_source_and_connect_with_error() {
         Default::default(),
         Some(override_config.into()),
         |_| {},
-        None,
     )
     .await;
 
@@ -464,7 +458,6 @@ async fn partial_source_and_partial_connect() {
         Default::default(),
         Some(override_config.into()),
         |_| {},
-        None,
     )
     .await;
 
@@ -536,7 +529,6 @@ async fn redact_errors_when_include_subgraph_errors_disabled() {
         Default::default(),
         Some(override_config.into()),
         |_| {},
-        None,
     )
     .await;
 
@@ -595,7 +587,6 @@ async fn does_not_redact_errors_when_include_subgraph_errors_enabled() {
         Default::default(),
         Some(override_config.into()),
         |_| {},
-        None,
     )
     .await;
 

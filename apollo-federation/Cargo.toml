@@ -18,13 +18,16 @@ snapshot_tracing = ["ron"]
 # `correctness` feature enables the `correctness` module.
 correctness = []
 # Builds the `connect-migrate` binary in `connectors/migration/`.
-# Pulls in clap + apollo-parser only when the binary is being built.
-connect-migrate = ["dep:clap", "dep:apollo-parser", "time/formatting"]
+# Pulls in clap only when the binary is being built.
+connect-migrate = ["dep:clap", "time/formatting"]
+# Lets composition merge GraphQL Federation source schemas (`@lookup`, `@internal`, `@is`,
+# `@require`). Not ready for use: only this crate's own tests enable it (see `dev-dependencies`).
+graphql_federation = []
 
 [dependencies]
 ahash.workspace = true
 apollo-compiler.workspace = true
-apollo-parser = { workspace = true, optional = true }
+apollo-parser.workspace = true
 clap = { version = "4", features = ["derive"], optional = true }
 time = { version = "0.3.34", default-features = false, features = [
   "local-offset",
@@ -77,7 +80,7 @@ test-log = { version = "0.2.16", default-features = false, features = [
   "trace",
 ] }
 # workaround for https://github.com/rust-lang/cargo/issues/2911
-apollo-federation = { path = ".", features = ["correctness"] }
+apollo-federation = { path = ".", features = ["correctness", "graphql_federation"] }
 
 [[test]]
 name = "main"
