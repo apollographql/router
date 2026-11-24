@@ -34,6 +34,8 @@ use thiserror::Error;
 use super::parsed_link_spec::ParsedLinkSpec;
 use crate::ApolloRouterError;
 use crate::Configuration;
+use crate::plugin::PluginFactory;
+use crate::plugin::plugins;
 use crate::spec::LINK_DIRECTIVE_NAME;
 use crate::spec::Schema;
 
@@ -186,18 +188,40 @@ impl LicenseEnforcementReport {
         schema: &Schema,
         license: &LicenseState,
     ) -> Vec<LicensedSetting> {
+        let mandatory_plugins = plugins()
+            .map(|factory| &**factory)
+            .filter(|factory| factory.mandatory);
+        Self::restricted_settings(configuration, schema, license, mandatory_plugins)
+    }
+
+    /// The settings of every plugin that will be built, and the top-level settings, that need a
+    /// license feature `license` lacks, ordered by path. `mandatory_plugins` are the plugins
+    /// built even when `configuration` has no section for them.
+    fn restricted_settings(
+        configuration: &Configuration,
+        schema: &Schema,
+        license: &LicenseState,
+        mandatory_plugins: impl IntoIterator<Item = &'static PluginFactory>,
+    ) -> Vec<LicensedSetting> {
         let allowed_features = license.get_allowed_features();
-        let plugins = configuration
+        let supergraph = schema.supergraph_schema();
+        let configured = configuration
             .apollo_plugins
             .iter()
             .chain(configuration.plugins.iter())
-            .map(|(_, parsed)| parsed);
-        let mut violations: Vec<LicensedSetting> = plugins
-            .flat_map(|parsed| {
-                parsed
-                    .factory
-                    .licensed_features(&parsed.config, schema.supergraph_schema())
+            .flat_map(|(_, parsed)| parsed.factory.licensed_features(&parsed.config, supergraph));
+        // A mandatory plugin without a section runs with its default config, so that is the
+        // config to check. If the default doesn't parse, building the plugin fails anyway.
+        let unconfigured = mandatory_plugins
+            .into_iter()
+            .filter(|factory| configuration.plugin_config(&factory.name).is_none())
+            .filter_map(|factory| {
+                let config = factory.default_config().ok()?;
+                Some(factory.licensed_features(&config, supergraph))
             })
+            .flatten();
+        let mut violations: Vec<LicensedSetting> = configured
+            .chain(unconfigured)
             .chain(Self::licensed_top_level_settings(configuration))
             .filter(|setting| !allowed_features.contains(&setting.feature))
             .collect();
@@ -947,6 +971,7 @@ mod test {
     use serde_json::json;
 
     use crate::Configuration;
+    use crate::configuration::plugin_configs::find_factory;
     use crate::spec::Schema;
     use crate::uplink::license_enforcement::AllowedFeature;
     use crate::uplink::license_enforcement::Audience;
@@ -1132,6 +1157,35 @@ mod test {
             report.restricted_config_in_use.is_empty(),
             "should not have found restricted features"
         );
+    }
+
+    // `subscription` stands in for a mandatory plugin: without a section its default config
+    // turns subscriptions on, which needs a license.
+    #[test]
+    fn test_mandatory_plugin_without_a_section_is_checked_with_its_default_config() {
+        let configuration = Configuration::from_str(include_str!("testdata/oss.router.yaml"))
+            .expect("router config must be valid");
+        let schema = Schema::parse(include_str!("testdata/oss.graphql"), &configuration)
+            .expect("supergraph schema must be valid");
+        let restricted = |mandatory_plugins: &[&str]| {
+            LicenseEnforcementReport::restricted_settings(
+                &configuration,
+                &schema,
+                &LicenseState::Unlicensed,
+                mandatory_plugins
+                    .iter()
+                    .map(|name| find_factory(name).expect("plugin is registered")),
+            )
+            .into_iter()
+            .map(|setting| setting.path)
+            .collect::<Vec<_>>()
+        };
+
+        assert_eq!(
+            restricted(&["apollo.subscription"]),
+            ["subscription.enabled"]
+        );
+        assert!(restricted(&[]).is_empty());
     }
 
     #[test]
