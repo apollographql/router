@@ -958,20 +958,7 @@ pub(crate) fn create_oci_license_stream(
     // Validate the reference to determine its type
     validate_oci_reference(&oci_config.reference)?;
     // An infinite polling stream is intended here
-    Ok(Box::pin(stream_license_from_oci(oci_config, None)))
-}
-
-/// The license from an explicitly named entitlement artifact (`registry.artifacts.entitlement`):
-/// no discovery, the reference is polled as given.
-pub(crate) fn create_oci_entitlement_license_stream(
-    oci_config: OciConfig,
-) -> Result<OciLicenseStream, anyhow::Error> {
-    validate_oci_reference(&oci_config.reference)?;
-    let entitlement_reference: Reference = oci_config.reference.parse()?;
-    Ok(Box::pin(stream_license_from_oci(
-        oci_config,
-        Some(entitlement_reference),
-    )))
+    Ok(Box::pin(stream_license_from_oci(oci_config)))
 }
 
 /// The repository the entitlement lives in, next to the graph repository: `entitlements/<id>`
@@ -987,7 +974,6 @@ fn entitlement_repository(graph_repository: &str, entitlement_id: &str) -> Strin
 
 fn stream_license_from_oci(
     oci_config: OciConfig,
-    explicit_entitlement: Option<Reference>,
 ) -> impl Stream<Item = Result<Option<License>, OciError>> {
     let (sender, receiver) = channel(2);
 
@@ -1027,12 +1013,7 @@ fn stream_license_from_oci(
             MissingAnnotation,
             HasAnnotation,
         }
-        // An explicit entitlement reference needs no discovery.
-        let mut graph_manifest_state = if explicit_entitlement.is_some() {
-            GraphManifestState::HasAnnotation
-        } else {
-            GraphManifestState::Unread
-        };
+        let mut graph_manifest_state = GraphManifestState::Unread;
 
         loop {
             match graph_manifest_state {
@@ -1095,14 +1076,11 @@ fn stream_license_from_oci(
                 // Step 2: Poll the entitlement artifact's `latest` tag and fetch the license
                 GraphManifestState::HasAnnotation => {
                     // Build the license Reference
-                    let license_reference = match &explicit_entitlement {
-                        Some(reference) => reference.clone(),
-                        None => Reference::with_tag(
-                            graph_reference.registry().to_string(),
-                            entitlement_repository(graph_reference.repository(), &entitlement_id),
-                            "latest".to_string(),
-                        ),
-                    };
+                    let license_reference = Reference::with_tag(
+                        graph_reference.registry().to_string(),
+                        entitlement_repository(graph_reference.repository(), &entitlement_id),
+                        "latest".to_string(),
+                    );
 
                     // Compare the old entitlement digest to the new one
                     // Retry if digest not found, otherwise Error
@@ -2061,7 +2039,7 @@ mod tests {
         .await;
         let oci_config = mock_oci_config_with_reference(image_reference.to_string());
 
-        let results = stream_license_from_oci(oci_config, None)
+        let results = stream_license_from_oci(oci_config)
             .take(1)
             .collect::<Vec<_>>()
             .await;
@@ -2113,7 +2091,7 @@ mod tests {
         .await;
         let oci_config = mock_oci_config_with_reference(graph_reference.to_string());
 
-        let results = stream_license_from_oci(oci_config, None)
+        let results = stream_license_from_oci(oci_config)
             .take(1)
             .collect::<Vec<_>>()
             .await;
@@ -2227,7 +2205,7 @@ mod tests {
             .expect("url must be valid");
         let oci_config = mock_oci_config_with_reference(image_reference.to_string());
 
-        let mut stream = stream_license_from_oci(oci_config, None);
+        let mut stream = stream_license_from_oci(oci_config);
 
         // First poll: new digest, license should be fetched.
         let first_result = stream.next().await;
@@ -2380,7 +2358,7 @@ mod tests {
             .expect("url must be valid");
         let oci_config = mock_oci_config_with_reference(image_reference.to_string());
 
-        let mut stream = stream_license_from_oci(oci_config, None);
+        let mut stream = stream_license_from_oci(oci_config);
         let expected = License::from_str(TEST_LICENSE_JWT).expect("test JWT must parse");
 
         // First poll: entitlement digest 1 is new → fetch.
@@ -2527,7 +2505,7 @@ mod tests {
         };
 
         let start_time = tokio::time::Instant::now();
-        let mut stream = stream_license_from_oci(oci_config, None);
+        let mut stream = stream_license_from_oci(oci_config);
 
         // First stream item should be the 429 error.
         let result = timeout(Duration::from_secs(20), stream.next()).await;
@@ -2702,7 +2680,7 @@ mod tests {
             .expect("url must be valid");
         let oci_config = mock_oci_config_with_reference(image_reference.to_string());
 
-        let mut stream = stream_license_from_oci(oci_config, None);
+        let mut stream = stream_license_from_oci(oci_config);
 
         // Poll 1: blob 500 → stream emits Err.
         let first_result = timeout(Duration::from_secs(5), stream.next())
@@ -2744,7 +2722,7 @@ mod tests {
         .await;
         let oci_config = mock_oci_config_with_reference(image_reference.to_string());
 
-        let mut stream = stream_license_from_oci(oci_config, None);
+        let mut stream = stream_license_from_oci(oci_config);
 
         let first_result = timeout(Duration::from_secs(5), stream.next())
             .await
@@ -2785,7 +2763,7 @@ mod tests {
         // Deliberately mount nothing under `entitlements/{entitlement_id}`.
 
         let oci_config = mock_oci_config_with_reference(image_reference.to_string());
-        let mut stream = stream_license_from_oci(oci_config, None);
+        let mut stream = stream_license_from_oci(oci_config);
 
         let item = timeout(Duration::from_millis(300), stream.next()).await;
         assert!(
@@ -2806,7 +2784,7 @@ mod tests {
             setup_license_mocks(mock_server, entitlement_id, vec![unrelated_layer()]).await;
 
         let oci_config = mock_oci_config_with_reference(image_reference.to_string());
-        let mut stream = stream_license_from_oci(oci_config, None);
+        let mut stream = stream_license_from_oci(oci_config);
 
         let first_result = timeout(Duration::from_secs(5), stream.next())
             .await
@@ -2944,7 +2922,7 @@ mod tests {
             .expect("url must be valid");
         let oci_config = mock_oci_config_with_reference(image_reference.to_string());
 
-        let mut stream = stream_license_from_oci(oci_config, None);
+        let mut stream = stream_license_from_oci(oci_config);
 
         // First poll: layer missing → Err.
         let first_result = timeout(Duration::from_secs(5), stream.next())

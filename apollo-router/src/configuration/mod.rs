@@ -244,7 +244,7 @@ pub struct Configuration {
     #[serde(skip)]
     pub uplink: Option<UplinkConfig>,
 
-    /// Where the router's artifacts (graph, persisted queries, entitlement) are fetched from.
+    /// Where the router's artifacts (graph, persisted queries, and the derived entitlement) are fetched from.
     #[serde(default)]
     pub(crate) registry: Registry,
 

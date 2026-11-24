@@ -67,8 +67,6 @@ impl Driver {
         let resolved = &configuration.resolved_registry;
         let first = self.current.is_none();
         let graph_changed = self.current.as_ref().map(|c| &c.graph) != Some(&resolved.graph);
-        let entitlement_changed =
-            self.current.as_ref().map(|c| &c.entitlement) != Some(&resolved.entitlement);
 
         if self.schema && graph_changed {
             match &resolved.graph {
@@ -102,13 +100,13 @@ impl Driver {
             }
         }
 
-        // The license follows the graph artifact unless an entitlement artifact is named.
-        if self.license && (graph_changed || entitlement_changed) {
-            let source = match (&resolved.entitlement, &resolved.graph) {
-                (Some(entitlement), _) => Some(LicenseSource::OCIEntitlement(entitlement.clone())),
-                (None, Some(graph)) => Some(LicenseSource::OCI(graph.clone())),
-                (None, None) => None,
-            };
+        // The license follows the graph artifact: the entitlement identifier comes off its
+        // manifest and is fetched from the same registry.
+        if self.license && graph_changed {
+            let source = resolved
+                .graph
+                .as_ref()
+                .map(|graph| LicenseSource::OCI(graph.clone()));
             match source {
                 Some(source) => {
                     self.license_poller = Some(Poller::spawn(
@@ -125,7 +123,7 @@ impl Driver {
                 }
                 None => {
                     tracing::error!(
-                        "the registry section no longer names an artifact to take the license from; the router keeps its current license"
+                        "registry.artifacts.graph was removed; the router keeps its current license"
                     );
                 }
             }

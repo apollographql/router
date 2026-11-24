@@ -1,6 +1,6 @@
 ### `registry`
 
-Where the router fetches its artifacts from: the graph artifact that carries the supergraph schema, the persisted-queries artifact, and the entitlement that licenses the router. All three are repositories under one registry host and path prefix, so a pull-through cache or mirror of Apollo's registry is declared once and applies to every artifact.
+Where the router fetches its artifacts from: the graph artifact that carries the supergraph schema, and the persisted-queries artifact. The entitlement that licenses the router is never declared; the router reads its identifier off the graph artifact's manifest and fetches `entitlements/<id>:latest` next to the graph repository. All of these are repositories under one registry host and path prefix, so a pull-through cache or mirror of Apollo's registry is declared once and applies to every fetch, the entitlement's included.
 
 ```yaml title="registry"
 registry:
@@ -14,7 +14,6 @@ registry:
       reference: my-graph:production
     persisted_queries:
       reference: persistedqueries/my-graph:production
-    entitlement: null
 ```
 
 | Property | Description |
@@ -26,7 +25,6 @@ registry:
 | `insecure` | Use plain HTTP for this registry, for a local or in-cluster cache without TLS. |
 | `artifacts.graph.reference` | The graph artifact: `<graph>:<variant>` to follow the variant (requires `--hot-reload`), or `<graph>@sha256:<digest>` to pin a launch. `APOLLO_GRAPH_ARTIFACT_REFERENCE` overrides this slot and must name the same registry. |
 | `artifacts.persisted_queries.reference` | The persisted-queries artifact: `persistedqueries/<graph>:<variant>` to follow the variant's persisted query list, or a digest to pin a revision. Tag references are always followed, independently of `--hot-reload`. Unset, persisted queries come from Apollo Uplink; `persisted_queries.local_manifests` takes precedence over both. |
-| `artifacts.entitlement.reference` | Normally unset: the router reads the entitlement identifier off the graph artifact's manifest and fetches `entitlements/<id>:latest` next to the graph repository, under the same prefix. Set it only to take the license from a different repository. |
 
 A reference is relative to `host` and `prefix` unless its first path segment is itself a host (it contains a `.` or a `:`, or is `localhost`), in which case it is used as written.
 

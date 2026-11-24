@@ -1,6 +1,6 @@
 ### Declare the router's artifacts in `router.yaml` with the `registry` section
 
-The graph artifact, the persisted-queries artifact and the entitlement can now be declared in one place in `router.yaml` instead of one environment variable per artifact:
+The graph artifact and the persisted-queries artifact can now be declared in one place in `router.yaml` instead of one environment variable per artifact:
 
 ```yaml
 registry:
@@ -12,7 +12,7 @@ registry:
       reference: persistedqueries/my-graph:production
 ```
 
-Every slot is a repository under one registry host and path prefix, so a pull-through cache or mirror of Apollo's registry is declared once (`host` and `prefix`) and applies to every artifact, including the entitlement, which is fetched from `entitlements/<id>` next to the graph repository under the same prefix. `auth` picks how the router authenticates (`auto`, `apollo_key`, `docker_credentials`, `anonymous`), and `poll_interval` and `insecure` apply to every slot.
+Every slot is a repository under one registry host and path prefix, so a pull-through cache or mirror of Apollo's registry is declared once (`host` and `prefix`) and applies to every fetch, including the entitlement that licenses the router, which is never declared: the router reads its identifier off the graph artifact's manifest and fetches `entitlements/<id>` next to the graph repository under the same prefix. `auth` picks how the router authenticates (`auto`, `apollo_key`, `docker_credentials`, `anonymous`), and `poll_interval` and `insecure` apply to every slot.
 
 The section follows configuration reloads: editing a reference while the router runs restarts only the poller it changes, so pointing `artifacts.graph` at another registry fetches that schema without a restart, and slots that did not change keep their pollers and cached state.
 

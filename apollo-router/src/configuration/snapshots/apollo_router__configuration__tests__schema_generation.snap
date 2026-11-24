@@ -367,18 +367,6 @@ expression: "&schema"
       "additionalProperties": false,
       "description": "The artifact filling each slot. Every reference is relative to `registry.host` and\n`registry.prefix` unless it names a host itself.",
       "properties": {
-        "entitlement": {
-          "anyOf": [
-            {
-              "$ref": "#/$defs/ArtifactReference"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "default": null,
-          "description": "The entitlement artifact carrying the router's license. Normally unset: the router reads\nthe entitlement identifier off the graph artifact's manifest and fetches\n`entitlements/<id>:latest` next to it. Set it only to point the license at a different\nrepository than that derivation gives."
-        },
         "graph": {
           "anyOf": [
             {
@@ -7997,7 +7985,6 @@ expression: "&schema"
         "artifacts": {
           "$ref": "#/$defs/Artifacts",
           "default": {
-            "entitlement": null,
             "graph": null,
             "persisted_queries": null
           },
@@ -12470,7 +12457,6 @@ expression: "&schema"
       "$ref": "#/$defs/Registry",
       "default": {
         "artifacts": {
-          "entitlement": null,
           "graph": null,
           "persisted_queries": null
         },
@@ -12480,7 +12466,7 @@ expression: "&schema"
         "poll_interval": null,
         "prefix": null
       },
-      "description": "Where the router's artifacts (graph, persisted queries, entitlement) are fetched from."
+      "description": "Where the router's artifacts (graph, persisted queries, and the derived entitlement) are fetched from."
     },
     "reload": {
       "$ref": "#/$defs/Reload",

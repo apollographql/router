@@ -8,7 +8,6 @@ use futures::prelude::*;
 
 use crate::registry::OciConfig;
 use crate::registry::OciError;
-use crate::registry::create_oci_entitlement_license_stream;
 use crate::registry::create_oci_license_stream;
 use crate::router::Event;
 use crate::router::Event::NoMoreLicense;
@@ -132,12 +131,6 @@ pub enum LicenseSource {
     /// Apollo graph artifact OCI registry.
     #[display("OCI")]
     OCI(OciConfig),
-
-    /// An explicitly named entitlement artifact in an OCI registry (`registry.artifacts.entitlement`).
-    /// EXPERIMENTAL and not subject to semver.
-    #[display("OCI")]
-    #[from(ignore)]
-    OCIEntitlement(OciConfig),
 
     /// The license that goes with the graph artifact declared in the configuration's `registry`
     /// section, driven off the configuration stream. EXPERIMENTAL and not subject to semver.
@@ -265,16 +258,9 @@ impl LicenseSource {
             }
             // Handled by the early return above.
             LicenseSource::FromRegistryConfiguration => stream::empty().boxed(),
-            LicenseSource::OCI(_) | LicenseSource::OCIEntitlement(_) => {
+            LicenseSource::OCI(oci_config) => {
                 tracing::debug!("using oci as license source");
-                let created = match self {
-                    LicenseSource::OCI(oci_config) => create_oci_license_stream(oci_config),
-                    LicenseSource::OCIEntitlement(oci_config) => {
-                        create_oci_entitlement_license_stream(oci_config)
-                    }
-                    _ => unreachable!("matched above"),
-                };
-                match created {
+                match create_oci_license_stream(oci_config) {
                     Ok(stream) => stream
                         .filter_map(|res| {
                             future::ready(match res {

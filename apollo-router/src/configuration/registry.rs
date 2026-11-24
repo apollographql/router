@@ -3,8 +3,9 @@
 //!
 //! Every slot is a repository under one registry host and path prefix, so a pull-through cache or
 //! a mirror is declared once (`host` and `prefix`) and applies to the graph artifact, the
-//! persisted-queries artifact and the entitlement alike. `APOLLO_GRAPH_ARTIFACT_REFERENCE`, the
-//! graph slot's original form, keeps working as an override of `artifacts.graph`.
+//! persisted-queries artifact and the derived entitlement fetch alike.
+//! `APOLLO_GRAPH_ARTIFACT_REFERENCE`, the graph slot's original form, keeps working as an
+//! override of `artifacts.graph`.
 //!
 //! Resolution happens on every configuration instance (see [`Registry::resolve`]), so a change to
 //! this section on a configuration reload rebuilds the affected pollers.
@@ -76,12 +77,6 @@ pub(crate) struct Artifacts {
     /// followed, independently of `--hot-reload`. Unset, persisted queries come from Apollo
     /// Uplink (or `persisted_queries.local_manifests`, which takes precedence over both).
     pub(crate) persisted_queries: Option<ArtifactReference>,
-
-    /// The entitlement artifact carrying the router's license. Normally unset: the router reads
-    /// the entitlement identifier off the graph artifact's manifest and fetches
-    /// `entitlements/<id>:latest` next to it. Set it only to point the license at a different
-    /// repository than that derivation gives.
-    pub(crate) entitlement: Option<ArtifactReference>,
 }
 
 /// One artifact slot.
@@ -118,17 +113,14 @@ pub(crate) struct ResolvedRegistry {
     pub(crate) graph: Option<OciConfig>,
     /// The persisted-queries artifact, from `registry.artifacts.persisted_queries`.
     pub(crate) persisted_queries: Option<OciConfig>,
-    /// An explicit entitlement artifact, from `registry.artifacts.entitlement`. `None` means the
-    /// license is derived from the graph artifact's manifest.
-    pub(crate) entitlement: Option<OciConfig>,
 }
 
 impl Registry {
     /// Turn the section into per-slot fetch configuration.
     ///
     /// The graph slot takes the environment reference over the declared one; when both are set
-    /// they must name the same registry, since the entitlement and the other slots are fetched
-    /// from the declared one and a split would be impossible to reason about.
+    /// they must name the same registry, since the entitlement and the persisted-queries slot are
+    /// fetched from the declared one and a split would be impossible to reason about.
     pub(crate) fn resolve(
         &self,
         overrides: &RegistryOverrides,
@@ -164,12 +156,6 @@ impl Registry {
             persisted_queries: self
                 .artifacts
                 .persisted_queries
-                .as_ref()
-                .map(|slot| self.oci_config(self.absolute(&slot.reference), overrides, true))
-                .transpose()?,
-            entitlement: self
-                .artifacts
-                .entitlement
                 .as_ref()
                 .map(|slot| self.oci_config(self.absolute(&slot.reference), overrides, true))
                 .transpose()?,
@@ -299,7 +285,6 @@ mod tests {
             artifacts: Artifacts {
                 graph: slot("my-graph:prod"),
                 persisted_queries: slot("persistedqueries/my-graph:prod"),
-                entitlement: None,
             },
             ..Default::default()
         };
@@ -320,7 +305,6 @@ mod tests {
         );
         // Tag references for persisted queries are always followed.
         assert!(persisted_queries.hot_reload);
-        assert!(resolved.entitlement.is_none());
     }
 
     #[test]
@@ -333,7 +317,6 @@ mod tests {
             artifacts: Artifacts {
                 graph: slot("my-graph:prod"),
                 persisted_queries: slot("persistedqueries/my-graph:prod"),
-                entitlement: slot("entitlements/abc:latest"),
             },
             ..Default::default()
         };
@@ -345,10 +328,6 @@ mod tests {
         assert_eq!(
             resolved.persisted_queries.as_ref().unwrap().reference,
             "mirror.internal:5000/apollo-remote/persistedqueries/my-graph:prod"
-        );
-        assert_eq!(
-            resolved.entitlement.as_ref().unwrap().reference,
-            "mirror.internal:5000/apollo-remote/entitlements/abc:latest"
         );
         let graph = resolved.graph.unwrap();
         assert!(!graph.use_ssl);
@@ -362,7 +341,6 @@ mod tests {
             artifacts: Artifacts {
                 graph: slot("other.example.com/team/my-graph:prod"),
                 persisted_queries: slot("localhost:5000/persistedqueries/my-graph:prod"),
-                entitlement: None,
             },
             ..Default::default()
         };
