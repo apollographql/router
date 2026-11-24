@@ -1,4 +1,4 @@
-### Do not emit `batching.size` for invalid batches ([PR #10852](https://github.com/apollographql/router/pull/10852))
+### Batching metrics no longer count invalid batches ([PR #10852](https://github.com/apollographql/router/pull/10852))
 
 When a batch request contains a JSON structure that cannot be parsed as a GraphQL request, the Router rejects the whole batch with an `INVALID_GRAPHQL_REQUEST` error. Previously, such rejected requests were still counted in batching metrics, though they were never executed. The following metrics no longer include these requests:
 
