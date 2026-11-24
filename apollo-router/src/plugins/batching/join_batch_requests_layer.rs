@@ -553,6 +553,7 @@ mod tests {
     use crate::Context;
     use crate::configuration::subgraph::SubgraphConfiguration;
     use crate::graphql;
+    use crate::metrics::FutureMetricsExt as _;
     use crate::plugins::batching::config::BatchingConfig;
     use crate::plugins::batching::config::CommonBatchingConfig;
     use crate::plugins::batching::state::Batch;
@@ -698,6 +699,57 @@ mod tests {
         }
 
         crate::plugin::test::await_mock_driver(driver).await;
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn it_records_batch_metrics() {
+        async {
+            let (mock, mut handle) = tower_test::mock::pair::<HttpRequest, HttpResponse>();
+
+            let batch = Arc::new(Batch::spawn_handler(3));
+            let mut requests = Vec::with_capacity(3);
+            for index in 0..3 {
+                let context = context_for_batch_index(&batch, index).await;
+                requests.push(graphql_request(&format!("{{ slot{index} }}"), context));
+            }
+
+            let driver = tokio::task::spawn(async move {
+                let (request, responder) = handle.next_request().await.unwrap();
+                let response_body = body::from_bytes(
+                    r#"[{"data":{"slot0":0}},{"data":{"slot1":1}},{"data":{"slot2":2}}]"#,
+                );
+                responder.send_response(HttpResponse {
+                    http_response: http::Response::builder().body(response_body).unwrap(),
+                    context: request.context,
+                });
+            });
+
+            let service = ServiceBuilder::new()
+                .layer(JoinBatchRequestsLayer::new("test_subgraph"))
+                .service(mock);
+
+            let futures = requests.into_iter().map(|request| {
+                let mut service = service.clone();
+                async move { service.ready().await.unwrap().call(request).await.unwrap() }
+            });
+            join_all(futures).await;
+            crate::plugin::test::await_mock_driver(driver).await;
+
+            assert_histogram_sum!(
+                "apollo.router.operations.batching.size",
+                3,
+                "mode" = "batch_http_link",
+                "subgraph" = "test_subgraph"
+            );
+            assert_counter!(
+                "apollo.router.operations.batching",
+                1,
+                "mode" = "batch_http_link",
+                "subgraph" = "test_subgraph"
+            );
+        }
+        .with_metrics()
+        .await;
     }
 
     #[rstest]

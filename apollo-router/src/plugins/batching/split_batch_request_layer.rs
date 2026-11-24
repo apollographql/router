@@ -810,6 +810,11 @@ mod tests {
                 3,
                 "mode" = "batch_http_link"
             );
+            assert_counter!(
+                "apollo.router.operations.batching",
+                1,
+                "mode" = "batch_http_link"
+            );
         }
         .with_metrics()
         .await;
