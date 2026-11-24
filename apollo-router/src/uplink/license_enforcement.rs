@@ -308,20 +308,6 @@ impl LicenseEnforcementReport {
 
         for restriction in schema_restrictions {
             match restriction {
-                SchemaRestriction::Spec {
-                    spec_url,
-                    name,
-                    version_req,
-                } => {
-                    if let Some(link_spec) = link_specs.get(spec_url)
-                        && version_req.matches(&link_spec.version)
-                    {
-                        schema_violations.push(SchemaViolation::Spec {
-                            url: link_spec.url.to_string(),
-                            name: name.to_string(),
-                        });
-                    }
-                }
                 SchemaRestriction::DirectiveArgument {
                     spec_url,
                     name,
@@ -846,15 +832,6 @@ pub(crate) struct LicensedSetting {
 /// An individual check for the supergraph schema
 #[derive(Clone, Debug)]
 pub(crate) enum SchemaRestriction {
-    // Note: this restriction is currently unused. It was used for the authorization directives
-    // before their plugin declared them as a licensed setting. Leaving it here for now in case
-    // other directives become gated by subscription tier
-    #[allow(dead_code)]
-    Spec {
-        spec_url: String,
-        name: String,
-        version_req: semver::VersionReq,
-    },
     // Note: this restriction is currently unused, but it's intention was to
     // traverse directives belonging to object types and their fields. It was used for
     // progressive overrides when they were gated to enterprise-only. Leaving it here for now
