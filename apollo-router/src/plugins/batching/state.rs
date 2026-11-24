@@ -44,6 +44,7 @@ use crate::Context;
 use crate::error::FetchError;
 use crate::error::SubgraphBatchingError;
 use crate::plugins::batching::config::BatchingConfig;
+use crate::plugins::batching::metrics::BatchMetrics;
 use crate::plugins::telemetry::otel::span_ext::OpenTelemetrySpanExt;
 use crate::services::http::HttpRequest;
 use crate::services::http::HttpResponse;
@@ -135,6 +136,7 @@ impl BatchQuery {
         subgraph_name: Arc<str>,
         http_client: crate::services::http::BoxCloneService,
         request: HttpRequest,
+        metrics: Arc<BatchMetrics>,
     ) -> Result<oneshot::Receiver<Result<HttpResponse, BoxError>>, BoxError> {
         // Create a receiver for this query so that it can eventually get the request meant for it
         let (tx, rx) = oneshot::channel();
@@ -157,6 +159,7 @@ impl BatchQuery {
                     response_sender: tx,
                     span_context: Span::current().context(),
                     subgraph_name,
+                    metrics,
                 },
             )))
             .await
@@ -229,6 +232,7 @@ struct BatchHandlerMessageProgress {
     response_sender: oneshot::Sender<Result<HttpResponse, BoxError>>,
     span_context: otelContext,
     subgraph_name: Arc<str>,
+    metrics: Arc<BatchMetrics>,
 }
 
 /// Collection of info needed to resolve a batch query
@@ -236,6 +240,7 @@ pub(super) struct BatchQueryInfo {
     /// The owning subgraph request
     pub(super) request: HttpRequest,
     pub(super) subgraph_name: Arc<str>,
+    pub(super) metrics: Arc<BatchMetrics>,
     pub(super) http_client: crate::services::http::BoxCloneService,
     /// Notifier for the subgraph service handler
     ///
@@ -374,6 +379,7 @@ impl Batch {
                             response_sender,
                             span_context,
                             subgraph_name,
+                            metrics,
                         } = *progress;
 
                         tracing::debug!("Progress index: {index}");
@@ -388,6 +394,7 @@ impl Batch {
                             request,
                             sender: response_sender,
                             subgraph_name,
+                            metrics,
                         })
                     }
                 }
@@ -414,6 +421,7 @@ impl Batch {
                 request: sg_request,
                 sender: tx,
                 subgraph_name,
+                metrics,
             } in all_in_one
             {
                 let value = svc_map.entry(subgraph_name.to_string()).or_default();
@@ -422,6 +430,7 @@ impl Batch {
                     request: sg_request,
                     sender: tx,
                     subgraph_name,
+                    metrics,
                 });
             }
 
@@ -492,6 +501,7 @@ mod tests {
     use crate::graphql;
     use crate::graphql::Request;
     use crate::layers::ServiceExt as LayerExt;
+    use crate::plugins::batching::metrics::BatchMetrics;
     use crate::services::http::HttpRequest;
     use crate::services::http::HttpResponse;
     use crate::services::router;
@@ -499,6 +509,10 @@ mod tests {
     use crate::services::subgraph;
     use crate::services::subgraph::http::APPLICATION_JSON_HEADER_VALUE;
     use crate::spec::QueryHash;
+
+    fn metrics() -> Arc<BatchMetrics> {
+        Arc::new(BatchMetrics::new())
+    }
 
     #[tokio::test(flavor = "multi_thread")]
     async fn it_rejects_index_out_of_bounds() {
@@ -560,7 +574,7 @@ mod tests {
         assert!(!bq.finished());
 
         assert!(
-            bq.signal_progress("whatever".into(), http_client.clone(), request)
+            bq.signal_progress("whatever".into(), http_client.clone(), request, metrics())
                 .await
                 .is_ok()
         );
@@ -573,7 +587,7 @@ mod tests {
             context: Context::new(),
         };
         assert!(
-            bq.signal_progress("whatever".into(), http_client, request)
+            bq.signal_progress("whatever".into(), http_client, request, metrics())
                 .await
                 .is_err()
         );
@@ -605,7 +619,7 @@ mod tests {
         );
         assert!(!bq.finished());
         assert!(
-            bq.signal_progress("whatever".into(), http_client, request)
+            bq.signal_progress("whatever".into(), http_client, request, metrics())
                 .await
                 .is_ok()
         );
@@ -640,7 +654,7 @@ mod tests {
         assert!(bq.set_query_hashes(vec![qh.clone(), qh]).await.is_ok());
         assert!(!bq.finished());
         assert!(
-            bq.signal_progress("whatever".into(), http_client, request)
+            bq.signal_progress("whatever".into(), http_client, request, metrics())
                 .await
                 .is_ok()
         );
@@ -820,12 +834,12 @@ mod tests {
         // We have to provide pre-readied HTTP clients.
         let client1 = http_client.clone().ready_oneshot().await.unwrap();
         let response1 = query1
-            .signal_progress("a".into(), client1, request1)
+            .signal_progress("a".into(), client1, request1, metrics())
             .await
             .unwrap();
         let client2 = http_client.clone().ready_oneshot().await.unwrap();
         let response2 = query2
-            .signal_progress("a".into(), client2, request2)
+            .signal_progress("a".into(), client2, request2, metrics())
             .await
             .unwrap();
 

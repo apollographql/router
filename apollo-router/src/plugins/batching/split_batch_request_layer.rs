@@ -11,10 +11,6 @@ use http::Method;
 use http::StatusCode;
 use http::header;
 use http_body::Body as _;
-use opentelemetry::KeyValue;
-use opentelemetry::metrics::Counter;
-use opentelemetry::metrics::Histogram;
-use opentelemetry::metrics::MeterProvider as _;
 use tower::BoxError;
 use tower::Service;
 use tower::ServiceExt as _;
@@ -25,6 +21,7 @@ use crate::graphql;
 use crate::json_ext::Value;
 use crate::plugins::batching::config::BatchingConfig;
 use crate::plugins::batching::config::BatchingMode;
+use crate::plugins::batching::metrics::BatchMetrics;
 use crate::plugins::batching::state::Batch;
 use crate::plugins::batching::state::BatchQuery;
 use crate::services::router;
@@ -65,42 +62,14 @@ struct TranslateError {
 /// pipeline, and reassembles the responses into a single JSON array response.
 ///
 /// # Telemetry
-/// Emits the `apollo.router.operations.batching.size` metric for batch requests.
+/// Emits the following metrics:
+/// - `apollo.router.operations.batching` counting the number of incoming batch requests
+/// - `apollo.router.operations.batching.size` measuring the size of incoming batch requests
 ///
 /// [`BatchingPlugin::split_batch_request_layer`]: super::BatchingPlugin::split_batch_request_layer
 pub(crate) struct SplitBatchRequestLayer {
     config: Arc<BatchingConfig>,
     metrics: Arc<BatchMetrics>,
-}
-
-/// Instruments emitted by the split layer.
-struct BatchMetrics {
-    /// `apollo.router.operations.batching.size`
-    size: Histogram<u64>,
-    /// `apollo.router.operations.batching`
-    requests: Counter<u64>,
-}
-
-impl BatchMetrics {
-    fn new() -> Self {
-        let meter = crate::metrics::meter_provider().meter("apollo/router");
-        Self {
-            size: meter
-                .u64_histogram("apollo.router.operations.batching.size")
-                .with_description("Number of queries contained within each query batch")
-                .build(),
-            requests: meter
-                .u64_counter("apollo.router.operations.batching")
-                .with_description("Total requests with batched operations")
-                .build(),
-        }
-    }
-
-    fn record(&self, mode: &BatchingMode, batch_size: usize) {
-        let attributes = [KeyValue::new("mode", mode.to_string())];
-        self.size.record(batch_size as u64, &attributes);
-        self.requests.add(1, &attributes);
-    }
 }
 
 impl SplitBatchRequestLayer {
@@ -314,7 +283,7 @@ where
                         "failed to deserialize the request body into JSON: {e}"
                     ),
                 })?;
-                self.metrics.record(&self.config.mode, result.len());
+                self.metrics.record(&self.config.mode, result.len(), None);
 
                 if result.is_empty() {
                     return Err(TranslateError {

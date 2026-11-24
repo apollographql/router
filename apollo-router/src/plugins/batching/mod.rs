@@ -13,6 +13,7 @@ use crate::uplink::license_enforcement::LicensedSetting;
 pub(crate) mod config;
 pub(crate) use state::BatchQuery;
 mod join_batch_requests_layer;
+mod metrics;
 mod query_plan_analysis_layer;
 mod split_batch_request_layer;
 mod state;
