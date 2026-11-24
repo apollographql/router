@@ -74,3 +74,137 @@ impl BatchingConfig {
         batch.len() > self.maximum_size.get()
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use apollo_configuration::ConfigParser;
+
+    use super::*;
+
+    fn parse(yaml: &str) -> BatchingConfig {
+        ConfigParser::<BatchingConfig>::builder()
+            .build()
+            .unwrap()
+            .parse_yaml(yaml)
+            .unwrap()
+    }
+
+    #[test]
+    fn subgraph_all_enabled() {
+        let config = parse(
+            r#"
+            enabled: true
+            mode: batch_http_link
+            subgraph:
+              all:
+                enabled: true
+            "#,
+        );
+
+        assert!(config.batch_include("anything"));
+    }
+
+    #[test]
+    fn subgraph_all_disabled() {
+        let config = parse(
+            r#"
+            enabled: true
+            mode: batch_http_link
+            subgraph:
+              all:
+                enabled: false
+            "#,
+        );
+
+        assert!(!config.batch_include("anything"));
+    }
+
+    #[test]
+    fn subgraph_accounts_enabled() {
+        let config = parse(
+            r#"
+            enabled: true
+            mode: batch_http_link
+            subgraph:
+              all:
+                enabled: false
+              subgraphs:
+                accounts:
+                  enabled: true
+            "#,
+        );
+
+        assert!(!config.batch_include("anything"));
+        assert!(config.batch_include("accounts"));
+    }
+
+    #[test]
+    fn subgraph_accounts_disabled() {
+        let config = parse(
+            r#"
+            enabled: true
+            mode: batch_http_link
+            subgraph:
+              all:
+                enabled: false
+              subgraphs:
+                accounts:
+                  enabled: false
+            "#,
+        );
+
+        assert!(!config.batch_include("anything"));
+        assert!(!config.batch_include("accounts"));
+    }
+
+    #[test]
+    fn subgraph_accounts_override_disabled() {
+        let config = parse(
+            r#"
+            enabled: true
+            mode: batch_http_link
+            subgraph:
+              all:
+                enabled: true
+              subgraphs:
+                accounts:
+                  enabled: false
+            "#,
+        );
+
+        assert!(config.batch_include("anything"));
+        assert!(!config.batch_include("accounts"));
+    }
+
+    #[test]
+    fn mode_defaults_to_batch_http_link() {
+        let config = parse("enabled: true");
+
+        assert!(matches!(config.mode, BatchingMode::BatchHttpLink));
+    }
+
+    #[test]
+    fn maximum_size_defaults_to_10() {
+        let config = parse(
+            r#"
+            enabled: true
+            mode: batch_http_link
+            "#,
+        );
+
+        assert_eq!(config.maximum_size.get(), 10);
+    }
+
+    #[test]
+    fn maximum_size_is_specified() {
+        let config = parse(
+            r#"
+            enabled: true
+            mode: batch_http_link
+            maximum_size: 50
+            "#,
+        );
+
+        assert_eq!(config.maximum_size.get(), 50);
+    }
+}
