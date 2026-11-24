@@ -252,18 +252,7 @@ pub(crate) struct AuthorizationPlugin {
 impl AuthorizationPlugin {
     pub(crate) fn enable_directives(configuration: &Configuration, schema: &Schema) -> bool {
         Self::configuration(configuration).directives.enabled
-            && Self::links_authorization_directives(schema)
-    }
-
-    /// Whether `schema` links `@authenticated`, `@requiresScopes` or `@policy`.
-    fn links_authorization_directives(schema: &Schema) -> bool {
-        schema.has_spec(
-            &Identity::authenticated_identity(),
-            AUTHENTICATED_SPEC_VERSION_RANGE,
-        ) || schema.has_spec(
-            &Identity::requires_scopes_identity(),
-            REQUIRES_SCOPES_SPEC_VERSION_RANGE,
-        ) || schema.has_spec(&Identity::policy_identity(), POLICY_SPEC_VERSION_RANGE)
+            && schema.authorization_directives.any_linked()
     }
 
     /// Returns a layer for the query parsing service that stores each parsed operation's

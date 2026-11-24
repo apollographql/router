@@ -354,24 +354,6 @@ impl Schema {
         None
     }
 
-    /// This function assumes `@link` usage is valid in the schema, and will return `false` if not.
-    pub(crate) fn has_spec(&self, spec_identity: &Identity, expected_version_range: &str) -> bool {
-        let Ok(Some(metadata)) = LinksMetadata::from_schema(self.supergraph_schema()) else {
-            return false;
-        };
-        let Some(link) = metadata.for_identity(spec_identity) else {
-            return false;
-        };
-        let Some(semver_version) = Version::parse(format!("{}.0", link.url.version).as_str()).ok()
-        else {
-            return false;
-        };
-        let Some(version_range) = VersionReq::parse(expected_version_range).ok() else {
-            return false;
-        };
-        version_range.matches(&semver_version)
-    }
-
     /// This function assumes `@link` usage is valid in the schema, and will return `None` if not.
     pub(crate) fn directive_name(
         schema: &apollo_compiler::schema::Schema,
