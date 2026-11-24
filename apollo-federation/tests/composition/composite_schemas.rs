@@ -754,11 +754,16 @@ mod require_validation {
                 type Book @key(fields: "id") {
                   id: ID!
                   title(suffix: String @require(field: "subtitle")): String
-                  subtitle: String
                 }
                 "#,
             ),
-            ("b", r#"type Book @key(fields: "id") { id: ID! }"#),
+            (
+                "b",
+                r#"
+                type Query { bookByIdInB(id: ID!): Book @lookup }
+                type Book @key(fields: "id") { id: ID! subtitle: String }
+                "#,
+            ),
         ])
         .expect("composes");
     }
