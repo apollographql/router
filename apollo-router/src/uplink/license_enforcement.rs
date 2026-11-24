@@ -1110,6 +1110,22 @@ mod test {
         );
     }
 
+    // With no sections, every mandatory plugin is checked with its default config, so this
+    // fails when a mandatory plugin's defaults need a license.
+    #[test]
+    fn test_empty_config_needs_no_license() {
+        let report = check(
+            include_str!("testdata/empty.router.yaml"),
+            include_str!("testdata/oss.graphql"),
+            LicenseState::Unlicensed,
+        );
+
+        assert_eq!(report.restricted_features_in_use(), Vec::<String>::new());
+        report
+            .enforce()
+            .expect("an unlicensed router with an empty config must start");
+    }
+
     // `subscription` stands in for a mandatory plugin: without a section its default config
     // turns subscriptions on, which needs a license.
     #[test]
