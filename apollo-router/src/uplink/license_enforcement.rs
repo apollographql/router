@@ -1280,17 +1280,14 @@ mod test {
     }
 
     #[test]
-    fn test_authorization_section_with_default_directives_is_restricted() {
-        // Directives are on by default, so any `authorization:` section turns them on.
+    fn test_authorization_section_without_linked_directives_is_not_restricted() {
+        // Directives are on by default, but a supergraph that links none has nothing to enforce.
         let yaml = indoc::indoc! {"
             authorization:
               directives:
                 dry_run: true
         "};
-        assert_eq!(
-            unlicensed_restricted_paths(yaml),
-            ["authorization.directives.enabled"]
-        );
+        assert!(unlicensed_restricted_paths(yaml).is_empty());
     }
 
     #[test]

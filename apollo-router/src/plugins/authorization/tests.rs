@@ -14,9 +14,12 @@ use crate::MockedSubgraphs;
 use crate::TestHarness;
 use crate::apollo_studio_interop::UsageReporting;
 use crate::graphql;
+use crate::plugin::PluginPrivate;
 use crate::plugin::test::MockSubgraph;
 use crate::plugins::authentication::APOLLO_AUTHENTICATION_JWT_CLAIMS;
+use crate::plugins::authorization::AuthorizationPlugin;
 use crate::plugins::authorization::CacheKeyMetadata;
+use crate::plugins::authorization::Conf;
 use crate::services::router;
 use crate::services::router::body;
 use crate::services::subgraph;
@@ -266,6 +269,33 @@ type Organization
    nonNullId: ID!
    suborga: [Organization]
 }"#;
+
+/// The settings the authorization plugin reports as licensed, for `config` and `supergraph`.
+fn licensed_paths(config: serde_json::Value, supergraph: &str) -> Vec<&'static str> {
+    let config: Conf = serde_json::from_value(config).expect("valid authorization config");
+    let supergraph =
+        apollo_compiler::Schema::parse(supergraph, "supergraph.graphql").expect("valid supergraph");
+    AuthorizationPlugin::licensed_features(&config, &supergraph)
+        .into_iter()
+        .map(|setting| setting.path)
+        .collect()
+}
+
+#[test]
+fn directives_are_licensed_only_when_the_supergraph_links_one() {
+    assert_eq!(
+        licensed_paths(serde_json::json!({}), AUTHENTICATED_SCHEMA),
+        ["authorization.directives.enabled"]
+    );
+    assert!(licensed_paths(serde_json::json!({}), SCHEMA).is_empty());
+    assert!(
+        licensed_paths(
+            serde_json::json!({ "directives": { "enabled": false } }),
+            AUTHENTICATED_SCHEMA
+        )
+        .is_empty()
+    );
+}
 
 #[tokio::test]
 async fn authenticated_directive() {
