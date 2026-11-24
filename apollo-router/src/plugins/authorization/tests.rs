@@ -14,6 +14,7 @@ use crate::MockedSubgraphs;
 use crate::TestHarness;
 use crate::apollo_studio_interop::UsageReporting;
 use crate::graphql;
+use crate::metrics::FutureMetricsExt;
 use crate::plugin::PluginPrivate;
 use crate::plugin::test::MockSubgraph;
 use crate::plugins::authentication::APOLLO_AUTHENTICATION_JWT_CLAIMS;
@@ -295,6 +296,66 @@ fn directives_are_licensed_only_when_the_supergraph_links_one() {
         )
         .is_empty()
     );
+}
+
+// The plugin is mandatory, so a router with no `authorization:` section still filters and counts
+// operations that use the directives.
+#[tokio::test]
+async fn authenticated_directive_without_authorization_section() {
+    async {
+        let subgraphs = MockedSubgraphs([
+            ("orga", MockSubgraph::builder().with_json(
+                serde_json::json!{{"query":"{orga(id:1){creatorUser{id name}}}"}},
+                serde_json::json!{{"data": {"orga": { "creatorUser": { "id": 0, "name": "Ada" } }}}}
+            ).build())
+        ].into_iter().collect());
+
+        let service = TestHarness::builder()
+            .schema(AUTHENTICATED_SCHEMA)
+            .extra_plugin(subgraphs)
+            .build_router()
+            .await
+            .unwrap();
+
+        let req = graphql::Request {
+            query: Some("query { orga(id: 1) { id creatorUser { id name phone } } }".to_string()),
+            ..Default::default()
+        };
+        let request = router::Request {
+            context: Context::new(),
+            router_request: http::Request::builder()
+                .method("POST")
+                .header(CONTENT_TYPE, "application/json")
+                .header(ACCEPT, "application/json")
+                .body(body::from_bytes(serde_json::to_vec(&req).unwrap()))
+                .unwrap(),
+        };
+
+        let response = service
+            .oneshot(request)
+            .await
+            .unwrap()
+            .into_graphql_response_stream()
+            .await
+            .next()
+            .await
+            .unwrap()
+            .unwrap();
+
+        assert_eq!(
+            response.data,
+            Some(json! {{ "orga": { "id": null, "creatorUser": { "id": 0, "name": "Ada", "phone": null } } }})
+        );
+        assert_counter!(
+            "apollo.router.operations.authorization",
+            1,
+            authorization.filtered = true,
+            authorization.needs_authenticated = true,
+            authorization.needs_requires_scopes = false
+        );
+    }
+    .with_metrics()
+    .await;
 }
 
 #[tokio::test]

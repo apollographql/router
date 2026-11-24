@@ -702,6 +702,11 @@ impl PluginPrivate for AuthorizationPlugin {
     }
 
     fn execution_service(&self, service: execution::BoxCloneService) -> execution::BoxCloneService {
+        // Only directive filtering records unauthorized paths, and only the extract checks layer
+        // sets the context keys counted below.
+        if !self.directives_in_effect() {
+            return service;
+        }
         let reject_unauthorized = self.reject_unauthorized;
 
         ServiceBuilder::new()
