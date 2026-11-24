@@ -115,7 +115,11 @@ where
                 policies,
             } = match doc.authorization.get() {
                 Some(requirements) => requirements.clone(),
-                None => operation_requirements(&doc, &schema),
+                None => operation_requirements(
+                    &doc,
+                    schema.supergraph_schema(),
+                    &schema.authorization_directives,
+                ),
             };
             if is_authenticated {
                 req.context

@@ -267,8 +267,12 @@ impl AuthorizationPlugin {
         schema: Arc<Schema>,
     ) -> OptionLayer<AuthorizationRequirementsLayer> {
         tower::util::option_layer(
-            (self.directives_enabled && Self::links_authorization_directives(&schema))
-                .then(|| AuthorizationRequirementsLayer::new(schema)),
+            (self.directives_enabled && Self::links_authorization_directives(&schema)).then(|| {
+                AuthorizationRequirementsLayer::new(
+                    Arc::new(schema.supergraph_schema().clone()),
+                    schema.authorization_directives.clone(),
+                )
+            }),
         )
     }
 
