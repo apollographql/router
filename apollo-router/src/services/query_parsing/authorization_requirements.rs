@@ -256,17 +256,12 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn not_installed_without_the_authorization_plugin() {
+    #[should_panic(expected = "mandatory plugin")]
+    async fn panics_without_the_authorization_plugin() {
         let configuration = Arc::new(Configuration::default());
         let schema = schema(POLICY_SCHEMA, &configuration);
 
-        let doc = parse(
-            build_query_parsing_service(schema, configuration, &Plugins::default()),
-            "{ private { id } }",
-        )
-        .await;
-
-        assert_eq!(doc.authorization.get(), None);
+        build_query_parsing_service(schema, configuration, &Plugins::default());
     }
 
     #[tokio::test]

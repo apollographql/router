@@ -6,6 +6,9 @@ License not found. The router is connected to GraphOS, but the graph in APOLLO_G
 
 Your configuration uses these licensed features. Remove the settings listed, or use a license that includes the features:
 
+  Authorization
+    authorization.directives.enabled
+
   Coprocessors
     coprocessor
 

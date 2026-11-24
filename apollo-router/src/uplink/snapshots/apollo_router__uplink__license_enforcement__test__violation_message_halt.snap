@@ -6,6 +6,9 @@ License has expired. The router will no longer serve requests. Renew your GraphO
 
 Your configuration uses these licensed features. Remove the settings listed, or use a license that includes the features:
 
+  Authorization
+    authorization.directives.enabled
+
   Coprocessors
     coprocessor
 

@@ -471,19 +471,6 @@ pub(crate) trait InternalServiceBuilderExt<L>: Sized {
     where
         P: PluginPrivate;
 
-    /// Apply a plugin layer that the plugin itself may decline to provide.
-    ///
-    /// Same as [`Self::apply_plugin_layer`], except that the getter returns `None` when the
-    /// plugin has no layer for this stack. A missing plugin and a `None` both apply nothing,
-    /// through a single [`OptionLayer`].
-    fn apply_optional_plugin_layer<P, OutLayer>(
-        self,
-        plugins: &Plugins,
-        get_layer: impl FnOnce(&P) -> Option<OutLayer>,
-    ) -> ServiceBuilder<Stack<OptionLayer<OutLayer>, L>>
-    where
-        P: PluginPrivate;
-
     /// Apply the layer of a *mandatory* plugin to a service stack.
     ///
     /// Unlike [`Self::apply_plugin_layer`], the layer is applied as the getter returns it,
@@ -532,17 +519,6 @@ impl<L> InternalServiceBuilderExt<L> for ServiceBuilder<L> {
         P: PluginPrivate,
     {
         self.option_layer(find_plugin::<P>(plugins).map(get_layer))
-    }
-
-    fn apply_optional_plugin_layer<P, OutLayer>(
-        self,
-        plugins: &Plugins,
-        get_layer: impl FnOnce(&P) -> Option<OutLayer>,
-    ) -> ServiceBuilder<Stack<OptionLayer<OutLayer>, L>>
-    where
-        P: PluginPrivate,
-    {
-        self.option_layer(find_plugin::<P>(plugins).and_then(get_layer))
     }
 
     fn apply_required_plugin_layer<P, OutLayer>(

@@ -770,6 +770,7 @@ mod test {
     use crate::pipeline::connect_apq_redis;
     use crate::pipeline::connect_query_plan_redis;
     use crate::pipeline::create_plugins;
+    use crate::pipeline::tests::stage_stack::query_parsing_plugins;
     use crate::plugin::DynPlugin;
     use crate::plugin::test::MockSubgraph;
     use crate::query_planner::QueryPlannerService;
@@ -871,7 +872,7 @@ mod test {
         let query_parser_service = crate::pipeline::build_query_parsing_service(
             schema.clone(),
             config.clone(),
-            &Default::default(),
+            &query_parsing_plugins().await,
         );
 
         let plugins = Arc::new(

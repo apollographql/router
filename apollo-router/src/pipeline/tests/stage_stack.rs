@@ -51,6 +51,19 @@ pub(crate) async fn required_stage_plugins() -> Arc<Plugins> {
     Arc::new(stage_plugins(&[(APOLLO_TRAFFIC_SHAPING, serde_json::json!({}))]).await)
 }
 
+/// The mandatory plugin the query parsing service applies: authorization at its defaults. It is
+/// built without a schema, so it links no directive and installs no layer.
+pub(crate) async fn query_parsing_plugins() -> Plugins {
+    let name = "apollo.authorization";
+    let authorization = crate::plugin::plugins()
+        .find(|factory| factory.name == name)
+        .expect("plugin is registered")
+        .create_instance_without_schema(&serde_json::json!({}))
+        .await
+        .expect("plugin builds");
+    Plugins::from([(name.to_string(), authorization)])
+}
+
 pub(crate) type Handle = tower_test::mock::Handle<SubgraphRequest, SubgraphResponse>;
 
 /// Replaces the subgraph service with `mock`.

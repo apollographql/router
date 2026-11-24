@@ -26,6 +26,7 @@ const MANDATORY_PLUGINS: &[&str] = &[
     "apollo.fleet_detector",
     "apollo.enhanced_client_awareness",
     "apollo.progressive_override",
+    "apollo.authorization",
 ];
 
 const OSS_PLUGINS: &[&str] = &[

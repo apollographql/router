@@ -6,6 +6,9 @@ The router can't run with this configuration and schema, because your license do
 
 Your configuration uses these licensed features. Remove the settings listed, or use a license that includes the features:
 
+  Authorization
+    authorization.directives.enabled
+
   Coprocessors
     coprocessor
 

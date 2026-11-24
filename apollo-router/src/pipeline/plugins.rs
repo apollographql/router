@@ -122,7 +122,7 @@ pub(crate) async fn create_plugins(
     registrar.add_optional("forbid_mutations").await;
     registrar.add_optional("subscription").await;
     registrar.add_optional("override_subgraph_url").await;
-    registrar.add_optional("authorization").await;
+    registrar.add_mandatory("authorization").await;
     registrar.add_optional("authentication").await;
     registrar.add_optional("preview_file_uploads").await;
     registrar.add_mandatory("progressive_override").await;

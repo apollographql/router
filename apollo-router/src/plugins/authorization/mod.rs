@@ -736,7 +736,9 @@ impl PluginPrivate for AuthorizationPlugin {
 //
 // In order to keep the plugin names consistent,
 // we use using the `Reverse domain name notation`
-register_private_plugin!("apollo", "authorization", AuthorizationPlugin);
+// Authorization directives are enforced without an `authorization:` section, so the plugin that
+// provides their layers must exist without one too.
+register_private_plugin!("apollo", "authorization", AuthorizationPlugin, mandatory);
 
 #[cfg(test)]
 mod tests;

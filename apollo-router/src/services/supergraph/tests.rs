@@ -11,6 +11,7 @@ use crate::Configuration;
 use crate::Context;
 use crate::TestHarness;
 use crate::graphql;
+use crate::pipeline::tests::stage_stack::query_parsing_plugins;
 use crate::plugin::test::MockSubgraph;
 use crate::plugins::subscription::notification::Notify;
 use crate::services::router::ClientRequestAccepts;
@@ -3929,7 +3930,7 @@ async fn test_cache_warmup() {
     let query_parsing_service = crate::pipeline::build_query_parsing_service(
         schema.clone(),
         Arc::new(configuration.clone()),
-        &Default::default(),
+        &query_parsing_plugins().await,
     );
     let pq_layer = PersistedQueryExpander::new(&configuration).await.unwrap();
 
