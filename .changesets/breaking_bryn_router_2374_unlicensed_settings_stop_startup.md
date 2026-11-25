@@ -7,7 +7,6 @@ If your license doesn't include the feature, these settings now stop startup:
 | Setting | License feature |
 |---|---|
 | `authorization.require_authentication: true` | Authorization |
-| An `authorization:` section without `directives.enabled: false`, on a supergraph that uses `@authenticated`, `@requiresScopes` or `@policy` | Authorization |
 | `authentication.subgraph` or `authentication.connector` | Authentication |
 | A `subscription:` section without `enabled: false` | Subscriptions |
 
@@ -15,7 +14,9 @@ These sections no longer stop startup, because they turn nothing on:
 
 - `batching` and `persisted_queries` sections that don't set `enabled: true`
 - a `demand_control` section with `enabled: false`
-- an `authorization` section with no `require_authentication`, when it sets `directives.enabled: false` or the supergraph uses none of the authorization directives
+- an `authorization` section without `require_authentication: true`
+
+The authorization directives have a license rule of their own, described in the entry for [PR #10798](https://github.com/apollographql/router/pull/10798).
 
 To migrate, remove each setting the error names, set `enabled: false` where the table says so, or get a license that includes the feature.
 

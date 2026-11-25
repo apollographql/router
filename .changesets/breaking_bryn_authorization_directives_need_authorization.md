@@ -1,9 +1,7 @@
 ### Authorization directives need the Authorization license feature ([PR #10798](https://github.com/apollographql/router/pull/10798))
 
-A supergraph that uses `@authenticated`, `@requiresScopes` or `@policy` now needs a license that includes the Authorization feature. Before, the router accepted `@authenticated` and `@requiresScopes` on any license that included Authentication, and accepted `@policy` with any license or none.
+If your supergraph uses `@authenticated`, `@requiresScopes` or `@policy`, the router needs a license that includes the Authorization feature. Without one, the router won't start, and a reload with that supergraph is refused while the router keeps serving its current one.
 
-If your router serves these directives without a license that includes Authorization, it refuses the schema after you upgrade: it won't start, and a reload with that schema is refused while the router keeps serving its current one. This applies whether or not router.yaml has an `authorization:` section, because the directives are enforced by default. The error lists `authorization.directives.enabled` under Authorization, including when router.yaml doesn't set it.
-
-To migrate, get a license that includes Authorization, or remove the directives from your subgraph schemas and recompose. Setting `authorization.directives.enabled: false` also lets the router start, but it then serves the fields these directives protect without checking them.
+To run without the Authorization feature, set `authorization.directives.enabled: false` in router.yaml. The router then doesn't enforce these directives, so it serves the fields they protect without checking them.
 
 By [@BrynCooke](https://github.com/BrynCooke) in https://github.com/apollographql/router/pull/10798
