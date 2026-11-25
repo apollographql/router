@@ -587,9 +587,9 @@ mod tests {
 
         use super::*;
         use crate::graphql::Response;
+        use crate::pipeline::tests::stage_stack::test_http_client_service;
         use crate::query_planner::fetch::OperationKind;
         use crate::services::SubgraphService;
-        use crate::services::http::test_http_client_service;
         use crate::services::router;
 
         async fn serve<Handler, Fut>(listener: TcpListener, handle: Handler) -> std::io::Result<()>
@@ -664,12 +664,14 @@ mod tests {
                 .build()
         }
 
-        fn layered_subgraph_service(
+        async fn layered_subgraph_service(
             name: &str,
             enable_apq: bool,
         ) -> SubgraphApqService<SubgraphService> {
-            SubgraphApqLayer::new(enable_apq)
-                .layer(SubgraphService::new(name, test_http_client_service(name)))
+            SubgraphApqLayer::new(enable_apq).layer(SubgraphService::new(
+                name,
+                test_http_client_service(name).await,
+            ))
         }
 
         #[tokio::test(flavor = "multi_thread")]
@@ -695,6 +697,7 @@ mod tests {
 
             let url = Uri::from_str(&format!("http://{socket_addr}")).unwrap();
             let resp = layered_subgraph_service("test", true)
+                .await
                 .oneshot(subgraph_request(url, "query"))
                 .await
                 .unwrap();
@@ -728,6 +731,7 @@ mod tests {
 
             let url = Uri::from_str(&format!("http://{socket_addr}")).unwrap();
             let resp = layered_subgraph_service("test", false)
+                .await
                 .oneshot(subgraph_request(url, "query"))
                 .await
                 .unwrap();
@@ -782,6 +786,7 @@ mod tests {
 
             let url = Uri::from_str(&format!("http://{socket_addr}")).unwrap();
             let resp = layered_subgraph_service("test", true)
+                .await
                 .oneshot(subgraph_request(url, "query"))
                 .await
                 .unwrap();

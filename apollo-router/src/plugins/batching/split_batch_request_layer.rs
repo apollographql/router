@@ -17,16 +17,34 @@ use tower::ServiceExt as _;
 use tracing::Instrument as _;
 
 use crate::Context;
-use crate::batching::Batch;
-use crate::batching::BatchQuery;
-use crate::configuration::Batching;
-use crate::configuration::BatchingMode;
 use crate::graphql;
+use crate::json_ext::Value;
+use crate::plugins::batching::config::BatchingConfig;
+use crate::plugins::batching::config::BatchingMode;
+use crate::plugins::batching::metrics::BatchMetrics;
+use crate::plugins::batching::state::Batch;
+use crate::plugins::batching::state::BatchQuery;
 use crate::services::router;
 // FIXME(@goto-bus-stop): Ideally the batching layer shouldn't have to care about this
 use crate::services::router::ClientRequestAccepts;
 use crate::services::router::Request as RouterRequest;
 use crate::services::router::Response as RouterResponse;
+
+/// Convert Bytes containing a JSON array into a batch of GraphQL [`graphql::Request`]s.
+///
+/// An error will be produced in the event that the bytes are not a JSON array of valid GraphQL
+/// requests.
+fn batch_from_bytes(bytes: &[u8]) -> Result<Vec<graphql::Request>, serde_json::Error> {
+    let entries: Vec<Value> = serde_json::from_slice(bytes)?;
+
+    entries
+        .iter()
+        .map(|entry| {
+            let bytes = serde_json::to_vec(entry)?;
+            graphql::Request::deserialize_from_bytes(&bytes.into())
+        })
+        .collect()
+}
 
 // FIXME(@goto-bus-stop): This is a copy of router::service::TranslateError. Probably should have
 // its own error type.
@@ -37,19 +55,29 @@ struct TranslateError {
     extension_details: String,
 }
 
+/// Layer type for [`BatchingPlugin::split_batch_request_layer`].
+///
 /// When the batching layer receives a batch query (a POST request with a JSON array in the body),
 /// it splits the requests into multiple requests that flow separately through the rest of the
 /// pipeline, and reassembles the responses into a single JSON array response.
 ///
 /// # Telemetry
-/// Emits the `apollo.router.operations.batching.size` metric for batch requests.
+/// Emits the following metrics:
+/// - `apollo.router.operations.batching` counting the number of incoming batch requests
+/// - `apollo.router.operations.batching.size` measuring the size of incoming batch requests
+///
+/// [`BatchingPlugin::split_batch_request_layer`]: super::BatchingPlugin::split_batch_request_layer
 pub(crate) struct SplitBatchRequestLayer {
-    config: Batching,
+    config: Arc<BatchingConfig>,
+    metrics: Arc<BatchMetrics>,
 }
 
 impl SplitBatchRequestLayer {
-    pub(crate) fn new(config: Batching) -> Self {
-        Self { config }
+    pub(crate) fn new(config: Arc<BatchingConfig>) -> Self {
+        Self {
+            config,
+            metrics: Arc::new(BatchMetrics::new()),
+        }
     }
 }
 
@@ -60,6 +88,7 @@ impl<S> tower::Layer<S> for SplitBatchRequestLayer {
         SplitBatchRequestService {
             inner,
             config: self.config.clone(),
+            metrics: self.metrics.clone(),
         }
     }
 }
@@ -67,7 +96,8 @@ impl<S> tower::Layer<S> for SplitBatchRequestLayer {
 #[derive(Clone)]
 pub(crate) struct SplitBatchRequestService<S> {
     inner: S,
-    config: Batching,
+    config: Arc<BatchingConfig>,
+    metrics: Arc<BatchMetrics>,
 }
 impl<S> Service<RouterRequest> for SplitBatchRequestService<S>
 where
@@ -237,56 +267,51 @@ where
         &self,
         bytes: &Bytes,
     ) -> Result<Option<Vec<graphql::Request>>, TranslateError> {
-        // Check if the body is probably a JSON array...
-        let first_non_ws_character = bytes.iter().find(|byte| !byte.is_ascii_whitespace());
-        if first_non_ws_character != Some(&b'[') {
-            // Not a batch request
-            return Ok(None);
-        }
+        match self.config.mode {
+            BatchingMode::BatchHttpLink => {
+                // Check if the body is probably a JSON array...
+                let first_non_ws_character = bytes.iter().find(|byte| !byte.is_ascii_whitespace());
+                if first_non_ws_character != Some(&b'[') {
+                    // Not a batch request
+                    return Ok(None);
+                }
 
-        if self.config.enabled && matches!(self.config.mode, BatchingMode::BatchHttpLink) {
-            let result = graphql::Request::batch_from_bytes(bytes).map_err(|e| TranslateError {
-                status: StatusCode::BAD_REQUEST,
-                extension_code: "INVALID_GRAPHQL_REQUEST".to_string(),
-                extension_details: format!("failed to deserialize the request body into JSON: {e}"),
-            })?;
-
-            if result.is_empty() {
-                return Err(TranslateError {
+                let result = batch_from_bytes(bytes).map_err(|e| TranslateError {
                     status: StatusCode::BAD_REQUEST,
                     extension_code: "INVALID_GRAPHQL_REQUEST".to_string(),
-                    extension_details:
-                        "failed to decode a valid GraphQL request from path: empty array "
-                            .to_string(),
-                });
-            }
-
-            if self.config.exceeds_batch_size(&result) {
-                return Err(TranslateError {
-                    status: StatusCode::UNPROCESSABLE_ENTITY,
-                    extension_code: "BATCH_LIMIT_EXCEEDED".to_string(),
                     extension_details: format!(
-                        "Batch limits exceeded: you provided a batch with {} entries, but the configured maximum router batch size is {}",
-                        result.len(),
-                        self.config.maximum_size
+                        "failed to deserialize the request body into JSON: {e}"
                     ),
-                });
-            }
+                })?;
+                if result.is_empty() {
+                    return Err(TranslateError {
+                        status: StatusCode::BAD_REQUEST,
+                        extension_code: "INVALID_GRAPHQL_REQUEST".to_string(),
+                        extension_details:
+                            "failed to decode a valid GraphQL request from path: empty array "
+                                .to_string(),
+                    });
+                }
 
-            Ok(Some(result))
-        } else {
-            let extension_details = if self.config.enabled
-                && !matches!(self.config.mode, BatchingMode::BatchHttpLink)
-            {
-                format!("batching not supported for mode `{}`", self.config.mode)
-            } else {
-                "batching not enabled".to_string()
-            };
-            Err(TranslateError {
-                status: StatusCode::BAD_REQUEST,
-                extension_code: "BATCHING_NOT_ENABLED".to_string(),
-                extension_details,
-            })
+                // Record metrics _before_ checking batch size so users can see if their max size is
+                // appropriate. This is a bit awkward, the metrics for batching really need some
+                // love
+                self.metrics.record(&self.config.mode, result.len(), None);
+
+                if self.config.exceeds_batch_size(&result) {
+                    return Err(TranslateError {
+                        status: StatusCode::UNPROCESSABLE_ENTITY,
+                        extension_code: "BATCH_LIMIT_EXCEEDED".to_string(),
+                        extension_details: format!(
+                            "Batch limits exceeded: you provided a batch with {} entries, but the configured maximum router batch size is {}",
+                            result.len(),
+                            self.config.maximum_size
+                        ),
+                    });
+                }
+
+                Ok(Some(result))
+            }
         }
     }
 
@@ -422,6 +447,7 @@ where
 #[cfg(test)]
 mod tests {
     use std::num::NonZeroUsize;
+    use std::sync::Arc;
     use std::time::Duration;
 
     use http::Method;
@@ -431,10 +457,10 @@ mod tests {
     use tower::ServiceExt as _;
 
     use super::SplitBatchRequestLayer;
-    use crate::configuration::Batching;
-    use crate::configuration::BatchingMode;
     use crate::graphql;
     use crate::metrics::FutureMetricsExt as _;
+    use crate::plugins::batching::config::BatchingConfig;
+    use crate::plugins::batching::config::BatchingMode;
     use crate::services::router;
     use crate::services::router::Request as RouterRequest;
     use crate::services::router::Response as RouterResponse;
@@ -464,7 +490,10 @@ mod tests {
         });
 
         let mut service = ServiceBuilder::new()
-            .layer(SplitBatchRequestLayer::new(Batching::default()))
+            .layer(SplitBatchRequestLayer::new(Arc::new(BatchingConfig {
+                enabled: true,
+                ..Default::default()
+            })))
             .service(mock);
 
         let response = service
@@ -486,96 +515,99 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn it_rejects_batches_when_batching_is_disabled() {
-        let (mock, handle) = tower_test::mock::pair::<RouterRequest, RouterResponse>();
-
-        let mut service = ServiceBuilder::new()
-            .layer(SplitBatchRequestLayer::new(Batching::default()))
-            .service(mock);
-
-        let response = service
-            .ready()
-            .await
-            .unwrap()
-            .call(
-                router::Request::fake_builder()
-                    .method(Method::POST)
-                    .body(router::body::from_bytes(
-                        r#"[{"query":"{ a }"},{"query":"{ b }"}]"#,
-                    ))
-                    .build()
-                    .unwrap(),
-            )
-            .await
-            .unwrap();
-        assert_eq!(response.response.status(), StatusCode::BAD_REQUEST);
-        assert_error_code(response, "BATCHING_NOT_ENABLED").await;
-
-        crate::plugin::test::assert_no_mock_calls(handle).await;
-    }
-
-    #[tokio::test]
     async fn it_rejects_non_json_body() {
-        let (mock, handle) = tower_test::mock::pair::<RouterRequest, RouterResponse>();
+        async {
+            let (mock, handle) = tower_test::mock::pair::<RouterRequest, RouterResponse>();
 
-        let config = Batching {
-            enabled: true,
-            mode: BatchingMode::BatchHttpLink,
-            ..Default::default()
-        };
-        let mut service = ServiceBuilder::new()
-            .layer(SplitBatchRequestLayer::new(config))
-            .service(mock);
+            let config = BatchingConfig {
+                enabled: true,
+                mode: BatchingMode::BatchHttpLink,
+                ..Default::default()
+            };
+            let mut service = ServiceBuilder::new()
+                .layer(SplitBatchRequestLayer::new(Arc::new(config)))
+                .service(mock);
 
-        let response = service
-            .ready()
-            .await
-            .unwrap()
-            .call(
-                router::Request::fake_builder()
-                    .method(Method::POST)
-                    .body(router::body::from_bytes(r#"[{"query": not valid json"#))
-                    .build()
-                    .unwrap(),
-            )
-            .await
-            .unwrap();
-        assert_eq!(response.response.status(), StatusCode::BAD_REQUEST);
-        assert_error_code(response, "INVALID_GRAPHQL_REQUEST").await;
+            let response = service
+                .ready()
+                .await
+                .unwrap()
+                .call(
+                    router::Request::fake_builder()
+                        .method(Method::POST)
+                        .body(router::body::from_bytes(r#"[{"query": not valid json"#))
+                        .build()
+                        .unwrap(),
+                )
+                .await
+                .unwrap();
+            assert_eq!(response.response.status(), StatusCode::BAD_REQUEST);
+            assert_error_code(response, "INVALID_GRAPHQL_REQUEST").await;
 
-        crate::plugin::test::assert_no_mock_calls(handle).await;
+            crate::plugin::test::assert_no_mock_calls(handle).await;
+
+            // Rejected request should not show in metrics
+            assert_counter_not_exists!(
+                "apollo.router.operations.batching",
+                u64,
+                "mode" = "batch_http_link"
+            );
+            assert_histogram_not_exists!(
+                "apollo.router.operations.batching.size",
+                u64,
+                "mode" = "batch_http_link"
+            );
+        }
+        .with_metrics()
+        .await;
     }
 
     #[tokio::test]
     async fn it_rejects_empty_batch_arrays() {
-        let (mock, handle) = tower_test::mock::pair::<RouterRequest, RouterResponse>();
+        async {
+            let (mock, handle) = tower_test::mock::pair::<RouterRequest, RouterResponse>();
 
-        let config = Batching {
-            enabled: true,
-            mode: BatchingMode::BatchHttpLink,
-            ..Default::default()
-        };
-        let mut service = ServiceBuilder::new()
-            .layer(SplitBatchRequestLayer::new(config))
-            .service(mock);
+            let config = BatchingConfig {
+                enabled: true,
+                mode: BatchingMode::BatchHttpLink,
+                ..Default::default()
+            };
+            let mut service = ServiceBuilder::new()
+                .layer(SplitBatchRequestLayer::new(Arc::new(config)))
+                .service(mock);
 
-        let response = service
-            .ready()
-            .await
-            .unwrap()
-            .call(
-                router::Request::fake_builder()
-                    .method(Method::POST)
-                    .body(router::body::from_bytes("[]"))
-                    .build()
-                    .unwrap(),
-            )
-            .await
-            .unwrap();
-        assert_eq!(response.response.status(), StatusCode::BAD_REQUEST);
-        assert_error_code(response, "INVALID_GRAPHQL_REQUEST").await;
+            let response = service
+                .ready()
+                .await
+                .unwrap()
+                .call(
+                    router::Request::fake_builder()
+                        .method(Method::POST)
+                        .body(router::body::from_bytes("[]"))
+                        .build()
+                        .unwrap(),
+                )
+                .await
+                .unwrap();
+            assert_eq!(response.response.status(), StatusCode::BAD_REQUEST);
+            assert_error_code(response, "INVALID_GRAPHQL_REQUEST").await;
 
-        crate::plugin::test::assert_no_mock_calls(handle).await;
+            crate::plugin::test::assert_no_mock_calls(handle).await;
+
+            // Rejected request should not show in metrics
+            assert_counter_not_exists!(
+                "apollo.router.operations.batching",
+                u64,
+                "mode" = "batch_http_link"
+            );
+            assert_histogram_not_exists!(
+                "apollo.router.operations.batching.size",
+                u64,
+                "mode" = "batch_http_link"
+            );
+        }
+        .with_metrics()
+        .await;
     }
 
     /// If a batch contains any non-GraphQL-shaped request, the whole request is rejected
@@ -583,13 +615,13 @@ mod tests {
     async fn it_rejects_batch_with_non_graphql_request() {
         let (mock, handle) = tower_test::mock::pair::<RouterRequest, RouterResponse>();
 
-        let config = Batching {
+        let config = BatchingConfig {
             enabled: true,
             mode: BatchingMode::BatchHttpLink,
             ..Default::default()
         };
         let mut service = ServiceBuilder::new()
-            .layer(SplitBatchRequestLayer::new(config))
+            .layer(SplitBatchRequestLayer::new(Arc::new(config)))
             .service(mock);
 
         let response = service
@@ -615,7 +647,7 @@ mod tests {
 
     #[tokio::test]
     async fn it_checks_maximum_size() {
-        let config = Batching {
+        let config = BatchingConfig {
             enabled: true,
             mode: BatchingMode::BatchHttpLink,
             maximum_size: NonZeroUsize::new(2).unwrap(),
@@ -637,7 +669,7 @@ mod tests {
                 }
             });
             let mut service = ServiceBuilder::new()
-                .layer(SplitBatchRequestLayer::new(config.clone()))
+                .layer(SplitBatchRequestLayer::new(Arc::new(config.clone())))
                 .service(mock);
 
             let response = service
@@ -663,7 +695,7 @@ mod tests {
         {
             let (mock, handle) = tower_test::mock::pair::<RouterRequest, RouterResponse>();
             let mut service = ServiceBuilder::new()
-                .layer(SplitBatchRequestLayer::new(config))
+                .layer(SplitBatchRequestLayer::new(Arc::new(config)))
                 .service(mock);
 
             let response = service
@@ -690,7 +722,7 @@ mod tests {
 
     #[tokio::test]
     async fn it_limits_batches_to_10_by_default() {
-        let config = Batching {
+        let config = BatchingConfig {
             enabled: true,
             mode: BatchingMode::BatchHttpLink,
             ..Default::default()
@@ -711,7 +743,7 @@ mod tests {
                 }
             });
             let mut service = ServiceBuilder::new()
-                .layer(SplitBatchRequestLayer::new(config.clone()))
+                .layer(SplitBatchRequestLayer::new(Arc::new(config.clone())))
                 .service(mock);
 
             let batch = vec![serde_json::json!({"query": "{ a }"}); 10];
@@ -738,7 +770,7 @@ mod tests {
         {
             let (mock, handle) = tower_test::mock::pair::<RouterRequest, RouterResponse>();
             let mut service = ServiceBuilder::new()
-                .layer(SplitBatchRequestLayer::new(config))
+                .layer(SplitBatchRequestLayer::new(Arc::new(config)))
                 .service(mock);
 
             let batch = vec![serde_json::json!({"query": "{ a }"}); 11];
@@ -781,13 +813,13 @@ mod tests {
                 }
             });
 
-            let config = Batching {
+            let config = BatchingConfig {
                 enabled: true,
                 mode: BatchingMode::BatchHttpLink,
                 ..Default::default()
             };
             let mut service = ServiceBuilder::new()
-                .layer(SplitBatchRequestLayer::new(config))
+                .layer(SplitBatchRequestLayer::new(Arc::new(config)))
                 .service(mock);
 
             let response = service
@@ -811,6 +843,11 @@ mod tests {
             assert_histogram_sum!(
                 "apollo.router.operations.batching.size",
                 3,
+                "mode" = "batch_http_link"
+            );
+            assert_counter!(
+                "apollo.router.operations.batching",
+                1,
                 "mode" = "batch_http_link"
             );
         }
@@ -838,13 +875,13 @@ mod tests {
             }
         });
 
-        let config = Batching {
+        let config = BatchingConfig {
             enabled: true,
             mode: BatchingMode::BatchHttpLink,
             ..Default::default()
         };
         let mut service = ServiceBuilder::new()
-            .layer(SplitBatchRequestLayer::new(config))
+            .layer(SplitBatchRequestLayer::new(Arc::new(config)))
             .service(mock);
 
         let response = service

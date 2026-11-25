@@ -41,7 +41,10 @@ expression: changed_settings(&config)
       "enabled": true
     }
   },
-  "/batching/enabled": true,
+  "/batching": {
+    "enabled": true,
+    "mode": "batch_http_link"
+  },
   "/coprocessor": {
     "url": "http://coprocessor.example.internal:8081"
   },

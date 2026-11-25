@@ -59,25 +59,6 @@ pub(crate) struct AnsweredByRouter;
 #[derive(Clone, Copy, Debug)]
 pub(crate) struct UploadStreamFailed;
 
-/// Test-only wrapper around the `build_http_client_service` pipeline function: a
-/// subgraph client for `name` built from default configuration with no plugins.
-#[cfg(test)]
-pub(crate) fn test_http_client_service(name: &str) -> BoxCloneService {
-    let inputs = service::HttpClientInputs::for_subgraph(
-        name,
-        &crate::Configuration::default(),
-        &rustls::RootCertStore::empty(),
-        crate::configuration::shared::Client::default(),
-        &mut service::DnsResolverCache::default(),
-    )
-    .unwrap();
-    crate::pipeline::build_http_client_service(
-        name,
-        inputs,
-        Arc::new(indexmap::IndexMap::default()),
-    )
-}
-
 /// The kind of remote service an [`HttpClientService`] is configured to talk to.
 ///
 /// Used by [`service::HttpClientService`] to derive the service name and by
