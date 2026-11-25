@@ -11,7 +11,7 @@ If your license doesn't include the feature, these settings now stop startup:
 | `authentication.subgraph` or `authentication.connector` | Authentication |
 | A `subscription:` section without `enabled: false` | Subscriptions |
 
-The authorization directives need the Authorization feature whether or not router.yaml has an `authorization:` section. With `authorization.directives.enabled: false`, the router doesn't enforce them, so it serves the fields they protect without checking them.
+The authorization directives were enforced before, but `@policy` needed no license, and `@authenticated` and `@requiresScopes` needed only the Authentication feature. They now need the Authorization feature, whether or not router.yaml has an `authorization:` section. With `authorization.directives.enabled: false`, the router doesn't enforce them, so it serves the fields they protect without checking them.
 
 These sections no longer stop startup, because they turn nothing on:
 
