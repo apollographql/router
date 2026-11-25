@@ -154,8 +154,16 @@ fn collect(node: &PlanNode, operations: &mut HashMap<FlattenKey, Arc<BatchOperat
 impl BatchOperation {
     /// Each member's piece of an operation shared by all of them. The planner only puts fetches
     /// to one subgraph with one operation type in a flatten together. None when a member's
-    /// operation was not parsed.
+    /// operation was not parsed, or when a member reads context.
     pub(crate) fn new(members: &[FlattenMember]) -> Option<Self> {
+        // A contextual argument is named after the context, not the fetch, so two members reading
+        // it would share one variable while needing different values.
+        if members
+            .iter()
+            .any(|member| member.fetch.kind.context_rewrites().is_some())
+        {
+            return None;
+        }
         let prefix = renamed_variable_prefix(members)?;
         let pieces = members
             .iter()
@@ -691,6 +699,27 @@ mod tests {
           }
         }
         "#);
+    }
+
+    #[test]
+    fn members_that_read_context_are_not_prepared() {
+        let op = "query($representations: [_Any!]!, $contextualArgument_1_0: Int) {
+              _entities(representations: $representations) { ... on Item { pages(first: $contextualArgument_1_0) } }
+            }";
+        let reads_context = || {
+            let mut member = member(op);
+            member.fetch.kind = FetchKind::Entities(EntitySelection {
+                requires: Vec::new(),
+                input_rewrites: None,
+                context_rewrites: Some(Vec::new()),
+            });
+            member
+        };
+
+        assert_eq!(
+            BatchOperation::new(&[reads_context(), reads_context()]),
+            None
+        );
     }
 
     #[test]
