@@ -1118,22 +1118,7 @@ jobs:
                   CHART_VERSION=$(helm show chart ${CHART_PATH} | yq .version)
                   helm show all oci://ghcr.io/apollographql/helm-charts/router --version ${CHART_VERSION} > /dev/null && exit 1
                   # Push chart to repository
-<<<<<<< HEAD
-                  helm push ${CHART} oci://ghcr.io/apollographql/helm-charts
-=======
                   helm push ${CHART_PATH} oci://ghcr.io/apollographql/helm-charts
-            - run:
-                # Runs AFTER all artifacts (binaries, Docker, Helm) are up so
-                # the release page is fully populated before notes appear.
-                # Dry-run for now — prints what would be posted.  Flip to
-                # `--publish` once we've watched a real release land.
-                # `|| true` so a bad extract doesn't fail the pipeline.
-                name: Publish release notes (dry-run)
-                command: |
-                  case "$VERSION" in *-*) echo "Prerelease — skipping notes"; exit 0 ;; esac
-                  VERSION_WITHOUT_LEADING_V="${VERSION#v}"
-                  cargo xtask release notes "$VERSION_WITHOUT_LEADING_V" || true
->>>>>>> 52a01cd (ci: fix determining the helm chart version (#10802))
 
   # Standalone ad hoc test build. Deliberately independent of `build_release`:
   # no release-versioning (`cargo xtask release prepare`), no nightly/release
