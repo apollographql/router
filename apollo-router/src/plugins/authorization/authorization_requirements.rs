@@ -112,9 +112,7 @@ mod tests {
     use super::*;
     use crate::Configuration;
     use crate::pipeline::build_query_parsing_service;
-    use crate::plugin::DynPlugin;
-    use crate::plugin::PluginInit;
-    use crate::plugin::PluginPrivate;
+    use crate::pipeline::tests::stage_stack::query_parsing_plugins_for;
     use crate::plugin::test::await_mock_driver;
     use crate::services::Plugins;
     use crate::spec::Query;
@@ -216,28 +214,13 @@ mod tests {
             .unwrap()
     }
 
-    /// A plugin registry holding the authorization plugin, built for the supergraph `sdl` from
-    /// `configuration`'s `authorization` section.
-    async fn authorization_plugins(sdl: &str, configuration: &Configuration) -> Plugins {
-        let plugin = <AuthorizationPlugin as PluginPrivate>::new(PluginInit::fake_new(
-            AuthorizationPlugin::configuration(configuration),
-            Arc::new(sdl.to_string()),
-        ))
-        .await
-        .unwrap();
-        Plugins::from([(
-            "apollo.authorization".to_string(),
-            Box::new(plugin) as Box<dyn DynPlugin>,
-        )])
-    }
-
     /// Builds the pipeline's query parsing service with the authorization plugin installed.
     async fn query_parsing_service(
         sdl: &str,
         configuration: Configuration,
     ) -> crate::services::query_parsing::BoxCloneService {
         let schema = schema(sdl, &configuration);
-        let plugins = authorization_plugins(sdl, &configuration).await;
+        let plugins = query_parsing_plugins_for(sdl, &configuration).await;
         build_query_parsing_service(schema, Arc::new(configuration), &plugins)
     }
 
