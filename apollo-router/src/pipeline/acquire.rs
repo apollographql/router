@@ -119,11 +119,9 @@ pub(super) async fn maybe_bootstrap_telemetry(
     {
         // No previous config: this branch only runs on first boot (`previous_config`
         // is `None` per the guard above).
-        let telemetry_init = PluginInit::builder()
+        let telemetry_init = PluginInit::router_builder()
             .config(())
-            .supergraph_sdl(schema.raw_sdl.clone())
-            .supergraph_schema_id(schema.schema_id.clone().into_inner())
-            .supergraph_schema(Arc::new(schema.supergraph_schema().clone()))
+            .schema(schema)
             .notify(configuration.notify.clone())
             .full_config(configuration.validated_yaml.clone())
             .and_original_config_yaml(configuration.raw_yaml.clone())

@@ -25,9 +25,7 @@ async fn test_diagnostics() {
         previous_config: None,
         supergraph_sdl: Arc::new("schema".to_string()),
         supergraph_schema_id: Arc::new("id".to_string()),
-        supergraph_schema: Arc::new(apollo_compiler::validation::Valid::assume_valid(
-            apollo_compiler::Schema::new(),
-        )),
+        supergraph: PluginInit::fake_builder().config(()).build().supergraph,
         subgraph_schemas: Default::default(),
         launch_id: None,
         notify: Default::default(),
@@ -60,9 +58,7 @@ async fn test_diagnostics_disabled() {
         previous_config: None,
         supergraph_sdl: Arc::new("schema".to_string()),
         supergraph_schema_id: Arc::new("id".to_string()),
-        supergraph_schema: Arc::new(apollo_compiler::validation::Valid::assume_valid(
-            apollo_compiler::Schema::new(),
-        )),
+        supergraph: PluginInit::fake_builder().config(()).build().supergraph,
         subgraph_schemas: Default::default(),
         launch_id: None,
         notify: Default::default(),

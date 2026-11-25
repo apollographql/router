@@ -56,13 +56,10 @@ pub(crate) async fn create_plugins(
         previous_config: previous_config.as_deref(),
         plugin_instances: Plugins::default(),
         errors: Vec::new(),
-        context: PluginInit::builder()
+        context: PluginInit::router_builder()
             .config(())
-            .supergraph_sdl(schema.as_string().clone())
-            .supergraph_schema_id(schema.schema_id.clone().into_inner())
-            .supergraph_schema(Arc::new(schema.supergraph_schema().clone()))
+            .schema(schema)
             .subgraph_schemas(subgraph_schemas)
-            .launch_id(schema.launch_id.clone())
             .notify(configuration.notify.clone())
             .and_original_config_yaml(configuration.raw_yaml.clone())
             .build(),

@@ -6,8 +6,8 @@ use apollo_compiler::Name;
 use apollo_compiler::Schema;
 use apollo_compiler::name;
 use apollo_compiler::schema::ExtendedType;
-use apollo_compiler::validation::Valid;
 use apollo_federation::link::spec::Identity;
+use apollo_federation::schema::ValidFederationSchema;
 use dashmap::DashMap;
 use sha2::Digest;
 use sha2::Sha256;
@@ -37,7 +37,7 @@ pub(crate) struct Config {}
 
 pub(crate) struct ProgressiveOverridePlugin {
     enabled: bool,
-    schema: Arc<Valid<Schema>>,
+    schema: ValidFederationSchema,
     labels_from_schema: LabelsFromSchema,
     // We have to visit each operation to find out which labels from the schema
     // are relevant for any given operation. This allows us to minimize the
@@ -125,8 +125,8 @@ impl Plugin for ProgressiveOverridePlugin {
     type Config = Config;
 
     async fn new(init: PluginInit<Self::Config>) -> Result<Self, BoxError> {
-        let schema = init.supergraph_schema.clone();
-        let labels_from_schema = collect_labels_from_schema(&schema);
+        let schema = init.supergraph.schema;
+        let labels_from_schema = collect_labels_from_schema(schema.schema());
         let enabled = !labels_from_schema.0.is_empty() || !labels_from_schema.1.is_empty();
         Ok(ProgressiveOverridePlugin {
             enabled,
@@ -205,7 +205,7 @@ impl Plugin for ProgressiveOverridePlugin {
                     let relevant_labels = labels_per_operation_cache
                         .entry(operation_hash)
                         .or_insert_with(|| {
-                            OverrideLabelVisitor::new(&schema)
+                            OverrideLabelVisitor::new(schema.schema())
                                 .map(|mut visitor| {
                                     let _ = traverse::document(&mut visitor, &parsed_doc.executable, operation_name.as_deref());
                                     visitor.override_labels.into_iter().collect::<Vec<_>>()

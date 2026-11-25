@@ -6,6 +6,7 @@ use std::task::Poll;
 
 use apollo_compiler::Schema;
 use apollo_compiler::validation::Valid;
+use apollo_federation::schema::ValidFederationSchema;
 use futures::future::BoxFuture;
 use tower::Layer;
 use tower::Service;
@@ -39,13 +40,13 @@ pub(crate) fn operation_requirements(
 /// the document carries its requirements. Parse errors pass through unchanged.
 #[derive(Clone)]
 pub(crate) struct AuthorizationRequirementsLayer {
-    supergraph_schema: Arc<Valid<Schema>>,
+    supergraph_schema: ValidFederationSchema,
     directives: Arc<AuthorizationDirectives>,
 }
 
 impl AuthorizationRequirementsLayer {
     pub(crate) fn new(
-        supergraph_schema: Arc<Valid<Schema>>,
+        supergraph_schema: ValidFederationSchema,
         directives: AuthorizationDirectives,
     ) -> Self {
         Self {
@@ -70,7 +71,7 @@ impl<S> Layer<S> for AuthorizationRequirementsLayer {
 #[derive(Clone)]
 pub(crate) struct AuthorizationRequirementsService<S> {
     inner: S,
-    supergraph_schema: Arc<Valid<Schema>>,
+    supergraph_schema: ValidFederationSchema,
     directives: Arc<AuthorizationDirectives>,
 }
 
@@ -95,8 +96,9 @@ where
 
         Box::pin(async move {
             let doc = inner.call(req).await?;
-            doc.authorization
-                .get_or_init(|| operation_requirements(&doc, &supergraph_schema, &directives));
+            doc.authorization.get_or_init(|| {
+                operation_requirements(&doc, supergraph_schema.schema(), &directives)
+            });
             Ok(doc)
         })
     }
@@ -159,7 +161,7 @@ mod tests {
         });
 
         let result = AuthorizationRequirementsLayer::new(
-            Arc::new(schema.supergraph_schema().clone()),
+            schema.federation_supergraph().schema.clone(),
             schema.authorization_directives.clone(),
         )
         .layer(mock)

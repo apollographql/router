@@ -2,13 +2,12 @@
 
 use std::collections::HashSet;
 use std::ops::ControlFlow;
-use std::sync::Arc;
 
 use apollo_compiler::ExecutableDocument;
 use apollo_compiler::ast;
-use apollo_compiler::validation::Valid;
 use apollo_federation::link::metadata::LinksMetadata;
 use apollo_federation::link::spec::Identity;
+use apollo_federation::schema::ValidFederationSchema;
 use http::StatusCode;
 use serde::Deserialize;
 use serde::Serialize;
@@ -253,7 +252,7 @@ pub(crate) struct AuthorizationPlugin {
     require_authentication: bool,
     reject_unauthorized: bool,
     directives_enabled: bool,
-    supergraph_schema: Arc<Valid<apollo_compiler::Schema>>,
+    supergraph_schema: ValidFederationSchema,
     directives: AuthorizationDirectives,
 }
 
@@ -671,8 +670,8 @@ impl PluginPrivate for AuthorizationPlugin {
             require_authentication: init.config.require_authentication,
             reject_unauthorized: init.config.directives.reject_unauthorized,
             directives_enabled: init.config.directives.enabled,
-            directives: AuthorizationDirectives::from_schema(&init.supergraph_schema),
-            supergraph_schema: init.supergraph_schema,
+            directives: AuthorizationDirectives::from_schema(init.supergraph.schema.schema()),
+            supergraph_schema: init.supergraph.schema,
         })
     }
 

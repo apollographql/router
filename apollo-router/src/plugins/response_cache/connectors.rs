@@ -7,6 +7,7 @@ use apollo_compiler::Schema;
 use apollo_compiler::collections::IndexMap;
 use apollo_compiler::validation::Valid;
 use apollo_federation::connectors::StringTemplate;
+use apollo_federation::schema::ValidFederationSchema;
 use http::HeaderValue;
 use http::header::CACHE_CONTROL;
 use lru::LruCache;
@@ -240,7 +241,7 @@ pub(super) struct ConnectorCacheService {
     pub(super) enabled: bool,
     pub(super) private_queries: Arc<RwLock<LruCache<PrivateQueryKey, ()>>>,
     pub(super) debug: bool,
-    pub(super) supergraph_schema: Arc<Valid<Schema>>,
+    pub(super) supergraph_schema: ValidFederationSchema,
     pub(super) subgraph_enums: Arc<HashMap<String, String>>,
     pub(super) lru_size_instrument: LruSizeInstrument,
 }
@@ -638,7 +639,7 @@ impl ConnectorCacheService {
             // Extract @cacheTag invalidation keys from the supergraph schema.
             if indexes.is_enabled(IndexMode::CacheTag)
                 && let Ok(cache_tag_keys) = get_invalidation_entity_keys_from_schema(
-                    &self.supergraph_schema,
+                    self.supergraph_schema.schema(),
                     &connector_synthetic_name,
                     &self.subgraph_enums,
                     typename,
@@ -1243,7 +1244,7 @@ pub(super) struct ConnectorRequestCacheService {
     pub(super) connector_ttl: Duration,
     pub(super) private_id_key: Option<String>,
     pub(super) debug: bool,
-    pub(super) supergraph_schema: Arc<Valid<Schema>>,
+    pub(super) supergraph_schema: ValidFederationSchema,
     pub(super) subgraph_enums: Arc<HashMap<String, String>>,
     pub(super) private_queries: Arc<RwLock<LruCache<PrivateQueryKey, ()>>>,
     pub(super) lru_size_instrument: LruSizeInstrument,
@@ -1432,7 +1433,7 @@ impl ConnectorRequestCacheService {
         // already did the work that they still have it to do.
         let root_field_has_cache_tags = |request: &connector::request_service::Request| {
             get_connector_root_cache_tags(
-                &self.supergraph_schema,
+                self.supergraph_schema.schema(),
                 &self.subgraph_enums,
                 &request.connector.id.synthetic_name(),
                 &root_field_name,
@@ -1792,7 +1793,7 @@ impl ConnectorRequestCacheService {
                         // Extract @cacheTag invalidation keys from the supergraph schema
                         if indexes.is_enabled(IndexMode::CacheTag)
                             && let Ok(cache_tag_keys) = get_connector_root_cache_tags(
-                                &supergraph_schema,
+                                supergraph_schema.schema(),
                                 &subgraph_enums,
                                 &connector_synthetic_name,
                                 &root_field_name,
@@ -2198,9 +2199,10 @@ pub(crate) async fn request_cache_for_test(
     let storage = Storage::mocked(&config, false, store, drop_rx)
         .await
         .expect("mock storage builds");
-    let supergraph_schema = Arc::new(
+    let supergraph_schema = ValidFederationSchema::new(
         Schema::parse_and_validate("type Query { hello: String }", "schema.graphql").unwrap(),
-    );
+    )
+    .unwrap();
 
     ConnectorRequestCacheService {
         service,

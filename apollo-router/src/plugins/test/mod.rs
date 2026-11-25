@@ -12,7 +12,6 @@ use std::str::FromStr;
 use std::sync::Arc;
 use std::task::Poll;
 
-use apollo_compiler::validation::Valid;
 use pin_project_lite::pin_project;
 use serde::Deserialize;
 use serde::Serialize;
@@ -117,30 +116,25 @@ impl<T: Into<Box<dyn DynPlugin + 'static>> + 'static> PluginTestHarness<T> {
             .clone()
             .filter(|_| name == "telemetry");
 
-        let (supergraph_sdl, parsed_schema, subgraph_schemas) = if let Some(schema) = schema {
+        let plugin_init = if let Some(schema) = schema {
             let schema = Schema::parse(schema, &config).unwrap();
-            let sdl = schema.raw_sdl.clone();
-            let supergraph = schema.supergraph_schema().clone();
             let qp_arc = QueryPlannerService::create_planner(&schema, &config).unwrap();
             let subgraph_schemas = crate::query_planner::build_subgraph_schemas(&qp_arc);
-            (sdl, supergraph, subgraph_schemas)
+            PluginInit::router_builder()
+                .config(config_for_plugin.clone())
+                .schema(&schema)
+                .subgraph_schemas(subgraph_schemas)
+                .notify(Notify::default())
+                .and_full_config(full_config)
+                .build()
         } else {
-            (
-                "".to_string().into(),
-                Valid::assume_valid(apollo_compiler::Schema::new()),
-                Default::default(),
-            )
+            PluginInit::fake_builder()
+                .config(config_for_plugin.clone())
+                .supergraph_schema_id(Schema::schema_id("").into_inner())
+                .notify(Notify::default())
+                .and_full_config(full_config)
+                .build()
         };
-
-        let plugin_init = PluginInit::builder()
-            .config(config_for_plugin.clone())
-            .supergraph_schema_id(crate::spec::Schema::schema_id(&supergraph_sdl).into_inner())
-            .supergraph_sdl(supergraph_sdl)
-            .supergraph_schema(Arc::new(parsed_schema))
-            .subgraph_schemas(subgraph_schemas)
-            .notify(Notify::default())
-            .full_config(full_config)
-            .build();
 
         let plugin = factory.create_instance(plugin_init).await?;
 
