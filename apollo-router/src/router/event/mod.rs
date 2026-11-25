@@ -1,5 +1,6 @@
 mod configuration;
 mod license;
+pub(crate) mod registry;
 pub(crate) mod reload;
 mod schema;
 mod shutdown;

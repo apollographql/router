@@ -45,7 +45,19 @@ To set graph artifacts as the supergraph schema for your router, use the [`--gra
 APOLLO_GRAPH_ARTIFACT_REFERENCE="artifact.api.apollographql.com/my-graph@sha256:6c3c62..." router
 ```
 
-See [Graph Artifacts](/graphos/platform/schema-management/delivery/graph-artifacts) for more information.
+You can also declare the graph artifact in `router.yaml`, together with the persisted-queries artifact and the registry they come from. This is the form to use with a pull-through cache or mirror of Apollo's registry, since the host and path prefix are declared once for every artifact, and it follows configuration reloads: editing a reference restarts only the poller it changes.
+
+```yaml title="router.yaml"
+registry:
+  host: artifact.api.apollographql.com   # or a pull-through cache, such as mirror.internal:5000
+  artifacts:
+    graph:
+      reference: my-graph:production      # or my-graph@sha256:6c3c62... to pin a launch
+    persisted_queries:
+      reference: persistedqueries/my-graph:production
+```
+
+See the [`registry` section](/graphos/routing/configuration/yaml#registry) of the YAML reference, and [Graph Artifacts](/graphos/platform/schema-management/delivery/graph-artifacts) for more information.
 
 ### Apollo GraphOS Operator for Kubernetes
 

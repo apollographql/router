@@ -1762,3 +1762,737 @@ async fn test_router_rejects_apollo_hosted_graph_artifact_reference_with_explici
     router.assert_shutdown().await;
     Ok(())
 }
+
+// --- Persisted queries served from the standalone persisted-queries artifact --------------
+//
+// The persisted-queries artifact lives in its own repository and is named by
+// `registry.artifacts.persisted_queries` in router.yaml, independent of the schema image: these
+// tests run the two mock registries as separate servers to prove nothing couples them.
+
+const APOLLO_PQ_CHUNK_MEDIA_TYPE: &str = "application/vnd.apollo.persisted-query-chunk.v1+gzip";
+const MIN_PQ_CONFIG: &str = include_str!("fixtures/minimal-oci-pq.router.yaml");
+const PQ_GRAPH_ID: &str = "pq-test-repo";
+
+/// Mock subgraphs that resolve the `count` and `hello` fields the OCI schema fixtures route to
+/// the accounts subgraph, mounted at the override URL's root path (unlike
+/// [`setup_mock_subgraphs`], whose responder lives at `/graphql` where the overrides never
+/// point). Returning both fields unconditionally is fine: the router filters the response to
+/// each query's selection set.
+async fn setup_pq_mock_subgraphs() -> (MockServer, HashMap<String, String>) {
+    let listener = TcpListener::bind(SocketAddr::from(([127, 0, 0, 1], 0))).unwrap();
+    let address = listener.local_addr().unwrap();
+    let url = format!("http://{address}/");
+
+    let subgraphs_server = wiremock::MockServer::builder()
+        .listener(listener)
+        .start()
+        .await;
+
+    Mock::given(method("POST"))
+        .respond_with(
+            ResponseTemplate::new(200)
+                .append_header("content-type", "application/json")
+                .set_body_json(serde_json::json!({"data": {"count": 1, "hello": "hi"}})),
+        )
+        .mount(&subgraphs_server)
+        .await;
+
+    let mut subgraph_overrides = HashMap::new();
+    for subgraph in ["accounts", "inventory", "products", "reviews"] {
+        subgraph_overrides.insert(subgraph.to_string(), url.clone());
+    }
+
+    (subgraphs_server, subgraph_overrides)
+}
+
+/// A persisted query request by ID (no query body).
+fn pq_query(id: &str) -> Query {
+    Query::builder()
+        .body(serde_json::json!({
+            "variables": {},
+            "extensions": {"persistedQuery": {"version": 1, "sha256Hash": id}}
+        }))
+        .build()
+}
+
+/// Gzip-compress bytes the way the graph artifact writer stores persisted query chunks.
+fn gzip(bytes: &[u8]) -> Vec<u8> {
+    use std::io::Write;
+    let mut encoder = flate2::write::GzEncoder::new(Vec::new(), flate2::Compression::default());
+    encoder.write_all(bytes).unwrap();
+    encoder.finish().unwrap()
+}
+
+/// A persisted query chunk layer holding the given (id, body) operations.
+fn pq_chunk_layer(operations: &[(&str, &str)]) -> ImageLayer {
+    let operations: Vec<_> = operations
+        .iter()
+        .map(|(id, body)| serde_json::json!({"id": id, "body": body}))
+        .collect();
+    let chunk = serde_json::json!({
+        "format": "apollo-persisted-query-manifest",
+        "version": 1,
+        "operations": operations,
+    });
+    ImageLayer {
+        data: gzip(chunk.to_string().as_bytes()).into(),
+        media_type: APOLLO_PQ_CHUNK_MEDIA_TYPE.to_string(),
+        annotations: None,
+    }
+}
+
+/// A built persisted-queries artifact version: the serialized manifest and its digest.
+#[derive(Clone)]
+struct ImageVersion {
+    digest: String,
+    manifest_bytes: Vec<u8>,
+}
+
+fn build_pq_artifact(layers: &[&ImageLayer]) -> ImageVersion {
+    let descriptors = layers
+        .iter()
+        .map(|layer| OciDescriptor {
+            media_type: layer.media_type.clone(),
+            digest: layer.sha256_digest(),
+            size: layer.data.len().try_into().unwrap(),
+            urls: None,
+            annotations: None,
+            artifact_type: None,
+        })
+        .collect();
+    let manifest = OciManifest::Image(OciImageManifest {
+        schema_version: 2,
+        media_type: Some(IMAGE_MANIFEST_MEDIA_TYPE.to_string()),
+        config: Default::default(),
+        layers: descriptors,
+        subject: None,
+        artifact_type: None,
+        annotations: None,
+    });
+    ImageVersion {
+        digest: calculate_manifest_digest(&manifest),
+        manifest_bytes: serde_json::to_vec(&manifest).unwrap(),
+    }
+}
+
+/// Set up a mock OCI registry for the persisted-queries artifact whose `:latest` tag serves
+/// whatever [`ImageVersion`] is in the returned slot; tests move the tag (the variant pointer
+/// re-tag a link or publish performs) by replacing the slot. Responses are keyed off shared
+/// state rather than request counts so the test controls exactly when the pointer moves.
+async fn setup_switchable_pq_server(
+    layers: &[&ImageLayer],
+    initial: ImageVersion,
+) -> (MockServer, String, Arc<parking_lot::Mutex<ImageVersion>>) {
+    let mock_server = MockServer::start().await;
+
+    Mock::given(method("GET"))
+        .and(path("/v2/"))
+        .respond_with(ResponseTemplate::new(200).append_header("content-type", "application/json"))
+        .mount(&mock_server)
+        .await;
+
+    for layer in layers {
+        Mock::given(method("GET"))
+            .and(path(format!(
+                "/v2/{}/blobs/{}",
+                PQ_GRAPH_ID,
+                layer.sha256_digest()
+            )))
+            .respond_with(
+                ResponseTemplate::new(200)
+                    .append_header("content-type", "application/octet-stream")
+                    .set_body_bytes(layer.data.clone()),
+            )
+            .mount(&mock_server)
+            .await;
+    }
+
+    let current = Arc::new(parking_lot::Mutex::new(initial));
+    let tag_path = format!("/v2/{}/manifests/latest", PQ_GRAPH_ID);
+    {
+        let current = current.clone();
+        Mock::given(method("HEAD"))
+            .and(path(tag_path.clone()))
+            .respond_with(move |_req: &wiremock::Request| {
+                let digest = current.lock().digest.clone();
+                ResponseTemplate::new(200)
+                    .append_header("content-type", OCI_IMAGE_MEDIA_TYPE)
+                    .append_header("docker-content-digest", digest)
+            })
+            .mount(&mock_server)
+            .await;
+    }
+    {
+        let current = current.clone();
+        Mock::given(method("GET"))
+            .and(path(tag_path))
+            .respond_with(move |_req: &wiremock::Request| {
+                let version = current.lock().clone();
+                ResponseTemplate::new(200)
+                    .append_header("content-type", OCI_IMAGE_MEDIA_TYPE)
+                    .append_header("docker-content-digest", version.digest)
+                    .set_body_bytes(version.manifest_bytes)
+            })
+            .mount(&mock_server)
+            .await;
+    }
+
+    let artifact_reference = format!("{}/{}:latest", mock_server.address(), PQ_GRAPH_ID);
+    (mock_server, artifact_reference, current)
+}
+
+async fn assert_pq_succeeds(router: &mut IntegrationTest, id: &str) {
+    let (_trace_id, response) = router.execute_query(pq_query(id)).await;
+    assert_eq!(response.status(), 200);
+    let graphql_response: apollo_router::graphql::Response = response
+        .json()
+        .await
+        .expect("failed to parse GraphQL response");
+    assert!(
+        graphql_response.errors.is_empty(),
+        "expected persisted query '{id}' to succeed, got errors: {:?}",
+        graphql_response.errors
+    );
+}
+
+async fn assert_pq_fails(router: &mut IntegrationTest, id: &str) {
+    let (_trace_id, response) = router.execute_query(pq_query(id)).await;
+    let graphql_response: apollo_router::graphql::Response = response
+        .json()
+        .await
+        .expect("failed to parse GraphQL response");
+    assert!(
+        !graphql_response.errors.is_empty(),
+        "expected persisted query '{id}' to fail"
+    );
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn test_router_oci_pq_served_from_standalone_artifact() -> Result<(), BoxError> {
+    if !graph_os_enabled() {
+        return Ok(());
+    }
+
+    // A tag reference, never moved: the PQ pointer tag below needs --hot-reload, which a
+    // digest-pinned schema reference refuses.
+    let (_schema_server, schema_reference, _enable_404, _serve_updated) =
+        setup_mock_oci_server_with_tag(
+            include_str!("fixtures/oci_initial_schema.graphql"),
+            include_str!("fixtures/oci_initial_schema.graphql"),
+        )
+        .await;
+
+    let chunk = pq_chunk_layer(&[("pq-count", "{ count }")]);
+    let artifact = build_pq_artifact(&[&chunk]);
+    let (_pq_server, pq_reference, _current) =
+        setup_switchable_pq_server(&[&chunk], artifact).await;
+
+    let (_subgraphs_server, subgraph_overrides) = setup_pq_mock_subgraphs().await;
+
+    let mut router = IntegrationTest::builder()
+        .config(registry_config(
+            MIN_PQ_CONFIG,
+            &schema_reference,
+            Some(&pq_reference),
+        ))
+        .env(HashMap::from([(
+            String::from("TEST_APOLLO_OCI_POLL_INTERVAL"),
+            OsString::from("1"),
+        )]))
+        .subgraph_overrides(subgraph_overrides)
+        .hot_reload(true)
+        .build()
+        .await;
+
+    router.start().await;
+    router.assert_started().await;
+
+    assert_pq_succeeds(&mut router, "pq-count").await;
+    assert_pq_fails(&mut router, "not-in-the-list").await;
+
+    router.graceful_shutdown().await;
+    Ok(())
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn test_router_oci_pq_pointer_move_hot_swaps() -> Result<(), BoxError> {
+    if !graph_os_enabled() {
+        return Ok(());
+    }
+
+    // A tag reference, never moved: the PQ pointer tag below needs --hot-reload, which a
+    // digest-pinned schema reference refuses.
+    let (_schema_server, schema_reference, _enable_404, _serve_updated) =
+        setup_mock_oci_server_with_tag(
+            include_str!("fixtures/oci_initial_schema.graphql"),
+            include_str!("fixtures/oci_initial_schema.graphql"),
+        )
+        .await;
+
+    let chunk_one = pq_chunk_layer(&[("pq-count", "{ count }")]);
+    let chunk_two = pq_chunk_layer(&[("pq-hello", "{ hello }")]);
+
+    let v1 = build_pq_artifact(&[&chunk_one]);
+    // A persisted query publish: the variant pointer moves to an artifact with one more chunk.
+    let v2 = build_pq_artifact(&[&chunk_one, &chunk_two]);
+
+    let (_pq_server, pq_reference, current) =
+        setup_switchable_pq_server(&[&chunk_one, &chunk_two], v1).await;
+    let (_subgraphs_server, subgraph_overrides) = setup_pq_mock_subgraphs().await;
+
+    let mut router = IntegrationTest::builder()
+        .config(registry_config(
+            MIN_PQ_CONFIG,
+            &schema_reference,
+            Some(&pq_reference),
+        ))
+        .env(HashMap::from([(
+            String::from("TEST_APOLLO_OCI_POLL_INTERVAL"),
+            OsString::from("1"),
+        )]))
+        .subgraph_overrides(subgraph_overrides)
+        .hot_reload(true)
+        .build()
+        .await;
+
+    router.start().await;
+    router.assert_started().await;
+
+    assert_pq_succeeds(&mut router, "pq-count").await;
+    assert_pq_fails(&mut router, "pq-hello").await;
+
+    // Move the pointer to the new artifact: the manifest hot-swaps in place, no router reload,
+    // and the schema image is never consulted.
+    *current.lock() = v2;
+    router
+        .wait_for_log_message("persisted query manifest successfully updated (2 operations total)")
+        .await;
+
+    assert_pq_succeeds(&mut router, "pq-hello").await;
+    assert_pq_succeeds(&mut router, "pq-count").await;
+
+    router.graceful_shutdown().await;
+    Ok(())
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn test_router_oci_pq_tag_polls_with_digest_pinned_schema() -> Result<(), BoxError> {
+    if !graph_os_enabled() {
+        return Ok(());
+    }
+
+    // An immutable deployment: the schema is pinned by digest and --hot-reload is off. The
+    // persisted-queries pointer tag is still followed, so a publish reaches this router
+    // without a redeploy.
+    let (_schema_server, schema_reference) = setup_mock_oci_server_with_license(
+        include_str!("fixtures/oci_initial_schema.graphql"),
+        &mint_license_jwt(None, LICENSE_SIX_MONTHS_SECS, LICENSE_SIX_MONTHS_SECS),
+    )
+    .await;
+
+    let chunk_one = pq_chunk_layer(&[("pq-count", "{ count }")]);
+    let chunk_two = pq_chunk_layer(&[("pq-hello", "{ hello }")]);
+    let v1 = build_pq_artifact(&[&chunk_one]);
+    let v2 = build_pq_artifact(&[&chunk_one, &chunk_two]);
+
+    let (_pq_server, pq_reference, current) =
+        setup_switchable_pq_server(&[&chunk_one, &chunk_two], v1).await;
+    let (_subgraphs_server, subgraph_overrides) = setup_pq_mock_subgraphs().await;
+
+    let mut router = IntegrationTest::builder()
+        .config(registry_config(
+            MIN_PQ_CONFIG,
+            &schema_reference,
+            Some(&pq_reference),
+        ))
+        .env(HashMap::from([(
+            String::from("TEST_APOLLO_OCI_POLL_INTERVAL"),
+            OsString::from("1"),
+        )]))
+        .subgraph_overrides(subgraph_overrides)
+        .hot_reload(false)
+        .build()
+        .await;
+
+    router.start().await;
+    router.assert_started().await;
+
+    assert_pq_succeeds(&mut router, "pq-count").await;
+    assert_pq_fails(&mut router, "pq-hello").await;
+
+    *current.lock() = v2;
+    router
+        .wait_for_log_message("persisted query manifest successfully updated (2 operations total)")
+        .await;
+
+    assert_pq_succeeds(&mut router, "pq-hello").await;
+
+    router.graceful_shutdown().await;
+    Ok(())
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn test_router_oci_pq_emptied_artifact_blocks_operations() -> Result<(), BoxError> {
+    if !graph_os_enabled() {
+        return Ok(());
+    }
+
+    // A tag reference, never moved: the PQ pointer tag below needs --hot-reload, which a
+    // digest-pinned schema reference refuses.
+    let (_schema_server, schema_reference, _enable_404, _serve_updated) =
+        setup_mock_oci_server_with_tag(
+            include_str!("fixtures/oci_initial_schema.graphql"),
+            include_str!("fixtures/oci_initial_schema.graphql"),
+        )
+        .await;
+
+    let chunk = pq_chunk_layer(&[("pq-count", "{ count }")]);
+    let v1 = build_pq_artifact(&[&chunk]);
+    // An emptied list builds a zero-layer artifact: a deliberate "allow nothing", distinct from
+    // an absent pointer (no list linked), which surfaces as a fetch error instead.
+    let v2 = build_pq_artifact(&[]);
+
+    let (_pq_server, pq_reference, current) = setup_switchable_pq_server(&[&chunk], v1).await;
+    let (_subgraphs_server, subgraph_overrides) = setup_pq_mock_subgraphs().await;
+
+    let mut router = IntegrationTest::builder()
+        .config(registry_config(
+            MIN_PQ_CONFIG,
+            &schema_reference,
+            Some(&pq_reference),
+        ))
+        .env(HashMap::from([(
+            String::from("TEST_APOLLO_OCI_POLL_INTERVAL"),
+            OsString::from("1"),
+        )]))
+        .subgraph_overrides(subgraph_overrides)
+        .hot_reload(true)
+        .build()
+        .await;
+
+    router.start().await;
+    router.assert_started().await;
+
+    assert_pq_succeeds(&mut router, "pq-count").await;
+
+    *current.lock() = v2;
+    router
+        .wait_for_log_message("persisted query manifest successfully updated (0 operations total)")
+        .await;
+
+    assert_pq_fails(&mut router, "pq-count").await;
+
+    router.graceful_shutdown().await;
+    Ok(())
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn test_router_oci_pq_survives_schema_reload() -> Result<(), BoxError> {
+    if !graph_os_enabled() {
+        return Ok(());
+    }
+
+    // The schema tag moves once armed below, triggering a router
+    // reload. The persisted-queries artifact never changes: the reloaded pipeline's fresh
+    // poller must re-fetch it and keep serving the same operations. There is deliberately no
+    // atomic schema+PQ changeover in this design (same semantics as Uplink today); the two
+    // artifacts converge independently.
+    let (_schema_server, schema_reference, _enable_404, serve_updated) =
+        setup_mock_oci_server_with_tag(
+            include_str!("fixtures/oci_initial_schema.graphql"),
+            include_str!("fixtures/oci_updated_schema.graphql"),
+        )
+        .await;
+
+    // `hello` exists in both schema versions, so the operation stays valid across the reload.
+    let chunk = pq_chunk_layer(&[("pq-hello", "{ hello }")]);
+    let artifact = build_pq_artifact(&[&chunk]);
+    let (_pq_server, pq_reference, _current) =
+        setup_switchable_pq_server(&[&chunk], artifact).await;
+    let (_subgraphs_server, subgraph_overrides) = setup_pq_mock_subgraphs().await;
+
+    let mut router = IntegrationTest::builder()
+        .config(registry_config(
+            MIN_PQ_CONFIG,
+            &schema_reference,
+            Some(&pq_reference),
+        ))
+        .env(HashMap::from([(
+            String::from("TEST_APOLLO_OCI_POLL_INTERVAL"),
+            OsString::from("1"),
+        )]))
+        .subgraph_overrides(subgraph_overrides)
+        .hot_reload(true)
+        .build()
+        .await;
+
+    router.start().await;
+    router.assert_started().await;
+
+    assert_pq_succeeds(&mut router, "pq-hello").await;
+
+    // Arm the schema change only once the first fetch has landed (the schema and license streams
+    // both poll this reference; see test_router_oci_tag_hot_reload).
+    serve_updated.store(true, Ordering::SeqCst);
+    router.assert_reloaded().await;
+
+    assert_pq_succeeds(&mut router, "pq-hello").await;
+
+    router.graceful_shutdown().await;
+    Ok(())
+}
+
+// --- Artifacts declared in router.yaml's `registry` section -------------------------------
+//
+// The same artifacts as above, but named in the configuration instead of the environment: the
+// graph artifact (and with it the license) and the persisted-queries artifact are resolved
+// from `registry`, and editing the section while the router runs moves the pollers.
+
+/// `base` plus a `registry` section naming the graph artifact behind `graph_reference` (its host
+/// becomes `registry.host`, so the slot is relative) and, optionally, an absolute
+/// persisted-queries reference on another server.
+fn registry_config(base: &str, graph_reference: &str, pq_reference: Option<&str>) -> String {
+    let (host, graph) = graph_reference
+        .split_once('/')
+        .expect("mock references are host/repository:tag");
+    let mut yaml = format!(
+        "{base}\nregistry:\n  host: \"{host}\"\n  artifacts:\n    graph:\n      reference: \"{graph}\"\n"
+    );
+    if let Some(pq_reference) = pq_reference {
+        yaml.push_str(&format!(
+            "    persisted_queries:\n      reference: \"{pq_reference}\"\n"
+        ));
+    }
+    yaml
+}
+
+/// How long an asynchronous change (a poller restarted by a configuration edit) gets to land.
+const REGISTRY_RELOAD_TIMEOUT: Duration = Duration::from_secs(30);
+
+async fn count_field_is_served(router: &mut IntegrationTest) -> bool {
+    let (_trace_id, response) = router.execute_query(query_count_field()).await;
+    let graphql_response: apollo_router::graphql::Response = response
+        .json()
+        .await
+        .expect("failed to parse GraphQL response");
+    graphql_response.errors.is_empty()
+}
+
+async fn pq_is_served(router: &mut IntegrationTest, id: &str) -> bool {
+    let (_trace_id, response) = router.execute_query(pq_query(id)).await;
+    let graphql_response: apollo_router::graphql::Response = response
+        .json()
+        .await
+        .expect("failed to parse GraphQL response");
+    graphql_response.errors.is_empty()
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn test_router_registry_config_serves_schema_license_and_persisted_queries()
+-> Result<(), BoxError> {
+    if !graph_os_enabled() {
+        return Ok(());
+    }
+
+    let (_schema_server, schema_reference, _enable_404, _serve_updated) =
+        setup_mock_oci_server_with_tag(
+            include_str!("fixtures/oci_initial_schema.graphql"),
+            include_str!("fixtures/oci_initial_schema.graphql"),
+        )
+        .await;
+    let chunk = pq_chunk_layer(&[("pq-count", "{ count }")]);
+    let artifact = build_pq_artifact(&[&chunk]);
+    let (_pq_server, pq_reference, _current) =
+        setup_switchable_pq_server(&[&chunk], artifact).await;
+    let (_subgraphs_server, subgraph_overrides) = setup_pq_mock_subgraphs().await;
+
+    // No APOLLO_GRAPH_ARTIFACT_REFERENCE: everything comes from router.yaml.
+    let mut router = IntegrationTest::builder()
+        .config(registry_config(
+            MIN_PQ_CONFIG,
+            &schema_reference,
+            Some(&pq_reference),
+        ))
+        .env(HashMap::from([(
+            String::from("TEST_APOLLO_OCI_POLL_INTERVAL"),
+            OsString::from("1"),
+        )]))
+        .subgraph_overrides(subgraph_overrides)
+        .hot_reload(true)
+        .build()
+        .await;
+
+    router.start().await;
+    router.assert_started().await;
+    if !router.log_contains("UpdateLicense(Licensed") {
+        router.wait_for_log_message("UpdateLicense(Licensed").await;
+    }
+    assert!(count_field_is_served(&mut router).await);
+    assert_pq_succeeds(&mut router, "pq-count").await;
+    assert_pq_fails(&mut router, "not-in-the-list").await;
+
+    router.graceful_shutdown().await;
+    Ok(())
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn test_router_registry_config_reload_moves_the_graph_artifact() -> Result<(), BoxError> {
+    if !graph_os_enabled() {
+        return Ok(());
+    }
+
+    // Two registries: the schema with `count`, and the updated schema without it.
+    let (_server_a, reference_a, _, _) = setup_mock_oci_server_with_tag(
+        include_str!("fixtures/oci_initial_schema.graphql"),
+        include_str!("fixtures/oci_initial_schema.graphql"),
+    )
+    .await;
+    let (_server_b, reference_b, _, _) = setup_mock_oci_server_with_tag(
+        include_str!("fixtures/oci_updated_schema.graphql"),
+        include_str!("fixtures/oci_updated_schema.graphql"),
+    )
+    .await;
+    let (_subgraphs_server, subgraph_overrides) = setup_pq_mock_subgraphs().await;
+
+    let mut router = IntegrationTest::builder()
+        .config(registry_config(MIN_CONFIG, &reference_a, None))
+        .env(HashMap::from([(
+            String::from("TEST_APOLLO_OCI_POLL_INTERVAL"),
+            OsString::from("1"),
+        )]))
+        .subgraph_overrides(subgraph_overrides)
+        .hot_reload(true)
+        .build()
+        .await;
+
+    router.start().await;
+    router.assert_started().await;
+    assert!(count_field_is_served(&mut router).await);
+
+    // Point the graph slot at the other registry: the schema poller is restarted against it.
+    router
+        .update_config(&registry_config(MIN_CONFIG, &reference_b, None))
+        .await;
+    router
+        .wait_for_log_message("registry.artifacts.graph changed")
+        .await;
+    let deadline = tokio::time::Instant::now() + REGISTRY_RELOAD_TIMEOUT;
+    while count_field_is_served(&mut router).await {
+        assert!(
+            tokio::time::Instant::now() < deadline,
+            "timed out waiting for the schema from the new registry"
+        );
+        tokio::time::sleep(Duration::from_millis(200)).await;
+    }
+
+    router.graceful_shutdown().await;
+    Ok(())
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn test_router_registry_config_reload_moves_the_persisted_queries_artifact()
+-> Result<(), BoxError> {
+    if !graph_os_enabled() {
+        return Ok(());
+    }
+
+    let (_schema_server, schema_reference, _enable_404, _serve_updated) =
+        setup_mock_oci_server_with_tag(
+            include_str!("fixtures/oci_initial_schema.graphql"),
+            include_str!("fixtures/oci_initial_schema.graphql"),
+        )
+        .await;
+    let chunk_count = pq_chunk_layer(&[("pq-count", "{ count }")]);
+    let chunk_hello = pq_chunk_layer(&[("pq-hello", "{ hello }")]);
+    let (_pq_server_a, pq_reference_a, _) =
+        setup_switchable_pq_server(&[&chunk_count], build_pq_artifact(&[&chunk_count])).await;
+    let (_pq_server_b, pq_reference_b, _) =
+        setup_switchable_pq_server(&[&chunk_hello], build_pq_artifact(&[&chunk_hello])).await;
+    let (_subgraphs_server, subgraph_overrides) = setup_pq_mock_subgraphs().await;
+
+    let mut router = IntegrationTest::builder()
+        .config(registry_config(
+            MIN_PQ_CONFIG,
+            &schema_reference,
+            Some(&pq_reference_a),
+        ))
+        .env(HashMap::from([(
+            String::from("TEST_APOLLO_OCI_POLL_INTERVAL"),
+            OsString::from("1"),
+        )]))
+        .subgraph_overrides(subgraph_overrides)
+        .hot_reload(true)
+        .build()
+        .await;
+
+    router.start().await;
+    router.assert_started().await;
+    assert_pq_succeeds(&mut router, "pq-count").await;
+    assert_pq_fails(&mut router, "pq-hello").await;
+
+    // Point the persisted-queries slot at the other artifact: the reloaded pipeline's poller
+    // reads the new list, and the schema poller is left alone.
+    router
+        .update_config(&registry_config(
+            MIN_PQ_CONFIG,
+            &schema_reference,
+            Some(&pq_reference_b),
+        ))
+        .await;
+    let deadline = tokio::time::Instant::now() + REGISTRY_RELOAD_TIMEOUT;
+    while !pq_is_served(&mut router, "pq-hello").await {
+        assert!(
+            tokio::time::Instant::now() < deadline,
+            "timed out waiting for the persisted queries from the new artifact"
+        );
+        tokio::time::sleep(Duration::from_millis(200)).await;
+    }
+    assert_pq_fails(&mut router, "pq-count").await;
+    assert!(
+        !router.log_contains("registry.artifacts.graph changed"),
+        "the schema poller must not restart for a persisted-queries change"
+    );
+
+    router.graceful_shutdown().await;
+    Ok(())
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn test_router_registry_config_rejects_env_reference_on_another_registry()
+-> Result<(), BoxError> {
+    if !graph_os_enabled() {
+        return Ok(());
+    }
+
+    let (_schema_server, schema_reference, _enable_404, _serve_updated) =
+        setup_mock_oci_server_with_tag(
+            include_str!("fixtures/oci_initial_schema.graphql"),
+            include_str!("fixtures/oci_initial_schema.graphql"),
+        )
+        .await;
+    let (_subgraphs_server, subgraph_overrides) = setup_mock_subgraphs().await;
+
+    // The environment names the mock registry while router.yaml names another host for the
+    // same slot; the two cannot be reconciled, so the configuration is refused.
+    let mut router = IntegrationTest::builder()
+        .config(registry_config(
+            MIN_CONFIG,
+            "mirror.invalid:5000/test-repo:latest",
+            None,
+        ))
+        .env(HashMap::from([(
+            String::from("APOLLO_GRAPH_ARTIFACT_REFERENCE"),
+            OsString::from(schema_reference),
+        )]))
+        .subgraph_overrides(subgraph_overrides)
+        .hot_reload(true)
+        .build()
+        .await;
+
+    router.start().await;
+    router
+        .wait_for_log_message("name different registries")
+        .await;
+    router.assert_shutdown().await;
+    Ok(())
+}

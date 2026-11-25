@@ -79,6 +79,7 @@ pub use apollo_redaction;
 pub use crate::axum_factory::Endpoint;
 pub use crate::configuration::Configuration;
 pub use crate::configuration::ListenAddr;
+pub use crate::configuration::RegistryOverrides;
 pub use crate::context::Context;
 pub use crate::context::extensions::Extensions;
 pub use crate::context::extensions::sync::ExtensionsMutex;
