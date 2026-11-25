@@ -30,6 +30,7 @@ use super::PlanNode;
 use super::fetch::FetchNode;
 use super::plan::FlattenMember;
 use super::plan::FlattenNode;
+use crate::spec::QueryHash;
 
 /// A name in a fetch's own operation, and the name it has in the shared operation.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -65,30 +66,17 @@ pub(crate) struct MemberPiece {
 #[derive(Debug, Default)]
 pub(crate) struct BatchOperations(HashMap<FlattenKey, Arc<BatchOperation>>);
 
-/// What a flatten's shared operation is made from: each member's subgraph, operation, kind and
-/// the client variables it reads, in order. Where a member merges does not change it, so its
-/// paths are left out.
+/// What a flatten's shared operation is made from: each member's operation, by its hash, and
+/// whether it is an entity fetch, in order. Where a member merges does not change it, so its paths
+/// are left out. The hash is computed once per plan, so a lookup doesn't copy operation text.
 #[derive(Debug, PartialEq, Eq, Hash)]
-struct FlattenKey(Vec<MemberKey>);
-
-#[derive(Debug, PartialEq, Eq, Hash)]
-struct MemberKey {
-    service_name: Arc<str>,
-    operation: String,
-    is_entities: bool,
-    variable_usages: Vec<Arc<str>>,
-}
+struct FlattenKey(Vec<(Arc<QueryHash>, bool)>);
 
 impl FlattenKey {
     fn of(flatten: &FlattenNode) -> Self {
         let members = flatten.members.iter().map(|member| {
             let fetch = &member.fetch;
-            MemberKey {
-                service_name: fetch.service_name.clone(),
-                operation: fetch.operation.as_serialized().to_string(),
-                is_entities: fetch.kind.is_entities(),
-                variable_usages: fetch.variable_usages.clone(),
-            }
+            (fetch.schema_aware_hash.clone(), fetch.kind.is_entities())
         });
         Self(members.collect())
     }
