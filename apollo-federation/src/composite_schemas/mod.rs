@@ -8,6 +8,8 @@
 pub(crate) mod cross_schema;
 pub(crate) mod detection;
 pub(crate) mod internal;
+pub(crate) mod lookups;
+pub(crate) mod normalize;
 #[cfg(test)]
 mod tests;
 pub(crate) mod validation;
