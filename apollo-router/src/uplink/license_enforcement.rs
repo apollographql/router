@@ -235,12 +235,6 @@ impl LicenseEnforcementReport {
                 path: "supergraph.query_planning.cache.redis",
             });
         }
-        if configuration.batching.enabled {
-            settings.push(LicensedSetting {
-                feature: AllowedFeature::Batching,
-                path: "batching.enabled",
-            });
-        }
         if configuration.persisted_queries.enabled {
             settings.push(LicensedSetting {
                 feature: AllowedFeature::PersistedQueries,

@@ -22,9 +22,9 @@ use crate::configuration::SubgraphApq;
 use crate::graphql::Response;
 use crate::pipeline::build_subgraph_services;
 use crate::pipeline::tests::stage_stack::required_stage_plugins;
+use crate::pipeline::tests::stage_stack::test_http_client_service;
 use crate::query_planner::fetch::OperationKind;
 use crate::services::SubgraphRequest;
-use crate::services::http::test_http_client_service;
 use crate::services::layers::apq::subgraph::PERSISTED_QUERY_KEY;
 use crate::services::router;
 
@@ -112,7 +112,7 @@ async fn respects_all_enabled_config() {
     config.apq.subgraph.all.enabled = true;
 
     let mut http_services = IndexMap::new();
-    http_services.insert("test".to_string(), test_http_client_service("test"));
+    http_services.insert("test".to_string(), test_http_client_service("test").await);
 
     let services = build_subgraph_services(http_services, &required_stage_plugins().await, &config);
     let url = Uri::from_str(&format!("http://{socket_addr}")).unwrap();
@@ -159,7 +159,7 @@ async fn respects_all_disabled_config() {
     config.apq.subgraph.all.enabled = false;
 
     let mut http_services = IndexMap::new();
-    http_services.insert("test".to_string(), test_http_client_service("test"));
+    http_services.insert("test".to_string(), test_http_client_service("test").await);
 
     let services = build_subgraph_services(http_services, &required_stage_plugins().await, &config);
     let url = Uri::from_str(&format!("http://{socket_addr}")).unwrap();
@@ -224,11 +224,11 @@ async fn per_subgraph_override_takes_precedence_over_all() {
     let mut http_services = IndexMap::new();
     http_services.insert(
         "enabled_subgraph".to_string(),
-        test_http_client_service("enabled_subgraph"),
+        test_http_client_service("enabled_subgraph").await,
     );
     http_services.insert(
         "disabled_subgraph".to_string(),
-        test_http_client_service("disabled_subgraph"),
+        test_http_client_service("disabled_subgraph").await,
     );
 
     let services = build_subgraph_services(http_services, &required_stage_plugins().await, &config);
