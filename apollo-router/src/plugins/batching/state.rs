@@ -41,20 +41,14 @@ use tracing::Instrument;
 use tracing::Span;
 
 use crate::Context;
-use crate::configuration::Batching;
 use crate::error::FetchError;
 use crate::error::SubgraphBatchingError;
+use crate::plugins::batching::config::BatchingConfig;
+use crate::plugins::batching::metrics::BatchMetrics;
 use crate::plugins::telemetry::otel::span_ext::OpenTelemetrySpanExt;
 use crate::services::http::HttpRequest;
 use crate::services::http::HttpResponse;
 use crate::spec::QueryHash;
-
-mod join_batch_requests_layer;
-mod query_plan_analysis_layer;
-mod split_batch_request_layer;
-pub(crate) use self::join_batch_requests_layer::*;
-pub(crate) use self::query_plan_analysis_layer::*;
-pub(crate) use self::split_batch_request_layer::*;
 
 /// A query that is part of a batch.
 /// Note: It's ok to make transient clones of this struct, but *do not* store clones anywhere apart
@@ -69,7 +63,7 @@ pub(crate) struct BatchQuery {
     sender: Arc<Mutex<Option<mpsc::Sender<BatchHandlerMessage>>>>,
 
     /// How many more progress updates are we expecting to send?
-    remaining: Arc<AtomicUsize>,
+    pub(super) remaining: Arc<AtomicUsize>,
 
     /// Batch to which this BatchQuery belongs
     batch: Arc<Batch>,
@@ -98,7 +92,7 @@ impl BatchQuery {
     /// its fetches.
     pub(crate) fn joined_by(context: &Context, subgraph_name: &str) -> Option<Self> {
         context.extensions().with_lock(|lock| {
-            lock.get::<Batching>()
+            lock.get::<Arc<BatchingConfig>>()
                 .filter(|batching| batching.batch_include(subgraph_name))
                 .and(lock.get::<BatchQuery>())
                 .filter(|query| !query.finished())
@@ -107,12 +101,15 @@ impl BatchQuery {
     }
 
     /// Is this BatchQuery finished?
-    fn finished(&self) -> bool {
+    pub(super) fn finished(&self) -> bool {
         self.remaining.load(Ordering::Acquire) == 0
     }
 
     /// Inform the batch of query hashes representing fetches needed by this element of the batch query
-    async fn set_query_hashes(&self, query_hashes: Vec<Arc<QueryHash>>) -> Result<(), BoxError> {
+    pub(super) async fn set_query_hashes(
+        &self,
+        query_hashes: Vec<Arc<QueryHash>>,
+    ) -> Result<(), BoxError> {
         self.remaining.store(query_hashes.len(), Ordering::Release);
 
         self.sender
@@ -134,11 +131,12 @@ impl BatchQuery {
     /// The returned channel can be awaited to receive the GraphQL response, when ready.
     ///
     /// The HTTP client must be pre-readied.
-    async fn signal_progress(
+    pub(super) async fn signal_progress(
         &self,
         subgraph_name: Arc<str>,
         http_client: crate::services::http::BoxCloneService,
         request: HttpRequest,
+        metrics: Arc<BatchMetrics>,
     ) -> Result<oneshot::Receiver<Result<HttpResponse, BoxError>>, BoxError> {
         // Create a receiver for this query so that it can eventually get the request meant for it
         let (tx, rx) = oneshot::channel();
@@ -161,6 +159,7 @@ impl BatchQuery {
                     response_sender: tx,
                     span_context: Span::current().context(),
                     subgraph_name,
+                    metrics,
                 },
             )))
             .await
@@ -180,7 +179,7 @@ impl BatchQuery {
     }
 
     /// Signal to the batch handler that this specific batch query is cancelled
-    async fn signal_cancelled(&self, reason: String) -> Result<(), BoxError> {
+    pub(super) async fn signal_cancelled(&self, reason: String) -> Result<(), BoxError> {
         self.sender
             .lock()
             .await
@@ -233,18 +232,20 @@ struct BatchHandlerMessageProgress {
     response_sender: oneshot::Sender<Result<HttpResponse, BoxError>>,
     span_context: otelContext,
     subgraph_name: Arc<str>,
+    metrics: Arc<BatchMetrics>,
 }
 
 /// Collection of info needed to resolve a batch query
-struct BatchQueryInfo {
+pub(super) struct BatchQueryInfo {
     /// The owning subgraph request
-    request: HttpRequest,
-    subgraph_name: Arc<str>,
-    http_client: crate::services::http::BoxCloneService,
+    pub(super) request: HttpRequest,
+    pub(super) subgraph_name: Arc<str>,
+    pub(super) metrics: Arc<BatchMetrics>,
+    pub(super) http_client: crate::services::http::BoxCloneService,
     /// Notifier for the subgraph service handler
     ///
     /// Note: This must be used or else the subgraph request will time out
-    sender: oneshot::Sender<Result<HttpResponse, BoxError>>,
+    pub(super) sender: oneshot::Sender<Result<HttpResponse, BoxError>>,
 }
 
 fn get_query_hash(request: &HttpRequest) -> Arc<QueryHash> {
@@ -258,7 +259,7 @@ fn get_query_hash(request: &HttpRequest) -> Arc<QueryHash> {
 // TODO: Do we want to generate a UUID for a batch for observability reasons?
 // TODO: Do we want to track the size of a batch?
 #[derive(Debug)]
-struct Batch {
+pub(super) struct Batch {
     /// A sender channel to communicate with the batching handler
     senders: PMutex<Vec<Option<mpsc::Sender<BatchHandlerMessage>>>>,
 
@@ -276,7 +277,7 @@ struct Batch {
 impl Batch {
     /// Creates a new batch, spawning an async task for handling updates to the
     /// batch lifecycle.
-    fn spawn_handler(size: usize) -> Self {
+    pub(super) fn spawn_handler(size: usize) -> Self {
         tracing::debug!("New batch created with size {size}");
 
         // Create the message channel pair for sending update events to the spawned task
@@ -378,6 +379,7 @@ impl Batch {
                             response_sender,
                             span_context,
                             subgraph_name,
+                            metrics,
                         } = *progress;
 
                         tracing::debug!("Progress index: {index}");
@@ -392,6 +394,7 @@ impl Batch {
                             request,
                             sender: response_sender,
                             subgraph_name,
+                            metrics,
                         })
                     }
                 }
@@ -418,6 +421,7 @@ impl Batch {
                 request: sg_request,
                 sender: tx,
                 subgraph_name,
+                metrics,
             } in all_in_one
             {
                 let value = svc_map.entry(subgraph_name.to_string()).or_default();
@@ -426,10 +430,11 @@ impl Batch {
                     request: sg_request,
                     sender: tx,
                     subgraph_name,
+                    metrics,
                 });
             }
 
-            self::join_batch_requests_layer::process_batches(svc_map).await?;
+            super::join_batch_requests_layer::process_batches(svc_map).await?;
             Ok(())
         }.instrument(tracing::info_span!("batch_request", size)));
 
@@ -443,7 +448,7 @@ impl Batch {
     /// Create a batch query for a specific index in this batch
     ///
     /// This function may fail if the index doesn't exist or has already been taken
-    fn query_for_index(
+    pub(super) fn query_for_index(
         batch: Arc<Batch>,
         index: usize,
     ) -> Result<BatchQuery, SubgraphBatchingError> {
@@ -496,6 +501,7 @@ mod tests {
     use crate::graphql;
     use crate::graphql::Request;
     use crate::layers::ServiceExt as LayerExt;
+    use crate::plugins::batching::metrics::BatchMetrics;
     use crate::services::http::HttpRequest;
     use crate::services::http::HttpResponse;
     use crate::services::router;
@@ -503,6 +509,10 @@ mod tests {
     use crate::services::subgraph;
     use crate::services::subgraph::http::APPLICATION_JSON_HEADER_VALUE;
     use crate::spec::QueryHash;
+
+    fn metrics() -> Arc<BatchMetrics> {
+        Arc::new(BatchMetrics::new())
+    }
 
     #[tokio::test(flavor = "multi_thread")]
     async fn it_rejects_index_out_of_bounds() {
@@ -564,7 +574,7 @@ mod tests {
         assert!(!bq.finished());
 
         assert!(
-            bq.signal_progress("whatever".into(), http_client.clone(), request)
+            bq.signal_progress("whatever".into(), http_client.clone(), request, metrics())
                 .await
                 .is_ok()
         );
@@ -577,7 +587,7 @@ mod tests {
             context: Context::new(),
         };
         assert!(
-            bq.signal_progress("whatever".into(), http_client, request)
+            bq.signal_progress("whatever".into(), http_client, request, metrics())
                 .await
                 .is_err()
         );
@@ -609,7 +619,7 @@ mod tests {
         );
         assert!(!bq.finished());
         assert!(
-            bq.signal_progress("whatever".into(), http_client, request)
+            bq.signal_progress("whatever".into(), http_client, request, metrics())
                 .await
                 .is_ok()
         );
@@ -644,7 +654,7 @@ mod tests {
         assert!(bq.set_query_hashes(vec![qh.clone(), qh]).await.is_ok());
         assert!(!bq.finished());
         assert!(
-            bq.signal_progress("whatever".into(), http_client, request)
+            bq.signal_progress("whatever".into(), http_client, request, metrics())
                 .await
                 .is_ok()
         );
@@ -722,7 +732,7 @@ mod tests {
             )
             .await;
 
-        let schema = include_str!("../tests/fixtures/batching/schema.graphql");
+        let schema = include_str!("../../../tests/fixtures/batching/schema.graphql");
         let service = TestHarness::builder()
             .configuration_json(serde_json::json!({
                 "include_subgraph_errors": {
@@ -824,12 +834,12 @@ mod tests {
         // We have to provide pre-readied HTTP clients.
         let client1 = http_client.clone().ready_oneshot().await.unwrap();
         let response1 = query1
-            .signal_progress("a".into(), client1, request1)
+            .signal_progress("a".into(), client1, request1, metrics())
             .await
             .unwrap();
         let client2 = http_client.clone().ready_oneshot().await.unwrap();
         let response2 = query2
-            .signal_progress("a".into(), client2, request2)
+            .signal_progress("a".into(), client2, request2, metrics())
             .await
             .unwrap();
 

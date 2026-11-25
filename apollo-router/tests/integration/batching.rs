@@ -180,6 +180,191 @@ async fn it_rejects_a_batched_deferred_query() -> Result<(), BoxError> {
 }
 
 #[tokio::test(flavor = "multi_thread")]
+async fn it_does_not_batch_to_subgraphs_with_batching_disabled() -> Result<(), BoxError> {
+    use wiremock::MockServer;
+    use wiremock::matchers;
+
+    const REQUEST_COUNT: usize = 3;
+
+    if !graph_os_enabled() {
+        return Ok(());
+    }
+
+    let requests_a = (0..REQUEST_COUNT).map(|index| {
+        Request::fake_builder()
+            .query(format!(
+                "query op{index}{{ entryA(count: {REQUEST_COUNT}) {{ index }} }}"
+            ))
+            .build()
+    });
+    let requests_b = (0..REQUEST_COUNT).map(|index| {
+        Request::fake_builder()
+            .query(format!(
+                "query op{index}{{ entryB(count: {REQUEST_COUNT}) {{ index }} }}"
+            ))
+            .build()
+    });
+    let requests: Vec<_> = requests_a.interleave(requests_b).collect();
+
+    let mock_server_a = MockServer::start().await;
+    let mock_server_b = MockServer::start().await;
+
+    // A fake subgraph that supports batching
+    wiremock::Mock::given(matchers::method("POST"))
+        .and(matchers::path("/batched"))
+        .respond_with(helper::expect_batch)
+        .expect(1)
+        .named("batching POST /batched")
+        .mount(&mock_server_a)
+        .await;
+
+    // A fake subgraph that does not support batching
+    wiremock::Mock::given(matchers::method("POST"))
+        .and(matchers::path("/unbatched"))
+        .respond_with(|request: &wiremock::Request| {
+            let _request: Request = request
+                .body_json()
+                .expect("should parse as a single GraphQL request");
+            // the actual number doesnt really matter here, we just need to respond with a single
+            // non-batched response.
+            let index = 1337usize;
+            ResponseTemplate::new(200).set_body_json(serde_json::json!({
+                "data": {
+                    "entryB": {
+                        "index": index,
+                    },
+                },
+            }))
+        })
+        .expect(REQUEST_COUNT as u64)
+        .named("non-batched POST /unbatched")
+        .mount(&mock_server_b)
+        .await;
+
+    let mut router = IntegrationTest::builder()
+        .config(indoc::indoc! {"
+            batching:
+              enabled: true
+              mode: batch_http_link
+              subgraph:
+                all:
+                  enabled: true
+                subgraphs:
+                  b:
+                    enabled: false
+
+            include_subgraph_errors:
+              all: true
+
+            telemetry:
+              exporters:
+                metrics:
+                  prometheus:
+                    enabled: true
+                    path: /metrics
+        "})
+        .supergraph("tests/fixtures/batching/schema.graphql")
+        .subgraph_override("a", format!("{}/batched", mock_server_a.uri()))
+        .subgraph_override("b", format!("{}/unbatched", mock_server_b.uri()))
+        .build()
+        .await;
+
+    router.start().await;
+    router.assert_started().await;
+
+    let (_span, response) = router
+        .execute_query(
+            Query::builder()
+                .body(serde_json::to_value(&requests)?)
+                .build(),
+        )
+        .await;
+    let responses = serde_json::from_slice::<Vec<graphql::Response>>(&response.bytes().await?)?;
+    assert_eq!(responses.len(), requests.len());
+    assert!(
+        responses.iter().all(|response| response.errors.is_empty()),
+        "{responses:?}"
+    );
+
+    // The router received one client batch of 6 operations, and sent one batch of 3 to `batched`.
+    router
+        .assert_metrics_contains_multiple(
+            vec![
+                r#"apollo_router_operations_batching_total{<anyopt>subgraph="a"<anyopt>} 1"#,
+                r#"apollo_router_operations_batching_size_sum{<anyopt>subgraph="a"<anyopt>} 3"#,
+            ],
+            None,
+        )
+        .await;
+
+    // There should not be a batching metric for the un-batched `b` subgraph
+    let metrics = router.get_metrics_response().await?.text().await?;
+    let batching_metrics_for_b: Vec<_> = metrics
+        .lines()
+        .filter(|line| line.starts_with("apollo_router_operations_batching"))
+        .filter(|line| line.contains(r#"subgraph="b""#))
+        .collect();
+    assert!(
+        batching_metrics_for_b.is_empty(),
+        "{batching_metrics_for_b:#?}"
+    );
+
+    router.graceful_shutdown().await;
+    Ok(())
+}
+
+/// With batching disabled we should get an INVALID_GRAPHQL_REQUEST error back.
+#[tokio::test(flavor = "multi_thread")]
+async fn it_rejects_batches_when_batching_is_disabled() -> Result<(), BoxError> {
+    const REQUEST_COUNT: usize = 2;
+
+    let requests: Vec<_> = (0..REQUEST_COUNT)
+        .map(|index| {
+            Request::fake_builder()
+                .query(format!(
+                    "query op{index}{{ entryA(count: {REQUEST_COUNT}) {{ index }} }}"
+                ))
+                .build()
+        })
+        .collect();
+
+    // Start up the router. We don't expect any subgraph requests.
+    let mut router = IntegrationTest::builder()
+        .config(indoc::indoc! {"
+            batching:
+              enabled: false
+
+            include_subgraph_errors:
+              all: true
+        "})
+        .supergraph("tests/fixtures/batching/schema.graphql")
+        .build()
+        .await;
+
+    router.start().await;
+    router.assert_started().await;
+
+    // Execute the request
+    let request = serde_json::to_value(requests)?;
+    let (_span, response) = router
+        .execute_query(Query::builder().body(request).build())
+        .await;
+
+    assert_eq!(response.status(), http::StatusCode::BAD_REQUEST);
+    let response = serde_json::from_slice::<graphql::Response>(&response.bytes().await?)?;
+    assert_eq!(response.errors.len(), 1);
+    assert_eq!(
+        response.errors[0]
+            .extensions
+            .get("code")
+            .and_then(|v| v.as_str()),
+        Some("INVALID_GRAPHQL_REQUEST")
+    );
+
+    Ok(())
+}
+
+#[tokio::test(flavor = "multi_thread")]
 async fn it_batches_with_errors_in_single_graph() -> Result<(), BoxError> {
     const REQUEST_COUNT: usize = 4;
 

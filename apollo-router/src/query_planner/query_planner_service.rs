@@ -901,12 +901,9 @@ mod tests {
             }
         }}"#);
         // Aliases
-        // FIXME: uncomment myName alias when this is fixed:
-        // https://github.com/apollographql/router/issues/3263
         s!(r#"query Q { me {
             username
-            # myName:
-             name {
+            myName: name {
                 firstName: first
                 ... @defer(label: "A") { lastName: last }
             }
@@ -1018,6 +1015,19 @@ mod tests {
                 }
             }
         }}"#);
+        // The same labeled @defer which is used under sibling type conditions
+        s!(r#"
+            query Q { topProducts {
+                upc
+                ... on Book { ...Deferred }
+                ... on Furniture { ...Deferred }
+            }}
+            fragment Deferred on Product {
+                ... @defer(label: "A") {
+                    name
+                }
+            }
+        "#);
     }
 
     async fn subselections_keys(query: &str, planner: &QueryPlannerService) -> String {
