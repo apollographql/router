@@ -32,6 +32,7 @@ use crate::graphql::Request;
 use crate::graphql::Response;
 use crate::json_ext::Object;
 use crate::json_ext::Path;
+use crate::json_ext::PathElement;
 use crate::json_ext::ResponsePathElement;
 use crate::json_ext::Value;
 use crate::plugins::authorization::UnauthorizedPaths;
@@ -140,16 +141,11 @@ impl Query {
         match data {
             Some(Value::Object(mut input)) => {
                 if self.is_deferred(defer_conditions) {
-                    // Get subselection from hashmap
-                    match self.subselections.get(&SubSelectionKey {
-                        defer_label: response.label.clone(),
+                    match self.subselection(
+                        &response.label,
+                        response.path.as_ref(),
                         defer_conditions,
-                        defer_path: response
-                            .path
-                            .as_ref()
-                            .map(subselections::defer_path_from_response_path)
-                            .unwrap_or_default(),
-                    }) {
+                    ) {
                         Some(subselection) => {
                             let mut output =
                                 Object::with_capacity(subselection.selection_set.len());
@@ -175,21 +171,7 @@ impl Query {
                                 },
                             );
 
-                            if !parameters.errors.is_empty()
-                                && let Ok(value) = serde_json_bytes::to_value(&parameters.errors)
-                            {
-                                response
-                                    .extensions
-                                    .insert(EXTENSIONS_VALUE_COMPLETION_KEY, value);
-                            }
-
-                            if let Some(errors) = parameters.coercion_errors.as_mut()
-                                && !errors.is_empty()
-                            {
-                                response.errors.append(errors);
-                            }
-
-                            return parameters.nullified;
+                            return parameters.finish(response);
                         }
                         None => {
                             response.data = Some(Value::Object(Object::default()));
@@ -238,21 +220,8 @@ impl Query {
                             Err(InvalidValue) => Value::Null,
                         },
                     );
-                    if !parameters.errors.is_empty()
-                        && let Ok(value) = serde_json_bytes::to_value(&parameters.errors)
-                    {
-                        response
-                            .extensions
-                            .insert(EXTENSIONS_VALUE_COMPLETION_KEY, value);
-                    }
 
-                    if let Some(errors) = parameters.coercion_errors.as_mut()
-                        && !errors.is_empty()
-                    {
-                        response.errors.append(errors);
-                    }
-
-                    return parameters.nullified;
+                    return parameters.finish(response);
                 }
             }
             Some(Value::Null) => {
@@ -1307,6 +1276,23 @@ impl Query {
             .and_then(|Variable { default_value, .. }| default_value.as_ref())
     }
 
+    /// The subselection that formats the response with the specified label and path.
+    fn subselection(
+        &self,
+        label: &Option<String>,
+        response_path: Option<&Path>,
+        defer_conditions: BooleanValues,
+    ) -> Option<&SubSelectionValue> {
+        self.subselections.get(&SubSelectionKey {
+            defer_label: label.clone(),
+            defer_conditions,
+            defer_path: response_path
+                .map(subselections::defer_path_from_response_path)
+                .unwrap_or_default(),
+        })
+    }
+
+    /// Is the error at path in the selections of the response?
     pub(crate) fn contains_error_path(
         &self,
         label: &Option<String>,
@@ -1314,13 +1300,7 @@ impl Query {
         path: &Path,
         defer_conditions: BooleanValues,
     ) -> bool {
-        let selection_set = match self.subselections.get(&SubSelectionKey {
-            defer_label: label.clone(),
-            defer_conditions,
-            defer_path: response_path
-                .map(subselections::defer_path_from_response_path)
-                .unwrap_or_default(),
-        }) {
+        let selection_set = match self.subselection(label, response_path, defer_conditions) {
             Some(subselection) => &subselection.selection_set,
             None => &self.operation.selection_set,
         };
@@ -1330,6 +1310,131 @@ impl Query {
             .max()
             .unwrap_or(0);
         path.len() == match_length
+    }
+
+    /// The selections of `@defer` with this label at response_path and the type they apply to.
+    pub(crate) fn deferred_selection_set(
+        &self,
+        label: &Option<String>,
+        response_path: &Path,
+        defer_conditions: BooleanValues,
+    ) -> Option<(&str, &[Selection])> {
+        let subselection = self.subselection(label, Some(response_path), defer_conditions)?;
+        // Deferred selections are stored wrapped in the fields of the same
+        // path that finds them, meaning there should always be a selection
+        // set. In case the impossible does happen, log an error to the logs.
+        let selection_set = subselection
+            .selection_set_at(&subselections::defer_path_from_response_path(response_path));
+        debug_assert!(
+            selection_set.is_some(),
+            "no deferred selections at {response_path}"
+        );
+        let Some(selection_set) = selection_set else {
+            tracing::error!(
+                %response_path,
+                "deferred subselection does not lead to its path, this is a bug"
+            );
+            return None;
+        };
+        Some((&subselection.type_name, selection_set))
+    }
+
+    /// This formats deferred responses which were split by object definition to
+    /// which a `@defer` is applied.
+    ///
+    /// Returns nullified paths to those responses.
+    pub(crate) fn format_deferred_responses(
+        &self,
+        response: &Response,
+        deferred_responses: &mut [Response],
+        variables: &Object,
+        schema: &ApiSchema,
+        defer_conditions: BooleanValues,
+        include_coercion_errors: bool,
+    ) -> Vec<Path> {
+        let Some(response_path) = &response.path else {
+            return Vec::new();
+        };
+        let mut nullified = Vec::new();
+        for query in self.filtered_query.as_deref().into_iter().chain([self]) {
+            let selection =
+                query.deferred_selection_set(&response.label, response_path, defer_conditions);
+            for deferred_response in deferred_responses.iter_mut() {
+                let Some(Value::Object(input)) = deferred_response.data.take() else {
+                    // As in `format_response`, data that isn't an object becomes null.
+                    deferred_response.data = Some(Value::Null);
+                    continue;
+                };
+                let Some((type_name, selection_set)) = selection else {
+                    // This query has no selections for this `@defer`, for example because
+                    // authorization filtered all of them out. As in `format_response`.
+                    deferred_response.data = Some(Value::Object(Object::default()));
+                    continue;
+                };
+                let mut parameters = FormatParameters {
+                    variables,
+                    schema,
+                    errors: Vec::new(),
+                    coercion_errors: include_coercion_errors.then(Vec::new),
+                    nullified: Vec::new(),
+                };
+                deferred_response.data = Some(query.format_deferred_object(
+                    type_name,
+                    selection_set,
+                    deferred_response.path.as_ref(),
+                    &mut parameters,
+                    input,
+                ));
+                nullified.extend(parameters.finish(deferred_response));
+            }
+        }
+        nullified
+    }
+
+    /// Format the object definition at the deferred response path.
+    fn format_deferred_object<'a: 'b, 'b>(
+        &'a self,
+        type_name: &str,
+        selection_set: &'a [Selection],
+        path: Option<&'b Path>,
+        parameters: &mut FormatParameters,
+        mut input: Object,
+    ) -> Value {
+        let Some(path) = path.filter(|path| !path.is_empty()) else {
+            let mut output = Object::with_capacity(selection_set.len());
+            return match self.apply_root_selection_set(
+                type_name,
+                selection_set,
+                parameters,
+                &mut input,
+                &mut output,
+                &mut Vec::new(),
+            ) {
+                Ok(()) => output.into(),
+                Err(InvalidValue) => Value::Null,
+            };
+        };
+
+        let mut response_path = path
+            .iter()
+            .filter_map(|element| match element {
+                PathElement::Key(key, _) => Some(ResponsePathElement::Key(key.as_str())),
+                PathElement::Index(index) => Some(ResponsePathElement::Index(*index)),
+                PathElement::Flatten(_) | PathElement::Fragment(_) => None,
+            })
+            .collect();
+        let type_name = Name::new_unchecked(type_name);
+        let mut output = Value::Null;
+        let _ = self.format_named_type(
+            parameters,
+            &executable::Type::Named(type_name.clone()),
+            &mut Value::Object(input),
+            &type_name,
+            &mut output,
+            &mut response_path,
+            selection_set,
+        );
+        output
     }
 
     pub(crate) fn matching_error_path_length(&self, path: &Path) -> usize {
@@ -1434,6 +1539,24 @@ impl FormatParameters<'_> {
         if let Some(errors) = self.coercion_errors.as_mut() {
             errors.push(error)
         }
+    }
+
+    /// This moves the value completion errors to extensions and extend response
+    /// with coercion errors.
+    ///
+    /// Returns nullified paths.
+    fn finish(self, response: &mut Response) -> Vec<Path> {
+        if !self.errors.is_empty()
+            && let Ok(value) = serde_json_bytes::to_value(&self.errors)
+        {
+            response
+                .extensions
+                .insert(EXTENSIONS_VALUE_COMPLETION_KEY, value);
+        }
+        if let Some(errors) = self.coercion_errors {
+            response.errors.extend(errors);
+        }
+        self.nullified
     }
 }
 
