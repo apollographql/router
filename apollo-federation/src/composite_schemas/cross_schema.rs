@@ -351,7 +351,7 @@ pub(crate) fn validate_selection_maps(subgraphs: &[Subgraph<Validated>]) -> Vec<
                         };
                         // A field this subgraph declares itself is reported as such, rather than
                         // as one the other subgraphs may not resolve.
-                        let locally_declared: Vec<(Name, Name)> = root_fields(&map)
+                        let locally_declared: IndexSet<(Name, Name)> = root_fields(&map)
                             .into_iter()
                             .map(|(condition, field_name)| {
                                 (condition.unwrap_or_else(|| type_name.clone()), field_name)

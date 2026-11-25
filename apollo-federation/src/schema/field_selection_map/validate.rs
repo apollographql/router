@@ -182,10 +182,15 @@ pub(crate) fn has_arguments(value: &SelectedValue) -> bool {
 }
 
 impl Validator<'_> {
+    /// Identical definitions of a field in several subgraphs produce identical messages, which
+    /// are reported once.
     fn error(&mut self, message: impl Into<String>) {
-        self.errors.push(FieldSelectionMapValidationError {
-            message: message.into(),
-        });
+        let message = message.into();
+        if self.errors.iter().any(|error| error.message == message) {
+            return;
+        }
+        self.errors
+            .push(FieldSelectionMapValidationError { message });
     }
 
     fn value(&mut self, value: &SelectedValue, output_type: &Name, expected: &ast::Type) {

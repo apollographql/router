@@ -1755,4 +1755,51 @@ mod cross_schema_order {
             &["REQUIRE_INVALID_FIELDS"],
         );
     }
+
+    #[test]
+    fn require_invalid_argument_is_reported_once_across_identical_definitions() {
+        let a = r#"
+            type Query { productById(id: ID!): Product @lookup }
+            type Product @key(fields: "id") {
+              id: ID!
+              shippingCost(weight: Float @require(field: "weight(unit: STONE)")): Float
+            }
+        "#;
+        assert_error_codes(
+            &[
+                ("a", a),
+                ("b", OPTIONAL),
+                ("c", &OPTIONAL.replace("productByIdC", "productByIdD")),
+            ],
+            &["REQUIRE_INVALID_FIELDS"],
+        );
+    }
+
+    #[test]
+    fn require_own_field_with_and_without_type_condition_is_reported_once() {
+        assert_error_codes(
+            &[
+                (
+                    "a",
+                    r#"
+                    input DimsInput { a: Int b: Int }
+                    type Query { bookById(id: ID!): Book @lookup }
+                    type Book @key(fields: "id") {
+                      id: ID!
+                      size: Int @shareable
+                      pages(dims: DimsInput @require(field: "{ a: size, b: <Book>.size }")): Int
+                    }
+                    "#,
+                ),
+                (
+                    "b",
+                    r#"
+                    type Query { bookByIdInB(id: ID!): Book @lookup }
+                    type Book @key(fields: "id") { id: ID! size: Int @shareable }
+                    "#,
+                ),
+            ],
+            &["REQUIRE_INVALID_FIELDS"],
+        );
+    }
 }
