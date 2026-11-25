@@ -9,7 +9,7 @@ rust = { version = "1.100.0", profile = "default" }
 "cargo:cargo-insta" = "1.49.0"
 "cargo:cargo-watch" = "8.5.3"
 "cargo:cargo-machete" = "0.10.1"
-"cargo:cargo-llvm-cov" = "0.9.1"
+"cargo:cargo-llvm-cov" = "0.9.2"
 "cargo:typos-cli" = "1.52.2"
 protoc = "36.2"
 gh = "2.105.0"
