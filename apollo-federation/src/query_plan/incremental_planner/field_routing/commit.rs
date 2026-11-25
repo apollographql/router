@@ -377,7 +377,14 @@ impl FieldRoutingSearchSpace {
             None
         };
 
-        let edge = self.wire_key_edge(state, pending.fetch_node, new_group, key_input);
+        // The anchor's edge carries the part of the key it selects; routed
+        // parts reach the group from the fetches that select them.
+        let anchor_key_input = key_input
+            .as_ref()
+            .zip(anchor_key.as_ref())
+            .map(|(input, anchor_key)| input.with_conditions(anchor_key.clone()));
+        let edge = self.wire_key_edge(state, pending.fetch_node, new_group, anchor_key_input);
+        let key_input = key_input.map(Arc::new);
 
         // Keys the current fetch cannot resolve directly are routed as
         // pending selections; ordering edges to the new group are wired as
@@ -396,10 +403,12 @@ impl FieldRoutingSearchSpace {
                     )));
                 }
                 self.commit_circular_key_conditions(
-                    state, pending, routed_key, &source, &gate_path, new_group,
+                    state, pending, routed_key, &source, &gate_path, new_group, key_input,
                 )?;
             } else {
-                self.push_condition_pendings_at(state, pending, routed_key, new_group, &gate_path)?;
+                self.push_condition_pendings_at(
+                    state, pending, routed_key, new_group, &gate_path, key_input,
+                )?;
             }
         }
 
@@ -461,6 +470,7 @@ impl FieldRoutingSearchSpace {
     /// key it can only partially resolve can never match an entity at
     /// runtime, so fail the commit and let backtracking look for an
     /// alternative instead of emitting a fetch that is dead on arrival.
+    #[allow(clippy::too_many_arguments)]
     fn commit_circular_key_conditions(
         &self,
         state: &mut PlanState,
@@ -469,6 +479,7 @@ impl FieldRoutingSearchSpace {
         source: &NodeSource,
         anchor_path: &SharedPath<Arc<OpPathElement>>,
         new_group: NodeIndex,
+        key_input: Option<Arc<InputContribution>>,
     ) -> Result<(), FederationError> {
         if !self.can_satisfy(key_conditions, &source.type_pos, &source.schema) {
             return Err(FederationError::internal(format!(
@@ -484,7 +495,21 @@ impl FieldRoutingSearchSpace {
             Some(key_conditions),
             source,
         );
-        self.push_condition_pendings_at(state, pending, key_conditions, new_group, anchor_path)?;
+        if let Some(key_input) = &key_input {
+            state.graph.add_input(
+                pending.fetch_node,
+                new_group,
+                key_input.with_conditions(key_conditions.clone()),
+            )?;
+        }
+        self.push_condition_pendings_at(
+            state,
+            pending,
+            key_conditions,
+            new_group,
+            anchor_path,
+            key_input,
+        )?;
         Ok(())
     }
 
@@ -531,7 +556,19 @@ impl FieldRoutingSearchSpace {
                 )
             };
 
+            let mut hop_key_input = None;
             if let Some(key_conds) = exit_key {
+                let dest_type: CompositeTypeDefinitionPosition =
+                    qg.node_weight(next_dest_node)?.type_.clone().try_into()?;
+                let key_input = InputContribution::Key {
+                    source_type_name: hop_type_pos.type_name().clone(),
+                    conditions: key_conds.clone(),
+                    rewrite_info: InputRewriteInfo {
+                        dest_type,
+                        dest_subgraph: next_subgraph.clone(),
+                    },
+                    needed_under: Default::default(),
+                };
                 let hop_source = self.node_source(hop.target_node)?;
                 let hop_path = self.entity_root_path(hop_type_pos.type_name())?;
                 let hop_anchor = pending
@@ -551,6 +588,7 @@ impl FieldRoutingSearchSpace {
                     in_place.as_ref(),
                     &hop_source,
                 );
+                hop_key_input = in_place.map(|in_place| key_input.with_conditions(in_place));
                 if let Some(routed) = &routed {
                     self.push_condition_pendings_at(
                         state,
@@ -558,26 +596,10 @@ impl FieldRoutingSearchSpace {
                         routed,
                         next_group,
                         &hop_path,
+                        Some(Arc::new(key_input)),
                     )?;
                 }
             }
-
-            let hop_key_input = match exit_key {
-                Some(key_conds) => {
-                    let dest_type: CompositeTypeDefinitionPosition =
-                        qg.node_weight(next_dest_node)?.type_.clone().try_into()?;
-                    Some(InputContribution::Key {
-                        source_type_name: hop_type_pos.type_name().clone(),
-                        conditions: key_conds.clone(),
-                        rewrite_info: InputRewriteInfo {
-                            dest_type,
-                            dest_subgraph: next_subgraph.clone(),
-                        },
-                        needed_under: Default::default(),
-                    })
-                }
-                None => None,
-            };
 
             let hop_edge = self.wire_key_edge(state, prev_group, next_group, hop_key_input);
             last = Some((next_group, hop_edge));
@@ -1447,6 +1469,7 @@ impl FieldRoutingSearchSpace {
         conditions_arc: &Arc<SelectionSet>,
         dependent: NodeIndex,
         input_path: &SharedPath<Arc<OpPathElement>>,
+        input: Option<Arc<InputContribution>>,
     ) -> Result<(), FederationError> {
         let conditions: &SelectionSet = conditions_arc;
         // Bound requires-of-requires nesting: mutually recursive @requires
@@ -1478,7 +1501,9 @@ impl FieldRoutingSearchSpace {
         // deferred section.
         let anchor_defer = state.graph.node(anchor.fetch_node).defer_ref.clone();
         for sel in conditions.selections.values().rev().cloned() {
-            let mut forked = anchor.fork(sel).into_condition_for(dependent);
+            let mut forked = anchor
+                .fork(sel)
+                .into_condition_for(dependent, input.clone());
             forked.op_path = input_path.clone();
             forked.defer_ref = anchor_defer.clone();
             state.push_pending(forked);
@@ -1536,7 +1561,13 @@ impl FieldRoutingSearchSpace {
             state
                 .graph
                 .append_selection(fetch_node, &target.op_path, None);
-            return Ok(());
+            return self.add_condition_input(
+                state,
+                pending,
+                fetch_node,
+                &target.response_path,
+                None,
+            );
         };
 
         // Bulk-insert: when the entire subtree is local to one subgraph
@@ -1550,7 +1581,13 @@ impl FieldRoutingSearchSpace {
                 &target.op_path,
                 Some(&Arc::new(sub_ss.clone())),
             );
-            return Ok(());
+            return self.add_condition_input(
+                state,
+                pending,
+                fetch_node,
+                &target.response_path,
+                Some(sub_ss),
+            );
         }
 
         let child_provides_anchor =

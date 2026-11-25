@@ -7,6 +7,7 @@ use std::sync::Arc;
 
 use apollo_compiler::Name;
 use petgraph::graph::EdgeIndex;
+use petgraph::graph::NodeIndex;
 
 use super::super::fetch_graph::InputContribution;
 use super::super::shared_path::SharedPath;
@@ -89,22 +90,17 @@ pub(super) fn alias_condition_fields(
 }
 
 /// Widen each aliased condition field whose original name is also a field
-/// of a key input on `edge` with that key field's sub-selection. The alias is
+/// of one of `keys` with that key field's sub-selection. The alias is
 /// renamed back by removing and reinserting the key, so without it the rename
 /// would drop the key's nested fields from the representation.
-fn widen_aliases_with_key_inputs(
+fn widen_aliases_with_keys<'a>(
     conditions: &Arc<SelectionSet>,
     alias_rewrites: &[(Name, Name)],
-    graph: &super::super::fetch_graph::FetchGraph,
-    edge: EdgeIndex,
-    source_type: &Name,
+    keys: impl IntoIterator<Item = &'a SelectionSet>,
 ) -> Result<Arc<SelectionSet>, FederationError> {
     let mut widened: Option<SelectionSet> = None;
-    for input in &graph.edge_weight_raw(edge).inputs {
-        if input.rewrite_info().is_none() || input.source_type_name() != source_type {
-            continue;
-        }
-        for key_sel in input.conditions().selections.values() {
+    for key in keys {
+        for key_sel in key.selections.values() {
             let Selection::Field(key_field) = key_sel else {
                 continue;
             };
@@ -138,6 +134,29 @@ fn widen_aliases_with_key_inputs(
         }
     }
     Ok(widened.map(Arc::new).unwrap_or_else(|| conditions.clone()))
+}
+
+/// The keys a @requires hop enters its entity with: the hop's own key, whose
+/// routed fields may not have reached the edge yet, and the key inputs already
+/// on the edge from the same source type. A chained hop's own key is its exit
+/// key, which its last edge may carry only part of.
+fn entering_keys<'a>(
+    graph: &'a super::super::fetch_graph::FetchGraph,
+    choice: &'a super::routing::RoutingChoice,
+    edge: Option<EdgeIndex>,
+    source_type: &'a Name,
+) -> Vec<&'a SelectionSet> {
+    let Some(edge) = edge else {
+        return Vec::new();
+    };
+    let own_key = choice.key().ok().map(|key| key.key_conditions.as_ref());
+    let edge_keys = graph
+        .edge_weight_raw(edge)
+        .inputs
+        .iter()
+        .filter(|input| input.rewrite_info().is_some() && input.source_type_name() == source_type)
+        .map(|input| input.conditions().as_ref());
+    own_key.into_iter().chain(edge_keys).collect()
 }
 
 /// The @skip/@include directives of `directives`.
@@ -282,25 +301,32 @@ impl FieldRoutingSearchSpace {
             let (conditions, alias_rewrites) =
                 self.stage_condition_aliases(state, pending, requires_conditions)?;
             let conditions = match key_hop_edge {
-                Some(edge) => widen_aliases_with_key_inputs(
+                Some(_) => widen_aliases_with_keys(
                     &conditions,
                     &alias_rewrites,
-                    &state.graph,
-                    edge,
-                    source.type_pos.type_name(),
+                    entering_keys(
+                        &state.graph,
+                        choice,
+                        key_hop_edge,
+                        source.type_pos.type_name(),
+                    ),
                 )?,
                 None => conditions,
             };
-            let input_conflict = key_hop_edge.is_some_and(|e| {
-                Self::has_conflicting_requires_inputs(&state.graph, e, &conditions, &alias_rewrites)
-            });
+            let input_conflict = key_hop_edge.is_some()
+                && Self::has_conflicting_requires_inputs(
+                    &state.graph,
+                    target.fetch_node,
+                    &conditions,
+                    &alias_rewrites,
+                );
             let (gate_path, needed_under) = input_gate(pending)?;
-            let input = InputContribution::Requires {
+            let input = Arc::new(InputContribution::Requires {
                 source_type_name: source.type_pos.type_name().clone(),
                 conditions: conditions.clone(),
                 condition_alias_rewrites: alias_rewrites,
                 needed_under,
-            };
+            });
             let dest = if input_conflict {
                 // The original target.fetch_node is abandoned: it retains its
                 // key-hop edge and inputs but receives no query selections, so
@@ -311,16 +337,18 @@ impl FieldRoutingSearchSpace {
                     merge_at,
                     pending.defer_ref.clone(),
                 );
-                let mut inputs = state.graph.clone_key_inputs(key_hop_edge.unwrap());
-                inputs.push(input);
-                state
+                // The key enters from the hop's last edge, whose parent is
+                // the last intermediate fetch of a chained hop.
+                let key_hop_edge = key_hop_edge.unwrap();
+                let key_parent = state
                     .graph
-                    .add_dependency(pending.fetch_node, split_group, inputs);
+                    .edge_source(key_hop_edge)
+                    .ok_or_else(|| FederationError::internal("key hop edge without a source"))?;
+                let inputs = state.graph.clone_key_inputs(key_hop_edge);
+                state.graph.add_dependency(key_parent, split_group, inputs);
+                Self::route_key_to_split_group(state, target.fetch_node, split_group);
                 split_group
             } else {
-                if let Some(edge_idx) = key_hop_edge {
-                    state.graph.add_input_to_edge(edge_idx, input);
-                }
                 target.fetch_node
             };
 
@@ -336,12 +364,21 @@ impl FieldRoutingSearchSpace {
                 state
                     .graph
                     .append_selection(pending.fetch_node, &gate_path, Some(in_place));
-                state
-                    .graph
-                    .add_ordering_dependency(pending.fetch_node, dest)?;
+                state.graph.add_input(
+                    pending.fetch_node,
+                    dest,
+                    input.with_conditions(in_place.clone()),
+                )?;
             }
             if let Some(routed) = &routed {
-                self.push_condition_pendings_at(state, pending, routed, dest, &gate_path)?;
+                self.push_condition_pendings_at(
+                    state,
+                    pending,
+                    routed,
+                    dest,
+                    &gate_path,
+                    Some(input),
+                )?;
             }
             return Ok(CommitTarget {
                 fetch_node: dest,
@@ -365,20 +402,54 @@ impl FieldRoutingSearchSpace {
         Ok(target)
     }
 
-    /// Whether adding these inputs to `edge` would put two different fields
+    /// Route the key fields the hop's last fetch doesn't select to
+    /// `split_group` as well. The hop pushed them as condition pendings for
+    /// the group it entered, which the split group replaces for this field;
+    /// without them the split group's representation has no key.
+    fn route_key_to_split_group(
+        state: &mut PlanState,
+        entered_group: NodeIndex,
+        split_group: NodeIndex,
+    ) {
+        let key_pendings: Vec<PendingSelection> = state
+            .pending
+            .iter()
+            .filter(|pending| {
+                pending.condition.as_ref().is_some_and(|condition| {
+                    condition.dependent == entered_group
+                        && condition
+                            .input
+                            .as_ref()
+                            .is_some_and(|input| input.rewrite_info().is_some())
+                })
+            })
+            .map(|pending| {
+                let mut copy = PendingSelection::clone(pending);
+                if let Some(condition) = &mut copy.condition {
+                    condition.dependent = split_group;
+                }
+                copy
+            })
+            .collect();
+        for pending in key_pendings {
+            state.push_pending(pending);
+        }
+    }
+
+    /// Whether adding these inputs to `node` would put two different fields
     /// under one key of the entity representation. An alias is renamed back
     /// by removing and reinserting the key, so it replaces whatever another
     /// input put there.
     fn has_conflicting_requires_inputs(
         graph: &super::super::fetch_graph::FetchGraph,
-        edge: EdgeIndex,
+        node: NodeIndex,
         new_conditions: &Arc<SelectionSet>,
         new_rewrites: &[(Name, Name)],
     ) -> bool {
-        if graph.has_conflicting_condition_rewrites(edge, new_rewrites) {
+        if graph.has_conflicting_condition_rewrites(node, new_rewrites) {
             return true;
         }
-        graph.edge_weight_raw(edge).inputs.iter().any(|input| {
+        graph.incoming_inputs(node).any(|input| {
             let rewrites = input.condition_alias_rewrites();
             if !rewrites.is_empty() {
                 return Self::aliased_input_collides_with_plain(rewrites, new_conditions);

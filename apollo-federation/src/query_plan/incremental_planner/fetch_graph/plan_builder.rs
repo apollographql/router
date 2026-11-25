@@ -969,7 +969,12 @@ impl FetchGraph {
             IndexMap::default();
         let mut rewrites: Vec<Arc<FetchDataRewrite>> = Vec::new();
 
-        for edge in self.graph.edges_directed(node_idx, Direction::Incoming) {
+        let mut edges: Vec<_> = self
+            .graph
+            .edges_directed(node_idx, Direction::Incoming)
+            .collect();
+        edges.reverse();
+        for edge in edges {
             for input in &edge.weight().inputs {
                 let input_type: CompositeTypeDefinitionPosition = ctx
                     .supergraph_schema
@@ -1038,7 +1043,14 @@ impl FetchGraph {
             type_position: parent_type.clone(),
             selections: Arc::new(merged_selections),
         };
-        Ok((result, rewrites))
+        // An input split between parents carries its rewrites on each part.
+        let mut unique_rewrites: Vec<Arc<FetchDataRewrite>> = Vec::with_capacity(rewrites.len());
+        for rewrite in rewrites {
+            if !unique_rewrites.contains(&rewrite) {
+                unique_rewrites.push(rewrite);
+            }
+        }
+        Ok((result, unique_rewrites))
     }
 
     /// Filter the operation's variable definitions to those actually
