@@ -668,6 +668,20 @@ fn validate_subgraph_schema(
     Ok(schema)
 }
 
+/// Validates a schema from which `@internal` elements were removed. The diagnostics keep their
+/// source locations, which `validate_subgraph_schema` reduces to message text. A failure here
+/// means source-schema validation accepted a schema whose removal is invalid, so the location
+/// points the author at the declaration involved.
+fn validate_without_internal_elements(
+    subgraph_name: &str,
+    schema: Schema,
+) -> Result<Schema, SubgraphError> {
+    schema
+        .validate()
+        .map(|valid| valid.into_inner())
+        .map_err(|invalid| SubgraphError::from_diagnostic_list(subgraph_name, invalid.errors))
+}
+
 /// Shared by Subgraph<Expanded> and Subgraph<Upgraded>
 fn normalize_root_types_in_subgraph_schema(
     schema: &mut FederationSchema,
@@ -823,6 +837,7 @@ impl Subgraph<Validated> {
         ) {
             return Ok(self);
         }
+        let schema = validate_without_internal_elements(&self.name, schema)?;
         let to_error = |err| SubgraphError::new_without_locations(self.name.clone(), err);
         let schema = FederationSchema::new(schema).map_err(to_error)?;
         let schema = validate_subgraph_schema(schema).map_err(to_error)?;
@@ -1374,6 +1389,25 @@ mod tests {
     use super::*;
     use crate::subgraph::test_utils::build_and_validate;
     use crate::subgraph::test_utils::build_for_errors;
+
+    #[test]
+    fn invalid_schema_after_removing_internal_elements_reports_locations() {
+        let schema = Schema::parse(
+            r#"
+                interface Lookups { productBySku: Int }
+                type Query implements Lookups { productById: Int }
+            "#,
+            "a",
+        )
+        .expect("builds");
+        let error = validate_without_internal_elements("a", schema)
+            .expect_err("`Query` does not implement `Lookups`");
+        assert_eq!(error.subgraph, "a");
+        assert!(
+            error.errors.iter().all(|e| !e.locations.is_empty()),
+            "{error:?}"
+        );
+    }
 
     #[test]
     fn detects_federation_1_subgraphs_correctly() {

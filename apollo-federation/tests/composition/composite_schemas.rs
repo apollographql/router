@@ -1004,6 +1004,45 @@ mod internal_validation {
     }
 
     #[test]
+    fn internal_lookup_implementing_public_interface_field() {
+        assert_error_codes(
+            &[(
+                "a",
+                r#"
+                interface Lookups { productBySku(sku: ID!): Product }
+                type Query implements Lookups {
+                  productById(id: ID!): Product @lookup
+                  productBySku(sku: ID!): Product @lookup @internal
+                }
+                type Product @key(fields: "id") { id: ID! sku: ID! }
+                "#,
+            )],
+            &["INTERFACE_FIELD_NO_IMPLEM"],
+        );
+    }
+
+    #[test]
+    fn internal_type_by_fields_implementing_public_interface_field() {
+        // `Lookups` has only internal fields, so it is not merged and its `implements` clause
+        // does not constrain the composite schema.
+        compose_sources(&[(
+            "a",
+            r#"
+            interface Finder { productBySku(sku: ID!): Product }
+            type Query {
+              productById(id: ID!): Product @lookup
+              lookups: Lookups! @internal
+            }
+            type Lookups implements Finder {
+              productBySku(sku: ID!): Product @lookup @internal
+            }
+            type Product @key(fields: "id") { id: ID! sku: ID! }
+            "#,
+        )])
+        .expect("composes");
+    }
+
+    #[test]
     fn internal_root_field_without_internal_lookup_type() {
         assert_error_codes(
             &[(
