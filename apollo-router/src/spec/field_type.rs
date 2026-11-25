@@ -1,4 +1,3 @@
-use apollo_compiler::Name;
 use apollo_compiler::schema;
 use serde::Deserialize;
 use serde::Serialize;
@@ -308,10 +307,6 @@ fn validate_input_value(
 }
 
 impl FieldType {
-    pub(crate) fn new_named(name: Name) -> Self {
-        Self(schema::Type::Named(name))
-    }
-
     // This function validates input values according to the graphql specification.
     // Each of the values are validated against the "input coercion" rules.
     pub(crate) fn validate_input_value(
