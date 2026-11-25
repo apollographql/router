@@ -14,21 +14,19 @@ use crate::error::MultipleFederationErrors;
 use crate::error::SingleFederationError;
 use crate::internal_error;
 use crate::link::authenticated_spec_definition::AUTHENTICATED_DIRECTIVE_NAME_IN_SPEC;
-use crate::link::authenticated_spec_definition::AUTHENTICATED_VERSIONS;
 use crate::link::context_spec_definition::CONTEXT_VERSIONS;
 use crate::link::federation_spec_definition::get_federation_spec_definition_from_subgraph;
 use crate::link::join_spec_definition::JoinSpecDefinition;
 use crate::link::policy_spec_definition::POLICY_DIRECTIVE_NAME_IN_SPEC;
 use crate::link::policy_spec_definition::POLICY_POLICIES_ARGUMENT_NAME;
-use crate::link::policy_spec_definition::POLICY_VERSIONS;
 use crate::link::requires_scopes_spec_definition::REQUIRES_SCOPES_DIRECTIVE_NAME_IN_SPEC;
 use crate::link::requires_scopes_spec_definition::REQUIRES_SCOPES_SCOPES_ARGUMENT_NAME;
-use crate::link::requires_scopes_spec_definition::REQUIRES_SCOPES_VERSIONS;
 use crate::link::spec::Identity;
 use crate::link::spec_definition::SpecDefinition;
 use crate::operation::FieldSelection;
 use crate::operation::Selection;
 use crate::operation::SelectionSet;
+use crate::schema::AccessControlDirectiveNames;
 use crate::schema::FederationSchema;
 use crate::schema::ValidFederationSchema;
 use crate::schema::argument_composition_strategies::dnf_conjunction;
@@ -198,43 +196,11 @@ impl<'validator> AccessControlValidator<'validator> {
             bail!("Missing links metadata in supergraph schema");
         };
 
-        // TODO could this be passed from merger?
-        let authenticated_directive_name = links_metadata
-            .for_identity(&Identity::authenticated_identity())
-            .and_then(|authenticated_spec| {
-                AUTHENTICATED_VERSIONS
-                    .find(&authenticated_spec.url.version)
-                    .and_then(|authenticated_definition| {
-                        authenticated_definition.directive_name_in_schema(
-                            supergraph_schema,
-                            &AUTHENTICATED_DIRECTIVE_NAME_IN_SPEC,
-                        )
-                    })
-            });
-        let requires_scopes_directive_name = links_metadata
-            .for_identity(&Identity::requires_scopes_identity())
-            .and_then(|requires_scopes_spec| {
-                REQUIRES_SCOPES_VERSIONS
-                    .find(&requires_scopes_spec.url.version)
-                    .and_then(|requires_scopes_definition| {
-                        requires_scopes_definition.directive_name_in_schema(
-                            supergraph_schema,
-                            &REQUIRES_SCOPES_DIRECTIVE_NAME_IN_SPEC,
-                        )
-                    })
-            });
-        let policy_directive_name = links_metadata
-            .for_identity(&Identity::policy_identity())
-            .and_then(|policy_spec| {
-                POLICY_VERSIONS
-                    .find(&policy_spec.url.version)
-                    .and_then(|policy_definition| {
-                        policy_definition.directive_name_in_schema(
-                            supergraph_schema,
-                            &POLICY_DIRECTIVE_NAME_IN_SPEC,
-                        )
-                    })
-            });
+        let AccessControlDirectiveNames {
+            authenticated: authenticated_directive_name,
+            requires_scopes: requires_scopes_directive_name,
+            policy: policy_directive_name,
+        } = supergraph_schema.access_control_directive_names();
 
         let mut contexts: IndexMap<String, IndexSet<Name>> = IndexMap::default();
         if let Some(context_spec_definition) = links_metadata

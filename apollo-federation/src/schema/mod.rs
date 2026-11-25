@@ -32,6 +32,8 @@ use crate::error::FederationError;
 use crate::error::SingleFederationError;
 use crate::internal_error;
 use crate::link::Link;
+use crate::link::authenticated_spec_definition::AUTHENTICATED_DIRECTIVE_NAME_IN_SPEC;
+use crate::link::authenticated_spec_definition::AUTHENTICATED_VERSIONS;
 use crate::link::context_spec_definition::ContextSpecDefinition;
 use crate::link::cost_spec_definition;
 use crate::link::cost_spec_definition::CostSpecDefinition;
@@ -51,9 +53,15 @@ use crate::link::federation_spec_definition::TagDirectiveArguments;
 use crate::link::federation_spec_definition::get_federation_spec_definition_from_subgraph;
 use crate::link::link_spec_definition::LINK_DIRECTIVE_URL_ARGUMENT_NAME;
 use crate::link::metadata::LinksMetadata;
+use crate::link::policy_spec_definition::POLICY_DIRECTIVE_NAME_IN_SPEC;
+use crate::link::policy_spec_definition::POLICY_VERSIONS;
+use crate::link::requires_scopes_spec_definition::REQUIRES_SCOPES_DIRECTIVE_NAME_IN_SPEC;
+use crate::link::requires_scopes_spec_definition::REQUIRES_SCOPES_VERSIONS;
+use crate::link::spec::Identity;
 use crate::link::spec::Url;
 use crate::link::spec::Version;
 use crate::link::spec_definition::SpecDefinition;
+use crate::link::spec_definition::SpecDefinitions;
 use crate::link::spec_registry::SPEC_REGISTRY;
 use crate::schema::blueprint::FederationBlueprint;
 use crate::schema::position::CompositeTypeDefinitionPosition;
@@ -117,6 +125,14 @@ pub(crate) static GRAPHQL_BUILT_IN_DIRECTIVES: [&str; 7] = [
     "stream",
     "oneOf",
 ];
+
+/// The names a schema uses for the access-control directives, after any `@link` renames.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub(crate) struct AccessControlDirectiveNames {
+    pub(crate) authenticated: Option<Name>,
+    pub(crate) requires_scopes: Option<Name>,
+    pub(crate) policy: Option<Name>,
+}
 
 /// A GraphQL schema with federation data.
 #[derive(Clone, Debug)]
@@ -1208,6 +1224,47 @@ impl FederationSchema {
         }
 
         Ok(features)
+    }
+
+    /// Returns the names under which this schema imports `@authenticated`, `@requiresScopes`
+    /// and `@policy`. Each is `None` when the schema doesn't link that spec at a known version.
+    pub(crate) fn access_control_directive_names(&self) -> AccessControlDirectiveNames {
+        let Some(links) = self.metadata() else {
+            return AccessControlDirectiveNames::default();
+        };
+        AccessControlDirectiveNames {
+            authenticated: self.linked_directive_name(
+                links,
+                &Identity::authenticated_identity(),
+                &AUTHENTICATED_VERSIONS,
+                &AUTHENTICATED_DIRECTIVE_NAME_IN_SPEC,
+            ),
+            requires_scopes: self.linked_directive_name(
+                links,
+                &Identity::requires_scopes_identity(),
+                &REQUIRES_SCOPES_VERSIONS,
+                &REQUIRES_SCOPES_DIRECTIVE_NAME_IN_SPEC,
+            ),
+            policy: self.linked_directive_name(
+                links,
+                &Identity::policy_identity(),
+                &POLICY_VERSIONS,
+                &POLICY_DIRECTIVE_NAME_IN_SPEC,
+            ),
+        }
+    }
+
+    fn linked_directive_name<T: SpecDefinition>(
+        &self,
+        links: &LinksMetadata,
+        identity: &Identity,
+        versions: &SpecDefinitions<T>,
+        name_in_spec: &Name,
+    ) -> Option<Name> {
+        links
+            .for_identity(identity)
+            .and_then(|link| versions.find(&link.url.version))
+            .and_then(|spec| spec.directive_name_in_schema(self, name_in_spec))
     }
 
     pub(crate) fn node_locations<T>(
