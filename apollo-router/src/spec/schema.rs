@@ -101,7 +101,7 @@ impl Schema {
                             sdl: raw_sdl,
                             launch_id: preserved_launch_id,
                         }),
-                        Some(ValidFederationSchema::new(*api).map_err(SchemaError::Connector)?),
+                        Some(api),
                         Some(apply_config(config, connectors)),
                     ),
                     ExpansionResult::Unchanged => (raw_sdl, None, None),

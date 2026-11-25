@@ -2,9 +2,7 @@ use std::collections::HashSet;
 use std::sync::Arc;
 
 use apollo_compiler::Name;
-use apollo_compiler::Schema;
 use apollo_compiler::collections::HashMap;
-use apollo_compiler::validation::Valid;
 use carryover::carryover_directives;
 use indexmap::IndexMap;
 use itertools::Itertools;
@@ -18,6 +16,7 @@ use crate::connectors::Connector;
 use crate::error::FederationError;
 use crate::merge::merge_subgraphs;
 use crate::schema::FederationSchema;
+use crate::schema::ValidFederationSchema;
 use crate::subgraph::Subgraph;
 use crate::subgraph::ValidSubgraph;
 
@@ -38,7 +37,7 @@ pub enum ExpansionResult {
     /// The supergraph had some subgraphs that were expanded
     Expanded {
         raw_sdl: String,
-        api_schema: Box<Valid<Schema>>,
+        api_schema: ValidFederationSchema,
         connectors: Connectors,
     },
 
@@ -208,7 +207,7 @@ pub fn expand_connectors_with_options(
 
     Ok(ExpansionResult::Expanded {
         raw_sdl: new_supergraph.schema().serialize().to_string(),
-        api_schema: Box::new(api_schema.schema().clone()),
+        api_schema,
         connectors: Connectors {
             by_service_name: Arc::new(connectors_by_service_name),
             labels_by_service_name: Arc::new(labels_by_service_name),

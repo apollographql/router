@@ -24,7 +24,7 @@ fn it_expand_supergraph() {
                 panic!("expected expansion to actually expand subgraphs for {path:?}");
             };
 
-            assert_snapshot!("api", api_schema);
+            assert_snapshot!("api", api_schema.schema());
             assert_debug_snapshot!("connectors", connectors.by_service_name);
             assert_snapshot!("supergraph", raw_sdl);
         });
