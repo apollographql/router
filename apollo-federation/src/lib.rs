@@ -226,7 +226,8 @@ pub(crate) fn validate_supergraph(
     ))
 }
 
-#[derive(Debug)]
+/// A validated supergraph. Cloning it is cheap: the schema is shared, not copied.
+#[derive(Clone, Debug)]
 pub struct Supergraph {
     pub schema: ValidFederationSchema,
 }
