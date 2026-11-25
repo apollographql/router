@@ -15,14 +15,9 @@ use apollo_federation::compat::coerce_and_validate_schema_values;
 use apollo_federation::connectors::expand::Connectors;
 use apollo_federation::connectors::expand::ExpansionResult;
 use apollo_federation::connectors::expand::build_connectors_without_expansion;
-use apollo_federation::link::metadata::LinksMetadata;
-use apollo_federation::link::spec::Identity;
 use apollo_federation::router_supported_supergraph_specs;
-use apollo_federation::schema::AccessControlDirectiveNames;
 use apollo_federation::schema::ValidFederationSchema;
 use http::Uri;
-use semver::Version;
-use semver::VersionReq;
 use serde::Deserialize;
 use serde::Serialize;
 use sha2::Digest;
@@ -43,7 +38,6 @@ pub(crate) struct Schema {
     supergraph: Supergraph,
     subgraphs: HashMap<String, Uri>,
     pub(crate) implementers_map: apollo_compiler::collections::HashMap<Name, Implementers>,
-    pub(crate) authorization_directives: AccessControlDirectiveNames,
     api_schema: ApiSchema,
     pub(crate) schema_id: SchemaHash,
     pub(crate) connectors: Option<Connectors>,
@@ -206,8 +200,6 @@ impl Schema {
         );
 
         let implementers_map = definitions.implementers_map();
-        let authorization_directives =
-            crate::plugins::authorization::directive_names_from_schema(&definitions);
         let supergraph =
             Supergraph::from_schema(definitions, Some(&router_supported_supergraph_specs()))?;
 
@@ -231,7 +223,6 @@ impl Schema {
             supergraph,
             subgraphs,
             implementers_map,
-            authorization_directives,
             api_schema: ApiSchema(api_schema),
             schema_id,
             connectors,
@@ -354,34 +345,6 @@ impl Schema {
         }
         None
     }
-
-    /// This function assumes `@link` usage is valid in the schema, and will return `None` if not.
-    pub(crate) fn directive_name(
-        schema: &apollo_compiler::schema::Schema,
-        spec_identity: &Identity,
-        expected_version_range: &str,
-        default: &Name,
-    ) -> Option<String> {
-        let metadata = LinksMetadata::from_schema(schema).ok()??;
-        Self::directive_name_in_links(&metadata, spec_identity, expected_version_range, default)
-            .map(|name| name.to_string())
-    }
-
-    /// Like [`Self::directive_name`], over `@link` metadata the caller has already parsed.
-    pub(crate) fn directive_name_in_links(
-        metadata: &LinksMetadata,
-        spec_identity: &Identity,
-        expected_version_range: &str,
-        default: &Name,
-    ) -> Option<Name> {
-        let link = metadata.for_identity(spec_identity)?;
-        let semver_version = Version::parse(format!("{}.0", link.url.version).as_str()).ok()?;
-        let version_range = VersionReq::parse(expected_version_range).ok()?;
-        if !version_range.matches(&semver_version) {
-            return None;
-        }
-        Some(link.directive_name_in_schema(default))
-    }
 }
 
 impl std::fmt::Debug for Schema {
@@ -391,7 +354,6 @@ impl std::fmt::Debug for Schema {
             supergraph: _, // skip
             subgraphs,
             implementers_map,
-            authorization_directives: _,
             api_schema: _, // skip
             schema_id: _,
             connectors: _,

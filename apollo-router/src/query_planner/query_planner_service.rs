@@ -14,6 +14,7 @@ use apollo_federation::error::SingleFederationError;
 use apollo_federation::query_plan::query_planner::QueryPlanOptions;
 use apollo_federation::query_plan::query_planner::QueryPlanner;
 use apollo_federation::query_plan::query_planner::QueryPlannerDebugConfig;
+use apollo_federation::schema::AccessControlDirectiveNames;
 use futures::future::BoxFuture;
 use opentelemetry::KeyValue;
 use opentelemetry::metrics::MeterProvider as _;
@@ -139,6 +140,7 @@ pub(crate) struct QueryPlannerService {
     subgraph_schemas: Arc<HashedSubgraphSchemas>,
     configuration: Arc<Configuration>,
     enable_authorization_directives: bool,
+    authorization_directives: AccessControlDirectiveNames,
     authorization_config: Arc<authorization::Conf>,
     _federation_instrument: ObservableGauge<u64>,
     signature_normalization_algorithm: ApolloSignatureNormalizationAlgorithm,
@@ -282,6 +284,10 @@ impl QueryPlannerService {
     ) -> Self {
         let enable_authorization_directives =
             AuthorizationPlugin::enable_directives(&configuration, &schema);
+        let authorization_directives = schema
+            .federation_supergraph()
+            .schema
+            .access_control_directive_names();
         let federation_instrument = federation_version_instrument(schema.federation_version());
         let signature_normalization_algorithm =
             TelemetryConfig::signature_normalization_algorithm(&configuration);
@@ -292,6 +298,7 @@ impl QueryPlannerService {
             schema,
             subgraph_schemas,
             enable_authorization_directives,
+            authorization_directives,
             authorization_config: Arc::new(AuthorizationPlugin::configuration(&configuration)),
             configuration,
             _federation_instrument: federation_instrument,
@@ -356,7 +363,7 @@ impl QueryPlannerService {
                     root_node.init_parsed_operations_and_hash_subqueries(&self.subgraph_schemas)?;
                     root_node.extract_authorization_metadata(
                         self.schema.supergraph_schema(),
-                        &self.schema.authorization_directives,
+                        &self.authorization_directives,
                         &key,
                     );
                     Ok(())
@@ -548,7 +555,7 @@ impl QueryPlannerService {
                 &self.authorization_config,
                 &key,
                 &self.schema,
-                &self.schema.authorization_directives,
+                &self.authorization_directives,
             )?
         } else {
             FilterResult::Unchanged

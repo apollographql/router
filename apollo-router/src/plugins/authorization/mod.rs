@@ -5,8 +5,6 @@ use std::ops::ControlFlow;
 
 use apollo_compiler::ExecutableDocument;
 use apollo_compiler::ast;
-use apollo_federation::link::metadata::LinksMetadata;
-use apollo_federation::link::spec::Identity;
 use apollo_federation::schema::AccessControlDirectiveNames;
 use apollo_federation::schema::ValidFederationSchema;
 use http::StatusCode;
@@ -18,18 +16,12 @@ use tower::ServiceBuilder;
 use tower::ServiceExt;
 use tower::util::option_layer;
 
-use self::authenticated::AUTHENTICATED_DIRECTIVE_NAME;
-use self::authenticated::AUTHENTICATED_SPEC_VERSION_RANGE;
 use self::authenticated::AuthenticatedCheckVisitor;
 use self::authenticated::AuthenticatedVisitor;
 use self::authorization_requirements::AuthorizationRequirementsLayer;
 use self::extract_authorization_checks_layer::ExtractAuthorizationChecksLayer;
-use self::policy::POLICY_DIRECTIVE_NAME;
-use self::policy::POLICY_SPEC_VERSION_RANGE;
 use self::policy::PolicyExtractionVisitor;
 use self::policy::PolicyFilteringVisitor;
-use self::scopes::REQUIRES_SCOPES_DIRECTIVE_NAME;
-use self::scopes::REQUIRES_SCOPES_SPEC_VERSION_RANGE;
 use self::scopes::ScopeExtractionVisitor;
 use self::scopes::ScopeFilteringVisitor;
 use crate::Configuration;
@@ -68,38 +60,6 @@ pub(crate) struct CacheKeyMetadata {
     pub(crate) is_authenticated: bool,
     pub(crate) scopes: Vec<String>,
     pub(crate) policies: Vec<String>,
-}
-
-/// Resolves authorization directive names by parsing the schema's `@link` metadata.
-///
-/// Names are as the schema imports them, after any renames. A name is `None` when the schema
-/// does not link that directive at a supported version; the directive is then not enforced.
-pub(crate) fn directive_names_from_schema(
-    schema: &apollo_compiler::Schema,
-) -> AccessControlDirectiveNames {
-    let Ok(Some(links)) = LinksMetadata::from_schema(schema) else {
-        return AccessControlDirectiveNames::default();
-    };
-    AccessControlDirectiveNames {
-        authenticated: Schema::directive_name_in_links(
-            &links,
-            &Identity::authenticated_identity(),
-            AUTHENTICATED_SPEC_VERSION_RANGE,
-            &AUTHENTICATED_DIRECTIVE_NAME,
-        ),
-        requires_scopes: Schema::directive_name_in_links(
-            &links,
-            &Identity::requires_scopes_identity(),
-            REQUIRES_SCOPES_SPEC_VERSION_RANGE,
-            &REQUIRES_SCOPES_DIRECTIVE_NAME,
-        ),
-        policy: Schema::directive_name_in_links(
-            &links,
-            &Identity::policy_identity(),
-            POLICY_SPEC_VERSION_RANGE,
-            &POLICY_DIRECTIVE_NAME,
-        ),
-    }
 }
 
 /// Whether the supergraph links at least one of the authorization directives at a supported
@@ -253,7 +213,12 @@ pub(crate) struct AuthorizationPlugin {
 impl AuthorizationPlugin {
     pub(crate) fn enable_directives(configuration: &Configuration, schema: &Schema) -> bool {
         Self::configuration(configuration).directives.enabled
-            && any_linked(&schema.authorization_directives)
+            && any_linked(
+                &schema
+                    .federation_supergraph()
+                    .schema
+                    .access_control_directive_names(),
+            )
     }
 
     /// Returns a layer for the query parsing service that stores each parsed operation's
@@ -649,7 +614,7 @@ impl PluginPrivate for AuthorizationPlugin {
         }
         // The directives are enforced only when enabled and the supergraph links one of them.
         if config.directives.enabled
-            && any_linked(&directive_names_from_schema(supergraph.schema.schema()))
+            && any_linked(&supergraph.schema.access_control_directive_names())
         {
             settings.push(LicensedSetting {
                 feature: AllowedFeature::Authorization,
@@ -664,7 +629,7 @@ impl PluginPrivate for AuthorizationPlugin {
             require_authentication: init.config.require_authentication,
             reject_unauthorized: init.config.directives.reject_unauthorized,
             directives_enabled: init.config.directives.enabled,
-            directives: directive_names_from_schema(init.supergraph.schema.schema()),
+            directives: init.supergraph.schema.access_control_directive_names(),
             supergraph_schema: init.supergraph.schema,
         })
     }

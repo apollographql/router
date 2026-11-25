@@ -6,7 +6,6 @@ use apollo_compiler::Name;
 use apollo_compiler::Node;
 use apollo_compiler::ast;
 use apollo_compiler::executable;
-use apollo_compiler::name;
 use apollo_compiler::schema;
 use apollo_compiler::schema::Implementers;
 use tower::BoxError;
@@ -17,9 +16,6 @@ use crate::spec::TYPENAME;
 use crate::spec::query::transform;
 use crate::spec::query::transform::TransformState;
 use crate::spec::query::traverse;
-
-pub(crate) const AUTHENTICATED_DIRECTIVE_NAME: Name = name!("authenticated");
-pub(crate) const AUTHENTICATED_SPEC_VERSION_RANGE: &str = ">=0.1.0, <=0.1.0";
 
 pub(crate) struct AuthenticatedCheckVisitor<'a> {
     schema: &'a schema::Schema,
@@ -496,6 +492,7 @@ impl transform::Visitor for AuthenticatedVisitor<'_> {
 mod tests {
     use apollo_compiler::Schema;
     use apollo_compiler::ast;
+    use apollo_federation::schema::ValidFederationSchema;
     use multimap::MultiMap;
     use serde_json_bytes::json;
     use tower::ServiceExt;
@@ -509,7 +506,6 @@ mod tests {
     use crate::plugin::test::MockSubgraph;
     use crate::plugins::authentication::APOLLO_AUTHENTICATION_JWT_CLAIMS;
     use crate::plugins::authorization::authenticated::AuthenticatedVisitor;
-    use crate::plugins::authorization::directive_names_from_schema;
     use crate::services::router::ClientRequestAccepts;
     use crate::services::supergraph;
     use crate::spec::query::transform;
@@ -586,7 +582,9 @@ mod tests {
         let doc = ast::Document::parse(query, "query.graphql").unwrap();
 
         let map = schema.implementers_map();
-        let directives = directive_names_from_schema(&schema);
+        let directives = ValidFederationSchema::new(schema.clone())
+            .unwrap()
+            .access_control_directive_names();
         let mut visitor = AuthenticatedVisitor::new(
             &schema,
             &map,

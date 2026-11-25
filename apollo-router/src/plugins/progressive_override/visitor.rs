@@ -2,30 +2,24 @@
 use std::collections::HashSet;
 use std::sync::Arc;
 
+use apollo_compiler::Name;
 use apollo_compiler::ast;
 use apollo_compiler::executable;
 use apollo_compiler::schema;
-use apollo_federation::link::spec::Identity;
 use tower::BoxError;
 
-use super::JOIN_FIELD_DIRECTIVE_NAME;
-use super::JOIN_SPEC_VERSION_RANGE;
 use super::OVERRIDE_LABEL_ARG_NAME;
-use crate::spec::Schema;
 use crate::spec::query::traverse;
 
 impl<'a> OverrideLabelVisitor<'a> {
-    pub(crate) fn new(schema: &'a schema::Schema) -> Option<Self> {
-        Some(Self {
+    /// Collects the override labels on the fields an operation selects, from the
+    /// `@join__field` directives named `join_field_directive_name` in `schema`.
+    pub(crate) fn new(schema: &'a schema::Schema, join_field_directive_name: Name) -> Self {
+        Self {
             schema,
             override_labels: HashSet::new(),
-            join_field_directive_name: Schema::directive_name(
-                schema,
-                &Identity::join_identity(),
-                JOIN_SPEC_VERSION_RANGE,
-                &JOIN_FIELD_DIRECTIVE_NAME,
-            )?,
-        })
+            join_field_directive_name,
+        }
     }
 }
 
@@ -48,7 +42,7 @@ impl traverse::Visitor for OverrideLabelVisitor<'_> {
             .directives
             .iter()
             .filter_map(|d| {
-                if d.name.as_str() == self.join_field_directive_name {
+                if d.name == self.join_field_directive_name {
                     Some(d.arguments.iter().filter_map(|arg| {
                         if arg.name == OVERRIDE_LABEL_ARG_NAME {
                             arg.value.as_str().map(|s| Arc::new(s.to_string()))
@@ -70,7 +64,7 @@ impl traverse::Visitor for OverrideLabelVisitor<'_> {
 pub(crate) struct OverrideLabelVisitor<'a> {
     schema: &'a schema::Schema,
     pub(crate) override_labels: HashSet<Arc<String>>,
-    join_field_directive_name: String,
+    join_field_directive_name: Name,
 }
 
 #[cfg(test)]
@@ -79,6 +73,7 @@ mod tests {
 
     use apollo_compiler::ExecutableDocument;
     use apollo_compiler::Schema;
+    use apollo_compiler::name;
     use apollo_compiler::validation::Valid;
 
     use crate::plugins::progressive_override::visitor::OverrideLabelVisitor;
@@ -156,7 +151,7 @@ mod tests {
         )
         .expect("parse operation");
 
-        let mut visitor = OverrideLabelVisitor::new(&schema).expect("create visitor");
+        let mut visitor = OverrideLabelVisitor::new(&schema, name!("join__field"));
 
         traverse::document(&mut visitor, &operation, None).unwrap();
 
@@ -177,7 +172,7 @@ mod tests {
         )
         .expect("parse operation");
 
-        let mut visitor = OverrideLabelVisitor::new(&schema).expect("create visitor");
+        let mut visitor = OverrideLabelVisitor::new(&schema, name!("join__field"));
 
         traverse::document(&mut visitor, &operation, None).unwrap();
 

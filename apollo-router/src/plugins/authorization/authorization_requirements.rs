@@ -162,7 +162,10 @@ mod tests {
 
         let result = AuthorizationRequirementsLayer::new(
             schema.federation_supergraph().schema.clone(),
-            schema.authorization_directives.clone(),
+            schema
+                .federation_supergraph()
+                .schema
+                .access_control_directive_names(),
         )
         .layer(mock)
         .oneshot(Request::new(

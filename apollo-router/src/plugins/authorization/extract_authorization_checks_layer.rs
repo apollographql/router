@@ -155,7 +155,10 @@ mod tests {
             .set(operation_requirements(
                 &doc,
                 schema.supergraph_schema(),
-                &schema.authorization_directives,
+                &schema
+                    .federation_supergraph()
+                    .schema
+                    .access_control_directive_names(),
             ))
             .unwrap();
         doc
