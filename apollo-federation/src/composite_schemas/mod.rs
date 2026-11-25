@@ -7,6 +7,7 @@
 
 pub(crate) mod cross_schema;
 pub(crate) mod detection;
+pub(crate) mod internal;
 #[cfg(test)]
 mod tests;
 pub(crate) mod validation;
