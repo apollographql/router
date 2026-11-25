@@ -13,49 +13,36 @@ description: Manage browser access to your Apollo GraphOS Router or Apollo Route
 
 </Note>
 
-By default, the router enables _only_ GraphOS Studio to initiate browser connections to it. If your supergraph serves data to other browser-based applications, you need to do one of the following in the `cors` section of your router's [YAML config file](/router/configuration/overview/#yaml-config-file):
+By default, the router accepts browser requests only from GraphOS Studio (`https://studio.apollographql.com`), so you can run operations against it from Explorer. If other web apps call your router from a browser, configure the `cors` section of your router's [YAML config file](/router/configuration/overview/#yaml-config-file):
 
-* Add the origins of those web applications to the router's list of allowed `policies`.
-    * Use this option if there is a known, finite list of web applications that consume your supergraph.
-* Add a regex that matches the origins of those web applications to the router's list of allowed `policies`.
-    * This option comes in handy if you want to match origins against a pattern, see the example below that matches subdomains of a specific namespace.
-* Enable the `allow_any_origin` option.
-    * Use this option if your supergraph is a public API with arbitrarily many web app consumers.
-    * With this option enabled, the router sends the [wildcard (`*`)](https://developer.mozilla.org/en-US/docs/Web/HTTP/Headers/Access-Control-Allow-Origin#directives) value for the `Access-Control-Allow-Origin` header. This enables _any_ website to initiate browser connections to it (but they can't provide cookies or other credentials).
+| Who calls your router from a browser | What to set |
+|---|---|
+| A known list of web apps | List their origins in a policy's `origins`. |
+| Web apps whose origins follow a pattern, such as subdomains of one domain | Add a regex to a policy's `match_origins`. |
+| Any website, for a public API | Set `allow_any_origin: true`. The router sends `Access-Control-Allow-Origin: *`, and browsers don't send cookies or other credentials with these requests. |
+| No browsers | Nothing. The default suits clients that aren't browsers. |
 
-* If clients need to [authenticate their requests with cookies](#passing-credentials), you _must_ use either `origins`, `match_origins`, or the combination of both options. If you list several policies, the router uses the first one that matches. Within each policy, it checks `origins` before `match_origins`. See [How the router chooses a policy](#how-the-router-chooses-a-policy).
-
-The following snippet includes an example of each option (use either `allow_any_origin`, or `origins` and/or `match_origins`):
+Each entry in `policies` is a policy: the origins it matches, plus the CORS settings for those origins, such as `allow_credentials` and `methods`. A policy that lists `origins` replaces the default, so include `https://studio.apollographql.com` if you still use GraphOS Studio:
 
 ```yaml title="router.yaml"
 cors:
-
-  # Set to true to allow any origin
-  # (Defaults to false)
-  allow_any_origin: true
-
-  # List of accepted origins
-  # (Ignored if allow_any_origin is true)
-  # (Defaults to the GraphOS Studio url: `https://studio.apollographql.com`)
-  #
-  # An origin is a combination of scheme, hostname and port.
-  # It does not have any path section, so no trailing slash.
   policies:
     - origins:
+        # An origin is a scheme, hostname and port, with no path or trailing slash
         - https://www.your-app.example.com
         - https://studio.apollographql.com # Keep this so GraphOS Studio can run queries against your router
       match_origins:
-        - "^https://([a-z0-9]+[.])*api[.]example[.]com$" # any host that uses https and ends with .api.example.com
+        - "^https://([a-z0-9]+[.])*api[.]example[.]com$" # Any HTTPS host ending in .api.example.com
 ```
 
-You can also disable CORS entirely by setting `policies` to an empty list:
+If you list more than one policy, the order matters: see [How the router chooses a policy](#how-the-router-chooses-a-policy). To accept cookies or other credentials, see [Passing credentials](#passing-credentials).
+
+To block all cross-origin browser requests, set `policies` to an empty list:
 
 ```yml title="router.yaml"
 cors:
   policies: []
 ```
-
-If your router serves exclusively _non_-browser-based clients, you probably don't need to modify the default CORS configuration.
 
 ## How the router chooses a policy
 
