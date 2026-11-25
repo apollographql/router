@@ -197,7 +197,7 @@ fn recommended_header_is_provided(headers: &HeaderMap, required_headers: &[Strin
         .any(|header| headers.get(header).is_some())
 }
 
-register_plugin!("apollo", "csrf", Csrf);
+register_private_plugin!("apollo", "csrf", Csrf, mandatory);
 
 #[cfg(test)]
 mod csrf_tests {

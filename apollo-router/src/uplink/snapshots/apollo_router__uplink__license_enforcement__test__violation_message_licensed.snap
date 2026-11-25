@@ -6,6 +6,9 @@ The router can't run with this configuration and schema, because your license do
 
 Your configuration uses these licensed features. Remove the settings listed, or use a license that includes the features:
 
+  Authorization
+    authorization.directives.enabled
+
   Coprocessors
     coprocessor
 
@@ -15,10 +18,5 @@ Your configuration uses these licensed features. Remove the settings listed, or 
 
   Subscriptions
     subscription.enabled
-
-The supergraph schema uses these licensed directives. Remove them from your subgraph schemas and recompose, or use a license that includes them:
-
-  @authenticated  https://specs.apollo.dev/authenticated/v0.1
-  @requiresScopes  https://specs.apollo.dev/requiresScopes/v0.1
 
 See https://go.apollo.dev/o/elp for more information.

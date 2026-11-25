@@ -174,4 +174,9 @@ impl Plugin for DiagnosticsPlugin {
     }
 }
 
-register_plugin!("apollo", "experimental_diagnostics", DiagnosticsPlugin);
+register_private_plugin!(
+    "apollo",
+    "experimental_diagnostics",
+    DiagnosticsPlugin,
+    mandatory
+);

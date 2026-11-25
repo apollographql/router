@@ -13,9 +13,13 @@ use tower_test::mock::Mock;
 
 use crate::Configuration;
 use crate::pipeline::build_connector_request_services;
+use crate::pipeline::build_http_client_service;
 use crate::pipeline::build_subgraph_services;
+use crate::plugin::DynPlugin;
 use crate::plugin::PluginInit;
+use crate::plugin::PluginPrivate;
 use crate::plugin::PluginUnstable;
+use crate::plugins::authorization::AuthorizationPlugin;
 use crate::plugins::traffic_shaping::APOLLO_TRAFFIC_SHAPING;
 use crate::services::Plugins;
 use crate::services::SubgraphRequest;
@@ -48,7 +52,35 @@ async fn stage_plugins(plugins: &[(&str, serde_json::Value)]) -> Plugins {
 
 /// Every mandatory plugin the stack builders apply, with traffic shaping left at its defaults.
 pub(crate) async fn required_stage_plugins() -> Arc<Plugins> {
-    Arc::new(stage_plugins(&[(APOLLO_TRAFFIC_SHAPING, serde_json::json!({}))]).await)
+    Arc::new(
+        stage_plugins(&[
+            (APOLLO_TRAFFIC_SHAPING, serde_json::json!({})),
+            ("apollo.batching", serde_json::json!({})),
+        ])
+        .await,
+    )
+}
+
+/// The mandatory plugin the query parsing service applies: authorization at its defaults. It is
+/// built without a schema, so it links no directive and installs no layer.
+pub(crate) async fn query_parsing_plugins() -> Plugins {
+    query_parsing_plugins_for("", &Configuration::default()).await
+}
+
+/// The mandatory plugin the query parsing service applies: authorization, built for the
+/// supergraph `sdl` from `configuration`'s `authorization` section. An empty `sdl` builds it
+/// without a schema.
+pub(crate) async fn query_parsing_plugins_for(sdl: &str, configuration: &Configuration) -> Plugins {
+    let plugin = <AuthorizationPlugin as PluginPrivate>::new(PluginInit::fake_new(
+        AuthorizationPlugin::configuration(configuration),
+        Arc::new(sdl.to_string()),
+    ))
+    .await
+    .expect("plugin builds");
+    Plugins::from([(
+        "apollo.authorization".to_string(),
+        Box::new(plugin) as Box<dyn DynPlugin>,
+    )])
 }
 
 pub(crate) type Handle = tower_test::mock::Handle<SubgraphRequest, SubgraphResponse>;
@@ -87,12 +119,9 @@ pub(crate) async fn subgraph_services(
     let mut plugins = stage_plugins(plugins).await;
     plugins.insert("stub".to_string(), Box::new(StubSubgraph { mock }));
 
-    let http_services = [(
-        name.to_string(),
-        crate::services::http::test_http_client_service(name),
-    )]
-    .into_iter()
-    .collect();
+    let http_services = [(name.to_string(), test_http_client_service(name).await)]
+        .into_iter()
+        .collect();
     let services =
         build_subgraph_services(http_services, &Arc::new(plugins), &Configuration::default());
     (services, handle)
@@ -119,4 +148,18 @@ pub(crate) async fn source_services(
     let services = build_connector_request_services(http_services, &Arc::new(plugins));
     let source = source.to_string();
     (move || services.get(source.clone()), handle)
+}
+
+/// A subgraph HTTP client for `name`, built from default configuration by the pipeline's own
+/// [`build_http_client_service`] with every mandatory plugin in the registry.
+pub(crate) async fn test_http_client_service(name: &str) -> crate::services::http::BoxCloneService {
+    let inputs = crate::services::http::service::HttpClientInputs::for_subgraph(
+        name,
+        &Configuration::default(),
+        &rustls::RootCertStore::empty(),
+        crate::configuration::shared::Client::default(),
+        &mut crate::services::http::service::DnsResolverCache::default(),
+    )
+    .unwrap();
+    build_http_client_service(name, inputs, required_stage_plugins().await)
 }

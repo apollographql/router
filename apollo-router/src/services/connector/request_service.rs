@@ -27,10 +27,10 @@ use tower::BoxError;
 use tower::ServiceExt;
 
 use crate::Context;
-use crate::batching::BatchQuery;
 use crate::error::FetchError;
 use crate::graphql;
 use crate::layers::unconstrained_buffer::UnconstrainedBuffer;
+use crate::plugins::batching::BatchQuery;
 use crate::plugins::connectors::handle_responses::process_response;
 use crate::plugins::connectors::tracing::CONNECTOR_TYPE_HTTP;
 use crate::plugins::telemetry::config_new::attributes::HTTP_REQUEST_BODY;

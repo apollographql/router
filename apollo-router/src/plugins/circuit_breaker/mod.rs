@@ -76,10 +76,10 @@ use tower::BoxError;
 
 use self::service::CircuitLayer;
 use self::service::Target;
-use crate::batching::BatchQuery;
 use crate::graphql;
 use crate::plugin::PluginInit;
 use crate::plugin::PluginPrivate;
+use crate::plugins::batching::BatchQuery;
 use crate::services::SubgraphResponse;
 use crate::services::connector;
 use crate::services::connector::request_service::TransportOutcome;

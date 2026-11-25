@@ -6,8 +6,7 @@ use serde_json_bytes::json;
 use super::acquire::maybe_bootstrap_telemetry;
 use super::*;
 use crate::configuration::Configuration;
-use crate::plugins::traffic_shaping::APOLLO_TRAFFIC_SHAPING;
-use crate::services::Plugins;
+use crate::pipeline::tests::stage_stack::required_stage_plugins;
 use crate::services::SupergraphRequest;
 use crate::spec::Schema;
 
@@ -38,20 +37,6 @@ fn sorted_keys<V>(map: &IndexMap<String, V>) -> Vec<&str> {
     let mut keys: Vec<&str> = map.keys().map(String::as_str).collect();
     keys.sort_unstable();
     keys
-}
-
-/// A plugin map holding a real traffic-shaping plugin, which
-/// [`parse_http_client_inputs`] looks up by name for per-subgraph client config.
-async fn plugins_with_traffic_shaping() -> Plugins {
-    let traffic_shaping = crate::plugin::plugins()
-        .find(|factory| factory.name == APOLLO_TRAFFIC_SHAPING)
-        .expect("traffic shaping plugin is registered")
-        .create_instance_without_schema(&serde_json::json!({}))
-        .await
-        .expect("traffic shaping plugin builds from an empty config");
-    let mut plugins = Plugins::default();
-    plugins.insert(APOLLO_TRAFFIC_SHAPING.to_string(), traffic_shaping);
-    plugins
 }
 
 /// A request carrying a persisted-query hash and no query string. An enabled APQ
@@ -86,7 +71,7 @@ fn create_query_planner_extracts_a_schema_per_subgraph() {
 async fn parse_http_client_inputs_covers_every_subgraph() {
     let configuration = test_configuration();
     let schema = test_schema(&configuration);
-    let plugins = plugins_with_traffic_shaping().await;
+    let plugins = required_stage_plugins().await;
 
     let client_inputs = parse_http_client_inputs(&plugins, &schema, &configuration).unwrap();
 
@@ -98,11 +83,10 @@ async fn parse_http_client_inputs_covers_every_subgraph() {
 async fn build_http_services_builds_a_client_per_subgraph() {
     let configuration = test_configuration();
     let schema = test_schema(&configuration);
-    let plugins = plugins_with_traffic_shaping().await;
+    let plugins = required_stage_plugins().await;
     let client_inputs = parse_http_client_inputs(&plugins, &schema, &configuration).unwrap();
 
-    let (subgraph_services, connector_services) =
-        build_http_services(client_inputs, &Arc::new(plugins));
+    let (subgraph_services, connector_services) = build_http_services(client_inputs, &plugins);
 
     assert_eq!(sorted_keys(&subgraph_services), FIXTURE_SUBGRAPHS);
     assert!(connector_services.is_empty());

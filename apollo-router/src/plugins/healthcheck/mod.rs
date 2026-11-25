@@ -303,7 +303,7 @@ impl Drop for HealthCheck {
     }
 }
 
-register_private_plugin!("apollo", "health_check", HealthCheck);
+register_private_plugin!("apollo", "health_check", HealthCheck, mandatory);
 
 #[cfg(test)]
 mod test {

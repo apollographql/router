@@ -47,7 +47,7 @@ use crate::services::SubgraphRequest;
 use crate::services::connector;
 use crate::services::router;
 
-register_private_plugin!("apollo", "headers", Headers);
+register_private_plugin!("apollo", "headers", Headers, mandatory);
 
 /// Request-side header configuration: propagation operations + optional masking.
 #[apollo_configuration::configuration]

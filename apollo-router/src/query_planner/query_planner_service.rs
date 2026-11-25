@@ -354,7 +354,11 @@ impl QueryPlannerService {
                     // XXX(@goto-bus-stop): Maybe we can use the `QueryPlanner::subgraph_schemas`
                     // type here directly to avoid having this additional subgraph_schemas field
                     root_node.init_parsed_operations_and_hash_subqueries(&self.subgraph_schemas)?;
-                    root_node.extract_authorization_metadata(self.schema.supergraph_schema(), &key);
+                    root_node.extract_authorization_metadata(
+                        self.schema.supergraph_schema(),
+                        &self.schema.authorization_directives,
+                        &key,
+                    );
                     Ok(())
                 },
             )
@@ -540,7 +544,12 @@ impl QueryPlannerService {
 
         // TODO(@goto-bus-stop): this is not a query planning concern
         let filter_res = if self.enable_authorization_directives {
-            AuthorizationPlugin::filter_query(&self.authorization_config, &key, &self.schema)?
+            AuthorizationPlugin::filter_query(
+                &self.authorization_config,
+                &key,
+                &self.schema,
+                &self.schema.authorization_directives,
+            )?
         } else {
             FilterResult::Unchanged
         };
@@ -901,12 +910,9 @@ mod tests {
             }
         }}"#);
         // Aliases
-        // FIXME: uncomment myName alias when this is fixed:
-        // https://github.com/apollographql/router/issues/3263
         s!(r#"query Q { me {
             username
-            # myName:
-             name {
+            myName: name {
                 firstName: first
                 ... @defer(label: "A") { lastName: last }
             }
@@ -1018,6 +1024,19 @@ mod tests {
                 }
             }
         }}"#);
+        // The same labeled @defer which is used under sibling type conditions
+        s!(r#"
+            query Q { topProducts {
+                upc
+                ... on Book { ...Deferred }
+                ... on Furniture { ...Deferred }
+            }}
+            fragment Deferred on Product {
+                ... @defer(label: "A") {
+                    name
+                }
+            }
+        "#);
     }
 
     async fn subselections_keys(query: &str, planner: &QueryPlannerService) -> String {

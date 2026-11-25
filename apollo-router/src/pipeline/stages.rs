@@ -18,9 +18,6 @@ use tower::util::BoxService;
 use super::acquire::HttpClientInputsMaps;
 use crate::Configuration;
 use crate::apollo_studio_interop::extended_references_layer::ExtendedReferencesLayer;
-use crate::batching::BatchQueryPlanAnalysisLayer;
-use crate::batching::JoinBatchRequestsLayer;
-use crate::batching::SplitBatchRequestLayer;
 use crate::cache::DeduplicatingCache;
 use crate::cache::redis::RedisCacheStorage;
 use crate::introspection;
@@ -30,7 +27,7 @@ use crate::layers::InternalServiceBuilderExt as _;
 use crate::layers::ServiceBuilderExt as _;
 use crate::layers::unconstrained_buffer::UnconstrainedBuffer;
 use crate::plugins::authorization::AuthorizationPlugin;
-use crate::plugins::authorization::extract_authorization_checks_layer::ExtractAuthorizationChecksLayer;
+use crate::plugins::batching::BatchingPlugin;
 use crate::plugins::circuit_breaker::CircuitBreaker;
 use crate::plugins::connectors::request_limit::RequestLimitLayer;
 use crate::plugins::connectors::tracing::connect_spec_version_instrument;
@@ -157,7 +154,9 @@ pub(crate) fn build_http_client_service(
     plugins: Arc<Plugins>,
 ) -> http::BoxCloneService {
     ServiceBuilder::new()
-        .layer(JoinBatchRequestsLayer::new(name))
+        .apply_required_plugin_layer(&plugins, |b: &BatchingPlugin| {
+            b.join_batch_requests_layer(name)
+        })
         .layer(SubgraphResponseSizeLimitLayer::new(name))
         .apply_plugin_layer(&plugins, Telemetry::overhead_subgraph_request_timing_layer)
         .apply_plugin_layer(&plugins, Telemetry::instrument_http_client_layer)
@@ -483,10 +482,17 @@ fn subscription_plugin_config(plugins: &Plugins) -> Option<SubscriptionConfig> {
 
 /// Build a query parsing service with in-memory caching.
 ///
-/// The cache size is the same as the query plan cache size.
+/// The cache size is the same as the query plan cache size. When the authorization plugin has
+/// directives enabled and the schema links one of them, each parsed document also carries its
+/// operation's authorization requirements, worked out once on a cache miss.
+///
+/// # Panics
+///
+/// If `plugins` has no authorization plugin, which `create_plugins` always builds.
 pub(crate) fn build_query_parsing_service(
     schema: Arc<Schema>,
     configuration: Arc<Configuration>,
+    plugins: &Plugins,
 ) -> query_parsing::BoxCloneService {
     let cache_limit = configuration
         .supergraph
@@ -503,6 +509,10 @@ pub(crate) fn build_query_parsing_service(
 
     ServiceBuilder::new()
         .layer(QueryParsingCacheLayer::new(cache_config))
+        .apply_required_plugin_layer(
+            plugins,
+            AuthorizationPlugin::authorization_requirements_layer,
+        )
         .layer(LimitRecursiveSelectionLayer::new(
             max_recursive_selections,
             warn_only,
@@ -579,7 +589,7 @@ fn build_execution_service(
         .unwrap_or_default();
 
     ServiceBuilder::new()
-        .layer(BatchQueryPlanAnalysisLayer::new())
+        .apply_required_plugin_layer(&plugins, BatchingPlugin::query_plan_analysis_layer)
         .layer(SubscriptionExecutionLayer::new(
             configuration.notify.clone(),
         ))
@@ -649,8 +659,6 @@ pub(crate) fn build_router_service(
     configuration: &Configuration,
     plugins: Arc<Plugins>,
 ) -> router::BoxCloneService {
-    let enable_authorization_directives =
-        AuthorizationPlugin::enable_directives(configuration, &schema);
     let extended_references = matches!(
         TelemetryConfig::metrics_reference_mode(configuration),
         ApolloMetricsReferenceMode::Extended
@@ -664,10 +672,12 @@ pub(crate) fn build_router_service(
         // Enforce the header list limit before the plugins, so no downstream layer sees anything
         // over the limit.
         .apply_required_plugin_layer(&plugins, LimitsPlugin::router_header_list_limit_layer)
-        .rust_plugins(plugins, |plugin, service| plugin.router_service(service))
+        .rust_plugins(plugins.clone(), |plugin, service| {
+            plugin.router_service(service)
+        })
         .layer(content_negotiation::RouterContentNegotiationLayer::default())
         .layer(DisplayRouterRequestLayer)
-        .layer(SplitBatchRequestLayer::new(configuration.batching.clone()))
+        .apply_required_plugin_layer(&plugins, BatchingPlugin::split_batch_request_layer)
         .layer(RouterToSupergraphRequestLayer)
         .layer(ExpandIdsLayer::new(persisted_queries.clone()))
         .layer(APQCachingLayer::new(Arc::new(apq_expander)))
@@ -675,9 +685,9 @@ pub(crate) fn build_router_service(
             query_parsing_service,
             configuration.supergraph.redact_query_validation_errors,
         ))
-        .option_layer(
-            enable_authorization_directives
-                .then(|| ExtractAuthorizationChecksLayer::new(schema.clone())),
+        .apply_required_plugin_layer(
+            &plugins,
+            AuthorizationPlugin::extract_authorization_checks_layer,
         )
         .option_layer(extended_references.then(|| ExtendedReferencesLayer::new(schema)))
         .layer(EnforceSafelistLayer::new(persisted_queries))

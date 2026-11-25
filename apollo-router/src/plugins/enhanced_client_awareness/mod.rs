@@ -93,10 +93,11 @@ impl Plugin for EnhancedClientAwareness {
     }
 }
 
-register_plugin!(
+register_private_plugin!(
     "apollo",
     "enhanced_client_awareness",
-    EnhancedClientAwareness
+    EnhancedClientAwareness,
+    mandatory
 );
 
 #[cfg(test)]

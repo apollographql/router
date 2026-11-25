@@ -1,0 +1,6 @@
+---
+source: apollo-router/src/query_planner/query_planner_service.rs
+expression: "subselections_keys(r#\"\n            query Q { topProducts {\n                upc\n                ... on Book { ...Deferred }\n                ... on Furniture { ...Deferred }\n            }}\n            fragment Deferred on Product {\n                ... @defer(label: \"A\") {\n                    name\n                }\n            }\n        \"#,\n& planner).await"
+---
+None 0 query{ topProducts { upc } }
+Some("A") 0 query{ topProducts { name } }

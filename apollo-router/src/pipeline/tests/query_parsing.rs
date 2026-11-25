@@ -8,6 +8,7 @@ use super::test_schema;
 use crate::compute_job::MaybeBackPressureError;
 use crate::metrics::FutureMetricsExt;
 use crate::pipeline::stages::build_query_parsing_service;
+use crate::pipeline::tests::stage_stack::query_parsing_plugins;
 use crate::services::query_parsing::Request;
 
 #[tokio::test]
@@ -15,7 +16,8 @@ async fn same_query_is_cache_hit() {
     async {
         let configuration = test_configuration();
         let schema = test_schema(&configuration);
-        let mut service = build_query_parsing_service(schema, configuration);
+        let mut service =
+            build_query_parsing_service(schema, configuration, &query_parsing_plugins().await);
         let request = Request::new("query { me { id } }".to_string(), None);
 
         let first = service
@@ -59,7 +61,8 @@ async fn different_query_is_cache_miss() {
     async {
         let configuration = test_configuration();
         let schema = test_schema(&configuration);
-        let mut service = build_query_parsing_service(schema, configuration);
+        let mut service =
+            build_query_parsing_service(schema, configuration, &query_parsing_plugins().await);
 
         let a = service
             .ready()
@@ -104,7 +107,8 @@ async fn different_operation_name_is_cache_miss() {
     async {
         let configuration = test_configuration();
         let schema = test_schema(&configuration);
-        let mut service = build_query_parsing_service(schema, configuration);
+        let mut service =
+            build_query_parsing_service(schema, configuration, &query_parsing_plugins().await);
         let document = r#"
             query UserId {
                 me { id }
@@ -161,7 +165,8 @@ async fn validation_error_is_cached() {
     async {
         let configuration = test_configuration();
         let schema = test_schema(&configuration);
-        let mut service = build_query_parsing_service(schema, configuration);
+        let mut service =
+            build_query_parsing_service(schema, configuration, &query_parsing_plugins().await);
         let request = Request::new("query { me { doesNotExist } }".to_string(), None);
 
         let err = service

@@ -125,7 +125,6 @@ impl<'de> Visitor<'de> for ConfigurationVisitor {
                 "persisted_queries" => config.persisted_queries = map.next_value()?,
                 "limits" => config.limits = map.next_value()?,
                 "plugins" => config.plugins = map.next_value()?,
-                "batching" => config.batching = map.next_value()?,
                 "experimental_type_conditioned_fetching" => {
                     config.experimental_type_conditioned_fetching = map.next_value()?
                 }

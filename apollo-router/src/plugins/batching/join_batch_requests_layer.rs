@@ -13,29 +13,29 @@ use tower::ServiceExt as _;
 use tracing::instrument;
 
 use crate::Context;
-use crate::batching::BatchQuery;
-use crate::batching::BatchQueryInfo;
-use crate::configuration::BatchingMode;
 use crate::error::FetchError;
 use crate::error::SubgraphBatchingError;
 use crate::graphql;
+use crate::plugins::batching::config::BatchingMode;
+use crate::plugins::batching::metrics::BatchMetrics;
+use crate::plugins::batching::state::BatchQuery;
+use crate::plugins::batching::state::BatchQueryInfo;
 use crate::services::http::HttpRequest;
 use crate::services::http::HttpResponse;
 use crate::services::router;
 use crate::services::router::body::RouterBody;
 
-/// Intercept requests that are part of a batch, and batch them up together into a single request
-/// per subgraph.
+/// Layer type for [`BatchingPlugin::join_batch_requests_layer`].
 ///
-/// All subgraph requests for a batch, even for different subgraphs, are sent at the same time once
-/// the whole batch is ready.
+/// [`BatchingPlugin::join_batch_requests_layer`]: super::BatchingPlugin::join_batch_requests_layer
 //
-// This layer works together with the `crate::batching::Batch` structure, which calls back into the
+// This layer works together with the `batching::state::Batch` structure, which calls back into the
 // `process_batches` function declared in this file, and that's where eventually the inner service
 // is called.
 #[derive(Clone)]
 pub(crate) struct JoinBatchRequestsLayer {
     subgraph_name: Arc<str>,
+    metrics: Arc<BatchMetrics>,
 }
 
 impl JoinBatchRequestsLayer {
@@ -43,8 +43,10 @@ impl JoinBatchRequestsLayer {
     ///
     /// The subgraph name must be passed in so requests for the same subgraph can be identified.
     pub(crate) fn new(subgraph_name: impl Into<Arc<str>>) -> Self {
+        let subgraph_name = subgraph_name.into();
         Self {
-            subgraph_name: subgraph_name.into(),
+            metrics: Arc::new(BatchMetrics::new()),
+            subgraph_name,
         }
     }
 }
@@ -56,6 +58,7 @@ impl<S> tower::Layer<S> for JoinBatchRequestsLayer {
         JoinBatchRequestsService {
             inner,
             subgraph_name: self.subgraph_name.clone(),
+            metrics: self.metrics.clone(),
         }
     }
 }
@@ -64,6 +67,7 @@ impl<S> tower::Layer<S> for JoinBatchRequestsLayer {
 pub(crate) struct JoinBatchRequestsService<S> {
     inner: S,
     subgraph_name: Arc<str>,
+    metrics: Arc<BatchMetrics>,
 }
 
 impl<S> tower::Service<HttpRequest> for JoinBatchRequestsService<S>
@@ -90,6 +94,7 @@ where
         let mut inner = std::mem::replace(&mut self.inner, inner);
 
         let subgraph_name = self.subgraph_name.clone();
+        let metrics = self.metrics.clone();
 
         Box::pin(async move {
             // If we are processing a batch, then we'd like to park tasks here, but we can't park them whilst
@@ -106,6 +111,7 @@ where
                         // Only one of the inner services will actually be called
                         inner.boxed_clone(),
                         req,
+                        metrics,
                     )
                     .await?;
 
@@ -129,6 +135,7 @@ struct SubgraphBatchRequest {
     contexts: Vec<Context>,
     request: http::Request<RouterBody>,
     txs: Vec<oneshot::Sender<Result<HttpResponse, BoxError>>>,
+    metrics: Arc<BatchMetrics>,
 }
 
 // Assemble a single batch request to a subgraph
@@ -143,6 +150,7 @@ async fn assemble_batch(
 
     let first = iter.next().ok_or(SubgraphBatchingError::RequestsIsEmpty)?;
     let http_client = first.http_client;
+    let metrics = first.metrics;
     txs.push(first.sender);
     contexts.push(first.request.context);
     // We'll use the HTTP parts (headers, URI etc) from the first request for the whole batch
@@ -184,17 +192,19 @@ async fn assemble_batch(
         contexts,
         request,
         txs,
+        metrics,
     })
 }
 
 /// Process a single subgraph batch request
-#[instrument(skip(http_client, contexts, request))]
+#[instrument(skip(http_client, contexts, request, metrics))]
 async fn process_batch(
     mut http_client: crate::services::http::BoxCloneService,
     service: &str,
     contexts: Vec<Context>,
     request: http::Request<RouterBody>,
     listener_count: usize,
+    metrics: &BatchMetrics,
 ) -> Result<Vec<HttpResponse>, FetchError> {
     // We need a "representative context" for a batch. We use the first context in our list of
     // contexts
@@ -205,23 +215,7 @@ async fn process_batch(
     let service_name = service.to_string();
 
     // Update our batching metrics (just before we fetch)
-    u64_histogram!(
-        "apollo.router.operations.batching.size",
-        "Number of queries contained within each query batch",
-        listener_count as u64,
-        mode = BatchingMode::BatchHttpLink.to_string(), // Only supported mode right now
-        subgraph = service_name.clone()
-    );
-
-    u64_counter!(
-        "apollo.router.operations.batching",
-        "Total requests with batched operations",
-        1,
-        // XXX(@goto-bus-stop): Should these be `batching.mode`, `batching.subgraph`?
-        // Also, other metrics use a different convention to report the subgraph name
-        mode = BatchingMode::BatchHttpLink.to_string(), // Only supported mode right now
-        subgraph = service_name.clone()
-    );
+    metrics.record(&BatchingMode::BatchHttpLink, listener_count, Some(service));
 
     // Perform the actual fetch. If this fails then we didn't manage to make the call at all, so we can't do anything with it.
     tracing::debug!("fetching from subgraph: {service}");
@@ -450,6 +444,7 @@ struct BatchInfo {
     http_client: crate::services::http::BoxCloneService,
     request: http::Request<RouterBody>,
     contexts: Vec<Context>,
+    metrics: Arc<BatchMetrics>,
 }
 
 type BatchResult = (
@@ -474,6 +469,7 @@ pub(super) async fn process_batches(
                 contexts,
                 request,
                 txs,
+                metrics,
             } = assemble_batch(requests).await?;
 
             Ok((
@@ -482,6 +478,7 @@ pub(super) async fn process_batches(
                     http_client,
                     request,
                     contexts,
+                    metrics,
                 },
                 txs,
             ))
@@ -517,12 +514,20 @@ pub(super) async fn process_batches(
                 http_client,
                 request,
                 contexts,
+                metrics,
             },
             senders,
         )| async move {
             let listener_count = senders.len();
-            let batch_result =
-                process_batch(http_client, &service, contexts, request, listener_count).await;
+            let batch_result = process_batch(
+                http_client,
+                &service,
+                contexts,
+                request,
+                listener_count,
+                &metrics,
+            )
+            .await;
 
             notify_batch_query(service, senders, batch_result).await
         },
@@ -546,11 +551,12 @@ mod tests {
 
     use super::JoinBatchRequestsLayer;
     use crate::Context;
-    use crate::batching::Batch;
-    use crate::configuration::Batching;
-    use crate::configuration::CommonBatchingConfig;
     use crate::configuration::subgraph::SubgraphConfiguration;
     use crate::graphql;
+    use crate::metrics::FutureMetricsExt as _;
+    use crate::plugins::batching::config::BatchingConfig;
+    use crate::plugins::batching::config::CommonBatchingConfig;
+    use crate::plugins::batching::state::Batch;
     use crate::services::http::HttpRequest;
     use crate::services::http::HttpResponse;
     use crate::services::router::body;
@@ -578,7 +584,7 @@ mod tests {
             .unwrap();
 
         // Subgraph batching on for all subgraphs
-        let config = Batching {
+        let config = BatchingConfig {
             enabled: true,
             subgraph: Some(SubgraphConfiguration {
                 all: CommonBatchingConfig { enabled: true },
@@ -589,7 +595,7 @@ mod tests {
 
         let context = Context::new();
         context.extensions().with_lock(|lock| {
-            lock.insert(config);
+            lock.insert(Arc::new(config));
             lock.insert(query);
             lock.insert(query_hash);
         });
@@ -693,6 +699,57 @@ mod tests {
         }
 
         crate::plugin::test::await_mock_driver(driver).await;
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn it_records_batch_metrics() {
+        async {
+            let (mock, mut handle) = tower_test::mock::pair::<HttpRequest, HttpResponse>();
+
+            let batch = Arc::new(Batch::spawn_handler(3));
+            let mut requests = Vec::with_capacity(3);
+            for index in 0..3 {
+                let context = context_for_batch_index(&batch, index).await;
+                requests.push(graphql_request(&format!("{{ slot{index} }}"), context));
+            }
+
+            let driver = tokio::task::spawn(async move {
+                let (request, responder) = handle.next_request().await.unwrap();
+                let response_body = body::from_bytes(
+                    r#"[{"data":{"slot0":0}},{"data":{"slot1":1}},{"data":{"slot2":2}}]"#,
+                );
+                responder.send_response(HttpResponse {
+                    http_response: http::Response::builder().body(response_body).unwrap(),
+                    context: request.context,
+                });
+            });
+
+            let service = ServiceBuilder::new()
+                .layer(JoinBatchRequestsLayer::new("test_subgraph"))
+                .service(mock);
+
+            let futures = requests.into_iter().map(|request| {
+                let mut service = service.clone();
+                async move { service.ready().await.unwrap().call(request).await.unwrap() }
+            });
+            join_all(futures).await;
+            crate::plugin::test::await_mock_driver(driver).await;
+
+            assert_histogram_sum!(
+                "apollo.router.operations.batching.size",
+                3,
+                "mode" = "batch_http_link",
+                "subgraph" = "test_subgraph"
+            );
+            assert_counter!(
+                "apollo.router.operations.batching",
+                1,
+                "mode" = "batch_http_link",
+                "subgraph" = "test_subgraph"
+            );
+        }
+        .with_metrics()
+        .await;
     }
 
     #[rstest]

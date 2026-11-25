@@ -4,19 +4,19 @@ use itertools::Itertools;
 use super::ConfiguredSubgraphs;
 use super::IncompatiblePlugin;
 use crate::Configuration;
-use crate::configuration::Batching;
+use crate::plugins::batching::config::BatchingConfig;
 
 pub(super) struct BatchingIncompatPlugin {
-    config: Batching,
+    config: BatchingConfig,
 }
 
 impl BatchingIncompatPlugin {
     pub(super) fn from_config(config: &Configuration) -> Option<Self> {
-        // Batching is always default initialized, but can be explicitly
-        // disabled by the config, so we init this plugin only if enabled.
-        config.batching.enabled.then_some(Self {
-            config: config.batching.clone(),
-        })
+        config
+            .document_section("batching")
+            .and_then(|raw| serde_json::from_value::<BatchingConfig>(raw.clone()).ok())
+            .filter(|batching| batching.enabled)
+            .map(|config| Self { config })
     }
 }
 

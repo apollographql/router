@@ -520,6 +520,7 @@ mod tests {
     use crate::configuration::Supergraph;
     use crate::graphql;
     use crate::metrics::FutureMetricsExt;
+    use crate::pipeline::tests::stage_stack::query_parsing_plugins;
     use crate::services::layers::persisted_queries::freeform_graphql_behavior::FreeformGraphQLBehavior;
     use crate::services::query_parsing;
     use crate::services::router::parse_query::ParseQueryLayer;
@@ -1019,7 +1020,7 @@ mod tests {
 
             let schema = Arc::new(Schema::parse(include_str!("../../../testdata/supergraph.graphql"), &Default::default()).unwrap());
 
-            let query_parsing_service = crate::pipeline::build_query_parsing_service(schema, Arc::new(config));
+            let query_parsing_service = crate::pipeline::build_query_parsing_service(schema, Arc::new(config), &query_parsing_plugins().await);
 
             // A random query is blocked.
             denied_by_safelist(
@@ -1236,8 +1237,11 @@ mod tests {
             )
             .unwrap(),
         );
-        let query_parsing_service =
-            crate::pipeline::build_query_parsing_service(schema, Arc::new(config));
+        let query_parsing_service = crate::pipeline::build_query_parsing_service(
+            schema,
+            Arc::new(config),
+            &query_parsing_plugins().await,
+        );
 
         // The client-scoped body is only accepted for its registered client.
         assert_allowed_for_client(

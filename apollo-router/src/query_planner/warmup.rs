@@ -365,6 +365,7 @@ mod tests {
     use crate::error::CacheResolverError;
     use crate::error::QueryPlannerError;
     use crate::metrics::FutureMetricsExt as _;
+    use crate::pipeline::tests::stage_stack::query_parsing_plugins;
     use crate::query_planner::CachingQueryKey;
     use crate::query_planner::ConfigModeHash;
     use crate::query_planner::InMemoryQueryPlanCache;
@@ -611,8 +612,11 @@ mod tests {
                 Schema::parse(include_str!("testdata/schema.graphql"), &configuration).unwrap(),
             );
 
-            let query_parsing_service =
-                crate::pipeline::build_query_parsing_service(schema, configuration);
+            let query_parsing_service = crate::pipeline::build_query_parsing_service(
+                schema,
+                configuration,
+                &query_parsing_plugins().await,
+            );
 
             let mut service = ServiceBuilder::new()
                 .layer(WarmupParseQueryLayer::new(query_parsing_service))
@@ -660,8 +664,11 @@ mod tests {
                 Schema::parse(include_str!("testdata/schema.graphql"), &configuration).unwrap(),
             );
 
-            let query_parsing_service =
-                crate::pipeline::build_query_parsing_service(schema, configuration);
+            let query_parsing_service = crate::pipeline::build_query_parsing_service(
+                schema,
+                configuration,
+                &query_parsing_plugins().await,
+            );
 
             let mut service = ServiceBuilder::new()
                 .layer(WarmupParseQueryLayer::new(query_parsing_service))
@@ -765,8 +772,11 @@ mod tests {
                 Schema::parse(include_str!("testdata/schema.graphql"), &configuration).unwrap(),
             );
 
-            let query_parsing_service =
-                crate::pipeline::build_query_parsing_service(schema, configuration);
+            let query_parsing_service = crate::pipeline::build_query_parsing_service(
+                schema,
+                configuration,
+                &query_parsing_plugins().await,
+            );
 
             let mut service = ServiceBuilder::new()
                 .layer(WarmupParseQueryLayer::new(query_parsing_service))

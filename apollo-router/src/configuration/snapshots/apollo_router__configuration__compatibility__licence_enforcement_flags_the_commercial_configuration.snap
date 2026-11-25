@@ -5,7 +5,6 @@ expression: features
 [
   "apq.router.cache.redis",
   "authentication.router",
-  "authorization.directives.enabled",
   "batching.enabled",
   "coprocessor",
   "demand_control.enabled",

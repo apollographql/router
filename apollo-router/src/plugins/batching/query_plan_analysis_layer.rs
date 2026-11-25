@@ -4,21 +4,20 @@ use futures::future::BoxFuture;
 use http::StatusCode;
 use tower::BoxError;
 
-use crate::batching::BatchQuery;
 use crate::graphql;
 use crate::json_ext::Object;
+use crate::plugins::batching::state::BatchQuery;
 use crate::query_planner::PlanNode;
 use crate::query_planner::QueryPlan;
 use crate::services::execution;
 use crate::spec::Query;
 use crate::spec::QueryHash;
 
-/// Analyze the query plan for a batch query.
+/// Layer type for [`BatchingPlugin::query_plan_analysis_layer`].
 ///
 /// This informs the [`BatchQuery`] about the query plan fetch node hashes.
 ///
-/// It also reject the request if it contains any subscription or defer nodes, which is not
-/// supported in batch requests.
+/// [`BatchingPlugin::query_plan_analysis_layer`]: super::BatchingPlugin::query_plan_analysis_layer
 #[derive(Clone)]
 pub(crate) struct BatchQueryPlanAnalysisLayer {
     _private: (),
@@ -70,15 +69,14 @@ where
             let is_deferred = plan.is_deferred(variables);
             let is_subscription = plan.is_subscription();
 
-            let Some(batching) = req
-                .context
-                .extensions()
-                .with_lock(|lock| lock.get::<crate::configuration::Batching>().cloned())
-            else {
+            let Some(batching) = req.context.extensions().with_lock(|lock| {
+                lock.get::<Arc<crate::plugins::batching::config::BatchingConfig>>()
+                    .cloned()
+            }) else {
                 return inner.call(req).await.map_err(Into::into);
             };
 
-            if batching.enabled && (is_deferred || is_subscription) {
+            if is_deferred || is_subscription {
                 let code = if is_deferred {
                     "BATCHING_DEFER_UNSUPPORTED"
                 } else {
@@ -120,7 +118,7 @@ struct BatchingUnsupportedError;
 
 fn query_hashes(
     plan: &QueryPlan,
-    batching_config: &crate::configuration::Batching,
+    batching_config: &crate::plugins::batching::config::BatchingConfig,
     variables: &Object,
 ) -> Result<Vec<Arc<QueryHash>>, BatchingUnsupportedError> {
     match &plan.root {
@@ -144,7 +142,7 @@ fn query_hashes(
 /// details and don't use _ so that future node types must be handled here.
 fn plan_node_query_hashes(
     root_node: &PlanNode,
-    batching_config: &crate::configuration::Batching,
+    batching_config: &crate::plugins::batching::config::BatchingConfig,
     variables: &Object,
     query: &Query,
 ) -> Result<Vec<Arc<QueryHash>>, BatchingUnsupportedError> {
@@ -215,13 +213,15 @@ mod tests {
     use tower::ServiceBuilder;
     use tower::ServiceExt as _;
 
-    use super::BatchQueryPlanAnalysisLayer;
     use crate::Configuration;
     use crate::Context;
-    use crate::batching::Batch;
-    use crate::batching::BatchQuery;
     use crate::compute_job::ComputeJobType;
     use crate::graphql;
+    use crate::plugins::batching::BatchingPlugin;
+    use crate::plugins::batching::config::BatchingConfig;
+    use crate::plugins::batching::state::Batch;
+    use crate::plugins::batching::state::BatchQuery;
+    use crate::plugins::test::PluginTestHarness;
     use crate::query_planner::QueryPlan;
     use crate::query_planner::QueryPlannerService;
     use crate::services::QueryPlannerRequest;
@@ -257,29 +257,34 @@ mod tests {
     async fn reject_defer_query_plans() {
         let (mock, handle) = tower_test::mock::pair::<execution::Request, execution::Response>();
 
+        let config = indoc::indoc! {"
+            batching:
+              enabled: true
+              mode: batch_http_link
+              subgraph:
+                all:
+                  enabled: true
+        "};
+        let harness = PluginTestHarness::<BatchingPlugin>::builder()
+            .config(config)
+            .build()
+            .await
+            .unwrap();
         let mut service = ServiceBuilder::new()
-            .layer(BatchQueryPlanAnalysisLayer::new())
+            .layer(harness.query_plan_analysis_layer())
             .service(mock);
 
-        // Setup is 70% of the work!
+        // We have to slightly awkwardly reparse the config here to mimick the context inserted by
+        // the split batch request layer. Hopefully we'll improve that later!
 
-        let configuration = Arc::new(
-            Configuration::from_str(
-                r#"
-            batching:
-                enabled: true
-                mode: batch_http_link
-                subgraph:
-                    all:
-                        enabled: true
-        "#,
-            )
-            .unwrap(),
-        );
+        let configuration = Arc::new(Configuration::from_str(config).unwrap());
+        let batching_config = configuration
+            .typed_plugin_config::<BatchingConfig>("apollo.batching")
+            .expect("should have batching config");
 
         let schema = Arc::new(
             Schema::parse(
-                include_str!("../../tests/fixtures/batching/schema.graphql"),
+                include_str!("../../../tests/fixtures/batching/schema.graphql"),
                 &configuration,
             )
             .unwrap(),
@@ -301,7 +306,7 @@ mod tests {
 
         let context = Context::new();
         context.extensions().with_lock(|lock| {
-            lock.insert(configuration.batching.clone());
+            lock.insert(Arc::new(batching_config.clone()));
             lock.insert(batch_query);
         });
 
@@ -326,6 +331,88 @@ mod tests {
         assert!(response.contains_error_code("BATCHING_DEFER_UNSUPPORTED"));
 
         crate::plugin::test::assert_no_mock_calls(handle).await;
+    }
+
+    #[tokio::test]
+    async fn passthru_when_batching_disabled() {
+        let (mock, mut handle) =
+            tower_test::mock::pair::<execution::Request, execution::Response>();
+        let driver = tokio::task::spawn(async move {
+            let (request, responder) = handle.next_request().await.unwrap();
+
+            // Succeed the request
+            responder.send_response(
+                execution::Response::builder()
+                    .data(serde_json_bytes::json!({
+                        "entryA": { "index": 20 },
+                    }))
+                    .context(request.context)
+                    .build()
+                    .unwrap(),
+            );
+        });
+
+        let config = indoc::indoc! {"
+            batching:
+              enabled: false
+        "};
+        let harness = PluginTestHarness::<BatchingPlugin>::builder()
+            .config(config)
+            .build()
+            .await
+            .unwrap();
+        let mut service = ServiceBuilder::new()
+            .layer(harness.query_plan_analysis_layer())
+            .service(mock);
+
+        // We have to slightly awkwardly reparse the config here to mimick the context inserted by
+        // the split batch request layer. Hopefully we'll improve that later!
+
+        let configuration = Arc::new(Configuration::from_str(config).unwrap());
+
+        let schema = Arc::new(
+            Schema::parse(
+                include_str!("../../../tests/fixtures/batching/schema.graphql"),
+                &configuration,
+            )
+            .unwrap(),
+        );
+
+        let query = r#"
+          {
+            entryA(count: 1) { index }
+            ... @defer {
+              entryB(count: 1) { index }
+            }
+          }
+        "#;
+
+        let query_plan = plan_query(query, schema, configuration.clone()).await;
+
+        // With batching disabled, the batching layers don't add anything to the context
+        let context = Context::new();
+
+        let request = execution::Request::builder()
+            .supergraph_request(http::Request::new(
+                graphql::Request::fake_builder().query(query).build(),
+            ))
+            .context(context)
+            .query_plan(query_plan)
+            .build();
+
+        let response = service
+            .ready()
+            .await
+            .unwrap()
+            .call(request)
+            .await
+            .unwrap()
+            .next_response()
+            .await
+            .unwrap();
+        assert!(!response.contains_error_code("BATCHING_DEFER_UNSUPPORTED"));
+
+        crate::plugin::test::await_mock_driver(driver).await;
     }
 
     #[tokio::test]
@@ -359,29 +446,34 @@ mod tests {
             );
         });
 
+        let config = indoc::indoc! {"
+            batching:
+              enabled: true
+              mode: batch_http_link
+              subgraph:
+                all:
+                  enabled: true
+        "};
+        let harness = PluginTestHarness::<BatchingPlugin>::builder()
+            .config(config)
+            .build()
+            .await
+            .unwrap();
         let mut service = ServiceBuilder::new()
-            .layer(BatchQueryPlanAnalysisLayer::new())
+            .layer(harness.query_plan_analysis_layer())
             .service(mock);
 
-        // Setup is 70% of the work!
+        // We have to slightly awkwardly reparse the config here to mimick the context inserted by
+        // the split batch request layer. Hopefully we'll improve that later!
 
-        let configuration = Arc::new(
-            Configuration::from_str(
-                r#"
-            batching:
-                enabled: true
-                mode: batch_http_link
-                subgraph:
-                    all:
-                        enabled: true
-        "#,
-            )
-            .unwrap(),
-        );
+        let configuration = Arc::new(Configuration::from_str(config).unwrap());
+        let batching_config = configuration
+            .typed_plugin_config::<BatchingConfig>("apollo.batching")
+            .expect("should have batching config");
 
         let schema = Arc::new(
             Schema::parse(
-                include_str!("../../tests/fixtures/batching/schema.graphql"),
+                include_str!("../../../tests/fixtures/batching/schema.graphql"),
                 &configuration,
             )
             .unwrap(),
@@ -401,7 +493,7 @@ mod tests {
 
         let context = Context::new();
         context.extensions().with_lock(|lock| {
-            lock.insert(configuration.batching.clone());
+            lock.insert(Arc::new(batching_config.clone()));
             lock.insert(batch_query);
         });
 

@@ -1061,11 +1061,10 @@ mod custom_error_message_for_misnamed_directives {
     }
 
     #[test]
-    fn has_suggestions_if_a_fed3_directive_is_used_in_fed1() {
-        assert_eq!(
-            unknown_directive_hint(LOOKUP_SCHEMA),
-            r#"If you meant the "@lookup" federation directive, note that this schema is a federation 1 schema. To use it, it needs to @link to the federation specification v3.0 or later."#
-        );
+    fn unlinked_schema_using_a_fed3_directive_is_a_graphql_federation_source_schema() {
+        // Without a federation `@link`, `@lookup` marks a GraphQL Federation source schema, which
+        // is validated against federation v3.0 rather than rejected as federation 1.
+        build_and_validate(LOOKUP_SCHEMA);
     }
 
     #[test]

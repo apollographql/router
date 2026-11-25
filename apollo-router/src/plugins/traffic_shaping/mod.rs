@@ -745,7 +745,7 @@ fn rate_limit_error() -> graphql::Error {
         .build()
 }
 
-register_private_plugin!("apollo", "traffic_shaping", TrafficShaping);
+register_private_plugin!("apollo", "traffic_shaping", TrafficShaping, mandatory);
 
 #[cfg(test)]
 mod test {
@@ -770,6 +770,7 @@ mod test {
     use crate::pipeline::connect_apq_redis;
     use crate::pipeline::connect_query_plan_redis;
     use crate::pipeline::create_plugins;
+    use crate::pipeline::tests::stage_stack::query_parsing_plugins;
     use crate::plugin::DynPlugin;
     use crate::plugin::test::MockSubgraph;
     use crate::query_planner::QueryPlannerService;
@@ -868,8 +869,11 @@ mod test {
         let qp_arc = QueryPlannerService::create_planner(&schema, &config).unwrap();
         let subgraph_schemas = crate::query_planner::build_subgraph_schemas(&qp_arc);
 
-        let query_parser_service =
-            crate::pipeline::build_query_parsing_service(schema.clone(), config.clone());
+        let query_parser_service = crate::pipeline::build_query_parsing_service(
+            schema.clone(),
+            config.clone(),
+            &query_parsing_plugins().await,
+        );
 
         let plugins = Arc::new(
             create_plugins(
@@ -910,19 +914,15 @@ mod test {
             query_plan_cache,
         );
 
-        let subgraph_services = crate::pipeline::build_subgraph_services(
-            ["accounts", "reviews", "products"]
-                .into_iter()
-                .map(|name| {
-                    (
-                        name.to_string(),
-                        crate::services::http::test_http_client_service(name),
-                    )
-                })
-                .collect(),
-            &plugins,
-            &config,
-        );
+        let mut http_services = indexmap::IndexMap::new();
+        for name in ["accounts", "reviews", "products"] {
+            http_services.insert(
+                name.to_string(),
+                crate::pipeline::tests::stage_stack::test_http_client_service(name).await,
+            );
+        }
+        let subgraph_services =
+            crate::pipeline::build_subgraph_services(http_services, &plugins, &config);
         let supergraph_service = build_supergraph_pipeline(
             query_planner_service,
             schema.clone(),

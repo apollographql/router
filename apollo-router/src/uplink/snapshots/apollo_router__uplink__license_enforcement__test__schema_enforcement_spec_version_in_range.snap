@@ -2,6 +2,7 @@
 source: apollo-router/src/uplink/license_enforcement.rs
 expression: report.to_string()
 ---
-The supergraph schema uses these licensed directives. Remove them from your subgraph schemas and recompose, or use a license that includes them:
+Your configuration uses these licensed features. Remove the settings listed, or use a license that includes the features:
 
-  @authenticated  https://specs.apollo.dev/authenticated/v0.1
+  Authorization
+    authorization.directives.enabled

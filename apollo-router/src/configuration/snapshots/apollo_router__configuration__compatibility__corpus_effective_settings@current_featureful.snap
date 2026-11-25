@@ -5,7 +5,10 @@ expression: changed_settings(&config)
 ---
 {
   "/apq/enabled": false,
-  "/batching/enabled": true,
+  "/batching": {
+    "enabled": true,
+    "mode": "batch_http_link"
+  },
   "/cors/policies": [
     {
       "allow_credentials": true,

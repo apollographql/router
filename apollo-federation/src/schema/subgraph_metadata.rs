@@ -40,6 +40,12 @@ pub(crate) struct SubgraphMetadata {
     provided_fields: IndexSet<FieldDefinitionPosition>,
     required_fields: IndexSet<FieldDefinitionPosition>,
     shareable_fields: IndexSet<FieldDefinitionPosition>,
+    /// Whether this is a GraphQL Federation source schema (see
+    /// [`crate::composite_schemas::is_composite_schema`]).
+    is_composite_schema: bool,
+    /// Whether this subgraph applies any GraphQL Federation directive (see
+    /// [`crate::composite_schemas::uses_composite_directives`]).
+    uses_composite_directives: bool,
 }
 
 impl SubgraphMetadata {
@@ -62,6 +68,10 @@ impl SubgraphMetadata {
         } else {
             Self::collect_shareable_fields(schema, federation_spec_definition)?
         };
+        let is_composite_schema =
+            crate::composite_schemas::is_composite_schema(schema, federation_spec_definition);
+        let uses_composite_directives =
+            crate::composite_schemas::uses_composite_directives(schema, federation_spec_definition);
 
         Ok(Self {
             federation_spec_definition,
@@ -73,7 +83,20 @@ impl SubgraphMetadata {
             provided_fields,
             required_fields,
             shareable_fields,
+            is_composite_schema,
+            uses_composite_directives,
         })
+    }
+
+    /// Whether this is a GraphQL Federation source schema (it applies `@lookup`).
+    pub(crate) fn is_composite_schema(&self) -> bool {
+        self.is_composite_schema
+    }
+
+    /// Whether this subgraph applies any GraphQL Federation directive (`@lookup`, `@internal`,
+    /// `@is`, `@require`).
+    pub(crate) fn uses_composite_directives(&self) -> bool {
+        self.uses_composite_directives
     }
 
     pub(crate) fn federation_spec_definition(&self) -> &'static FederationSpecDefinition {
