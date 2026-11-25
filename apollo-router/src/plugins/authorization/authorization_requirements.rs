@@ -6,12 +6,12 @@ use std::task::Poll;
 
 use apollo_compiler::Schema;
 use apollo_compiler::validation::Valid;
+use apollo_federation::schema::AccessControlDirectiveNames;
 use apollo_federation::schema::ValidFederationSchema;
 use futures::future::BoxFuture;
 use tower::Layer;
 use tower::Service;
 
-use crate::plugins::authorization::AuthorizationDirectives;
 use crate::plugins::authorization::AuthorizationPlugin;
 use crate::plugins::authorization::CacheKeyMetadata;
 use crate::services::query_parsing::ParsedDocument;
@@ -23,7 +23,7 @@ use crate::services::query_parsing::Request;
 pub(crate) fn operation_requirements(
     doc: &ParsedDocumentInner,
     supergraph_schema: &Valid<Schema>,
-    directives: &AuthorizationDirectives,
+    directives: &AccessControlDirectiveNames,
 ) -> CacheKeyMetadata {
     AuthorizationPlugin::generate_cache_metadata(
         &doc.executable,
@@ -41,13 +41,13 @@ pub(crate) fn operation_requirements(
 #[derive(Clone)]
 pub(crate) struct AuthorizationRequirementsLayer {
     supergraph_schema: ValidFederationSchema,
-    directives: Arc<AuthorizationDirectives>,
+    directives: Arc<AccessControlDirectiveNames>,
 }
 
 impl AuthorizationRequirementsLayer {
     pub(crate) fn new(
         supergraph_schema: ValidFederationSchema,
-        directives: AuthorizationDirectives,
+        directives: AccessControlDirectiveNames,
     ) -> Self {
         Self {
             supergraph_schema,
@@ -72,7 +72,7 @@ impl<S> Layer<S> for AuthorizationRequirementsLayer {
 pub(crate) struct AuthorizationRequirementsService<S> {
     inner: S,
     supergraph_schema: ValidFederationSchema,
-    directives: Arc<AuthorizationDirectives>,
+    directives: Arc<AccessControlDirectiveNames>,
 }
 
 impl<S> Service<Request> for AuthorizationRequirementsService<S>

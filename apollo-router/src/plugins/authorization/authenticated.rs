@@ -508,8 +508,8 @@ mod tests {
     use crate::json_ext::Path;
     use crate::plugin::test::MockSubgraph;
     use crate::plugins::authentication::APOLLO_AUTHENTICATION_JWT_CLAIMS;
-    use crate::plugins::authorization::AuthorizationDirectives;
     use crate::plugins::authorization::authenticated::AuthenticatedVisitor;
+    use crate::plugins::authorization::directive_names_from_schema;
     use crate::services::router::ClientRequestAccepts;
     use crate::services::supergraph;
     use crate::spec::query::transform;
@@ -586,7 +586,7 @@ mod tests {
         let doc = ast::Document::parse(query, "query.graphql").unwrap();
 
         let map = schema.implementers_map();
-        let directives = AuthorizationDirectives::from_schema(&schema);
+        let directives = directive_names_from_schema(&schema);
         let mut visitor = AuthenticatedVisitor::new(
             &schema,
             &map,

@@ -18,6 +18,7 @@ use apollo_federation::connectors::expand::build_connectors_without_expansion;
 use apollo_federation::link::metadata::LinksMetadata;
 use apollo_federation::link::spec::Identity;
 use apollo_federation::router_supported_supergraph_specs;
+use apollo_federation::schema::AccessControlDirectiveNames;
 use apollo_federation::schema::ValidFederationSchema;
 use http::Uri;
 use semver::Version;
@@ -30,7 +31,6 @@ use sha2::Sha256;
 use crate::Configuration;
 use crate::error::ParseErrors;
 use crate::error::SchemaError;
-use crate::plugins::authorization::AuthorizationDirectives;
 use crate::plugins::connectors::configuration::apply_config;
 use crate::query_planner::OperationKind;
 #[cfg(unix)]
@@ -43,7 +43,7 @@ pub(crate) struct Schema {
     supergraph: Supergraph,
     subgraphs: HashMap<String, Uri>,
     pub(crate) implementers_map: apollo_compiler::collections::HashMap<Name, Implementers>,
-    pub(crate) authorization_directives: AuthorizationDirectives,
+    pub(crate) authorization_directives: AccessControlDirectiveNames,
     api_schema: ApiSchema,
     pub(crate) schema_id: SchemaHash,
     pub(crate) connectors: Option<Connectors>,
@@ -206,7 +206,8 @@ impl Schema {
         );
 
         let implementers_map = definitions.implementers_map();
-        let authorization_directives = AuthorizationDirectives::from_schema(&definitions);
+        let authorization_directives =
+            crate::plugins::authorization::directive_names_from_schema(&definitions);
         let supergraph =
             Supergraph::from_schema(definitions, Some(&router_supported_supergraph_specs()))?;
 
@@ -363,6 +364,7 @@ impl Schema {
     ) -> Option<String> {
         let metadata = LinksMetadata::from_schema(schema).ok()??;
         Self::directive_name_in_links(&metadata, spec_identity, expected_version_range, default)
+            .map(|name| name.to_string())
     }
 
     /// Like [`Self::directive_name`], over `@link` metadata the caller has already parsed.
@@ -371,14 +373,14 @@ impl Schema {
         spec_identity: &Identity,
         expected_version_range: &str,
         default: &Name,
-    ) -> Option<String> {
+    ) -> Option<Name> {
         let link = metadata.for_identity(spec_identity)?;
         let semver_version = Version::parse(format!("{}.0", link.url.version).as_str()).ok()?;
         let version_range = VersionReq::parse(expected_version_range).ok()?;
         if !version_range.matches(&semver_version) {
             return None;
         }
-        Some(link.directive_name_in_schema(default).to_string())
+        Some(link.directive_name_in_schema(default))
     }
 }
 

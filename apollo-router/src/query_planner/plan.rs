@@ -4,6 +4,7 @@ use std::sync::atomic::Ordering;
 
 use apollo_compiler::collections::HashSet;
 use apollo_compiler::validation::Valid;
+use apollo_federation::schema::AccessControlDirectiveNames;
 use serde::Deserialize;
 use serde::Serialize;
 
@@ -16,7 +17,6 @@ use crate::error::ValidationErrors;
 use crate::json_ext::Object;
 use crate::json_ext::Path;
 use crate::json_ext::Value;
-use crate::plugins::authorization::AuthorizationDirectives;
 use crate::plugins::authorization::CacheKeyMetadata;
 use crate::query_planner::HashedSubgraphSchemas;
 use crate::query_planner::SubgraphSchemas;
@@ -454,7 +454,7 @@ impl PlanNode {
     pub(crate) fn extract_authorization_metadata(
         &mut self,
         schema: &Valid<apollo_compiler::Schema>,
-        directives: &AuthorizationDirectives,
+        directives: &AccessControlDirectiveNames,
         key: &CacheKeyMetadata,
     ) {
         match self {

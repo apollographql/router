@@ -592,7 +592,7 @@ mod tests {
     use apollo_compiler::ast::Document;
 
     use crate::json_ext::Path;
-    use crate::plugins::authorization::AuthorizationDirectives;
+    use crate::plugins::authorization::directive_names_from_schema;
     use crate::plugins::authorization::policy::PolicyExtractionVisitor;
     use crate::plugins::authorization::policy::PolicyFilteringVisitor;
     use crate::spec::query::transform;
@@ -662,7 +662,7 @@ mod tests {
     fn extract(schema: &str, query: &str) -> BTreeSet<String> {
         let schema = Schema::parse_and_validate(schema, "schema.graphql").unwrap();
         let doc = ExecutableDocument::parse(&schema, query, "query.graphql").unwrap();
-        let directives = AuthorizationDirectives::from_schema(&schema);
+        let directives = directive_names_from_schema(&schema);
         let mut visitor = PolicyExtractionVisitor::new(
             &schema,
             &doc,
@@ -699,7 +699,7 @@ mod tests {
         let doc = ast::Document::parse(query, "query.graphql").unwrap();
         doc.to_executable_validate(&schema).unwrap();
         let map = schema.implementers_map();
-        let directives = AuthorizationDirectives::from_schema(&schema);
+        let directives = directive_names_from_schema(&schema);
         let mut visitor = PolicyFilteringVisitor::new(
             &schema,
             &map,

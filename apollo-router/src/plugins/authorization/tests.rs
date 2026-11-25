@@ -1837,11 +1837,12 @@ async fn cache_key_metadata() {
 mod directive_names {
     use apollo_compiler::Name;
     use apollo_federation::link::spec::Identity;
+    use apollo_federation::schema::AccessControlDirectiveNames;
     use rstest::rstest;
 
-    use crate::plugins::authorization::AuthorizationDirectives;
     use crate::plugins::authorization::authenticated::AUTHENTICATED_DIRECTIVE_NAME;
     use crate::plugins::authorization::authenticated::AUTHENTICATED_SPEC_VERSION_RANGE;
+    use crate::plugins::authorization::directive_names_from_schema;
     use crate::plugins::authorization::policy::POLICY_DIRECTIVE_NAME;
     use crate::plugins::authorization::policy::POLICY_SPEC_VERSION_RANGE;
     use crate::plugins::authorization::scopes::REQUIRES_SCOPES_DIRECTIVE_NAME;
@@ -1855,11 +1856,12 @@ mod directive_names {
         type Query { field: Int }
     "#;
 
-    fn one_by_one(schema: &apollo_compiler::Schema) -> AuthorizationDirectives {
+    fn one_by_one(schema: &apollo_compiler::Schema) -> AccessControlDirectiveNames {
         let name = |identity: Identity, range: &str, default: &Name| {
             Schema::directive_name(schema, &identity, range, default)
+                .map(|name| Name::new(&name).unwrap())
         };
-        AuthorizationDirectives {
+        AccessControlDirectiveNames {
             authenticated: name(
                 Identity::authenticated_identity(),
                 AUTHENTICATED_SPEC_VERSION_RANGE,
@@ -1923,15 +1925,15 @@ mod directive_names {
         let sdl = format!("{schema_definition}\n{LINK_DEFINITIONS}");
         let schema = apollo_compiler::Schema::parse_and_validate(sdl, "schema.graphql").unwrap();
 
-        let directives = AuthorizationDirectives::from_schema(&schema);
+        let directives = directive_names_from_schema(&schema);
 
         assert_eq!(directives, one_by_one(&schema));
         assert_eq!(
             directives,
-            AuthorizationDirectives {
-                authenticated: authenticated.map(str::to_string),
-                requires_scopes: requires_scopes.map(str::to_string),
-                policy: policy.map(str::to_string),
+            AccessControlDirectiveNames {
+                authenticated: authenticated.map(|name| Name::new(name).unwrap()),
+                requires_scopes: requires_scopes.map(|name| Name::new(name).unwrap()),
+                policy: policy.map(|name| Name::new(name).unwrap()),
             }
         );
     }

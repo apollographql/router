@@ -586,7 +586,7 @@ mod tests {
     use apollo_compiler::ast::Document;
 
     use crate::json_ext::Path;
-    use crate::plugins::authorization::AuthorizationDirectives;
+    use crate::plugins::authorization::directive_names_from_schema;
     use crate::plugins::authorization::scopes::ScopeExtractionVisitor;
     use crate::plugins::authorization::scopes::ScopeFilteringVisitor;
     use crate::spec::query::transform;
@@ -658,7 +658,7 @@ mod tests {
         let schema = Schema::parse_and_validate(schema, "schema.graphql").unwrap();
         let doc = Document::parse(query, "query.graphql").unwrap();
         let exec = doc.to_executable_validate(&schema).unwrap();
-        let directives = AuthorizationDirectives::from_schema(&schema);
+        let directives = directive_names_from_schema(&schema);
         let mut visitor = ScopeExtractionVisitor::new(
             &schema,
             &exec,
@@ -697,7 +697,7 @@ mod tests {
         doc.to_executable_validate(&schema).unwrap();
 
         let map = schema.implementers_map();
-        let directives = AuthorizationDirectives::from_schema(&schema);
+        let directives = directive_names_from_schema(&schema);
         let mut visitor = ScopeFilteringVisitor::new(
             &schema,
             &map,
