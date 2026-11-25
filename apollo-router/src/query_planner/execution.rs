@@ -158,7 +158,7 @@ impl PlanNode {
             let mut errors;
 
             match self {
-                PlanNode::Sequence { nodes } => {
+                PlanNode::Sequence { nodes, .. } => {
                     value = parent_value.clone();
                     errors = Vec::new();
                     async {
@@ -182,7 +182,7 @@ impl PlanNode {
                     ))
                     .await
                 }
-                PlanNode::Parallel { nodes } => {
+                PlanNode::Parallel { nodes, .. } => {
                     value = Value::default();
                     errors = Vec::new();
                     async {
@@ -301,6 +301,7 @@ impl PlanNode {
                 PlanNode::Defer {
                     primary: Primary { node, .. },
                     deferred,
+                    ..
                 } => {
                     value = parent_value.clone();
                     errors = Vec::new();
@@ -382,6 +383,7 @@ impl PlanNode {
                     condition,
                     if_clause,
                     else_clause,
+                    ..
                 } => {
                     value = Value::default();
                     errors = Vec::new();

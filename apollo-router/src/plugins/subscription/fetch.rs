@@ -279,6 +279,7 @@ mod tests {
                 operation_kind: OperationKind::Subscription,
                 input_rewrites: None,
                 output_rewrites: None,
+                node_id: Default::default(),
             };
 
             let (sender, _receiver) = mpsc::channel(1);

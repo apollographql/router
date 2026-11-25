@@ -26,6 +26,7 @@ use crate::query_plan::SequenceNode;
 use crate::query_plan::conditions::Conditions;
 use crate::query_plan::fetch_dependency_graph::DeferredInfo;
 use crate::query_plan::fetch_dependency_graph::FetchDependencyGraphNode;
+use crate::query_plan::fetch_dependency_graph::FetchIdGenerator;
 
 /// Constant used during query plan cost computation to account for the base cost of doing a fetch,
 /// that is the fact any fetch imply some networking cost, request serialization/deserialization,
@@ -57,6 +58,7 @@ pub(crate) struct FetchDependencyGraphToQueryPlanProcessor {
     /// See [`crate::operation::NormalizedDefer::client_labels`].
     client_labels: IndexMap<String, Option<String>>,
     counter: u32,
+    fetch_id_generator: Arc<FetchIdGenerator>,
 }
 
 /// Computes the cost of a Plan.
@@ -254,6 +256,7 @@ impl FetchDependencyGraphToQueryPlanProcessor {
         operation_compression: SubgraphOperationCompression,
         operation_name: Option<Name>,
         client_labels: IndexMap<String, Option<String>>,
+        fetch_id_generator: Arc<FetchIdGenerator>,
     ) -> Self {
         Self {
             variable_definitions,
@@ -262,6 +265,7 @@ impl FetchDependencyGraphToQueryPlanProcessor {
             operation_name,
             client_labels,
             counter: 0,
+            fetch_id_generator,
         }
     }
 }
@@ -289,6 +293,7 @@ impl FetchDependencyGraphProcessor<Option<PlanNode>, DeferredDeferBlock>
             &self.operation_directives,
             &mut self.operation_compression,
             op_name,
+            &self.fetch_id_generator,
         )
     }
 
@@ -316,6 +321,7 @@ impl FetchDependencyGraphProcessor<Option<PlanNode>, DeferredDeferBlock>
                         condition_variable: name.clone(),
                         if_clause,
                         else_clause,
+                        node_id: self.fetch_id_generator.next_node_id(),
                     });
                 }
                 Some(value)
@@ -327,14 +333,14 @@ impl FetchDependencyGraphProcessor<Option<PlanNode>, DeferredDeferBlock>
         &mut self,
         values: impl IntoIterator<Item = Option<PlanNode>>,
     ) -> Option<PlanNode> {
-        flat_wrap_nodes(NodeKind::Parallel, values)
+        flat_wrap_nodes(NodeKind::Parallel, values, &self.fetch_id_generator)
     }
 
     fn reduce_sequence(
         &mut self,
         values: impl IntoIterator<Item = Option<PlanNode>>,
     ) -> Option<PlanNode> {
-        flat_wrap_nodes(NodeKind::Sequence, values)
+        flat_wrap_nodes(NodeKind::Sequence, values, &self.fetch_id_generator)
     }
 
     fn reduce_deferred(
@@ -403,6 +409,7 @@ impl FetchDependencyGraphProcessor<Option<PlanNode>, DeferredDeferBlock>
                 node: main.map(Box::new),
             },
             deferred,
+            node_id: self.fetch_id_generator.next_node_id(),
         })))
     }
 }
@@ -452,6 +459,7 @@ enum NodeKind {
 fn flat_wrap_nodes(
     kind: NodeKind,
     nodes: impl IntoIterator<Item = Option<PlanNode>>,
+    fetch_id_generator: &FetchIdGenerator,
 ) -> Option<PlanNode> {
     let mut iter = nodes.into_iter().flatten();
     let first = iter.next()?;
@@ -466,8 +474,9 @@ fn flat_wrap_nodes(
             (_, node) => nodes.push(node),
         }
     }
+    let node_id = fetch_id_generator.next_node_id();
     Some(match kind {
-        NodeKind::Parallel => PlanNode::Parallel(ParallelNode { nodes }),
-        NodeKind::Sequence => PlanNode::Sequence(SequenceNode { nodes }),
+        NodeKind::Parallel => PlanNode::Parallel(ParallelNode { nodes, node_id }),
+        NodeKind::Sequence => PlanNode::Sequence(SequenceNode { nodes, node_id }),
     })
 }

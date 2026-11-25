@@ -235,6 +235,12 @@ impl FetchIdGenerator {
     pub(crate) fn next_id(&self) -> u64 {
         self.next.fetch_add(1, std::sync::atomic::Ordering::Relaxed)
     }
+
+    /// Generate the id of a node in the query plan. A plan runs out of memory long before it
+    /// has `u32::MAX` nodes, so the id is not checked for overflow.
+    pub(crate) fn next_node_id(&self) -> super::NodeId {
+        super::NodeId(self.next_id() as u32)
+    }
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -2891,6 +2897,7 @@ impl FetchDependencyGraphNode {
         self.cached_cost.unwrap()
     }
 
+    #[allow(clippy::too_many_arguments)]
     pub(crate) fn to_plan_node(
         &self,
         query_graph: &QueryGraph,
@@ -2899,6 +2906,7 @@ impl FetchDependencyGraphNode {
         operation_directives: &DirectiveList,
         operation_compression: &mut SubgraphOperationCompression,
         operation_name: Option<Name>,
+        fetch_id_generator: &FetchIdGenerator,
     ) -> Result<Option<super::PlanNode>, FederationError> {
         if self.selection_set.selection_set.selections.is_empty() {
             return Ok(None);
@@ -3061,10 +3069,15 @@ impl FetchDependencyGraphNode {
             operation_name,
             operation_kind: self.root_kind.into(),
             output_rewrites,
+            node_id: fetch_id_generator.next_node_id(),
         };
 
         Ok(Some(if let Some(path) = self.merge_at.clone() {
-            super::PlanNode::Flatten(super::FlattenNode::at_path(path, fetch))
+            super::PlanNode::Flatten(super::FlattenNode::at_path(
+                path,
+                fetch,
+                fetch_id_generator.next_node_id(),
+            ))
         } else {
             super::PlanNode::Fetch(Box::new(fetch))
         }))

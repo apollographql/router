@@ -452,7 +452,10 @@ mod tests {
         fn start_with_execution() -> (Self, ExecutionHandle) {
             let (execution_service, execution) = mock::pair();
             // The mock never runs the plan, so any node will do.
-            let rest = PlanNode::Sequence { nodes: Vec::new() };
+            let rest = PlanNode::Sequence {
+                nodes: Vec::new(),
+                node_id: Default::default(),
+            };
             let harness = Self::spawn(
                 Context::new(),
                 SubscriptionConfig::default(),
@@ -488,8 +491,10 @@ mod tests {
                             operation_kind: OperationKind::Subscription,
                             input_rewrites: None,
                             output_rewrites: None,
+                            node_id: Default::default(),
                         },
                         rest,
+                        node_id: Default::default(),
                     })
                     .build(),
             );

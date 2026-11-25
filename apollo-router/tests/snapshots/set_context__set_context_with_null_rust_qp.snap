@@ -35,7 +35,8 @@ expression: response
                 "is_authenticated": false,
                 "scopes": [],
                 "policies": []
-              }
+              },
+              "nodeId": 0
             },
             {
               "kind": "Flatten",
@@ -93,12 +94,15 @@ expression: response
                       "is_authenticated": false,
                       "scopes": [],
                       "policies": []
-                    }
+                    },
+                    "nodeId": 1
                   }
                 }
-              ]
+              ],
+              "nodeId": 2
             }
-          ]
+          ],
+          "nodeId": 3
         }
       },
       "text": "QueryPlan {\n  Sequence {\n    Fetch(service: \"Subgraph1\") {\n      {\n        t {\n          __typename\n          prop\n          id\n          u {\n            __typename\n            id\n          }\n        }\n      }\n    },\n    Flatten(path: \"t.u\") {\n      Fetch(service: \"Subgraph1\") {\n        {\n          ... on U {\n            __typename\n            id\n          }\n        } =>\n        {\n          ... on U {\n            field(a: $contextualArgument_1_0)\n          }\n        }\n      },\n    },\n  },\n}"

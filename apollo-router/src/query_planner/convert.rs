@@ -48,10 +48,15 @@ impl From<&'_ Box<next::PlanNode>> for plan::PlanNode {
 
 impl From<&'_ next::SubscriptionNode> for plan::PlanNode {
     fn from(value: &'_ next::SubscriptionNode) -> Self {
-        let next::SubscriptionNode { primary, rest } = value;
+        let next::SubscriptionNode {
+            primary,
+            rest,
+            node_id,
+        } = value;
         Self::Subscription {
             primary: primary.as_ref().into(),
             rest: option(rest).map(Box::new),
+            node_id: *node_id,
         }
     }
 }
@@ -74,6 +79,7 @@ impl From<&'_ next::FetchNode> for super::fetch::FetchNode {
             operation_name,
             operation_kind,
             output_rewrites,
+            node_id,
         } = value;
         Self {
             service_name: subgraph_name.clone(),
@@ -86,6 +92,7 @@ impl From<&'_ next::FetchNode> for super::fetch::FetchNode {
             output_rewrites: option_vec(output_rewrites),
             schema_aware_hash: Default::default(),
             authorization: Default::default(),
+            node_id: *node_id,
         }
     }
 }
@@ -116,21 +123,27 @@ impl From<&'_ next::EntitySelection> for super::fetch::EntitySelection {
 
 impl From<&'_ next::SequenceNode> for plan::PlanNode {
     fn from(value: &'_ next::SequenceNode) -> Self {
-        let next::SequenceNode { nodes } = value;
-        Self::Sequence { nodes: vec(nodes) }
+        let next::SequenceNode { nodes, node_id } = value;
+        Self::Sequence {
+            nodes: vec(nodes),
+            node_id: *node_id,
+        }
     }
 }
 
 impl From<&'_ next::ParallelNode> for plan::PlanNode {
     fn from(value: &'_ next::ParallelNode) -> Self {
-        let next::ParallelNode { nodes } = value;
-        Self::Parallel { nodes: vec(nodes) }
+        let next::ParallelNode { nodes, node_id } = value;
+        Self::Parallel {
+            nodes: vec(nodes),
+            node_id: *node_id,
+        }
     }
 }
 
 impl From<&'_ next::FlattenNode> for plan::PlanNode {
     fn from(value: &'_ next::FlattenNode) -> Self {
-        let next::FlattenNode { members } = value;
+        let next::FlattenNode { members, node_id } = value;
         Self::Flatten(plan::FlattenNode {
             members: members
                 .iter()
@@ -143,16 +156,22 @@ impl From<&'_ next::FlattenNode> for plan::PlanNode {
                     fetch: (&member.fetch).into(),
                 })
                 .collect(),
+            node_id: *node_id,
         })
     }
 }
 
 impl From<&'_ next::DeferNode> for plan::PlanNode {
     fn from(value: &'_ next::DeferNode) -> Self {
-        let next::DeferNode { primary, deferred } = value;
+        let next::DeferNode {
+            primary,
+            deferred,
+            node_id,
+        } = value;
         Self::Defer {
             primary: primary.into(),
             deferred: vec(deferred),
+            node_id: *node_id,
         }
     }
 }
@@ -163,11 +182,13 @@ impl From<&'_ next::ConditionNode> for plan::PlanNode {
             condition_variable,
             if_clause,
             else_clause,
+            node_id,
         } = value;
         Self::Condition {
             condition: condition_variable.to_string(),
             if_clause: if_clause.as_ref().map(Into::into).map(Box::new),
             else_clause: else_clause.as_ref().map(Into::into).map(Box::new),
+            node_id: *node_id,
         }
     }
 }
@@ -184,6 +205,7 @@ impl From<&'_ next::FetchNode> for subscription::SubscriptionNode {
             operation_name,
             operation_kind,
             output_rewrites,
+            node_id,
         } = value;
         let input_rewrites = kind
             .entity_selection()
@@ -196,6 +218,7 @@ impl From<&'_ next::FetchNode> for subscription::SubscriptionNode {
             operation_kind: (*operation_kind).into(),
             input_rewrites,
             output_rewrites: option_vec(output_rewrites),
+            node_id: *node_id,
         }
     }
 }

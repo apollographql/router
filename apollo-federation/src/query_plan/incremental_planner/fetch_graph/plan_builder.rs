@@ -44,6 +44,7 @@ use crate::query_plan::QueryPlanCost;
 use crate::query_plan::conditions::ConditionKind;
 use crate::query_plan::conditions::Conditions;
 use crate::query_plan::conditions::remove_conditions_from_selection_set;
+use crate::query_plan::fetch_dependency_graph::FetchIdGenerator;
 use crate::query_plan::fetch_dependency_graph::compute_input_rewrites_on_key_fetch;
 use crate::query_plan::fetch_dependency_graph::operation_for_entities_fetch;
 use crate::query_plan::fetch_dependency_graph::operation_for_query_fetch;
@@ -70,6 +71,8 @@ pub(crate) struct PlanBuildContext<'a> {
     /// Numbers fetch nodes referenced by deferred blocks' `depends`; spans
     /// the whole plan so per-field mutation planning cannot collide ids.
     pub(crate) fetch_id_counter: u64,
+    /// Draws the id of each node in the plan, from ids shared by the whole plan.
+    pub(crate) fetch_id_generator: Arc<FetchIdGenerator>,
     /// When true, generated subgraph operations skip document validation
     /// and selection-set validation (valid by construction).
     pub(crate) skip_validation: bool,
@@ -155,23 +158,25 @@ fn push_into_parallel(nodes: &mut Vec<PlanNode>, plan_node: PlanNode) {
 }
 
 /// None for no nodes, the node itself for one, a SequenceNode otherwise.
-fn reduce_sequence(mut nodes: Vec<PlanNode>) -> Option<PlanNode> {
+fn reduce_sequence(mut nodes: Vec<PlanNode>, ids: &FetchIdGenerator) -> Option<PlanNode> {
     match nodes.len() {
         0 => None,
         1 => nodes.pop(),
         _ => Some(PlanNode::Sequence(crate::query_plan::SequenceNode {
             nodes,
+            node_id: ids.next_node_id(),
         })),
     }
 }
 
 /// None for no nodes, the node itself for one, a ParallelNode otherwise.
-fn reduce_parallel(mut nodes: Vec<PlanNode>) -> Option<PlanNode> {
+fn reduce_parallel(mut nodes: Vec<PlanNode>, ids: &FetchIdGenerator) -> Option<PlanNode> {
     match nodes.len() {
         0 => None,
         1 => nodes.pop(),
         _ => Some(PlanNode::Parallel(crate::query_plan::ParallelNode {
             nodes,
+            node_id: ids.next_node_id(),
         })),
     }
 }
@@ -319,6 +324,7 @@ impl FetchGraph {
                 node: primary_plan.map(Box::new),
             },
             deferred: deferred_blocks,
+            node_id: ctx.fetch_id_generator.next_node_id(),
         });
 
         Ok((Some(defer_node), total_cost))
@@ -469,6 +475,7 @@ impl FetchGraph {
                         node: inner_plan.map(Box::new),
                     },
                     deferred: inner_deferred,
+                    node_id: ctx.fetch_id_generator.next_node_id(),
                 });
                 Some(Box::new(nested_defer))
             } else if nodes.is_empty() {
@@ -521,7 +528,7 @@ impl FetchGraph {
                 push_into_parallel(&mut parallel, plan_node);
             }
         }
-        Ok(reduce_parallel(parallel))
+        Ok(reduce_parallel(parallel, &ctx.fetch_id_generator))
     }
 
     /// Run a connected part's wavefront (its lowest-level fetches), each
@@ -554,19 +561,19 @@ impl FetchGraph {
             if let Some(plan_node) = self.plan_by_level(ctx, branch, levels, scope, cost)? {
                 push_into_sequence(&mut sequence, plan_node);
             }
-            if let Some(plan_node) = reduce_sequence(sequence) {
+            if let Some(plan_node) = reduce_sequence(sequence, &ctx.fetch_id_generator) {
                 push_into_parallel(&mut parallel, plan_node);
             }
         }
 
         let mut sequence = Vec::new();
-        if let Some(plan_node) = reduce_parallel(parallel) {
+        if let Some(plan_node) = reduce_parallel(parallel, &ctx.fetch_id_generator) {
             push_into_sequence(&mut sequence, plan_node);
         }
         if let Some(plan_node) = self.plan_by_level(ctx, &after, levels, scope, cost)? {
             push_into_sequence(&mut sequence, plan_node);
         }
-        Ok(reduce_sequence(sequence))
+        Ok(reduce_sequence(sequence, &ctx.fetch_id_generator))
     }
 
     /// Assign each fetch after the wavefront to the branch of the one
@@ -859,6 +866,7 @@ impl FetchGraph {
             operation_name: op_name,
             operation_kind: node_root_kind.into(),
             output_rewrites,
+            node_id: ctx.fetch_id_generator.next_node_id(),
         };
 
         // 8. Wrap entity/root-hop fetches in FlattenNode.
@@ -867,6 +875,7 @@ impl FetchGraph {
                 PlanNode::Flatten(crate::query_plan::FlattenNode::at_path(
                     merge_at.clone(),
                     fetch,
+                    ctx.fetch_id_generator.next_node_id(),
                 ))
             }
             FetchGroupKind::Root { .. } => PlanNode::Fetch(Box::new(fetch)),
@@ -883,6 +892,7 @@ impl FetchGraph {
                     condition_variable: name.clone(),
                     if_clause,
                     else_clause,
+                    node_id: ctx.fetch_id_generator.next_node_id(),
                 }));
             }
         }
@@ -1359,6 +1369,7 @@ mod tests {
             operation_compression: &mut compression,
             operation_counter: 0,
             fetch_id_counter: 0,
+            fetch_id_generator: Arc::new(FetchIdGenerator::new()),
             skip_validation: false,
         };
 
@@ -1418,6 +1429,7 @@ mod tests {
             operation_compression: &mut compression,
             operation_counter: 0,
             fetch_id_counter: 0,
+            fetch_id_generator: Arc::new(FetchIdGenerator::new()),
             skip_validation: false,
         };
         assert!(
@@ -1488,6 +1500,7 @@ mod tests {
             operation_compression: &mut compression,
             operation_counter: 0,
             fetch_id_counter: 0,
+            fetch_id_generator: Arc::new(FetchIdGenerator::new()),
             skip_validation: false,
         };
 
@@ -1544,6 +1557,7 @@ mod tests {
             operation_compression: compression,
             operation_counter: 0,
             fetch_id_counter: 0,
+            fetch_id_generator: Arc::new(FetchIdGenerator::new()),
             skip_validation: false,
         }
     }

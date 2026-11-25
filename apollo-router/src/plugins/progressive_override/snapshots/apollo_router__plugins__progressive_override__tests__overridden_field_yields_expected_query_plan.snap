@@ -40,7 +40,8 @@ expression: query_plan
                 "is_authenticated": false,
                 "scopes": [],
                 "policies": []
-              }
+              },
+              "nodeId": 0
             },
             {
               "kind": "Flatten",
@@ -85,12 +86,15 @@ expression: query_plan
                       "is_authenticated": false,
                       "scopes": [],
                       "policies": []
-                    }
+                    },
+                    "nodeId": 1
                   }
                 }
-              ]
+              ],
+              "nodeId": 2
             }
-          ]
+          ],
+          "nodeId": 3
         }
       },
       "text": "QueryPlan {\n  Sequence {\n    Fetch(service: \"Subgraph1\") {\n      {\n        percent100 {\n          __typename\n          id\n        }\n      }\n    },\n    Flatten(path: \"percent100\") {\n      Fetch(service: \"Subgraph2\") {\n        {\n          ... on T {\n            __typename\n            id\n          }\n        } =>\n        {\n          ... on T {\n            foo\n          }\n        }\n      },\n    },\n  },\n}"

@@ -1037,7 +1037,9 @@ mod tests {
             subselections: &HashMap<SubSelectionKey, SubSelectionValue>,
         ) {
             match node {
-                PlanNode::Defer { primary, deferred } => {
+                PlanNode::Defer {
+                    primary, deferred, ..
+                } => {
                     if let Some(subselection) = primary.subselection.clone() {
                         assert!(
                             subselections
@@ -1071,7 +1073,7 @@ mod tests {
                         }
                     }
                 }
-                PlanNode::Sequence { nodes } | PlanNode::Parallel { nodes } => {
+                PlanNode::Sequence { nodes, .. } | PlanNode::Parallel { nodes, .. } => {
                     for node in nodes {
                         check_query_plan_coverage(node, parent_label, subselections)
                     }
@@ -1081,6 +1083,7 @@ mod tests {
                     condition: _,
                     if_clause,
                     else_clause,
+                    ..
                 } => {
                     if let Some(node) = if_clause {
                         check_query_plan_coverage(node, parent_label, subselections)

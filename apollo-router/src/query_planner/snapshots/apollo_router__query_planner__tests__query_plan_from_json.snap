@@ -24,6 +24,9 @@ Sequence {
                     scopes: [],
                     policies: [],
                 },
+                node_id: NodeId(
+                    0,
+                ),
             },
         ),
         Parallel {
@@ -97,9 +100,15 @@ Sequence {
                                                 scopes: [],
                                                 policies: [],
                                             },
+                                            node_id: NodeId(
+                                                0,
+                                            ),
                                         },
                                     },
                                 ],
+                                node_id: NodeId(
+                                    0,
+                                ),
                             },
                         ),
                         Flatten(
@@ -181,12 +190,21 @@ Sequence {
                                                 scopes: [],
                                                 policies: [],
                                             },
+                                            node_id: NodeId(
+                                                0,
+                                            ),
                                         },
                                     },
                                 ],
+                                node_id: NodeId(
+                                    0,
+                                ),
                             },
                         ),
                     ],
+                    node_id: NodeId(
+                        0,
+                    ),
                 },
                 Sequence {
                     nodes: [
@@ -252,9 +270,15 @@ Sequence {
                                                 scopes: [],
                                                 policies: [],
                                             },
+                                            node_id: NodeId(
+                                                0,
+                                            ),
                                         },
                                     },
                                 ],
+                                node_id: NodeId(
+                                    0,
+                                ),
                             },
                         ),
                         Flatten(
@@ -333,14 +357,29 @@ Sequence {
                                                 scopes: [],
                                                 policies: [],
                                             },
+                                            node_id: NodeId(
+                                                0,
+                                            ),
                                         },
                                     },
                                 ],
+                                node_id: NodeId(
+                                    0,
+                                ),
                             },
                         ),
                     ],
+                    node_id: NodeId(
+                        0,
+                    ),
                 },
             ],
+            node_id: NodeId(
+                0,
+            ),
         },
     ],
+    node_id: NodeId(
+        0,
+    ),
 }

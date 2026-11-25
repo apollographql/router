@@ -147,7 +147,8 @@ expression: response
                 "is_authenticated": false,
                 "scopes": [],
                 "policies": []
-              }
+              },
+              "nodeId": 0
             },
             {
               "kind": "Parallel",
@@ -215,10 +216,12 @@ expression: response
                           "is_authenticated": false,
                           "scopes": [],
                           "policies": []
-                        }
+                        },
+                        "nodeId": 1
                       }
                     }
-                  ]
+                  ],
+                  "nodeId": 2
                 },
                 {
                   "kind": "Flatten",
@@ -283,14 +286,18 @@ expression: response
                           "is_authenticated": false,
                           "scopes": [],
                           "policies": []
-                        }
+                        },
+                        "nodeId": 3
                       }
                     }
-                  ]
+                  ],
+                  "nodeId": 4
                 }
-              ]
+              ],
+              "nodeId": 5
             }
-          ]
+          ],
+          "nodeId": 6
         }
       },
       "text": "QueryPlan {\n  Sequence {\n    Fetch(service: \"searchSubgraph\") {\n      {\n        searchListOfList {\n          __typename\n          ... on MovieResult {\n            sections {\n              ...c\n            }\n            id\n          }\n          ... on ArticleResult {\n            id\n            sections {\n              ...c\n            }\n          }\n        }\n      }\n\n      fragment a on EntityCollectionSection {\n        __typename\n        id\n      }\n\n      fragment b on GallerySection {\n        __typename\n        id\n      }\n\n      fragment c on Section {\n        __typename\n        ...a\n        ...b\n      }\n    },\n    Parallel {\n      Flatten(path: \"searchListOfList.@.@|[ArticleResult].sections.@\") {\n        Fetch(service: \"artworkSubgraph\") {\n          {\n            ... on GallerySection {\n              __typename\n              id\n            }\n            ... on EntityCollectionSection {\n              __typename\n              id\n            }\n          } =>\n          {\n            ... on GallerySection {\n              artwork(params: $articleResultParam)\n            }\n            ... on EntityCollectionSection {\n              artwork(params: $articleResultParam)\n              title\n            }\n          }\n        },\n      },\n      Flatten(path: \"searchListOfList.@.@|[MovieResult].sections.@\") {\n        Fetch(service: \"artworkSubgraph\") {\n          {\n            ... on EntityCollectionSection {\n              __typename\n              id\n            }\n            ... on GallerySection {\n              __typename\n              id\n            }\n          } =>\n          {\n            ... on EntityCollectionSection {\n              title\n              artwork(params: $movieResultParam)\n            }\n            ... on GallerySection {\n              artwork(params: $movieResultParam)\n            }\n          }\n        },\n      },\n    },\n  },\n}"

@@ -45,6 +45,8 @@ pub struct SubscriptionNode {
     pub primary: Box<FetchNode>,
     // XXX(@goto-bus-stop) Is this not just always a SequenceNode?
     pub rest: Option<Box<PlanNode>>,
+    #[serde(default)]
+    pub node_id: NodeId,
 }
 
 #[derive(Debug, Clone, PartialEq, derive_more::From, Serialize, Deserialize)]
@@ -104,7 +106,17 @@ pub struct FetchNode {
     /// data that is received from a fetch (and before it is applied to the current in-memory
     /// results).
     pub output_rewrites: Vec<Arc<FetchDataRewrite>>,
+    #[serde(default)]
+    pub node_id: NodeId,
 }
+
+/// Identifies a node within its plan. The planner draws it from the plan's fetch ids when it
+/// builds the node, so it is unique within the plan but says nothing about order.
+#[derive(
+    Debug, Clone, Copy, Default, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize, Deserialize,
+)]
+#[serde(transparent)]
+pub struct NodeId(pub u32);
 
 /// Whether a fetch selects root fields or `_entities`, and what it sends from data already in
 /// the response to do so.
@@ -153,16 +165,22 @@ impl FetchKind {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct SequenceNode {
     pub nodes: Vec<PlanNode>,
+    #[serde(default)]
+    pub node_id: NodeId,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct ParallelNode {
     pub nodes: Vec<PlanNode>,
+    #[serde(default)]
+    pub node_id: NodeId,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct FlattenNode {
     pub members: Vec<FlattenMember>,
+    #[serde(default)]
+    pub node_id: NodeId,
 }
 
 /// One fetch of a `FlattenNode`. An entity fetch collects its representations at every one of
@@ -175,8 +193,9 @@ pub struct FlattenMember {
 
 impl FlattenNode {
     /// `fetch` with its whole response merging at `path`.
-    pub fn at_path(path: Vec<FetchDataPathElement>, fetch: FetchNode) -> Self {
+    pub fn at_path(path: Vec<FetchDataPathElement>, fetch: FetchNode, node_id: NodeId) -> Self {
         Self {
+            node_id,
             members: vec![FlattenMember {
                 paths: vec![path],
                 fetch,
@@ -202,7 +221,11 @@ impl FlattenNode {
             .iter()
             .flat_map(|member| {
                 member.paths.iter().map(|path| {
-                    PlanNode::Flatten(Self::at_path(path.clone(), member.fetch.clone()))
+                    PlanNode::Flatten(Self::at_path(
+                        path.clone(),
+                        member.fetch.clone(),
+                        self.node_id,
+                    ))
                 })
             })
             .collect()
@@ -234,6 +257,8 @@ pub struct DeferNode {
     /// will correspond to a different chunk of the response to the client (after the initial
     /// on-deferred one that is).
     pub deferred: Vec<DeferredDeferBlock>,
+    #[serde(default)]
+    pub node_id: NodeId,
 }
 
 /// The primary block of a `DeferNode`.
@@ -286,6 +311,8 @@ pub struct ConditionNode {
     pub condition_variable: Name,
     pub if_clause: Option<Box<PlanNode>>,
     pub else_clause: Option<Box<PlanNode>>,
+    #[serde(default)]
+    pub node_id: NodeId,
 }
 
 /// The type of rewrites currently supported on the input/output data of fetches.
@@ -386,6 +413,7 @@ mod tests {
             operation_name: None,
             operation_kind: executable::OperationType::Query,
             output_rewrites: Vec::new(),
+            node_id: NodeId::default(),
         }
     }
 
@@ -417,7 +445,10 @@ mod tests {
             (Vec::new(), None),
         ];
         for (members, single_path_len) in cases {
-            let flatten = FlattenNode { members };
+            let flatten = FlattenNode {
+                members,
+                node_id: NodeId::default(),
+            };
             assert_eq!(
                 flatten.single().map(|(path, _)| path.len()),
                 single_path_len

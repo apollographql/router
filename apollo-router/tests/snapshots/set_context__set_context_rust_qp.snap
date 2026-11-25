@@ -19,6 +19,7 @@ expression: response
         "kind": "QueryPlan",
         "node": {
           "kind": "Sequence",
+          "nodeId": 3,
           "nodes": [
             {
               "authorization": {
@@ -31,6 +32,7 @@ expression: response
               },
               "id": null,
               "kind": "Fetch",
+              "nodeId": 0,
               "operation": "query set_context_rust_qp__Subgraph1__0 { t { __typename prop id u { __typename id } } }",
               "operationKind": "query",
               "operationName": "set_context_rust_qp__Subgraph1__0",
@@ -81,6 +83,7 @@ expression: response
                       ]
                     },
                     "id": null,
+                    "nodeId": 1,
                     "operation": "query set_context_rust_qp__Subgraph1__1($representations: [_Any!]!, $contextualArgument_1_0: String) { _entities(representations: $representations) { ... on U { field(a: $contextualArgument_1_0) } } }",
                     "operationKind": "query",
                     "operationName": "set_context_rust_qp__Subgraph1__1",
@@ -98,7 +101,8 @@ expression: response
                     ]
                   ]
                 }
-              ]
+              ],
+              "nodeId": 2
             }
           ]
         }

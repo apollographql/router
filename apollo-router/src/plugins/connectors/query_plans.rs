@@ -69,12 +69,12 @@ pub(crate) fn replace_connector_service_names(
 
     fn recurse(plan: &mut PlanNode, replacements: &IndexMap<Arc<str>, String>) {
         match plan {
-            PlanNode::Sequence { nodes } => {
+            PlanNode::Sequence { nodes, .. } => {
                 for node in nodes {
                     recurse(node, replacements);
                 }
             }
-            PlanNode::Parallel { nodes } => {
+            PlanNode::Parallel { nodes, .. } => {
                 for node in nodes {
                     recurse(node, replacements);
                 }
@@ -91,7 +91,9 @@ pub(crate) fn replace_connector_service_names(
                     }
                 }
             }
-            PlanNode::Defer { primary, deferred } => {
+            PlanNode::Defer {
+                primary, deferred, ..
+            } => {
                 if let Some(primary) = primary.node.as_mut() {
                     recurse(primary, replacements);
                 }
@@ -101,7 +103,9 @@ pub(crate) fn replace_connector_service_names(
                     }
                 }
             }
-            PlanNode::Subscription { primary: _, rest } => {
+            PlanNode::Subscription {
+                primary: _, rest, ..
+            } => {
                 // ignoring subscriptions because connectors are not supported
                 if let Some(node) = rest {
                     recurse(node, replacements);

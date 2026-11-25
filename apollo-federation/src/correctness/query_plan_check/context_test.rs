@@ -216,6 +216,7 @@ fn context_met(
         operation_kind: executable::OperationType::Query,
         output_rewrites: Vec::new(),
         protocol: Default::default(),
+        node_id: Default::default(),
     };
     // Outside a deferred block, what a fetch can read is everything fetched before it.
     check_context_rewrites(

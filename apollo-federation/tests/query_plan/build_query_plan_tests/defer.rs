@@ -2745,7 +2745,7 @@ fn defer_test_defer_with_mutliple_conditions_and_labels() {
               Defer {
                 Primary {
                   { t { x u { a } } }:
-                  Fetch(service: "Subgraph1", id: 2) {
+                  Fetch(service: "Subgraph1", id: 11) {
                     {
                       t {
                         __typename
@@ -2760,7 +2760,7 @@ fn defer_test_defer_with_mutliple_conditions_and_labels() {
                     }
                   },
                 }, [
-                  Deferred(depends: [2], path: "t", label: "foo") {
+                  Deferred(depends: [11], path: "t", label: "foo") {
                     { y }:
                     Flatten(path: "t") {
                       Fetch(service: "Subgraph2") {
@@ -2778,7 +2778,7 @@ fn defer_test_defer_with_mutliple_conditions_and_labels() {
                       },
                     },
                   },
-                  Deferred(depends: [2], path: "t/u") {
+                  Deferred(depends: [11], path: "t/u") {
                     { b }:
                     Flatten(path: "t.u") {
                       Fetch(service: "Subgraph3") {
@@ -2807,7 +2807,7 @@ fn defer_test_defer_with_mutliple_conditions_and_labels() {
                 Primary {
                   { t { x y } }:
                   Sequence {
-                    Fetch(service: "Subgraph1", id: 3) {
+                    Fetch(service: "Subgraph1", id: 19) {
                       {
                         t {
                           __typename
@@ -2833,7 +2833,7 @@ fn defer_test_defer_with_mutliple_conditions_and_labels() {
                     },
                   },
                 }, [
-                  Deferred(depends: [3], path: "t", label: "bar") {
+                  Deferred(depends: [19], path: "t", label: "bar") {
                     { u { a b } }:
                     Sequence {
                       Flatten(path: "t") {

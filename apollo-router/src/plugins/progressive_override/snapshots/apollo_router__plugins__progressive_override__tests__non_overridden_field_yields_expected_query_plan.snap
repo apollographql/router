@@ -35,7 +35,8 @@ expression: query_plan
             "is_authenticated": false,
             "scopes": [],
             "policies": []
-          }
+          },
+          "nodeId": 0
         }
       },
       "text": "QueryPlan {\n  Fetch(service: \"Subgraph2\") {\n    {\n      percent0 {\n        foo\n      }\n    }\n  },\n}"

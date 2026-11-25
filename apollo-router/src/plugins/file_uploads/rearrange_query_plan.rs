@@ -11,6 +11,7 @@ use super::MapField;
 use super::Result as UploadResult;
 use super::error::FileUploadError;
 use crate::query_planner::DeferredNode;
+use crate::query_planner::NodeId;
 use crate::query_planner::PlanNode;
 use crate::services::execution::QueryPlan;
 
@@ -38,7 +39,16 @@ pub(super) fn rearrange_query_plan(
     }
 
     let root = root
-        .map(|root| rearrange_plan_node(root, &mut IndexMap::default(), &variable_ranges))
+        .map(|root| {
+            // A node this adds needs an id no node in the plan has.
+            let mut next_id = root.max_node_id().0 + 1;
+            rearrange_plan_node(
+                root,
+                &mut IndexMap::default(),
+                &variable_ranges,
+                &mut next_id,
+            )
+        })
         .transpose()?;
     Ok(QueryPlan {
         root: root.map(Arc::new),
@@ -54,29 +64,32 @@ fn rearrange_plan_node<'a>(
     node: &PlanNode,
     acc_variables: &mut IndexMap<&'a str, &'a (Option<usize>, Option<usize>)>,
     variable_ranges: &'a HashMap<&str, (Option<usize>, Option<usize>)>,
+    next_id: &mut u32,
 ) -> UploadResult<PlanNode> {
     Ok(match node {
         PlanNode::Condition {
             condition,
             if_clause,
             else_clause,
+            node_id,
         } => {
             // Rearrange and validate nodes inside 'if_clause'
             let if_clause = if_clause
                 .as_ref()
-                .map(|node| rearrange_plan_node(node, acc_variables, variable_ranges))
+                .map(|node| rearrange_plan_node(node, acc_variables, variable_ranges, next_id))
                 .transpose();
 
             // Rearrange and validate nodes inside 'if_clause'
             let else_clause = else_clause
                 .as_ref()
-                .map(|node| rearrange_plan_node(node, acc_variables, variable_ranges))
+                .map(|node| rearrange_plan_node(node, acc_variables, variable_ranges, next_id))
                 .transpose();
 
             PlanNode::Condition {
                 condition: condition.clone(),
                 if_clause: if_clause?.map(Box::new),
                 else_clause: else_clause?.map(Box::new),
+                node_id: *node_id,
             }
         }
         PlanNode::Fetch(fetch) => {
@@ -88,7 +101,11 @@ fn rearrange_plan_node<'a>(
             }
             PlanNode::Fetch(fetch.clone())
         }
-        PlanNode::Subscription { primary, rest } => {
+        PlanNode::Subscription {
+            primary,
+            rest,
+            node_id,
+        } => {
             // Extract variables used in this node
             for variable in primary.variable_usages.iter() {
                 if let Some((name, range)) = variable_ranges.get_key_value(variable.as_ref()) {
@@ -104,6 +121,7 @@ fn rearrange_plan_node<'a>(
                     rest,
                     &mut rest_variables,
                     variable_ranges,
+                    next_id,
                 ));
                 if !rest_variables.is_empty() {
                     return Err(FileUploadError::VariablesForbiddenInsideSubscription(
@@ -118,16 +136,21 @@ fn rearrange_plan_node<'a>(
             PlanNode::Subscription {
                 primary: primary.clone(),
                 rest: rest.clone(),
+                node_id: *node_id,
             }
         }
-        PlanNode::Defer { primary, deferred } => {
+        PlanNode::Defer {
+            primary,
+            deferred,
+            node_id,
+        } => {
             let mut primary = primary.clone();
             let deferred = deferred.clone();
 
             // Rearrange and validate nodes inside 'primary'
             let primary_node = primary
                 .node
-                .map(|node| rearrange_plan_node(&node, acc_variables, variable_ranges))
+                .map(|node| rearrange_plan_node(&node, acc_variables, variable_ranges, next_id))
                 .transpose();
 
             // Error if 'deferred' contains file variables
@@ -139,6 +162,7 @@ fn rearrange_plan_node<'a>(
                         node,
                         &mut deferred_variables,
                         variable_ranges,
+                        next_id,
                     ));
                 }
             }
@@ -152,7 +176,11 @@ fn rearrange_plan_node<'a>(
             }
 
             primary.node = primary_node?.map(Box::new);
-            PlanNode::Defer { primary, deferred }
+            PlanNode::Defer {
+                primary,
+                deferred,
+                node_id: *node_id,
+            }
         }
         PlanNode::Flatten(flatten_node) => {
             // Extract variables used in this node.
@@ -167,7 +195,7 @@ fn rearrange_plan_node<'a>(
             }
             PlanNode::Flatten(flatten_node.clone())
         }
-        PlanNode::Sequence { nodes } => {
+        PlanNode::Sequence { nodes, node_id } => {
             // We can't rearange nodes inside a Sequence so just error if "file ranges" of nodes overlaps.
             let mut sequence = Vec::new();
             let mut sequence_last = None;
@@ -176,7 +204,8 @@ fn rearrange_plan_node<'a>(
             let mut duplicate_variables = IndexSet::new();
             for node in nodes.iter() {
                 let mut node_variables = IndexMap::new();
-                let node = rearrange_plan_node(node, &mut node_variables, variable_ranges)?;
+                let node =
+                    rearrange_plan_node(node, &mut node_variables, variable_ranges, next_id)?;
                 sequence.push(node);
 
                 for (variable, range) in node_variables.into_iter() {
@@ -205,9 +234,12 @@ fn rearrange_plan_node<'a>(
             if has_overlap {
                 return Err(FileUploadError::MisorderedVariables);
             }
-            PlanNode::Sequence { nodes: sequence }
+            PlanNode::Sequence {
+                nodes: sequence,
+                node_id: *node_id,
+            }
         }
-        PlanNode::Parallel { nodes } => {
+        PlanNode::Parallel { nodes, node_id } => {
             // We can rearange nodes inside a Parallel, so we order all nodes based on the first file they use and wrap them into Sequence node.
             // Note: we don't wrap or change order of nodes that don't use "file variables".
             let mut parallel = Vec::new();
@@ -216,7 +248,8 @@ fn rearrange_plan_node<'a>(
 
             for node in nodes.iter() {
                 let mut node_variables = IndexMap::new();
-                let node = rearrange_plan_node(node, &mut node_variables, variable_ranges)?;
+                let node =
+                    rearrange_plan_node(node, &mut node_variables, variable_ranges, next_id)?;
                 if node_variables.is_empty() {
                     parallel.push(node);
                     continue;
@@ -254,7 +287,10 @@ fn rearrange_plan_node<'a>(
             if sequence.len() <= 1 {
                 // if there are no node competing for files, keep nodes nodes in Parallel
                 parallel.extend(sequence.into_values().map(|(node, _)| node));
-                PlanNode::Parallel { nodes: parallel }
+                PlanNode::Parallel {
+                    nodes: parallel,
+                    node_id: *node_id,
+                }
             } else {
                 let mut nodes = Vec::new();
                 let mut sequence_last_file = None;
@@ -268,11 +304,22 @@ fn rearrange_plan_node<'a>(
 
                 if parallel.is_empty() {
                     // if all nodes competing for files replace Parallel with Sequence
-                    PlanNode::Sequence { nodes }
+                    PlanNode::Sequence {
+                        nodes,
+                        node_id: *node_id,
+                    }
                 } else {
                     // if some of the nodes competing for files wrap them with Sequence within Parallel
-                    parallel.push(PlanNode::Sequence { nodes });
-                    PlanNode::Parallel { nodes: parallel }
+                    let sequence_id = NodeId(*next_id);
+                    *next_id += 1;
+                    parallel.push(PlanNode::Sequence {
+                        nodes,
+                        node_id: sequence_id,
+                    });
+                    PlanNode::Parallel {
+                        nodes: parallel,
+                        node_id: *node_id,
+                    }
                 }
             }
         }
@@ -381,7 +428,10 @@ mod tests {
         .unwrap();
 
         let result = rearrange_query_plan(&query_plan, &map_field);
-        assert_eq!(to_root_json(result.unwrap()), root_json);
+        assert_eq!(
+            to_root_json(result.unwrap()),
+            normalize_json::<PlanNode>(root_json)
+        );
     }
 
     #[test]
@@ -450,7 +500,10 @@ mod tests {
         .unwrap();
 
         let result = rearrange_query_plan(&query_plan, &map_field);
-        assert_eq!(to_root_json(result.unwrap()), root_json);
+        assert_eq!(
+            to_root_json(result.unwrap()),
+            normalize_json::<PlanNode>(root_json)
+        );
     }
 
     #[test]
@@ -497,7 +550,10 @@ mod tests {
         .unwrap();
 
         let result = rearrange_query_plan(&query_plan, &map_field);
-        assert_eq!(to_root_json(result.unwrap()), root_json);
+        assert_eq!(
+            to_root_json(result.unwrap()),
+            normalize_json::<PlanNode>(root_json)
+        );
     }
 
     #[test]
@@ -592,7 +648,10 @@ mod tests {
         .unwrap();
 
         let result = rearrange_query_plan(&query_plan, &map_field);
-        assert_eq!(to_root_json(result.unwrap()), root_json);
+        assert_eq!(
+            to_root_json(result.unwrap()),
+            normalize_json::<PlanNode>(root_json)
+        );
     }
 
     #[test]
@@ -635,7 +694,10 @@ mod tests {
         .unwrap();
 
         let result = rearrange_query_plan(&query_plan, &map_field);
-        assert_eq!(to_root_json(result.unwrap()), root_json);
+        assert_eq!(
+            to_root_json(result.unwrap()),
+            normalize_json::<PlanNode>(root_json)
+        );
     }
 
     #[test]
@@ -725,14 +787,14 @@ mod tests {
         let result = rearrange_query_plan(&query_plan, &map_field);
         assert_eq!(
             to_root_json(result.unwrap()),
-            json!({
+            normalize_json::<PlanNode>(json!({
               "kind": "Parallel",
               "nodes": [
                 fake_fetch("subgraph1", vec!["not_a_file"]),
                 fake_fetch("subgraph2", vec!["not_a_file"]),
                 fake_fetch("uploads1", vec!["file1"]),
               ]
-            })
+            }))
         );
     }
 
@@ -755,13 +817,13 @@ mod tests {
         let result = rearrange_query_plan(&query_plan, &map_field);
         assert_eq!(
             to_root_json(result.unwrap()),
-            json!({
+            normalize_json::<PlanNode>(json!({
               "kind": "Sequence",
               "nodes": [
                 fake_fetch("uploads1", vec!["file1"]),
                 fake_fetch("uploads2", vec!["file2"])
               ]
-            })
+            }))
         );
     }
 
@@ -785,7 +847,7 @@ mod tests {
         let result = rearrange_query_plan(&query_plan, &map_field);
         assert_eq!(
             to_root_json(result.unwrap()),
-            json!({
+            normalize_json::<PlanNode>(json!({
               "kind": "Parallel",
               "nodes": [
                 fake_fetch("subgraph1", vec!["not_a_file"]),
@@ -794,10 +856,12 @@ mod tests {
                   "nodes": [
                     fake_fetch("uploads1", vec!["file1"]),
                     fake_fetch("uploads2", vec!["file2"])
-                  ]
+                  ],
+                  // The sequence is new, so it takes an id no node in the plan has.
+                  "nodeId": 1
                 }
               ]
-            })
+            }))
         );
     }
 
@@ -820,13 +884,13 @@ mod tests {
         let result = rearrange_query_plan(&query_plan, &map_field);
         assert_eq!(
             to_root_json(result.unwrap()),
-            json!({
+            normalize_json::<PlanNode>(json!({
               "kind": "Sequence",
               "nodes": [
                 fake_fetch("uploads2", vec!["file0"]),
                 fake_fetch("uploads1", vec!["file1"])
               ]
-            })
+            }))
         );
     }
 

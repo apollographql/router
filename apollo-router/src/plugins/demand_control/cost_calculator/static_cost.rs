@@ -962,7 +962,7 @@ fn collect_fetches<'a>(
 ) -> PlanCost {
     let mut collect = |node| collect_fetches(node, flatten_path, entity_counts, fetches);
     match node {
-        PlanNode::Sequence { nodes } | PlanNode::Parallel { nodes } => {
+        PlanNode::Sequence { nodes, .. } | PlanNode::Parallel { nodes, .. } => {
             PlanCost::Sum(nodes.iter().map(collect).collect())
         }
         PlanNode::Fetch(fetch_node) => collect_fetch(fetch_node, flatten_path, fetches),
@@ -984,6 +984,7 @@ fn collect_fetches<'a>(
             condition: _,
             if_clause,
             else_clause,
+            ..
         } => match (if_clause, else_clause) {
             (None, None) => PlanCost::Sum(Vec::new()),
             (Some(node), None) | (None, Some(node)) => collect(node),
@@ -993,7 +994,9 @@ fn collect_fetches<'a>(
                 PlanCost::Max(Box::new(if_cost), Box::new(else_cost))
             }
         },
-        PlanNode::Defer { primary, deferred } => PlanCost::Sum(
+        PlanNode::Defer {
+            primary, deferred, ..
+        } => PlanCost::Sum(
             primary
                 .node
                 .iter()
@@ -1007,7 +1010,11 @@ fn collect_fetches<'a>(
                 .collect(),
         ),
         // A subscription's follow-up fetches (`rest`) aren't scored.
-        PlanNode::Subscription { primary, rest: _ } => {
+        PlanNode::Subscription {
+            primary,
+            rest: _,
+            node_id: _,
+        } => {
             fetches.push(PlannedFetch {
                 flatten_path,
                 subgraph: &primary.service_name,
@@ -2590,8 +2597,8 @@ mod tests {
     /// Reverses the children of every `Parallel` node, whose order carries no meaning.
     fn reverse_parallel_nodes(node: &mut PlanNode) {
         match node {
-            PlanNode::Sequence { nodes } => nodes.iter_mut().for_each(reverse_parallel_nodes),
-            PlanNode::Parallel { nodes } => {
+            PlanNode::Sequence { nodes, .. } => nodes.iter_mut().for_each(reverse_parallel_nodes),
+            PlanNode::Parallel { nodes, .. } => {
                 nodes.reverse();
                 nodes.iter_mut().for_each(reverse_parallel_nodes);
             }
@@ -2615,11 +2622,11 @@ mod tests {
             subgraphs: [("first".to_string(), Some(3))].into_iter().collect(),
         };
         let (mut node, calculator) = plan_and_calculator(schema, query, 10, subgraph_list_sizes);
-        let PlanNode::Sequence { nodes } = &node else {
+        let PlanNode::Sequence { nodes, .. } = &node else {
             panic!("expected a sequence, got: {node:?}");
         };
         assert!(
-            matches!(&nodes[1], PlanNode::Parallel { nodes } if nodes.len() == 2),
+            matches!(&nodes[1], PlanNode::Parallel { nodes, .. } if nodes.len() == 2),
             "expected the fetches after the first to run in parallel, got: {node:?}"
         );
 

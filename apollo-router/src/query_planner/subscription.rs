@@ -6,6 +6,7 @@ use serde::Deserialize;
 use serde::Serialize;
 use tokio::sync::broadcast;
 
+use super::NodeId;
 use super::OperationKind;
 use super::rewrites;
 use crate::error::ValidationErrors;
@@ -63,6 +64,9 @@ pub(crate) struct SubscriptionNode {
 
     // Optionally describes a number of "rewrites" to apply to the data that received from a subscription (and before it is applied to the current in-memory results).
     pub(crate) output_rewrites: Option<Vec<rewrites::DataRewrite>>,
+
+    #[serde(default)]
+    pub(crate) node_id: NodeId,
 }
 
 impl SubscriptionNode {

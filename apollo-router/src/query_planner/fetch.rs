@@ -16,6 +16,7 @@ use tracing::Instrument;
 use tracing::instrument;
 
 use super::log::SubfetchTrace;
+use super::plan::NodeId;
 use super::rewrites;
 use super::selection::execute_selection_set;
 use super::subgraph_context::ContextualArguments;
@@ -136,6 +137,10 @@ pub(crate) struct FetchNode {
     // authorization metadata for the subgraph query
     #[serde(default)]
     pub(crate) authorization: Arc<CacheKeyMetadata>,
+
+    /// The id of the node that sends this fetch: its own, or its flatten's.
+    #[serde(default)]
+    pub(crate) node_id: NodeId,
 }
 
 /// Whether a fetch selects from a root operation type or from `_entities`, and what it sends
@@ -819,6 +824,7 @@ mod tests {
             output_rewrites: None,
             schema_aware_hash: Default::default(),
             authorization: Default::default(),
+            node_id: Default::default(),
         }
     }
 
