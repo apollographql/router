@@ -105,10 +105,10 @@ pub(crate) struct FetchNode {
     /// The name of the service or subgraph that the fetch is querying.
     pub(crate) service_name: Arc<str>,
 
-    /// The data that is required for the subgraph fetch.
-    #[serde(skip_serializing_if = "Vec::is_empty")]
-    #[serde(default)]
-    pub(crate) requires: Vec<requires_selection::Selection>,
+    /// Root or entity fetch, with what it sends from data already in the response. Serialized
+    /// as `fetchKind`, since a fetch's `PlanNode` and the fetch kind itself are tagged `kind`.
+    #[serde(rename = "fetchKind")]
+    pub(crate) kind: FetchKind,
 
     /// The variables that are used for the subgraph fetch.
     pub(crate) variable_usages: Vec<Arc<str>>,
@@ -125,14 +125,8 @@ pub(crate) struct FetchNode {
     /// Optional id used by Deferred nodes
     pub(crate) id: Option<String>,
 
-    // Optionally describes a number of "rewrites" that query plan executors should apply to the data that is sent as input of this fetch.
-    pub(crate) input_rewrites: Option<Vec<rewrites::DataRewrite>>,
-
     // Optionally describes a number of "rewrites" to apply to the data that received from a fetch (and before it is applied to the current in-memory results).
     pub(crate) output_rewrites: Option<Vec<rewrites::DataRewrite>>,
-
-    // Optionally describes a number of "rewrites" to apply to the data that has already been received further up the tree
-    pub(crate) context_rewrites: Option<Vec<rewrites::DataRewrite>>,
 
     // hash for the query and relevant parts of the schema. if two different schemas provide the exact same types, fields and directives
     // affecting the query, then they will have the same hash
@@ -142,6 +136,61 @@ pub(crate) struct FetchNode {
     // authorization metadata for the subgraph query
     #[serde(default)]
     pub(crate) authorization: Arc<CacheKeyMetadata>,
+}
+
+/// Whether a fetch selects from a root operation type or from `_entities`, and what it sends
+/// from data already in the response to do so.
+#[derive(Debug, Clone, PartialEq, Deserialize, Serialize)]
+#[serde(tag = "kind")]
+pub(crate) enum FetchKind {
+    /// A fetch from a root operation type, at the response root or below it.
+    Root,
+    /// One `_entities` selection under `$representations`.
+    Entities(EntitySelection),
+}
+
+/// The `_entities` selection of an entity fetch.
+#[derive(Debug, Clone, PartialEq, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct EntitySelection {
+    /// The data that is required for the subgraph fetch.
+    pub(crate) requires: Vec<requires_selection::Selection>,
+
+    // Optionally describes a number of "rewrites" that query plan executors should apply to the data that is sent as input of this fetch.
+    pub(crate) input_rewrites: Option<Vec<rewrites::DataRewrite>>,
+
+    // Optionally describes a number of "rewrites" to apply to the data that has already been received further up the tree
+    pub(crate) context_rewrites: Option<Vec<rewrites::DataRewrite>>,
+}
+
+impl FetchKind {
+    pub(crate) fn is_entities(&self) -> bool {
+        matches!(self, Self::Entities(_))
+    }
+
+    /// The `requires` of an entity fetch, and nothing for a root fetch.
+    pub(crate) fn requires(&self) -> &[requires_selection::Selection] {
+        match self {
+            Self::Root => &[],
+            Self::Entities(selection) => &selection.requires,
+        }
+    }
+
+    /// The input rewrites of an entity fetch, and none for a root fetch.
+    pub(crate) fn input_rewrites(&self) -> &Option<Vec<rewrites::DataRewrite>> {
+        match self {
+            Self::Root => &None,
+            Self::Entities(selection) => &selection.input_rewrites,
+        }
+    }
+
+    /// The context rewrites of an entity fetch, and none for a root fetch.
+    pub(crate) fn context_rewrites(&self) -> &Option<Vec<rewrites::DataRewrite>> {
+        match self {
+            Self::Root => &None,
+            Self::Entities(selection) => &selection.context_rewrites,
+        }
+    }
 }
 
 #[derive(Default)]
@@ -451,7 +500,7 @@ impl FetchNode {
         response: graphql::Response,
         hoist_orphan_errors: bool,
     ) -> (Value, Vec<Error>) {
-        if !self.requires.is_empty() {
+        if self.kind.is_entities() {
             let entities_path = Path(vec![json_ext::PathElement::Key(
                 "_entities".to_string(),
                 None,
@@ -695,7 +744,7 @@ impl FetchNode {
             &doc,
             self.operation_name.as_deref(),
             schema,
-            !self.requires.is_empty(),
+            self.kind.is_entities(),
         );
 
         // we need to intersect the cache keys because the global key already takes into account
@@ -753,15 +802,21 @@ mod tests {
     fn make_fetch_node(requires: Vec<requires_selection::Selection>) -> FetchNode {
         FetchNode {
             service_name: "test".into(),
-            requires,
+            kind: if requires.is_empty() {
+                FetchKind::Root
+            } else {
+                FetchKind::Entities(EntitySelection {
+                    requires,
+                    input_rewrites: None,
+                    context_rewrites: None,
+                })
+            },
             variable_usages: vec![],
             operation: SerializableDocument::from_string("{ me }"),
             operation_name: None,
             operation_kind: OperationKind::Query,
             id: None,
-            input_rewrites: None,
             output_rewrites: None,
-            context_rewrites: None,
             schema_aware_hash: Default::default(),
             authorization: Default::default(),
         }

@@ -311,11 +311,12 @@ pub(super) fn handle_from_context(
                         cond.argument_coordinate, append_subgraph,
                     ))
                 })?;
-            search_space.push_condition_pendings(
+            search_space.push_condition_pendings_at(
                 state,
                 &anchor,
                 &Arc::new(context_selection.clone()),
                 context_fetch_node,
+                &ancestor_op_path,
             )?;
         }
 

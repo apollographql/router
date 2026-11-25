@@ -1,7 +1,6 @@
 //! Test harness and mocks for the Apollo Router.
 
 use std::collections::HashMap;
-use std::collections::HashSet;
 use std::default::Default;
 use std::str::FromStr;
 use std::sync::Arc;
@@ -14,7 +13,6 @@ use tower::ServiceExt;
 use tower_http::trace::MakeSpan;
 use tracing_futures::Instrument;
 
-use crate::AllowedFeature;
 use crate::axum_factory::utils::PropagatingMakeSpan;
 use crate::configuration::Configuration;
 use crate::configuration::ConfigurationError;
@@ -40,7 +38,6 @@ use crate::services::router;
 use crate::services::subgraph;
 use crate::services::supergraph;
 use crate::spec::Schema;
-use crate::uplink::license_enforcement::LicenseLimits;
 use crate::uplink::license_enforcement::LicenseState;
 
 /// Mocks for services the Apollo Router must integrate with.
@@ -104,7 +101,6 @@ pub struct TestHarness<'a> {
     configuration: Option<Arc<Configuration>>,
     extra_plugins: Vec<(String, Box<dyn DynPlugin>)>,
     subgraph_network_requests: bool,
-    license: Option<Arc<LicenseState>>,
 }
 
 // Not using buildstructor because `extra_plugin` has non-trivial signature and behavior
@@ -116,7 +112,6 @@ impl<'a> TestHarness<'a> {
             configuration: None,
             extra_plugins: Vec::new(),
             subgraph_network_requests: false,
-            license: None,
         }
     }
 
@@ -165,7 +160,7 @@ impl<'a> TestHarness<'a> {
     ) -> Result<Self, serde_json::Error> {
         // Convert from a json Value to yaml str to Configuration so that we can ensure we validate
         // and populate the Configuration's validated_yaml attribute
-        let yaml = serde_yaml::to_string(&configuration).map_err(SerializeError::custom)?;
+        let yaml = yaml_serde::to_string(&configuration).map_err(SerializeError::custom)?;
         let configuration: Configuration =
             Configuration::from_str(&yaml).map_err(DeserializeError::custom)?;
         Ok(self.configuration(Arc::new(configuration)))
@@ -175,25 +170,6 @@ impl<'a> TestHarness<'a> {
     pub fn configuration_yaml(self, configuration: &'a str) -> Result<Self, ConfigurationError> {
         let configuration: Configuration = Configuration::from_str(configuration)?;
         Ok(self.configuration(Arc::new(configuration)))
-    }
-
-    /// Specifies the (static) license.
-    ///
-    /// Panics if called more than once.
-    ///
-    /// If this isn't called, the default license is used.
-    pub fn license_from_allowed_features(mut self, allowed_features: Vec<AllowedFeature>) -> Self {
-        assert!(self.license.is_none(), "license was specified twice");
-        self.license = Some(Arc::new(LicenseState::Licensed {
-            limits: {
-                Some(
-                    LicenseLimits::builder()
-                        .allowed_features(HashSet::from_iter(allowed_features))
-                        .build(),
-                )
-            },
-        }));
-        self
     }
 
     /// Adds an extra, already instantiated plugin.
@@ -354,18 +330,9 @@ impl<'a> TestHarness<'a> {
         let canned_schema = include_str!("../testing_schema.graphql");
         let schema = self.schema.unwrap_or(canned_schema);
         let schema = Arc::new(Schema::parse(schema, &config)?);
-        // Default to using an unrestricted license
-        let license = self.license.unwrap_or(Arc::new(LicenseState::Licensed {
-            limits: Default::default(),
-        }));
-
-        let (plugins, supergraph_pipeline) = build_supergraph_for_test_harness(
-            config.clone(),
-            schema.clone(),
-            self.extra_plugins,
-            license,
-        )
-        .await?;
+        let (plugins, supergraph_pipeline) =
+            build_supergraph_for_test_harness(config.clone(), schema.clone(), self.extra_plugins)
+                .await?;
 
         Ok((config, schema, plugins, supergraph_pipeline))
     }

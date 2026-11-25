@@ -35,6 +35,12 @@ impl LogAttributes {
         &self.attributes
     }
 
+    /// Whether an attribute with this key is present. The formatters print it in place of an
+    /// OpenTelemetry span attribute with the same key.
+    pub(crate) fn contains_key(&self, key: &Key) -> bool {
+        self.attributes.iter().any(|kv| kv.key == *key)
+    }
+
     pub(crate) fn insert(&mut self, kv: KeyValue) {
         upsert_attribute(&mut self.attributes, kv);
     }

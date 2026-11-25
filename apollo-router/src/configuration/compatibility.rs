@@ -155,9 +155,9 @@ fn load(case: &Case) -> Result<Configuration, ConfigurationError> {
     match case.upgrade {
         Upgrade::Startup => parse(case.text),
         Upgrade::Command => {
-            let original: Value = serde_yaml::from_str(case.text).expect("fixtures are YAML");
+            let original: Value = yaml_serde::from_str(case.text).expect("fixtures are YAML");
             let upgraded = upgrade_configuration(&original, false, UpgradeMode::Major)?;
-            let upgraded = serde_yaml::to_string(&upgraded).expect("migrations serialize");
+            let upgraded = yaml_serde::to_string(&upgraded).expect("migrations serialize");
             parse_without_inputs(&upgraded, Migration::None)
         }
     }
@@ -180,7 +180,6 @@ fn effective_settings(config: &Configuration) -> Value {
         "persisted_queries": config.persisted_queries,
         "limits": config.limits,
         "plugins": config.document_section("plugins"),
-        "batching": config.batching,
         "experimental_type_conditioned_fetching": config.experimental_type_conditioned_fetching,
         "experimental_hoist_orphan_errors": config.experimental_hoist_orphan_errors,
     });
@@ -298,13 +297,17 @@ fn unknown_plugin_name_is_rejected() {
     assert!(error.contains("this_plugin_is_not_registered"), "{error}");
 }
 
-/// Duplicate keys are rejected in the original text, before migration or parsing could
-/// collapse them.
+/// Duplicate keys are rejected in the original text, even when migration rewrites the file.
 #[test]
 fn duplicate_keys_are_rejected_before_migration() {
     let error = parse(include_str!("testdata/compat/duplicate_keys.yaml"))
         .expect_err("migration must not erase duplicate keys");
-    assert!(error.to_string().contains("duplicated keys"), "{error}");
+    assert!(
+        error
+            .to_string()
+            .contains(r#"duplicate entry with key "supergraph""#),
+        "{error}"
+    );
 }
 
 /// Configuration-usage selectors and licence checks read `validated_yaml`, which holds the
@@ -763,7 +766,7 @@ fn schema_declared_top_level_defaults_match_the_default_configuration() {
         checked += 1;
 
         // A JSON scalar is valid YAML flow-scalar syntax, so `default`'s `Display` (JSON text)
-        // can be written directly after the key without a round trip through `serde_yaml`.
+        // can be written directly after the key without a round trip through `yaml_serde`.
         let config = parse(&format!("{key}: {default}\n")).unwrap_or_else(|error| {
             panic!("[{key}] loading rejected its own schema-declared default: {error}")
         });
@@ -799,7 +802,7 @@ fn rate_limit_settings_are_applied() {
     }
 }
 
-/// Licence enforcement reads `validated_yaml` and flags every restricted feature the commercial
+/// Licence enforcement flags every restricted feature the commercial
 /// fixture enables, so an unlicensed router refuses it.
 #[test]
 fn licence_enforcement_flags_the_commercial_configuration() {

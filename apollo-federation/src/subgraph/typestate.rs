@@ -271,16 +271,37 @@ impl Subgraph<Initial> {
     }
 
     /// Given a schema that is assumed to _not_ be a fed2 schema (it does not have a `@link` to the federation spec),
-    /// converts the schema to a fed2 schema by adding `@link` to the last known federation spec.
+    /// converts the schema to a fed2 schema by adding `@link` to federation v2.15, the last 2.x
+    /// version.
     ///
     /// - It is assumed to have no `@link` to the federation spec.
-    /// - Returns an equivalent subgraph with a `@link` added with latest federation spec.
+    /// - Returns an equivalent subgraph with a `@link` added to federation v2.15.
     /// - Based on the `include_all_imports` param, we either import ALL directive definitions OR just up to fed v2.4
     /// - This is mainly for testing and not optimized.
+    ///
+    /// Use [`Self::into_fed3_test_subgraph`] to link federation v3.
     // PORT_NOTE: Corresponds to `asFed2SubgraphDocument` function in JS, but simplified.
     pub fn into_fed2_test_subgraph(self, include_all_imports: bool) -> Result<Self, SubgraphError> {
+        let federation_spec = FederationSpecDefinition::for_version(&Version {
+            major: 2,
+            minor: 15,
+        })
+        .expect("federation v2.15 is a known version");
+        self.into_test_subgraph(federation_spec, include_all_imports)
+    }
+
+    /// Same as [`Self::into_fed2_test_subgraph`], but adds a `@link` to the latest federation spec
+    /// (v3.x), so v3-only directives are imported too when `include_all_imports` is set.
+    pub fn into_fed3_test_subgraph(self, include_all_imports: bool) -> Result<Self, SubgraphError> {
+        self.into_test_subgraph(FederationSpecDefinition::latest(), include_all_imports)
+    }
+
+    fn into_test_subgraph(
+        self,
+        federation_spec: &FederationSpecDefinition,
+        include_all_imports: bool,
+    ) -> Result<Self, SubgraphError> {
         let mut schema = self.state.schema;
-        let federation_spec = FederationSpecDefinition::latest();
         // we cannot use FederationSpecDefinition::add_elements_to_schema as we don't have FederationSchema yet
         let imports: Vec<Node<Value>> = if include_all_imports {
             federation_spec
@@ -365,7 +386,13 @@ impl Subgraph<Initial> {
     }
 
     fn expand_links_internal(self) -> Result<Subgraph<Expanded>, FederationError> {
-        let schema = expand_schema(self.state.schema)?;
+        let mut schema = self.state.schema;
+        // A GraphQL Federation source schema carries no `@link`; stamp the implicit federation
+        // link before expansion, or it would be expanded as a Fed 1 schema.
+        if crate::composite_schemas::detection::is_composite_source_schema(&schema) {
+            crate::composite_schemas::detection::stamp_federation_link(&mut schema);
+        }
+        let schema = expand_schema(schema)?;
         let orphan_extension_types = self.state.orphan_extension_types;
         let Some(metadata) = schema.subgraph_metadata().cloned() else {
             bail!(
@@ -601,9 +628,13 @@ impl Subgraph<Expanded> {
         tracing::debug!("Subgraph<Expanded>: validate `{}`", self.name);
         // Connectors first: it is defined against the expanded-but-unvalidated schema, and its
         // diagnostics are more actionable than the GraphQL ones for a subgraph author.
-        let hints = ConnectorsBlueprint::on_validation(&self)?;
+        let mut hints = ConnectorsBlueprint::on_validation(&self)?;
         let schema = validate_subgraph_schema(self.state.schema)
             .map_err(|err| SubgraphError::new_without_locations(self.name.clone(), err))?;
+        hints.extend(
+            crate::composite_schemas::validation::validate_source_schema(&schema)
+                .map_err(|err| SubgraphError::new_without_locations(self.name.clone(), err))?,
+        );
 
         Ok(Subgraph {
             name: self.name,
@@ -674,9 +705,13 @@ impl Subgraph<Upgraded> {
         // See the note in `Subgraph::<Expanded>::validate`. A connectors subgraph is necessarily
         // fed2, so it only reaches this state when it is upgraded to fed3; running here keeps the
         // two paths into `Validated` equivalent.
-        let hints = ConnectorsBlueprint::on_validation(&self)?;
+        let mut hints = ConnectorsBlueprint::on_validation(&self)?;
         let schema = validate_subgraph_schema(self.state.schema)
             .map_err(|err| SubgraphError::new_without_locations(self.name.clone(), err))?;
+        hints.extend(
+            crate::composite_schemas::validation::validate_source_schema(&schema)
+                .map_err(|err| SubgraphError::new_without_locations(self.name.clone(), err))?,
+        );
         let Some(metadata) = schema.subgraph_metadata().cloned() else {
             return Err(SubgraphError::new_without_locations(
                 self.name.clone(),
@@ -1138,9 +1173,18 @@ impl FederationSchema {
         //            (https://github.com/apollographql/federation/blob/e17173bf9e7b3fdee42a9ee0ac4bd269de67e374/internals-js/src/federation.ts#L2505)
         //            Many corpus subgraphs have `_Entity` definitions that do not exactly match
         //            the one computed by composition. Reporting error here will break them.
-        _ = ANY_TYPE_SPEC.check_or_add(self, None);
+        // A GraphQL Federation source schema resolves entities through its `@lookup` fields, not
+        // through `_entities`, so it gets neither `_entities` nor the `_Entity` and `_Any` types.
+        let is_source_schema = self
+            .subgraph_metadata()
+            .is_some_and(|metadata| metadata.is_composite_schema());
+        if !is_source_schema {
+            _ = ANY_TYPE_SPEC.check_or_add(self, None);
+        }
         _ = SERVICE_TYPE_SPEC.check_or_add(self, None);
-        _ = self.entity_type_spec()?.check_or_add(self, None);
+        if !is_source_schema {
+            _ = self.entity_type_spec()?.check_or_add(self, None);
+        }
 
         // Add the root `Query` Type (if not already present) and get the actual name in the schema.
         let query_root_pos = SchemaRootDefinitionPosition {

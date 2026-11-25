@@ -4236,7 +4236,12 @@ fn assert_no_self_dependent_deferred_blocks(defer: &DeferNode) {
 fn collect_fetch_ids(node: &PlanNode, ids: &mut Vec<String>) {
     match node {
         PlanNode::Fetch(fetch) => ids.extend(fetch.id.map(|id| id.to_string())),
-        PlanNode::Flatten(flatten) => collect_fetch_ids(&flatten.node, ids),
+        PlanNode::Flatten(flatten) => ids.extend(
+            flatten
+                .members
+                .iter()
+                .filter_map(|member| member.fetch.id.map(|id| id.to_string())),
+        ),
         PlanNode::Sequence(sequence) => sequence
             .nodes
             .iter()
@@ -4331,14 +4336,12 @@ fn context_rewrite_path_includes_typename_equals() {
     let Some(PlanNode::Flatten(node)) = node.nodes.get(1) else {
         panic!("expected flatten node at index 1");
     };
-    let PlanNode::Fetch(fetch) = &*node.node else {
-        panic!("expected fetch node inside flatten");
-    };
+    let (_, fetch) = node.single().expect("one fetch at one path");
 
     // The rewrite path must include the TypenameEquals guard:
     // [Parent, TypenameEquals("T"), Key("prop")], not [Parent, Key("prop")].
-    assert_eq!(fetch.context_rewrites.len(), 1);
-    let FetchDataRewrite::KeyRenamer(renamer) = &*fetch.context_rewrites[0] else {
+    assert_eq!(fetch.kind.context_rewrites().len(), 1);
+    let FetchDataRewrite::KeyRenamer(renamer) = &*fetch.kind.context_rewrites()[0] else {
         panic!("expected KeyRenamer");
     };
     assert_eq!(renamer.rename_key_to.as_str(), "contextualArgument_1_0");
@@ -4474,17 +4477,15 @@ fn inc_from_context_multi_hop_ancestor() {
     let Some(flatten) = last_flatten else {
         panic!("expected at least one flatten node");
     };
-    let PlanNode::Fetch(fetch) = &*flatten.node else {
-        panic!("expected fetch node inside flatten");
-    };
+    let (_, fetch) = flatten.single().expect("one fetch at one path");
 
     // The rewrite path should walk 2+ Parent elements back to the
     // grandparent A, with a TypenameEquals guard for A.
     assert!(
-        !fetch.context_rewrites.is_empty(),
+        !fetch.kind.context_rewrites().is_empty(),
         "context rewrites must be present on the deepest fetch"
     );
-    let FetchDataRewrite::KeyRenamer(renamer) = &*fetch.context_rewrites[0] else {
+    let FetchDataRewrite::KeyRenamer(renamer) = &*fetch.kind.context_rewrites()[0] else {
         panic!("expected KeyRenamer");
     };
 
@@ -4513,13 +4514,17 @@ fn context_rewrite_paths(plan: &QueryPlan) -> Vec<(String, Vec<FetchDataPathElem
     fn walk(node: &PlanNode, out: &mut Vec<(String, Vec<FetchDataPathElement>)>) {
         match node {
             PlanNode::Fetch(fetch) => {
-                for rewrite in &fetch.context_rewrites {
+                for rewrite in fetch.kind.context_rewrites() {
                     if let FetchDataRewrite::KeyRenamer(renamer) = &**rewrite {
                         out.push((renamer.rename_key_to.to_string(), renamer.path.clone()));
                     }
                 }
             }
-            PlanNode::Flatten(flatten) => walk(&flatten.node, out),
+            PlanNode::Flatten(flatten) => {
+                for member in &flatten.members {
+                    walk(&PlanNode::Fetch(Box::new(member.fetch.clone())), out);
+                }
+            }
             PlanNode::Sequence(seq) => seq.nodes.iter().for_each(|n| walk(n, out)),
             PlanNode::Parallel(par) => par.nodes.iter().for_each(|n| walk(n, out)),
             other => panic!("unexpected plan node in context test: {other:?}"),
@@ -8266,5 +8271,289 @@ fn inc_literal_conditions_are_kept_when_hoisting_variable_conditions() {
           },
         }
         "###
+    );
+}
+
+#[rstest::rstest]
+#[case::complementary_branches(
+    "path_conditions_complementary_branches",
+    r#"
+      query Test($branch: Boolean!, $enabled: Boolean!) {
+        foo {
+          bar
+          ... @include(if: $branch) { t { f1 @include(if: $enabled) } }
+          ... @skip(if: $branch) { t { f1 @include(if: $enabled) } }
+        }
+      }
+    "#
+)]
+#[case::contradictory_conditions(
+    "path_conditions_contradictory_conditions",
+    r#"
+      query Test($enabled: Boolean!) {
+        foo {
+          bar
+          ... @skip(if: $enabled) { t { f1 @include(if: $enabled) } }
+        }
+      }
+    "#
+)]
+#[case::single_branch(
+    "path_conditions_single_branch",
+    r#"
+      query Test($enabled: Boolean!) {
+        foo { bar t { f1 @include(if: $enabled) } }
+      }
+    "#
+)]
+#[case::ancestor_condition(
+    "path_conditions_ancestor_condition",
+    r#"
+      query Test($ancestor: Boolean!, $enabled: Boolean!) {
+        foo {
+          bar
+          ... @skip(if: $ancestor) { t { f1 @include(if: $enabled) } }
+        }
+      }
+    "#
+)]
+#[case::field_ancestor_condition(
+    "path_conditions_field_ancestor_condition",
+    r#"
+      query Test($ancestor: Boolean!, $enabled: Boolean!) {
+        foo @skip(if: $ancestor) { bar t { f1 @include(if: $enabled) } }
+      }
+    "#
+)]
+#[case::unconditional_sibling(
+    "path_conditions_unconditional_sibling",
+    r#"
+      query Test($ancestor: Boolean!) {
+        foo {
+          t { always: f1 }
+          ... @skip(if: $ancestor) { t { conditional: f1 } }
+        }
+      }
+    "#
+)]
+fn inc_preserves_path_conditions(#[case] name: &str, #[case] operation: &str) {
+    let supergraph = apollo_federation::Supergraph::new_with_router_specs(include_str!(
+        "../supergraphs/test_if_directives_at_the_operation_level_are_passed_down_to_subgraph_queries.graphql"
+    ))
+    .unwrap();
+    let planner = apollo_federation::query_plan::query_planner::QueryPlanner::new(
+        &supergraph,
+        incremental_config(),
+    )
+    .unwrap();
+    let document = apollo_compiler::ExecutableDocument::parse_and_validate(
+        planner.api_schema().schema(),
+        operation,
+        "operation.graphql",
+    )
+    .unwrap();
+    let plan = planner
+        .build_query_plan(&document, None, Default::default())
+        .unwrap();
+    apollo_federation::correctness::check_plan(
+        planner.api_schema(),
+        planner.supergraph_schema(),
+        planner.subgraph_schemas(),
+        &document,
+        &plan,
+    )
+    .unwrap();
+    insta::assert_snapshot!(name, plan);
+}
+
+#[test]
+fn inc_inputs_keep_path_conditions_on_mutation() {
+    let planner = planner!(
+        config = incremental_config(),
+        Subgraph1: r#"
+        type Query {
+          t: T!
+        }
+        type Mutation {
+          m: T!
+          p: P @provides(fields: "a")
+        }
+        type T @key(fields: "id") @context(name: "context") {
+          id: ID!
+          u: U!
+          prop: String!
+          remote: String! @external
+        }
+        type U @key(fields: "id") {
+          id: ID!
+          local(a: String @fromContext(field: "$context { prop }")): Int!
+          routed(a: String @fromContext(field: "$context { remote }")): Int!
+        }
+        type P @key(fields: "k") {
+          k: ID!
+          a: String @external
+          r: String @requires(fields: "a")
+        }
+        "#,
+        Subgraph2: r#"
+        type Query {
+          a: Int!
+        }
+        type T @key(fields: "id") {
+          id: ID!
+          remote: String!
+        }
+        type U @key(fields: "id") {
+          id: ID!
+        }
+        type P @key(fields: "k") {
+          k: ID!
+          a: String @shareable
+        }
+        "#,
+    );
+    assert_plan!(
+        &planner,
+        r#"
+        mutation Test($s: Boolean!) {
+          ... @skip(if: $s) {
+            m {
+              u {
+                local
+              }
+            }
+          }
+        }
+        "#,
+        @r###"
+    QueryPlan {
+      Sequence {
+        Skip(if: $s) {
+          Fetch(service: "Subgraph1") {
+            {
+              m {
+                u {
+                  __typename
+                  id
+                }
+                prop
+              }
+            }
+          },
+        },
+        Skip(if: $s) {
+          Flatten(path: "m.u") {
+            Fetch(service: "Subgraph1") {
+              {
+                ... on U {
+                  __typename
+                  id
+                }
+              } =>
+              {
+                ... on U {
+                  local(a: $contextualArgument_1_0)
+                }
+              }
+            },
+          },
+        },
+      },
+    }
+    "###
+    );
+    assert_plan!(
+        &planner,
+        r#"
+        mutation Test($s: Boolean!) {
+          ... @skip(if: $s) {
+            m {
+              u {
+                routed
+              }
+            }
+          }
+        }
+        "#,
+        @r###"
+    QueryPlan {
+      Sequence {
+        Skip(if: $s) {
+          Fetch(service: "Subgraph1") {
+            {
+              m {
+                __typename
+                u {
+                  __typename
+                  id
+                }
+                id
+              }
+            }
+          },
+        },
+        Skip(if: $s) {
+          Flatten(path: "m") {
+            Fetch(service: "Subgraph2") {
+              {
+                ... on T {
+                  __typename
+                  id
+                }
+              } =>
+              {
+                ... on T {
+                  remote
+                }
+              }
+            },
+          },
+        },
+        Skip(if: $s) {
+          Flatten(path: "m.u") {
+            Fetch(service: "Subgraph1") {
+              {
+                ... on U {
+                  __typename
+                  id
+                }
+              } =>
+              {
+                ... on U {
+                  routed(a: $contextualArgument_1_1)
+                }
+              }
+            },
+          },
+        },
+      },
+    }
+    "###
+    );
+    assert_plan!(
+        &planner,
+        r#"
+        mutation Test($s: Boolean!) {
+          ... @skip(if: $s) {
+            p {
+              r
+            }
+          }
+        }
+        "#,
+        @r###"
+    QueryPlan {
+      Skip(if: $s) {
+        Fetch(service: "Subgraph1") {
+          {
+            p {
+              a
+              r
+            }
+          }
+        },
+      },
+    }
+    "###
     );
 }

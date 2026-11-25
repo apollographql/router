@@ -32,70 +32,79 @@ expression: response
                 "policies": [],
                 "scopes": []
               },
-              "contextRewrites": null,
+              "fetchKind": {
+                "kind": "Root"
+              },
               "id": null,
-              "inputRewrites": null,
               "kind": "Fetch",
               "operation": "query set_context_list_rust_qp__Subgraph1__0 { t { __typename prop id uList { __typename id } } }",
               "operationKind": "query",
               "operationName": "set_context_list_rust_qp__Subgraph1__0",
               "outputRewrites": null,
-              "schemaAwareHash": "736cb58176af93ed67c2343ec05e76c26cba274354544201dd753eda17d99bdb",
+              "schemaAwareHash": "2b9dca2016b4d0a622830fe2b60905c72dbac0e5c6b3ea69b7fc85f8025e1f7f",
               "serviceName": "Subgraph1",
               "variableUsages": []
             },
             {
               "kind": "Flatten",
-              "node": {
-                "authorization": {
-                  "is_authenticated": false,
-                  "policies": [],
-                  "scopes": []
-                },
-                "contextRewrites": [
-                  {
-                    "kind": "KeyRenamer",
-                    "path": [
-                      "..",
-                      "... on T",
-                      "prop"
-                    ],
-                    "renameKeyTo": "contextualArgument_1_0"
-                  }
-                ],
-                "id": null,
-                "inputRewrites": null,
-                "kind": "Fetch",
-                "operation": "query set_context_list_rust_qp__Subgraph1__1($representations: [_Any!]!, $contextualArgument_1_0: String) { _entities(representations: $representations) { ... on U { field(a: $contextualArgument_1_0) } } }",
-                "operationKind": "query",
-                "operationName": "set_context_list_rust_qp__Subgraph1__1",
-                "outputRewrites": null,
-                "requires": [
-                  {
-                    "kind": "InlineFragment",
-                    "selections": [
-                      {
-                        "kind": "Field",
-                        "name": "__typename"
-                      },
-                      {
-                        "kind": "Field",
-                        "name": "id"
-                      }
-                    ],
-                    "typeCondition": "U"
-                  }
-                ],
-                "schemaAwareHash": "23643dadc4ca657610f63280a58dd456188576e2bffe746e31fa949903881ec8",
-                "serviceName": "Subgraph1",
-                "variableUsages": [
-                  "contextualArgument_1_0"
-                ]
-              },
-              "path": [
-                "t",
-                "uList",
-                "@"
+              "members": [
+                {
+                  "fetch": {
+                    "authorization": {
+                      "is_authenticated": false,
+                      "policies": [],
+                      "scopes": []
+                    },
+                    "fetchKind": {
+                      "contextRewrites": [
+                        {
+                          "kind": "KeyRenamer",
+                          "path": [
+                            "..",
+                            "... on T",
+                            "prop"
+                          ],
+                          "renameKeyTo": "contextualArgument_1_0"
+                        }
+                      ],
+                      "inputRewrites": null,
+                      "kind": "Entities",
+                      "requires": [
+                        {
+                          "kind": "InlineFragment",
+                          "selections": [
+                            {
+                              "kind": "Field",
+                              "name": "__typename"
+                            },
+                            {
+                              "kind": "Field",
+                              "name": "id"
+                            }
+                          ],
+                          "typeCondition": "U"
+                        }
+                      ]
+                    },
+                    "id": null,
+                    "operation": "query set_context_list_rust_qp__Subgraph1__1($representations: [_Any!]!, $contextualArgument_1_0: String) { _entities(representations: $representations) { ... on U { field(a: $contextualArgument_1_0) } } }",
+                    "operationKind": "query",
+                    "operationName": "set_context_list_rust_qp__Subgraph1__1",
+                    "outputRewrites": null,
+                    "schemaAwareHash": "704ac91a7ca3cba079a9380f64ee8c48382d6fe15850af1f017ceec6e52fe96b",
+                    "serviceName": "Subgraph1",
+                    "variableUsages": [
+                      "contextualArgument_1_0"
+                    ]
+                  },
+                  "paths": [
+                    [
+                      "t",
+                      "uList",
+                      "@"
+                    ]
+                  ]
+                }
               ]
             }
           ]

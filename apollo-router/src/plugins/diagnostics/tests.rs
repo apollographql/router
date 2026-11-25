@@ -31,7 +31,6 @@ async fn test_diagnostics() {
         subgraph_schemas: Default::default(),
         launch_id: None,
         notify: Default::default(),
-        license: Arc::new(crate::uplink::license_enforcement::LicenseState::Unlicensed),
         full_config: None,
         raw_yaml: Some(Arc::from("test_config")),
     };
@@ -67,7 +66,6 @@ async fn test_diagnostics_disabled() {
         subgraph_schemas: Default::default(),
         launch_id: None,
         notify: Default::default(),
-        license: Arc::new(crate::uplink::license_enforcement::LicenseState::Unlicensed),
         full_config: None,
         raw_yaml: Some(Arc::from("test_config")),
     };

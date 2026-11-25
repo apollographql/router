@@ -367,7 +367,7 @@ impl ShapeContext {
         named_shapes: impl IntoIterator<Item = (String, Shape)>,
     ) -> Self {
         for (name, shape) in named_shapes {
-            self.named_shapes.insert(name.clone(), shape.clone());
+            self.named_shapes.insert(name, shape);
         }
         self
     }

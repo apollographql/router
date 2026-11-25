@@ -1,3 +1,4 @@
+use std::collections::HashMap;
 use std::sync::Arc;
 use std::sync::atomic::AtomicBool;
 use std::time::Duration;
@@ -379,21 +380,21 @@ async fn test_subscription_ws_passthrough_with_coprocessor() -> Result<(), BoxEr
     .await;
     let coprocessor_server = start_coprocessor_server().await;
 
-    // Create router with port reservations
+    let ws_url = format!("ws://{ws_addr}/ws");
+    // Create router, passing service URLs via environment variables
     let mut router = IntegrationTest::builder()
         .supergraph("tests/integration/subscriptions/fixtures/supergraph.graphql")
         .config(SUBSCRIPTION_COPROCESSOR_CONFIG)
+        .env(HashMap::from([
+            ("PRODUCTS_URL".to_string(), http_server.uri().into()),
+            ("ACCOUNTS_URL".to_string(), ws_url.clone().into()),
+            (
+                "COPROCESSOR_URL".to_string(),
+                coprocessor_server.uri().into(),
+            ),
+        ]))
         .build()
         .await;
-
-    // Configure URLs using the string replacement method
-    let ws_url = format!("ws://{ws_addr}/ws");
-    router.replace_config_string("http://localhost:{{PRODUCTS_PORT}}", &http_server.uri());
-    router.replace_config_string("http://localhost:{{ACCOUNTS_PORT}}", &ws_url);
-    router.replace_config_string(
-        "http://localhost:{{COPROCESSOR_PORT}}",
-        &coprocessor_server.uri(),
-    );
 
     info!("WebSocket server started at: {}", ws_url);
     info!(
@@ -678,21 +679,21 @@ async fn test_subscription_ws_passthrough_pure_error_payload_with_coprocessor()
     .await;
     let coprocessor_server = start_coprocessor_server().await;
 
+    let ws_url = format!("ws://{ws_addr}/ws");
     // Create router with port reservations
     let mut router = IntegrationTest::builder()
         .supergraph("tests/integration/subscriptions/fixtures/supergraph.graphql")
         .config(SUBSCRIPTION_COPROCESSOR_CONFIG)
+        .env(HashMap::from([
+            ("PRODUCTS_URL".to_string(), http_server.uri().into()),
+            ("ACCOUNTS_URL".to_string(), ws_url.clone().into()),
+            (
+                "COPROCESSOR_URL".to_string(),
+                coprocessor_server.uri().into(),
+            ),
+        ]))
         .build()
         .await;
-
-    // Configure URLs using the string replacement method
-    let ws_url = format!("ws://{ws_addr}/ws");
-    router.replace_config_string("http://localhost:{{PRODUCTS_PORT}}", &http_server.uri());
-    router.replace_config_string("http://localhost:{{ACCOUNTS_PORT}}", &ws_url);
-    router.replace_config_string(
-        "http://localhost:{{COPROCESSOR_PORT}}",
-        &coprocessor_server.uri(),
-    );
 
     info!("WebSocket server started at: {}", ws_url);
     info!(

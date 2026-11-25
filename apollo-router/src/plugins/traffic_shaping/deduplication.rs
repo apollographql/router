@@ -24,11 +24,11 @@ use parking_lot::Mutex;
 use tower::BoxError;
 use tower::Layer;
 
-use crate::batching::BatchQuery;
 use crate::error::FetchError;
 use crate::graphql::Request;
 use crate::http_ext;
 use crate::plugins::authorization::CacheKeyMetadata;
+use crate::plugins::batching::BatchQuery;
 use crate::query_planner::fetch::OperationKind;
 use crate::services::SubgraphRequest;
 use crate::services::SubgraphResponse;
@@ -355,9 +355,9 @@ mod tests {
     use tower_test::mock::Handle;
 
     use super::QueryDeduplicationService;
-    use crate::batching::BatchQuery;
     use crate::graphql;
     use crate::metrics::FutureMetricsExt;
+    use crate::plugins::batching::BatchQuery;
     use crate::plugins::traffic_shaping::timeout::SubgraphTimeoutLayer;
     use crate::query_planner::fetch::OperationKind;
     use crate::services::SubgraphRequest;

@@ -2,30 +2,25 @@
 source: apollo-router/src/uplink/license_enforcement.rs
 expression: report.to_string()
 ---
-Configuration yaml:
-* Subgraph response caching
-  .response_cache.enabled
+Your configuration uses these licensed features. Remove the settings listed, or use a license that includes the features:
 
-* Federated subscriptions
-  .subscription.enabled
+  Coprocessors
+    coprocessor
 
-* Coprocessor plugin
-  .coprocessor
+  Distributed query plan caching
+    supergraph.query_planning.cache.redis
 
-* Query plan caching
-  .supergraph.query_planning.cache.redis
+  Experimental features
+    plugins."experimental.restricted".enabled
 
-* Restricted
-  .plugins.['experimental.restricted'].enabled
+  Request limits
+    limits.router.max_aliases
+    limits.router.max_depth
+    limits.router.max_height
+    limits.router.max_root_fields
 
-* Operation depth limiting
-  .limits.router.max_depth
+  Response caching
+    response_cache.enabled
 
-* Operation height limiting
-  .limits.router.max_height
-
-* Operation root fields limiting
-  .limits.router.max_root_fields
-
-* Operation aliases limiting
-  .limits.router.max_aliases
+  Subscriptions
+    subscription.enabled

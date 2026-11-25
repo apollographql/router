@@ -92,7 +92,9 @@ fn stamp_fetch_id(plan_node: &mut PlanNode, id: u64) {
             fetch.id = Some(id);
         }
         PlanNode::Flatten(flatten) => {
-            stamp_fetch_id(&mut flatten.node, id);
+            for member in &mut flatten.members {
+                member.fetch.id = Some(id);
+            }
         }
         PlanNode::Condition(condition) => {
             if let Some(node) = condition.if_clause.as_deref_mut() {
@@ -724,13 +726,13 @@ impl FetchGraph {
         let node_cost = FETCH_COST + selection_cost;
 
         // Group-level @skip/@include: when every selection is gated by the
-        // same variable conditions, hoist them out of the operation and
+        // shared variable conditions, hoist them out of the operation and
         // gate the fetch itself (ConditionNodes below). Execution can then
         // skip the fetch entirely. Unlike the reference planner, no
         // handled-conditions set is threaded through: descendants are
         // sequenced after their parent rather than nested inside its
         // ConditionNode, so every node self-gates.
-        let group_conditions = selection_set.conditions()?;
+        let group_conditions = common_selection_conditions(&selection_set)?;
         if let Conditions::Boolean(false) = group_conditions {
             return Ok(None);
         }
@@ -815,11 +817,31 @@ impl FetchGraph {
             .map(|ss| trim_requires(&ss))
             .unwrap_or_default();
 
+        let kind = if is_entity {
+            crate::query_plan::FetchKind::Entities(crate::query_plan::EntitySelection {
+                requires,
+                input_rewrites: Arc::new(input_rewrites),
+                context_rewrites: node
+                    .context_rewrites
+                    .iter()
+                    .cloned()
+                    .map(|r| Arc::new(r.into()))
+                    .collect(),
+            })
+        } else if node.context_rewrites.is_empty() {
+            crate::query_plan::FetchKind::Root
+        } else {
+            return Err(FederationError::internal(format!(
+                "root fetch to {} reads context values, which only entity fetches can",
+                node.subgraph,
+            )));
+        };
+
         // 7. Construct FetchNode. Connector fetches carry the connector's
         // synthetic service name, the same name expansion would have given
         // its virtual subgraph, because the router dispatches fetches to
         // connectors by service name.
-        let fetch_node = PlanNode::Fetch(Box::new(crate::query_plan::FetchNode {
+        let fetch = crate::query_plan::FetchNode {
             subgraph_name: match &node.connector {
                 Some(c) => Arc::from(c.id.synthetic_name()),
                 None => node.subgraph.clone(),
@@ -832,29 +854,22 @@ impl FetchGraph {
             },
             id: None,
             variable_usages,
-            requires,
+            kind,
             operation_document: SerializableDocument::from_parsed(operation_document),
             operation_name: op_name,
             operation_kind: node_root_kind.into(),
-            input_rewrites: Arc::new(input_rewrites),
             output_rewrites,
-            context_rewrites: node
-                .context_rewrites
-                .iter()
-                .cloned()
-                .map(|r| Arc::new(r.into()))
-                .collect(),
-        }));
+        };
 
         // 8. Wrap entity/root-hop fetches in FlattenNode.
         let mut plan_node = match &node.kind {
             FetchGroupKind::Entity { merge_at } | FetchGroupKind::RootHop { merge_at, .. } => {
-                PlanNode::Flatten(crate::query_plan::FlattenNode {
-                    path: merge_at.clone(),
-                    node: Box::new(fetch_node),
-                })
+                PlanNode::Flatten(crate::query_plan::FlattenNode::at_path(
+                    merge_at.clone(),
+                    fetch,
+                ))
             }
-            FetchGroupKind::Root { .. } => fetch_node,
+            FetchGroupKind::Root { .. } => PlanNode::Fetch(Box::new(fetch)),
         };
 
         // 9. Gate the fetch on its hoisted group conditions.
@@ -1069,6 +1084,26 @@ impl FetchGraph {
         variable_usages.sort();
         (variable_definitions, variable_usages)
     }
+}
+
+fn common_selection_conditions(
+    selection_set: &SelectionSet,
+) -> Result<Conditions, FederationError> {
+    let mut common = Conditions::never();
+    for selection in selection_set.selections.values() {
+        let conditions = match selection {
+            Selection::Field(field) => Conditions::from_directives(&field.field.directives)?,
+            Selection::InlineFragment(fragment) => {
+                Conditions::from_directives(&fragment.inline_fragment.directives)?
+                    .merge(common_selection_conditions(&fragment.selection_set)?)
+            }
+        };
+        common = common.common_factors_with(conditions);
+        if common == Conditions::always() {
+            break;
+        }
+    }
+    Ok(common)
 }
 
 /// `selection_set` without the condition-only fragments (no type condition,
@@ -1475,16 +1510,14 @@ mod tests {
         let PlanNode::Flatten(flatten) = &seq.nodes[1] else {
             panic!("expected Flatten(entity fetch) second");
         };
-        let PlanNode::Fetch(entity_fetch) = flatten.node.as_ref() else {
-            panic!("expected entity Fetch inside Flatten");
-        };
+        let (_, entity_fetch) = flatten.single().expect("one entity fetch at one path");
         assert_eq!(
             entity_fetch.operation_kind,
             executable::OperationType::Query,
             "entity fetches target the subgraph Query root even under a mutation",
         );
         assert!(
-            !entity_fetch.requires.is_empty(),
+            matches!(entity_fetch.kind, crate::query_plan::FetchKind::Entities(_)),
             "entity fetch carries the key representation requires",
         );
     }

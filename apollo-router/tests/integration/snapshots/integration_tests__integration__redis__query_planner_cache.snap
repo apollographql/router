@@ -5,15 +5,16 @@ expression: query_plan
 {
   "kind": "Fetch",
   "serviceName": "products",
+  "fetchKind": {
+    "kind": "Root"
+  },
   "variableUsages": [],
   "operation": "{ topProducts { name name2: name } }",
   "operationName": null,
   "operationKind": "query",
   "id": null,
-  "inputRewrites": null,
   "outputRewrites": null,
-  "contextRewrites": null,
-  "schemaAwareHash": "247714c94d3ad9dd88583ad043a8f426cfd40005234d502f3ef7534385f467b4",
+  "schemaAwareHash": "07a872e228b2d402ba514453b350a456ddc608cd778a70dda1d8c7f1bb4b9fc3",
   "authorization": {
     "is_authenticated": false,
     "scopes": [],

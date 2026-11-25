@@ -6,11 +6,9 @@ use serde_json_bytes::json;
 use super::acquire::maybe_bootstrap_telemetry;
 use super::*;
 use crate::configuration::Configuration;
-use crate::plugins::traffic_shaping::APOLLO_TRAFFIC_SHAPING;
-use crate::services::Plugins;
+use crate::pipeline::tests::stage_stack::required_stage_plugins;
 use crate::services::SupergraphRequest;
 use crate::spec::Schema;
-use crate::uplink::license_enforcement::LicenseState;
 
 mod plugin_instantiation;
 mod query_parsing;
@@ -39,20 +37,6 @@ fn sorted_keys<V>(map: &IndexMap<String, V>) -> Vec<&str> {
     let mut keys: Vec<&str> = map.keys().map(String::as_str).collect();
     keys.sort_unstable();
     keys
-}
-
-/// A plugin map holding a real traffic-shaping plugin, which
-/// [`parse_http_client_inputs`] looks up by name for per-subgraph client config.
-async fn plugins_with_traffic_shaping() -> Plugins {
-    let traffic_shaping = crate::plugin::plugins()
-        .find(|factory| factory.name == APOLLO_TRAFFIC_SHAPING)
-        .expect("traffic shaping plugin is registered")
-        .create_instance_without_schema(&serde_json::json!({}))
-        .await
-        .expect("traffic shaping plugin builds from an empty config");
-    let mut plugins = Plugins::default();
-    plugins.insert(APOLLO_TRAFFIC_SHAPING.to_string(), traffic_shaping);
-    plugins
 }
 
 /// A request carrying a persisted-query hash and no query string. An enabled APQ
@@ -87,7 +71,7 @@ fn create_query_planner_extracts_a_schema_per_subgraph() {
 async fn parse_http_client_inputs_covers_every_subgraph() {
     let configuration = test_configuration();
     let schema = test_schema(&configuration);
-    let plugins = plugins_with_traffic_shaping().await;
+    let plugins = required_stage_plugins().await;
 
     let client_inputs = parse_http_client_inputs(&plugins, &schema, &configuration).unwrap();
 
@@ -99,11 +83,10 @@ async fn parse_http_client_inputs_covers_every_subgraph() {
 async fn build_http_services_builds_a_client_per_subgraph() {
     let configuration = test_configuration();
     let schema = test_schema(&configuration);
-    let plugins = plugins_with_traffic_shaping().await;
+    let plugins = required_stage_plugins().await;
     let client_inputs = parse_http_client_inputs(&plugins, &schema, &configuration).unwrap();
 
-    let (subgraph_services, connector_services) =
-        build_http_services(client_inputs, &Arc::new(plugins));
+    let (subgraph_services, connector_services) = build_http_services(client_inputs, &plugins);
 
     assert_eq!(sorted_keys(&subgraph_services), FIXTURE_SUBGRAPHS);
     assert!(connector_services.is_empty());
@@ -113,9 +96,7 @@ async fn build_http_services_builds_a_client_per_subgraph() {
 async fn init_telemetry_returns_no_plugin_on_hot_reload() {
     let configuration = test_configuration();
     let schema = test_schema(&configuration);
-    let license = Arc::new(LicenseState::default());
-
-    let plugin = maybe_bootstrap_telemetry(&configuration, &schema, &license, Some(&configuration))
+    let plugin = maybe_bootstrap_telemetry(&configuration, &schema, Some(&configuration))
         .await
         .unwrap();
 
@@ -128,17 +109,9 @@ async fn create_plugins_instantiates_mandatory_plugins() {
     let schema = test_schema(&configuration);
     let (_planner, subgraph_schemas) = create_query_planner(&schema, &configuration).unwrap();
 
-    let plugins = create_plugins(
-        &configuration,
-        &schema,
-        subgraph_schemas,
-        None,
-        None,
-        Arc::new(LicenseState::default()),
-        None,
-    )
-    .await
-    .unwrap();
+    let plugins = create_plugins(&configuration, &schema, subgraph_schemas, None, None, None)
+        .await
+        .unwrap();
 
     assert!(plugins.contains_key("apollo.include_subgraph_errors"));
     assert!(plugins.contains_key("apollo.traffic_shaping"));
@@ -146,7 +119,7 @@ async fn create_plugins_instantiates_mandatory_plugins() {
 
 #[tokio::test]
 async fn build_query_plan_cache_without_redis_uses_the_configured_capacity() {
-    let configuration: Configuration = serde_yaml::from_str(
+    let configuration: Configuration = yaml_serde::from_str(
         r#"
         supergraph:
           query_planning:
@@ -298,16 +271,9 @@ async fn construction_spans_form_the_documented_tree() {
 
     let configuration = test_configuration();
     let schema = test_schema(&configuration);
-    build_pipeline(
-        configuration,
-        schema,
-        None,
-        None,
-        None,
-        Arc::new(LicenseState::default()),
-    )
-    .await
-    .expect("pipeline builds");
+    build_pipeline(configuration, schema, None, None, None)
+        .await
+        .expect("pipeline builds");
 
     insta::assert_snapshot!(layer.render(&["prepare_pipeline", "activate", "apply_pipeline"]));
 }

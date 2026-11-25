@@ -20,12 +20,14 @@ use crate::configuration::subgraph::SubgraphConfiguration;
 use crate::graphql;
 use crate::json_ext::Object;
 use crate::layers::ServiceBuilderExt;
-use crate::plugin::Plugin;
 use crate::plugin::PluginInit;
+use crate::plugin::PluginPrivate;
 use crate::protocols::websocket::WebSocketProtocol;
 use crate::query_planner::OperationKind;
 use crate::services::SubgraphRequest;
 use crate::services::SubgraphResponse;
+use crate::uplink::license_enforcement::AllowedFeature;
+use crate::uplink::license_enforcement::LicensedSetting;
 
 mod callback;
 mod execution;
@@ -264,8 +266,22 @@ pub(crate) fn default_listen_addr() -> ListenAddr {
 }
 
 #[async_trait::async_trait]
-impl Plugin for Subscription {
+impl PluginPrivate for Subscription {
     type Config = SubscriptionConfig;
+
+    fn licensed_features(
+        config: &Self::Config,
+        _supergraph: &apollo_compiler::Schema,
+    ) -> Vec<LicensedSetting> {
+        if config.enabled {
+            vec![LicensedSetting {
+                feature: AllowedFeature::Subscriptions,
+                path: "subscription.enabled",
+            }]
+        } else {
+            Vec::new()
+        }
+    }
 
     async fn new(init: PluginInit<Self::Config>) -> Result<Self, BoxError> {
         let mut callback_hmac_key = None;
@@ -347,7 +363,6 @@ impl Plugin for Subscription {
 #[cfg(test)]
 mod tests {
     use std::str::FromStr;
-    use std::sync::Arc;
 
     use futures::StreamExt;
     use http::HeaderName;
@@ -368,7 +383,6 @@ mod tests {
     use crate::services::SubgraphResponse;
     use crate::services::router;
     use crate::services::router::body;
-    use crate::uplink::license_enforcement::LicenseState;
 
     #[tokio::test(flavor = "multi_thread")]
     async fn it_test_callback_endpoint() {
@@ -540,7 +554,6 @@ mod tests {
                         .unwrap(),
                     )
                     .notify(notify.clone())
-                    .license(Arc::new(LicenseState::default()))
                     .build(),
             )
             .await
@@ -632,7 +645,6 @@ mod tests {
                         .unwrap(),
                     )
                     .notify(notify.clone())
-                    .license(Arc::new(LicenseState::default()))
                     .build(),
             )
             .await
@@ -1211,4 +1223,4 @@ mod tests {
     }
 }
 
-register_plugin!("apollo", "subscription", Subscription);
+register_private_plugin!("apollo", "subscription", Subscription);

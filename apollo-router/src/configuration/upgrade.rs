@@ -154,7 +154,7 @@ fn upgrade(
     });
     for filename in files {
         if let Some(migration) = Asset::get(&filename) {
-            let parsed_migration = serde_yaml::from_slice(&migration.data).map_err(|error| {
+            let parsed_migration = yaml_serde::from_slice(&migration.data).map_err(|error| {
                 ConfigurationError::MigrationFailure {
                     error: format!("Failed to parse migration {filename}: {error}"),
                 }
@@ -500,11 +500,11 @@ fn apply_migration(config: &Value, migration: &Migration) -> Result<Value, Confi
 /// Used for upgrade command
 pub(crate) fn generate_upgrade(config: &str, diff: bool) -> Result<String, ConfigurationError> {
     let parsed_config =
-        serde_yaml::from_str(config).map_err(|error| ConfigurationError::MigrationFailure {
+        yaml_serde::from_str(config).map_err(|error| ConfigurationError::MigrationFailure {
             error: format!("Failed to parse config: {error}"),
         })?;
     let upgraded_config = upgrade_configuration(&parsed_config, true, UpgradeMode::Major)?;
-    let upgraded_config = serde_yaml::to_string(&upgraded_config).map_err(|error| {
+    let upgraded_config = yaml_serde::to_string(&upgraded_config).map_err(|error| {
         ConfigurationError::MigrationFailure {
             error: format!("Failed to serialize upgraded config: {error}"),
         }

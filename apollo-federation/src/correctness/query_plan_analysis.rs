@@ -25,6 +25,7 @@ use crate::SingleFederationError;
 use crate::bail;
 use crate::query_plan::ConditionNode;
 use crate::query_plan::DeferNode;
+use crate::query_plan::EntitySelection;
 use crate::query_plan::FetchDataPathElement;
 use crate::query_plan::FetchDataRewrite;
 use crate::query_plan::FetchNode;
@@ -416,8 +417,9 @@ fn interpret_fetch_node(
         .operation_document
         .as_parsed()
         .map_err(|e| e.to_string())?;
+    let entity_selection = fetch.kind.entity_selection();
     let boolean_clause = Clause::from_literals(conditions);
-    let mut result = if !fetch.requires.is_empty() {
+    let mut result = if let Some(EntitySelection { requires, .. }) = entity_selection {
         // Response shapes per entity selection
         let response_shapes =
             compute_response_shape_for_entity_fetch_operation(operation_doc, schema).map_err(
@@ -443,7 +445,7 @@ fn interpret_fetch_node(
             state,
             &boolean_clause,
             &response_shapes,
-            &fetch.requires,
+            requires,
         )
         .map_err(|e| format!("{e}\nfetch node: {fetch}"))?;
 
@@ -463,14 +465,18 @@ fn interpret_fetch_node(
         })
     }
     .map(|rs| rs.add_boolean_conditions(&boolean_clause))?;
-    for rewrite in fetch.input_rewrites.iter() {
+    for rewrite in entity_selection
+        .iter()
+        .flat_map(|selection| selection.input_rewrites.iter())
+    {
         check_input_rewrite(rewrite)?;
     }
     for rewrite in &fetch.output_rewrites {
         result = apply_output_rewrite(schema, &result, rewrite)?;
     }
-    if !fetch.context_rewrites.is_empty() {
-        result = remove_context_arguments(&fetch.context_rewrites, &result)?;
+    let context_rewrites = fetch.kind.context_rewrites();
+    if !context_rewrites.is_empty() {
+        result = remove_context_arguments(context_rewrites, &result)?;
     }
     Ok(result)
 }
@@ -628,10 +634,12 @@ fn interpret_plan_node_at_path(
     conditions: &[Literal],
     type_condition: Option<&Vec<Name>>,
     path: &[FetchDataPathElement],
-    node: &PlanNode,
+    fetch: &FetchNode,
 ) -> Result<Option<ResponseShape>, String> {
     let Some((first, rest)) = path.split_first() else {
-        return Ok(Some(interpret_plan_node(context, state, conditions, node)?));
+        return Ok(Some(interpret_fetch_node(
+            context, state, conditions, fetch,
+        )?));
     };
     match first {
         FetchDataPathElement::Key(response_key, next_type_condition) => {
@@ -646,7 +654,7 @@ fn interpret_plan_node_at_path(
                 conditions,
                 next_type_condition,
                 rest,
-                node,
+                fetch,
             )?;
             if response_defs.is_empty() {
                 // No state definitions match the given condition => return None
@@ -661,7 +669,7 @@ fn interpret_plan_node_at_path(
                 return Err("flatten: unexpected multiple type conditions".to_string());
             }
             let type_condition = next_type_condition.as_ref();
-            interpret_plan_node_at_path(context, state, conditions, type_condition, rest, node)
+            interpret_plan_node_at_path(context, state, conditions, type_condition, rest, fetch)
         }
         FetchDataPathElement::TypenameEquals(_type_name) => {
             Err("flatten: unexpected TypenameEquals variant".to_string())
@@ -679,7 +687,7 @@ fn interpret_plan_node_for_matching_conditions(
     boolean_conditions: &[Literal],
     next_type_condition: &Option<Vec<Name>>,
     next_path: &[FetchDataPathElement],
-    node: &PlanNode,
+    fetch: &FetchNode,
 ) -> Result<PossibleDefinitions, String> {
     // Note: `next_type_condition` is applied to the next key down the path.
     let schema = &context.supergraph_schema;
@@ -695,7 +703,7 @@ fn interpret_plan_node_for_matching_conditions(
             boolean_conditions,
             next_type_condition,
             next_path,
-            node,
+            fetch,
         )? {
             response_defs.insert(type_cond, response_per_type_cond);
         }
@@ -709,7 +717,7 @@ fn interpret_plan_node_for_matching_conditions(
                 boolean_conditions,
                 next_type_condition,
                 next_path,
-                node,
+                fetch,
             )? {
                 response_defs.insert(type_cond.clone(), response_per_type_cond);
             }
@@ -745,7 +753,7 @@ fn interpret_plan_node_under_type_condition(
     conditions: &[Literal],
     next_type_condition: &Option<Vec<Name>>,
     next_path: &[FetchDataPathElement],
-    node: &PlanNode,
+    fetch: &FetchNode,
 ) -> Result<Option<PossibleDefinitionsPerTypeCondition>, String> {
     // `state_defs` may have multiple overlapping type conditions. We merge them so that the plan
     // node is interpreted in the merged state. That means the `requires` conditions can be checked
@@ -773,7 +781,7 @@ fn interpret_plan_node_under_type_condition(
                 conditions,
                 next_type_condition,
                 next_path,
-                node,
+                fetch,
             );
             match sub_rs {
                 Ok(None) => None,
@@ -802,7 +810,7 @@ fn interpret_plan_node_under_boolean_condition(
     conditions: &[Literal],
     next_type_condition: &Option<Vec<Name>>,
     next_path: &[FetchDataPathElement],
-    node: &PlanNode,
+    fetch: &FetchNode,
 ) -> Result<Option<ResponseShape>, String> {
     // We are considering variants that satisfy both the `variant_clause` and the fetch
     // `conditions`. We concatenate them into a single full condition.
@@ -830,7 +838,7 @@ fn interpret_plan_node_under_boolean_condition(
         conditions,
         next_type_condition.as_ref(),
         next_path,
-        node,
+        fetch,
     )
 }
 
@@ -840,13 +848,14 @@ fn interpret_flatten_node(
     conditions: &[Literal],
     flatten: &FlattenNode,
 ) -> Result<ResponseShape, String> {
+    let Some((path, fetch)) = flatten.single() else {
+        // Fetches sent together select the same data as each of them run in parallel.
+        let nodes = flatten.batched_fetches();
+        return interpret_parallel_node(context, state, conditions, &ParallelNode { nodes });
+    };
     let response_shape = interpret_plan_node_at_path(
-        context,
-        state,
-        conditions,
-        None, // no type condition at the top level
-        &flatten.path,
-        &flatten.node,
+        context, state, conditions, None, // no type condition at the top level
+        path, fetch,
     )?;
     let Some(response_shape) = response_shape else {
         // `flatten.path` is addressing a non-existing response object.

@@ -41,7 +41,6 @@ pub mod metrics;
 mod ageing_priority_queue;
 mod apollo_studio_interop;
 pub(crate) mod axum_factory;
-mod batching;
 mod cache;
 mod compute_job;
 mod configuration;
@@ -98,7 +97,6 @@ pub use crate::test_harness::http_snapshot::SnapshotServer;
 pub use crate::test_harness::http_snapshot::standalone::main as snapshot_server;
 pub use crate::test_harness::make_fake_batch;
 pub use crate::uplink::UplinkConfig;
-pub use crate::uplink::license_enforcement::AllowedFeature;
 
 /// Not part of the public API
 #[doc(hidden)]

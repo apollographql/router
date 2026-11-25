@@ -28,7 +28,6 @@ async fn test_env_var() {
         Default::default(),
         None,
         |_| {},
-        None,
     )
     .await;
 
@@ -79,7 +78,6 @@ async fn expanded_config_values_keep_their_yaml_type_in_the_request_body() {
         Default::default(),
         config,
         |_| {},
-        None,
     )
     .await;
 

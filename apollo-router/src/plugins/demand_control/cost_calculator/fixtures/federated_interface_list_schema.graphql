@@ -1,0 +1,69 @@
+schema
+  @link(url: "https://specs.apollo.dev/link/v1.0")
+  @link(url: "https://specs.apollo.dev/join/v0.3", for: EXECUTION)
+  @link(url: "https://specs.apollo.dev/cost/v0.1", import: ["@listSize"])
+{
+  query: Query
+}
+
+directive @join__enumValue(graph: join__Graph!) repeatable on ENUM_VALUE
+directive @join__field(graph: join__Graph, requires: join__FieldSet, provides: join__FieldSet, type: String, external: Boolean, override: String, usedOverridden: Boolean) repeatable on FIELD_DEFINITION | INPUT_FIELD_DEFINITION
+directive @join__graph(name: String!, url: String!) on ENUM_VALUE
+directive @join__implements(graph: join__Graph!, interface: String!) repeatable on OBJECT | INTERFACE
+directive @join__type(graph: join__Graph!, key: join__FieldSet, extension: Boolean! = false, resolvable: Boolean! = true, isInterfaceObject: Boolean! = false) repeatable on OBJECT | INTERFACE | UNION | ENUM | INPUT_OBJECT | SCALAR
+directive @join__unionMember(graph: join__Graph!, member: String!) repeatable on UNION
+directive @link(url: String, as: String, for: link__Purpose, import: [link__Import]) repeatable on SCHEMA
+directive @listSize(assumedSize: Int, slicingArguments: [String!], sizedFields: [String!], requireOneSlicingArgument: Boolean = true) on FIELD_DEFINITION
+
+scalar join__FieldSet
+scalar link__Import
+
+enum link__Purpose {
+  SECURITY
+  EXECUTION
+}
+
+enum join__Graph {
+  FIRST @join__graph(name: "first", url: "http://localhost:4001")
+  SECOND @join__graph(name: "second", url: "http://localhost:4002")
+  THIRD @join__graph(name: "third", url: "http://localhost:4003")
+}
+
+type Query
+  @join__type(graph: FIRST)
+  @join__type(graph: SECOND)
+  @join__type(graph: THIRD)
+{
+  pet: Animal @join__field(graph: FIRST)
+}
+
+# Only `first` knows the interface, so it selects `toys` through `Animal` (sized 3), while
+# `second` can only select it through `Cat` (sized 7).
+interface Animal
+  @join__type(graph: FIRST)
+{
+  id: ID!
+  toys: [Toy!]! @listSize(assumedSize: 3)
+}
+
+type Cat implements Animal
+  @join__implements(graph: FIRST, interface: "Animal")
+  @join__type(graph: FIRST, key: "id")
+  @join__type(graph: SECOND, key: "id")
+{
+  id: ID!
+  toys: [Toy!]! @join__field(graph: FIRST) @join__field(graph: SECOND) @listSize(assumedSize: 7)
+}
+
+# `first` and `second` each resolve a field of `Toy` that the other can't, so a query for both
+# fields selects the same `toys` list from both subgraphs.
+type Toy
+  @join__type(graph: FIRST, key: "id", resolvable: false)
+  @join__type(graph: SECOND, key: "id", resolvable: false)
+  @join__type(graph: THIRD, key: "id")
+{
+  id: ID!
+  a: String @join__field(graph: FIRST)
+  b: String @join__field(graph: SECOND)
+  c: String @join__field(graph: THIRD)
+}

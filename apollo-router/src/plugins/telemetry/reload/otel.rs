@@ -59,6 +59,7 @@ use tracing_subscriber::util::SubscriberInitExt;
 
 use crate::plugins::telemetry::dynamic_attribute::DynAttributeLayer;
 use crate::plugins::telemetry::fmt_layer::FmtLayer;
+use crate::plugins::telemetry::fmt_layer::LogFormatLayer;
 use crate::plugins::telemetry::fmt_layer::SpanFieldsLayer;
 use crate::plugins::telemetry::formatters::json::Json;
 use crate::plugins::telemetry::formatters::text::Text;
@@ -89,7 +90,8 @@ pub(in crate::plugins::telemetry) static OPENTELEMETRY_TRACER_HANDLE: OnceCell<
 /// without rebuilding the entire tracing subscriber stack.
 static FMT_LAYER_HANDLE: OnceCell<LogFormatHandle<LayeredTracer>> = OnceCell::new();
 
-/// Swaps the reloadable log format layer, and records span fields only while there is one.
+/// Swaps the reloadable log format layer, and records span fields only while its format shows
+/// them.
 struct LogFormatHandle<S> {
     layer: Handle<Box<dyn Layer<S> + Send + Sync>, S>,
     /// [`SpanFieldsLayer::enabled`]
@@ -99,14 +101,16 @@ struct LogFormatHandle<S> {
 impl<S: Subscriber> LogFormatHandle<S> {
     /// Installs `layer` as the log format layer, or a layer that logs nothing when it is `None`.
     ///
-    /// Without a format layer nothing reads span fields, so they aren't recorded. Logs from a
-    /// request in flight when logging is turned back on therefore lack the fields of spans the
-    /// request created before then.
-    fn reload(&self, layer: Option<Box<dyn Layer<S> + Send + Sync>>) {
-        self.span_fields_enabled
-            .store(layer.is_some(), Ordering::Relaxed);
+    /// Span fields are recorded only while the installed format shows them, because nothing
+    /// else reads them. Logs from a request in flight when a format that shows them is installed
+    /// therefore lack the fields of spans the request created before then.
+    fn reload(&self, layer: Option<LogFormatLayer<S>>) {
+        self.span_fields_enabled.store(
+            layer.as_ref().is_some_and(|layer| layer.shows_span_fields),
+            Ordering::Relaxed,
+        );
         self.layer
-            .reload(layer.unwrap_or_else(|| NoOpLayer.boxed()))
+            .reload(layer.map_or_else(|| NoOpLayer.boxed(), |layer| layer.layer))
             .expect("fmt layer reload must succeed");
     }
 }
@@ -184,9 +188,7 @@ pub(crate) fn init_telemetry(log_level: &str) -> anyhow::Result<()> {
 }
 
 /// Installs `layer` as the log format layer; `None` turns stdout logging off.
-pub(in crate::plugins::telemetry) fn reload_fmt(
-    layer: Option<Box<dyn Layer<LayeredTracer> + Send + Sync>>,
-) {
+pub(in crate::plugins::telemetry) fn reload_fmt(layer: Option<LogFormatLayer<LayeredTracer>>) {
     if let Some(handle) = FMT_LAYER_HANDLE.get() {
         handle.reload(layer);
     }
@@ -319,7 +321,7 @@ mod tests {
     }
 
     #[test]
-    fn span_fields_are_recorded_only_while_stdout_logging_is_on() {
+    fn span_fields_are_recorded_only_while_the_log_format_shows_them() {
         let span_fields = SpanFieldsLayer::default();
         let (fmt_layer, layer) = tracing_subscriber::reload::Layer::new(NoOpLayer.boxed());
         let handle = LogFormatHandle {
@@ -330,20 +332,31 @@ mod tests {
             .with(DynAttributeLayer::new())
             .with(EventsOnly::new(fmt_layer))
             .with(span_fields);
+        let text_layer = |shows_span_fields| LogFormatLayer {
+            layer: FmtLayer::new(Text::default(), std::io::sink).boxed(),
+            shows_span_fields,
+        };
+        let recorded_fields = || {
+            let span = tracing::info_span!("span", field = "value", late = tracing::field::Empty);
+            span.record("late", "value");
+            let mut names = log_attribute_names(&span);
+            names.sort();
+            names
+        };
 
         tracing::subscriber::with_default(subscriber, || {
             handle.reload(None);
-            let off = tracing::info_span!("off", field = "value", late = tracing::field::Empty);
-            off.record("late", "value");
-            assert!(log_attribute_names(&off).is_empty());
+            assert!(recorded_fields().is_empty(), "stdout logging off");
 
-            handle.reload(Some(FmtLayer::new(Text::default(), std::io::sink).boxed()));
-            let on = tracing::info_span!("on", field = "value", late = tracing::field::Empty);
-            on.record("late", "value");
-            let mut names = log_attribute_names(&on);
-            names.sort();
-            assert_eq!(names, ["field", "late"]);
-            assert!(log_attribute_names(&off).is_empty());
+            handle.reload(Some(text_layer(false)));
+            assert!(recorded_fields().is_empty(), "format hides span fields");
+
+            handle.reload(Some(text_layer(true)));
+            assert_eq!(
+                recorded_fields(),
+                ["field", "late"],
+                "format shows span fields"
+            );
         });
     }
 

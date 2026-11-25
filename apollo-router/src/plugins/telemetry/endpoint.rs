@@ -130,12 +130,12 @@ mod test {
 
     #[test]
     fn test_parse_uri_default() {
-        let endpoint = serde_yaml::from_str::<UriEndpoint>("default").unwrap();
+        let endpoint = yaml_serde::from_str::<UriEndpoint>("default").unwrap();
         assert_eq!(endpoint, UriEndpoint::default());
     }
     #[test]
     fn test_parse_uri() {
-        let endpoint = serde_yaml::from_str::<UriEndpoint>("http://example.com:2000/path").unwrap();
+        let endpoint = yaml_serde::from_str::<UriEndpoint>("http://example.com:2000/path").unwrap();
         assert_eq!(
             endpoint,
             Uri::from_static("http://example.com:2000/path").into()
@@ -144,11 +144,11 @@ mod test {
 
     #[test]
     fn test_parse_uri_error() {
-        let error = serde_yaml::from_str::<UriEndpoint>("example.com:2000/path")
+        let error = yaml_serde::from_str::<UriEndpoint>("example.com:2000/path")
             .expect_err("expected error");
         assert_eq!(
             error.to_string(),
-            "invalid endpoint: example.com:2000/path. Expected a valid uri or 'default' at line 1 column 1"
+            "invalid endpoint: example.com:2000/path. Expected a valid uri or 'default'"
         );
     }
 

@@ -93,8 +93,8 @@ impl RequestTestExt<subgraph::Request, subgraph::Response> for SubgraphRequest {
         T: for<'de> Deserialize<'de> + Eq + PartialEq + Debug + Serialize,
     {
         pretty_assertions::assert_eq!(
-            serde_yaml::to_string(&self.subgraph_request.body()).expect("could not serialize"),
-            serde_yaml::to_string(&value).expect("could not serialize")
+            yaml_serde::to_string(&self.subgraph_request.body()).expect("could not serialize"),
+            yaml_serde::to_string(&value).expect("could not serialize")
         );
     }
 
@@ -142,8 +142,8 @@ impl ResponseTestExt for SubgraphResponse {
         T: for<'de> Deserialize<'de> + Eq + PartialEq + Debug + Serialize,
     {
         pretty_assertions::assert_eq!(
-            serde_yaml::to_string(&self.response.body_mut()).expect("could not serialize"),
-            serde_yaml::to_string(&value).expect("could not serialize")
+            yaml_serde::to_string(&self.response.body_mut()).expect("could not serialize"),
+            yaml_serde::to_string(&value).expect("could not serialize")
         );
     }
 
@@ -154,8 +154,8 @@ impl ResponseTestExt for SubgraphResponse {
         if !serialized_errors.iter().contains(error) {
             panic!(
                 "Expected error {}\nActual errors\n{}",
-                serde_yaml::to_string(error).expect("error"),
-                serde_yaml::to_string(errors).expect("errors")
+                yaml_serde::to_string(error).expect("error"),
+                yaml_serde::to_string(errors).expect("errors")
             )
         }
     }

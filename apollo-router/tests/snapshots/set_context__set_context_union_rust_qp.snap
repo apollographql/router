@@ -23,15 +23,16 @@ expression: response
                 "policies": [],
                 "scopes": []
               },
-              "contextRewrites": null,
+              "fetchKind": {
+                "kind": "Root"
+              },
               "id": null,
-              "inputRewrites": null,
               "kind": "Fetch",
               "operation": "query QueryUnion__Subgraph1__0 { k { __typename ... on A { __typename prop v { __typename id } } ... on B { __typename prop v { __typename id } } } }",
               "operationKind": "query",
               "operationName": "QueryUnion__Subgraph1__0",
               "outputRewrites": null,
-              "schemaAwareHash": "fbd9aad933c5b596a7506ab8d53e278249df59a8aaaa05b2fad4d639555d3ad0",
+              "schemaAwareHash": "f29acafaaecdfbcc40a9a937cc3c6a22a6ff3601cbf8a368bcf80f0ab3e7468b",
               "serviceName": "Subgraph1",
               "variableUsages": []
             },
@@ -40,108 +41,124 @@ expression: response
               "nodes": [
                 {
                   "kind": "Flatten",
-                  "node": {
-                    "authorization": {
-                      "is_authenticated": false,
-                      "policies": [],
-                      "scopes": []
-                    },
-                    "contextRewrites": [
-                      {
-                        "kind": "KeyRenamer",
-                        "path": [
-                          "..",
-                          "... on B",
-                          "prop"
-                        ],
-                        "renameKeyTo": "contextualArgument_1_1"
-                      }
-                    ],
-                    "id": null,
-                    "inputRewrites": null,
-                    "kind": "Fetch",
-                    "operation": "query QueryUnion__Subgraph1__1($representations: [_Any!]!, $contextualArgument_1_1: String) { _entities(representations: $representations) { ... on V { field(a: $contextualArgument_1_1) } } }",
-                    "operationKind": "query",
-                    "operationName": "QueryUnion__Subgraph1__1",
-                    "outputRewrites": null,
-                    "requires": [
-                      {
-                        "kind": "InlineFragment",
-                        "selections": [
-                          {
-                            "kind": "Field",
-                            "name": "__typename"
-                          },
-                          {
-                            "kind": "Field",
-                            "name": "id"
-                          }
-                        ],
-                        "typeCondition": "V"
-                      }
-                    ],
-                    "schemaAwareHash": "4d177920d6b646c239583d1cdca520cea5170370e6bade999ac44088826486b0",
-                    "serviceName": "Subgraph1",
-                    "variableUsages": [
-                      "contextualArgument_1_1"
-                    ]
-                  },
-                  "path": [
-                    "k|[B]",
-                    "v"
+                  "members": [
+                    {
+                      "fetch": {
+                        "authorization": {
+                          "is_authenticated": false,
+                          "policies": [],
+                          "scopes": []
+                        },
+                        "fetchKind": {
+                          "contextRewrites": [
+                            {
+                              "kind": "KeyRenamer",
+                              "path": [
+                                "..",
+                                "... on B",
+                                "prop"
+                              ],
+                              "renameKeyTo": "contextualArgument_1_1"
+                            }
+                          ],
+                          "inputRewrites": null,
+                          "kind": "Entities",
+                          "requires": [
+                            {
+                              "kind": "InlineFragment",
+                              "selections": [
+                                {
+                                  "kind": "Field",
+                                  "name": "__typename"
+                                },
+                                {
+                                  "kind": "Field",
+                                  "name": "id"
+                                }
+                              ],
+                              "typeCondition": "V"
+                            }
+                          ]
+                        },
+                        "id": null,
+                        "operation": "query QueryUnion__Subgraph1__1($representations: [_Any!]!, $contextualArgument_1_1: String) { _entities(representations: $representations) { ... on V { field(a: $contextualArgument_1_1) } } }",
+                        "operationKind": "query",
+                        "operationName": "QueryUnion__Subgraph1__1",
+                        "outputRewrites": null,
+                        "schemaAwareHash": "128ab70275fe907e8e50c36edeae43f789972f7c4765ef38f547a4ef048a9745",
+                        "serviceName": "Subgraph1",
+                        "variableUsages": [
+                          "contextualArgument_1_1"
+                        ]
+                      },
+                      "paths": [
+                        [
+                          "k|[B]",
+                          "v"
+                        ]
+                      ]
+                    }
                   ]
                 },
                 {
                   "kind": "Flatten",
-                  "node": {
-                    "authorization": {
-                      "is_authenticated": false,
-                      "policies": [],
-                      "scopes": []
-                    },
-                    "contextRewrites": [
-                      {
-                        "kind": "KeyRenamer",
-                        "path": [
-                          "..",
-                          "... on A",
-                          "prop"
-                        ],
-                        "renameKeyTo": "contextualArgument_1_1"
-                      }
-                    ],
-                    "id": null,
-                    "inputRewrites": null,
-                    "kind": "Fetch",
-                    "operation": "query QueryUnion__Subgraph1__2($representations: [_Any!]!, $contextualArgument_1_1: String) { _entities(representations: $representations) { ... on V { field(a: $contextualArgument_1_1) } } }",
-                    "operationKind": "query",
-                    "operationName": "QueryUnion__Subgraph1__2",
-                    "outputRewrites": null,
-                    "requires": [
-                      {
-                        "kind": "InlineFragment",
-                        "selections": [
-                          {
-                            "kind": "Field",
-                            "name": "__typename"
-                          },
-                          {
-                            "kind": "Field",
-                            "name": "id"
-                          }
-                        ],
-                        "typeCondition": "V"
-                      }
-                    ],
-                    "schemaAwareHash": "53c9faa955c90f835534740528a420a437b6017e143c871b332d08ec23cf7cf1",
-                    "serviceName": "Subgraph1",
-                    "variableUsages": [
-                      "contextualArgument_1_1"
-                    ]
-                  },
-                  "path": [
-                    "k|[A]",
-                    "v"
+                  "members": [
+                    {
+                      "fetch": {
+                        "authorization": {
+                          "is_authenticated": false,
+                          "policies": [],
+                          "scopes": []
+                        },
+                        "fetchKind": {
+                          "contextRewrites": [
+                            {
+                              "kind": "KeyRenamer",
+                              "path": [
+                                "..",
+                                "... on A",
+                                "prop"
+                              ],
+                              "renameKeyTo": "contextualArgument_1_1"
+                            }
+                          ],
+                          "inputRewrites": null,
+                          "kind": "Entities",
+                          "requires": [
+                            {
+                              "kind": "InlineFragment",
+                              "selections": [
+                                {
+                                  "kind": "Field",
+                                  "name": "__typename"
+                                },
+                                {
+                                  "kind": "Field",
+                                  "name": "id"
+                                }
+                              ],
+                              "typeCondition": "V"
+                            }
+                          ]
+                        },
+                        "id": null,
+                        "operation": "query QueryUnion__Subgraph1__2($representations: [_Any!]!, $contextualArgument_1_1: String) { _entities(representations: $representations) { ... on V { field(a: $contextualArgument_1_1) } } }",
+                        "operationKind": "query",
+                        "operationName": "QueryUnion__Subgraph1__2",
+                        "outputRewrites": null,
+                        "schemaAwareHash": "9172a66c4e373250009904a1797fad59b8a631e53936f4a8de1c7dc43b5669d3",
+                        "serviceName": "Subgraph1",
+                        "variableUsages": [
+                          "contextualArgument_1_1"
+                        ]
+                      },
+                      "paths": [
+                        [
+                          "k|[A]",
+                          "v"
+                        ]
+                      ]
+                    }
                   ]
                 }
               ]

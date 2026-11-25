@@ -295,6 +295,34 @@ The `telemetry.instrumentation.spans.mode` option is removed. The `spec_complian
 **Upgrade step**:
 - Remove the `telemetry.instrumentation.spans.mode` field from your configuration.
 
+### JSON path selectors return an array for any path that can match several values
+
+In GraphOS Router v2.x, the `response_data`, `response_errors`, `subgraph_response_data` and `subgraph_response_errors` selectors returned a single value when their JSON path matched one value, and an array when it matched several. The same configuration could produce a string for one response and an array for the next.
+
+Starting in Router 3, the shape of the path decides. A path made only of field names and single indexes, such as `$[0].extensions.code`, returns the matched value. Any other path, such as one with `[*]`, `.*`, `..`, a slice, a union or a filter, always returns an array, even when it matches one value. For example, with `$[*].extensions.code`:
+
+| Errors in the response | v2.x | v3 |
+| --- | --- | --- |
+| One `NOT_FOUND` error | `"NOT_FOUND"` | `["NOT_FOUND"]` |
+| `NOT_FOUND` and `FORBIDDEN` errors | `["NOT_FOUND", "FORBIDDEN"]` | `["NOT_FOUND", "FORBIDDEN"]` |
+
+For these paths, Router 3 also leaves `null` matches out:
+
+| Path and data | v2.x | v3 |
+| --- | --- | --- |
+| `$[*].x` over `[{"x": null}, {"x": "a"}]` | `"[null,\"a\"]"` | `["a"]` |
+| `$[*].x` over `[{"x": null}, {"x": null}]` | `"[null,null]"` | No attribute; `default` applies |
+
+When matches have different types, Router 3 returns an array of strings instead of one JSON string. A match that is itself an array or object is written as one JSON string in the array: `$.*` over `{"items": [{"id": 1}, {"id": 2}]}` returned `["{\"id\":1}", "{\"id\":2}"]` in v2.x and returns `["[{\"id\":1},{\"id\":2}]"]` in Router 3. With such a path, the `response_errors_field` selector now adds each non-null match from each error to its array, instead of writing an error with several matches as one JSON string.
+
+**Upgrade step**:
+- For each of these selectors whose path uses `[*]`, `.*`, `..`, a slice, a union or a filter, check the dashboards and alerts that use its attribute: a value that was a string is now a one-element array, which starts a new metric series.
+- Check `condition` blocks that use these selectors. An array never equals a single value, so `eq: ["NOT_FOUND", {response_errors: "$[*].extensions.code"}]` stops matching. `exists` is now false when every match is `null`.
+- Check instrument `value`s. An instrument can't use an array as its value, so the router rejects the configuration when an instrument's `value` uses one of these paths or `response_errors_field`.
+- If you want a single value, change the path to select one, for example `$[0].extensions.code` instead of `$[*].extensions.code`. `response_errors_field` gives an array whatever its path, so replace it with `response_errors` and an index, for example `response_errors: "$[0].extensions.code"`.
+
+See [Single values and arrays](/graphos/routing/observability/router-telemetry-otel/enabling-telemetry/selectors#single-values-and-arrays).
+
 ## Configuration changes
 
 The following describes changes to router configuration, including renamed options and changed default values.
@@ -349,6 +377,35 @@ When a client disconnects, the Router now cancels the request immediately by def
 Previously the default was `false`, which caused requests to continue running in a background task even after the client disconnected.
 
 To restore the previous behavior (e.g. to preserve telemetry for canceled requests), set `early_cancel: false` in your router config.
+
+### Changed default for `http2` to `disable`
+
+The router now uses HTTP/1.1 for requests to subgraphs, connector sources and coprocessors unless you configure HTTP/2. Previously the default was `enable`, so the router offered HTTP/2 over TLS and used it whenever the server supported it.
+
+You need to act if a subgraph, connector source or coprocessor accepts only HTTP/2 over TLS, or if you set `experimental_http2_keep_alive_interval`, which sends pings only over HTTP/2. Otherwise the router opens more connections under load, because HTTP/1.1 sends one request at a time on each connection.
+
+To restore the previous behavior, set `http2: enable` for each client you want to use HTTP/2:
+
+```yaml title="router.yaml"
+traffic_shaping:
+  all:
+    http2: enable
+  connector:
+    all:
+      experimental_http2: enable
+coprocessor:
+  url: https://coprocessor.example.com
+  client:
+    http2: enable
+```
+
+### Client batches are limited to 10 operations by default
+
+When [query batching](/graphos/routing/performance/query-batching) is enabled, `batching.maximum_size` now defaults to `10` and can no longer be turned off. Router v2.x accepted batches of any size unless you set a limit.
+
+Batches exceeding the maximum size are rejected with an HTTP 422 status code and a `BATCH_LIMIT_EXCEEDED` error code.
+
+If your clients send larger batches, check the [`apollo.router.operations.batching.size`](/graphos/routing/performance/query-batching#metrics-for-query-batching) metric and set `maximum_size` a little above the largest batch you see.
 
 ### Stabilized `supergraph.log_on_broken_pipe`
 
@@ -423,6 +480,11 @@ plugins:
 # After
 expose_query_plan: true
 ```
+
+If you parse `extensions.apolloQueryPlan.object`, update your parser for the Router v3 JSON format.
+
+- Read the fetch type from `fetchKind.kind`. For an `Entities` fetch, read `requires`, `inputRewrites`, and `contextRewrites` from `fetchKind`.
+- Read a `Flatten` node's fetches and merge paths from `members`. The v2 `node` and `path` of a single fetch map to `members[0].fetch` and `members[0].paths[0]`. A member's `fetch` has no `kind: "Fetch"` tag.
 
 ### Removed plain string syntax from telemetry selectors
 

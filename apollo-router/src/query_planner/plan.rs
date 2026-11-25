@@ -168,7 +168,7 @@ impl PlanNode {
         match self {
             Self::Sequence { nodes } => nodes.iter().any(|n| n.is_deferred(variables, query)),
             Self::Parallel { nodes } => nodes.iter().any(|n| n.is_deferred(variables, query)),
-            Self::Flatten(node) => node.node.is_deferred(variables, query),
+            Self::Flatten(_) => false,
             Self::Fetch(..) => false,
             Self::Defer { .. } => true,
             Self::Subscription { .. } => false,
@@ -205,7 +205,7 @@ impl PlanNode {
             PlanNode::Sequence { nodes } => nodes.iter().map(|n| n.subgraph_fetches()).sum(),
             PlanNode::Parallel { nodes } => nodes.iter().map(|n| n.subgraph_fetches()).sum(),
             PlanNode::Fetch(_) => 1,
-            PlanNode::Flatten(node) => node.node.subgraph_fetches(),
+            PlanNode::Flatten(_) => 1,
             PlanNode::Defer { primary, deferred } => {
                 primary.node.as_ref().map_or(0, |n| n.subgraph_fetches())
                     + deferred
@@ -254,7 +254,11 @@ impl PlanNode {
                     node.init_parsed_operations(subgraph_schemas)?;
                 }
             }
-            PlanNode::Flatten(flatten) => flatten.node.init_parsed_operations(subgraph_schemas)?,
+            PlanNode::Flatten(flatten) => {
+                for member in &mut flatten.members {
+                    member.fetch.init_parsed_operation(subgraph_schemas)?;
+                }
+            }
             PlanNode::Defer { primary, deferred } => {
                 if let Some(node) = primary.node.as_mut() {
                     node.init_parsed_operations(subgraph_schemas)?;
@@ -306,9 +310,13 @@ impl PlanNode {
                     node.init_parsed_operations_and_hash_subqueries(subgraph_schemas)?;
                 }
             }
-            PlanNode::Flatten(flatten) => flatten
-                .node
-                .init_parsed_operations_and_hash_subqueries(subgraph_schemas)?,
+            PlanNode::Flatten(flatten) => {
+                for member in &mut flatten.members {
+                    member
+                        .fetch
+                        .init_parsed_operation_and_hash_subquery(subgraph_schemas)?;
+                }
+            }
             PlanNode::Defer { primary, deferred } => {
                 if let Some(node) = primary.node.as_mut() {
                     node.init_parsed_operations_and_hash_subqueries(subgraph_schemas)?;
@@ -358,7 +366,12 @@ impl PlanNode {
                 ) as Box<dyn Iterator<Item = &'a str> + 'a>,
                 None => Box::new(Some(primary.service_name.as_ref()).into_iter()),
             },
-            Self::Flatten(flatten) => flatten.node.service_usage(),
+            Self::Flatten(flatten) => Box::new(
+                flatten
+                    .members
+                    .iter()
+                    .map(|member| member.fetch.service_name()),
+            ),
             Self::Defer { primary, deferred } => primary
                 .node
                 .as_ref()
@@ -410,7 +423,9 @@ impl PlanNode {
                     }
                 }
                 Self::Flatten(flatten) => {
-                    stack.push(&flatten.node);
+                    for member in &flatten.members {
+                        services.insert(member.fetch.service_name.as_ref());
+                    }
                 }
                 Self::Defer { primary, deferred } => {
                     if let Some(primary) = primary.node.as_ref() {
@@ -455,7 +470,11 @@ impl PlanNode {
                     node.extract_authorization_metadata(schema, key);
                 }
             }
-            PlanNode::Flatten(flatten) => flatten.node.extract_authorization_metadata(schema, key),
+            PlanNode::Flatten(flatten) => {
+                for member in &mut flatten.members {
+                    member.fetch.extract_authorization_metadata(schema, key);
+                }
+            }
             PlanNode::Defer { primary, deferred } => {
                 if let Some(node) = primary.node.as_mut() {
                     node.extract_authorization_metadata(schema, key);
@@ -489,15 +508,44 @@ impl PlanNode {
     }
 }
 
-/// A flatten node.
+/// Fetches to one subgraph whose responses merge into objects already in the response. A fetch
+/// on its own is one member at one path.
 #[derive(Debug, Clone, PartialEq, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub(crate) struct FlattenNode {
-    /// The path when result should be merged.
-    pub(crate) path: Path,
+    pub(crate) members: Vec<FlattenMember>,
+}
 
-    /// The child execution plan.
-    pub(crate) node: Box<PlanNode>,
+/// One fetch of a `FlattenNode`, with the paths its response merges at.
+#[derive(Debug, Clone, PartialEq, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct FlattenMember {
+    pub(crate) paths: Vec<Path>,
+    pub(crate) fetch: fetch::FetchNode,
+}
+
+impl FlattenNode {
+    /// `fetch` with its whole response merging at `path`.
+    #[cfg(test)]
+    pub(crate) fn at_path(path: Path, fetch: fetch::FetchNode) -> Self {
+        Self {
+            members: vec![FlattenMember {
+                paths: vec![path],
+                fetch,
+            }],
+        }
+    }
+
+    /// The fetch and the path it merges at, when the node is one fetch at one path.
+    pub(crate) fn single(&self) -> Option<(&Path, &fetch::FetchNode)> {
+        let [member] = self.members.as_slice() else {
+            return None;
+        };
+        let [path] = member.paths.as_slice() else {
+            return None;
+        };
+        Some((path, &member.fetch))
+    }
 }
 
 /// A primary query for a Defer node, the non deferred part

@@ -40,15 +40,16 @@ expression: response
                 "policies": [],
                 "scopes": []
               },
-              "contextRewrites": null,
+              "fetchKind": {
+                "kind": "Root"
+              },
               "id": null,
-              "inputRewrites": null,
               "kind": "Fetch",
               "operation": "query Query_fetch_failure__Subgraph1__0 { t { __typename prop id u { __typename id } } }",
               "operationKind": "query",
               "operationName": "Query_fetch_failure__Subgraph1__0",
               "outputRewrites": null,
-              "schemaAwareHash": "95f47f644db47c463750714f6d830cc1b14f2ba2d7662cad6f4a7db08b68bff5",
+              "schemaAwareHash": "cdfc247abbc53ea7eddaf235eed6d8cd63c31831465e10ad2e0fce175617fa9c",
               "serviceName": "Subgraph1",
               "variableUsages": []
             },
@@ -57,96 +58,112 @@ expression: response
               "nodes": [
                 {
                   "kind": "Flatten",
-                  "node": {
-                    "authorization": {
-                      "is_authenticated": false,
-                      "policies": [],
-                      "scopes": []
-                    },
-                    "contextRewrites": [
-                      {
-                        "kind": "KeyRenamer",
-                        "path": [
-                          "..",
-                          "... on T",
-                          "prop"
-                        ],
-                        "renameKeyTo": "contextualArgument_1_0"
-                      }
-                    ],
-                    "id": null,
-                    "inputRewrites": null,
-                    "kind": "Fetch",
-                    "operation": "query Query_fetch_failure__Subgraph1__1($representations: [_Any!]!, $contextualArgument_1_0: String) { _entities(representations: $representations) { ... on U { field(a: $contextualArgument_1_0) } } }",
-                    "operationKind": "query",
-                    "operationName": "Query_fetch_failure__Subgraph1__1",
-                    "outputRewrites": null,
-                    "requires": [
-                      {
-                        "kind": "InlineFragment",
-                        "selections": [
-                          {
-                            "kind": "Field",
-                            "name": "__typename"
-                          },
-                          {
-                            "kind": "Field",
-                            "name": "id"
-                          }
-                        ],
-                        "typeCondition": "U"
-                      }
-                    ],
-                    "schemaAwareHash": "11fe8f745d00c891aac690824866876093db3efb69dca49a2684b6122e3075aa",
-                    "serviceName": "Subgraph1",
-                    "variableUsages": [
-                      "contextualArgument_1_0"
-                    ]
-                  },
-                  "path": [
-                    "t",
-                    "u"
+                  "members": [
+                    {
+                      "fetch": {
+                        "authorization": {
+                          "is_authenticated": false,
+                          "policies": [],
+                          "scopes": []
+                        },
+                        "fetchKind": {
+                          "contextRewrites": [
+                            {
+                              "kind": "KeyRenamer",
+                              "path": [
+                                "..",
+                                "... on T",
+                                "prop"
+                              ],
+                              "renameKeyTo": "contextualArgument_1_0"
+                            }
+                          ],
+                          "inputRewrites": null,
+                          "kind": "Entities",
+                          "requires": [
+                            {
+                              "kind": "InlineFragment",
+                              "selections": [
+                                {
+                                  "kind": "Field",
+                                  "name": "__typename"
+                                },
+                                {
+                                  "kind": "Field",
+                                  "name": "id"
+                                }
+                              ],
+                              "typeCondition": "U"
+                            }
+                          ]
+                        },
+                        "id": null,
+                        "operation": "query Query_fetch_failure__Subgraph1__1($representations: [_Any!]!, $contextualArgument_1_0: String) { _entities(representations: $representations) { ... on U { field(a: $contextualArgument_1_0) } } }",
+                        "operationKind": "query",
+                        "operationName": "Query_fetch_failure__Subgraph1__1",
+                        "outputRewrites": null,
+                        "schemaAwareHash": "5ce8496ae5c2b404ae1d2b1a882345e07d16590db2ed6611ea24a1999bd4415f",
+                        "serviceName": "Subgraph1",
+                        "variableUsages": [
+                          "contextualArgument_1_0"
+                        ]
+                      },
+                      "paths": [
+                        [
+                          "t",
+                          "u"
+                        ]
+                      ]
+                    }
                   ]
                 },
                 {
                   "kind": "Flatten",
-                  "node": {
-                    "authorization": {
-                      "is_authenticated": false,
-                      "policies": [],
-                      "scopes": []
-                    },
-                    "contextRewrites": null,
-                    "id": null,
-                    "inputRewrites": null,
-                    "kind": "Fetch",
-                    "operation": "query Query_fetch_failure__Subgraph2__2($representations: [_Any!]!) { _entities(representations: $representations) { ... on U { b } } }",
-                    "operationKind": "query",
-                    "operationName": "Query_fetch_failure__Subgraph2__2",
-                    "outputRewrites": null,
-                    "requires": [
-                      {
-                        "kind": "InlineFragment",
-                        "selections": [
-                          {
-                            "kind": "Field",
-                            "name": "__typename"
-                          },
-                          {
-                            "kind": "Field",
-                            "name": "id"
-                          }
-                        ],
-                        "typeCondition": "U"
-                      }
-                    ],
-                    "schemaAwareHash": "e803b0533a4a30f4a1443d12981ef43ba44c9e5922e7fe663e198e9ad01fc1d7",
-                    "serviceName": "Subgraph2",
-                    "variableUsages": []
-                  },
-                  "path": [
-                    "t",
-                    "u"
+                  "members": [
+                    {
+                      "fetch": {
+                        "authorization": {
+                          "is_authenticated": false,
+                          "policies": [],
+                          "scopes": []
+                        },
+                        "fetchKind": {
+                          "contextRewrites": null,
+                          "inputRewrites": null,
+                          "kind": "Entities",
+                          "requires": [
+                            {
+                              "kind": "InlineFragment",
+                              "selections": [
+                                {
+                                  "kind": "Field",
+                                  "name": "__typename"
+                                },
+                                {
+                                  "kind": "Field",
+                                  "name": "id"
+                                }
+                              ],
+                              "typeCondition": "U"
+                            }
+                          ]
+                        },
+                        "id": null,
+                        "operation": "query Query_fetch_failure__Subgraph2__2($representations: [_Any!]!) { _entities(representations: $representations) { ... on U { b } } }",
+                        "operationKind": "query",
+                        "operationName": "Query_fetch_failure__Subgraph2__2",
+                        "outputRewrites": null,
+                        "schemaAwareHash": "570e6c45cd3fc42f66f961fc2456a856cf12072dd6b63f2636d9e2b265254fed",
+                        "serviceName": "Subgraph2",
+                        "variableUsages": []
+                      },
+                      "paths": [
+                        [
+                          "t",
+                          "u"
+                        ]
+                      ]
+                    }
                   ]
                 }
               ]

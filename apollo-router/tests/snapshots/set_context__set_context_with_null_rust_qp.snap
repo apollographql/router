@@ -21,15 +21,16 @@ expression: response
             {
               "kind": "Fetch",
               "serviceName": "Subgraph1",
+              "fetchKind": {
+                "kind": "Root"
+              },
               "variableUsages": [],
               "operation": "query Query_Null_Param__Subgraph1__0 { t { __typename prop id u { __typename id } } }",
               "operationName": "Query_Null_Param__Subgraph1__0",
               "operationKind": "query",
               "id": null,
-              "inputRewrites": null,
               "outputRewrites": null,
-              "contextRewrites": null,
-              "schemaAwareHash": "77eac1cc310bce67a20fc913685be1a70e0cf1590271b09241b2fbfb8369d3d4",
+              "schemaAwareHash": "ecdb179190966b3d8451ed0acfeec8116a83faaef2f61aa3c243ba1f0ed65e3b",
               "authorization": {
                 "is_authenticated": false,
                 "scopes": [],
@@ -38,56 +39,64 @@ expression: response
             },
             {
               "kind": "Flatten",
-              "path": [
-                "t",
-                "u"
-              ],
-              "node": {
-                "kind": "Fetch",
-                "serviceName": "Subgraph1",
-                "requires": [
-                  {
-                    "kind": "InlineFragment",
-                    "typeCondition": "U",
-                    "selections": [
-                      {
-                        "kind": "Field",
-                        "name": "__typename"
-                      },
-                      {
-                        "kind": "Field",
-                        "name": "id"
-                      }
+              "members": [
+                {
+                  "paths": [
+                    [
+                      "t",
+                      "u"
                     ]
-                  }
-                ],
-                "variableUsages": [
-                  "contextualArgument_1_0"
-                ],
-                "operation": "query Query_Null_Param__Subgraph1__1($representations: [_Any!]!, $contextualArgument_1_0: String) { _entities(representations: $representations) { ... on U { field(a: $contextualArgument_1_0) } } }",
-                "operationName": "Query_Null_Param__Subgraph1__1",
-                "operationKind": "query",
-                "id": null,
-                "inputRewrites": null,
-                "outputRewrites": null,
-                "contextRewrites": [
-                  {
-                    "kind": "KeyRenamer",
-                    "path": [
-                      "..",
-                      "... on T",
-                      "prop"
+                  ],
+                  "fetch": {
+                    "serviceName": "Subgraph1",
+                    "fetchKind": {
+                      "kind": "Entities",
+                      "requires": [
+                        {
+                          "kind": "InlineFragment",
+                          "typeCondition": "U",
+                          "selections": [
+                            {
+                              "kind": "Field",
+                              "name": "__typename"
+                            },
+                            {
+                              "kind": "Field",
+                              "name": "id"
+                            }
+                          ]
+                        }
+                      ],
+                      "inputRewrites": null,
+                      "contextRewrites": [
+                        {
+                          "kind": "KeyRenamer",
+                          "path": [
+                            "..",
+                            "... on T",
+                            "prop"
+                          ],
+                          "renameKeyTo": "contextualArgument_1_0"
+                        }
+                      ]
+                    },
+                    "variableUsages": [
+                      "contextualArgument_1_0"
                     ],
-                    "renameKeyTo": "contextualArgument_1_0"
+                    "operation": "query Query_Null_Param__Subgraph1__1($representations: [_Any!]!, $contextualArgument_1_0: String) { _entities(representations: $representations) { ... on U { field(a: $contextualArgument_1_0) } } }",
+                    "operationName": "Query_Null_Param__Subgraph1__1",
+                    "operationKind": "query",
+                    "id": null,
+                    "outputRewrites": null,
+                    "schemaAwareHash": "ff41adc91765a86d81b08bc9afdc6941f56d0354f78637212c4044875e6cbd18",
+                    "authorization": {
+                      "is_authenticated": false,
+                      "scopes": [],
+                      "policies": []
+                    }
                   }
-                ],
-                "schemaAwareHash": "4ff62f66ebb6514078be6f82300a442269cc980a0630a9b07d078a38d1195f91",
-                "authorization": {
-                  "is_authenticated": false,
-                  "scopes": [],
-                  "policies": []
                 }
-              }
+              ]
             }
           ]
         }

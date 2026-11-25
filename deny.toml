@@ -11,12 +11,6 @@ unmaintained = "workspace"
 # The lint level for crates that have been yanked from their source registry
 yanked = "warn"
 
-# If this is true, then cargo deny will use the git executable to fetch advisory database.
-# If this is false, then it uses a built-in git library.
-# Setting this to true can be helpful if you have special authentication requirements that cargo-deny does not support.
-# See Git Authentication for more information about setting up git authentication.
-git-fetch-with-cli = true
-
 # A list of advisory IDs to ignore. Note that ignored advisories will still
 # output a note when they are encountered.
 
@@ -26,10 +20,11 @@ ignore = [
     "RUSTSEC-2026-0387", # Waiting for jsonwebtoken to be updated so crypto-bigint can be updated: https://github.com/Keats/jsonwebtoken/pull/536
 
     # The following crates are unmaintained
-    "RUSTSEC-2024-0320", # TODO replace the `yaml-rust` crate with a maintained equivalent
     "RUSTSEC-2024-0436", # TODO replace the `paste` crate with a maintained equivalent
     "RUSTSEC-2025-0134", # TODO figure out what to do with rustls-pemfile, which is no longer maintained (trans dep of hyper-rustls, tonic)
     "RUSTSEC-2026-0440", # TODO replace `astral-tokio-tar` (diagnostics export) once a production-ready replacement exists; its suggested successor, tar-codec, is still pre-release
+    "RUSTSEC-2026-0543", # TODO replace `chrono` by `jiff`?
+    "RUSTSEC-2026-0542", # TODO replace `humantime` crate with a maintained equivalent based on `jiff`
 ]
 
 # This section is considered when running `cargo deny check licenses`
@@ -44,6 +39,7 @@ allow = [
     "Apache-2.0 WITH LLVM-exception",
     "BSD-2-Clause",
     "BSD-3-Clause",
+    "BSL-1.0", # xxhash-rust, used by notify
     "CC0-1.0",
     "ISC",
     "LicenseRef-ring",

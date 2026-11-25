@@ -524,7 +524,7 @@ policies:
     match_origins: ["["]
     methods: ["GET", "POST", "OPTIONS"]
 "#;
-        let cors: Result<Cors, _> = serde_yaml::from_str(yaml);
+        let cors: Result<Cors, _> = yaml_serde::from_str(yaml);
         assert!(cors.is_err());
         let err = format!("{}", cors.unwrap_err());
         assert!(err.contains("regex parse error"));

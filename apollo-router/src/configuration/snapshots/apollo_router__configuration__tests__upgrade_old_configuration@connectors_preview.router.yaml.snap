@@ -2,14 +2,13 @@
 source: apollo-router/src/configuration/tests.rs
 expression: new_config
 ---
----
 connectors:
   debug_extensions: true
   expose_sources_in_context: true
   max_requests_per_operation_per_source: 50
   sources:
     subgraph_name.source_name:
-      override_url: "http://localhost:5280"
+      override_url: http://localhost:5280
       max_requests_per_operation: 50
       $config:
         api_key: secret

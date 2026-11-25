@@ -5,17 +5,15 @@ expression: "plan.root.as_deref().expect(\"non-empty plan\")"
 Fetch(
     FetchNode {
         service_name: "accounts",
-        requires: [],
+        kind: Root,
         variable_usages: [],
         operation: "{ me { name { first last } } }",
         operation_name: None,
         operation_kind: Query,
         id: None,
-        input_rewrites: None,
         output_rewrites: None,
-        context_rewrites: None,
         schema_aware_hash: QueryHash(
-            "2216b9adcba62b2fc2a54e30fa477bda19c79be484b505a25a84e6517fc6a653",
+            "1a54b15d7eb9299491d022cc3cdeb6b57d8c9639b98cebf004bc4b7b32beabdc",
         ),
         authorization: CacheKeyMetadata {
             is_authenticated: false,

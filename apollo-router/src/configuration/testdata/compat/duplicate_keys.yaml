@@ -2,3 +2,7 @@ supergraph:
   listen: 127.0.0.1:4000
 supergraph:
   listen: 127.0.0.1:5000
+# Startup migration removes this setting, so the file is rewritten before it is parsed.
+telemetry:
+  apollo:
+    otlp_tracing_sampler: 0.5

@@ -21,15 +21,16 @@ expression: query_plan
         "node": {
           "kind": "Fetch",
           "serviceName": "Subgraph2",
+          "fetchKind": {
+            "kind": "Root"
+          },
           "variableUsages": [],
           "operation": "{ percent0 { foo } }",
           "operationName": null,
           "operationKind": "query",
           "id": null,
-          "inputRewrites": null,
           "outputRewrites": null,
-          "contextRewrites": null,
-          "schemaAwareHash": "99803e419812c964e6cb6bd89137965561d0efdff13ae1b808c139771ecb36f4",
+          "schemaAwareHash": "ed662628936d2d6ffd84318c1402297a3707163524b7336ed0a31e71fb44a890",
           "authorization": {
             "is_authenticated": false,
             "scopes": [],

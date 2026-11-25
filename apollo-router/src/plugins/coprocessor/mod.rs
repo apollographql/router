@@ -53,6 +53,8 @@ use crate::services::http::HttpResponse;
 use crate::services::router;
 use crate::services::router::body::RouterBody;
 use crate::services::subgraph;
+use crate::uplink::license_enforcement::AllowedFeature;
+use crate::uplink::license_enforcement::LicensedSetting;
 
 #[cfg(test)]
 mod test;
@@ -187,6 +189,16 @@ type HTTPClientService = tower::timeout::Timeout<crate::services::http::HttpClie
 #[async_trait::async_trait]
 impl PluginPrivate for CoprocessorPlugin<HTTPClientService> {
     type Config = Conf;
+
+    fn licensed_features(
+        _config: &Self::Config,
+        _supergraph: &apollo_compiler::Schema,
+    ) -> Vec<LicensedSetting> {
+        vec![LicensedSetting {
+            feature: AllowedFeature::Coprocessors,
+            path: "coprocessor",
+        }]
+    }
 
     async fn new(init: PluginInit<Self::Config>) -> Result<Self, BoxError> {
         let client_config = init.config.client.clone().unwrap_or_default();

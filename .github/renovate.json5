@@ -67,7 +67,7 @@
 
     // Auto-merge non-major updates from other package managers (these usually don't come in batches)
     {
-      matchManagers: ['docker', 'mise', 'github-actions', 'circleci'],
+      matchManagers: ['dockerfile', 'docker-compose', 'mise', 'github-actions', 'circleci'],
       matchUpdateTypes: [
         'minor',
         'patch',
@@ -109,17 +109,6 @@
       schedule: ['* 0-3 1 * *'],
       minimumReleaseAge: '5 days',
       automerge: false,
-    },
-
-    // Keep serde_yaml at 0.8.x - version 0.9.x has breaking changes and the
-    // underlying package is deprecated. The package works as-is and we can
-    // consider replacing it in the future. We'll allow 0.8.x just in case
-    // there HAPPEN to be any security updates that we need to be aware of.
-    // See: https://github.com/dtolnay/serde-yaml/releases/tag/0.9.34
-    {
-      matchManagers: ['cargo'],
-      matchPackageNames: ['serde_yaml'],
-      allowedVersions: '0.8.x',
     },
 
     // We're currently constrained in our ability to update the `tracing`

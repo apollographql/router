@@ -75,7 +75,10 @@ impl Fixture {
     fn init_operations(&self, node: &mut PlanNode) {
         match node {
             PlanNode::Fetch(fetch) => self.init_operation(fetch),
-            PlanNode::Flatten(flatten) => self.init_operations(&mut flatten.node),
+            PlanNode::Flatten(flatten) => flatten
+                .members
+                .iter_mut()
+                .for_each(|member| self.init_operation(&mut member.fetch)),
             PlanNode::Sequence(sequence) => sequence
                 .nodes
                 .iter_mut()
@@ -390,36 +393,38 @@ fn aliased_requires_plan(
             {{ "Fetch": {{
                 "subgraph_name": "locations",
                 "variable_usages": [],
+                "fetch_kind": {{ "kind": "Root" }},
                 "operation_document": "{{ feed {{ __typename ... on Book {{ {locations_selections} }} }} }}",
                 "operation_kind": "query",
-                "input_rewrites": [],
-                "output_rewrites": [],
-                "context_rewrites": []
+                "output_rewrites": []
             }} }},
-            {{ "Flatten": {{
-                "path": [{{ "Key": ["feed", null] }}, {{ "AnyIndex": null }}],
-                "node": {{ "Fetch": {{
+            {{ "Flatten": {{ "members": [{{
+                "paths": [[{{ "Key": ["feed", null] }}, {{ "AnyIndex": null }}]],
+                "fetch": {{
                     "subgraph_name": "reviews",
                     "variable_usages": [],
-                    "requires": [{{
-                        "kind": "InlineFragment",
-                        "typeCondition": "Book",
-                        "selections": [
-                            {{ "kind": "Field", "name": "__typename" }},
-                            {{ "kind": "Field", "name": "id" }},
-                            {{ "kind": "Field", "alias": "__require_0_isbn", "name": "{aliased}" }}
-                        ]
-                    }}],
+                    "fetch_kind": {{
+                        "kind": "Entities",
+                        "requires": [{{
+                            "kind": "InlineFragment",
+                            "typeCondition": "Book",
+                            "selections": [
+                                {{ "kind": "Field", "name": "__typename" }},
+                                {{ "kind": "Field", "name": "id" }},
+                                {{ "kind": "Field", "alias": "__require_0_isbn", "name": "{aliased}" }}
+                            ]
+                        }}],
+                        "input_rewrites": [{{ "KeyRenamer": {{
+                            "path": [{{ "Key": ["__require_0_isbn", null] }}],
+                            "rename_key_to": "isbn"
+                        }} }}],
+                        "context_rewrites": []
+                    }},
                     "operation_document": "query($representations: [_Any!]!) {{ _entities(representations: $representations) {{ ... on Book {{ blurb }} }} }}",
                     "operation_kind": "query",
-                    "input_rewrites": [{{ "KeyRenamer": {{
-                        "path": [{{ "Key": ["__require_0_isbn", null] }}],
-                        "rename_key_to": "isbn"
-                    }} }}],
-                    "output_rewrites": [],
-                    "context_rewrites": []
-                }} }}
-            }} }}
+                    "output_rewrites": []
+                }}
+            }}] }} }}
         ] }} }}"#
         ),
     )
@@ -495,49 +500,57 @@ fn defer_plan(fixture: &Fixture, depends: &[u64]) -> QueryPlan {
              {{ _entities(representations: $representations) {{ ... on Book {{ {body} }} }} }}"
         )
     };
-    let book_entry = |fields: &[&str]| {
+    let book_entities = |fields: &[&str]| {
         let selections = fields
             .iter()
             .map(|name| format!(r#"{{ "kind": "Field", "name": "{name}" }}"#))
             .collect::<Vec<_>>()
             .join(", ");
         format!(
-            r#"[{{ "kind": "InlineFragment", "typeCondition": "Book", "selections": [{selections}] }}]"#
+            r#"{{
+                "kind": "Entities",
+                "requires": [{{ "kind": "InlineFragment", "typeCondition": "Book", "selections": [{selections}] }}],
+                "input_rewrites": [],
+                "context_rewrites": []
+            }}"#
         )
     };
-    let fetch = |subgraph: &str, id: Option<u64>, requires: &str, operation: &str| {
+    let fetch = |subgraph: &str, id: Option<u64>, kind: &str, operation: &str| {
         let id = id.map_or("null".to_string(), |id| id.to_string());
         format!(
-            r#"{{ "Fetch": {{
+            r#"{{
                 "subgraph_name": "{subgraph}",
                 "id": {id},
                 "variable_usages": [],
-                "requires": {requires},
+                "fetch_kind": {kind},
                 "operation_document": "{operation}",
                 "operation_kind": "query",
-                "input_rewrites": [],
-                "output_rewrites": [],
-                "context_rewrites": []
-            }} }}"#
+                "output_rewrites": []
+            }}"#
         )
     };
     let ids_fetch = fetch(
         "locations",
         Some(0),
-        "[]",
+        r#"{ "kind": "Root" }"#,
         "{ feed { __typename ... on Book { __typename id } } }",
     );
     let isbn_fetch = fetch(
         "locations",
         Some(1),
-        &book_entry(&["__typename", "id"]),
+        &book_entities(&["__typename", "id"]),
         &entities("isbn"),
     );
-    let root_typename_fetch = fetch("locations", Some(2), "[]", "{ __typename }");
+    let root_typename_fetch = fetch(
+        "locations",
+        Some(2),
+        r#"{ "kind": "Root" }"#,
+        "{ __typename }",
+    );
     let blurb_fetch = fetch(
         "reviews",
         None,
-        &book_entry(&["__typename", "id", "isbn"]),
+        &book_entities(&["__typename", "id", "isbn"]),
         &entities("blurb"),
     );
     fixture.written_plan(&format!(
@@ -546,10 +559,10 @@ fn defer_plan(fixture: &Fixture, depends: &[u64]) -> QueryPlan {
                     "sub_selection": null,
                     "node": {{ "Parallel": {{ "nodes": [
                         {{ "Sequence": {{ "nodes": [
-                            {ids_fetch},
-                            {{ "Flatten": {{ "path": {feed}, "node": {isbn_fetch} }} }}
+                            {{ "Fetch": {ids_fetch} }},
+                            {{ "Flatten": {{ "members": [{{ "paths": [{feed}], "fetch": {isbn_fetch} }}] }} }}
                         ] }} }},
-                        {root_typename_fetch}
+                        {{ "Fetch": {root_typename_fetch} }}
                     ] }} }}
                 }},
                 "deferred": [{{
@@ -557,7 +570,7 @@ fn defer_plan(fixture: &Fixture, depends: &[u64]) -> QueryPlan {
                     "label": null,
                     "query_path": [],
                     "sub_selection": null,
-                    "node": {{ "Flatten": {{ "path": {feed}, "node": {blurb_fetch} }} }}
+                    "node": {{ "Flatten": {{ "members": [{{ "paths": [{feed}], "fetch": {blurb_fetch} }}] }} }}
                 }}]
             }} }}"#
     ))

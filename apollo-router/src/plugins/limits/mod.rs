@@ -34,6 +34,8 @@ use crate::services::SubgraphRequest;
 use crate::services::connector;
 use crate::services::router;
 use crate::services::subgraph;
+use crate::uplink::license_enforcement::AllowedFeature;
+use crate::uplink::license_enforcement::LicensedSetting;
 
 /// Configuration for operation limits, parser limits, HTTP limits, etc.
 #[apollo_configuration::configuration]
@@ -277,6 +279,28 @@ impl LimitsPlugin {
 #[async_trait]
 impl PluginPrivate for LimitsPlugin {
     type Config = Config;
+
+    fn licensed_features(
+        config: &Self::Config,
+        _supergraph: &apollo_compiler::Schema,
+    ) -> Vec<LicensedSetting> {
+        // Parser limits such as `parser_max_recursion` only configure the GraphQL parser and are
+        // not licensed.
+        let router = &config.router;
+        [
+            (router.max_depth, "limits.router.max_depth"),
+            (router.max_height, "limits.router.max_height"),
+            (router.max_root_fields, "limits.router.max_root_fields"),
+            (router.max_aliases, "limits.router.max_aliases"),
+        ]
+        .into_iter()
+        .filter(|(limit, _)| limit.is_some())
+        .map(|(_, path)| LicensedSetting {
+            feature: AllowedFeature::RequestLimits,
+            path,
+        })
+        .collect()
+    }
 
     async fn new(init: PluginInit<Self::Config>) -> Result<Self, BoxError>
     where

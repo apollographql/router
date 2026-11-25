@@ -85,7 +85,11 @@ pub(crate) fn replace_connector_service_names(
                 }
             }
             PlanNode::Flatten(flatten) => {
-                recurse(&mut flatten.node, replacements);
+                for member in &mut flatten.members {
+                    if let Some(service_name) = replacements.get(&member.fetch.service_name) {
+                        member.fetch.service_name = service_name.clone().into();
+                    }
+                }
             }
             PlanNode::Defer { primary, deferred } => {
                 if let Some(primary) = primary.node.as_mut() {

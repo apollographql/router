@@ -89,9 +89,10 @@ pub struct FetchNode {
     /// guaranteed to have a unique `id`.
     pub id: Option<u64>,
     pub variable_usages: Vec<Name>,
-    #[serde(skip_serializing_if = "Vec::is_empty")]
-    #[serde(default)]
-    pub requires: Vec<requires_selection::Selection>,
+    /// Root or entity fetch, with what it sends from data already in the response. Serialized
+    /// as `fetch_kind`, since the kind inside it is tagged `kind`.
+    #[serde(rename = "fetch_kind")]
+    pub kind: FetchKind,
     // PORT_NOTE: We don't serialize the "operation" string in this struct, as these query plan
     // nodes are meant for direct consumption by router (without any serdes), so we leave the
     // question of whether it needs to be serialized to router.
@@ -99,19 +100,54 @@ pub struct FetchNode {
     pub operation_name: Option<Name>,
     #[serde(with = "crate::utils::serde_bridge::operation_type")]
     pub operation_kind: executable::OperationType,
-    /// Optionally describe a number of "rewrites" that query plan executors should apply to the
-    /// data that is sent as the input of this fetch. Note that such rewrites should only impact the
-    /// inputs of the fetch they are applied to (meaning that, as those inputs are collected from
-    /// the current in-memory result, the rewrite should _not_ impact said in-memory results, only
-    /// what is sent in the fetch).
-    pub input_rewrites: Arc<Vec<Arc<FetchDataRewrite>>>,
-    /// Similar to `input_rewrites`, but for optional "rewrites" to apply to the data that is
-    /// received from a fetch (and before it is applied to the current in-memory results).
+    /// Similar to `EntitySelection::input_rewrites`, but for optional "rewrites" to apply to the
+    /// data that is received from a fetch (and before it is applied to the current in-memory
+    /// results).
     pub output_rewrites: Vec<Arc<FetchDataRewrite>>,
+}
+
+/// Whether a fetch selects root fields or `_entities`, and what it sends from data already in
+/// the response to do so.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(tag = "kind")]
+pub enum FetchKind {
+    /// Fields of a root operation type.
+    Root,
+    /// One `_entities` selection under `$representations`.
+    Entities(EntitySelection),
+}
+
+/// The `_entities` selection of an entity fetch.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct EntitySelection {
+    /// The selection that builds each representation from an object in the response.
+    pub requires: Vec<requires_selection::Selection>,
+    /// Optionally describe a number of "rewrites" that query plan executors should apply to the
+    /// data that is sent as the input of this selection. Note that such rewrites should only
+    /// impact the inputs of the fetch they are applied to (meaning that, as those inputs are
+    /// collected from the current in-memory result, the rewrite should _not_ impact said
+    /// in-memory results, only what is sent in the fetch).
+    pub input_rewrites: Arc<Vec<Arc<FetchDataRewrite>>>,
     /// Similar to the other kinds of rewrites. This is a mechanism to convert a contextual path into
     /// an argument to a resolver. Note value setters are currently unused here, but may be used in
     /// the future.
     pub context_rewrites: Vec<Arc<FetchDataRewrite>>,
+}
+
+impl FetchKind {
+    /// The fetch's `_entities` selection, if it is an entity fetch.
+    pub fn entity_selection(&self) -> Option<&EntitySelection> {
+        match self {
+            Self::Root => None,
+            Self::Entities(selection) => Some(selection),
+        }
+    }
+
+    /// The context rewrites of an entity fetch, and none for a root fetch.
+    pub fn context_rewrites(&self) -> &[Arc<FetchDataRewrite>] {
+        self.entity_selection()
+            .map_or(&[], |selection| &selection.context_rewrites)
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -126,8 +162,51 @@ pub struct ParallelNode {
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct FlattenNode {
-    pub path: Vec<FetchDataPathElement>,
-    pub node: Box<PlanNode>,
+    pub members: Vec<FlattenMember>,
+}
+
+/// One fetch of a `FlattenNode`. An entity fetch collects its representations at every one of
+/// its paths.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct FlattenMember {
+    pub paths: Vec<Vec<FetchDataPathElement>>,
+    pub fetch: FetchNode,
+}
+
+impl FlattenNode {
+    /// `fetch` with its whole response merging at `path`.
+    pub fn at_path(path: Vec<FetchDataPathElement>, fetch: FetchNode) -> Self {
+        Self {
+            members: vec![FlattenMember {
+                paths: vec![path],
+                fetch,
+            }],
+        }
+    }
+
+    /// The fetch and the path it merges at, when the node is one fetch at one path.
+    pub fn single(&self) -> Option<(&[FetchDataPathElement], &FetchNode)> {
+        let [member] = self.members.as_slice() else {
+            return None;
+        };
+        let [path] = member.paths.as_slice() else {
+            return None;
+        };
+        Some((path.as_slice(), &member.fetch))
+    }
+
+    /// The fetches this node stands for, each on its own at one path. For tools that reason
+    /// about individual fetches.
+    pub fn batched_fetches(&self) -> Vec<PlanNode> {
+        self.members
+            .iter()
+            .flat_map(|member| {
+                member.paths.iter().map(|path| {
+                    PlanNode::Flatten(Self::at_path(path.clone(), member.fetch.clone()))
+                })
+            })
+            .collect()
+    }
 }
 
 /// A `DeferNode` corresponds to one or more `@defer` applications at the same level of "nestedness"
@@ -283,5 +362,84 @@ impl PlanNode {
             Self::Defer(_) => "Defer",
             Self::Condition(_) => "Condition",
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use apollo_compiler::name;
+
+    use super::*;
+
+    fn item() -> Vec<FetchDataPathElement> {
+        vec![FetchDataPathElement::Key(name!("item"), None)]
+    }
+
+    fn fetch(kind: FetchKind) -> FetchNode {
+        FetchNode {
+            subgraph_name: "inventory".into(),
+            protocol: FetchProtocol::GraphQL,
+            id: None,
+            variable_usages: Vec::new(),
+            kind,
+            operation_document: serializable_document::SerializableDocument::from_string(""),
+            operation_name: None,
+            operation_kind: executable::OperationType::Query,
+            output_rewrites: Vec::new(),
+        }
+    }
+
+    fn entity_fetch() -> FetchNode {
+        fetch(FetchKind::Entities(EntitySelection {
+            requires: vec![requires_selection::Selection::Field(
+                requires_selection::Field {
+                    alias: None,
+                    name: name!("id"),
+                    selections: Vec::new(),
+                },
+            )],
+            input_rewrites: Default::default(),
+            context_rewrites: Vec::new(),
+        }))
+    }
+
+    /// `single()` only answers for exactly one member at exactly one path.
+    #[test]
+    fn single_requires_one_member_at_one_path() {
+        let member = |paths| FlattenMember {
+            paths,
+            fetch: entity_fetch(),
+        };
+        let cases = [
+            (vec![member(vec![item()])], Some(1)),
+            (vec![member(vec![item()]), member(vec![item()])], None),
+            (vec![member(vec![item(), item()])], None),
+            (Vec::new(), None),
+        ];
+        for (members, single_path_len) in cases {
+            let flatten = FlattenNode { members };
+            assert_eq!(
+                flatten.single().map(|(path, _)| path.len()),
+                single_path_len
+            );
+            let fetch_count: usize = flatten.members.iter().map(|m| m.paths.len()).sum();
+            assert_eq!(flatten.batched_fetches().len(), fetch_count);
+        }
+    }
+
+    /// A fetch's kind is written out, so reading a plan never guesses it from `requires`.
+    #[test]
+    fn fetch_kind_is_explicit_in_json() {
+        let entity = serde_json::to_value(entity_fetch()).expect("serializes");
+        assert_eq!(entity["fetch_kind"]["kind"], "Entities");
+        assert_eq!(entity["fetch_kind"]["requires"][0]["name"], "id");
+        assert!(entity.get("requires").is_none());
+        let read: FetchNode = serde_json::from_value(entity).expect("deserializes");
+        assert_eq!(read, entity_fetch());
+
+        let root = serde_json::to_value(fetch(FetchKind::Root)).expect("serializes");
+        assert_eq!(root["fetch_kind"], serde_json::json!({ "kind": "Root" }));
+        let read: FetchNode = serde_json::from_value(root).expect("deserializes");
+        assert_eq!(read.kind, FetchKind::Root);
     }
 }

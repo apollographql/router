@@ -28,7 +28,6 @@ use crate::services::http::service::HttpClientInputs;
 use crate::services::layers::persisted_queries::PersistedQueryExpander;
 use crate::services::subgraph::http::create_certificate_store;
 use crate::spec::Schema;
-use crate::uplink::license_enforcement::LicenseState;
 
 /// Everything the acquire phase produces; the assemble phase consumes it infallibly.
 pub(super) struct Acquired {
@@ -46,7 +45,6 @@ pub(super) async fn acquire(
     schema: &Arc<Schema>,
     previous_config: Option<Arc<Configuration>>,
     extra_plugins: Option<Vec<(String, Box<dyn DynPlugin>)>>,
-    license: Arc<LicenseState>,
     bootstrap_telemetry_plugin: Option<Box<dyn DynPlugin>>,
 ) -> Result<Acquired, BoxError> {
     let (query_planner, subgraph_schemas) = create_query_planner(schema, configuration)?;
@@ -58,7 +56,6 @@ pub(super) async fn acquire(
             subgraph_schemas.clone(),
             bootstrap_telemetry_plugin,
             extra_plugins,
-            license,
             previous_config,
         )
         .instrument(tracing::info_span!("plugins"))
@@ -108,7 +105,6 @@ pub(super) async fn acquire(
 pub(super) async fn maybe_bootstrap_telemetry(
     configuration: &Configuration,
     schema: &Schema,
-    license: &Arc<LicenseState>,
     previous_config: Option<&Configuration>,
 ) -> Result<Option<Box<dyn DynPlugin>>, BoxError> {
     let plugin_registry = &*crate::plugin::PLUGINS;
@@ -129,7 +125,6 @@ pub(super) async fn maybe_bootstrap_telemetry(
             .supergraph_schema_id(schema.schema_id.clone().into_inner())
             .supergraph_schema(Arc::new(schema.supergraph_schema().clone()))
             .notify(configuration.notify.clone())
-            .license(license.clone())
             .full_config(configuration.validated_yaml.clone())
             .and_original_config_yaml(configuration.raw_yaml.clone())
             .build()
