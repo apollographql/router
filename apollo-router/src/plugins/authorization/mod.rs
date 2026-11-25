@@ -644,7 +644,7 @@ impl PluginPrivate for AuthorizationPlugin {
 
     fn licensed_features(
         config: &Self::Config,
-        supergraph: &apollo_compiler::Schema,
+        supergraph: &apollo_federation::Supergraph,
     ) -> Vec<LicensedSetting> {
         let mut settings = Vec::new();
         if config.require_authentication {
@@ -655,7 +655,7 @@ impl PluginPrivate for AuthorizationPlugin {
         }
         // The directives are enforced only when enabled and the supergraph links one of them.
         if config.directives.enabled
-            && AuthorizationDirectives::from_schema(supergraph).any_linked()
+            && AuthorizationDirectives::from_schema(supergraph.schema.schema()).any_linked()
         {
             settings.push(LicensedSetting {
                 feature: AllowedFeature::Authorization,

@@ -26,7 +26,6 @@ use std::task::Context;
 use std::task::Poll;
 
 use ::serde::Deserialize;
-use apollo_compiler::Schema;
 /// The crate whose `Configuration` trait every plugin's `Config` must implement.
 ///
 /// Declare a plugin's `Config` with its `#[configuration]` attribute, which needs a direct
@@ -74,7 +73,7 @@ type InstanceFactory =
 
 type SchemaFactory = fn(&mut SchemaGenerator) -> schemars::Schema;
 
-type LicensedFeaturesFactory = fn(&PluginConfig, &Schema) -> Vec<LicensedSetting>;
+type LicensedFeaturesFactory = fn(&PluginConfig, &Supergraph) -> Vec<LicensedSetting>;
 
 /// A plugin's config, deserialized when the router configuration is parsed. It validates
 /// itself, so the configuration can run every plugin's rules without knowing their types.
@@ -506,7 +505,7 @@ impl PluginFactory {
     pub(crate) fn licensed_features(
         &self,
         config: &PluginConfig,
-        supergraph: &Schema,
+        supergraph: &Supergraph,
     ) -> Vec<LicensedSetting> {
         (self.licensed_features_factory)(config, supergraph)
     }
@@ -815,7 +814,7 @@ pub(crate) trait PluginPrivate: Send + Sync + 'static {
     /// returned setting needs. Return only settings that are in effect: a section that turns a
     /// licensed feature off, or whose feature `supergraph` doesn't use, needs no license. The
     /// default returns nothing.
-    fn licensed_features(_config: &Self::Config, _supergraph: &Schema) -> Vec<LicensedSetting> {
+    fn licensed_features(_config: &Self::Config, _supergraph: &Supergraph) -> Vec<LicensedSetting> {
         Vec::new()
     }
 

@@ -275,7 +275,7 @@ type Organization
 fn licensed_paths(config: serde_json::Value, supergraph: &str) -> Vec<&'static str> {
     let config: Conf = serde_json::from_value(config).expect("valid authorization config");
     let supergraph =
-        apollo_compiler::Schema::parse(supergraph, "supergraph.graphql").expect("valid supergraph");
+        apollo_federation::Supergraph::new_with_router_specs(supergraph).expect("valid supergraph");
     AuthorizationPlugin::licensed_features(&config, &supergraph)
         .into_iter()
         .map(|setting| setting.path)
