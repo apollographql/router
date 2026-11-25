@@ -296,12 +296,7 @@ impl ExecutionService {
         let has_next = response.has_next.unwrap_or(true);
         let variables_set = query.defer_variables_set(variables);
 
-<<<<<<< HEAD
-        tracing::debug_span!("format_response").in_scope(|| {
-            let mut paths = Vec::new();
-=======
         let deferred_responses = tracing::debug_span!("format_response").in_scope(|| {
->>>>>>> af116fd (fix(defer): deliver @defer responses under a type condition in a list of mixed types (#10816))
             if !query.unauthorized.paths.is_empty() {
                 query.unauthorized.log_unauthorized_paths();
                 query
@@ -309,12 +304,6 @@ impl ExecutionService {
                     .update_response_with_unauthorized_path_errors(&mut response);
             }
 
-<<<<<<< HEAD
-            if let Some(filtered_query) = query.filtered_query.as_ref() {
-                paths = filtered_query.format_response(
-                    &mut response,
-                    variables.clone(),
-=======
             // A response with a path is a deferred response, which is formatted as a response
             // for each object its `@defer` applies to.
             let (deferred_responses, paths) = if response.path.is_some() {
@@ -324,34 +313,21 @@ impl ExecutionService {
                     &response,
                     &mut deferred_responses,
                     variables,
->>>>>>> af116fd (fix(defer): deliver @defer responses under a type condition in a list of mixed types (#10816))
                     schema.api_schema(),
                     variables_set,
                     insert_result_coercion_errors,
                 );
-<<<<<<< HEAD
-            }
-
-            paths.extend(query.format_response(
-                &mut response,
-                variables.clone(),
-                schema.api_schema(),
-                variables_set,
-                insert_result_coercion_errors,
-            ));
-=======
                 (deferred_responses, paths)
             } else {
-                let paths = query.format_response_filtered_then_original(
+                let paths = query.format_response(
                     &mut response,
-                    variables,
+                    variables.clone(),
                     schema.api_schema(),
                     variables_set,
                     insert_result_coercion_errors,
                 );
                 (Vec::new(), paths)
             };
->>>>>>> af116fd (fix(defer): deliver @defer responses under a type condition in a list of mixed types (#10816))
 
             for error in response.errors.iter_mut() {
                 if let Some(path) = &mut error.path {
