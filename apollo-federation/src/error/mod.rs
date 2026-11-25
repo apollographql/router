@@ -120,6 +120,8 @@ impl From<SchemaRootKind> for String {
 pub enum UnsupportedFeatureKind {
     #[strum(to_string = "alias")]
     Alias,
+    #[strum(to_string = "lookup")]
+    Lookup,
 }
 
 /// Modeled after `SubgraphLocation` defined in `apollo_composition`, so this struct can be
