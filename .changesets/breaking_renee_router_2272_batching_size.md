@@ -5,4 +5,6 @@ When a batch request contains a JSON structure that cannot be parsed as a GraphQ
 - `apollo.router.operations.batching`
 - `apollo.router.operations.batching.size`
 
+The size metric is still reported even for oversized batches that are not executed.
+
 By [@goto-bus-stop](https://github.com/goto-bus-stop) in https://github.com/apollographql/router/pull/10852
