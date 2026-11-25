@@ -217,10 +217,8 @@ mod tests {
     use crate::Configuration;
     use crate::Context;
     use crate::compute_job::ComputeJobType;
-    use crate::configuration::subgraph::SubgraphConfiguration;
     use crate::graphql;
     use crate::plugins::batching::config::BatchingConfig;
-    use crate::plugins::batching::config::CommonBatchingConfig;
     use crate::plugins::batching::state::Batch;
     use crate::plugins::batching::state::BatchQuery;
     use crate::query_planner::QueryPlan;
@@ -277,6 +275,9 @@ mod tests {
             )
             .unwrap(),
         );
+        let batching_config = configuration
+            .typed_plugin_config::<BatchingConfig>("apollo.batching")
+            .expect("should have batching config");
 
         let schema = Arc::new(
             Schema::parse(
@@ -302,14 +303,7 @@ mod tests {
 
         let context = Context::new();
         context.extensions().with_lock(|lock| {
-            lock.insert(Arc::new(BatchingConfig {
-                enabled: true,
-                subgraph: Some(SubgraphConfiguration {
-                    all: CommonBatchingConfig { enabled: true },
-                    subgraphs: Default::default(),
-                }),
-                ..Default::default()
-            }));
+            lock.insert(Arc::new(batching_config.clone()));
             lock.insert(batch_query);
         });
 
@@ -386,6 +380,9 @@ mod tests {
             )
             .unwrap(),
         );
+        let batching_config = configuration
+            .typed_plugin_config::<BatchingConfig>("apollo.batching")
+            .expect("should have batching config");
 
         let schema = Arc::new(
             Schema::parse(
@@ -409,14 +406,7 @@ mod tests {
 
         let context = Context::new();
         context.extensions().with_lock(|lock| {
-            lock.insert(Arc::new(BatchingConfig {
-                enabled: true,
-                subgraph: Some(SubgraphConfiguration {
-                    all: CommonBatchingConfig { enabled: true },
-                    subgraphs: Default::default(),
-                }),
-                ..Default::default()
-            }));
+            lock.insert(Arc::new(batching_config.clone()));
             lock.insert(batch_query);
         });
 
