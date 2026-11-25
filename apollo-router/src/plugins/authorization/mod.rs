@@ -91,7 +91,7 @@ impl AuthorizationDirectives {
         self.authenticated.is_some() || self.requires_scopes.is_some() || self.policy.is_some()
     }
 
-    /// Resolves all three names from one parse of the schema's `@link` metadata.
+    /// Resolves authorization directive names by parsing the schema's `@link` metadata.
     pub(crate) fn from_schema(schema: &apollo_compiler::Schema) -> Self {
         let Ok(Some(links)) = LinksMetadata::from_schema(schema) else {
             return Self::default();
