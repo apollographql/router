@@ -7,10 +7,9 @@
 //! merge process" either. Validation, including the cross-schema `@is`/`@require` rules, runs on
 //! the unmodified subgraphs before this.
 //!
-//! The supergraph does not record lookups or requirements yet, so removing them loses nothing
-//! today. Once it does, internal lookups and `@require` arguments must be kept for the executor
-//! (spec: "Internal lookup fields remain usable for transitions"), hidden from the API schema
-//! rather than removed.
+//! The supergraph does not record lookups or requirements yet, so the planner cannot use internal
+//! lookups or build fetches that supply `@require` arguments. Recording them is left to the change
+//! that adds that join metadata (spec: "Internal lookup fields remain usable for transitions").
 
 use apollo_compiler::Name;
 use apollo_compiler::Schema;
@@ -19,6 +18,14 @@ use apollo_compiler::schema::ExtendedType;
 
 use super::validation::fields_of;
 use super::validation::is_federation_root_field;
+
+/// Whether a type is internal: annotated with `@internal`, or an object or interface type whose
+/// fields are all `@internal`. Validation and removal both use this, so they cannot disagree on
+/// which types are not merged. Root operation types are never removed, which callers handle.
+pub(crate) fn is_internal_type(ty: &ExtendedType, internal: &Name) -> bool {
+    ty.directives().has(internal)
+        || fields_of(ty).is_some_and(|fields| fields.values().all(|f| f.directives.has(internal)))
+}
 
 /// Remove from a subgraph schema (directive names as in `schema`):
 /// - fields annotated `@internal`;
@@ -46,11 +53,8 @@ pub(crate) fn remove_internal_elements(
         .iter()
         .filter(|(name, ty)| {
             !root_types.contains(*name)
-                && (matches!(ty, ExtendedType::Object(_) | ExtendedType::Interface(_))
-                    && (ty.directives().has(internal)
-                        || fields_of(ty).is_some_and(|fields| {
-                            fields.values().all(|f| f.directives.has(internal))
-                        })))
+                && matches!(ty, ExtendedType::Object(_) | ExtendedType::Interface(_))
+                && is_internal_type(ty, internal)
         })
         .map(|(name, _)| name.clone())
         .collect();
