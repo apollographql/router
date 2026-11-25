@@ -15,8 +15,11 @@ use crate::Configuration;
 use crate::pipeline::build_connector_request_services;
 use crate::pipeline::build_http_client_service;
 use crate::pipeline::build_subgraph_services;
+use crate::plugin::DynPlugin;
 use crate::plugin::PluginInit;
+use crate::plugin::PluginPrivate;
 use crate::plugin::PluginUnstable;
+use crate::plugins::authorization::AuthorizationPlugin;
 use crate::plugins::traffic_shaping::APOLLO_TRAFFIC_SHAPING;
 use crate::services::Plugins;
 use crate::services::SubgraphRequest;
@@ -56,6 +59,28 @@ pub(crate) async fn required_stage_plugins() -> Arc<Plugins> {
         ])
         .await,
     )
+}
+
+/// The mandatory plugin the query parsing service applies: authorization at its defaults. It is
+/// built without a schema, so it links no directive and installs no layer.
+pub(crate) async fn query_parsing_plugins() -> Plugins {
+    query_parsing_plugins_for("", &Configuration::default()).await
+}
+
+/// The mandatory plugin the query parsing service applies: authorization, built for the
+/// supergraph `sdl` from `configuration`'s `authorization` section. An empty `sdl` builds it
+/// without a schema.
+pub(crate) async fn query_parsing_plugins_for(sdl: &str, configuration: &Configuration) -> Plugins {
+    let plugin = <AuthorizationPlugin as PluginPrivate>::new(PluginInit::fake_new(
+        AuthorizationPlugin::configuration(configuration),
+        Arc::new(sdl.to_string()),
+    ))
+    .await
+    .expect("plugin builds");
+    Plugins::from([(
+        "apollo.authorization".to_string(),
+        Box::new(plugin) as Box<dyn DynPlugin>,
+    )])
 }
 
 pub(crate) type Handle = tower_test::mock::Handle<SubgraphRequest, SubgraphResponse>;

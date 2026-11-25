@@ -14,9 +14,13 @@ use crate::MockedSubgraphs;
 use crate::TestHarness;
 use crate::apollo_studio_interop::UsageReporting;
 use crate::graphql;
+use crate::metrics::FutureMetricsExt;
+use crate::plugin::PluginPrivate;
 use crate::plugin::test::MockSubgraph;
 use crate::plugins::authentication::APOLLO_AUTHENTICATION_JWT_CLAIMS;
+use crate::plugins::authorization::AuthorizationPlugin;
 use crate::plugins::authorization::CacheKeyMetadata;
+use crate::plugins::authorization::Conf;
 use crate::services::router;
 use crate::services::router::body;
 use crate::services::subgraph;
@@ -266,6 +270,93 @@ type Organization
    nonNullId: ID!
    suborga: [Organization]
 }"#;
+
+/// The settings the authorization plugin reports as licensed, for `config` and `supergraph`.
+fn licensed_paths(config: serde_json::Value, supergraph: &str) -> Vec<&'static str> {
+    let config: Conf = serde_json::from_value(config).expect("valid authorization config");
+    let supergraph =
+        apollo_compiler::Schema::parse(supergraph, "supergraph.graphql").expect("valid supergraph");
+    AuthorizationPlugin::licensed_features(&config, &supergraph)
+        .into_iter()
+        .map(|setting| setting.path)
+        .collect()
+}
+
+#[test]
+fn directives_are_licensed_only_when_the_supergraph_links_one() {
+    assert_eq!(
+        licensed_paths(serde_json::json!({}), AUTHENTICATED_SCHEMA),
+        ["authorization.directives.enabled"]
+    );
+    assert!(licensed_paths(serde_json::json!({}), SCHEMA).is_empty());
+    assert!(
+        licensed_paths(
+            serde_json::json!({ "directives": { "enabled": false } }),
+            AUTHENTICATED_SCHEMA
+        )
+        .is_empty()
+    );
+}
+
+// The plugin is mandatory, so a router with no `authorization:` section still filters and counts
+// operations that use the directives.
+#[tokio::test]
+async fn authenticated_directive_without_authorization_section() {
+    async {
+        let subgraphs = MockedSubgraphs([
+            ("orga", MockSubgraph::builder().with_json(
+                serde_json::json!{{"query":"{orga(id:1){creatorUser{id name}}}"}},
+                serde_json::json!{{"data": {"orga": { "creatorUser": { "id": 0, "name": "Ada" } }}}}
+            ).build())
+        ].into_iter().collect());
+
+        let service = TestHarness::builder()
+            .schema(AUTHENTICATED_SCHEMA)
+            .extra_plugin(subgraphs)
+            .build_router()
+            .await
+            .unwrap();
+
+        let req = graphql::Request {
+            query: Some("query { orga(id: 1) { id creatorUser { id name phone } } }".to_string()),
+            ..Default::default()
+        };
+        let request = router::Request {
+            context: Context::new(),
+            router_request: http::Request::builder()
+                .method("POST")
+                .header(CONTENT_TYPE, "application/json")
+                .header(ACCEPT, "application/json")
+                .body(body::from_bytes(serde_json::to_vec(&req).unwrap()))
+                .unwrap(),
+        };
+
+        let response = service
+            .oneshot(request)
+            .await
+            .unwrap()
+            .into_graphql_response_stream()
+            .await
+            .next()
+            .await
+            .unwrap()
+            .unwrap();
+
+        assert_eq!(
+            response.data,
+            Some(json! {{ "orga": { "id": null, "creatorUser": { "id": 0, "name": "Ada", "phone": null } } }})
+        );
+        assert_counter!(
+            "apollo.router.operations.authorization",
+            1,
+            authorization.filtered = true,
+            authorization.needs_authenticated = true,
+            authorization.needs_requires_scopes = false
+        );
+    }
+    .with_metrics()
+    .await;
+}
 
 #[tokio::test]
 async fn authenticated_directive() {
@@ -1740,6 +1831,109 @@ async fn cache_key_metadata() {
 
     for driver in Arc::try_unwrap(drivers).unwrap().into_inner().unwrap() {
         crate::plugin::test::await_mock_driver(driver).await;
+    }
+}
+
+mod directive_names {
+    use apollo_compiler::Name;
+    use apollo_federation::link::spec::Identity;
+    use rstest::rstest;
+
+    use crate::plugins::authorization::AuthorizationDirectives;
+    use crate::plugins::authorization::authenticated::AUTHENTICATED_DIRECTIVE_NAME;
+    use crate::plugins::authorization::authenticated::AUTHENTICATED_SPEC_VERSION_RANGE;
+    use crate::plugins::authorization::policy::POLICY_DIRECTIVE_NAME;
+    use crate::plugins::authorization::policy::POLICY_SPEC_VERSION_RANGE;
+    use crate::plugins::authorization::scopes::REQUIRES_SCOPES_DIRECTIVE_NAME;
+    use crate::plugins::authorization::scopes::REQUIRES_SCOPES_SPEC_VERSION_RANGE;
+    use crate::spec::Schema;
+
+    const LINK_DEFINITIONS: &str = r#"
+        directive @link(url: String, as: String, for: link__Purpose, import: [link__Import]) repeatable on SCHEMA
+        scalar link__Import
+        enum link__Purpose { SECURITY EXECUTION }
+        type Query { field: Int }
+    "#;
+
+    fn one_by_one(schema: &apollo_compiler::Schema) -> AuthorizationDirectives {
+        let name = |identity: Identity, range: &str, default: &Name| {
+            Schema::directive_name(schema, &identity, range, default)
+        };
+        AuthorizationDirectives {
+            authenticated: name(
+                Identity::authenticated_identity(),
+                AUTHENTICATED_SPEC_VERSION_RANGE,
+                &AUTHENTICATED_DIRECTIVE_NAME,
+            ),
+            requires_scopes: name(
+                Identity::requires_scopes_identity(),
+                REQUIRES_SCOPES_SPEC_VERSION_RANGE,
+                &REQUIRES_SCOPES_DIRECTIVE_NAME,
+            ),
+            policy: name(
+                Identity::policy_identity(),
+                POLICY_SPEC_VERSION_RANGE,
+                &POLICY_DIRECTIVE_NAME,
+            ),
+        }
+    }
+
+    /// Filtering skips a directive whose name is missing, so resolving all three names at once
+    /// must agree with resolving each one on its own.
+    #[rstest]
+    #[case::default_names(
+        r#"schema
+            @link(url: "https://specs.apollo.dev/link/v1.0")
+            @link(url: "https://specs.apollo.dev/authenticated/v0.1", for: SECURITY)
+            @link(url: "https://specs.apollo.dev/requiresScopes/v0.1", for: SECURITY)
+            @link(url: "https://specs.apollo.dev/policy/v0.1", for: SECURITY)
+            { query: Query }"#,
+        Some("authenticated"),
+        Some("requiresScopes"),
+        Some("policy")
+    )]
+    #[case::renamed_imports(
+        r#"schema
+            @link(url: "https://specs.apollo.dev/link/v1.0")
+            @link(url: "https://specs.apollo.dev/authenticated/v0.1", import: [{ name: "@authenticated", as: "@auth" }])
+            @link(url: "https://specs.apollo.dev/requiresScopes/v0.1", import: [{ name: "@requiresScopes", as: "@scopes" }])
+            @link(url: "https://specs.apollo.dev/policy/v0.1", as: "access")
+            { query: Query }"#,
+        Some("auth"),
+        Some("scopes"),
+        Some("access")
+    )]
+    #[case::unsupported_version(
+        r#"schema
+            @link(url: "https://specs.apollo.dev/link/v1.0")
+            @link(url: "https://specs.apollo.dev/authenticated/v0.2", for: SECURITY)
+            @link(url: "https://specs.apollo.dev/requiresScopes/v0.1", for: SECURITY)
+            { query: Query }"#,
+        None,
+        Some("requiresScopes"),
+        None
+    )]
+    #[case::no_link("schema { query: Query }", None, None, None)]
+    fn resolved_once_matches_schema_directive_name(
+        #[case] schema_definition: &str,
+        #[case] authenticated: Option<&str>,
+        #[case] requires_scopes: Option<&str>,
+        #[case] policy: Option<&str>,
+    ) {
+        let sdl = format!("{schema_definition}\n{LINK_DEFINITIONS}");
+        let schema = apollo_compiler::Schema::parse_and_validate(sdl, "schema.graphql").unwrap();
+
+        let directives = AuthorizationDirectives::from_schema(&schema);
+
+        assert_eq!(directives, one_by_one(&schema));
+        assert_eq!(
+            directives,
+            AuthorizationDirectives {
+                authenticated: authenticated.map(str::to_string),
+                requires_scopes: requires_scopes.map(str::to_string),
+                policy: policy.map(str::to_string),
+            }
+        );
     }
 }
 

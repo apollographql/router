@@ -337,6 +337,10 @@ impl<T> PluginInit<T> {
 pub struct PluginFactory {
     pub(crate) name: String,
     pub(crate) hidden_from_config_json_schema: bool,
+    /// Whether the router builds this plugin even when the configuration has no section for
+    /// it, with its default config. Set by registering it with
+    /// `register_private_plugin!(…, mandatory)`.
+    pub(crate) mandatory: bool,
     config_factory: ConfigFactory,
     instance_factory: InstanceFactory,
     schema_factory: SchemaFactory,
@@ -374,6 +378,7 @@ impl PluginFactory {
         PluginFactory {
             name: plugin_factory_name,
             hidden_from_config_json_schema: P::HIDDEN_FROM_CONFIG_JSON_SCHEMA,
+            mandatory: false,
             config_factory: |deserializer| {
                 let config: P::Config = erased_serde::deserialize(deserializer)?;
                 Ok(PluginConfig::new(config))
@@ -397,6 +402,14 @@ impl PluginFactory {
         }
     }
 
+    /// Marks the plugin as built even when the configuration has no section for it.
+    pub(crate) fn into_mandatory(self) -> Self {
+        Self {
+            mandatory: true,
+            ..self
+        }
+    }
+
     /// Deserializes a plugin's config from the deserializer the configuration is parsed with,
     /// so errors keep their path in the document.
     pub(crate) fn parse_config<'de>(
@@ -414,6 +427,11 @@ impl PluginFactory {
     ) -> Result<PluginConfig, BoxError> {
         let mut deserializer = <dyn erased_serde::Deserializer>::erase(config);
         Ok(self.parse_config(&mut deserializer)?)
+    }
+
+    /// The config the plugin runs with when the configuration has no section for it.
+    pub(crate) fn default_config(&self) -> Result<PluginConfig, BoxError> {
+        self.parse_config_value(Value::Object(serde_json::Map::new()))
     }
 
     /// Constructs the plugin from config deserialized by [`Self::parse_config`].
@@ -1144,6 +1162,22 @@ macro_rules! register_private_plugin {
             #[linkme(crate = $crate::_private::linkme)]
             static REGISTER_PLUGIN: Lazy<PluginFactory> = Lazy::new(|| {
                 $crate::plugin::PluginFactory::new_private::<$plugin_type>($group, $name)
+            });
+        };
+    };
+    // A plugin the router builds even when the configuration has no section for it.
+    ($group: literal, $name: literal, $plugin_type: ident, mandatory) => {
+        //  Artificial scope to avoid naming collisions
+        const _: () = {
+            use $crate::_private::PLUGINS;
+            use $crate::_private::PluginFactory;
+            use $crate::_private::once_cell::sync::Lazy;
+
+            #[$crate::_private::linkme::distributed_slice(PLUGINS)]
+            #[linkme(crate = $crate::_private::linkme)]
+            static REGISTER_PLUGIN: Lazy<PluginFactory> = Lazy::new(|| {
+                $crate::plugin::PluginFactory::new_private::<$plugin_type>($group, $name)
+                    .into_mandatory()
             });
         };
     };

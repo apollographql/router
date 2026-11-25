@@ -4,6 +4,7 @@ use std::fmt::Display;
 use std::fmt::Formatter;
 use std::hash::Hash;
 use std::sync::Arc;
+use std::sync::OnceLock;
 
 use apollo_compiler::ExecutableDocument;
 use apollo_compiler::Node;
@@ -13,6 +14,7 @@ use apollo_compiler::validation::Valid;
 
 use crate::compute_job::ComputeJobType;
 use crate::compute_job::MaybeBackPressureError;
+use crate::plugins::authorization::CacheKeyMetadata;
 use crate::spec::QueryHash;
 use crate::spec::SpecError;
 
@@ -73,6 +75,11 @@ pub(crate) struct ParsedDocumentInner {
     pub(crate) executable: Arc<Valid<ExecutableDocument>>,
     pub(crate) hash: Arc<QueryHash>,
     pub(crate) operation: Node<Operation>,
+    /// The authorization requirements of `operation`, set by
+    /// [`AuthorizationRequirementsLayer`](crate::plugins::authorization::authorization_requirements::AuthorizationRequirementsLayer) when the authorization
+    /// plugin is installed with directives enabled and the schema links one of them. Otherwise,
+    /// and for documents built elsewhere, it is unset.
+    pub(crate) authorization: OnceLock<CacheKeyMetadata>,
 }
 
 impl ParsedDocumentInner {
@@ -88,6 +95,7 @@ impl ParsedDocumentInner {
             executable,
             hash,
             operation,
+            authorization: OnceLock::new(),
         }))
     }
 }

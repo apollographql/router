@@ -93,4 +93,4 @@ impl BatchingPlugin {
     }
 }
 
-register_private_plugin!("apollo", "batching", BatchingPlugin);
+register_private_plugin!("apollo", "batching", BatchingPlugin, mandatory);

@@ -16,12 +16,10 @@ use apollo_compiler::executable;
 use apollo_compiler::name;
 use apollo_compiler::schema;
 use apollo_compiler::schema::Implementers;
-use apollo_federation::link::spec::Identity;
 use tower::BoxError;
 
 use crate::json_ext::Path;
 use crate::json_ext::PathElement;
-use crate::spec::Schema;
 use crate::spec::TYPENAME;
 use crate::spec::query::transform;
 use crate::spec::query::transform::TransformState;
@@ -31,7 +29,7 @@ pub(crate) struct ScopeExtractionVisitor<'a> {
     schema: &'a schema::Schema,
     fragments: HashMap<&'a Name, &'a Node<executable::Fragment>>,
     pub(crate) extracted_scopes: HashSet<String>,
-    requires_scopes_directive_name: String,
+    requires_scopes_directive_name: &'a str,
     entity_query: bool,
 }
 
@@ -44,24 +42,20 @@ impl<'a> ScopeExtractionVisitor<'a> {
         schema: &'a schema::Schema,
         executable: &'a executable::ExecutableDocument,
         entity_query: bool,
-    ) -> Option<Self> {
-        Some(Self {
+        requires_scopes_directive_name: &'a str,
+    ) -> Self {
+        Self {
             schema,
             entity_query,
             fragments: executable.fragments.iter().collect(),
             extracted_scopes: HashSet::new(),
-            requires_scopes_directive_name: Schema::directive_name(
-                schema,
-                &Identity::requires_scopes_identity(),
-                REQUIRES_SCOPES_SPEC_VERSION_RANGE,
-                &REQUIRES_SCOPES_DIRECTIVE_NAME,
-            )?,
-        })
+            requires_scopes_directive_name,
+        }
     }
 
     fn scopes_from_field(&mut self, field: &schema::FieldDefinition) {
         self.extracted_scopes.extend(scopes_argument(
-            field.directives.get(&self.requires_scopes_directive_name),
+            field.directives.get(self.requires_scopes_directive_name),
         ));
 
         if let Some(ty) = self.schema.types.get(field.ty.inner_named_type()) {
@@ -71,7 +65,7 @@ impl<'a> ScopeExtractionVisitor<'a> {
 
     fn scopes_from_type(&mut self, ty: &schema::ExtendedType) {
         self.extracted_scopes.extend(scopes_argument(
-            ty.directives().get(&self.requires_scopes_directive_name),
+            ty.directives().get(self.requires_scopes_directive_name),
         ));
     }
 
@@ -127,7 +121,7 @@ impl traverse::Visitor for ScopeExtractionVisitor<'_> {
     fn operation(&mut self, root_type: &str, node: &executable::Operation) -> Result<(), BoxError> {
         if let Some(ty) = self.schema.types.get(root_type) {
             self.extracted_scopes.extend(scopes_argument(
-                ty.directives().get(&self.requires_scopes_directive_name),
+                ty.directives().get(self.requires_scopes_directive_name),
             ));
         }
 
@@ -215,7 +209,7 @@ pub(crate) struct ScopeFilteringVisitor<'a> {
     // the point of application
     fragments_unauthorized_paths: HashMap<String, Vec<Path>>,
     current_path: Path,
-    requires_scopes_directive_name: String,
+    requires_scopes_directive_name: &'a str,
     dry_run: bool,
 }
 
@@ -225,8 +219,9 @@ impl<'a> ScopeFilteringVisitor<'a> {
         implementers_map: &'a apollo_compiler::collections::HashMap<Name, Implementers>,
         scopes: HashSet<String>,
         dry_run: bool,
-    ) -> Option<Self> {
-        Some(Self {
+        requires_scopes_directive_name: &'a str,
+    ) -> Self {
+        Self {
             schema,
             state: TransformState::new(),
             implementers_map,
@@ -236,17 +231,12 @@ impl<'a> ScopeFilteringVisitor<'a> {
             unauthorized_paths: vec![],
             fragments_unauthorized_paths: HashMap::new(),
             current_path: Path::default(),
-            requires_scopes_directive_name: Schema::directive_name(
-                schema,
-                &Identity::requires_scopes_identity(),
-                REQUIRES_SCOPES_SPEC_VERSION_RANGE,
-                &REQUIRES_SCOPES_DIRECTIVE_NAME,
-            )?,
-        })
+            requires_scopes_directive_name,
+        }
     }
 
     fn is_field_authorized(&self, field: &schema::FieldDefinition) -> bool {
-        if let Some(directive) = field.directives.get(&self.requires_scopes_directive_name) {
+        if let Some(directive) = field.directives.get(self.requires_scopes_directive_name) {
             let mut field_scopes_sets = scopes_sets_argument(directive);
 
             // The outer array acts like a logical OR: if any of the inner arrays of scopes matches, the field
@@ -270,7 +260,7 @@ impl<'a> ScopeFilteringVisitor<'a> {
     }
 
     fn is_type_authorized(&self, ty: &schema::ExtendedType) -> bool {
-        match ty.directives().get(&self.requires_scopes_directive_name) {
+        match ty.directives().get(self.requires_scopes_directive_name) {
             None => true,
             Some(directive) => {
                 let mut type_scopes_sets = scopes_sets_argument(directive);
@@ -373,7 +363,7 @@ impl transform::Visitor for ScopeFilteringVisitor<'_> {
         node: &ast::OperationDefinition,
     ) -> Result<Option<ast::OperationDefinition>, BoxError> {
         let is_authorized = if let Some(ty) = self.schema.types.get(root_type) {
-            match ty.directives().get(&self.requires_scopes_directive_name) {
+            match ty.directives().get(self.requires_scopes_directive_name) {
                 None => true,
                 Some(directive) => {
                     let mut type_scopes_sets = scopes_sets_argument(directive);
@@ -596,6 +586,7 @@ mod tests {
     use apollo_compiler::ast::Document;
 
     use crate::json_ext::Path;
+    use crate::plugins::authorization::AuthorizationDirectives;
     use crate::plugins::authorization::scopes::ScopeExtractionVisitor;
     use crate::plugins::authorization::scopes::ScopeFilteringVisitor;
     use crate::spec::query::transform;
@@ -667,7 +658,13 @@ mod tests {
         let schema = Schema::parse_and_validate(schema, "schema.graphql").unwrap();
         let doc = Document::parse(query, "query.graphql").unwrap();
         let exec = doc.to_executable_validate(&schema).unwrap();
-        let mut visitor = ScopeExtractionVisitor::new(&schema, &exec, false).unwrap();
+        let directives = AuthorizationDirectives::from_schema(&schema);
+        let mut visitor = ScopeExtractionVisitor::new(
+            &schema,
+            &exec,
+            false,
+            directives.requires_scopes.as_deref().unwrap(),
+        );
         traverse::document(&mut visitor, &exec, None).unwrap();
 
         visitor.extracted_scopes.into_iter().collect()
@@ -700,7 +697,14 @@ mod tests {
         doc.to_executable_validate(&schema).unwrap();
 
         let map = schema.implementers_map();
-        let mut visitor = ScopeFilteringVisitor::new(&schema, &map, scopes, false).unwrap();
+        let directives = AuthorizationDirectives::from_schema(&schema);
+        let mut visitor = ScopeFilteringVisitor::new(
+            &schema,
+            &map,
+            scopes,
+            false,
+            directives.requires_scopes.as_deref().unwrap(),
+        );
         (
             transform::document(&mut visitor, &doc).unwrap(),
             visitor.unauthorized_paths,

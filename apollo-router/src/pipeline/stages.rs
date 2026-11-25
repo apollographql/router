@@ -27,7 +27,6 @@ use crate::layers::InternalServiceBuilderExt as _;
 use crate::layers::ServiceBuilderExt as _;
 use crate::layers::unconstrained_buffer::UnconstrainedBuffer;
 use crate::plugins::authorization::AuthorizationPlugin;
-use crate::plugins::authorization::extract_authorization_checks_layer::ExtractAuthorizationChecksLayer;
 use crate::plugins::batching::BatchingPlugin;
 use crate::plugins::circuit_breaker::CircuitBreaker;
 use crate::plugins::connectors::request_limit::RequestLimitLayer;
@@ -483,10 +482,17 @@ fn subscription_plugin_config(plugins: &Plugins) -> Option<SubscriptionConfig> {
 
 /// Build a query parsing service with in-memory caching.
 ///
-/// The cache size is the same as the query plan cache size.
+/// The cache size is the same as the query plan cache size. When the authorization plugin has
+/// directives enabled and the schema links one of them, each parsed document also carries its
+/// operation's authorization requirements, worked out once on a cache miss.
+///
+/// # Panics
+///
+/// If `plugins` has no authorization plugin, which `create_plugins` always builds.
 pub(crate) fn build_query_parsing_service(
     schema: Arc<Schema>,
     configuration: Arc<Configuration>,
+    plugins: &Plugins,
 ) -> query_parsing::BoxCloneService {
     let cache_limit = configuration
         .supergraph
@@ -503,6 +509,10 @@ pub(crate) fn build_query_parsing_service(
 
     ServiceBuilder::new()
         .layer(QueryParsingCacheLayer::new(cache_config))
+        .apply_required_plugin_layer(
+            plugins,
+            AuthorizationPlugin::authorization_requirements_layer,
+        )
         .layer(LimitRecursiveSelectionLayer::new(
             max_recursive_selections,
             warn_only,
@@ -649,8 +659,6 @@ pub(crate) fn build_router_service(
     configuration: &Configuration,
     plugins: Arc<Plugins>,
 ) -> router::BoxCloneService {
-    let enable_authorization_directives =
-        AuthorizationPlugin::enable_directives(configuration, &schema);
     let extended_references = matches!(
         TelemetryConfig::metrics_reference_mode(configuration),
         ApolloMetricsReferenceMode::Extended
@@ -677,9 +685,9 @@ pub(crate) fn build_router_service(
             query_parsing_service,
             configuration.supergraph.redact_query_validation_errors,
         ))
-        .option_layer(
-            enable_authorization_directives
-                .then(|| ExtractAuthorizationChecksLayer::new(schema.clone())),
+        .apply_required_plugin_layer(
+            &plugins,
+            AuthorizationPlugin::extract_authorization_checks_layer,
         )
         .option_layer(extended_references.then(|| ExtendedReferencesLayer::new(schema)))
         .layer(EnforceSafelistLayer::new(persisted_queries))

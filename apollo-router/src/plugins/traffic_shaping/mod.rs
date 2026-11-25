@@ -745,7 +745,7 @@ fn rate_limit_error() -> graphql::Error {
         .build()
 }
 
-register_private_plugin!("apollo", "traffic_shaping", TrafficShaping);
+register_private_plugin!("apollo", "traffic_shaping", TrafficShaping, mandatory);
 
 #[cfg(test)]
 mod test {
@@ -770,6 +770,7 @@ mod test {
     use crate::pipeline::connect_apq_redis;
     use crate::pipeline::connect_query_plan_redis;
     use crate::pipeline::create_plugins;
+    use crate::pipeline::tests::stage_stack::query_parsing_plugins;
     use crate::plugin::DynPlugin;
     use crate::plugin::test::MockSubgraph;
     use crate::query_planner::QueryPlannerService;
@@ -868,8 +869,11 @@ mod test {
         let qp_arc = QueryPlannerService::create_planner(&schema, &config).unwrap();
         let subgraph_schemas = crate::query_planner::build_subgraph_schemas(&qp_arc);
 
-        let query_parser_service =
-            crate::pipeline::build_query_parsing_service(schema.clone(), config.clone());
+        let query_parser_service = crate::pipeline::build_query_parsing_service(
+            schema.clone(),
+            config.clone(),
+            &query_parsing_plugins().await,
+        );
 
         let plugins = Arc::new(
             create_plugins(

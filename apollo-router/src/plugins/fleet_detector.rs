@@ -584,7 +584,7 @@ fn get_deployment_type(official_helm_chart: Option<&str>, deployment_type: Optio
     }
 }
 
-register_private_plugin!("apollo", "fleet_detector", FleetDetector);
+register_private_plugin!("apollo", "fleet_detector", FleetDetector, mandatory);
 
 #[cfg(test)]
 mod tests {
