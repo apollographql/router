@@ -5,8 +5,8 @@
 use std::sync::Arc;
 
 use apollo_compiler::collections::HashMap;
-use apollo_compiler::validation::Valid;
 use apollo_federation::query_plan::query_planner::QueryPlanner;
+use apollo_federation::schema::ValidFederationSchema;
 pub(crate) use caching_query_planner::*;
 pub use plan::QueryPlan;
 pub(crate) use plan::*;
@@ -42,7 +42,7 @@ pub(crate) const CONDITION_IF_SPAN_NAME: &str = "condition_if";
 pub(crate) const CONDITION_ELSE_SPAN_NAME: &str = "condition_else";
 
 /// Subgraph schemas, keyed by subgraph name.
-pub(crate) type SubgraphSchemas = HashMap<String, Arc<Valid<apollo_compiler::Schema>>>;
+pub(crate) type SubgraphSchemas = HashMap<String, ValidFederationSchema>;
 
 /// Returns a map of the subgraph schemas known to the given planner, keyed by subgraph name.
 /// Connector fetches carry their connector's synthetic service name, and their operations
@@ -52,7 +52,7 @@ pub(crate) fn build_subgraph_schemas(planner: &QueryPlanner) -> Arc<SubgraphSche
     let mut schemas: SubgraphSchemas = planner
         .subgraph_schemas()
         .iter()
-        .map(|(name, schema)| (name.to_string(), Arc::new(schema.schema().clone())))
+        .map(|(name, schema)| (name.to_string(), schema.clone()))
         .collect();
     for (service_name, subgraph_name) in planner.connector_index().service_subgraphs() {
         if let Some(schema) = schemas.get(subgraph_name).cloned() {
@@ -81,12 +81,7 @@ fn hashed_subgraph_schemas(planner: &QueryPlanner) -> Arc<HashedSubgraphSchemas>
     let mut schemas: HashedSubgraphSchemas = planner
         .subgraph_schemas()
         .iter()
-        .map(|(name, schema)| {
-            (
-                name.to_string(),
-                HashedSubgraphSchema::new(schema.schema().clone()),
-            )
-        })
+        .map(|(name, schema)| (name.to_string(), HashedSubgraphSchema::new(schema.clone())))
         .collect();
     for (service_name, subgraph_name) in planner.connector_index().service_subgraphs() {
         if let Some(schema) = schemas.get(subgraph_name).cloned() {
@@ -104,15 +99,15 @@ fn hashed_subgraph_schemas(planner: &QueryPlanner) -> Arc<HashedSubgraphSchemas>
 
 #[derive(Clone)]
 struct HashedSubgraphSchema {
-    schema: Arc<Valid<apollo_compiler::Schema>>,
+    schema: ValidFederationSchema,
     hash: SchemaHash,
 }
 
 impl HashedSubgraphSchema {
-    fn new(schema: Valid<apollo_compiler::Schema>) -> Self {
-        let sdl = schema.serialize().no_indent().to_string();
+    fn new(schema: ValidFederationSchema) -> Self {
+        let sdl = schema.schema().serialize().no_indent().to_string();
         Self {
-            schema: Arc::new(schema),
+            schema,
             hash: SchemaHash::new(&sdl),
         }
     }

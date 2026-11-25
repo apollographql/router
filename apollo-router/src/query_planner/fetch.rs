@@ -712,7 +712,7 @@ impl FetchNode {
         subgraph_schemas: &SubgraphSchemas,
     ) -> Result<(), ValidationErrors> {
         let schema = &subgraph_schemas[self.service_name.as_ref()];
-        self.operation.init_parsed(schema)?;
+        self.operation.init_parsed(schema.schema())?;
         Ok(())
     }
 
@@ -721,7 +721,8 @@ impl FetchNode {
         subgraph_schemas: &HashedSubgraphSchemas,
     ) -> Result<(), ValidationErrors> {
         let subgraph_schema = &subgraph_schemas[self.service_name.as_ref()];
-        self.operation.init_parsed(&subgraph_schema.schema)?;
+        self.operation
+            .init_parsed(subgraph_schema.schema.schema())?;
         self.schema_aware_hash = Arc::new(subgraph_schema.hash.operation_hash(
             self.operation.as_serialized(),
             self.operation_name.as_deref(),

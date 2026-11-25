@@ -534,7 +534,7 @@ impl PluginPrivate for DemandControl {
         let mut demand_controlled_subgraph_schemas = HashMap::new();
         for (subgraph_name, subgraph_schema) in init.subgraph_schemas.iter() {
             let demand_controlled_subgraph_schema =
-                DemandControlledSchema::new(subgraph_schema.clone())?;
+                DemandControlledSchema::new(Arc::new(subgraph_schema.schema().clone()))?;
             demand_controlled_subgraph_schemas
                 .insert(subgraph_name.clone(), demand_controlled_subgraph_schema);
         }

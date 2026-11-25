@@ -251,7 +251,7 @@ impl FetchService {
                 tracing::error!("cannot build aliased operation: {reason}");
                 return Box::pin(std::future::ready(Err(reason.into())));
             };
-            match build_operation_with_aliasing(operation, ctx_arg, subgraph_schema) {
+            match build_operation_with_aliasing(operation, ctx_arg, subgraph_schema.schema()) {
                 Ok(op) => {
                     alias_query_string = op.serialize().no_indent().to_string();
                     alias_query_string.as_str()
