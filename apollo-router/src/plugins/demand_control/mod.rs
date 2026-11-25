@@ -15,6 +15,7 @@ use apollo_compiler::validation::Valid;
 use apollo_compiler::validation::WithErrors;
 use apollo_federation::error::FederationError;
 use apollo_federation::query_plan::serializable_document::SerializableDocumentNotInitialized;
+use apollo_federation::schema::ValidFederationSchema;
 use displaydoc::Display;
 use futures::StreamExt;
 use futures::future::Either;
@@ -520,21 +521,22 @@ impl PluginPrivate for DemandControl {
             return Ok(DemandControl {
                 strategy_factory: StrategyFactory::new(
                     init.config.clone(),
-                    Arc::new(DemandControlledSchema::empty(
-                        init.supergraph_schema.clone(),
-                    )?),
+                    Arc::new(DemandControlledSchema::empty(ValidFederationSchema::new(
+                        (*init.supergraph_schema).clone(),
+                    )?)),
                     Arc::new(HashMap::new()),
                 ),
                 config: init.config,
             });
         }
 
-        let demand_controlled_supergraph_schema =
-            DemandControlledSchema::new(init.supergraph_schema.clone())?;
+        let demand_controlled_supergraph_schema = DemandControlledSchema::new(
+            ValidFederationSchema::new((*init.supergraph_schema).clone())?,
+        )?;
         let mut demand_controlled_subgraph_schemas = HashMap::new();
         for (subgraph_name, subgraph_schema) in init.subgraph_schemas.iter() {
             let demand_controlled_subgraph_schema =
-                DemandControlledSchema::new(Arc::new(subgraph_schema.schema().clone()))?;
+                DemandControlledSchema::new(subgraph_schema.clone())?;
             demand_controlled_subgraph_schemas
                 .insert(subgraph_name.clone(), demand_controlled_subgraph_schema);
         }

@@ -1161,6 +1161,7 @@ mod tests {
     use ahash::HashMapExt;
     use apollo_compiler::validation::Valid;
     use apollo_federation::query_plan::query_planner::QueryPlanner;
+    use apollo_federation::schema::ValidFederationSchema;
     use bytes::Bytes;
     use test_log::test;
     use tower::Service;
@@ -1213,7 +1214,7 @@ mod tests {
             .cloned()
             .unwrap_or_default();
         let schema =
-            DemandControlledSchema::new(Arc::new(schema.supergraph_schema().clone())).unwrap();
+            DemandControlledSchema::new(schema.federation_supergraph().schema.clone()).unwrap();
         let calculator = StaticCostCalculator::new(
             Arc::new(schema),
             Default::default(),
@@ -1250,7 +1251,8 @@ mod tests {
             .as_object()
             .cloned()
             .unwrap_or_default();
-        let schema = DemandControlledSchema::new(Arc::new(schema)).unwrap();
+        let schema =
+            DemandControlledSchema::new(ValidFederationSchema::new(schema).unwrap()).unwrap();
         let calculator = StaticCostCalculator::new(
             Arc::new(schema),
             Default::default(),
@@ -1271,7 +1273,7 @@ mod tests {
             .as_object()
             .cloned()
             .unwrap_or_default();
-        let supergraph_schema = schema.supergraph_schema().clone();
+        let supergraph_schema = schema.federation_supergraph().schema.clone();
 
         let schema_arc: Arc<crate::spec::Schema> = schema.into();
         let qp_arc = QueryPlannerService::create_planner(&schema_arc, &config).unwrap();
@@ -1295,11 +1297,11 @@ mod tests {
             .unwrap();
         let query_plan = planner_res.content.unwrap();
 
-        let schema = DemandControlledSchema::new(Arc::new(supergraph_schema)).unwrap();
+        let schema = DemandControlledSchema::new(supergraph_schema).unwrap();
         let mut demand_controlled_subgraph_schemas = HashMap::new();
         for (subgraph_name, subgraph_schema) in subgraph_schemas.iter() {
             let demand_controlled_subgraph_schema =
-                DemandControlledSchema::new(Arc::new(subgraph_schema.schema().clone())).unwrap();
+                DemandControlledSchema::new(subgraph_schema.clone()).unwrap();
             demand_controlled_subgraph_schemas
                 .insert(subgraph_name.clone(), demand_controlled_subgraph_schema);
         }
@@ -1331,11 +1333,11 @@ mod tests {
             .unwrap();
 
         let schema =
-            DemandControlledSchema::new(Arc::new(schema.supergraph_schema().clone())).unwrap();
+            DemandControlledSchema::new(schema.federation_supergraph().schema.clone()).unwrap();
         let mut demand_controlled_subgraph_schemas = HashMap::new();
         for (subgraph_name, subgraph_schema) in planner.subgraph_schemas().iter() {
             let demand_controlled_subgraph_schema =
-                DemandControlledSchema::new(Arc::new(subgraph_schema.schema().clone())).unwrap();
+                DemandControlledSchema::new(subgraph_schema.clone()).unwrap();
             demand_controlled_subgraph_schemas
                 .insert(subgraph_name.to_string(), demand_controlled_subgraph_schema);
         }
@@ -1365,7 +1367,7 @@ mod tests {
             .unwrap_or_default();
         let response = Response::from_bytes(Bytes::from(response_bytes)).unwrap();
         let schema =
-            DemandControlledSchema::new(Arc::new(schema.supergraph_schema().clone())).unwrap();
+            DemandControlledSchema::new(schema.federation_supergraph().schema.clone()).unwrap();
         StaticCostCalculator::new(
             Arc::new(schema),
             Default::default(),
@@ -1398,7 +1400,8 @@ mod tests {
             .unwrap_or_default();
         let response = Response::from_bytes(Bytes::from(response_bytes)).unwrap();
 
-        let schema = DemandControlledSchema::new(Arc::new(schema)).unwrap();
+        let schema =
+            DemandControlledSchema::new(ValidFederationSchema::new(schema).unwrap()).unwrap();
         StaticCostCalculator::new(
             Arc::new(schema),
             Default::default(),
@@ -1652,7 +1655,7 @@ mod tests {
         let query = include_str!("./fixtures/federated_ships_deferred_query.graphql");
         let (schema, query) = parse_schema_and_operation(schema, query, &Default::default());
         let schema = Arc::new(
-            DemandControlledSchema::new(Arc::new(schema.supergraph_schema().clone())).unwrap(),
+            DemandControlledSchema::new(schema.federation_supergraph().schema.clone()).unwrap(),
         );
 
         let calculator =
@@ -1796,7 +1799,8 @@ mod tests {
             "query.graphql",
         )
         .unwrap();
-        let schema = DemandControlledSchema::new(Arc::new(schema)).unwrap();
+        let schema =
+            DemandControlledSchema::new(ValidFederationSchema::new(schema).unwrap()).unwrap();
         let calculator = StaticCostCalculator::new(
             Arc::new(schema),
             Default::default(),
@@ -2147,8 +2151,6 @@ mod tests {
         /// Schema load fails when a sizedFields path has more than one leaf (one-leaf-per-path rule).
         #[test]
         fn multiple_leaves_in_one_path_fails_at_schema_load() {
-            use std::sync::Arc;
-
             use crate::plugins::demand_control::cost_calculator::schema::DemandControlledSchema;
             use crate::spec;
 
@@ -2160,7 +2162,7 @@ mod tests {
             // ResultContainer has page: [A] and metadata: String. So "results { page metadata }"
             // has two top-level selections with no sub-selections (page is a leaf, metadata is a leaf).
             let schema = spec::Schema::parse(&schema_str, &Default::default()).unwrap();
-            let result = DemandControlledSchema::new(Arc::new(schema.supergraph_schema().clone()));
+            let result = DemandControlledSchema::new(schema.federation_supergraph().schema.clone());
 
             match &result {
                 Err(e) => assert!(
@@ -2186,7 +2188,10 @@ mod tests {
     ) -> Option<i32> {
         let executable =
             ExecutableDocument::parse_and_validate(schema, query_str, "query.graphql").unwrap();
-        let dc_schema = Arc::new(DemandControlledSchema::new(Arc::new(schema.clone())).unwrap());
+        let dc_schema = Arc::new(
+            DemandControlledSchema::new(ValidFederationSchema::new(schema.clone()).unwrap())
+                .unwrap(),
+        );
         let calc =
             StaticCostCalculator::new(dc_schema, Default::default(), Default::default(), list_size);
 
@@ -2360,12 +2365,12 @@ mod tests {
             .unwrap();
 
         let dc_schema =
-            DemandControlledSchema::new(Arc::new(schema.supergraph_schema().clone())).unwrap();
+            DemandControlledSchema::new(schema.federation_supergraph().schema.clone()).unwrap();
         let mut subgraph_schemas = HashMap::new();
         for (subgraph_name, subgraph_schema) in planner.subgraph_schemas().iter() {
             subgraph_schemas.insert(
                 subgraph_name.to_string(),
-                DemandControlledSchema::new(Arc::new(subgraph_schema.schema().clone())).unwrap(),
+                DemandControlledSchema::new(subgraph_schema.clone()).unwrap(),
             );
         }
         let calculator = StaticCostCalculator::new(
