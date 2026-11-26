@@ -82,7 +82,7 @@ pub(crate) struct ParsedDocumentInner {
     /// and for documents built elsewhere, it is unset.
     pub(crate) authorization: OnceLock<CacheKeyMetadata>,
     /// Unset for documents not built by the query parsing service.
-    pub(crate) operation_limits: OnceLock<OperationLimits<u32>>,
+    pub(crate) operation_counts: OnceLock<OperationLimits<u32>>,
 }
 
 impl ParsedDocumentInner {
@@ -99,7 +99,7 @@ impl ParsedDocumentInner {
             hash,
             operation,
             authorization: OnceLock::new(),
-            operation_limits: OnceLock::new(),
+            operation_counts: OnceLock::new(),
         }))
     }
 }

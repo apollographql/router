@@ -46,7 +46,7 @@ where
 
         Box::pin(async move {
             let doc = parsed.await?;
-            doc.operation_limits
+            doc.operation_counts
                 .get_or_init(|| operation_limits::measure(&doc.executable, &doc.operation));
             Ok(doc)
         })
@@ -123,7 +123,7 @@ mod tests {
         let large = call_layer(query, Some("Large")).await.unwrap();
 
         assert_eq!(
-            small.operation_limits.get(),
+            small.operation_counts.get(),
             Some(&OperationLimits {
                 depth: 2,
                 height: 2,
@@ -132,7 +132,7 @@ mod tests {
             })
         );
         assert_eq!(
-            large.operation_limits.get(),
+            large.operation_counts.get(),
             Some(&OperationLimits {
                 depth: 2,
                 height: 7,
@@ -175,6 +175,6 @@ mod tests {
             Arc::ptr_eq(&first, &second),
             "the second request should be served from the parse cache"
         );
-        assert!(second.operation_limits.get().is_some());
+        assert!(second.operation_counts.get().is_some());
     }
 }

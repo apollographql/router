@@ -92,7 +92,7 @@ where
 
         // Missing counts mean the pipeline was set up improperly, never that the operation is
         // within its limits.
-        let Some(&query_metrics) = document.operation_limits.get() else {
+        let Some(&query_metrics) = document.operation_counts.get() else {
             let response = supergraph::Response::error_builder()
                 .status_code(http::StatusCode::INTERNAL_SERVER_ERROR)
                 .context(req.context)
@@ -197,7 +197,7 @@ mod tests {
     fn make_request(schema: &Schema, query: &str) -> supergraph::Request {
         // In the future, we can hopefully just use a query parsing tower layer here...
         let doc = Query::parse_document(query, None, schema, &Default::default()).unwrap();
-        doc.operation_limits
+        doc.operation_counts
             .set(operation_limits::measure(&doc.executable, &doc.operation))
             .unwrap();
         let ctx = Context::new();
