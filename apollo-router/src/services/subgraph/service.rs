@@ -386,6 +386,7 @@ mod tests {
     use crate::graphql::Response;
     use crate::metrics::FutureMetricsExt;
     use crate::pipeline::tests::stage_stack::test_http_client_service;
+    use crate::pipeline::tests::stage_stack::test_http_client_service_with_limits;
     use crate::plugins::limits::response_size_limit::SubgraphResponseSizeLimit;
     use crate::plugins::subscription::CallbackMode;
     use crate::plugins::subscription::HeartbeatInterval;
@@ -1060,7 +1061,11 @@ mod tests {
         tokio::task::spawn(emulate_subgraph_large_response(listener));
         let subgraph_service = with_content_negotiation_layer(SubgraphService::new(
             "test",
-            test_http_client_service("test").await,
+            test_http_client_service_with_limits(
+                "test",
+                serde_json::json!({ "subgraph": { "all": { "http_max_response_size": "1024b" } } }),
+            )
+            .await,
         ));
 
         let context = Context::new();
@@ -1154,7 +1159,11 @@ mod tests {
         tokio::task::spawn(emulate_subgraph_application_json_response(listener));
         let subgraph_service = with_content_negotiation_layer(SubgraphService::new(
             "test",
-            test_http_client_service("test").await,
+            test_http_client_service_with_limits(
+                "test",
+                serde_json::json!({ "subgraph": { "all": { "http_max_response_size": "1024b" } } }),
+            )
+            .await,
         ));
 
         let context = Context::new();

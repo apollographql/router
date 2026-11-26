@@ -1,6 +1,7 @@
 pub(crate) mod http2_header_list;
 mod layer;
 mod limited;
+pub(crate) mod measure_operation_limits;
 pub(crate) mod operation_limits;
 pub(crate) mod operation_limits_layer;
 pub(crate) mod response_size_limit;
@@ -19,19 +20,25 @@ use serde::Serialize;
 use tower::BoxError;
 use tower::ServiceBuilder;
 use tower::ServiceExt;
+use tower::util::option_layer;
 
 use crate::Context;
 use crate::configuration::connector::ConnectorConfiguration;
 use crate::configuration::subgraph::SubgraphConfiguration;
 use crate::graphql;
+use crate::layers::OptionLayer;
 use crate::layers::ServiceBuilderExt;
 use crate::plugin::PluginInit;
 use crate::plugin::PluginPrivate;
 use crate::plugins::limits::layer::RequestBodyLimitLayer;
 use crate::plugins::limits::layer::RequestSizeLimitError;
+use crate::plugins::limits::measure_operation_limits::MeasureOperationLimitsLayer;
+use crate::plugins::limits::operation_limits_layer::EnforceOperationLimitsLayer;
 use crate::plugins::limits::response_size_limit::SubgraphResponseSizeLimit;
+use crate::plugins::limits::response_size_limit::SubgraphResponseSizeLimitLayer;
 use crate::services::SubgraphRequest;
 use crate::services::connector;
+use crate::services::query_parsing::recursive_selections_limit::LimitRecursiveSelectionLayer;
 use crate::services::router;
 use crate::services::subgraph;
 use crate::uplink::license_enforcement::AllowedFeature;
@@ -233,6 +240,15 @@ impl Config {
         Some(SubgraphResponseSizeLimit(limit.as_u64().try_into().ok()?))
     }
 
+    fn has_subgraph_response_size_limit(&self) -> bool {
+        self.subgraph.all.http_max_response_size.is_some()
+            || self
+                .subgraph
+                .subgraphs
+                .values()
+                .any(|s| s.http_max_response_size.is_some())
+    }
+
     fn connector_response_size_limit(
         &self,
         source_name: &str,
@@ -272,6 +288,35 @@ impl LimitsPlugin {
     ) -> http2_header_list::EndpointHeaderListLimitLayer {
         http2_header_list::EndpointHeaderListLimitLayer::new(
             self.config.router.http2_header_list_limit(),
+        )
+    }
+
+    pub(crate) fn recursive_selections_limit_layer(&self) -> LimitRecursiveSelectionLayer {
+        LimitRecursiveSelectionLayer::new(
+            self.config.router.max_recursive_selections,
+            self.config.router.warn_only,
+        )
+    }
+
+    pub(crate) fn measure_operation_limits_layer(&self) -> MeasureOperationLimitsLayer {
+        MeasureOperationLimitsLayer
+    }
+
+    pub(crate) fn enforce_operation_limits_layer(&self) -> EnforceOperationLimitsLayer {
+        EnforceOperationLimitsLayer::new(&self.config.router)
+    }
+
+    pub(crate) fn subgraph_response_size_limit_layer(
+        &self,
+        name: &str,
+    ) -> OptionLayer<SubgraphResponseSizeLimitLayer> {
+        // Kept for every subgraph once any has a limit, not only for subgraphs with their own:
+        // the check enforces whichever limit a subgraph call last put in the request context,
+        // which also reaches later calls to other subgraphs in the same request.
+        option_layer(
+            self.config
+                .has_subgraph_response_size_limit()
+                .then(|| SubgraphResponseSizeLimitLayer::new(name)),
         )
     }
 }
@@ -474,6 +519,8 @@ mod test {
     use crate::plugins::test::PluginTestHarness;
     use crate::services::connector;
     use crate::services::connector::request_service::TransportOutcome;
+    use crate::services::http::HttpRequest;
+    use crate::services::http::HttpResponse;
     use crate::services::router;
 
     async fn body_to_string(resp: router::Response) -> String {
@@ -1192,6 +1239,84 @@ mod test {
     }
 
     // --- LimitsPlugin::subgraph_service ---
+
+    async fn read_oversized_products_response(config: &str) -> Result<bytes::Bytes, BoxError> {
+        let plugin: PluginTestHarness<LimitsPlugin> = PluginTestHarness::builder()
+            .config(config)
+            .build()
+            .await
+            .expect("test harness");
+
+        let (mock, mut handle) = tower_test::mock::pair::<HttpRequest, HttpResponse>();
+        let driver = tokio::spawn(async move {
+            let (_req, responder) = handle.next_request().await.unwrap();
+            responder.send_response(HttpResponse {
+                http_response: http::Response::builder()
+                    .body(router::body::from_bytes(vec![0; 10_000]))
+                    .unwrap(),
+                context: Context::new(),
+            });
+        });
+
+        let service = ServiceBuilder::new()
+            .layer(plugin.subgraph_response_size_limit_layer("products"))
+            .service(mock);
+
+        let context = Context::new();
+        context
+            .extensions()
+            .with_lock(|lock| lock.insert(SubgraphResponseSizeLimit(1000)));
+        let request = HttpRequest {
+            http_request: http::Request::builder()
+                .body(router::body::empty())
+                .unwrap(),
+            context,
+        };
+
+        let response = service.oneshot(request).await.unwrap();
+        let body = router::body::into_bytes(response.http_response.into_body()).await;
+        crate::plugin::test::await_mock_driver(driver).await;
+        body.map_err(BoxError::from)
+    }
+
+    #[tokio::test]
+    async fn subgraph_response_size_layer_left_out_without_limits() {
+        let body = read_oversized_products_response("limits: {}").await;
+        assert_eq!(body.expect("no limit is checked").len(), 10_000);
+    }
+
+    #[tokio::test]
+    async fn subgraph_response_size_layer_applied_with_a_limit_for_all() {
+        let body = read_oversized_products_response(indoc::indoc! {"
+            limits:
+              subgraph:
+                all:
+                  http_max_response_size: 1024b
+        "})
+        .await;
+        assert_eq!(
+            body.expect_err("the context's limit is enforced")
+                .to_string(),
+            "subgraph response body exceeded limit of 1000 bytes"
+        );
+    }
+
+    #[tokio::test]
+    async fn subgraph_response_size_layer_applied_for_subgraphs_without_their_own_limit() {
+        let body = read_oversized_products_response(indoc::indoc! {"
+            limits:
+              subgraph:
+                subgraphs:
+                  reviews:
+                    http_max_response_size: 1024b
+        "})
+        .await;
+        assert_eq!(
+            body.expect_err("the context's limit is enforced")
+                .to_string(),
+            "subgraph response body exceeded limit of 1000 bytes"
+        );
+    }
 
     #[tokio::test]
     async fn subgraph_service_sets_limit_on_context() {

@@ -154,6 +154,11 @@ pub fn expand_subgraphs(
 #[instrument(skip(subgraphs))]
 pub fn pre_merge_validations(subgraphs: &[Subgraph<Validated>]) -> Result<(), CompositionFailure> {
     validate_consistent_root_fields(subgraphs).map_err(CompositionFailure::from_errors)?;
+    let selection_map_errors =
+        crate::composite_schemas::cross_schema::validate_selection_maps(subgraphs);
+    if !selection_map_errors.is_empty() {
+        return Err(CompositionFailure::from_errors(selection_map_errors));
+    }
     // TODO: (FED-713) Implement any pre-merge validations that require knowledge of all subgraphs.
     Ok(())
 }
@@ -182,6 +187,20 @@ pub fn merge_subgraphs(
         if !errors.is_empty() {
             return Err(CompositionFailure::from_errors(errors));
         }
+    }
+    // `@internal` elements are local to their source schema and are not merged.
+    let mut errors = Vec::new();
+    let subgraphs: Vec<Subgraph<Validated>> = subgraphs
+        .into_iter()
+        .filter_map(|subgraph| {
+            subgraph
+                .without_internal_elements()
+                .map_err(|e| errors.extend(e.to_composition_errors()))
+                .ok()
+        })
+        .collect();
+    if !errors.is_empty() {
+        return Err(CompositionFailure::from_errors(errors));
     }
     let merger = Merger::new(subgraphs, options.clone()).map_err(|e| {
         CompositionFailure::from_errors(vec![CompositionError::InternalError {

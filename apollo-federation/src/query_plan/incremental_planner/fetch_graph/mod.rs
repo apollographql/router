@@ -141,6 +141,18 @@ impl InputContribution {
         }
     }
 
+    /// This input with only `conditions`, for the part of it one parent
+    /// fetch selects. The rewrites stay, so every part can stand alone.
+    pub(crate) fn with_conditions(&self, conditions: Arc<SelectionSet>) -> Self {
+        let mut part = self.clone();
+        match &mut part {
+            Self::Key { conditions: c, .. } | Self::Requires { conditions: c, .. } => {
+                *c = conditions;
+            }
+        }
+        part
+    }
+
     pub(crate) fn rewrite_info(&self) -> Option<&InputRewriteInfo> {
         match self {
             Self::Key { rewrite_info, .. } => Some(rewrite_info),
@@ -728,7 +740,6 @@ impl FetchGraph {
 
     /// Iterator over all inputs arriving at `node` from parent fetch
     /// groups.
-    #[cfg(test)]
     pub(crate) fn incoming_inputs(
         &self,
         node: NodeIndex,
@@ -743,16 +754,20 @@ impl FetchGraph {
         &self.graph[edge]
     }
 
-    /// Whether adding `new_rewrites` to `edge` would rename two different
-    /// aliases to the same original field name.
+    /// The parent fetch of `edge`.
+    pub(crate) fn edge_source(&self, edge: EdgeIndex) -> Option<NodeIndex> {
+        self.graph.edge_endpoints(edge).map(|(source, _)| source)
+    }
+
+    /// Whether adding `new_rewrites` to `node`'s inputs would rename two
+    /// different aliases to the same original field name.
     pub(crate) fn has_conflicting_condition_rewrites(
         &self,
-        edge: EdgeIndex,
+        node: NodeIndex,
         new_rewrites: &[(Name, Name)],
     ) -> bool {
-        let existing = &self.graph[edge].inputs;
         for (alias, original) in new_rewrites {
-            for input in existing {
+            for input in self.incoming_inputs(node) {
                 if input
                     .condition_alias_rewrites()
                     .iter()
@@ -781,6 +796,23 @@ impl FetchGraph {
     pub(crate) fn add_input_to_edge(&mut self, edge: EdgeIndex, input: InputContribution) {
         self.undo_log.push(FetchGraphOp::AppendEdgeInput(edge));
         self.graph[edge].inputs.push(input);
+    }
+
+    /// Add `input`, which `parent` selects for `child`'s representation, to
+    /// the edge between them, adding the edge if there is none. Errors if the
+    /// edge would create a cycle.
+    pub(crate) fn add_input(
+        &mut self,
+        parent: NodeIndex,
+        child: NodeIndex,
+        input: InputContribution,
+    ) -> Result<(), FederationError> {
+        self.add_ordering_dependency(parent, child)?;
+        let edge = self
+            .find_edge(parent, child)
+            .ok_or_else(|| FederationError::internal("input added across a missing edge"))?;
+        self.add_input_to_edge(edge, input);
+        Ok(())
     }
 
     /// Append a selection to a node's SelectionBuilder.
@@ -1122,7 +1154,7 @@ impl FetchGraph {
         struct Bucket {
             signatures: HashMap<Vec<String>, String>,
             merge_at: Option<Vec<FetchDataPathElement>>,
-            input_conditions: HashMap<Name, BTreeSet<String>>,
+            input_conditions: HashMap<Name, SelectionSet>,
             by_source_type: HashMap<Name, SourceTypeMerge>,
             nodes: Vec<NodeIndex>,
         }
@@ -1132,11 +1164,13 @@ impl FetchGraph {
             // A conflicted builder (None) must stay alone; treating it as an
             // empty signature map would make it vacuously compatible with
             // every bucket.
-            let Some(signatures) = self.graph[n].selection_builder.field_signatures() else {
+            let (Some(signatures), Some(input_conditions)) = (
+                self.graph[n].selection_builder.field_signatures(),
+                self.input_condition_fingerprints(n),
+            ) else {
                 unmergeable.push(vec![n]);
                 continue;
             };
-            let input_conditions = self.input_condition_fingerprints(n);
             let FetchGroupKind::Entity { merge_at } = &self.graph[n].kind else {
                 continue;
             };
@@ -1171,11 +1205,7 @@ impl FetchGraph {
                         bucket.merge_at = None;
                     }
                     for (ty, conditions) in input_conditions {
-                        bucket
-                            .input_conditions
-                            .entry(ty)
-                            .or_default()
-                            .extend(conditions);
+                        bucket.input_conditions.entry(ty).or_insert(conditions);
                     }
                     bucket.nodes.push(n);
                 }
@@ -1199,20 +1229,23 @@ impl FetchGraph {
     }
 
     /// Condition selections this node's entity representation receives per
-    /// source type, rendered to strings for cheap set comparison. Two nodes
-    /// disagreeing here would union into a per-type representation neither
-    /// branch's runtime objects satisfy.
-    fn input_condition_fingerprints(&self, node: NodeIndex) -> HashMap<Name, BTreeSet<String>> {
-        let mut fingerprints: HashMap<Name, BTreeSet<String>> = HashMap::new();
-        for edge in self.graph.edges_directed(node, Direction::Incoming) {
-            for input in &edge.weight().inputs {
-                fingerprints
-                    .entry(input.source_type_name().clone())
-                    .or_default()
-                    .insert(input.conditions().to_string());
+    /// source type, unioned across incoming edges since one input can be split
+    /// between parents. Two nodes disagreeing here would union into a per-type
+    /// representation neither branch's runtime objects satisfy. None if the
+    /// selections can't be unioned.
+    fn input_condition_fingerprints(&self, node: NodeIndex) -> Option<HashMap<Name, SelectionSet>> {
+        let mut fingerprints: HashMap<Name, SelectionSet> = HashMap::new();
+        for input in self.incoming_inputs(node) {
+            match fingerprints.entry(input.source_type_name().clone()) {
+                std::collections::hash_map::Entry::Occupied(mut entry) => {
+                    entry.get_mut().add_selection_set(input.conditions()).ok()?;
+                }
+                std::collections::hash_map::Entry::Vacant(entry) => {
+                    entry.insert(input.conditions().as_ref().clone());
+                }
             }
         }
-        fingerprints
+        Some(fingerprints)
     }
 
     /// Merge each exact union group of mutually unreachable `nodes`. Returns
@@ -2074,6 +2107,46 @@ mod tests {
 
         assert_eq!(g.node_count(), 1);
         assert_eq!(g.merge_at(e1), user_path(None).as_slice());
+    }
+
+    fn user_input(selections: &str) -> InputContribution {
+        let schema = apollo_compiler::schema::Schema::parse_and_validate(
+            "type Query { user: User } type User { id: ID upc: ID }",
+            "schema.graphql",
+        )
+        .expect("valid schema");
+        let schema =
+            crate::schema::ValidFederationSchema::new(schema).expect("valid federation schema");
+        let user = CompositeTypeDefinitionPosition::Object(
+            crate::schema::position::ObjectTypeDefinitionPosition {
+                type_name: apollo_compiler::name!("User"),
+            },
+        );
+        let conditions = SelectionSet::parse(schema, user, selections).expect("selections parse");
+        InputContribution::Requires {
+            source_type_name: apollo_compiler::name!("User"),
+            conditions: Arc::new(conditions),
+            condition_alias_rewrites: Vec::new(),
+            needed_under: Default::default(),
+        }
+    }
+
+    #[test]
+    fn merge_sibling_entities_merges_same_input_split_across_edges() {
+        let mut g = FetchGraph::new();
+        let root = g.get_or_create_root_group(&Arc::from("A"), dummy_root_type());
+        let other = g.add_entity_group(&Arc::from("C"), user_path(None));
+        let sg: Arc<str> = Arc::from("B");
+        let e1 = g.add_entity_group(&sg, user_path(None));
+        let e2 = g.add_entity_group(&sg, user_path(None));
+        g.add_dependency(root, other, vec![]);
+        g.add_dependency(root, e1, vec![user_input("id upc")]);
+        g.add_dependency(root, e2, vec![user_input("id")]);
+        g.add_dependency(other, e2, vec![user_input("upc")]);
+
+        g.merge_sibling_entities();
+
+        assert_eq!(g.node_count(), 3);
     }
 
     #[test]

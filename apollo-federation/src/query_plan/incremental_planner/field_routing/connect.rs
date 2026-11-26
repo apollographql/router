@@ -195,18 +195,22 @@ impl FieldRoutingSearchSpace {
                 // differs from the source type when the source is an
                 // implementation of an @interfaceObject.
                 let entity_type = key_conditions.type_position.clone();
-                let inputs = vec![InputContribution::Key {
+                let key_input = InputContribution::Key {
                     source_type_name: source.type_pos.type_name().clone(),
                     conditions: key_conditions.clone(),
                     rewrite_info: InputRewriteInfo {
                         dest_type: entity_type.clone(),
                         dest_subgraph: source_subgraph.clone(),
                     },
-                    needed_under: needed_under.clone(),
-                }];
+                    needed_under,
+                };
+                let anchor_inputs = local_key
+                    .iter()
+                    .map(|local_key| key_input.with_conditions(local_key.clone()))
+                    .collect();
                 state
                     .graph
-                    .add_dependency(pending.fetch_node, new_group, inputs);
+                    .add_dependency(pending.fetch_node, new_group, anchor_inputs);
 
                 if let Some(routed_key) = &routed_key {
                     self.push_condition_pendings_at(
@@ -215,6 +219,7 @@ impl FieldRoutingSearchSpace {
                         routed_key,
                         new_group,
                         &input_path,
+                        Some(Arc::new(key_input)),
                     )?;
                 }
 
@@ -330,6 +335,13 @@ impl FieldRoutingSearchSpace {
                 _ => Some(restored),
             };
             if let Some(kept) = kept {
+                self.add_condition_input(
+                    state,
+                    pending,
+                    fetch_node,
+                    &child_response_path,
+                    Some(&kept),
+                )?;
                 state
                     .graph
                     .append_selection(fetch_node, &child_op_path, Some(&Arc::new(kept)));
@@ -363,6 +375,7 @@ impl FieldRoutingSearchSpace {
             state
                 .graph
                 .append_selection(fetch_node, &child_op_path, None);
+            self.add_condition_input(state, pending, fetch_node, &child_response_path, None)?;
         }
 
         if let Some(dependent) = pending.ordering_dependent() {

@@ -754,11 +754,16 @@ mod require_validation {
                 type Book @key(fields: "id") {
                   id: ID!
                   title(suffix: String @require(field: "subtitle")): String
-                  subtitle: String
                 }
                 "#,
             ),
-            ("b", r#"type Book @key(fields: "id") { id: ID! }"#),
+            (
+                "b",
+                r#"
+                type Query { bookByIdInB(id: ID!): Book @lookup }
+                type Book @key(fields: "id") { id: ID! subtitle: String }
+                "#,
+            ),
         ])
         .expect("composes");
     }
@@ -996,6 +1001,45 @@ mod internal_validation {
             )],
             &["INTERNAL_INVALID_USAGE"],
         );
+    }
+
+    #[test]
+    fn internal_lookup_implementing_public_interface_field() {
+        assert_error_codes(
+            &[(
+                "a",
+                r#"
+                interface Lookups { productBySku(sku: ID!): Product }
+                type Query implements Lookups {
+                  productById(id: ID!): Product @lookup
+                  productBySku(sku: ID!): Product @lookup @internal
+                }
+                type Product @key(fields: "id") { id: ID! sku: ID! }
+                "#,
+            )],
+            &["INTERFACE_FIELD_NO_IMPLEM"],
+        );
+    }
+
+    #[test]
+    fn internal_type_by_fields_implementing_public_interface_field() {
+        // `Lookups` has only internal fields, so it is not merged and its `implements` clause
+        // does not constrain the composite schema.
+        compose_sources(&[(
+            "a",
+            r#"
+            interface Finder { productBySku(sku: ID!): Product }
+            type Query {
+              productById(id: ID!): Product @lookup
+              lookups: Lookups! @internal
+            }
+            type Lookups implements Finder {
+              productBySku(sku: ID!): Product @lookup @internal
+            }
+            type Product @key(fields: "id") { id: ID! sku: ID! }
+            "#,
+        )])
+        .expect("composes");
     }
 
     #[test]
@@ -1300,8 +1344,565 @@ mod carve_outs {
     }
 }
 
+mod cross_schema_validation {
+    use super::*;
+
+    #[test]
+    fn is_fields_resolve_against_the_return_type() {
+        compose_sources(&[(
+            "a",
+            r#"
+            type Query { personById(productId: ID! @is(field: "id")): Person @lookup }
+            type Person @key(fields: "id") { id: ID! name: String }
+            "#,
+        )])
+        .expect("composes");
+    }
+
+    #[test]
+    fn is_unknown_field_is_caught_as_unmappable_key() {
+        // Spec counter-example for `IS_INVALID_FIELDS`: in the lookup's own schema the source-schema
+        // rule `LOOKUP_KEY_MISSING_FOR_TYPE` already rejects it.
+        assert_errors(
+            &[(
+                "a",
+                r#"
+                type Query { personById(id: ID! @is(field: "unknownField")): Person @lookup }
+                type Person @key(fields: "id") { id: ID! name: String }
+                "#,
+            )],
+            &[(
+                "LOOKUP_KEY_MISSING_FOR_TYPE",
+                "[a] The argument \"Query.personById(id:)\" of the @lookup field cannot be mapped for \"Person\": its @is selection map \"unknownField\" selects \"Person.unknownField\", which is not defined.",
+            )],
+        );
+    }
+
+    #[test]
+    fn is_invalid_fields_type_mismatch() {
+        // Appendix A "Values of Correct Type" counter-example.
+        assert_error_codes(
+            &[(
+                "a",
+                r#"
+                type Query { storeById(id: ID! @is(field: "id")): Store @lookup }
+                type Store @key(fields: "id") { id: Int city: String! }
+                "#,
+            )],
+            &["IS_INVALID_FIELDS"],
+        );
+    }
+
+    #[test]
+    fn require_selects_fields_of_another_schema() {
+        compose_sources(&[
+            (
+                "a",
+                r#"
+                type Query { userById(id: ID!): User @lookup }
+                type User @key(fields: "id") {
+                  id: ID!
+                  profile(name: String @require(field: "name")): Profile
+                }
+                type Profile { id: ID! name: String }
+                "#,
+            ),
+            (
+                "b",
+                r#"
+                type Query { userByIdInB(id: ID!): User @lookup }
+                type User @key(fields: "id") { id: ID! name: String }
+                "#,
+            ),
+        ])
+        .expect("composes");
+    }
+
+    #[test]
+    fn require_with_constant_arguments() {
+        compose_sources(&[
+            (
+                "a",
+                r#"
+                type Query { productById(id: ID!): Product @lookup }
+                type Product @key(fields: "id") {
+                  id: ID!
+                  shippingCost(weight: Float @require(field: "weight(unit: IMPERIAL)")): Int
+                }
+                "#,
+            ),
+            (
+                "b",
+                r#"
+                type Query { productByIdInB(id: ID!): Product @lookup }
+                type Product @key(fields: "id") { id: ID! weight(unit: WeightUnit!): Float }
+                enum WeightUnit { METRIC IMPERIAL }
+                "#,
+            ),
+        ])
+        .expect("composes");
+    }
+
+    #[test]
+    fn require_invalid_fields_unknown_field() {
+        assert_error_codes(
+            &[(
+                "a",
+                r#"
+                type Query { bookById(id: ID!): Book @lookup }
+                type Book @key(fields: "id") {
+                  id: ID!
+                  pages(pageSize: Int @require(field: "unknownField")): Int
+                }
+                "#,
+            )],
+            &["REQUIRE_INVALID_FIELDS"],
+        );
+    }
+
+    #[test]
+    fn require_invalid_fields_own_field_also_declared_elsewhere() {
+        // The declaring schema has `size` itself; that another schema also has it doesn't help.
+        assert_error_codes(
+            &[
+                (
+                    "a",
+                    r#"
+                    type Query { bookById(id: ID!): Book @lookup }
+                    type Book @key(fields: "id") {
+                      id: ID!
+                      size: Int @shareable
+                      pages(pageSize: Int @require(field: "size")): Int
+                    }
+                    "#,
+                ),
+                (
+                    "b",
+                    r#"
+                    type Query { bookByIdInB(id: ID!): Book @lookup }
+                    type Book @key(fields: "id") { id: ID! size: Int @shareable }
+                    "#,
+                ),
+            ],
+            &["REQUIRE_INVALID_FIELDS"],
+        );
+    }
+
+    #[test]
+    fn require_invalid_fields_own_field_in_selected_object() {
+        assert_error_codes(
+            &[
+                (
+                    "a",
+                    r#"
+                    type Query { bookById(id: ID!): Book @lookup }
+                    type Book @key(fields: "id") {
+                      id: ID!
+                      size: Int @shareable
+                      pages(dims: DimsInput @require(field: "{ size, weight }")): Int
+                    }
+                    input DimsInput { size: Int weight: Int }
+                    "#,
+                ),
+                (
+                    "b",
+                    r#"
+                    type Query { bookByIdInB(id: ID!): Book @lookup }
+                    type Book @key(fields: "id") { id: ID! size: Int @shareable weight: Int }
+                    "#,
+                ),
+            ],
+            &["REQUIRE_INVALID_FIELDS"],
+        );
+    }
+
+    #[test]
+    fn require_own_field_overridden_by_another_schema() {
+        // `b` takes `size` over from `a`, so `a` no longer resolves it and may require it.
+        compose_sources(&[
+            (
+                "a",
+                r#"
+                type Query { bookById(id: ID!): Book @lookup }
+                type Book @key(fields: "id") {
+                  id: ID!
+                  size: Int
+                  pages(pageSize: Int @require(field: "size")): Int
+                }
+                "#,
+            ),
+            (
+                "b",
+                r#"
+                type Query { bookByIdInB(id: ID!): Book @lookup }
+                type Book @key(fields: "id") { id: ID! size: Int @override(from: "a") }
+                "#,
+            ),
+        ])
+        .expect("composes");
+    }
+
+    #[test]
+    fn require_own_external_field() {
+        // An `@external` field is not declared by this schema, so it may be required. (`@require`
+        // doesn't count as a use of it, so `@provides` keeps it from being `EXTERNAL_UNUSED`.)
+        compose_sources(&[
+            (
+                "a",
+                r#"
+                type Query {
+                  bookById(id: ID!): Book @lookup
+                  featuredBook: Book @provides(fields: "size")
+                }
+                type Book @key(fields: "id") {
+                  id: ID!
+                  size: Int @external
+                  pages(pageSize: Int @require(field: "size")): Int
+                }
+                "#,
+            ),
+            (
+                "b",
+                r#"
+                type Query { bookByIdInB(id: ID!): Book @lookup }
+                type Book @key(fields: "id") { id: ID! size: Int @shareable }
+                "#,
+            ),
+        ])
+        .expect("composes");
+    }
+
+    #[test]
+    fn require_invalid_fields_own_field() {
+        // Spec counter-example: a requirement cannot be satisfied by the declaring schema.
+        assert_error_codes(
+            &[(
+                "a",
+                r#"
+                type Query { bookById(id: ID!): Book @lookup }
+                type Book @key(fields: "id") {
+                  id: ID!
+                  size: Int
+                  pages(pageSize: Int @require(field: "size")): Int
+                }
+                "#,
+            )],
+            &["REQUIRE_INVALID_FIELDS"],
+        );
+    }
+
+    #[test]
+    fn require_selects_field_whose_required_argument_is_itself_required() {
+        // `Product.price(region:)` carries `@require`, so the executor supplies it and the map
+        // does not have to (Appendix A, "Path Field Argument Validity").
+        let a = r#"
+            type Query { productById(id: ID!): Product @lookup }
+            type Product @key(fields: "id") {
+              id: ID!
+              shipping(price: Int @require(field: "price")): Int
+            }
+        "#;
+        let c = r#"
+            type Query { productByIdInC(id: ID!): Product @lookup }
+            type Product @key(fields: "id") { id: ID! region: String! }
+        "#;
+        compose_sources(&[
+            ("a", a),
+            (
+                "b",
+                r#"
+                type Query { productByIdInB(id: ID!): Product @lookup }
+                type Product @key(fields: "id") {
+                  id: ID!
+                  price(region: String! @require(field: "region")): Int
+                }
+                "#,
+            ),
+            ("c", c),
+        ])
+        .expect("composes");
+
+        // Without `@require`, the required argument must be supplied.
+        assert_error_codes(
+            &[
+                ("a", a),
+                (
+                    "b",
+                    r#"
+                    type Query { productByIdInB(id: ID!): Product @lookup }
+                    type Product @key(fields: "id") { id: ID! price(region: String!): Int }
+                    "#,
+                ),
+                ("c", c),
+            ],
+            &["REQUIRE_INVALID_FIELDS"],
+        );
+    }
+
+    #[test]
+    fn require_type_condition_uses_the_declaring_schema_type_relationships() {
+        // `User implements Account` is only declared by the declaring schema, which still makes
+        // `<User>` a valid type condition on `Account`.
+        let a = r#"
+            type Query { accountById(id: ID!): Account @lookup userById(id: ID!): User @lookup }
+            interface Account @key(fields: "id") {
+              id: ID!
+              displayName(locale: String @require(field: "<User>.preferredLocale")): String
+            }
+            type User implements Account @key(fields: "id") {
+              id: ID!
+              displayName(locale: String @require(field: "preferredLocale")): String
+            }
+        "#;
+        compose_sources(&[
+            ("a", a),
+            (
+                "b",
+                r#"
+                type Query { userByIdInB(id: ID!): User @lookup }
+                type User @key(fields: "id") { id: ID! preferredLocale: String }
+                "#,
+            ),
+        ])
+        .expect("composes");
+
+        // The field itself must still come from another schema.
+        assert_error_codes(
+            &[
+                ("a", a),
+                (
+                    "b",
+                    r#"
+                    type Query { userByIdInB(id: ID!): User @lookup }
+                    type User @key(fields: "id") { id: ID! locale: String }
+                    "#,
+                ),
+            ],
+            &["REQUIRE_INVALID_FIELDS", "REQUIRE_INVALID_FIELDS"],
+        );
+    }
+
+    #[test]
+    fn require_selects_field_of_an_interface_object_stand_in() {
+        // `Book.price` is contributed by the `@interfaceObject` stand-in for `Media` in "b".
+        let a = r#"
+            type Query { bookById(id: ID!): Book @lookup mediaById(id: ID!): Media @lookup }
+            interface Media @key(fields: "id") { id: ID! }
+            type Book implements Media @key(fields: "id") {
+              id: ID!
+              summary(price: Int @require(field: "price")): String
+            }
+        "#;
+        let b = |fields: &str| {
+            format!(
+                r#"
+                extend schema @link(url: "https://specs.apollo.dev/federation/v3.0", import: ["@key", "@interfaceObject"])
+                type Query {{ media: Media }}
+                type Media @interfaceObject @key(fields: "id") {{ id: ID! {fields} }}
+                "#
+            )
+        };
+        compose_sources(&[("a", a), ("b", &b("price: Int"))]).expect("composes");
+        assert_error_codes(
+            &[("a", a), ("b", &b("cost: Int"))],
+            &["REQUIRE_INVALID_FIELDS"],
+        );
+    }
+}
+
+mod internal_merging {
+    use super::*;
+
+    #[test]
+    fn internal_elements_are_not_merged() {
+        let supergraph = compose_sources(&[(
+            "a",
+            r#"
+            type Query {
+              top: Product
+              productBySku(sku: ID!): Product @lookup @internal
+              productByKey(key: ProductKey! @is(field: "{ id }")): Product @lookup @internal
+              lookups: InternalLookups @internal
+            }
+            type InternalLookups @internal { productById(id: ID!): Product @lookup }
+            input ProductKey @internal { id: ID! }
+            type Product @key(fields: "id") { id: ID! sku: ID! }
+            "#,
+        )])
+        .expect("composes");
+        let sdl = print_sdl(supergraph.schema().schema());
+        for internal in [
+            "productBySku",
+            "productByKey",
+            "lookups",
+            "InternalLookups",
+            "ProductKey",
+        ] {
+            assert!(
+                !sdl.contains(internal),
+                "{internal} is in the supergraph:\n{sdl}"
+            );
+        }
+        assert!(sdl.contains("top: Product"), "{sdl}");
+    }
+
+    #[test]
+    fn internal_lookup_does_not_conflict_with_public_lookup() {
+        // Spec `INVALID_FIELD_SHARING` excludes `@internal` declarations.
+        let supergraph = compose_sources(&[
+            (
+                "a",
+                r#"
+                type Query { productById(id: ID!): Product @lookup }
+                type Product @key(fields: "id") { id: ID! name: String }
+                "#,
+            ),
+            (
+                "b",
+                r#"
+                type Query { productById(id: ID!): Product @lookup @internal }
+                type Product @key(fields: "id") { id: ID! price: Int }
+                "#,
+            ),
+        ])
+        .expect("composes");
+        let sdl = print_sdl(supergraph.schema().schema());
+        assert!(
+            sdl.contains("productById(id: ID!): Product @join__field(graph: A)\n"),
+            "{sdl}"
+        );
+    }
+
+    #[test]
+    fn require_arguments_and_their_internal_input_types_are_not_merged() {
+        // `@require` arguments are supplied by the executor and do not participate in merging,
+        // and neither do internal input types.
+        let supergraph = compose_sources(&[
+            (
+                "a",
+                r#"
+                type Query { productById(id: ID!): Product @lookup }
+                type Product @key(fields: "id") {
+                  id: ID!
+                  shipping(zip: String, dimension: Dimension! @require(field: "{ width }")): Int
+                }
+                input Dimension @internal { width: Int }
+                "#,
+            ),
+            (
+                "b",
+                r#"
+                type Query { productByIdInB(id: ID!): Product @lookup }
+                type Product @key(fields: "id") { id: ID! width: Int }
+                "#,
+            ),
+        ])
+        .expect("composes");
+        let sdl = print_sdl(supergraph.schema().schema());
+        assert!(!sdl.contains("Dimension"), "{sdl}");
+        assert!(
+            sdl.contains("shipping(zip: String): Int @join__field(graph: A)"),
+            "{sdl}"
+        );
+    }
+
+    #[test]
+    fn internal_input_types_do_not_conflict_across_schemas() {
+        // Spec "Merge Input Types": internal input types neither contribute fields to nor
+        // constrain an input type of the same name in another source schema.
+        let supergraph = compose_sources(&[
+            (
+                "a",
+                r#"
+                type Query { productById(id: ID!): Product @lookup }
+                type Product @key(fields: "id") {
+                  id: ID!
+                  shipping(dimension: Dimension @require(field: "{ width }")): Int
+                }
+                input Dimension @internal { width: Int }
+                "#,
+            ),
+            (
+                "b",
+                r#"
+                type Query { productByIdInB(id: ID!): Product @lookup }
+                type Product @key(fields: "id") {
+                  id: ID!
+                  tax(dimension: Dimension @require(field: "{ length: height }")): Int
+                }
+                input Dimension @internal { length: Int! }
+                "#,
+            ),
+            (
+                "c",
+                r#"
+                type Query {
+                  productByIdInC(id: ID!): Product @lookup
+                  boxes(dimension: Dimension): [Int]
+                }
+                type Product @key(fields: "id") { id: ID! width: Int height: Int! }
+                input Dimension { depth: Int! }
+                "#,
+            ),
+        ])
+        .expect("composes");
+        let sdl = print_sdl(supergraph.schema().schema());
+        assert!(
+            sdl.contains("input Dimension @join__type(graph: C) {\n  depth: Int!\n}"),
+            "{sdl}"
+        );
+    }
+
+    #[test]
+    fn recursive_internal_input_types_are_not_merged() {
+        let supergraph = compose_sources(&[(
+            "a",
+            r#"
+            type Query {
+              productById(id: ID!): Product @lookup
+              productByKey(key: ProductKey! @is(field: "{ sku }")): Product @lookup @internal
+            }
+            input ProductKey @internal { sku: ID! fallback: ProductKey other: OtherKey }
+            input OtherKey @internal { key: ProductKey }
+            type Product @key(fields: "id") { id: ID! sku: ID! }
+            "#,
+        )])
+        .expect("composes");
+        let sdl = print_sdl(supergraph.schema().schema());
+        assert!(!sdl.contains("ProductKey"), "{sdl}");
+        assert!(!sdl.contains("OtherKey"), "{sdl}");
+    }
+}
+
 mod internal_root_type {
     use super::*;
+
+    #[test]
+    fn internal_query_root_type_holds_only_internal_lookups() {
+        // `@internal` on a type is shorthand for `@internal` on each of its fields, so the
+        // lookups of "b" stay out of the supergraph. The `_service`/`_entities` fields that
+        // federation adds are not subject to `INTERNAL_INVALID_USAGE`.
+        let supergraph = compose_sources(&[
+            (
+                "a",
+                r#"
+                type Query { productById(id: ID!): Product @lookup }
+                type Product @key(fields: "id") { id: ID! name: String sku: ID! @shareable }
+                "#,
+            ),
+            (
+                "b",
+                r#"
+                type Query @internal { productBySku(sku: ID!): Product @lookup }
+                type Product @key(fields: "id") { id: ID! sku: ID! @shareable price: Int }
+                "#,
+            ),
+        ])
+        .expect("composes");
+        let sdl = print_sdl(supergraph.schema().schema());
+        assert!(!sdl.contains("productBySku"), "{sdl}");
+        assert!(sdl.contains("price: Int @join__field(graph: B)"), "{sdl}");
+    }
 
     #[test]
     fn internal_query_root_type_with_non_lookup_field() {
@@ -1321,6 +1922,114 @@ mod internal_root_type {
                 "[a] The field \"Query.version\" of the @internal type \"Query\" must be a @lookup \
                  field, or a lookup path field without arguments that returns a single object type.",
             )],
+        );
+    }
+}
+
+mod cross_schema_order {
+    use super::*;
+
+    const A: &str = r#"
+        type Query { productById(id: ID!): Product @lookup }
+        type Product @key(fields: "id") {
+          id: ID!
+          shippingCost(weight: Float @require(field: "weight")): Float
+        }
+    "#;
+    const REQUIRED: &str = r#"
+        enum WeightUnit { KG LB }
+        type Query { productByIdB(id: ID!): Product @lookup }
+        type Product @key(fields: "id") { id: ID! weight(unit: WeightUnit!): Float @shareable }
+    "#;
+    const OPTIONAL: &str = r#"
+        enum WeightUnit { KG LB }
+        type Query { productByIdC(id: ID!): Product @lookup }
+        type Product @key(fields: "id") { id: ID! weight(unit: WeightUnit): Float @shareable }
+    "#;
+
+    #[test]
+    fn require_argument_check_does_not_depend_on_subgraph_order() {
+        assert_error_codes(
+            &[("a", A), ("b", REQUIRED), ("c", OPTIONAL)],
+            &["REQUIRE_INVALID_FIELDS"],
+        );
+        assert_error_codes(
+            &[("a", A), ("b", OPTIONAL), ("c", REQUIRED)],
+            &["REQUIRE_INVALID_FIELDS"],
+        );
+    }
+
+    #[test]
+    fn require_own_field_with_type_condition_is_reported() {
+        assert_error_codes(
+            &[
+                (
+                    "a",
+                    r#"
+                    type Query { bookById(id: ID!): Book @lookup }
+                    type Book @key(fields: "id") {
+                      id: ID!
+                      size: Int @shareable
+                      pages(pageSize: Int @require(field: "<Book>.size")): Int
+                    }
+                    "#,
+                ),
+                (
+                    "b",
+                    r#"
+                    type Query { bookByIdInB(id: ID!): Book @lookup }
+                    type Book @key(fields: "id") { id: ID! size: Int @shareable }
+                    "#,
+                ),
+            ],
+            &["REQUIRE_INVALID_FIELDS"],
+        );
+    }
+
+    #[test]
+    fn require_invalid_argument_is_reported_once_across_identical_definitions() {
+        let a = r#"
+            type Query { productById(id: ID!): Product @lookup }
+            type Product @key(fields: "id") {
+              id: ID!
+              shippingCost(weight: Float @require(field: "weight(unit: STONE)")): Float
+            }
+        "#;
+        assert_error_codes(
+            &[
+                ("a", a),
+                ("b", OPTIONAL),
+                ("c", &OPTIONAL.replace("productByIdC", "productByIdD")),
+            ],
+            &["REQUIRE_INVALID_FIELDS"],
+        );
+    }
+
+    #[test]
+    fn require_own_field_with_and_without_type_condition_is_reported_once() {
+        assert_error_codes(
+            &[
+                (
+                    "a",
+                    r#"
+                    input DimsInput { a: Int b: Int }
+                    type Query { bookById(id: ID!): Book @lookup }
+                    type Book @key(fields: "id") {
+                      id: ID!
+                      size: Int @shareable
+                      pages(dims: DimsInput @require(field: "{ a: size, b: <Book>.size }")): Int
+                    }
+                    "#,
+                ),
+                (
+                    "b",
+                    r#"
+                    type Query { bookByIdInB(id: ID!): Book @lookup }
+                    type Book @key(fields: "id") { id: ID! size: Int @shareable }
+                    "#,
+                ),
+            ],
+            &["REQUIRE_INVALID_FIELDS"],
         );
     }
 }

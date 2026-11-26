@@ -2,7 +2,7 @@
 //! Schemas"), plus the Apollo-specific restrictions on federation directives in source schemas.
 //!
 //! Rules that validate selection maps against other source schemas (`IS_INVALID_FIELDS`,
-//! `REQUIRE_INVALID_FIELDS`) run before merging, across subgraphs.
+//! `REQUIRE_INVALID_FIELDS`) live in [`super::cross_schema`].
 
 use apollo_compiler::Name;
 use apollo_compiler::Node;
@@ -14,6 +14,7 @@ use apollo_compiler::collections::IndexSet;
 use apollo_compiler::schema::ExtendedType;
 
 use super::CompositeNames;
+use super::internal::is_internal_type;
 use crate::error::FederationError;
 use crate::error::MultipleFederationErrors;
 use crate::error::SingleFederationError;
@@ -226,18 +227,25 @@ impl SourceSchemaValidator<'_> {
                     });
                 }
                 if field_is_internal {
+                    self.validate_internal_field_implementation(
+                        type_name,
+                        field,
+                        &interface_type_names,
+                    );
+                }
+                if field_is_internal {
                     continue;
                 }
                 // `REFERENCE_TO_INTERNAL_TYPE`: an internal type (annotated, or with only internal
-                // fields) is not part of the composite schema, so a public field cannot return it.
-                // Root operation types always are.
+                // fields) is not merged (see `super::internal`), so a public field cannot return
+                // it. Root operation types are always merged.
                 let return_type = field.ty.inner_named_type();
                 let is_root = self
                     .schema
                     .schema_definition
                     .iter_root_operations()
                     .any(|(_, root)| **root == *return_type);
-                if !is_root && self.is_internal_type(&internal_types, return_type) {
+                if !is_root && self.is_internal_type(return_type) {
                     let internal_type = if internal_types.contains(return_type) {
                         format!("the @internal type \"{return_type}\"")
                     } else {
@@ -294,7 +302,7 @@ impl SourceSchemaValidator<'_> {
                 continue;
             }
             for member in &union_.members {
-                if !self.is_internal_type(internal_types, member) {
+                if !self.is_internal_type(member) {
                     continue;
                 }
                 let internal_type = if internal_types.contains(&**member) {
@@ -642,18 +650,57 @@ impl SourceSchemaValidator<'_> {
     }
 
     /// Whether `type_name` is internal: annotated with `@internal`, or all of its fields are.
-    fn is_internal_type(&self, internal_types: &IndexSet<Name>, type_name: &Name) -> bool {
-        internal_types.contains(type_name)
-            || self
+    fn is_internal_type(&self, type_name: &Name) -> bool {
+        self.schema
+            .types
+            .get(type_name)
+            .is_some_and(|ty| is_internal_type(ty, &self.names.internal))
+    }
+
+    /// `INTERFACE_FIELD_NO_IMPLEM`: an internal field is not merged, so it cannot implement
+    /// a field of an interface that is merged. Interfaces that are internal are not merged either, and their
+    /// `implements` clause is dropped along with them.
+    fn validate_internal_field_implementation(
+        &mut self,
+        type_name: &Name,
+        field: &FieldDefinition,
+        interface_type_names: &[Name],
+    ) {
+        // A type that is internal is not merged, so what it implements does not constrain the
+        // composite schema. Root operation types are always merged.
+        let is_root = self
+            .schema
+            .schema_definition
+            .iter_root_operations()
+            .any(|(_, root)| **root == *type_name);
+        if !is_root && self.is_internal_type(type_name) {
+            return;
+        }
+        for interface_name in interface_type_names {
+            if self.is_internal_type(interface_name) {
+                continue;
+            }
+            let Some(interface_field) = self
                 .schema
                 .types
-                .get(type_name)
+                .get(interface_name)
                 .and_then(fields_of)
-                .is_some_and(|fields| {
-                    fields
-                        .values()
-                        .all(|field| field.directives.has(&self.names.internal))
-                })
+                .and_then(|fields| fields.get(&field.name))
+            else {
+                continue;
+            };
+            if interface_field.directives.has(&self.names.internal) {
+                continue;
+            }
+            self.error(SingleFederationError::InterfaceFieldNoImplem {
+                message: format!(
+                    "The @internal field \"{type_name}.{}\" implements \"{interface_name}.{}\", \
+                     which is not internal. Internal fields are not part of the composite \
+                     schema, so they cannot implement the fields of an interface that is.",
+                    field.name, field.name
+                ),
+            });
+        }
     }
 
     /// `INTERNAL_INVALID_USAGE`: `@internal` hides lookups used only for entity resolution, so it
@@ -732,7 +779,7 @@ impl SourceSchemaValidator<'_> {
                     continue;
                 }
                 let target = field.ty.inner_named_type();
-                if !self.is_internal_type(internal_types, target) {
+                if !self.is_internal_type(target) {
                     self.error(SingleFederationError::InternalInvalidUsage {
                         message: format!(
                             "{subject} returns the type \"{target}\", which must also be internal: \

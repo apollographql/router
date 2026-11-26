@@ -5,16 +5,26 @@
 //! - `can_satisfy_conditions`: pure schema lookup (field exists, not external).
 //! - `conditions_resolvable_at_node`: graph-based, path-sensitive variant.
 //! - `conditions_have_requires`: detects @requires on condition edges.
+//!
+//! Also records, as a condition lands in a fetch, the part of the condition
+//! input that fetch selects on its edge to the condition's consumer.
 
 use std::sync::Arc;
 
+use apollo_compiler::Name;
 use petgraph::graph::NodeIndex;
 
+use super::super::shared_path::SharedPath;
 use super::FieldRoutingSearchSpace;
+use super::state::PendingSelection;
+use super::state::PlanState;
 use crate::error::FederationError;
 use crate::link::federation_spec_definition::get_federation_spec_definition_from_subgraph;
+use crate::operation::FieldSelection;
+use crate::operation::Selection;
 use crate::operation::SelectionSet;
 use crate::operation::TYPENAME_FIELD;
+use crate::query_plan::FetchDataPathElement;
 use crate::schema::ValidFederationSchema;
 use crate::schema::position::CompositeTypeDefinitionPosition;
 
@@ -75,7 +85,7 @@ impl FieldRoutingSearchSpace {
     ) -> Result<bool, FederationError> {
         for selection in conditions.selections.values() {
             match selection {
-                crate::operation::Selection::Field(field_sel) => {
+                Selection::Field(field_sel) => {
                     if *field_sel.field.name() == TYPENAME_FIELD {
                         continue;
                     }
@@ -102,7 +112,7 @@ impl FieldRoutingSearchSpace {
                         }
                     }
                 }
-                crate::operation::Selection::InlineFragment(frag_sel) => {
+                Selection::InlineFragment(frag_sel) => {
                     // A type-conditioned fragment without a downcast edge
                     // (same-type or supertype spread) collects at this node:
                     // unresolvable for the resolvability check, walked here
@@ -155,7 +165,7 @@ pub(super) fn can_satisfy_conditions(
 ) -> bool {
     for selection in conditions.selections.values() {
         match selection {
-            crate::operation::Selection::Field(field_sel) => {
+            Selection::Field(field_sel) => {
                 let field_name = field_sel.field.name();
                 if field_name.as_str() == "__typename" {
                     continue;
@@ -184,7 +194,7 @@ pub(super) fn can_satisfy_conditions(
                     }
                 }
             }
-            crate::operation::Selection::InlineFragment(frag_sel) => {
+            Selection::InlineFragment(frag_sel) => {
                 // FIXME: this does not compare runtime type sets between
                 // the subgraph and supergraph. Type explosion addresses this.
                 let inner_pos = match &frag_sel.inline_fragment.type_condition_position {
@@ -245,6 +255,201 @@ fn has_progressive_override(
     })
 }
 
+impl FieldRoutingSearchSpace {
+    /// Add the part of `pending`'s condition input that `fetch_node` selects
+    /// at `response_path` to the edge from `fetch_node` to the condition's
+    /// consumer: the whole subtree there, or only the fields of `within`
+    /// when the fetch selects part of it.
+    pub(super) fn add_condition_input(
+        &self,
+        state: &mut PlanState,
+        pending: &PendingSelection,
+        fetch_node: NodeIndex,
+        response_path: &SharedPath<FetchDataPathElement>,
+        within: Option<&SelectionSet>,
+    ) -> Result<(), FederationError> {
+        let Some(scope) = &pending.condition else {
+            return Ok(());
+        };
+        let Some(input) = &scope.input else {
+            return Ok(());
+        };
+        let mut path = response_keys(state.graph.merge_at(fetch_node));
+        path.extend(response_keys(response_path.iter()));
+        let consumer_path = response_keys(state.graph.merge_at(scope.dependent));
+        let part = path
+            .strip_prefix(consumer_path.as_slice())
+            .and_then(|relative| project(input.conditions(), relative, within));
+        let Some(conditions) = part else {
+            return Ok(());
+        };
+        state.graph.add_input(
+            fetch_node,
+            scope.dependent,
+            input.with_conditions(Arc::new(conditions)),
+        )
+    }
+}
+
+/// The response keys of a merge path. List indices and type conditions
+/// don't change which fetch writes the data under it, so they're left out.
+fn response_keys<'a>(path: impl IntoIterator<Item = &'a FetchDataPathElement>) -> Vec<Name> {
+    path.into_iter()
+        .filter_map(|element| match element {
+            FetchDataPathElement::Key(name, _) => Some(name.clone()),
+            _ => None,
+        })
+        .collect()
+}
+
+/// The part of `conditions` on the path `keys` (response keys, fragments
+/// transparent) and below it, narrowed to the fields of `within`.
+fn project(
+    conditions: &SelectionSet,
+    keys: &[Name],
+    within: Option<&SelectionSet>,
+) -> Option<SelectionSet> {
+    let Some((key, rest)) = keys.split_first() else {
+        return match within {
+            Some(within) => narrow(conditions, within),
+            None => (!conditions.is_empty()).then(|| conditions.clone()),
+        };
+    };
+    rebuild(conditions, |selection| match selection {
+        Selection::Field(field) if field.field.response_name() == key => {
+            match &field.selection_set {
+                Some(sub) => project(sub, rest, within)
+                    .map(|sub| field.with_updated_selection_set(Some(sub)).into()),
+                None => rest.is_empty().then(|| selection.clone()),
+            }
+        }
+        Selection::Field(_) => None,
+        Selection::InlineFragment(fragment) => project(&fragment.selection_set, keys, within)
+            .map(|sub| fragment.with_updated_selection_set(sub).into()),
+    })
+}
+
+/// The fields of `conditions` that `within` also selects, by response key.
+fn narrow(conditions: &SelectionSet, within: &SelectionSet) -> Option<SelectionSet> {
+    narrow_in_scope(conditions, &[within])
+}
+
+/// `narrow` against every selection set in `scope`: the parts of the
+/// committed selection at the same position and type as `conditions`.
+fn narrow_in_scope(conditions: &SelectionSet, scope: &[&SelectionSet]) -> Option<SelectionSet> {
+    rebuild(conditions, |selection| match selection {
+        Selection::Field(field) => {
+            let matching = fields_in_scope(scope, field.field.response_name());
+            let Some(sub) = &field.selection_set else {
+                return (!matching.is_empty()).then(|| selection.clone());
+            };
+            let mut within_subs = Vec::with_capacity(matching.len());
+            for matched in &matching {
+                match &matched.selection_set {
+                    Some(within_sub) => within_subs.push(within_sub),
+                    // The fetch selects the field whole.
+                    None => return Some(selection.clone()),
+                }
+            }
+            narrow_in_scope(sub, &within_subs)
+                .map(|sub| field.with_updated_selection_set(Some(sub)).into())
+        }
+        Selection::InlineFragment(fragment) => {
+            let type_condition = fragment
+                .inline_fragment
+                .type_condition_position
+                .as_ref()
+                .map(|position| position.type_name());
+            let mut fragment_scope = scope.to_vec();
+            if let Some(type_condition) = type_condition {
+                for within in scope {
+                    collect_fragments_on(within, type_condition, &mut fragment_scope);
+                }
+            }
+            narrow_in_scope(&fragment.selection_set, &fragment_scope)
+                .map(|sub| fragment.with_updated_selection_set(sub).into())
+        }
+    })
+}
+
+/// The fields named `response_name` in `scope`, at its own level or inside
+/// fragments without a type condition. A fragment on another type selects
+/// for other objects, so its fields only count when nothing in scope
+/// matches, as when the committed selection was split by type.
+fn fields_in_scope<'a>(
+    scope: &[&'a SelectionSet],
+    response_name: &Name,
+) -> Vec<&'a FieldSelection> {
+    let mut found = Vec::new();
+    for within in scope {
+        collect_fields(within, response_name, false, &mut found);
+    }
+    if found.is_empty() {
+        for within in scope {
+            collect_fields(within, response_name, true, &mut found);
+        }
+    }
+    found
+}
+
+fn collect_fields<'a>(
+    selections: &'a SelectionSet,
+    response_name: &Name,
+    any_type: bool,
+    found: &mut Vec<&'a FieldSelection>,
+) {
+    for selection in selections.selections.values() {
+        match selection {
+            Selection::Field(field) if field.field.response_name() == response_name => {
+                found.push(field.as_ref());
+            }
+            Selection::Field(_) => {}
+            Selection::InlineFragment(fragment) => {
+                if any_type || fragment.inline_fragment.type_condition_position.is_none() {
+                    collect_fields(&fragment.selection_set, response_name, any_type, found);
+                }
+            }
+        }
+    }
+}
+
+/// The selection sets of fragments on `type_name` in `selections`, looking
+/// through fragments without a type condition.
+fn collect_fragments_on<'a>(
+    selections: &'a SelectionSet,
+    type_name: &Name,
+    found: &mut Vec<&'a SelectionSet>,
+) {
+    for selection in selections.selections.values() {
+        let Selection::InlineFragment(fragment) = selection else {
+            continue;
+        };
+        match &fragment.inline_fragment.type_condition_position {
+            Some(position) if position.type_name() == type_name => {
+                found.push(&fragment.selection_set);
+            }
+            Some(_) => {}
+            None => collect_fragments_on(&fragment.selection_set, type_name, found),
+        }
+    }
+}
+
+/// `selections` with each selection replaced by `keep`'s result; `None`
+/// when nothing is kept.
+fn rebuild(
+    selections: &SelectionSet,
+    keep: impl Fn(&Selection) -> Option<Selection>,
+) -> Option<SelectionSet> {
+    let kept: Vec<Selection> = selections.selections.values().filter_map(keep).collect();
+    (!kept.is_empty()).then(|| {
+        SelectionSet::from_raw_selections(
+            selections.schema.clone(),
+            selections.type_position.clone(),
+            kept,
+        )
+    })
+}
+
 #[cfg(test)]
 mod tests {
     use apollo_compiler::name;
@@ -252,6 +457,7 @@ mod tests {
     use super::super::test_support;
     use super::*;
     use crate::schema::position::InterfaceTypeDefinitionPosition;
+    use crate::schema::position::ObjectTypeDefinitionPosition;
     use crate::schema::position::UnionTypeDefinitionPosition;
 
     const S1: &str = r#"
@@ -607,5 +813,40 @@ mod tests {
             result,
             "known gap: schema check does not compare runtime type sets across subgraphs",
         );
+    }
+
+    fn parse_on_t(sdl: &str, selections: &str) -> SelectionSet {
+        let schema = apollo_compiler::Schema::parse_and_validate(sdl, "schema.graphql")
+            .expect("valid schema");
+        let schema = ValidFederationSchema::new(schema).expect("valid federation schema");
+        let t = CompositeTypeDefinitionPosition::Object(ObjectTypeDefinitionPosition {
+            type_name: name!("T"),
+        });
+        SelectionSet::parse(schema, t, selections).expect("selections parse")
+    }
+
+    /// Each fragment's fields are matched against the same fragment of the
+    /// committed selection, not the first field anywhere with that name.
+    #[test]
+    fn project_narrows_each_fragment_within_its_own_type() {
+        let sdl = "
+            type Query { t: T }
+            type T { id: ID related: I }
+            interface I { id: ID }
+            type A implements I { id: ID common: C }
+            type B implements I { id: ID common: C }
+            type C { x: Int y: Int }
+        ";
+        let conditions = parse_on_t(
+            sdl,
+            "related { ... on A { common { x } } ... on B { common { y } } }",
+        );
+        let Some(Selection::Field(related)) = conditions.selections.values().next() else {
+            panic!("related is the condition's only field");
+        };
+        let within = related.selection_set.as_ref().expect("related has fields");
+        let selected = project(&conditions, &[name!("related")], Some(within))
+            .expect("related is a condition");
+        assert_eq!(selected.to_string(), conditions.to_string());
     }
 }
