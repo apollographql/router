@@ -81,9 +81,7 @@ pub(crate) struct ParsedDocumentInner {
     /// plugin is installed with directives enabled and the schema links one of them. Otherwise,
     /// and for documents built elsewhere, it is unset.
     pub(crate) authorization: OnceLock<CacheKeyMetadata>,
-    /// The depth, height, root field and alias counts of `operation`, set by
-    /// [`MeasureOperationLimitsLayer`](crate::plugins::limits::measure_operation_limits::MeasureOperationLimitsLayer)
-    /// when the query parsing service parses the document. Unset for documents built elsewhere.
+    /// Unset for documents not built by the query parsing service.
     pub(crate) operation_limits: OnceLock<OperationLimits<u32>>,
 }
 

@@ -15,9 +15,7 @@ use crate::services::supergraph;
 ///
 /// # Context
 /// This layer requires the following context values to be available on the request:
-/// - [`ParsedDocument`], carrying the counts that
-///   [`MeasureOperationLimitsLayer`](crate::plugins::limits::measure_operation_limits::MeasureOperationLimitsLayer)
-///   stores. The layer answers with a 500 if the document or its counts are missing.
+/// - [`ParsedDocument`] - An error is returned if the document or its operation limits are missing
 ///
 /// This layer populates the following context values on the request:
 /// - [`OperationLimits`] - This can then be used to report telemetry.
@@ -92,9 +90,8 @@ where
             return Box::pin(std::future::ready(Ok(response)));
         };
 
-        // The query parsing service stores the counts on every document it parses, so a
-        // missing value means the pipeline was set up improperly. It never means the
-        // operation is within its limits.
+        // Missing counts mean the pipeline was set up improperly, never that the operation is
+        // within its limits.
         let Some(&query_metrics) = document.operation_limits.get() else {
             let response = supergraph::Response::error_builder()
                 .status_code(http::StatusCode::INTERNAL_SERVER_ERROR)

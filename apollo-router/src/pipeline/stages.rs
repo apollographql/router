@@ -483,13 +483,11 @@ fn subscription_plugin_config(plugins: &Plugins) -> Option<SubscriptionConfig> {
 ///
 /// The cache size is the same as the query plan cache size. When the authorization plugin has
 /// directives enabled and the schema links one of them, each parsed document also carries its
-/// operation's authorization requirements, worked out once on a cache miss. Each parsed document
-/// also carries the counts its operation limits are checked against, measured once on a cache
-/// miss.
+/// operation's authorization requirements, worked out once on a cache miss.
 ///
 /// # Panics
 ///
-/// If `plugins` has no authorization or limits plugin, which `create_plugins` always builds.
+/// If a mandatory plugin is missing from `plugins`.
 pub(crate) fn build_query_parsing_service(
     schema: Arc<Schema>,
     configuration: Arc<Configuration>,

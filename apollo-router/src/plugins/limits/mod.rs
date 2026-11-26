@@ -240,7 +240,6 @@ impl Config {
         Some(SubgraphResponseSizeLimit(limit.as_u64().try_into().ok()?))
     }
 
-    /// Whether `http_max_response_size` is set for any subgraph, or for all of them.
     fn has_subgraph_response_size_limit(&self) -> bool {
         self.subgraph.all.http_max_response_size.is_some()
             || self
@@ -292,8 +291,6 @@ impl LimitsPlugin {
         )
     }
 
-    /// The recursive-selection limit, applied in the query parsing service as each operation is
-    /// parsed.
     pub(crate) fn recursive_selections_limit_layer(&self) -> LimitRecursiveSelectionLayer {
         LimitRecursiveSelectionLayer::new(
             self.config.router.max_recursive_selections,
@@ -301,20 +298,14 @@ impl LimitsPlugin {
         )
     }
 
-    /// The layer for the query parsing service that stores each parsed operation's depth,
-    /// height, root field and alias counts on its document, for
-    /// [`Self::enforce_operation_limits_layer`] to check.
     pub(crate) fn measure_operation_limits_layer(&self) -> MeasureOperationLimitsLayer {
         MeasureOperationLimitsLayer
     }
 
-    /// The depth, height, root field and alias limits, enforced in the supergraph service stack.
     pub(crate) fn enforce_operation_limits_layer(&self) -> EnforceOperationLimitsLayer {
         EnforceOperationLimitsLayer::new(&self.config.router)
     }
 
-    /// The response size check for the HTTP clients of subgraph `name` and its connector sources.
-    /// It does nothing when no subgraph has `http_max_response_size` set.
     pub(crate) fn subgraph_response_size_limit_layer(
         &self,
         name: &str,
@@ -1249,9 +1240,7 @@ mod test {
 
     // --- LimitsPlugin::subgraph_service ---
 
-    /// Sends a request carrying a 1,000-byte `SubgraphResponseSizeLimit` through the plugin's
-    /// response size layer for `products`, answers it with a 10,000-byte body, and returns the
-    /// result of reading that body.
+    /// The request's context carries a 1,000-byte limit and the response body is 10,000 bytes.
     async fn read_oversized_products_response(config: &str) -> Result<bytes::Bytes, BoxError> {
         let plugin: PluginTestHarness<LimitsPlugin> = PluginTestHarness::builder()
             .config(config)

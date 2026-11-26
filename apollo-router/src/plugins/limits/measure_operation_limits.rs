@@ -1,6 +1,3 @@
-//! Measures an operation's depth, height, root fields and aliases once, when its document is
-//! parsed.
-
 use std::task::Context as TaskContext;
 use std::task::Poll;
 
@@ -14,9 +11,7 @@ use crate::services::query_parsing::Request;
 
 /// Stores each parsed document's operation limit counts on the document.
 ///
-/// Placed below the parse cache, this runs only when a query is parsed, and every cached copy of
-/// the document carries its counts. The counts depend only on the document, so they stay valid
-/// when the configured limits change. Parse errors pass through unchanged.
+/// Errors from the inner service pass through unchanged.
 #[derive(Clone)]
 pub(crate) struct MeasureOperationLimitsLayer;
 
@@ -85,8 +80,6 @@ mod tests {
         )
     }
 
-    /// Sends one request through the layer over a mock parser, which answers it by parsing the
-    /// query as the query parsing service does.
     async fn call_layer(
         query: &str,
         operation_name: Option<&str>,

@@ -53,7 +53,6 @@ impl OperationLimits<bool> {
     }
 }
 
-/// Counts the depth, height, root fields and aliases of `operation`, an operation of `document`.
 pub(crate) fn measure(
     document: &ExecutableDocument,
     operation: &executable::Operation,
@@ -62,10 +61,9 @@ pub(crate) fn measure(
     count(document, &mut fragment_cache, &operation.selection_set)
 }
 
-/// Returns which limits the `measured` operation exceeds, if any, and logs a warning naming
-/// them.
+/// Returns which limits are exceeded by `measured`, if any.
 ///
-/// `document` and `operation_name` only appear in the warning.
+/// `document` and `operation_name` are only used in the warning it logs.
 pub(crate) fn check(
     measured: OperationLimits<u32>,
     max: OperationLimits<Option<u32>>,

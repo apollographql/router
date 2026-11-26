@@ -56,8 +56,7 @@ pub(crate) async fn required_stage_plugins() -> Arc<Plugins> {
     required_stage_plugins_with_limits(serde_json::json!({})).await
 }
 
-/// Every mandatory plugin the stack builders apply, with limits built from `limits` and traffic
-/// shaping left at its defaults.
+/// As [`required_stage_plugins`], with limits built from `limits`.
 async fn required_stage_plugins_with_limits(limits: serde_json::Value) -> Arc<Plugins> {
     Arc::new(
         stage_plugins(&[
@@ -69,16 +68,14 @@ async fn required_stage_plugins_with_limits(limits: serde_json::Value) -> Arc<Pl
     )
 }
 
-/// The mandatory plugins the query parsing service applies, authorization and limits, at their
-/// defaults. Authorization is built without a schema, so it links no directive and installs no
-/// layer.
+/// The mandatory plugins the query parsing service applies, at their defaults and without a
+/// schema.
 pub(crate) async fn query_parsing_plugins() -> Plugins {
     query_parsing_plugins_for("", &Configuration::default()).await
 }
 
-/// The mandatory plugins the query parsing service applies: authorization, built for the
-/// supergraph `sdl` from `configuration`'s `authorization` section, and limits, built from its
-/// `limits` section. An empty `sdl` builds authorization without a schema.
+/// The mandatory plugins the query parsing service applies, built for the supergraph `sdl` from
+/// `configuration`. An empty `sdl` builds them without a schema.
 pub(crate) async fn query_parsing_plugins_for(sdl: &str, configuration: &Configuration) -> Plugins {
     let authorization = <AuthorizationPlugin as PluginPrivate>::new(PluginInit::fake_new(
         AuthorizationPlugin::configuration(configuration),
@@ -178,8 +175,7 @@ pub(crate) async fn test_http_client_service(name: &str) -> crate::services::htt
 }
 
 /// A subgraph HTTP client for `name`, as [`test_http_client_service`] builds it, with the limits
-/// plugin built from `limits`. The client only checks response size when `limits` sets
-/// `http_max_response_size` for some subgraph.
+/// plugin built from `limits`.
 pub(crate) async fn test_http_client_service_with_limits(
     name: &str,
     limits: serde_json::Value,

@@ -350,8 +350,7 @@ impl<'a> TestHarness<'a> {
             // that is always populated by the router service. For the testing harness, however,
             // tests normally craft a supergraph request manually, and it's inconvenient to
             // manually populate the ParsedDocument. Instead of doing it many different ways
-            // over and over in different tests, we simulate that part of the router service here,
-            // with the same query parsing service.
+            // over and over in different tests, we simulate that part of the router service here.
             let body = request.supergraph_request.body();
             // If we don't have a query we definitely won't have a parsed document.
             let parse_request = body
