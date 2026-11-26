@@ -1299,9 +1299,12 @@ mod test {
 
     #[tokio::test]
     async fn subgraph_response_size_layer_applied_with_a_limit_for_all() {
-        let body = read_oversized_products_response(
-            "limits:\n  subgraph:\n    all:\n      http_max_response_size: 1024b",
-        )
+        let body = read_oversized_products_response(indoc::indoc! {"
+            limits:
+              subgraph:
+                all:
+                  http_max_response_size: 1024b
+        "})
         .await;
         assert_eq!(
             body.expect_err("the context's limit is enforced")
@@ -1312,9 +1315,13 @@ mod test {
 
     #[tokio::test]
     async fn subgraph_response_size_layer_applied_for_subgraphs_without_their_own_limit() {
-        let body = read_oversized_products_response(
-            "limits:\n  subgraph:\n    subgraphs:\n      reviews:\n        http_max_response_size: 1024b",
-        )
+        let body = read_oversized_products_response(indoc::indoc! {"
+            limits:
+              subgraph:
+                subgraphs:
+                  reviews:
+                    http_max_response_size: 1024b
+        "})
         .await;
         assert_eq!(
             body.expect_err("the context's limit is enforced")

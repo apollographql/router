@@ -121,8 +121,10 @@ mod tests {
 
     #[tokio::test]
     async fn stores_the_counts_of_the_requested_operation() {
-        let query = "query Small { me { id } } \
-                     query Large { a: me { id } b: me { id name } topProducts { upc } }";
+        let query = indoc::indoc! {"
+            query Small { me { id } }
+            query Large { a: me { id } b: me { id name } topProducts { upc } }
+        "};
 
         let small = call_layer(query, Some("Small")).await.unwrap();
         let large = call_layer(query, Some("Large")).await.unwrap();
