@@ -7923,6 +7923,10 @@ fn filtered_defer_fragment() {
         &Default::default(),
     )
     .unwrap();
+
+    // XXX(@goto-bus-stop): Preserving this now-unused bit as this test setup may be junk,
+    // and a fixed setup that makes the test useful might require this original input query text.
+    #[allow(unused)]
     let query = r#"{
         a {
           b
@@ -7953,7 +7957,6 @@ fn filtered_defer_fragment() {
     )
     .unwrap();
     let mut query = Query {
-        string: query.to_string(),
         fragments,
         operation,
         filtered_query: None,
@@ -7980,7 +7983,6 @@ fn filtered_defer_fragment() {
     .unwrap();
 
     let filtered = Query {
-        string: filtered_query.to_string(),
         fragments,
         operation,
         filtered_query: None,

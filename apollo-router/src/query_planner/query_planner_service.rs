@@ -317,7 +317,6 @@ impl QueryPlannerService {
             &defer_stats,
         )?;
         Ok(Query {
-            string: query,
             fragments,
             operation,
             filtered_query: None,
