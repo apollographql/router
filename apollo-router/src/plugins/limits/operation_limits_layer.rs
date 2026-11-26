@@ -78,7 +78,7 @@ where
             // We shouldn't ever reach here unless the pipeline was set up
             // improperly (i.e. programmer error), but do something better than
             // panicking just in case.
-            return ready(Ok(supergraph::Response::error_builder()
+            let response = supergraph::Response::error_builder()
                 .status_code(http::StatusCode::INTERNAL_SERVER_ERROR)
                 .context(req.context)
                 .error(
@@ -88,14 +88,15 @@ where
                         .build(),
                 )
                 .build()
-                .expect("body is valid")));
+                .expect("body is valid");
+            return Box::pin(std::future::ready(Ok(response)));
         };
 
         // The query parsing service stores the counts on every document it parses, so a
         // missing value means the pipeline was set up improperly. It never means the
         // operation is within its limits.
         let Some(&query_metrics) = document.operation_limits.get() else {
-            return ready(Ok(supergraph::Response::error_builder()
+            let response = supergraph::Response::error_builder()
                 .status_code(http::StatusCode::INTERNAL_SERVER_ERROR)
                 .context(req.context)
                 .error(
@@ -105,7 +106,8 @@ where
                         .build(),
                 )
                 .build()
-                .expect("body is valid")));
+                .expect("body is valid");
+            return Box::pin(std::future::ready(Ok(response)));
         };
 
         let max = OperationLimits {
@@ -167,25 +169,19 @@ where
             );
             let graphql_response = graphql::Response::builder().errors(errors).build();
 
-            return ready(
-                http::Response::builder()
-                    .status(http::StatusCode::BAD_REQUEST)
-                    .body(futures::stream::once(std::future::ready(graphql_response)).boxed())
-                    .map_err(Self::Error::from)
-                    .map(|http_response| supergraph::Response {
-                        response: http_response,
-                        context: req.context,
-                    }),
-            );
+            let response = http::Response::builder()
+                .status(http::StatusCode::BAD_REQUEST)
+                .body(futures::stream::once(std::future::ready(graphql_response)).boxed())
+                .map_err(Self::Error::from)
+                .map(|http_response| supergraph::Response {
+                    response: http_response,
+                    context: req.context,
+                });
+            return Box::pin(std::future::ready(response));
         }
 
         Box::pin(self.inner.call(req))
     }
-}
-
-/// Boxes a response this layer has already decided on.
-fn ready<T: Send + 'static>(result: T) -> BoxFuture<'static, T> {
-    Box::pin(std::future::ready(result))
 }
 
 #[cfg(test)]
