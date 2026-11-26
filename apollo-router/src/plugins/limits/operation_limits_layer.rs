@@ -15,7 +15,7 @@ use crate::services::supergraph;
 ///
 /// # Context
 /// This layer requires the following context values to be available on the request:
-/// - [`ParsedDocument`] - An error is returned if the document is missing.
+/// - [`ParsedDocument`] - An error is returned if the document or its operation counts are missing
 ///
 /// This layer populates the following context values on the request:
 /// - [`OperationLimits`] - This can then be used to report telemetry.
@@ -52,7 +52,7 @@ pub(crate) struct EnforceOperationLimits<S> {
 
 impl<S> Service<supergraph::Request> for EnforceOperationLimits<S>
 where
-    S: Service<supergraph::Request, Response = supergraph::Response> + Clone + Send + 'static,
+    S: Service<supergraph::Request, Response = supergraph::Response>,
     S::Error: From<http::Error> + Send + 'static,
     S::Future: Send + 'static,
 {
@@ -68,105 +68,116 @@ where
     }
 
     fn call(&mut self, req: supergraph::Request) -> Self::Future {
-        let config = self.config.clone();
-        let inner = self.inner.clone();
-        let mut inner = std::mem::replace(&mut self.inner, inner);
+        let Some(document) = req
+            .context
+            .extensions()
+            .with_lock(|lock| lock.get::<ParsedDocument>().cloned())
+        else {
+            // We shouldn't ever reach here unless the pipeline was set up
+            // improperly (i.e. programmer error), but do something better than
+            // panicking just in case.
+            let response = supergraph::Response::error_builder()
+                .status_code(http::StatusCode::INTERNAL_SERVER_ERROR)
+                .context(req.context)
+                .error(
+                    graphql::Error::builder()
+                        .message("Cannot find executable document")
+                        .extension_code("MISSING_EXECUTABLE_DOCUMENT")
+                        .build(),
+                )
+                .build()
+                .expect("body is valid");
+            return Box::pin(std::future::ready(Ok(response)));
+        };
 
-        Box::pin(async move {
-            let Some(document) = req
-                .context
-                .extensions()
-                .with_lock(|lock| lock.get::<ParsedDocument>().cloned())
-            else {
-                // We shouldn't ever reach here unless the pipeline was set up
-                // improperly (i.e. programmer error), but do something better than
-                // panicking just in case.
-                return Ok(supergraph::Response::error_builder()
-                    .status_code(http::StatusCode::INTERNAL_SERVER_ERROR)
-                    .context(req.context)
-                    .error(
+        // Missing counts mean the pipeline was set up improperly, never that the operation is
+        // within its limits.
+        let Some(&query_metrics) = document.operation_counts.get() else {
+            let response = supergraph::Response::error_builder()
+                .status_code(http::StatusCode::INTERNAL_SERVER_ERROR)
+                .context(req.context)
+                .error(
+                    graphql::Error::builder()
+                        .message("Cannot find the operation's counts")
+                        .extension_code("MISSING_OPERATION_COUNTS")
+                        .build(),
+                )
+                .build()
+                .expect("body is valid");
+            return Box::pin(std::future::ready(Ok(response)));
+        };
+
+        let max = OperationLimits {
+            depth: self.config.max_depth,
+            height: self.config.max_height,
+            root_fields: self.config.max_root_fields,
+            aliases: self.config.max_aliases,
+        };
+        let result = operation_limits::check(
+            query_metrics,
+            max,
+            &document.executable,
+            document.operation.name.as_deref(),
+        );
+
+        // Stash the measurements in context so they can be used for telemetry.
+        req.context.extensions().with_lock(|lock| {
+            let _ = lock.insert(query_metrics);
+        });
+
+        if let Err(OperationLimits {
+            depth,
+            height,
+            root_fields,
+            aliases,
+        }) = result
+            && !self.config.warn_only
+        {
+            let mut errors = Vec::new();
+            let mut build = |exceeded, code, message| {
+                if exceeded {
+                    errors.push(
                         graphql::Error::builder()
-                            .message("Cannot find executable document")
-                            .extension_code("MISSING_EXECUTABLE_DOCUMENT")
+                            .message(message)
+                            .extension_code(code)
                             .build(),
                     )
-                    .build()
-                    .expect("body is valid"));
+                }
             };
-
-            let mut query_metrics = OperationLimits::default();
-
-            let max = OperationLimits {
-                depth: config.max_depth,
-                height: config.max_height,
-                root_fields: config.max_root_fields,
-                aliases: config.max_aliases,
-            };
-            let result = operation_limits::check(
-                &mut query_metrics,
-                max,
-                &document.executable,
-                document.operation.name.as_deref(),
-            );
-
-            // Stash the measurements in context so they can be used for telemetry.
-            req.context.extensions().with_lock(|lock| {
-                let _ = lock.insert(query_metrics);
-            });
-
-            if let Err(OperationLimits {
+            build(
                 depth,
+                "MAX_DEPTH_LIMIT",
+                "Maximum depth limit exceeded in this operation",
+            );
+            build(
                 height,
+                "MAX_HEIGHT_LIMIT",
+                "Maximum height (field count) limit exceeded in this operation",
+            );
+            build(
                 root_fields,
+                "MAX_ROOT_FIELDS_LIMIT",
+                "Maximum root fields limit exceeded in this operation",
+            );
+            build(
                 aliases,
-            }) = result
-                && !config.warn_only
-            {
-                let mut errors = Vec::new();
-                let mut build = |exceeded, code, message| {
-                    if exceeded {
-                        errors.push(
-                            graphql::Error::builder()
-                                .message(message)
-                                .extension_code(code)
-                                .build(),
-                        )
-                    }
-                };
-                build(
-                    depth,
-                    "MAX_DEPTH_LIMIT",
-                    "Maximum depth limit exceeded in this operation",
-                );
-                build(
-                    height,
-                    "MAX_HEIGHT_LIMIT",
-                    "Maximum height (field count) limit exceeded in this operation",
-                );
-                build(
-                    root_fields,
-                    "MAX_ROOT_FIELDS_LIMIT",
-                    "Maximum root fields limit exceeded in this operation",
-                );
-                build(
-                    aliases,
-                    "MAX_ALIASES_LIMIT",
-                    "Maximum aliases limit exceeded in this operation",
-                );
-                let graphql_response = graphql::Response::builder().errors(errors).build();
+                "MAX_ALIASES_LIMIT",
+                "Maximum aliases limit exceeded in this operation",
+            );
+            let graphql_response = graphql::Response::builder().errors(errors).build();
 
-                return http::Response::builder()
-                    .status(http::StatusCode::BAD_REQUEST)
-                    .body(futures::stream::once(std::future::ready(graphql_response)).boxed())
-                    .map_err(Self::Error::from)
-                    .map(|http_response| supergraph::Response {
-                        response: http_response,
-                        context: req.context,
-                    });
-            }
+            let response = http::Response::builder()
+                .status(http::StatusCode::BAD_REQUEST)
+                .body(futures::stream::once(std::future::ready(graphql_response)).boxed())
+                .map_err(Self::Error::from)
+                .map(|http_response| supergraph::Response {
+                    response: http_response,
+                    context: req.context,
+                });
+            return Box::pin(std::future::ready(response));
+        }
 
-            inner.call(req).await
-        })
+        Box::pin(self.inner.call(req))
     }
 }
 
@@ -186,6 +197,9 @@ mod tests {
     fn make_request(schema: &Schema, query: &str) -> supergraph::Request {
         // In the future, we can hopefully just use a query parsing tower layer here...
         let doc = Query::parse_document(query, None, schema, &Default::default()).unwrap();
+        doc.operation_counts
+            .set(operation_limits::measure(&doc.executable, &doc.operation))
+            .unwrap();
         let ctx = Context::new();
         ctx.extensions()
             .with_lock(|lock| lock.insert::<ParsedDocument>(doc));
@@ -400,5 +414,83 @@ mod tests {
         );
 
         crate::plugin::test::await_mock_driver(driver).await;
+    }
+
+    #[tokio::test]
+    async fn records_the_stored_counts_for_telemetry() {
+        let schema = Schema::parse(
+            include_str!("../../testdata/supergraph.graphql"),
+            &Default::default(),
+        )
+        .unwrap();
+        let config = RouterLimitsConfig::default();
+
+        let (mock, mut handle) =
+            tower_test::mock::pair::<supergraph::Request, supergraph::Response>();
+        let driver = tokio::spawn(async move {
+            let (req, responder) = handle.next_request().await.unwrap();
+            let recorded = req
+                .context
+                .extensions()
+                .with_lock(|lock| lock.get::<OperationLimits<u32>>().copied());
+            responder.send_response(supergraph::Response::fake_builder().build().unwrap());
+            recorded
+        });
+
+        let service = ServiceBuilder::new()
+            .layer(EnforceOperationLimitsLayer::new(&config))
+            .service(mock);
+
+        let mut response = service
+            .oneshot(make_request(&schema, "{ me { id } topProducts { upc } }"))
+            .await
+            .unwrap();
+        response.next_response().await.unwrap();
+
+        assert_eq!(
+            driver.await.unwrap(),
+            Some(OperationLimits {
+                depth: 2,
+                height: 4,
+                root_fields: 2,
+                aliases: 0,
+            })
+        );
+    }
+
+    #[tokio::test]
+    async fn missing_counts_are_an_internal_error() {
+        let schema = Schema::parse(
+            include_str!("../../testdata/supergraph.graphql"),
+            &Default::default(),
+        )
+        .unwrap();
+        let query = "{ me { id } }";
+        let doc = Query::parse_document(query, None, &schema, &Default::default()).unwrap();
+        let ctx = Context::new();
+        ctx.extensions()
+            .with_lock(|lock| lock.insert::<ParsedDocument>(doc));
+        let request = supergraph::Request::fake_builder()
+            .query(query)
+            .context(ctx)
+            .build()
+            .unwrap();
+
+        let (mock, handle) = tower_test::mock::pair::<supergraph::Request, supergraph::Response>();
+        let service = ServiceBuilder::new()
+            .layer(EnforceOperationLimitsLayer::new(
+                &RouterLimitsConfig::default(),
+            ))
+            .service(mock);
+
+        let mut response = service.oneshot(request).await.unwrap();
+        assert_eq!(
+            response.response.status(),
+            http::StatusCode::INTERNAL_SERVER_ERROR
+        );
+        let body = response.next_response().await.unwrap();
+        assert_eq!(error_codes(&body), &["MISSING_OPERATION_COUNTS"]);
+
+        crate::plugin::test::assert_no_mock_calls(handle).await;
     }
 }

@@ -7,7 +7,7 @@ use apollo_compiler::executable;
 use serde::Deserialize;
 use serde::Serialize;
 
-#[derive(Clone, Copy, Debug, Default, Serialize, Deserialize)]
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub(crate) struct OperationLimits<T> {
     pub(crate) depth: T,
     pub(crate) height: T,
@@ -53,26 +53,23 @@ impl OperationLimits<bool> {
     }
 }
 
-/// Returns which limits are exceeded by the given query, if any
+pub(crate) fn measure(
+    document: &ExecutableDocument,
+    operation: &executable::Operation,
+) -> OperationLimits<u32> {
+    let mut fragment_cache = HashMap::new();
+    count(document, &mut fragment_cache, &operation.selection_set)
+}
+
+/// Returns which limits are exceeded by `measured`, if any.
+///
+/// `document` and `operation_name` are only used in the warning it logs.
 pub(crate) fn check(
-    query_metrics_in: &mut OperationLimits<u32>,
+    measured: OperationLimits<u32>,
     max: OperationLimits<Option<u32>>,
     document: &ExecutableDocument,
     operation_name: Option<&str>,
 ) -> Result<(), OperationLimits<bool>> {
-    let Ok(operation) = document.operations.get(operation_name) else {
-        // Undefined or ambiguous operation name.
-        // The request is invalid and will be rejected by some other part of the router,
-        // if it wasn’t already before we got to this code path.
-        return Ok(());
-    };
-
-    let mut fragment_cache = HashMap::new();
-    let measured = count(document, &mut fragment_cache, &operation.selection_set);
-
-    // Keep a record of the measurements
-    *query_metrics_in = measured;
-
     // If we don't have a configured limit, we can just return Ok
     if !max.map(|limit| limit.is_some()).any() {
         // No configured limit

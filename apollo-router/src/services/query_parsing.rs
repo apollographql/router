@@ -15,6 +15,7 @@ use apollo_compiler::validation::Valid;
 use crate::compute_job::ComputeJobType;
 use crate::compute_job::MaybeBackPressureError;
 use crate::plugins::authorization::CacheKeyMetadata;
+use crate::plugins::limits::operation_limits::OperationLimits;
 use crate::spec::QueryHash;
 use crate::spec::SpecError;
 
@@ -80,6 +81,7 @@ pub(crate) struct ParsedDocumentInner {
     /// plugin is installed with directives enabled and the schema links one of them. Otherwise,
     /// and for documents built elsewhere, it is unset.
     pub(crate) authorization: OnceLock<CacheKeyMetadata>,
+    pub(crate) operation_counts: OnceLock<OperationLimits<u32>>,
 }
 
 impl ParsedDocumentInner {
@@ -96,6 +98,7 @@ impl ParsedDocumentInner {
             hash,
             operation,
             authorization: OnceLock::new(),
+            operation_counts: OnceLock::new(),
         }))
     }
 }
