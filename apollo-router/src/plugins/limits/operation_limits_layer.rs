@@ -94,7 +94,8 @@ where
                     .expect("body is valid"));
             };
 
-            let mut query_metrics = OperationLimits::default();
+            let query_metrics =
+                operation_limits::measure(&document.executable, &document.operation);
 
             let max = OperationLimits {
                 depth: config.max_depth,
@@ -103,7 +104,7 @@ where
                 aliases: config.max_aliases,
             };
             let result = operation_limits::check(
-                &mut query_metrics,
+                query_metrics,
                 max,
                 &document.executable,
                 document.operation.name.as_deref(),

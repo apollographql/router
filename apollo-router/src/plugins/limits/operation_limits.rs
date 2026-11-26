@@ -53,26 +53,25 @@ impl OperationLimits<bool> {
     }
 }
 
-/// Returns which limits are exceeded by the given query, if any
+/// Counts the depth, height, root fields and aliases of `operation`, an operation of `document`.
+pub(crate) fn measure(
+    document: &ExecutableDocument,
+    operation: &executable::Operation,
+) -> OperationLimits<u32> {
+    let mut fragment_cache = HashMap::new();
+    count(document, &mut fragment_cache, &operation.selection_set)
+}
+
+/// Returns which limits the `measured` operation exceeds, if any, and logs a warning naming
+/// them.
+///
+/// `document` and `operation_name` only appear in the warning.
 pub(crate) fn check(
-    query_metrics_in: &mut OperationLimits<u32>,
+    measured: OperationLimits<u32>,
     max: OperationLimits<Option<u32>>,
     document: &ExecutableDocument,
     operation_name: Option<&str>,
 ) -> Result<(), OperationLimits<bool>> {
-    let Ok(operation) = document.operations.get(operation_name) else {
-        // Undefined or ambiguous operation name.
-        // The request is invalid and will be rejected by some other part of the router,
-        // if it wasn’t already before we got to this code path.
-        return Ok(());
-    };
-
-    let mut fragment_cache = HashMap::new();
-    let measured = count(document, &mut fragment_cache, &operation.selection_set);
-
-    // Keep a record of the measurements
-    *query_metrics_in = measured;
-
     // If we don't have a configured limit, we can just return Ok
     if !max.map(|limit| limit.is_some()).any() {
         // No configured limit
