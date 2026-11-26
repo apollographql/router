@@ -81,7 +81,6 @@ pub(crate) struct ParsedDocumentInner {
     /// plugin is installed with directives enabled and the schema links one of them. Otherwise,
     /// and for documents built elsewhere, it is unset.
     pub(crate) authorization: OnceLock<CacheKeyMetadata>,
-    /// Unset for documents not built by the query parsing service.
     pub(crate) operation_counts: OnceLock<OperationLimits<u32>>,
 }
 

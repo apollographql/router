@@ -56,7 +56,6 @@ pub(crate) async fn required_stage_plugins() -> Arc<Plugins> {
     required_stage_plugins_with_limits(serde_json::json!({})).await
 }
 
-/// As [`required_stage_plugins`], with limits built from `limits`.
 async fn required_stage_plugins_with_limits(limits: serde_json::Value) -> Arc<Plugins> {
     Arc::new(
         stage_plugins(&[
@@ -174,8 +173,6 @@ pub(crate) async fn test_http_client_service(name: &str) -> crate::services::htt
     test_http_client_service_with_limits(name, serde_json::json!({})).await
 }
 
-/// A subgraph HTTP client for `name`, as [`test_http_client_service`] builds it, with the limits
-/// plugin built from `limits`.
 pub(crate) async fn test_http_client_service_with_limits(
     name: &str,
     limits: serde_json::Value,

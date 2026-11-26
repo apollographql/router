@@ -9,9 +9,6 @@ use crate::plugins::limits::operation_limits;
 use crate::services::query_parsing::ParsedDocument;
 use crate::services::query_parsing::Request;
 
-/// Stores each parsed document's operation limit counts on the document.
-///
-/// Errors from the inner service pass through unchanged.
 #[derive(Clone)]
 pub(crate) struct MeasureOperationLimitsLayer;
 

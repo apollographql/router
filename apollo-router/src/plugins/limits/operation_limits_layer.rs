@@ -15,7 +15,7 @@ use crate::services::supergraph;
 ///
 /// # Context
 /// This layer requires the following context values to be available on the request:
-/// - [`ParsedDocument`] - An error is returned if the document or its operation limits are missing
+/// - [`ParsedDocument`] - An error is returned if the document or its operation counts are missing
 ///
 /// This layer populates the following context values on the request:
 /// - [`OperationLimits`] - This can then be used to report telemetry.

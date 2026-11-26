@@ -1240,7 +1240,6 @@ mod test {
 
     // --- LimitsPlugin::subgraph_service ---
 
-    /// The request's context carries a 1,000-byte limit and the response body is 10,000 bytes.
     async fn read_oversized_products_response(config: &str) -> Result<bytes::Bytes, BoxError> {
         let plugin: PluginTestHarness<LimitsPlugin> = PluginTestHarness::builder()
             .config(config)
