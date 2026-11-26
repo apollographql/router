@@ -69,7 +69,7 @@ pub(crate) struct SubgraphResponseSizeLimitService<S> {
 
 impl<S> Service<HttpRequest> for SubgraphResponseSizeLimitService<S>
 where
-    S: Service<HttpRequest, Response = HttpResponse, Error = BoxError> + Clone + Send + 'static,
+    S: Service<HttpRequest, Response = HttpResponse, Error = BoxError>,
     S::Future: Send + 'static,
 {
     type Response = HttpResponse;
