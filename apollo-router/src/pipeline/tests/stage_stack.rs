@@ -53,10 +53,16 @@ async fn stage_plugins(plugins: &[(&str, serde_json::Value)]) -> Plugins {
 
 /// Every mandatory plugin the stack builders apply, with traffic shaping left at its defaults.
 pub(crate) async fn required_stage_plugins() -> Arc<Plugins> {
+    required_stage_plugins_with_limits(serde_json::json!({})).await
+}
+
+/// Every mandatory plugin the stack builders apply, with limits built from `limits` and traffic
+/// shaping left at its defaults.
+async fn required_stage_plugins_with_limits(limits: serde_json::Value) -> Arc<Plugins> {
     Arc::new(
         stage_plugins(&[
             (APOLLO_TRAFFIC_SHAPING, serde_json::json!({})),
-            ("apollo.limits", serde_json::json!({})),
+            ("apollo.limits", limits),
             ("apollo.batching", serde_json::json!({})),
         ])
         .await,
@@ -168,6 +174,16 @@ pub(crate) async fn source_services(
 /// A subgraph HTTP client for `name`, built from default configuration by the pipeline's own
 /// [`build_http_client_service`] with every mandatory plugin in the registry.
 pub(crate) async fn test_http_client_service(name: &str) -> crate::services::http::BoxCloneService {
+    test_http_client_service_with_limits(name, serde_json::json!({})).await
+}
+
+/// A subgraph HTTP client for `name`, as [`test_http_client_service`] builds it, with the limits
+/// plugin built from `limits`. The client only checks response size when `limits` sets
+/// `http_max_response_size` for some subgraph.
+pub(crate) async fn test_http_client_service_with_limits(
+    name: &str,
+    limits: serde_json::Value,
+) -> crate::services::http::BoxCloneService {
     let inputs = crate::services::http::service::HttpClientInputs::for_subgraph(
         name,
         &Configuration::default(),
@@ -176,5 +192,9 @@ pub(crate) async fn test_http_client_service(name: &str) -> crate::services::htt
         &mut crate::services::http::service::DnsResolverCache::default(),
     )
     .unwrap();
-    build_http_client_service(name, inputs, required_stage_plugins().await)
+    build_http_client_service(
+        name,
+        inputs,
+        required_stage_plugins_with_limits(limits).await,
+    )
 }

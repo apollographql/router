@@ -34,7 +34,6 @@ use crate::plugins::connectors::tracing::connect_spec_version_instrument;
 use crate::plugins::headers::Headers;
 use crate::plugins::include_subgraph_errors::IncludeSubgraphErrors;
 use crate::plugins::limits::LimitsPlugin;
-use crate::plugins::limits::response_size_limit::SubgraphResponseSizeLimitLayer;
 use crate::plugins::subscription::APOLLO_SUBSCRIPTION_PLUGIN;
 use crate::plugins::subscription::Subscription;
 use crate::plugins::subscription::SubscriptionConfig;
@@ -155,7 +154,9 @@ pub(crate) fn build_http_client_service(
         .apply_required_plugin_layer(&plugins, |b: &BatchingPlugin| {
             b.join_batch_requests_layer(name)
         })
-        .layer(SubgraphResponseSizeLimitLayer::new(name))
+        .apply_required_plugin_layer(&plugins, |l: &LimitsPlugin| {
+            l.subgraph_response_size_limit_layer(name)
+        })
         .apply_plugin_layer(&plugins, Telemetry::overhead_subgraph_request_timing_layer)
         .apply_plugin_layer(&plugins, Telemetry::instrument_http_client_layer)
         .apply_plugin_layer(&plugins, Telemetry::custom_instrument_http_client_layer)
