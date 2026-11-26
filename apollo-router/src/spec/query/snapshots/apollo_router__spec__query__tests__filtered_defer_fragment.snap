@@ -4,8 +4,8 @@ expression: response
 ---
 {
   "data": {
-    "a": {
-      "b": "b"
+    "concreteFoo": {
+      "id": "1"
     }
   }
 }
