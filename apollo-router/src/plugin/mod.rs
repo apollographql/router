@@ -130,7 +130,7 @@ pub struct PluginInit<T> {
     pub supergraph_sdl: Arc<String>,
     /// Router Supergraph Schema ID (SHA256 of the SDL))
     pub(crate) supergraph_schema_id: Arc<String>,
-    /// The supergraph as the router parsed it, shared rather than copied.
+    /// The parsed supergraph schema.
     pub(crate) supergraph: Supergraph,
 
     /// The parsed subgraph schemas from the query planner, keyed by subgraph name
