@@ -1,6 +1,7 @@
 pub(crate) mod http2_header_list;
 mod layer;
 mod limited;
+pub(crate) mod measure_operation_limits;
 pub(crate) mod operation_limits;
 pub(crate) mod operation_limits_layer;
 pub(crate) mod response_size_limit;
@@ -29,6 +30,7 @@ use crate::plugin::PluginInit;
 use crate::plugin::PluginPrivate;
 use crate::plugins::limits::layer::RequestBodyLimitLayer;
 use crate::plugins::limits::layer::RequestSizeLimitError;
+use crate::plugins::limits::measure_operation_limits::MeasureOperationLimitsLayer;
 use crate::plugins::limits::operation_limits_layer::EnforceOperationLimitsLayer;
 use crate::plugins::limits::response_size_limit::SubgraphResponseSizeLimit;
 use crate::services::SubgraphRequest;
@@ -284,6 +286,13 @@ impl LimitsPlugin {
             self.config.router.max_recursive_selections,
             self.config.router.warn_only,
         )
+    }
+
+    /// The layer for the query parsing service that stores each parsed operation's depth,
+    /// height, root field and alias counts on its document, for
+    /// [`Self::enforce_operation_limits_layer`] to check.
+    pub(crate) fn measure_operation_limits_layer(&self) -> MeasureOperationLimitsLayer {
+        MeasureOperationLimitsLayer
     }
 
     /// The depth, height, root field and alias limits, enforced in the supergraph service stack.

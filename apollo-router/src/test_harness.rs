@@ -339,37 +339,45 @@ impl<'a> TestHarness<'a> {
 
     /// Builds the supergraph service
     pub async fn build_supergraph(self) -> Result<supergraph::BoxCloneService, BoxError> {
-        let (config, schema, _plugins, supergraph_service) = self.build_common().await?;
+        let (config, schema, plugins, supergraph_service) = self.build_common().await?;
+        let query_parsing_service = build_query_parsing_service(schema, config, &plugins);
 
         Ok(tower::service_fn(move |request: supergraph::Request| {
             let router = supergraph_service.clone();
+            let query_parsing_service = query_parsing_service.clone();
 
             // The supergraph service expects a ParsedDocument in the context. In the real world,
             // that is always populated by the router service. For the testing harness, however,
             // tests normally craft a supergraph request manually, and it's inconvenient to
             // manually populate the ParsedDocument. Instead of doing it many different ways
-            // over and over in different tests, we simulate that part of the router service here.
+            // over and over in different tests, we simulate that part of the router service here,
+            // with the same query parsing service.
             let body = request.supergraph_request.body();
             // If we don't have a query we definitely won't have a parsed document.
-            if let Some(query_str) = body.query.as_deref() {
-                let operation_name = body.operation_name.as_deref();
-                if !request.context.extensions().with_lock(|lock| {
-                    lock.contains_key::<crate::services::query_parsing::ParsedDocument>()
-                }) {
-                    let doc = crate::spec::Query::parse_document(
-                        query_str,
-                        operation_name,
-                        &schema,
-                        &config,
-                    )
-                    .expect("parse error in test");
+            let parse_request = body
+                .query
+                .clone()
+                .filter(|_| {
+                    !request.context.extensions().with_lock(|lock| {
+                        lock.contains_key::<crate::services::query_parsing::ParsedDocument>()
+                    })
+                })
+                .map(|query| {
+                    crate::services::query_parsing::Request::new(query, body.operation_name.clone())
+                });
+
+            async move {
+                if let Some(parse_request) = parse_request {
+                    let doc = query_parsing_service
+                        .oneshot(parse_request)
+                        .await
+                        .expect("parse error in test");
                     request.context.extensions().with_lock(|lock| {
                         lock.insert::<crate::services::query_parsing::ParsedDocument>(doc)
                     });
                 }
+                router.oneshot(request).await
             }
-
-            async move { router.oneshot(request).await }
         })
         .boxed_clone())
     }

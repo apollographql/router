@@ -482,7 +482,9 @@ fn subscription_plugin_config(plugins: &Plugins) -> Option<SubscriptionConfig> {
 ///
 /// The cache size is the same as the query plan cache size. When the authorization plugin has
 /// directives enabled and the schema links one of them, each parsed document also carries its
-/// operation's authorization requirements, worked out once on a cache miss.
+/// operation's authorization requirements, worked out once on a cache miss. Each parsed document
+/// also carries the counts its operation limits are checked against, measured once on a cache
+/// miss.
 ///
 /// # Panics
 ///
@@ -509,6 +511,7 @@ pub(crate) fn build_query_parsing_service(
             plugins,
             AuthorizationPlugin::authorization_requirements_layer,
         )
+        .apply_required_plugin_layer(plugins, LimitsPlugin::measure_operation_limits_layer)
         .apply_required_plugin_layer(plugins, LimitsPlugin::recursive_selections_limit_layer)
         .service(QueryParsingService::new(schema, configuration))
         .boxed_clone()

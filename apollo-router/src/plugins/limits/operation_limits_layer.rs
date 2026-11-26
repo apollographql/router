@@ -15,7 +15,9 @@ use crate::services::supergraph;
 ///
 /// # Context
 /// This layer requires the following context values to be available on the request:
-/// - [`ParsedDocument`] - An error is returned if the document is missing.
+/// - [`ParsedDocument`], carrying the counts that
+///   [`MeasureOperationLimitsLayer`](crate::plugins::limits::measure_operation_limits::MeasureOperationLimitsLayer)
+///   stores. The layer answers with a 500 if the document or its counts are missing.
 ///
 /// This layer populates the following context values on the request:
 /// - [`OperationLimits`] - This can then be used to report telemetry.
@@ -94,8 +96,22 @@ where
                     .expect("body is valid"));
             };
 
-            let query_metrics =
-                operation_limits::measure(&document.executable, &document.operation);
+            // The query parsing service stores the counts on every document it parses, so a
+            // missing value means the pipeline was set up improperly. It never means the
+            // operation is within its limits.
+            let Some(&query_metrics) = document.operation_limits.get() else {
+                return Ok(supergraph::Response::error_builder()
+                    .status_code(http::StatusCode::INTERNAL_SERVER_ERROR)
+                    .context(req.context)
+                    .error(
+                        graphql::Error::builder()
+                            .message("Cannot find the operation's limit counts")
+                            .extension_code("MISSING_OPERATION_LIMITS")
+                            .build(),
+                    )
+                    .build()
+                    .expect("body is valid"));
+            };
 
             let max = OperationLimits {
                 depth: config.max_depth,
@@ -187,6 +203,9 @@ mod tests {
     fn make_request(schema: &Schema, query: &str) -> supergraph::Request {
         // In the future, we can hopefully just use a query parsing tower layer here...
         let doc = Query::parse_document(query, None, schema, &Default::default()).unwrap();
+        doc.operation_limits
+            .set(operation_limits::measure(&doc.executable, &doc.operation))
+            .unwrap();
         let ctx = Context::new();
         ctx.extensions()
             .with_lock(|lock| lock.insert::<ParsedDocument>(doc));
@@ -401,5 +420,83 @@ mod tests {
         );
 
         crate::plugin::test::await_mock_driver(driver).await;
+    }
+
+    #[tokio::test]
+    async fn records_the_stored_counts_for_telemetry() {
+        let schema = Schema::parse(
+            include_str!("../../testdata/supergraph.graphql"),
+            &Default::default(),
+        )
+        .unwrap();
+        let config = RouterLimitsConfig::default();
+
+        let (mock, mut handle) =
+            tower_test::mock::pair::<supergraph::Request, supergraph::Response>();
+        let driver = tokio::spawn(async move {
+            let (req, responder) = handle.next_request().await.unwrap();
+            let recorded = req
+                .context
+                .extensions()
+                .with_lock(|lock| lock.get::<OperationLimits<u32>>().copied());
+            responder.send_response(supergraph::Response::fake_builder().build().unwrap());
+            recorded
+        });
+
+        let service = ServiceBuilder::new()
+            .layer(EnforceOperationLimitsLayer::new(&config))
+            .service(mock);
+
+        let mut response = service
+            .oneshot(make_request(&schema, "{ me { id } topProducts { upc } }"))
+            .await
+            .unwrap();
+        response.next_response().await.unwrap();
+
+        assert_eq!(
+            driver.await.unwrap(),
+            Some(OperationLimits {
+                depth: 2,
+                height: 4,
+                root_fields: 2,
+                aliases: 0,
+            })
+        );
+    }
+
+    #[tokio::test]
+    async fn missing_counts_are_an_internal_error() {
+        let schema = Schema::parse(
+            include_str!("../../testdata/supergraph.graphql"),
+            &Default::default(),
+        )
+        .unwrap();
+        let query = "{ me { id } }";
+        let doc = Query::parse_document(query, None, &schema, &Default::default()).unwrap();
+        let ctx = Context::new();
+        ctx.extensions()
+            .with_lock(|lock| lock.insert::<ParsedDocument>(doc));
+        let request = supergraph::Request::fake_builder()
+            .query(query)
+            .context(ctx)
+            .build()
+            .unwrap();
+
+        let (mock, handle) = tower_test::mock::pair::<supergraph::Request, supergraph::Response>();
+        let service = ServiceBuilder::new()
+            .layer(EnforceOperationLimitsLayer::new(
+                &RouterLimitsConfig::default(),
+            ))
+            .service(mock);
+
+        let mut response = service.oneshot(request).await.unwrap();
+        assert_eq!(
+            response.response.status(),
+            http::StatusCode::INTERNAL_SERVER_ERROR
+        );
+        let body = response.next_response().await.unwrap();
+        assert_eq!(error_codes(&body), &["MISSING_OPERATION_LIMITS"]);
+
+        crate::plugin::test::assert_no_mock_calls(handle).await;
     }
 }

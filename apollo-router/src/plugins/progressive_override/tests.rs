@@ -283,23 +283,8 @@ async fn plugin_supergraph_service_trims_0pc_label() {
 }
 
 async fn get_json_query_plan(query: &str) -> serde_json::Value {
-    let schema = crate::spec::Schema::parse(
-        include_str!("./testdata/supergraph.graphql"),
-        &Default::default(),
-    )
-    .unwrap();
-    let parsed_doc =
-        crate::spec::Query::parse_document(query, None, &schema, &crate::Configuration::default())
-            .unwrap();
-
-    let context: Context = Context::new();
-    context
-        .extensions()
-        .with_lock(|lock| lock.insert::<ParsedDocument>(parsed_doc));
-
     let request = supergraph::Request::fake_builder()
         .query(query)
-        .context(context)
         .header("Apollo-Expose-Query-Plan", "true")
         .build()
         .unwrap();
