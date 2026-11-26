@@ -98,8 +98,8 @@ where
                 .context(req.context)
                 .error(
                     graphql::Error::builder()
-                        .message("Cannot find the operation's limit counts")
-                        .extension_code("MISSING_OPERATION_LIMITS")
+                        .message("Cannot find the operation's counts")
+                        .extension_code("MISSING_OPERATION_COUNTS")
                         .build(),
                 )
                 .build()
@@ -489,7 +489,7 @@ mod tests {
             http::StatusCode::INTERNAL_SERVER_ERROR
         );
         let body = response.next_response().await.unwrap();
-        assert_eq!(error_codes(&body), &["MISSING_OPERATION_LIMITS"]);
+        assert_eq!(error_codes(&body), &["MISSING_OPERATION_COUNTS"]);
 
         crate::plugin::test::assert_no_mock_calls(handle).await;
     }
