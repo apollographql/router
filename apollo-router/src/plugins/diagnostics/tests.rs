@@ -20,18 +20,11 @@ async fn test_diagnostics() {
         output_directory: PathBuf::from("/tmp/router-diagnostics"),
     };
 
-    let init = PluginInit {
-        config,
-        previous_config: None,
-        supergraph_sdl: Arc::new("schema".to_string()),
-        supergraph_schema_id: Arc::new("id".to_string()),
-        supergraph: PluginInit::fake_builder().config(()).build().supergraph,
-        subgraph_schemas: Default::default(),
-        launch_id: None,
-        notify: Default::default(),
-        full_config: None,
-        raw_yaml: Some(Arc::from("test_config")),
-    };
+    let init = PluginInit::fake_builder()
+        .config(config)
+        .supergraph_schema_id(Arc::new("id".to_string()))
+        .original_config_yaml(Arc::from("test_config"))
+        .build();
 
     let result = DiagnosticsPlugin::new(init).await;
     assert!(result.is_ok(), "Plugin should work on all platforms");
@@ -53,18 +46,11 @@ async fn test_diagnostics_disabled() {
         output_directory: PathBuf::from("/tmp/router-diagnostics"),
     };
 
-    let init = PluginInit {
-        config,
-        previous_config: None,
-        supergraph_sdl: Arc::new("schema".to_string()),
-        supergraph_schema_id: Arc::new("id".to_string()),
-        supergraph: PluginInit::fake_builder().config(()).build().supergraph,
-        subgraph_schemas: Default::default(),
-        launch_id: None,
-        notify: Default::default(),
-        full_config: None,
-        raw_yaml: Some(Arc::from("test_config")),
-    };
+    let init = PluginInit::fake_builder()
+        .config(config)
+        .supergraph_schema_id(Arc::new("id".to_string()))
+        .original_config_yaml(Arc::from("test_config"))
+        .build();
 
     let result = DiagnosticsPlugin::new(init).await;
     assert!(
