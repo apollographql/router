@@ -140,7 +140,7 @@ pub(crate) struct LimitRecursiveSelectionService<S> {
 
 impl<S> Service<Request> for LimitRecursiveSelectionService<S>
 where
-    S: Service<Request, Response = ParsedDocument, Error = ServiceError> + Clone + Send + 'static,
+    S: Service<Request, Response = ParsedDocument, Error = ServiceError>,
     S::Future: Send + 'static,
 {
     type Response = ParsedDocument;
@@ -152,14 +152,13 @@ where
     }
 
     fn call(&mut self, req: Request) -> Self::Future {
-        let inner = self.inner.clone();
-        let mut inner = std::mem::replace(&mut self.inner, inner);
         let max_recursive_selections = self.max_recursive_selections;
         let warn_only = self.warn_only;
         let operation_name = req.operation_name.clone();
+        let parsed = self.inner.call(req);
 
         Box::pin(async move {
-            let doc = inner.call(req).await?;
+            let doc = parsed.await?;
 
             let recursive_selections = count_recursive_selections(
                 &doc.executable,
