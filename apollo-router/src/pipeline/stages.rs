@@ -34,7 +34,6 @@ use crate::plugins::connectors::tracing::connect_spec_version_instrument;
 use crate::plugins::headers::Headers;
 use crate::plugins::include_subgraph_errors::IncludeSubgraphErrors;
 use crate::plugins::limits::LimitsPlugin;
-use crate::plugins::limits::operation_limits_layer::EnforceOperationLimitsLayer;
 use crate::plugins::limits::response_size_limit::SubgraphResponseSizeLimitLayer;
 use crate::plugins::subscription::APOLLO_SUBSCRIPTION_PLUGIN;
 use crate::plugins::subscription::Subscription;
@@ -74,7 +73,6 @@ use crate::services::layers::persisted_queries::PersistedQueryExpander;
 use crate::services::layers::static_page::StaticPageLayer;
 use crate::services::query_parsing;
 use crate::services::query_parsing::cache::QueryParsingCacheLayer;
-use crate::services::query_parsing::recursive_selections_limit::LimitRecursiveSelectionLayer;
 use crate::services::query_parsing::service::QueryParsingService;
 use crate::services::query_planner;
 use crate::services::router;
@@ -488,7 +486,7 @@ fn subscription_plugin_config(plugins: &Plugins) -> Option<SubscriptionConfig> {
 ///
 /// # Panics
 ///
-/// If `plugins` has no authorization plugin, which `create_plugins` always builds.
+/// If `plugins` has no authorization or limits plugin, which `create_plugins` always builds.
 pub(crate) fn build_query_parsing_service(
     schema: Arc<Schema>,
     configuration: Arc<Configuration>,
@@ -500,8 +498,6 @@ pub(crate) fn build_query_parsing_service(
         .cache
         .in_memory
         .limit;
-    let max_recursive_selections = configuration.limits.router.max_recursive_selections;
-    let warn_only = configuration.limits.router.warn_only;
 
     let cache_config = InMemoryConfig {
         limit: u64::try_from(cache_limit.get()).expect("usize should fit in u64"),
@@ -513,10 +509,7 @@ pub(crate) fn build_query_parsing_service(
             plugins,
             AuthorizationPlugin::authorization_requirements_layer,
         )
-        .layer(LimitRecursiveSelectionLayer::new(
-            max_recursive_selections,
-            warn_only,
-        ))
+        .apply_required_plugin_layer(plugins, LimitsPlugin::recursive_selections_limit_layer)
         .service(QueryParsingService::new(schema, configuration))
         .boxed_clone()
 }
@@ -637,13 +630,11 @@ fn build_supergraph_service(
             IncludeSubgraphErrors::redact_subgraph_errors_layer,
         )
         .apply_plugin_layer(&plugins, Telemetry::instrument_supergraph_layer)
-        .rust_plugins(plugins, |plugin, service| {
+        .rust_plugins(plugins.clone(), |plugin, service| {
             plugin.supergraph_service(service)
         })
         .layer(AllowOnlyHttpPostMutationsLayer::default())
-        .layer(EnforceOperationLimitsLayer::new(
-            &configuration.limits.router,
-        ))
+        .apply_required_plugin_layer(&plugins, LimitsPlugin::enforce_operation_limits_layer)
         .service(supergraph_service)
 }
 

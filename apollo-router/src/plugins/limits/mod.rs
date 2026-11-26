@@ -29,9 +29,11 @@ use crate::plugin::PluginInit;
 use crate::plugin::PluginPrivate;
 use crate::plugins::limits::layer::RequestBodyLimitLayer;
 use crate::plugins::limits::layer::RequestSizeLimitError;
+use crate::plugins::limits::operation_limits_layer::EnforceOperationLimitsLayer;
 use crate::plugins::limits::response_size_limit::SubgraphResponseSizeLimit;
 use crate::services::SubgraphRequest;
 use crate::services::connector;
+use crate::services::query_parsing::recursive_selections_limit::LimitRecursiveSelectionLayer;
 use crate::services::router;
 use crate::services::subgraph;
 use crate::uplink::license_enforcement::AllowedFeature;
@@ -273,6 +275,20 @@ impl LimitsPlugin {
         http2_header_list::EndpointHeaderListLimitLayer::new(
             self.config.router.http2_header_list_limit(),
         )
+    }
+
+    /// The recursive-selection limit, applied in the query parsing service as each operation is
+    /// parsed.
+    pub(crate) fn recursive_selections_limit_layer(&self) -> LimitRecursiveSelectionLayer {
+        LimitRecursiveSelectionLayer::new(
+            self.config.router.max_recursive_selections,
+            self.config.router.warn_only,
+        )
+    }
+
+    /// The depth, height, root field and alias limits, enforced in the supergraph service stack.
+    pub(crate) fn enforce_operation_limits_layer(&self) -> EnforceOperationLimitsLayer {
+        EnforceOperationLimitsLayer::new(&self.config.router)
     }
 }
 

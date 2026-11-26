@@ -20,6 +20,7 @@ use crate::plugin::PluginInit;
 use crate::plugin::PluginPrivate;
 use crate::plugin::PluginUnstable;
 use crate::plugins::authorization::AuthorizationPlugin;
+use crate::plugins::limits::LimitsPlugin;
 use crate::plugins::traffic_shaping::APOLLO_TRAFFIC_SHAPING;
 use crate::services::Plugins;
 use crate::services::SubgraphRequest;
@@ -55,32 +56,46 @@ pub(crate) async fn required_stage_plugins() -> Arc<Plugins> {
     Arc::new(
         stage_plugins(&[
             (APOLLO_TRAFFIC_SHAPING, serde_json::json!({})),
+            ("apollo.limits", serde_json::json!({})),
             ("apollo.batching", serde_json::json!({})),
         ])
         .await,
     )
 }
 
-/// The mandatory plugin the query parsing service applies: authorization at its defaults. It is
-/// built without a schema, so it links no directive and installs no layer.
+/// The mandatory plugins the query parsing service applies, authorization and limits, at their
+/// defaults. Authorization is built without a schema, so it links no directive and installs no
+/// layer.
 pub(crate) async fn query_parsing_plugins() -> Plugins {
     query_parsing_plugins_for("", &Configuration::default()).await
 }
 
-/// The mandatory plugin the query parsing service applies: authorization, built for the
-/// supergraph `sdl` from `configuration`'s `authorization` section. An empty `sdl` builds it
-/// without a schema.
+/// The mandatory plugins the query parsing service applies: authorization, built for the
+/// supergraph `sdl` from `configuration`'s `authorization` section, and limits, built from its
+/// `limits` section. An empty `sdl` builds authorization without a schema.
 pub(crate) async fn query_parsing_plugins_for(sdl: &str, configuration: &Configuration) -> Plugins {
-    let plugin = <AuthorizationPlugin as PluginPrivate>::new(PluginInit::fake_new(
+    let authorization = <AuthorizationPlugin as PluginPrivate>::new(PluginInit::fake_new(
         AuthorizationPlugin::configuration(configuration),
         Arc::new(sdl.to_string()),
     ))
     .await
     .expect("plugin builds");
-    Plugins::from([(
-        "apollo.authorization".to_string(),
-        Box::new(plugin) as Box<dyn DynPlugin>,
-    )])
+    let limits = <LimitsPlugin as PluginPrivate>::new(PluginInit::fake_new(
+        configuration.limits.clone(),
+        Arc::new(sdl.to_string()),
+    ))
+    .await
+    .expect("plugin builds");
+    Plugins::from([
+        (
+            "apollo.limits".to_string(),
+            Box::new(limits) as Box<dyn DynPlugin>,
+        ),
+        (
+            "apollo.authorization".to_string(),
+            Box::new(authorization) as Box<dyn DynPlugin>,
+        ),
+    ])
 }
 
 pub(crate) type Handle = tower_test::mock::Handle<SubgraphRequest, SubgraphResponse>;
