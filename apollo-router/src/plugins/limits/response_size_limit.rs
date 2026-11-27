@@ -27,6 +27,11 @@ pub(crate) struct ResponseSizeLimitError {
 }
 
 impl ResponseSizeLimitError {
+    /// The limit the response body exceeded, in bytes.
+    pub(crate) fn limit(&self) -> usize {
+        self.limit
+    }
+
     /// The response size limit error in `error`'s chain of sources, present when the body was cut
     /// off at the limit rather than failing for another reason.
     pub(crate) fn find<'a>(error: &'a (dyn std::error::Error + 'static)) -> Option<&'a Self> {
@@ -268,6 +273,10 @@ mod tests {
             assert_eq!(
                 err.to_string(),
                 "connector response body exceeded limit of 1000 bytes"
+            );
+            assert_eq!(
+                ResponseSizeLimitError::find(&err).map(ResponseSizeLimitError::limit),
+                Some(1_000)
             );
 
             assert_counter!(

@@ -9,6 +9,7 @@
 use std::collections::HashMap;
 use std::sync::Arc;
 
+use apollo_federation::connectors::runtime::responses::MappedResponse;
 use http_body_util::BodyExt as _;
 use indexmap::IndexMap;
 use tower::BoxError;
@@ -20,6 +21,7 @@ use crate::Configuration;
 use crate::Context;
 use crate::graphql;
 use crate::pipeline::HttpClientTarget;
+use crate::pipeline::build_connector_request_services;
 use crate::pipeline::build_http_client_service;
 use crate::pipeline::build_subgraph_services;
 use crate::plugin::PluginInit;
@@ -27,6 +29,8 @@ use crate::plugin::PluginPrivate;
 use crate::services::Plugins;
 use crate::services::SubgraphRequest;
 use crate::services::SubgraphServices;
+use crate::services::connector::request_service;
+use crate::services::connector::request_service::ConnectorRequestServices;
 use crate::services::http;
 use crate::services::http::HttpRequest;
 use crate::services::http::HttpResponse;
@@ -38,7 +42,9 @@ const LIMITED: &str = "products";
 const UNLIMITED: &str = "reviews";
 /// A subgraph whose connector sources call out over HTTP.
 const CONNECTORS: &str = "connectors";
-/// A connector source of [`CONNECTORS`].
+/// A connector source of [`CONNECTORS`] with a 10-byte response size limit.
+const LIMITED_SOURCE: &str = "connectors.limited";
+/// A connector source of [`CONNECTORS`] with no response size limit.
 const UNLIMITED_SOURCE: &str = "connectors.unlimited";
 
 /// Every response body: valid GraphQL, and longer than [`LIMITED`]'s limit.
@@ -236,4 +242,90 @@ async fn a_connector_client_is_not_held_to_a_subgraph_limit() {
         .await
         .expect("the whole body is read");
     assert_eq!(body.to_bytes(), BODY);
+}
+
+/// The request services of [`LIMITED_SOURCE`] and [`UNLIMITED_SOURCE`], built together over their
+/// HTTP clients with only [`LIMITED_SOURCE`] given a response size limit, and the connection of
+/// [`CONNECTORS`], which owns both sources.
+async fn sources() -> (
+    ConnectorRequestServices,
+    tower_test::mock::Handle<HttpRequest, HttpResponse>,
+) {
+    let limits = serde_json::json!({ "connector": { "sources": {
+        LIMITED_SOURCE: { "http_max_response_size": "10B" }
+    } } });
+    let (mock, connection) = tower_test::mock::pair();
+    let mut plugins =
+        stage_stack::required_stage_plugin_registry(&[("apollo.limits", limits)]).await;
+    let mocks = HashMap::from([(CONNECTORS.to_string(), mock)]);
+    plugins.insert("stub".to_string(), Box::new(StubConnections { mocks }));
+    let plugins = Arc::new(plugins);
+
+    let http_services = [LIMITED_SOURCE, UNLIMITED_SOURCE]
+        .into_iter()
+        .map(|source| {
+            let client = http_client(
+                HttpClientTarget::ConnectorSource(source),
+                CONNECTORS,
+                &plugins,
+            );
+            (source.to_string(), client)
+        })
+        .collect();
+    (
+        build_connector_request_services(http_services, &plugins),
+        connection,
+    )
+}
+
+async fn fetch_source(
+    services: &ConnectorRequestServices,
+    source: &str,
+    context: &Context,
+) -> Option<String> {
+    let mut request = request_service::Request::test_new();
+    request.context = context.clone();
+    let response = services.get(source.to_string()).oneshot(request).await;
+    match response.expect("the source is answered").mapped_response {
+        MappedResponse::Error { error, .. } => Some(error.message),
+        _ => None,
+    }
+}
+
+const SOURCE_OVER_LIMIT: &str = "connector response body exceeded limit of 10 bytes";
+
+#[tokio::test]
+async fn an_unlimited_source_is_not_held_to_a_limit_fetched_before_it() {
+    let (services, mut connection) = sources().await;
+    let context = Context::new();
+
+    let (error, ()) = tokio::join!(
+        fetch_source(&services, LIMITED_SOURCE, &context),
+        answer(&mut connection)
+    );
+    assert_eq!(error.as_deref(), Some(SOURCE_OVER_LIMIT));
+
+    let (error, ()) = tokio::join!(
+        fetch_source(&services, UNLIMITED_SOURCE, &context),
+        answer(&mut connection)
+    );
+    assert_eq!(error, None);
+}
+
+#[tokio::test]
+async fn parallel_source_fetches_are_each_held_to_their_own_limit() {
+    let (services, mut connection) = sources().await;
+    let context = Context::new();
+
+    let (limited, unlimited, ()) = tokio::join!(
+        fetch_source(&services, LIMITED_SOURCE, &context),
+        fetch_source(&services, UNLIMITED_SOURCE, &context),
+        async {
+            answer(&mut connection).await;
+            answer(&mut connection).await;
+        },
+    );
+
+    assert_eq!(limited.as_deref(), Some(SOURCE_OVER_LIMIT));
+    assert_eq!(unlimited, None);
 }
