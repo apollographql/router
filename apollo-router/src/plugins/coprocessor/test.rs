@@ -4348,6 +4348,28 @@ mod tests {
         (mock, driver)
     }
 
+    fn create_mock_http_client_connection_reset() -> (
+        tower_test::mock::Mock<
+            crate::services::http::HttpRequest,
+            crate::services::http::HttpResponse,
+        >,
+        tokio::task::JoinHandle<()>,
+    ) {
+        let (mock, mut handle) = tower_test::mock::pair::<
+            crate::services::http::HttpRequest,
+            crate::services::http::HttpResponse,
+        >();
+        let driver = tokio::spawn(async move {
+            while let Some((_req, responder)) = handle.next_request().await {
+                responder.send_error(std::io::Error::new(
+                    std::io::ErrorKind::ConnectionReset,
+                    "connection reset by peer",
+                ));
+            }
+        });
+        (mock, driver)
+    }
+
     #[tokio::test]
     async fn external_plugin_subgraph_response_validation_disabled_invalid() {
         let (subgraph_mock, subgraph_driver) = create_mock_subgraph_service();
@@ -6382,6 +6404,36 @@ mod tests {
         }
         .with_metrics()
         .await;
+    }
+
+    #[tokio::test]
+    async fn router_request_outbound_connection_reset_is_not_client_body_error() {
+        let _guard = tracing_test::dispatcher_guard();
+
+        let router_stage = create_router_stage_for_request_validation_test();
+        let (http_client, http_driver) = create_mock_http_client_connection_reset();
+        let (router_mock, router_driver) = create_mock_router_service();
+        let service_stack = router_stage
+            .as_service(
+                http_client,
+                router_mock.boxed(),
+                "http://test".to_string(),
+                Arc::new("".to_string()),
+                false,
+            )
+            .boxed();
+        let request = router::Request::fake_builder().build().unwrap();
+        let err = service_stack.oneshot(request).await.unwrap_err();
+        assert!(
+            !router::body::is_client_request_body_read_error(err.as_ref()),
+            "outbound coprocessor ConnectionReset must not be classified as a client body read"
+        );
+        assert!(
+            tracing_test::logs_contain("coprocessor: router request stage error"),
+            "coprocessor outbound failure should still be logged"
+        );
+        crate::plugin::test::await_mock_driver(router_driver).await;
+        crate::plugin::test::await_mock_driver(http_driver).await;
     }
 
     #[tokio::test]
