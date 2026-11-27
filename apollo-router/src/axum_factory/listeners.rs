@@ -33,6 +33,7 @@ use tower_service::Service;
 use crate::ListenAddr;
 use crate::axum_factory::ENDPOINT_CALLBACK;
 use crate::axum_factory::connection_handle::ConnectionHandle;
+use crate::axum_factory::connection_handle::listener_attributes;
 use crate::axum_factory::utils::ConnectionInfo;
 use crate::axum_factory::utils::InjectConnectionInfo;
 use crate::configuration::Configuration;
@@ -237,14 +238,14 @@ async fn handle_connection<C, E: AsRef<dyn std::error::Error + Send + Sync>>(
     tokio::select! {
         // the connection finished first
         res = &mut connection => {
-            // Hyper rejects requests with oversized headers (431) or URI (414) before they
-            // reach the axum service layer, so those responses are invisible to the normal
-            // metrics/tracing middleware. We detect them here from the connection error and
-            // emit metrics manually so they remain observable.
-            if let Err(ref err) = res &&
-                 let Some(status_code) = classify_hyper_rejection(err.as_ref()) {
-                    emit_connection_rejection_metrics(status_code, connection_start, span_mode);
-                }
+            if let Err(err) = res {
+                record_connection_error(
+                    err.as_ref(),
+                    connection_start,
+                    span_mode,
+                    &connection_handle.address,
+                );
+            }
         }
         // the shutdown receiver was triggered first,
         // so we tell the connection to do a graceful shutdown
@@ -259,15 +260,24 @@ async fn handle_connection<C, E: AsRef<dyn std::error::Error + Send + Sync>>(
                 // Connections stuck terminating will keep the pipeline and everything related to that pipeline
                 // in memory.
 
-                if connection.timeout(connection_shutdown_timeout).await.is_err() {
-                    tracing::warn!(
+                match connection.timeout(connection_shutdown_timeout).await {
+                    Ok(Err(err)) => {
+                        record_connection_error(
+                            err.as_ref(),
+                            connection_start,
+                            span_mode,
+                            &connection_handle.address,
+                        );
+                    }
+                    Ok(Ok(())) => {}
+                    Err(_) => tracing::warn!(
                         timeout = connection_shutdown_timeout.as_secs(),
                         server.address = connection_handle.address.to_string(),
                         schema.id = connection_handle.pipeline_ref.schema_id,
                         config.hash = connection_handle.pipeline_ref.config_hash,
                         launch.id = connection_handle.pipeline_ref.launch_id,
                         "connection shutdown exceeded, forcing close",
-                    );
+                    ),
                 }
             }
         }
@@ -615,6 +625,73 @@ fn emit_connection_rejection_metrics(status_code: u16, start: Instant, span_mode
     let entered = span_mode.create_router_rejection().entered();
     entered.record("http.response.status_code", status_code as i64);
     entered.record("apollo_private.duration_ns", elapsed_ns);
+}
+
+/// Records telemetry for a connection that ended with an error.
+///
+/// hyper rejects HTTP/1 requests with oversized headers (431) or URI (414), and h2 closes HTTP/2
+/// connections with a GOAWAY, before any request reaches the axum service layer. Neither is seen
+/// by the normal metrics and tracing middleware, so they are recorded here from the error.
+fn record_connection_error(
+    err: &(dyn std::error::Error + Send + Sync + 'static),
+    start: Instant,
+    span_mode: SpanMode,
+    address: &ListenAddr,
+) {
+    if let Some(status_code) = classify_hyper_rejection(err) {
+        emit_connection_rejection_metrics(status_code, start, span_mode);
+    } else if let Some(error_type) = http2_go_away_sent(err).and_then(http2_error_type) {
+        use opentelemetry::KeyValue;
+
+        let mut attributes = vec![
+            KeyValue::new("error.type", error_type),
+            KeyValue::new("network.protocol.name", "http"),
+            KeyValue::new("network.protocol.version", "2"),
+        ];
+        attributes.extend(listener_attributes(address));
+        u64_counter_with_unit!(
+            "apollo.router.server.connection.errors",
+            "Number of client connections the router closed with a protocol error code.",
+            "{connection}",
+            1,
+            attributes
+        );
+    }
+}
+
+/// Walks the error source chain to an [`h2::Error`] for a GOAWAY that the router sent, and returns
+/// its error code.
+///
+/// GOAWAYs the client sent and I/O errors return `None`.
+fn http2_go_away_sent(err: &(dyn std::error::Error + 'static)) -> Option<h2::Reason> {
+    std::iter::successors(Some(err), |e| e.source())
+        .find_map(|e| e.downcast_ref::<h2::Error>())
+        .filter(|h2_err| h2_err.is_go_away() && h2_err.is_library())
+        .and_then(h2::Error::reason)
+}
+
+/// Maps an HTTP/2 error code to its RFC 9113 name for the `error.type` attribute.
+///
+/// Returns `None` for `NO_ERROR`, which a graceful close sends. Unknown codes map to `_OTHER`, so
+/// the attribute has at most 14 values.
+fn http2_error_type(reason: h2::Reason) -> Option<&'static str> {
+    Some(match reason {
+        h2::Reason::NO_ERROR => return None,
+        h2::Reason::PROTOCOL_ERROR => "PROTOCOL_ERROR",
+        h2::Reason::INTERNAL_ERROR => "INTERNAL_ERROR",
+        h2::Reason::FLOW_CONTROL_ERROR => "FLOW_CONTROL_ERROR",
+        h2::Reason::SETTINGS_TIMEOUT => "SETTINGS_TIMEOUT",
+        h2::Reason::STREAM_CLOSED => "STREAM_CLOSED",
+        h2::Reason::FRAME_SIZE_ERROR => "FRAME_SIZE_ERROR",
+        h2::Reason::REFUSED_STREAM => "REFUSED_STREAM",
+        h2::Reason::CANCEL => "CANCEL",
+        h2::Reason::COMPRESSION_ERROR => "COMPRESSION_ERROR",
+        h2::Reason::CONNECT_ERROR => "CONNECT_ERROR",
+        h2::Reason::ENHANCE_YOUR_CALM => "ENHANCE_YOUR_CALM",
+        h2::Reason::INADEQUATE_SECURITY => "INADEQUATE_SECURITY",
+        h2::Reason::HTTP_1_1_REQUIRED => "HTTP_1_1_REQUIRED",
+        _ => "_OTHER",
+    })
 }
 
 #[derive(Clone)]
@@ -998,32 +1075,46 @@ mod tests {
             .collect()
     }
 
-    async fn send_h2c(
+    /// Sends a request over a new h2c connection. Also returns the client connection task, which
+    /// ends once the router has closed the connection.
+    async fn try_send_h2c(
         addr: &ListenAddr,
         path: &str,
-        cookies: &[String],
-    ) -> http::Response<hyper::body::Incoming> {
+        headers: impl IntoIterator<Item = (&'static str, String)>,
+    ) -> (
+        Result<http::Response<hyper::body::Incoming>, hyper::Error>,
+        tokio::task::JoinHandle<Result<(), hyper::Error>>,
+    ) {
         let (ip, port) = addr.ip_and_port().unwrap();
         let stream = tokio::net::TcpStream::connect((ip, port)).await.unwrap();
         let (mut sender, conn) =
             hyper::client::conn::http2::handshake(TokioExecutor::new(), TokioIo::new(stream))
                 .await
                 .unwrap();
-        tokio::spawn(conn);
+        let conn = tokio::spawn(conn);
         let mut request = http::Request::builder()
             .method("POST")
             .uri(format!("http://{ip}:{port}{path}"));
-        for cookie in cookies {
-            request = request.header("cookie", cookie);
+        for (name, value) in headers {
+            request = request.header(name, value);
         }
-        sender
+        let response = sender
             .send_request(
                 request
                     .body(http_body_util::Empty::<bytes::Bytes>::new())
                     .unwrap(),
             )
-            .await
-            .unwrap()
+            .await;
+        (response, conn)
+    }
+
+    async fn send_h2c(
+        addr: &ListenAddr,
+        path: &str,
+        cookies: &[String],
+    ) -> http::Response<hyper::body::Incoming> {
+        let cookies = cookies.iter().map(|cookie| ("cookie", cookie.clone()));
+        try_send_h2c(addr, path, cookies).await.0.unwrap()
     }
 
     #[derive(Clone, Default)]
@@ -1112,5 +1203,322 @@ mod tests {
         );
 
         server.shutdown().await.unwrap();
+    }
+
+    const CONNECTION_ERRORS: &str = "apollo.router.server.connection.errors";
+
+    const H2_PREFACE_AND_SETTINGS: &[u8] = b"PRI * HTTP/2.0\r\n\r\nSM\r\n\r\n\0\0\0\x04\0\0\0\0\0";
+
+    // HTTP/2 frame types and flags (RFC 9113, section 6).
+    const HEADERS_FRAME: u8 = 0x1;
+    const GOAWAY_FRAME: u8 = 0x7;
+    const CONTINUATION_FRAME: u8 = 0x9;
+    const END_STREAM: u8 = 0x1;
+    const END_HEADERS: u8 = 0x4;
+
+    /// Writes raw HTTP/2 frames after the client preface, then reads until the router closes the
+    /// connection. Returns the error code of the GOAWAY the router sent, if any.
+    async fn send_raw_h2c(addr: &ListenAddr, frames: &[u8]) -> Option<h2::Reason> {
+        use tokio::io::AsyncWriteExt;
+
+        let (ip, port) = addr.ip_and_port().unwrap();
+        let mut stream = tokio::net::TcpStream::connect((ip, port)).await.unwrap();
+        stream.write_all(H2_PREFACE_AND_SETTINGS).await.unwrap();
+        stream.write_all(frames).await.unwrap();
+        read_until_closed(&mut stream).await
+    }
+
+    fn h2_frame(kind: u8, flags: u8, stream_id: u32, payload: &[u8]) -> Vec<u8> {
+        let mut frame = (payload.len() as u32).to_be_bytes()[1..].to_vec();
+        frame.extend([kind, flags]);
+        frame.extend(stream_id.to_be_bytes());
+        frame.extend(payload);
+        frame
+    }
+
+    /// A header block that never ends: one HEADERS frame without END_HEADERS, then 100 empty
+    /// CONTINUATION frames.
+    fn continuation_flood(stream_id: u32) -> Vec<u8> {
+        let mut frames = h2_frame(HEADERS_FRAME, END_STREAM, stream_id, &[]);
+        for _ in 0..100 {
+            frames.extend(h2_frame(CONTINUATION_FRAME, 0, stream_id, &[]));
+        }
+        frames
+    }
+
+    /// Reads one HTTP/2 frame, returning its type, stream ID and payload, or `None` at EOF.
+    async fn read_h2_frame(stream: &mut tokio::net::TcpStream) -> Option<(u8, u32, Vec<u8>)> {
+        use tokio::io::AsyncReadExt;
+
+        let mut header = [0u8; 9];
+        stream.read_exact(&mut header).await.ok()?;
+        let len = u32::from_be_bytes([0, header[0], header[1], header[2]]) as usize;
+        let stream_id = u32::from_be_bytes(header[5..9].try_into().unwrap()) & 0x7fff_ffff;
+        let mut payload = vec![0u8; len];
+        stream.read_exact(&mut payload).await.ok()?;
+        Some((header[3], stream_id, payload))
+    }
+
+    /// Returns the error code in a GOAWAY frame's payload.
+    fn go_away_reason(payload: &[u8]) -> h2::Reason {
+        h2::Reason::from(u32::from_be_bytes(payload[4..8].try_into().unwrap()))
+    }
+
+    /// Reads frames until the router closes the connection. Returns the error code of the last
+    /// GOAWAY it sent, if any.
+    async fn read_until_closed(stream: &mut tokio::net::TcpStream) -> Option<h2::Reason> {
+        let mut go_away = None;
+        while let Some((kind, _, payload)) = read_h2_frame(stream).await {
+            if kind == GOAWAY_FRAME {
+                go_away = Some(go_away_reason(&payload));
+            }
+        }
+        go_away
+    }
+
+    enum OverLimitRequest {
+        Crumbs(usize),
+        SingleHeader(usize),
+        ContinuationFlood,
+    }
+
+    /// Sends a request whose header list is over the advertised size. Returns the response status,
+    /// or the error code of the GOAWAY the router closed the connection with.
+    async fn send_over_limit(
+        addr: &ListenAddr,
+        request: OverLimitRequest,
+    ) -> Result<StatusCode, h2::Reason> {
+        let headers = match request {
+            OverLimitRequest::Crumbs(size) => cookie_crumbs(size)
+                .into_iter()
+                .map(|cookie| ("cookie", cookie))
+                .collect(),
+            OverLimitRequest::SingleHeader(size) => vec![("x-large", "v".repeat(size))],
+            OverLimitRequest::ContinuationFlood => {
+                return Err(send_raw_h2c(addr, &continuation_flood(1))
+                    .await
+                    .expect("a GOAWAY"));
+            }
+        };
+
+        let (response, conn) = try_send_h2c(addr, "/", headers).await;
+        match response {
+            Ok(response) => Ok(response.status()),
+            Err(err) => {
+                // On the current-thread runtime the router records the error in the same poll
+                // that closes the connection, so it has been recorded once the client sees EOF.
+                let _ = conn.await;
+                let h2_err =
+                    std::iter::successors(Some(&err as &(dyn std::error::Error + 'static)), |e| {
+                        e.source()
+                    })
+                    .find_map(|e| e.downcast_ref::<h2::Error>())
+                    .expect("an HTTP/2 error");
+                assert!(h2_err.is_go_away() && h2_err.is_remote(), "{h2_err:?}");
+                Err(h2_err.reason().unwrap())
+            }
+        }
+    }
+
+    /// Pins how h2 answers header lists over the advertised 64 KiB at the default limit, and that
+    /// each connection close is counted once. If an h2 upgrade changes an answer, the counter's
+    /// `error.type` values and the request-limits docs need to change with it.
+    #[rstest::rstest]
+    #[case::crumbs_just_over_the_advertised_size(
+        OverLimitRequest::Crumbs(90 * 1024),
+        Ok(StatusCode::REQUEST_HEADER_FIELDS_TOO_LARGE)
+    )]
+    #[case::crumbs_far_over_the_advertised_size(
+        OverLimitRequest::Crumbs(200 * 1024),
+        Err(h2::Reason::ENHANCE_YOUR_CALM)
+    )]
+    #[case::single_header_far_over_the_advertised_size(
+        OverLimitRequest::SingleHeader(200 * 1024),
+        Err(h2::Reason::ENHANCE_YOUR_CALM)
+    )]
+    #[case::continuation_flood(
+        OverLimitRequest::ContinuationFlood,
+        Err(h2::Reason::ENHANCE_YOUR_CALM)
+    )]
+    #[tokio::test]
+    async fn it_counts_http2_connections_closed_for_header_lists_over_the_advertised_size(
+        #[case] request: OverLimitRequest,
+        #[case] expected: Result<StatusCode, h2::Reason>,
+    ) {
+        async move {
+            let (server, _) = init_with_config(
+                router::service::empty().await,
+                Arc::new(Configuration::fake_builder().build().unwrap()),
+                MultiMap::new(),
+            )
+            .await
+            .unwrap();
+            let addr = server.graphql_listen_address().clone().unwrap();
+
+            let outcome = send_over_limit(&addr, request).await;
+            server.shutdown().await.unwrap();
+
+            assert_eq!(outcome, expected);
+            match outcome {
+                Ok(_) => assert!(
+                    crate::metrics::collect_metrics()
+                        .find(CONNECTION_ERRORS)
+                        .is_none()
+                ),
+                Err(reason) => {
+                    let (ip, port) = addr.ip_and_port().unwrap();
+                    assert_counter!(
+                        "apollo.router.server.connection.errors",
+                        1,
+                        "error.type" = http2_error_type(reason).unwrap(),
+                        "network.protocol.name" = "http",
+                        "network.protocol.version" = "2",
+                        "server.address" = ip.to_string(),
+                        "server.port" = port.to_string()
+                    );
+                }
+            }
+        }
+        .with_metrics()
+        .await;
+    }
+
+    #[tokio::test]
+    async fn it_does_not_count_http2_connections_the_client_closes_with_an_error() {
+        async {
+            let (server, _) = init_with_config(
+                router::service::empty().await,
+                Arc::new(Configuration::fake_builder().build().unwrap()),
+                MultiMap::new(),
+            )
+            .await
+            .unwrap();
+            let addr = server.graphql_listen_address().clone().unwrap();
+
+            // Last stream ID 0, error code ENHANCE_YOUR_CALM.
+            let go_away = h2_frame(GOAWAY_FRAME, 0, 0, &[0, 0, 0, 0, 0, 0, 0, 0x0b]);
+            send_raw_h2c(&addr, &go_away).await;
+            server.shutdown().await.unwrap();
+
+            assert!(
+                crate::metrics::collect_metrics()
+                    .find(CONNECTION_ERRORS)
+                    .is_none()
+            );
+        }
+        .with_metrics()
+        .await;
+    }
+
+    /// Starts a server whose only route that answers without a supergraph is `/custom`.
+    async fn init_with_custom_endpoint() -> crate::http_server_factory::HttpServerHandle {
+        let conf = Arc::new(Configuration::fake_builder().build().unwrap());
+        let endpoint = service_fn(|req: router::Request| async move {
+            router::Response::http_response_builder()
+                .response(http::Response::builder().body(body::empty())?)
+                .context(req.context)
+                .build()
+        })
+        .boxed();
+        let mut web_endpoints = MultiMap::new();
+        web_endpoints.insert(
+            conf.supergraph.listen.clone(),
+            Endpoint::from_router_service("/custom".to_string(), endpoint),
+        );
+        init_with_config(router::service::empty().await, conf, web_endpoints)
+            .await
+            .unwrap()
+            .0
+    }
+
+    #[tokio::test]
+    async fn it_does_not_count_http2_connections_closed_by_graceful_shutdown() {
+        async {
+            let server = init_with_custom_endpoint().await;
+            let addr = server.graphql_listen_address().clone().unwrap();
+
+            // One served request, so the shutdown branch waits for the connection to close.
+            let (response, conn) = try_send_h2c(&addr, "/custom", []).await;
+            assert_eq!(response.unwrap().status(), StatusCode::OK);
+
+            server.shutdown().await.unwrap();
+            // The router sends GOAWAY NO_ERROR and closes the connection, which ends the client's
+            // connection task.
+            conn.await.unwrap().unwrap();
+
+            assert!(
+                crate::metrics::collect_metrics()
+                    .find(CONNECTION_ERRORS)
+                    .is_none()
+            );
+        }
+        .with_metrics()
+        .await;
+    }
+
+    #[tokio::test]
+    async fn it_counts_http2_connections_closed_with_an_error_during_graceful_shutdown() {
+        async {
+            use tokio::io::AsyncWriteExt;
+
+            let server = init_with_custom_endpoint().await;
+            let addr = server.graphql_listen_address().clone().unwrap();
+            let (ip, port) = addr.ip_and_port().unwrap();
+            let mut stream = tokio::net::TcpStream::connect((ip, port)).await.unwrap();
+            stream.write_all(H2_PREFACE_AND_SETTINGS).await.unwrap();
+
+            // GET /custom on stream 1, HPACK-encoded with the static table: :method GET,
+            // :scheme http, then :path as a literal.
+            let mut block = vec![0x82, 0x86, 0x04, 7];
+            block.extend(b"/custom");
+            let request = h2_frame(HEADERS_FRAME, END_HEADERS | END_STREAM, 1, &block);
+            stream.write_all(&request).await.unwrap();
+            while let Some((kind, stream_id, _)) = read_h2_frame(&mut stream).await {
+                if kind == HEADERS_FRAME && stream_id == 1 {
+                    break;
+                }
+            }
+
+            // Graceful shutdown starts with a GOAWAY NO_ERROR. This client never answers the
+            // PING that follows, so the router keeps reading frames from it.
+            server.shutdown().await.unwrap();
+            loop {
+                let (kind, _, payload) = read_h2_frame(&mut stream).await.expect("a GOAWAY");
+                if kind == GOAWAY_FRAME {
+                    assert_eq!(go_away_reason(&payload), h2::Reason::NO_ERROR);
+                    break;
+                }
+            }
+
+            stream.write_all(&continuation_flood(3)).await.unwrap();
+            // On the current-thread runtime the router records the error in the same poll
+            // that closes the connection, so it has been recorded once the client sees EOF.
+            assert_eq!(
+                read_until_closed(&mut stream).await,
+                Some(h2::Reason::ENHANCE_YOUR_CALM)
+            );
+
+            assert_counter!(
+                "apollo.router.server.connection.errors",
+                1,
+                "error.type" = "ENHANCE_YOUR_CALM",
+                "network.protocol.name" = "http",
+                "network.protocol.version" = "2",
+                "server.address" = ip.to_string(),
+                "server.port" = port.to_string()
+            );
+        }
+        .with_metrics()
+        .await;
+    }
+
+    #[test]
+    fn http2_error_type_skips_no_error_and_bounds_unknown_codes() {
+        assert_eq!(http2_error_type(h2::Reason::NO_ERROR), None);
+        assert_eq!(
+            http2_error_type(h2::Reason::COMPRESSION_ERROR),
+            Some("COMPRESSION_ERROR")
+        );
+        assert_eq!(http2_error_type(h2::Reason::from(0xff)), Some("_OTHER"));
     }
 }
