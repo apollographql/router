@@ -250,9 +250,7 @@ fn default_enable_directives() -> bool {
 }
 
 pub(crate) struct AuthorizationPlugin {
-    require_authentication: bool,
-    reject_unauthorized: bool,
-    directives_enabled: bool,
+    config: Conf,
     supergraph_schema: Arc<Valid<apollo_compiler::Schema>>,
     directives: AuthorizationDirectives,
 }
@@ -293,7 +291,7 @@ impl AuthorizationPlugin {
     /// layers above are provided under this one condition, so a document reaching the
     /// router-service layer always went through the requirements layer.
     fn directives_in_effect(&self) -> bool {
-        self.directives_enabled && self.directives.any_linked()
+        self.config.directives.enabled && self.directives.any_linked()
     }
 
     pub(crate) fn configuration(configuration: &Configuration) -> Conf {
@@ -420,12 +418,12 @@ impl AuthorizationPlugin {
     }
 
     pub(crate) fn filter_query(
-        configuration: &Conf,
+        config: &Conf,
         key: &QueryKey,
         schema: &Schema,
         directives: &AuthorizationDirectives,
     ) -> Result<FilterResult, QueryPlannerError> {
-        let dry_run = configuration.directives.dry_run;
+        let dry_run = config.directives.dry_run;
 
         // The filtered query will then be used
         // to generate selections for response formatting, to execute introspection and
@@ -667,12 +665,12 @@ impl PluginPrivate for AuthorizationPlugin {
     }
 
     async fn new(init: PluginInit<Self::Config>) -> Result<Self, BoxError> {
+        let directives = AuthorizationDirectives::from_schema(&init.supergraph_schema);
+
         Ok(AuthorizationPlugin {
-            require_authentication: init.config.require_authentication,
-            reject_unauthorized: init.config.directives.reject_unauthorized,
-            directives_enabled: init.config.directives.enabled,
-            directives: AuthorizationDirectives::from_schema(&init.supergraph_schema),
+            config: init.config,
             supergraph_schema: init.supergraph_schema,
+            directives,
         })
     }
 
@@ -680,7 +678,7 @@ impl PluginPrivate for AuthorizationPlugin {
         &self,
         service: supergraph::BoxCloneService,
     ) -> supergraph::BoxCloneService {
-        if self.require_authentication {
+        if self.config.require_authentication {
             ServiceBuilder::new()
                 .checkpoint_async(move |request: supergraph::Request| async move {
                     // Whether to reject unauthenticated requests is an authorization policy,
@@ -716,7 +714,7 @@ impl PluginPrivate for AuthorizationPlugin {
         if !self.directives_in_effect() {
             return service;
         }
-        let reject_unauthorized = self.reject_unauthorized;
+        let reject_unauthorized = self.config.directives.reject_unauthorized;
 
         ServiceBuilder::new()
             // Ahead of the counter below, so a refused operation stays uncounted.
