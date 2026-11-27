@@ -2851,10 +2851,8 @@ impl FetchDependencyGraphNode {
     fn remove_inputs_from_selection(&mut self) -> Result<(), FederationError> {
         if let Some(inputs) = &mut self.inputs {
             self.cached_cost = None;
-            let fetch_selection_set = &mut self.selection_set;
             for (_, selection) in &inputs.selection_sets_per_parent_type {
-                fetch_selection_set.selection_set =
-                    Arc::new(fetch_selection_set.selection_set.minus(selection)?);
+                self.selection_set.remove_selections(selection)?;
             }
         }
         Ok(())
@@ -3530,6 +3528,12 @@ impl FetchSelectionSet {
 
     fn add_selections(&mut self, selection_set: &Arc<SelectionSet>) -> Result<(), FederationError> {
         Arc::make_mut(&mut self.selection_set).add_selection_set(selection_set)?;
+        self.conditions.take();
+        Ok(())
+    }
+
+    fn remove_selections(&mut self, selection_set: &SelectionSet) -> Result<(), FederationError> {
+        self.selection_set = Arc::new(self.selection_set.minus(selection_set)?);
         self.conditions.take();
         Ok(())
     }
@@ -5537,6 +5541,7 @@ fn path_for_parent(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::schema::field_set::parse_field_set;
 
     #[test]
     fn type_condition_fetching_disabled() {
@@ -5790,6 +5795,60 @@ mod tests {
                 defer_ref.map(String::from),
             )
             .unwrap()
+    }
+
+    #[test]
+    fn removing_inputs_recomputes_warmed_conditions() {
+        for (selected, removed) in [("id", "id"), ("id v1 @include(if: false)", "id")] {
+            let mut graph = make_test_dep_graph();
+            let node_id = add_test_node(&mut graph, "Subgraph2", None);
+            let schema = graph
+                .federated_query_graph
+                .schema_by_source("Subgraph2")
+                .expect("test graph has Subgraph2")
+                .clone();
+            let parent = schema
+                .get_type(&name!("T"))
+                .expect("Subgraph2 defines T")
+                .try_into()
+                .expect("T is a composite type");
+            let selection =
+                SelectionSet::parse(schema, parent, selected).expect("selection parses");
+            let inputs = parse_field_set(&graph.supergraph_schema, name!("T"), removed, true)
+                .expect("input field set parses");
+            let node = Arc::make_mut(graph.graph.node_weight_mut(node_id).expect("node exists"));
+            node.selection_set_mut()
+                .add_selections(&Arc::new(selection))
+                .expect("selection is added");
+            node.add_inputs(&inputs, iter::empty())
+                .expect("inputs are added");
+            assert_eq!(
+                node.selection_set.conditions().expect("conditions compute"),
+                &Conditions::always()
+            );
+
+            graph
+                .remove_inputs_from_selection(node_id)
+                .expect("inputs are removed");
+
+            let node = &graph.graph[node_id];
+            let expected = node
+                .selection_set
+                .selection_set
+                .conditions()
+                .expect("fresh conditions compute");
+            assert_ne!(expected, Conditions::always());
+            assert_eq!(
+                node.selection_set.selection_set.is_empty(),
+                selected == "id"
+            );
+            assert_eq!(
+                node.selection_set
+                    .conditions()
+                    .expect("cached conditions compute"),
+                &expected
+            );
+        }
     }
 
     fn add_test_edge(graph: &mut FetchDependencyGraph, from: NodeIndex, to: NodeIndex) {
