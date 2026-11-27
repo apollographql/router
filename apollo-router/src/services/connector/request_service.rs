@@ -17,6 +17,7 @@ use apollo_federation::connectors::runtime::key::ResponseKey;
 use apollo_federation::connectors::runtime::mapping::Problem;
 use apollo_federation::connectors::runtime::responses::MappedResponse;
 use apollo_federation::connectors::runtime::responses::handle_mapping_only_response;
+use apollo_federation::connectors::runtime::responses::handle_requires_not_met;
 use futures::future::BoxFuture;
 use indexmap::IndexMap;
 use opentelemetry::KeyValue;
@@ -163,6 +164,10 @@ pub enum TransportOutcome {
     /// headers, but for an entirely different reason — this connector never has a transport,
     /// whereas a cache hit skipped one it normally makes.
     MappingOnly,
+
+    /// The connector's `requires` precondition was not met, so no request was made at all.
+    /// CNN-474 proof of concept.
+    Skipped,
 
     /// The connector call was attempted and failed at the transport level.
     Error(Error),
@@ -444,6 +449,15 @@ impl tower::Service<Request> for ConnectorRequestService {
 
         Box::pin(async move {
             match request.transport_request {
+                // CNN-474 proof of concept: `requires` precondition wasn't met, so no
+                // request is made at all — not even the mapping-only `{}` selection.
+                TransportRequest::Skipped => Ok(Response {
+                    context: request.context,
+                    subgraph_name: original_subgraph_name,
+                    transport_outcome: TransportOutcome::Skipped,
+                    mapped_response: handle_requires_not_met(request.key),
+                }),
+
                 // For mapping-only connectors, skip HTTP entirely and apply the selection against {}
                 TransportRequest::MappingOnly => {
                     let mapped = handle_mapping_only_response(

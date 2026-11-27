@@ -49,6 +49,12 @@ pub enum TransportRequest {
     /// A mapping-only request that skips the HTTP transport entirely.
     /// The selection is applied against an empty object `{}`.
     MappingOnly,
+    /// A `requires` precondition on the connector was not met (some
+    /// `$this`/`$args`/`$config`/`$context` path it names was null or
+    /// missing), so no request is made at all — the field resolves to
+    /// `null` (or `[]` for a batch entity) directly. CNN-474 proof of
+    /// concept.
+    Skipped,
 }
 
 /// Response from an underlying transport
