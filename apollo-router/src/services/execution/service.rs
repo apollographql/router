@@ -37,6 +37,7 @@ use crate::json_ext::Path;
 use crate::json_ext::PathElement;
 use crate::json_ext::ValueExt;
 use crate::plugins::authentication::APOLLO_AUTHENTICATION_JWT_CLAIMS;
+use crate::plugins::authorization::AuthorizationPlugin;
 use crate::plugins::subscription::SubscriptionConfig;
 use crate::plugins::telemetry::config::ApolloMetricsReferenceMode;
 use crate::query_planner::SubgraphSchemas;
@@ -176,14 +177,15 @@ impl ExecutionService {
             return ExecutionResponse::new_from_response(http::Response::new(stream as _), ctx);
         }
 
+        let configuration = self.configuration.clone();
         let schema = self.schema.clone();
+
         let mut nullified_paths: Vec<Path> = vec![];
 
         let metrics_ref_mode = self.metrics_reference_mode;
 
         let execution_span = Span::current();
-        let insert_result_coercion_errors =
-            self.configuration.supergraph.enable_result_coercion_errors;
+        let insert_result_coercion_errors = configuration.supergraph.enable_result_coercion_errors;
 
         let stream = stream
             .map(move |mut response: Response| {
@@ -228,6 +230,7 @@ impl ExecutionService {
             .filter_map(move |response: Response| {
                 ready(execution_span.in_scope(|| {
                     Self::process_graphql_response(
+                        &configuration,
                         &query,
                         &supergraph_request.body().variables,
                         is_deferred,
@@ -247,6 +250,7 @@ impl ExecutionService {
 
     #[allow(clippy::too_many_arguments)]
     fn process_graphql_response(
+        configuration: &Configuration,
         query: &Arc<Query>,
         variables: &Object,
         is_deferred: bool,
@@ -287,12 +291,11 @@ impl ExecutionService {
         let variables_set = query.defer_variables_set(variables);
 
         let deferred_responses = tracing::debug_span!("format_response").in_scope(|| {
-            if !query.unauthorized.paths.is_empty() {
-                query.unauthorized.log_unauthorized_paths();
-                query
-                    .unauthorized
-                    .update_response_with_unauthorized_path_errors(&mut response);
-            }
+            AuthorizationPlugin::report_authorization_errors(
+                configuration,
+                &query.unauthorized,
+                &mut response,
+            );
 
             // A response with a path is a deferred response, which is formatted as a response
             // for each object its `@defer` applies to.
@@ -983,6 +986,7 @@ mod tests {
 
         let context = crate::Context::new();
         ExecutionService::process_graphql_response(
+            &configuration,
             &Arc::new(query),
             &Object::new(),
             true,
@@ -1031,6 +1035,7 @@ mod tests {
                 .data(data)
                 .build();
             ExecutionService::process_graphql_response(
+                &configuration,
                 &query,
                 &Object::new(),
                 true,

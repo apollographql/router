@@ -37,7 +37,6 @@ use crate::plugins::authorization;
 use crate::plugins::authorization::AuthorizationPlugin;
 use crate::plugins::authorization::CacheKeyMetadata;
 use crate::plugins::authorization::FilterResult;
-use crate::plugins::authorization::UnauthorizedPaths;
 use crate::plugins::telemetry::config::ApolloSignatureNormalizationAlgorithm;
 use crate::plugins::telemetry::config::Conf as TelemetryConfig;
 use crate::query_planner::HashedSubgraphSchemas;
@@ -319,10 +318,7 @@ impl QueryPlannerService {
             fragments,
             operation,
             filtered_query: None,
-            unauthorized: UnauthorizedPaths {
-                paths: vec![],
-                errors: self.authorization_config.error_config(),
-            },
+            unauthorized: Default::default(),
             subselections,
             defer_stats,
             is_original: true,
