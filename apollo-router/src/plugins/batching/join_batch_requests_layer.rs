@@ -94,9 +94,9 @@ where
             return Box::pin(self.inner.call(req));
         };
 
-        // The batching worker calls this service without readying it, so it must get the one
-        // `poll_ready` readied.
         let inner = self.inner.clone();
+        // We'll send this readied, type-erased inner service to the batching worker.
+        // Only one of the inner services will actually be called
         let inner = std::mem::replace(&mut self.inner, inner).boxed_clone();
         let subgraph_name = self.subgraph_name.clone();
         let metrics = self.metrics.clone();
