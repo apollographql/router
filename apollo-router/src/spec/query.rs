@@ -62,7 +62,6 @@ pub(crate) const EXTENSIONS_VALUE_COMPLETION_KEY: &str = "valueCompletion";
 /// A GraphQL query.
 #[derive(Debug, Serialize, Deserialize)]
 pub(crate) struct Query {
-    pub(crate) string: String,
     pub(crate) fragments: Fragments,
     pub(crate) operation: Operation,
     pub(crate) subselections: HashMap<SubSelectionKey, SubSelectionValue>,
@@ -96,7 +95,6 @@ impl Query {
     /// FIXME: This should be marked cfg(test) but it's used in places where adding cfg(test) is tricky.
     pub(crate) fn empty_for_tests() -> Self {
         Self {
-            string: String::new(),
             fragments: Fragments {
                 map: HashMap::new(),
             },
@@ -331,7 +329,6 @@ impl Query {
             Self::extract_query_information(schema, &query_text, &doc.executable, operation_name)?;
 
         Ok(Query {
-            string: query_text,
             fragments,
             operation,
             subselections: HashMap::new(),

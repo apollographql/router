@@ -1,4 +1,3 @@
-use apollo_compiler::parser::Parser;
 use insta::assert_json_snapshot;
 use serde_json_bytes::json;
 use test_log::test;
@@ -7765,6 +7764,7 @@ const AUTHENTICATED_INTERFACE_SCHEMA: &str = r#"
 
     type Query @join__type(graph: TEST) {
         thing: Thing
+        concreteFoo: Foo
     }
 
     interface Thing @join__type(graph: TEST) {
@@ -7778,6 +7778,7 @@ const AUTHENTICATED_INTERFACE_SCHEMA: &str = r#"
         inline: String
         spread: String
         secret: String @authenticated
+        required: String! @authenticated
     }
 "#;
 
@@ -7823,7 +7824,11 @@ async fn authorization_filtered_query(query_str: &str) -> (Arc<Query>, Arc<Schem
 
 /// Formats `data` through [`Query::format_response_filtered_then_original`] and returns
 /// the resulting `thing` object.
-fn format_filtered_then_original(query: &Query, schema: &Schema, data: Value) -> Value {
+fn format_filtered_then_original(
+    query: &Query,
+    schema: &Schema,
+    data: Value,
+) -> crate::graphql::Response {
     let mut response = crate::graphql::Response::builder().data(data).build();
 
     query.format_response_filtered_then_original(
@@ -7835,12 +7840,6 @@ fn format_filtered_then_original(query: &Query, schema: &Schema, data: Value) ->
     );
 
     response
-        .data
-        .as_ref()
-        .unwrap()
-        .get("thing")
-        .unwrap()
-        .clone()
 }
 
 /// Double-applying response formatting on an abstract type should apply the
@@ -7858,11 +7857,13 @@ async fn filtered_inline_fragment_on_abstract_type() {
         authorization_filtered_query("{ thing { id ... on Foo { inline secret } } }").await;
 
     // What the subgraph returns for the filtered plan: `secret` was never requested.
-    let thing = format_filtered_then_original(
+    let response = format_filtered_then_original(
         &query,
         &schema,
         json! {{ "thing": { "__typename": "Foo", "id": "1", "inline": "inline" } }},
     );
+
+    let thing = response.data.as_ref().unwrap().get("thing").unwrap();
 
     assert_eq!(thing.get("inline"), Some(&json!("inline")));
 }
@@ -7876,148 +7877,28 @@ async fn filtered_fragment_spread_on_abstract_type() {
     )
     .await;
 
-    let thing = format_filtered_then_original(
+    let response = format_filtered_then_original(
         &query,
         &schema,
         json! {{ "thing": { "__typename": "Foo", "id": "1", "spread": "spread" } }},
     );
 
+    let thing = response.data.as_ref().unwrap().get("thing").unwrap();
+
     assert_eq!(thing.get("spread"), Some(&json!("spread")));
 }
 
-#[test]
-fn filtered_defer_fragment() {
-    let config = Configuration::default();
-    let schema = Schema::parse(
-        r#"
-        schema
-            @link(url: "https://specs.apollo.dev/link/v1.0")
-            @link(url: "https://specs.apollo.dev/join/v0.3", for: EXECUTION)
-        {
-            query: Query
-        }
-        directive @link(url: String, as: String, for: link__Purpose, import: [link__Import]) repeatable on SCHEMA
-        directive @join__graph(name: String!, url: String!) on ENUM_VALUE
-        directive @join__type(graph: join__Graph!, key: join__FieldSet, extension: Boolean! = false, resolvable: Boolean! = true, isInterfaceObject: Boolean! = false) repeatable on OBJECT | INTERFACE | UNION | ENUM | INPUT_OBJECT | SCALAR
-
-        scalar join__FieldSet
-        scalar link__Import
-
-        enum link__Purpose {
-          SECURITY
-          EXECUTION
-        }
-        enum join__Graph {
-            TEST @join__graph(name: "test", url: "http://localhost:4001/graphql")
-        }
-
-        type Query @join__type(graph: TEST) {
-            a: A
-        }
-
-        type A {
-            b: String
-            c: String!
-        }
-        "#,
-        &Default::default(),
+#[tokio::test]
+async fn filtered_defer_fragment() {
+    // `required` is authenticated, so filtering drops it, but it's in a `@defer` so it shouldn't
+    // null-propagate up to `thing`.
+    let (query, schema) = authorization_filtered_query(
+        r#"{ concreteFoo { id ... @defer(label: "A") { required } } }"#,
     )
-    .unwrap();
-    let query = r#"{
-        a {
-          b
-          ... @defer(label: "A") {
-            c
-          }
-        }
-      }"#;
+    .await;
 
-    let filtered_query = "{
-        a {
-          b
-        }
-      }";
-
-    let ast = Parser::new()
-        .parse_ast(filtered_query, "filtered_query.graphql")
-        .unwrap();
-    let doc = ast.to_executable(schema.supergraph_schema()).unwrap();
-    let (fragments, operation, defer_stats, schema_aware_hash) =
-        Query::extract_query_information(&schema, filtered_query, &doc, None).unwrap();
-
-    let subselections = crate::spec::query::subselections::collect_subselections(
-        &config,
-        &operation,
-        &fragments.map,
-        &defer_stats,
-    )
-    .unwrap();
-    let mut query = Query {
-        string: query.to_string(),
-        fragments,
-        operation,
-        filtered_query: None,
-        subselections,
-        defer_stats,
-        is_original: true,
-        unauthorized: UnauthorizedPaths::default(),
-        schema_aware_hash,
-    };
-
-    let ast = Parser::new()
-        .parse_ast(filtered_query, "filtered_query.graphql")
-        .unwrap();
-    let doc = ast.to_executable(schema.supergraph_schema()).unwrap();
-    let (fragments, operation, defer_stats, schema_aware_hash) =
-        Query::extract_query_information(&schema, filtered_query, &doc, None).unwrap();
-
-    let subselections = crate::spec::query::subselections::collect_subselections(
-        &config,
-        &operation,
-        &fragments.map,
-        &defer_stats,
-    )
-    .unwrap();
-
-    let filtered = Query {
-        string: filtered_query.to_string(),
-        fragments,
-        operation,
-        filtered_query: None,
-        subselections,
-        defer_stats,
-        is_original: false,
-        unauthorized: UnauthorizedPaths::default(),
-        schema_aware_hash,
-    };
-
-    query.filtered_query = Some(Arc::new(filtered));
-
-    let mut response = crate::graphql::Response::builder()
-        .data(json! {{
-            "a": {
-                "b": "b",
-              }
-        }})
-        .build();
-
-    query.filtered_query.as_ref().unwrap().format_response(
-        &mut response,
-        &Object::new(),
-        schema.api_schema(),
-        BooleanValues { bits: 0 },
-        true,
-    );
-
-    assert_json_snapshot!(response);
-
-    query.format_response(
-        &mut response,
-        &Object::new(),
-        schema.api_schema(),
-        BooleanValues { bits: 0 },
-        true,
-    );
+    let response =
+        format_filtered_then_original(&query, &schema, json! {{ "concreteFoo": { "id": "1" } }});
 
     assert_json_snapshot!(response);
 }
