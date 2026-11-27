@@ -301,14 +301,13 @@ impl QueryPlannerService {
 
     async fn parse_selections(
         &self,
-        query: &str,
         operation_name: Option<&str>,
         doc: &ParsedDocument,
     ) -> Result<Query, QueryPlannerError> {
         let executable = &doc.executable;
 
-        let (fragments, operation, defer_stats, schema_aware_hash) =
-            Query::extract_query_information(&self.schema, query, executable, operation_name)?;
+        let (fragments, operation, defer_stats) =
+            Query::extract_query_information(&self.schema, executable, operation_name)?;
 
         let subselections = crate::spec::query::subselections::collect_subselections(
             &self.configuration,
@@ -327,7 +326,6 @@ impl QueryPlannerService {
             subselections,
             defer_stats,
             is_original: true,
-            schema_aware_hash,
         })
     }
 
@@ -534,7 +532,7 @@ impl QueryPlannerService {
         compute_job_type: ComputeJobType,
     ) -> Result<QueryPlannerContent, MaybeBackPressureError<QueryPlannerError>> {
         let mut selections = self
-            .parse_selections(&key.original_query, key.operation_name.as_deref(), &doc)
+            .parse_selections(key.operation_name.as_deref(), &doc)
             .await?;
 
         // TODO(@goto-bus-stop): this is not a query planning concern
@@ -600,7 +598,7 @@ impl QueryPlannerService {
 
         if key.filtered_query != key.original_query {
             let mut filtered = self
-                .parse_selections(&key.filtered_query, key.operation_name.as_deref(), &doc)
+                .parse_selections(key.operation_name.as_deref(), &doc)
                 .await?;
             filtered.is_original = false;
             selections.filtered_query = Some(Arc::new(filtered));

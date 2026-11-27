@@ -506,8 +506,8 @@ mod tests {
         )
         .unwrap();
         let doc = Query::parse_document(query, None, &schema, &configuration).unwrap();
-        let (fragments, operation, defer_stats, _) =
-            Query::extract_query_information(&schema, query, &doc.executable, None).unwrap();
+        let (fragments, operation, defer_stats) =
+            Query::extract_query_information(&schema, &doc.executable, None).unwrap();
         let subselections =
             collect_subselections(&configuration, &operation, &fragments.map, &defer_stats)
                 .unwrap();
