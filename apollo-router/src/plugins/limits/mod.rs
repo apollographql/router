@@ -34,8 +34,8 @@ use crate::plugins::limits::layer::RequestBodyLimitLayer;
 use crate::plugins::limits::layer::RequestSizeLimitError;
 use crate::plugins::limits::measure_operation_limits::MeasureOperationLimitsLayer;
 use crate::plugins::limits::operation_limits_layer::EnforceOperationLimitsLayer;
+use crate::plugins::limits::response_size_limit::ResponseSizeLimitLayer;
 use crate::plugins::limits::response_size_limit::SubgraphResponseSizeLimit;
-use crate::plugins::limits::response_size_limit::SubgraphResponseSizeLimitLayer;
 use crate::services::SubgraphRequest;
 use crate::services::connector;
 use crate::services::query_parsing::recursive_selections_limit::LimitRecursiveSelectionLayer;
@@ -309,14 +309,14 @@ impl LimitsPlugin {
     pub(crate) fn subgraph_response_size_limit_layer(
         &self,
         name: &str,
-    ) -> OptionLayer<SubgraphResponseSizeLimitLayer> {
+    ) -> OptionLayer<ResponseSizeLimitLayer> {
         // Kept for every subgraph once any has a limit, not only for subgraphs with their own:
         // the check enforces whichever limit a subgraph call last put in the request context,
         // which also reaches later calls to other subgraphs in the same request.
         option_layer(
             self.config
                 .has_subgraph_response_size_limit()
-                .then(|| SubgraphResponseSizeLimitLayer::new(name)),
+                .then(|| ResponseSizeLimitLayer::new(name)),
         )
     }
 }

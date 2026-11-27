@@ -38,11 +38,11 @@ pub(crate) struct ResponseSizeLimitError {
 /// # Metrics
 /// Emits `apollo.router.limits.subgraph_response_size.exceeded` when the limit is hit.
 #[derive(Clone)]
-pub(crate) struct SubgraphResponseSizeLimitLayer {
+pub(crate) struct ResponseSizeLimitLayer {
     subgraph_name: Arc<str>,
 }
 
-impl SubgraphResponseSizeLimitLayer {
+impl ResponseSizeLimitLayer {
     pub(crate) fn new(subgraph_name: impl Into<Arc<str>>) -> Self {
         Self {
             subgraph_name: subgraph_name.into(),
@@ -50,11 +50,11 @@ impl SubgraphResponseSizeLimitLayer {
     }
 }
 
-impl<S> Layer<S> for SubgraphResponseSizeLimitLayer {
-    type Service = SubgraphResponseSizeLimitService<S>;
+impl<S> Layer<S> for ResponseSizeLimitLayer {
+    type Service = ResponseSizeLimitService<S>;
 
     fn layer(&self, inner: S) -> Self::Service {
-        SubgraphResponseSizeLimitService {
+        ResponseSizeLimitService {
             inner,
             subgraph_name: self.subgraph_name.clone(),
         }
@@ -62,12 +62,12 @@ impl<S> Layer<S> for SubgraphResponseSizeLimitLayer {
 }
 
 #[derive(Clone)]
-pub(crate) struct SubgraphResponseSizeLimitService<S> {
+pub(crate) struct ResponseSizeLimitService<S> {
     inner: S,
     subgraph_name: Arc<str>,
 }
 
-impl<S> Service<HttpRequest> for SubgraphResponseSizeLimitService<S>
+impl<S> Service<HttpRequest> for ResponseSizeLimitService<S>
 where
     S: Service<HttpRequest, Response = HttpResponse, Error = BoxError>,
     S::Future: Send + 'static,
@@ -168,7 +168,7 @@ mod tests {
         });
 
         let service = ServiceBuilder::new()
-            .layer(SubgraphResponseSizeLimitLayer::new(SUBGRAPH_NAME))
+            .layer(ResponseSizeLimitLayer::new(SUBGRAPH_NAME))
             .service(mock);
 
         let response = service.oneshot(request_with_limit(LIMIT)).await.unwrap();
@@ -194,7 +194,7 @@ mod tests {
         });
 
         let service = ServiceBuilder::new()
-            .layer(SubgraphResponseSizeLimitLayer::new(SUBGRAPH_NAME))
+            .layer(ResponseSizeLimitLayer::new(SUBGRAPH_NAME))
             .service(mock);
 
         let request = HttpRequest {
@@ -229,7 +229,7 @@ mod tests {
             });
 
             let service = ServiceBuilder::new()
-                .layer(SubgraphResponseSizeLimitLayer::new(SUBGRAPH_NAME))
+                .layer(ResponseSizeLimitLayer::new(SUBGRAPH_NAME))
                 .service(mock);
 
             let response = service.oneshot(request_with_limit(LIMIT)).await.unwrap();
