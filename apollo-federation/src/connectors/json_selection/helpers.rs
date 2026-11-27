@@ -219,8 +219,30 @@ pub(crate) fn quote_if_necessary(input: &str) -> String {
     {
         input.to_string()
     } else {
-        serde_json_bytes::Value::String(input.into()).to_string()
+        quote_string_literal(input)
     }
+}
+
+/// Prints `value` as a double-quoted `LitString` that parses back to `value`.
+///
+/// The `LitString` parser (`parse_string_literal`) reads a backslash as
+/// escaping the following character, with `\n` as the only named escape (a
+/// newline). Every other character, including control characters, may appear
+/// raw. JSON string escaping must not be used here: `\t`, `\r`, `\u0000` and
+/// friends would be read back as `t`, `r`, `u0000`, changing the value.
+pub(crate) fn quote_string_literal(value: &str) -> String {
+    let mut quoted = String::with_capacity(value.len() + 2);
+    quoted.push('"');
+    for c in value.chars() {
+        match c {
+            '"' => quoted.push_str("\\\""),
+            '\\' => quoted.push_str("\\\\"),
+            '\n' => quoted.push_str("\\n"),
+            _ => quoted.push(c),
+        }
+    }
+    quoted.push('"');
+    quoted
 }
 
 /// A helper to call `assert_snapshot!` without prepending the module, since prepending the
