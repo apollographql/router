@@ -140,16 +140,32 @@ pub(crate) fn build_query_planner_service(
     .boxed_clone()
 }
 
-/// Builds the HTTP client service stack for one target around the [`HttpClientService`]
-/// built from `inputs`.
-///
-/// `name` is the subgraph name — for a connector source's client, the name of the
-/// subgraph that owns the source — and is what the plugin hook receives.
+/// What an HTTP client built by [`build_http_client_service`] calls.
+#[derive(Clone, Copy, Debug)]
+pub(crate) enum HttpClientTarget<'a> {
+    Subgraph(&'a str),
+    /// A connector source, keyed by `<subgraph name>.<source name>`.
+    ConnectorSource(&'a str),
+}
+
+impl HttpClientTarget<'_> {
+    /// The subgraph the client belongs to, which is what the plugin hook receives.
+    fn subgraph_name(&self) -> &str {
+        match self {
+            Self::Subgraph(name) => name,
+            Self::ConnectorSource(source) => source.split('.').next().unwrap_or(source),
+        }
+    }
+}
+
+/// Builds the HTTP client service stack for `target` around the [`HttpClientService`] built
+/// from `inputs`.
 pub(crate) fn build_http_client_service(
-    name: &str,
+    target: HttpClientTarget<'_>,
     inputs: HttpClientInputs,
     plugins: Arc<Plugins>,
 ) -> http::BoxCloneService {
+    let name = target.subgraph_name();
     ServiceBuilder::new()
         .apply_required_plugin_layer(&plugins, |b: &BatchingPlugin| {
             b.join_batch_requests_layer(name)
@@ -183,17 +199,22 @@ pub(crate) fn build_http_services(
     let subgraph_services = subgraph_inputs
         .into_iter()
         .map(|(name, inputs)| {
-            let service = build_http_client_service(&name, inputs, plugins.clone());
+            let service = build_http_client_service(
+                HttpClientTarget::Subgraph(&name),
+                inputs,
+                plugins.clone(),
+            );
             (name, service)
         })
         .collect();
     let connector_services = connector_inputs
         .into_iter()
         .map(|(source, inputs)| {
-            // source_config_key() format is "{subgraph_name}.{source_or_synthetic}"; the
-            // http_client_service plugin hook receives the subgraph name, not the source key.
-            let subgraph_name = source.split('.').next().unwrap_or(&source);
-            let service = build_http_client_service(subgraph_name, inputs, plugins.clone());
+            let service = build_http_client_service(
+                HttpClientTarget::ConnectorSource(&source),
+                inputs,
+                plugins.clone(),
+            );
             (source, service)
         })
         .collect();

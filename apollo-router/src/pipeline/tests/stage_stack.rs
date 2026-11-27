@@ -12,6 +12,7 @@ use tower::ServiceExt;
 use tower_test::mock::Mock;
 
 use crate::Configuration;
+use crate::pipeline::HttpClientTarget;
 use crate::pipeline::build_connector_request_services;
 use crate::pipeline::build_http_client_service;
 use crate::pipeline::build_subgraph_services;
@@ -186,7 +187,7 @@ pub(crate) async fn test_http_client_service_with_limits(
     )
     .unwrap();
     build_http_client_service(
-        name,
+        HttpClientTarget::Subgraph(name),
         inputs,
         required_stage_plugins_with_limits(limits).await,
     )
