@@ -614,3 +614,62 @@ telemetry:
           attributes:
             subgraph.name: true
 ```
+
+### Count HTTP requests by status code
+
+To track how many HTTP requests the router handles for each response status code, use the standard `http.server.request.duration` instrument. A histogram records a count of its measurements alongside the measurements themselves, so the count of `http.server.request.duration` is the number of requests the router handled. With the default `default_requirement_level` of `required`, this instrument already has the `http.response.status_code` attribute, so you can group the count by status code in your APM.
+
+To keep the attribute enabled regardless of `default_requirement_level`, set it explicitly:
+
+```yaml title="router.yaml"
+telemetry:
+  instrumentation:
+    instruments:
+      router:
+        http.server.request.duration:
+          attributes:
+            http.response.status_code: true
+```
+
+For example, the Prometheus exporter exposes the count as `http_server_request_duration_seconds_count`, which you can query with `sum by (http_response_status_code) (rate(http_server_request_duration_seconds_count[5m]))`.
+
+If you prefer a dedicated counter, define a [custom instrument](#custom-instruments) with `value: unit` and attach the status code as an attribute. The following example defines three counters:
+
+- `acme.router.requests` counts every request the router handles, grouped by status code.
+- `acme.router.server_errors` counts only requests with a `5xx` status code, using a [`condition`](#condition).
+- `acme.subgraph.requests` counts requests to each subgraph, grouped by the status code the subgraph returns.
+
+```yaml title="router.yaml"
+telemetry:
+  instrumentation:
+    instruments:
+      router:
+        acme.router.requests:
+          value: unit
+          type: counter
+          unit: "{request}"
+          description: "Number of HTTP requests by response status code"
+          attributes:
+            http.response.status_code: true
+        acme.router.server_errors:
+          value: unit
+          type: counter
+          unit: "{request}"
+          description: "Number of HTTP requests with a 5xx response status code"
+          condition:
+            gt:
+              - response_status: code
+              - 499
+          attributes:
+            http.response.status_code: true
+      subgraph:
+        acme.subgraph.requests:
+          value: unit
+          type: counter
+          unit: "{request}"
+          description: "Number of subgraph requests by response status code"
+          attributes:
+            subgraph.name: true
+            http.response.status_code:
+              subgraph_response_status: code
+```
