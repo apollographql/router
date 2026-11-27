@@ -23,7 +23,6 @@ use self::subselections::BooleanValues;
 use self::subselections::SubSelectionKey;
 use self::subselections::SubSelectionValue;
 use super::Fragment;
-use super::QueryHash;
 use crate::Configuration;
 use crate::configuration::mode::Mode;
 use crate::error::FetchError;
@@ -69,11 +68,6 @@ pub(crate) struct Query {
     pub(crate) filtered_query: Option<Arc<Query>>,
     pub(crate) defer_stats: DeferStats,
     pub(crate) is_original: bool,
-
-    /// This is a hash that depends on:
-    /// - the query itself
-    /// - the schema
-    pub(crate) schema_aware_hash: QueryHash,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -108,7 +102,6 @@ impl Query {
                 conditional_defer_variable_names: IndexSet::default(),
             },
             is_original: true,
-            schema_aware_hash: QueryHash::default(),
         }
     }
 
@@ -325,8 +318,8 @@ impl Query {
         let query_text = query_text.into();
 
         let doc = Self::parse_document(&query_text, operation_name, schema, configuration)?;
-        let (fragments, operation, defer_stats, schema_aware_hash) =
-            Self::extract_query_information(schema, &query_text, &doc.executable, operation_name)?;
+        let (fragments, operation, defer_stats) =
+            Self::extract_query_information(schema, &doc.executable, operation_name)?;
 
         Ok(Query {
             fragments,
@@ -336,17 +329,15 @@ impl Query {
             filtered_query: None,
             defer_stats,
             is_original: true,
-            schema_aware_hash,
         })
     }
 
     /// Extract serializable data structures from the apollo-compiler HIR.
     pub(crate) fn extract_query_information(
         schema: &Schema,
-        query_text: &str,
         document: &ExecutableDocument,
         operation_name: Option<&str>,
-    ) -> Result<(Fragments, Operation, DeferStats, QueryHash), SpecError> {
+    ) -> Result<(Fragments, Operation, DeferStats), SpecError> {
         let mut defer_stats = DeferStats {
             has_defer: false,
             has_unconditional_defer: false,
@@ -355,9 +346,8 @@ impl Query {
         let fragments = Fragments::from_hir(document, schema, &mut defer_stats)?;
         let operation = get_operation(document, operation_name)?;
         let operation = Operation::from_hir(&operation, schema, &mut defer_stats, &fragments)?;
-        let hash = schema.schema_id.operation_hash(query_text, operation_name);
 
-        Ok((fragments, operation, defer_stats, hash))
+        Ok((fragments, operation, defer_stats))
     }
 
     /// Format a field's value.
