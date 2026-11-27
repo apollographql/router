@@ -4,6 +4,7 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use apollo_compiler::Schema;
+use apollo_federation::schema::ValidFederationSchema;
 use apollo_redaction::Redacted;
 use futures::StreamExt;
 use http::HeaderName;
@@ -204,7 +205,9 @@ fn remove_debug_extensions_key(response: &mut graphql::Response) -> bool {
 
 #[tokio::test]
 async fn insert() {
-    let valid_schema = Arc::new(Schema::parse_and_validate(SCHEMA, "test.graphql").unwrap());
+    let valid_schema =
+        ValidFederationSchema::new(Schema::parse_and_validate(SCHEMA, "test.graphql").unwrap())
+            .unwrap();
     let query = "query { currentUser { activeOrganization { id creatorUser { __typename id } } } }";
 
     let subgraphs = serde_json::json!({
@@ -379,7 +382,9 @@ async fn insert() {
 
 #[tokio::test]
 async fn insert_with_custom_key() {
-    let valid_schema = Arc::new(Schema::parse_and_validate(SCHEMA, "test.graphql").unwrap());
+    let valid_schema =
+        ValidFederationSchema::new(Schema::parse_and_validate(SCHEMA, "test.graphql").unwrap())
+            .unwrap();
     let query = "query { currentUser { activeOrganization { id creatorUser { __typename id } } } }";
 
     let subgraphs = serde_json::json!({
@@ -566,7 +571,9 @@ async fn insert_with_custom_key() {
 
 #[tokio::test]
 async fn already_expired_cache_control() {
-    let valid_schema = Arc::new(Schema::parse_and_validate(SCHEMA, "test.graphql").unwrap());
+    let valid_schema =
+        ValidFederationSchema::new(Schema::parse_and_validate(SCHEMA, "test.graphql").unwrap())
+            .unwrap();
     let query = "query { currentUser { activeOrganization { id creatorUser { __typename id } } } }";
 
     let subgraphs = serde_json::json!({
@@ -735,7 +742,9 @@ async fn already_expired_cache_control() {
 
 #[tokio::test]
 async fn insert_without_debug_header() {
-    let valid_schema = Arc::new(Schema::parse_and_validate(SCHEMA, "test.graphql").unwrap());
+    let valid_schema =
+        ValidFederationSchema::new(Schema::parse_and_validate(SCHEMA, "test.graphql").unwrap())
+            .unwrap();
     let query = "query { currentUser { activeOrganization { id creatorUser { __typename id } } } }";
 
     let subgraphs = serde_json::json!({
@@ -890,8 +899,10 @@ async fn insert_without_debug_header() {
 
 #[tokio::test]
 async fn insert_with_requires() {
-    let valid_schema =
-        Arc::new(Schema::parse_and_validate(SCHEMA_REQUIRES, "test.graphql").unwrap());
+    let valid_schema = ValidFederationSchema::new(
+        Schema::parse_and_validate(SCHEMA_REQUIRES, "test.graphql").unwrap(),
+    )
+    .unwrap();
     let query = "query { topProducts { name shippingEstimate price } }";
 
     let subgraphs = MockedSubgraphs([
@@ -1065,8 +1076,10 @@ async fn insert_with_requires() {
 
 #[tokio::test]
 async fn insert_with_nested_field_set() {
-    let valid_schema =
-        Arc::new(Schema::parse_and_validate(SCHEMA_NESTED_KEYS, "test.graphql").unwrap());
+    let valid_schema = ValidFederationSchema::new(
+        Schema::parse_and_validate(SCHEMA_NESTED_KEYS, "test.graphql").unwrap(),
+    )
+    .unwrap();
     let query = "query { allProducts { name createdBy { name country { a } } } }";
 
     let subgraphs = serde_json::json!({
@@ -1239,7 +1252,9 @@ async fn insert_with_nested_field_set() {
 
 #[tokio::test]
 async fn no_cache_control() {
-    let valid_schema = Arc::new(Schema::parse_and_validate(SCHEMA, "test.graphql").unwrap());
+    let valid_schema =
+        ValidFederationSchema::new(Schema::parse_and_validate(SCHEMA, "test.graphql").unwrap())
+            .unwrap();
     let query = "query { currentUser { activeOrganization { id creatorUser { __typename id } } } }";
 
     let subgraphs = serde_json::json!({
@@ -1425,7 +1440,9 @@ async fn client_cache_control_header_follows_enabled(
 
 #[tokio::test]
 async fn no_store_from_request() {
-    let valid_schema = Arc::new(Schema::parse_and_validate(SCHEMA, "test.graphql").unwrap());
+    let valid_schema =
+        ValidFederationSchema::new(Schema::parse_and_validate(SCHEMA, "test.graphql").unwrap())
+            .unwrap();
     let query = "query { currentUser { activeOrganization { id creatorUser { __typename id } } } }";
 
     let subgraphs = serde_json::json!({
@@ -1609,7 +1626,9 @@ async fn no_store_from_request() {
 // causing insert_entities_in_result to produce `_entities: []` and entity fields to be null.
 #[tokio::test]
 async fn no_cache_from_request() {
-    let valid_schema = Arc::new(Schema::parse_and_validate(SCHEMA, "test.graphql").unwrap());
+    let valid_schema =
+        ValidFederationSchema::new(Schema::parse_and_validate(SCHEMA, "test.graphql").unwrap())
+            .unwrap();
     let query = "query { currentUser { activeOrganization { id creatorUser { __typename id } } } }";
 
     let subgraphs = serde_json::json!({
@@ -1756,7 +1775,7 @@ async fn no_cache_from_request() {
 async fn private_only() {
     async {
         let query = "query { currentUser { activeOrganization { id creatorUser { __typename id } } } }";
-        let valid_schema = Arc::new(Schema::parse_and_validate(SCHEMA, "test.graphql").unwrap());
+        let valid_schema = ValidFederationSchema::new(Schema::parse_and_validate(SCHEMA, "test.graphql").unwrap()).unwrap();
 
         let subgraphs = serde_json::json!({
             "user": {
@@ -1953,7 +1972,9 @@ async fn private_only() {
 #[tokio::test]
 async fn private_and_public() {
     let query = "query { currentUser { activeOrganization { id creatorUser { __typename id } } } orga(id: \"2\") { name } }";
-    let valid_schema = Arc::new(Schema::parse_and_validate(SCHEMA, "test.graphql").unwrap());
+    let valid_schema =
+        ValidFederationSchema::new(Schema::parse_and_validate(SCHEMA, "test.graphql").unwrap())
+            .unwrap();
 
     let subgraphs = serde_json::json!({
         "user": {
@@ -2169,7 +2190,7 @@ async fn private_and_public() {
 async fn polymorphic_private_and_public() {
     async {
         let query = "query { currentUser { activeOrganization { id creatorUser { __typename id } } } orga(id: \"2\") { name } }";
-        let valid_schema = Arc::new(Schema::parse_and_validate(SCHEMA, "test.graphql").unwrap());
+        let valid_schema = ValidFederationSchema::new(Schema::parse_and_validate(SCHEMA, "test.graphql").unwrap()).unwrap();
 
         let subgraphs = serde_json::json!({
             "user": {
@@ -2564,7 +2585,7 @@ async fn polymorphic_private_and_public() {
 async fn private_without_private_id() {
     async {
         let query = "query { currentUser { activeOrganization { id creatorUser { __typename id } } } }";
-        let valid_schema = Arc::new(Schema::parse_and_validate(SCHEMA, "test.graphql").unwrap());
+        let valid_schema = ValidFederationSchema::new(Schema::parse_and_validate(SCHEMA, "test.graphql").unwrap()).unwrap();
 
         let subgraphs = serde_json::json!({
             "user": {
@@ -2722,7 +2743,9 @@ async fn private_without_private_id() {
 #[tokio::test]
 async fn no_data() {
     let query = "query { currentUser { allOrganizations { id name } } }";
-    let valid_schema = Arc::new(Schema::parse_and_validate(SCHEMA, "test.graphql").unwrap());
+    let valid_schema =
+        ValidFederationSchema::new(Schema::parse_and_validate(SCHEMA, "test.graphql").unwrap())
+            .unwrap();
 
     let subgraphs = MockedSubgraphs([
         ("user", MockSubgraph::builder().with_json(
@@ -2981,7 +3004,9 @@ async fn no_data() {
 #[tokio::test]
 async fn missing_entities() {
     let query = "query { currentUser { allOrganizations { id name } } }";
-    let valid_schema = Arc::new(Schema::parse_and_validate(SCHEMA, "test.graphql").unwrap());
+    let valid_schema =
+        ValidFederationSchema::new(Schema::parse_and_validate(SCHEMA, "test.graphql").unwrap())
+            .unwrap();
     let subgraphs = MockedSubgraphs([
         ("user", MockSubgraph::builder().with_json(
             serde_json::json! {{"query":"{currentUser{allOrganizations{__typename id}}}"}},
@@ -3181,7 +3206,7 @@ async fn missing_entities() {
 #[tokio::test(flavor = "multi_thread")]
 async fn invalidate_by_cache_tag() {
     async move {
-        let valid_schema = Arc::new(Schema::parse_and_validate(SCHEMA, "test.graphql").unwrap());
+        let valid_schema = ValidFederationSchema::new(Schema::parse_and_validate(SCHEMA, "test.graphql").unwrap()).unwrap();
         let query = "query { currentUser { activeOrganization { id creatorUser { __typename id } } } }";
         let subgraphs = serde_json::json!({
             "user": {
@@ -3398,7 +3423,7 @@ async fn invalidate_by_cache_tag() {
 #[tokio::test(flavor = "multi_thread")]
 async fn complex_cache_tag() {
     async move {
-        let valid_schema = Arc::new(Schema::parse_and_validate(SCHEMA_CACHE_TAG, "test.graphql").unwrap());
+        let valid_schema = ValidFederationSchema::new(Schema::parse_and_validate(SCHEMA_CACHE_TAG, "test.graphql").unwrap()).unwrap();
         let query = "query { currentUser { activeOrganization { ... on Organization { id creatorUser { __typename id } } } } }";
         let subgraphs = serde_json::json!({
             "user": {
@@ -3523,8 +3548,10 @@ async fn setup_cdn_invalidation_gating_test(
     cdn_invalidation_enabled: bool,
     extension_tag: Option<&str>,
 ) -> supergraph::Response {
-    let valid_schema =
-        Arc::new(Schema::parse_and_validate(SCHEMA_CACHE_TAG, "test.graphql").unwrap());
+    let valid_schema = ValidFederationSchema::new(
+        Schema::parse_and_validate(SCHEMA_CACHE_TAG, "test.graphql").unwrap(),
+    )
+    .unwrap();
     // `creatorUser` is `@join__field(graph: ORGA)` only, so requesting it forces an actual
     // `_entities` fetch to `orga` — requesting only `id` (a key field) lets `user` answer the
     // whole query itself, with no entity fetch at all.
@@ -3734,7 +3761,7 @@ async fn fine_grained_tags_stay_off_context_when_cdn_invalidation_disabled() {
 async fn cdn_invalidation_debug_reflects_outcome_and_truncation() {
     async move {
         let valid_schema =
-            Arc::new(Schema::parse_and_validate(SCHEMA_CACHE_TAG, "test.graphql").unwrap());
+            ValidFederationSchema::new(Schema::parse_and_validate(SCHEMA_CACHE_TAG, "test.graphql").unwrap()).unwrap();
         let query = "query { currentUser { activeOrganization { ... on Organization { id creatorUser { __typename id } } } } }";
         let orga_entity = serde_json::json!({
             "__typename": "Organization",
@@ -3939,7 +3966,7 @@ async fn cdn_invalidation_debug_reflects_outcome_and_truncation() {
 async fn cdn_invalidation_header_excludes_deferred_payload_tags() {
     async move {
         let valid_schema =
-            Arc::new(Schema::parse_and_validate(SCHEMA_CACHE_TAG, "test.graphql").unwrap());
+            ValidFederationSchema::new(Schema::parse_and_validate(SCHEMA_CACHE_TAG, "test.graphql").unwrap()).unwrap();
         let query = "query { currentUser { id ... @defer { activeOrganization { ... on Organization { id creatorUser { __typename id } } } } } }";
         let subgraphs = serde_json::json!({
             "user": {
@@ -4079,8 +4106,10 @@ async fn setup_cdn_invalidation_hit_test(
     cache_tag_index_enabled: bool,
     extension_tag: Option<&str>,
 ) -> (supergraph::Response, supergraph::Response) {
-    let valid_schema =
-        Arc::new(Schema::parse_and_validate(SCHEMA_CACHE_TAG, "test.graphql").unwrap());
+    let valid_schema = ValidFederationSchema::new(
+        Schema::parse_and_validate(SCHEMA_CACHE_TAG, "test.graphql").unwrap(),
+    )
+    .unwrap();
     let query = "query { currentUser { activeOrganization { ... on Organization { id creatorUser { __typename id } } } } }";
     let mut orga_entity = serde_json::json!({
         "__typename": "Organization",
@@ -4275,7 +4304,7 @@ async fn cdn_invalidation_header_persists_extension_tag_across_cache_hit(
 async fn cdn_invalidation_header_unions_hit_and_miss_entities_in_the_same_request() {
     async move {
         let valid_schema =
-            Arc::new(Schema::parse_and_validate(SCHEMA_CACHE_TAG, "test.graphql").unwrap());
+            ValidFederationSchema::new(Schema::parse_and_validate(SCHEMA_CACHE_TAG, "test.graphql").unwrap()).unwrap();
         let query = "query { currentUser { allOrganizations { id name } } }";
 
         // Shared namespace so the second storage/service can see what the first cached —
@@ -4507,7 +4536,7 @@ async fn cdn_invalidation_header_unions_hit_and_miss_entities_in_the_same_reques
 #[tokio::test(flavor = "multi_thread")]
 async fn invalidate_by_type() {
     async move {
-        let valid_schema = Arc::new(Schema::parse_and_validate(SCHEMA, "test.graphql").unwrap());
+        let valid_schema = ValidFederationSchema::new(Schema::parse_and_validate(SCHEMA, "test.graphql").unwrap()).unwrap();
         let query = "query { currentUser { activeOrganization { id creatorUser { __typename id } } } }";
         let subgraphs = serde_json::json!({
             "user": {
@@ -4719,7 +4748,9 @@ async fn invalidate_by_type() {
 #[tokio::test]
 async fn failure_mode() {
     async {
-        let valid_schema = Arc::new(Schema::parse_and_validate(SCHEMA, "test.graphql").unwrap());
+        let valid_schema =
+            ValidFederationSchema::new(Schema::parse_and_validate(SCHEMA, "test.graphql").unwrap())
+                .unwrap();
         let query =
             "query { currentUser { activeOrganization { id creatorUser { __typename id } } } }";
 
@@ -4892,7 +4923,7 @@ async fn failure_mode() {
 #[tokio::test]
 async fn failure_mode_reconnect() {
     async {
-        let valid_schema = Arc::new(Schema::parse_and_validate(SCHEMA, "test.graphql").unwrap());
+        let valid_schema = ValidFederationSchema::new(Schema::parse_and_validate(SCHEMA, "test.graphql").unwrap()).unwrap();
         let query =
             "query { currentUser { activeOrganization { id creatorUser { __typename id } } } }";
 
@@ -5145,7 +5176,9 @@ async fn failure_mode_reconnect() {
 /// `Cache-Control: no-store` to prevent intermediate caches from caching a partial/error response.
 #[tokio::test(flavor = "multi_thread")]
 async fn no_store_on_subgraph_timeout() {
-    let valid_schema = Arc::new(Schema::parse_and_validate(SCHEMA, "test.graphql").unwrap());
+    let valid_schema =
+        ValidFederationSchema::new(Schema::parse_and_validate(SCHEMA, "test.graphql").unwrap())
+            .unwrap();
     // This query spans two subgraphs: `user` (returns data) and `orga` (entity lookup).
     let query = "query { currentUser { activeOrganization { id creatorUser { __typename id } } } }";
 
@@ -5259,7 +5292,9 @@ async fn no_store_on_subgraph_timeout() {
 /// incomplete or error response.
 #[tokio::test]
 async fn no_store_on_partial_subgraph_failure() {
-    let valid_schema = Arc::new(Schema::parse_and_validate(SCHEMA, "test.graphql").unwrap());
+    let valid_schema =
+        ValidFederationSchema::new(Schema::parse_and_validate(SCHEMA, "test.graphql").unwrap())
+            .unwrap();
     // This query spans two subgraphs: `user` (returns data) and `orga` (entity lookup).
     let query = "query { currentUser { activeOrganization { id creatorUser { __typename id } } } }";
 
@@ -5533,7 +5568,9 @@ async fn setup_send_cache_control_test(
         .into_iter()
         .collect(),
     );
-    let valid_schema = Arc::new(Schema::parse_and_validate(SCHEMA, "test.graphql").unwrap());
+    let valid_schema =
+        ValidFederationSchema::new(Schema::parse_and_validate(SCHEMA, "test.graphql").unwrap())
+            .unwrap();
     let response_cache = ResponseCache::for_test(
         storage.clone(),
         subgraphs_conf,
@@ -7286,7 +7323,9 @@ async fn partial_entity_hit_stores_fetched_entity_under_its_own_ttl() {
         service.oneshot(request).await.unwrap()
     }
 
-    let valid_schema = Arc::new(Schema::parse_and_validate(SCHEMA, "test.graphql").unwrap());
+    let valid_schema =
+        ValidFederationSchema::new(Schema::parse_and_validate(SCHEMA, "test.graphql").unwrap())
+            .unwrap();
     let (drop_tx, drop_rx) = tokio::sync::broadcast::channel(2);
     let storage = Storage::new(&Config::test(false, &Uuid::new_v4().to_string()), drop_rx)
         .await
@@ -7565,7 +7604,9 @@ impl ToggledSubgraphHarness {
         healthy_data: serde_json_bytes::Value,
         with_private_id: bool,
     ) -> Self {
-        let valid_schema = Arc::new(Schema::parse_and_validate(SCHEMA, "test.graphql").unwrap());
+        let valid_schema =
+            ValidFederationSchema::new(Schema::parse_and_validate(SCHEMA, "test.graphql").unwrap())
+                .unwrap();
         let mode = Arc::new(std::sync::Mutex::new(ToggledSubgraphResponse::Healthy));
         let calls = Arc::new(std::sync::atomic::AtomicUsize::new(0));
 
@@ -7836,7 +7877,9 @@ async fn response_with_errors_is_not_reported_as_stored() {
 /// In an entity batch, only the entity an error points at is reported as not stored.
 #[tokio::test]
 async fn entity_with_error_is_not_reported_as_stored() {
-    let valid_schema = Arc::new(Schema::parse_and_validate(SCHEMA, "test.graphql").unwrap());
+    let valid_schema =
+        ValidFederationSchema::new(Schema::parse_and_validate(SCHEMA, "test.graphql").unwrap())
+            .unwrap();
     let subgraphs = MockedSubgraphs([
         ("user", MockSubgraph::builder().with_json(
             serde_json::json! {{"query":"{currentUser{allOrganizations{__typename id}}}"}},
@@ -8335,7 +8378,9 @@ async fn entity_error_harness(
     drop_tx: tokio::sync::broadcast::Sender<()>,
     orga_responses: Vec<OrgaResponse>,
 ) -> supergraph::BoxCloneService {
-    let valid_schema = Arc::new(Schema::parse_and_validate(SCHEMA, "test.graphql").unwrap());
+    let valid_schema =
+        ValidFederationSchema::new(Schema::parse_and_validate(SCHEMA, "test.graphql").unwrap())
+            .unwrap();
     let orga_subgraph = orga_responses
         .into_iter()
         .fold(MockSubgraph::builder(), |builder, response| {
@@ -8979,8 +9024,10 @@ async fn aliased_context_entity_fetch_bypasses_cache() {
 async fn aliased_context_entity_fetch_bypasses_cache_end_to_end() {
     const SCHEMA_SET_CONTEXT: &str =
         include_str!("../../../tests/fixtures/set_context/supergraph.graphql");
-    let valid_schema =
-        Arc::new(Schema::parse_and_validate(SCHEMA_SET_CONTEXT, "test.graphql").unwrap());
+    let valid_schema = ValidFederationSchema::new(
+        Schema::parse_and_validate(SCHEMA_SET_CONTEXT, "test.graphql").unwrap(),
+    )
+    .unwrap();
     // `U.field` takes its argument from the enclosing `T.prop` through `@fromContext`. The two
     // `T`s have different `prop`s, so the fetch for `field` carries one aliased `_entities` copy
     // per `U`.

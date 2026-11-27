@@ -234,7 +234,7 @@ impl PluginPrivate for AuthenticationPlugin {
 
     fn licensed_features(
         config: &Self::Config,
-        _supergraph: &apollo_compiler::Schema,
+        _supergraph: &apollo_federation::Supergraph,
     ) -> Vec<LicensedSetting> {
         [
             (config.router.is_some(), "authentication.router"),

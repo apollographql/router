@@ -15,6 +15,7 @@ use apollo_compiler::resolvers;
 use apollo_compiler::schema::ObjectType;
 use apollo_compiler::validation::Valid;
 use apollo_federation::connectors::StringTemplate;
+use apollo_federation::schema::ValidFederationSchema;
 use http::HeaderValue;
 use http::header::CACHE_CONTROL;
 use itertools::Itertools;
@@ -150,7 +151,7 @@ pub(crate) struct ResponseCache {
     cdn_invalidation: CdnInvalidationConfig,
     private_queries: Arc<RwLock<LruCache<PrivateQueryKey, ()>>>,
     pub(crate) invalidation: Invalidation,
-    supergraph_schema: Arc<Valid<Schema>>,
+    supergraph_schema: ValidFederationSchema,
     /// map containing the enum GRAPH
     subgraph_enums: Arc<HashMap<String, String>>,
     lru_size_instrument: LruSizeInstrument,
@@ -463,7 +464,7 @@ impl PluginPrivate for ResponseCache {
 
     fn licensed_features(
         config: &Self::Config,
-        _supergraph: &apollo_compiler::Schema,
+        _supergraph: &apollo_federation::Supergraph,
     ) -> Vec<LicensedSetting> {
         if config.enabled {
             vec![LicensedSetting {
@@ -480,7 +481,9 @@ impl PluginPrivate for ResponseCache {
         Self: Sized,
     {
         let entity_type = init
-            .supergraph_schema
+            .supergraph
+            .schema
+            .schema()
             .schema_definition
             .query
             .as_ref()
@@ -700,8 +703,8 @@ impl PluginPrivate for ResponseCache {
                 init.config.private_queries_buffer_size,
             ))),
             invalidation,
-            subgraph_enums: Arc::new(get_subgraph_enums(&init.supergraph_schema)),
-            supergraph_schema: init.supergraph_schema,
+            subgraph_enums: Arc::new(get_subgraph_enums(init.supergraph.schema.schema())),
+            supergraph_schema: init.supergraph.schema,
             lru_size_instrument: LruSizeInstrument::new(LRU_PRIVATE_QUERIES_INSTRUMENT_NAME),
             drop_tx,
         })
@@ -1107,7 +1110,7 @@ impl ResponseCache {
     pub(crate) async fn for_test(
         storage: Storage,
         subgraphs: SubgraphConfiguration<Subgraph>,
-        supergraph_schema: Arc<Valid<Schema>>,
+        supergraph_schema: ValidFederationSchema,
         truncate_namespace: bool,
         drop_tx: broadcast::Sender<()>,
         include_cache_control_header_on_router_response: bool,
@@ -1136,7 +1139,7 @@ impl ResponseCache {
     pub(crate) async fn for_test_with_cdn_invalidation(
         storage: Storage,
         subgraphs: SubgraphConfiguration<Subgraph>,
-        supergraph_schema: Arc<Valid<Schema>>,
+        supergraph_schema: ValidFederationSchema,
         truncate_namespace: bool,
         drop_tx: broadcast::Sender<()>,
         include_cache_control_header_on_router_response: bool,
@@ -1164,7 +1167,7 @@ impl ResponseCache {
     async fn build_for_test(
         storage: Storage,
         subgraphs: SubgraphConfiguration<Subgraph>,
-        supergraph_schema: Arc<Valid<Schema>>,
+        supergraph_schema: ValidFederationSchema,
         truncate_namespace: bool,
         drop_tx: broadcast::Sender<()>,
         include_cache_control_header_on_router_response: bool,
@@ -1205,7 +1208,7 @@ impl ResponseCache {
                 )),
             })),
             invalidation,
-            subgraph_enums: Arc::new(get_subgraph_enums(&supergraph_schema)),
+            subgraph_enums: Arc::new(get_subgraph_enums(supergraph_schema.schema())),
             supergraph_schema,
             lru_size_instrument: LruSizeInstrument::new(LRU_PRIVATE_QUERIES_INSTRUMENT_NAME),
             drop_tx,
@@ -1218,7 +1221,7 @@ impl ResponseCache {
     /// Use this method when you want to test ResponseCache without database available
     pub(crate) async fn without_storage_for_failure_mode(
         subgraphs: HashMap<String, Subgraph>,
-        supergraph_schema: Arc<Valid<Schema>>,
+        supergraph_schema: ValidFederationSchema,
     ) -> Result<Self, BoxError>
     where
         Self: Sized,
@@ -1266,7 +1269,7 @@ impl ResponseCache {
                 )),
             })),
             invalidation,
-            subgraph_enums: Arc::new(get_subgraph_enums(&supergraph_schema)),
+            subgraph_enums: Arc::new(get_subgraph_enums(supergraph_schema.schema())),
             supergraph_schema,
             lru_size_instrument: LruSizeInstrument::new(LRU_PRIVATE_QUERIES_INSTRUMENT_NAME),
             drop_tx,
@@ -1359,7 +1362,7 @@ struct CacheService {
     private_queries: Arc<RwLock<LruCache<PrivateQueryKey, ()>>>,
     private_id_key_name: Option<String>,
     debug: bool,
-    supergraph_schema: Arc<Valid<Schema>>,
+    supergraph_schema: ValidFederationSchema,
     subgraph_enums: Arc<HashMap<String, String>>,
     lru_size_instrument: LruSizeInstrument,
     /// Active invalidation index modes for this subgraph, resolved from configuration.
@@ -1407,13 +1410,14 @@ pub(crate) async fn subgraph_cache_for_test(
     let storage = Storage::mocked(&config, false, store, drop_rx)
         .await
         .expect("mock storage builds");
-    let supergraph_schema = Arc::new(
+    let supergraph_schema = ValidFederationSchema::new(
         Schema::parse_and_validate(
             "type Query { hello: String } type Product { upc: String name: String }",
             "schema.graphql",
         )
         .unwrap(),
-    );
+    )
+    .unwrap();
 
     CacheService {
         service,
@@ -2069,7 +2073,7 @@ async fn cache_lookup_root(
     private_id: Option<&str>,
     debug: bool,
     mut request: subgraph::Request,
-    supergraph_schema: Arc<Valid<Schema>>,
+    supergraph_schema: ValidFederationSchema,
     subgraph_enums: &HashMap<String, String>,
     cache_control: Option<&CacheControl>,
     indexes: &InvalidationIndexes,
@@ -2285,7 +2289,7 @@ async fn cache_lookup_root(
 fn get_invalidation_root_keys_from_schema(
     request: &subgraph::Request,
     subgraph_enums: &HashMap<String, String>,
-    supergraph_schema: Arc<Valid<Schema>>,
+    supergraph_schema: ValidFederationSchema,
 ) -> Result<HashSet<String>, anyhow::Error> {
     struct Root<'a> {
         subgraph_name: &'a str,
@@ -2380,11 +2384,13 @@ fn get_invalidation_root_keys_from_schema(
                 reason: "cannot get the executable document for subgraph request".to_string(),
             })?;
     let root_query_type = supergraph_schema
+        .schema()
         .root_operation(apollo_compiler::ast::OperationType::Query)
         .ok_or_else(|| FetchError::MalformedRequest {
             reason: "cannot get the root operation from supergraph schema".to_string(),
         })?;
     let query_object_type = supergraph_schema
+        .schema()
         .get_object(root_query_type.as_str())
         .ok_or_else(|| FetchError::MalformedRequest {
             reason: "cannot get the root query type from supergraph schema".to_string(),
@@ -2398,7 +2404,7 @@ fn get_invalidation_root_keys_from_schema(
     let subgraph_request = request.subgraph_request.body();
     // FIXME: in principle we should use the subgraph schema here.
     // Maybe this is good enough as far as finding root fields is concerned?
-    resolvers::Execution::new(&supergraph_schema, executable_document)
+    resolvers::Execution::new(supergraph_schema.schema(), executable_document)
         .operation_name(subgraph_request.operation_name.as_deref())
         .unwrap()
         .raw_variable_values(&subgraph_request.variables)
@@ -2414,7 +2420,7 @@ struct ResponseCacheResults(Vec<IntermediateResult>, Option<CacheControl>);
 #[allow(clippy::too_many_arguments)]
 async fn cache_lookup_entities(
     name: String,
-    supergraph_schema: Arc<Valid<Schema>>,
+    supergraph_schema: ValidFederationSchema,
     subgraph_enums: &HashMap<String, String>,
     cache: Storage,
     is_known_private: bool,
@@ -2857,7 +2863,7 @@ struct CacheMetadata {
 #[allow(clippy::too_many_arguments)]
 fn extract_cache_keys(
     subgraph_name: &str,
-    supergraph_schema: Arc<Valid<Schema>>,
+    supergraph_schema: ValidFederationSchema,
     subgraph_enums: &HashMap<String, String>,
     request: &mut subgraph::Request,
     is_known_private: bool,
@@ -2917,7 +2923,7 @@ fn extract_cache_keys(
                 representation,
                 typename,
                 subgraph_name,
-                &supergraph_schema,
+                supergraph_schema.schema(),
                 subgraph_enums,
             )?;
 
@@ -2953,7 +2959,7 @@ fn extract_cache_keys(
         let invalidation_cache_keys =
             if indexes.tracks_invalidation_labels(cdn_invalidation_enabled) {
                 get_invalidation_entity_keys_from_schema(
-                    &supergraph_schema,
+                    supergraph_schema.schema(),
                     subgraph_name,
                     subgraph_enums,
                     typename,
@@ -3015,7 +3021,7 @@ fn extract_cache_keys(
 
 /// Get invalidation keys from @cacheTag directives in supergraph schema for entities
 pub(super) fn get_invalidation_entity_keys_from_schema(
-    supergraph_schema: &Arc<Valid<Schema>>,
+    supergraph_schema: &Valid<Schema>,
     subgraph_name: &str,
     subgraph_enums: &HashMap<String, String>,
     typename: &str,
@@ -4002,6 +4008,7 @@ mod tests {
 
     use apollo_compiler::Schema;
     use apollo_compiler::parser::Parser;
+    use apollo_federation::schema::ValidFederationSchema;
     use serde_json_bytes::json;
     use tokio::sync::broadcast;
     use uuid::Uuid;
@@ -4053,7 +4060,9 @@ mod tests {
 
     #[tokio::test]
     async fn test_subgraph_enabled() {
-        let valid_schema = Arc::new(Schema::parse_and_validate(SCHEMA, "test.graphql").unwrap());
+        let valid_schema =
+            ValidFederationSchema::new(Schema::parse_and_validate(SCHEMA, "test.graphql").unwrap())
+                .unwrap();
         let (drop_tx, drop_rx) = broadcast::channel(2);
         let storage = Storage::new(&Config::test(false, "test_subgraph_enabled"), drop_rx)
             .await
@@ -4099,7 +4108,9 @@ mod tests {
         subgraph_enabled: bool,
         subgraph_invalidation_enabled: bool,
     ) -> ResponseCache {
-        let valid_schema = Arc::new(Schema::parse_and_validate(SCHEMA, "test.graphql").unwrap());
+        let valid_schema =
+            ValidFederationSchema::new(Schema::parse_and_validate(SCHEMA, "test.graphql").unwrap())
+                .unwrap();
         let (drop_tx, drop_rx) = broadcast::channel(2);
         let storage = Storage::new(&Config::test(false, &Uuid::new_v4().to_string()), drop_rx)
             .await
@@ -4138,7 +4149,9 @@ mod tests {
 
     #[tokio::test]
     async fn test_redis_connection_disabled() {
-        let valid_schema = Arc::new(Schema::parse_and_validate(SCHEMA, "test.graphql").unwrap());
+        let valid_schema =
+            ValidFederationSchema::new(Schema::parse_and_validate(SCHEMA, "test.graphql").unwrap())
+                .unwrap();
         let config: super::Config = serde_json_bytes::from_value(serde_json_bytes::json!({
             "enabled": true,
             "subgraph": {
@@ -4162,7 +4175,7 @@ mod tests {
         .unwrap();
         let response_cache = ResponseCache::new(PluginInit::fake_new(
             config,
-            Arc::new(valid_schema.to_string()),
+            Arc::new(valid_schema.schema().to_string()),
         ))
         .await
         .unwrap();
@@ -4200,7 +4213,7 @@ mod tests {
         .unwrap();
         let response_cache = ResponseCache::new(PluginInit::fake_new(
             config,
-            Arc::new(valid_schema.to_string()),
+            Arc::new(valid_schema.schema().to_string()),
         ))
         .await
         .unwrap();
@@ -4218,7 +4231,9 @@ mod tests {
 
     #[tokio::test]
     async fn test_no_redis_conf_provided_should_fail() {
-        let valid_schema = Arc::new(Schema::parse_and_validate(SCHEMA, "test.graphql").unwrap());
+        let valid_schema =
+            ValidFederationSchema::new(Schema::parse_and_validate(SCHEMA, "test.graphql").unwrap())
+                .unwrap();
         let config: super::Config = serde_json_bytes::from_value(serde_json_bytes::json!({
             "enabled": true,
             "subgraph": {
@@ -4240,7 +4255,7 @@ mod tests {
         assert!(
             ResponseCache::new(PluginInit::fake_new(
                 config,
-                Arc::new(valid_schema.to_string()),
+                Arc::new(valid_schema.schema().to_string()),
             ))
             .await
             .is_err(),
@@ -4250,7 +4265,9 @@ mod tests {
 
     #[tokio::test]
     async fn connector_cache_key_headers_are_required() {
-        let valid_schema = Arc::new(Schema::parse_and_validate(SCHEMA, "test.graphql").unwrap());
+        let valid_schema =
+            ValidFederationSchema::new(Schema::parse_and_validate(SCHEMA, "test.graphql").unwrap())
+                .unwrap();
         // An enabled, storage-backed connector `all` block with a TTL but no `cache_key_headers`:
         // the startup validation must reject it (before any Redis connection is attempted). The
         // field is an `Option` so this can't be a parse error — the requirement is enforced here.
@@ -4267,7 +4284,7 @@ mod tests {
         .unwrap();
         let result = ResponseCache::new(PluginInit::fake_new(
             config,
-            Arc::new(valid_schema.to_string()),
+            Arc::new(valid_schema.schema().to_string()),
         ))
         .await;
         let err = match result {
@@ -4291,7 +4308,9 @@ mod tests {
         #[case] all_enabled: bool,
         #[case] subgraph_enabled: bool,
     ) {
-        let valid_schema = Arc::new(Schema::parse_and_validate(SCHEMA, "test.graphql").unwrap());
+        let valid_schema =
+            ValidFederationSchema::new(Schema::parse_and_validate(SCHEMA, "test.graphql").unwrap())
+                .unwrap();
         let config: super::Config = serde_json_bytes::from_value(serde_json_bytes::json!({
             "enabled": global_enabled,
             "subgraph": {
@@ -4312,7 +4331,7 @@ mod tests {
         .unwrap();
         let response_cache = ResponseCache::new(PluginInit::fake_new(
             config,
-            Arc::new(valid_schema.to_string()),
+            Arc::new(valid_schema.schema().to_string()),
         ))
         .await
         .unwrap();
@@ -4332,7 +4351,9 @@ mod tests {
 
     #[tokio::test]
     async fn test_redis_connection_enabled_multiple_subgraphs() {
-        let valid_schema = Arc::new(Schema::parse_and_validate(SCHEMA, "test.graphql").unwrap());
+        let valid_schema =
+            ValidFederationSchema::new(Schema::parse_and_validate(SCHEMA, "test.graphql").unwrap())
+                .unwrap();
         let config: super::Config = serde_json_bytes::from_value(serde_json_bytes::json!({
             "enabled": true,
             "subgraph": {
@@ -4359,7 +4380,7 @@ mod tests {
         .unwrap();
         let response_cache = ResponseCache::new(PluginInit::fake_new(
             config,
-            Arc::new(valid_schema.to_string()),
+            Arc::new(valid_schema.schema().to_string()),
         ))
         .await
         .unwrap();
@@ -4388,7 +4409,9 @@ mod tests {
         #[case] all_enabled: bool,
         #[case] subgraph_enabled: bool,
     ) {
-        let valid_schema = Arc::new(Schema::parse_and_validate(SCHEMA, "test.graphql").unwrap());
+        let valid_schema =
+            ValidFederationSchema::new(Schema::parse_and_validate(SCHEMA, "test.graphql").unwrap())
+                .unwrap();
         let config: super::Config = serde_json_bytes::from_value(serde_json_bytes::json!({
             "enabled": true,
             "subgraph": {
@@ -4412,7 +4435,7 @@ mod tests {
         .unwrap();
         let response_cache = ResponseCache::new(PluginInit::fake_new(
             config,
-            Arc::new(valid_schema.to_string()),
+            Arc::new(valid_schema.schema().to_string()),
         ))
         .await
         .unwrap();
@@ -4542,7 +4565,9 @@ mod tests {
 
     #[tokio::test]
     async fn test_subgraph_ttl() {
-        let valid_schema = Arc::new(Schema::parse_and_validate(SCHEMA, "test.graphql").unwrap());
+        let valid_schema =
+            ValidFederationSchema::new(Schema::parse_and_validate(SCHEMA, "test.graphql").unwrap())
+                .unwrap();
         let (drop_tx, drop_rx) = broadcast::channel(2);
         let storage = Storage::new(&Config::test(false, "test_subgraph_ttl"), drop_rx)
             .await
@@ -5224,7 +5249,10 @@ mod tests {
                 location: String!
             }
         "#;
-        let schema = Arc::new(Schema::parse_and_validate(schema_text, "test.graphql").unwrap());
+        let schema = ValidFederationSchema::new(
+            Schema::parse_and_validate(schema_text, "test.graphql").unwrap(),
+        )
+        .unwrap();
         let query = r#"query Test {
           testByCountry(id: "2", country: BE) {
             locale
@@ -5245,8 +5273,12 @@ mod tests {
             .subgraph_name("USER")
             .build();
         sub_request.executable_document = Some(Arc::new(
-            apollo_compiler::ExecutableDocument::parse_and_validate(&schema, query, "test.graphql")
-                .unwrap(),
+            apollo_compiler::ExecutableDocument::parse_and_validate(
+                schema.schema(),
+                query,
+                "test.graphql",
+            )
+            .unwrap(),
         ));
         let subgraph_enums: HashMap<String, String> = [("USER".to_string(), "USER".to_string())]
             .into_iter()
@@ -5306,7 +5338,10 @@ mod tests {
                 }
               "#;
 
-        let schema = Arc::new(Schema::parse_and_validate(schema_text, "schema.graphql").unwrap());
+        let schema = ValidFederationSchema::new(
+            Schema::parse_and_validate(schema_text, "schema.graphql").unwrap(),
+        )
+        .unwrap();
         let subgraph_enums = HashMap::from([
             ("SEARCH".into(), "search".into()),
             ("INVENTORY".into(), "inventory".into()),
@@ -5318,7 +5353,7 @@ mod tests {
             .clone();
 
         let result = get_invalidation_entity_keys_from_schema(
-            &schema,
+            schema.schema(),
             "inventory",
             &subgraph_enums,
             "Book",
@@ -5363,7 +5398,10 @@ mod tests {
                 }
               "#;
 
-        let schema = Arc::new(Schema::parse_and_validate(schema_text, "schema.graphql").unwrap());
+        let schema = ValidFederationSchema::new(
+            Schema::parse_and_validate(schema_text, "schema.graphql").unwrap(),
+        )
+        .unwrap();
         let subgraph_enums = HashMap::from([
             ("SEARCH".into(), "search".into()),
             ("INVENTORY".into(), "inventory".into()),
@@ -5375,7 +5413,7 @@ mod tests {
             .clone();
 
         let result = get_invalidation_entity_keys_from_schema(
-            &schema,
+            schema.schema(),
             "inventory",
             &subgraph_enums,
             "Item",
@@ -5427,7 +5465,10 @@ mod tests {
                 }
               "#;
 
-        let schema = Arc::new(Schema::parse_and_validate(schema_text, "schema.graphql").unwrap());
+        let schema = ValidFederationSchema::new(
+            Schema::parse_and_validate(schema_text, "schema.graphql").unwrap(),
+        )
+        .unwrap();
         let subgraph_enums = HashMap::from([
             ("INVENTORY".into(), "inventory".into()),
             ("SEARCH".into(), "search".into()),
@@ -5440,7 +5481,7 @@ mod tests {
             .clone();
 
         let result = get_invalidation_entity_keys_from_schema(
-            &schema,
+            schema.schema(),
             "inventory",
             &subgraph_enums,
             "Item",
@@ -5478,7 +5519,10 @@ mod tests {
             }
         "#;
 
-        let schema = Arc::new(Schema::parse_and_validate(schema_text, "schema.graphql").unwrap());
+        let schema = ValidFederationSchema::new(
+            Schema::parse_and_validate(schema_text, "schema.graphql").unwrap(),
+        )
+        .unwrap();
         let subgraph_enums = HashMap::from([("PRODUCTS".into(), "products".into())]);
 
         // when isInterfaceObject: false, typename in _entities is the concrete type "Product"
@@ -5491,7 +5535,7 @@ mod tests {
         .clone();
 
         let result = get_invalidation_entity_keys_from_schema(
-            &schema,
+            schema.schema(),
             "products",
             &subgraph_enums,
             "Product", // concrete object typename (ie, normal case)

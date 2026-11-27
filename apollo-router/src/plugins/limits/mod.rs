@@ -327,7 +327,7 @@ impl PluginPrivate for LimitsPlugin {
 
     fn licensed_features(
         config: &Self::Config,
-        _supergraph: &apollo_compiler::Schema,
+        _supergraph: &apollo_federation::Supergraph,
     ) -> Vec<LicensedSetting> {
         // Parser limits such as `parser_max_recursion` only configure the GraphQL parser and are
         // not licensed.

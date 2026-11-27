@@ -21,15 +21,11 @@ pub mod test;
 
 use std::any::TypeId;
 use std::fmt;
-#[cfg(test)]
-use std::path::PathBuf;
 use std::sync::Arc;
 use std::task::Context;
 use std::task::Poll;
 
 use ::serde::Deserialize;
-use apollo_compiler::Schema;
-use apollo_compiler::validation::Valid;
 /// The crate whose `Configuration` trait every plugin's `Config` must implement.
 ///
 /// Declare a plugin's `Config` with its `#[configuration]` attribute, which needs a direct
@@ -42,6 +38,7 @@ pub use apollo_configuration;
 use apollo_configuration::Configuration;
 use apollo_configuration::ErrorCollector;
 use apollo_configuration::Validate;
+use apollo_federation::Supergraph;
 use async_trait::async_trait;
 pub use enabled::Enabled;
 use futures::future::BoxFuture;
@@ -76,7 +73,7 @@ type InstanceFactory =
 
 type SchemaFactory = fn(&mut SchemaGenerator) -> schemars::Schema;
 
-type LicensedFeaturesFactory = fn(&PluginConfig, &Schema) -> Vec<LicensedSetting>;
+type LicensedFeaturesFactory = fn(&PluginConfig, &Supergraph) -> Vec<LicensedSetting>;
 
 /// A plugin's config, deserialized when the router configuration is parsed. It validates
 /// itself, so the configuration can run every plugin's rules without knowing their types.
@@ -133,8 +130,8 @@ pub struct PluginInit<T> {
     pub supergraph_sdl: Arc<String>,
     /// Router Supergraph Schema ID (SHA256 of the SDL))
     pub(crate) supergraph_schema_id: Arc<String>,
-    /// The supergraph schema (parsed)
-    pub(crate) supergraph_schema: Arc<Valid<Schema>>,
+    /// The parsed supergraph schema.
+    pub(crate) supergraph: Supergraph,
 
     /// The parsed subgraph schemas from the query planner, keyed by subgraph name
     pub(crate) subgraph_schemas: Arc<crate::query_planner::SubgraphSchemas>,
@@ -159,18 +156,10 @@ where
 {
     #[cfg(test)]
     pub(crate) fn fake_new(config: T, supergraph_sdl: Arc<String>) -> Self {
-        let supergraph_schema = Arc::new(if !supergraph_sdl.is_empty() {
-            Schema::parse_and_validate(supergraph_sdl.to_string(), PathBuf::from("synthetic"))
-                .expect("failed to parse supergraph schema")
-        } else {
-            Valid::assume_valid(Schema::new())
-        });
-
         PluginInit::fake_builder()
             .config(config)
             .supergraph_schema_id(crate::spec::Schema::schema_id(&supergraph_sdl).into_inner())
             .supergraph_sdl(supergraph_sdl)
-            .supergraph_schema(supergraph_schema)
             .launch_id(Arc::new("launch_id".to_string()))
             .notify(Notify::for_tests())
             .build()
@@ -182,29 +171,61 @@ impl<T> PluginInit<T>
 where
     T: for<'de> Deserialize<'de>,
 {
-    /// Create a new PluginInit builder
-    #[builder(entry = "builder", exit = "build", visibility = "pub")]
-    /// Build a new PluginInit for the supplied configuration and SDL.
-    ///
-    /// You can reuse a notify instance, or Build your own.
-    pub(crate) fn new_builder(
+    /// Shares `schema`'s parsed supergraph rather than parsing the SDL again.
+    #[builder(entry = "router_builder", exit = "build", visibility = "pub(crate)")]
+    // buildstructor rejects an elided lifetime on a reference parameter.
+    #[allow(clippy::needless_lifetimes)]
+    fn router_new_builder<'schema>(
         config: T,
-        previous_config: Option<T>,
-        supergraph_sdl: Arc<String>,
-        supergraph_schema_id: Arc<String>,
-        supergraph_schema: Arc<Valid<Schema>>,
+        schema: &'schema crate::spec::Schema,
         subgraph_schemas: Option<Arc<crate::query_planner::SubgraphSchemas>>,
-        launch_id: Option<Option<Arc<String>>>,
         notify: Notify<String, graphql::Response>,
         full_config: Option<Value>,
         original_config_yaml: Option<Arc<str>>,
     ) -> Self {
         PluginInit {
             config,
+            previous_config: None,
+            supergraph_sdl: schema.as_string().clone(),
+            supergraph_schema_id: schema.schema_id.clone().into_inner(),
+            supergraph: schema.federation_supergraph().clone(),
+            subgraph_schemas: subgraph_schemas.unwrap_or_default(),
+            launch_id: schema.launch_id.clone(),
+            notify,
+            full_config,
+            raw_yaml: original_config_yaml,
+        }
+    }
+
+    /// Create a new PluginInit builder
+    #[builder(entry = "builder", exit = "build", visibility = "pub")]
+    /// Build a new PluginInit for the supplied configuration and SDL.
+    ///
+    /// You can reuse a notify instance, or Build your own.
+    ///
+    /// # Panics
+    ///
+    /// `build()` panics if `supergraph_sdl` isn't a valid supergraph. Use `try_builder` to get
+    /// an error instead. Empty SDL gives plugins a minimal supergraph.
+    pub(crate) fn new_builder(
+        config: T,
+        previous_config: Option<T>,
+        supergraph_sdl: Arc<String>,
+        supergraph_schema_id: Arc<String>,
+        subgraph_schemas: Option<Arc<crate::query_planner::SubgraphSchemas>>,
+        launch_id: Option<Option<Arc<String>>>,
+        notify: Notify<String, graphql::Response>,
+        full_config: Option<Value>,
+        original_config_yaml: Option<Arc<str>>,
+    ) -> Self {
+        let supergraph =
+            parse_supergraph(&supergraph_sdl).expect("`supergraph_sdl` must be a valid supergraph");
+        PluginInit {
+            config,
             previous_config,
             supergraph_sdl,
             supergraph_schema_id,
-            supergraph_schema,
+            supergraph,
             subgraph_schemas: subgraph_schemas.unwrap_or_default(),
             launch_id: launch_id.flatten(),
             notify,
@@ -216,14 +237,17 @@ where
     #[builder(entry = "try_builder", exit = "build", visibility = "pub")]
     /// Try to build a new PluginInit for the supplied json configuration and SDL.
     ///
-    /// You can reuse a notify instance, or Build your own.
-    /// invoking build() will fail if the JSON doesn't comply with the configuration format.
+    /// You can reuse a notify instance, or build your own.
+    ///
+    /// # Errors
+    ///
+    /// `build()` returns an error if the JSON doesn't match the configuration format, or if
+    /// `supergraph_sdl` isn't a valid supergraph.
     pub(crate) fn try_new_builder(
         config: serde_json::Value,
         previous_config: Option<serde_json::Value>,
         supergraph_sdl: Arc<String>,
         supergraph_schema_id: Arc<String>,
-        supergraph_schema: Arc<Valid<Schema>>,
         subgraph_schemas: Option<Arc<crate::query_planner::SubgraphSchemas>>,
         launch_id: Option<Arc<String>>,
         notify: Notify<String, graphql::Response>,
@@ -232,11 +256,12 @@ where
     ) -> Result<Self, BoxError> {
         let config: T = serde_json::from_value(config)?;
         let previous_config = previous_config.map(serde_json::from_value).transpose()?;
+        let supergraph = parse_supergraph(&supergraph_sdl)?;
         Ok(PluginInit {
             config,
             previous_config,
             supergraph_sdl,
-            supergraph_schema,
+            supergraph,
             supergraph_schema_id,
             subgraph_schemas: subgraph_schemas.unwrap_or_default(),
             launch_id,
@@ -246,27 +271,33 @@ where
         })
     }
 
-    /// Create a new PluginInit builder
+    /// Create a new PluginInit builder for tests.
+    ///
+    /// Without `supergraph_sdl`, or with an empty one, plugins see a minimal supergraph.
+    ///
+    /// # Panics
+    ///
+    /// `build()` panics if `supergraph_sdl` is set and isn't a valid supergraph.
     #[builder(entry = "fake_builder", exit = "build", visibility = "pub")]
     fn fake_new_builder(
         config: T,
         previous_config: Option<T>,
         supergraph_sdl: Option<Arc<String>>,
         supergraph_schema_id: Option<Arc<String>>,
-        supergraph_schema: Option<Arc<Valid<Schema>>>,
         subgraph_schemas: Option<Arc<crate::query_planner::SubgraphSchemas>>,
         launch_id: Option<Arc<String>>,
         notify: Option<Notify<String, graphql::Response>>,
         full_config: Option<Value>,
         original_config_yaml: Option<Arc<str>>,
     ) -> Self {
+        let supergraph = parse_supergraph(supergraph_sdl.as_deref().map_or("", String::as_str))
+            .expect("`supergraph_sdl` must be a valid supergraph");
         PluginInit {
             config,
             previous_config,
             supergraph_sdl: supergraph_sdl.unwrap_or_default(),
             supergraph_schema_id: supergraph_schema_id.unwrap_or_default(),
-            supergraph_schema: supergraph_schema
-                .unwrap_or_else(|| Arc::new(Valid::assume_valid(Schema::new()))),
+            supergraph,
             subgraph_schemas: subgraph_schemas.unwrap_or_default(),
             launch_id,
             notify: notify.unwrap_or_else(Notify::for_tests),
@@ -282,17 +313,7 @@ impl PluginInit<serde_json::Value> {
     where
         T: for<'de> Deserialize<'de>,
     {
-        PluginInit::try_builder()
-            .config(self.config)
-            .and_previous_config(self.previous_config)
-            .supergraph_schema(self.supergraph_schema)
-            .supergraph_schema_id(self.supergraph_schema_id)
-            .supergraph_sdl(self.supergraph_sdl)
-            .subgraph_schemas(self.subgraph_schemas)
-            .notify(self.notify.clone())
-            .and_full_config(self.full_config)
-            .and_original_config_yaml(self.raw_yaml)
-            .build()
+        self.try_map_config(|config| Ok(serde_json::from_value(config)?))
     }
 }
 
@@ -304,7 +325,7 @@ impl<T> PluginInit<T> {
             previous_config,
             supergraph_sdl: self.supergraph_sdl.clone(),
             supergraph_schema_id: self.supergraph_schema_id.clone(),
-            supergraph_schema: self.supergraph_schema.clone(),
+            supergraph: self.supergraph.clone(),
             subgraph_schemas: self.subgraph_schemas.clone(),
             launch_id: self.launch_id.clone(),
             notify: self.notify.clone(),
@@ -322,7 +343,7 @@ impl<T> PluginInit<T> {
             previous_config: self.previous_config.map(&convert).transpose()?,
             supergraph_sdl: self.supergraph_sdl,
             supergraph_schema_id: self.supergraph_schema_id,
-            supergraph_schema: self.supergraph_schema,
+            supergraph: self.supergraph,
             subgraph_schemas: self.subgraph_schemas,
             launch_id: self.launch_id,
             notify: self.notify,
@@ -330,6 +351,19 @@ impl<T> PluginInit<T> {
             raw_yaml: self.raw_yaml,
         })
     }
+}
+
+/// Parses `supergraph_sdl` the way the router does, for a `PluginInit` built outside it.
+/// Empty SDL gives a minimal supergraph, for tests that need no schema.
+fn parse_supergraph(supergraph_sdl: &str) -> Result<Supergraph, BoxError> {
+    static MINIMAL: Lazy<Supergraph> = Lazy::new(|| {
+        Supergraph::new_with_router_specs(include_str!("../testdata/minimal_supergraph.graphql"))
+            .expect("the minimal supergraph is valid")
+    });
+    if supergraph_sdl.is_empty() {
+        return Ok(MINIMAL.clone());
+    }
+    Ok(Supergraph::new_with_router_specs(supergraph_sdl)?)
 }
 
 /// Factories for plugin schema and configuration.
@@ -474,7 +508,7 @@ impl PluginFactory {
     pub(crate) fn licensed_features(
         &self,
         config: &PluginConfig,
-        supergraph: &Schema,
+        supergraph: &Supergraph,
     ) -> Vec<LicensedSetting> {
         (self.licensed_features_factory)(config, supergraph)
     }
@@ -783,7 +817,7 @@ pub(crate) trait PluginPrivate: Send + Sync + 'static {
     /// returned setting needs. Return only settings that are in effect: a section that turns a
     /// licensed feature off, or whose feature `supergraph` doesn't use, needs no license. The
     /// default returns nothing.
-    fn licensed_features(_config: &Self::Config, _supergraph: &Schema) -> Vec<LicensedSetting> {
+    fn licensed_features(_config: &Self::Config, _supergraph: &Supergraph) -> Vec<LicensedSetting> {
         Vec::new()
     }
 

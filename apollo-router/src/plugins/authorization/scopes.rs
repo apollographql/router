@@ -13,7 +13,6 @@ use apollo_compiler::Name;
 use apollo_compiler::Node;
 use apollo_compiler::ast;
 use apollo_compiler::executable;
-use apollo_compiler::name;
 use apollo_compiler::schema;
 use apollo_compiler::schema::Implementers;
 use tower::BoxError;
@@ -32,9 +31,6 @@ pub(crate) struct ScopeExtractionVisitor<'a> {
     requires_scopes_directive_name: &'a str,
     entity_query: bool,
 }
-
-pub(crate) const REQUIRES_SCOPES_DIRECTIVE_NAME: Name = name!("requiresScopes");
-pub(crate) const REQUIRES_SCOPES_SPEC_VERSION_RANGE: &str = ">=0.1.0, <=0.1.0";
 
 impl<'a> ScopeExtractionVisitor<'a> {
     #[allow(dead_code)]
@@ -584,9 +580,9 @@ mod tests {
 
     use apollo_compiler::Schema;
     use apollo_compiler::ast::Document;
+    use apollo_federation::schema::ValidFederationSchema;
 
     use crate::json_ext::Path;
-    use crate::plugins::authorization::AuthorizationDirectives;
     use crate::plugins::authorization::scopes::ScopeExtractionVisitor;
     use crate::plugins::authorization::scopes::ScopeFilteringVisitor;
     use crate::spec::query::transform;
@@ -658,7 +654,9 @@ mod tests {
         let schema = Schema::parse_and_validate(schema, "schema.graphql").unwrap();
         let doc = Document::parse(query, "query.graphql").unwrap();
         let exec = doc.to_executable_validate(&schema).unwrap();
-        let directives = AuthorizationDirectives::from_schema(&schema);
+        let directives = ValidFederationSchema::new(schema.clone())
+            .unwrap()
+            .access_control_directive_names();
         let mut visitor = ScopeExtractionVisitor::new(
             &schema,
             &exec,
@@ -697,7 +695,9 @@ mod tests {
         doc.to_executable_validate(&schema).unwrap();
 
         let map = schema.implementers_map();
-        let directives = AuthorizationDirectives::from_schema(&schema);
+        let directives = ValidFederationSchema::new(schema.clone())
+            .unwrap()
+            .access_control_directive_names();
         let mut visitor = ScopeFilteringVisitor::new(
             &schema,
             &map,

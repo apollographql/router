@@ -188,7 +188,7 @@ impl LicenseEnforcementReport {
         license: &LicenseState,
     ) -> Vec<LicensedSetting> {
         let allowed_features = license.get_allowed_features();
-        let supergraph = schema.supergraph_schema();
+        let supergraph = schema.federation_supergraph();
         let configured = configuration
             .apollo_plugins
             .iter()

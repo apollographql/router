@@ -4,10 +4,8 @@ use std::sync::Arc;
 
 use apollo_compiler::Name;
 use apollo_compiler::Schema;
-use apollo_compiler::name;
 use apollo_compiler::schema::ExtendedType;
-use apollo_compiler::validation::Valid;
-use apollo_federation::link::spec::Identity;
+use apollo_federation::schema::ValidFederationSchema;
 use dashmap::DashMap;
 use sha2::Digest;
 use sha2::Sha256;
@@ -20,15 +18,12 @@ use self::visitor::OverrideLabelVisitor;
 use crate::plugin::Plugin;
 use crate::plugin::PluginInit;
 use crate::services::*;
-use crate::spec;
 use crate::spec::query::traverse;
 
 pub(crate) mod visitor;
 pub(crate) const UNRESOLVED_LABELS_KEY: &str = "apollo::progressive_override::unresolved_labels";
 pub(crate) const LABELS_TO_OVERRIDE_KEY: &str = "apollo::progressive_override::labels_to_override";
 
-pub(crate) const JOIN_FIELD_DIRECTIVE_NAME: Name = name!("field");
-pub(crate) const JOIN_SPEC_VERSION_RANGE: &str = ">=0.4";
 pub(crate) const OVERRIDE_LABEL_ARG_NAME: &str = "overrideLabel";
 
 /// Configuration for the progressive override plugin
@@ -37,7 +32,8 @@ pub(crate) struct Config {}
 
 pub(crate) struct ProgressiveOverridePlugin {
     enabled: bool,
-    schema: Arc<Valid<Schema>>,
+    schema: ValidFederationSchema,
+    join_field_directive_name: Option<Name>,
     labels_from_schema: LabelsFromSchema,
     // We have to visit each operation to find out which labels from the schema
     // are relevant for any given operation. This allows us to minimize the
@@ -53,14 +49,12 @@ type LabelsFromSchema = (
     Arc<HashSet<Arc<String>>>,
 );
 
-fn collect_labels_from_schema(schema: &Schema) -> LabelsFromSchema {
-    let Some(join_field_directive_name_in_schema) = spec::Schema::directive_name(
-        schema,
-        &Identity::join_identity(),
-        JOIN_SPEC_VERSION_RANGE,
-        &JOIN_FIELD_DIRECTIVE_NAME,
-    ) else {
-        tracing::debug!("No join spec >=v0.4 found in the schema. No labels will be overridden.");
+fn collect_labels_from_schema(
+    schema: &Schema,
+    join_field_directive_name: Option<&Name>,
+) -> LabelsFromSchema {
+    let Some(join_field_directive_name) = join_field_directive_name else {
+        tracing::debug!("No join spec found in the schema. No labels will be overridden.");
         return (Arc::new(HashMap::new()), Arc::new(HashSet::new()));
     };
 
@@ -79,7 +73,7 @@ fn collect_labels_from_schema(schema: &Schema) -> LabelsFromSchema {
             let join_field_directives = field
                 .directives
                 .iter()
-                .filter(|d| d.name.as_str() == join_field_directive_name_in_schema)
+                .filter(|d| d.name == *join_field_directive_name)
                 .collect::<Vec<_>>();
             if !join_field_directives.is_empty() {
                 Some(join_field_directives)
@@ -125,12 +119,15 @@ impl Plugin for ProgressiveOverridePlugin {
     type Config = Config;
 
     async fn new(init: PluginInit<Self::Config>) -> Result<Self, BoxError> {
-        let schema = init.supergraph_schema.clone();
-        let labels_from_schema = collect_labels_from_schema(&schema);
+        let schema = init.supergraph.schema;
+        let join_field_directive_name = schema.join_field_directive_name();
+        let labels_from_schema =
+            collect_labels_from_schema(schema.schema(), join_field_directive_name.as_ref());
         let enabled = !labels_from_schema.0.is_empty() || !labels_from_schema.1.is_empty();
         Ok(ProgressiveOverridePlugin {
             enabled,
             schema,
+            join_field_directive_name,
             labels_from_schema,
             // we have to visit each operation to find out which labels from the schema are relevant.
             labels_per_operation_cache: Arc::new(DashMap::new()),
@@ -175,6 +172,7 @@ impl Plugin for ProgressiveOverridePlugin {
             let labels_per_operation_cache = self.labels_per_operation_cache.clone();
 
             let schema = self.schema.clone();
+            let join_field_directive_name = self.join_field_directive_name.clone();
             ServiceBuilder::new()
             .map_request(move |request: supergraph::Request| {
                 // evaluate each percentage-based label in the schema
@@ -205,8 +203,10 @@ impl Plugin for ProgressiveOverridePlugin {
                     let relevant_labels = labels_per_operation_cache
                         .entry(operation_hash)
                         .or_insert_with(|| {
-                            OverrideLabelVisitor::new(&schema)
-                                .map(|mut visitor| {
+                            join_field_directive_name
+                                .clone()
+                                .map(|join_field_directive_name| {
+                                    let mut visitor = OverrideLabelVisitor::new(schema.schema(), join_field_directive_name);
                                     let _ = traverse::document(&mut visitor, &parsed_doc.executable, operation_name.as_deref());
                                     visitor.override_labels.into_iter().collect::<Vec<_>>()
                                 })

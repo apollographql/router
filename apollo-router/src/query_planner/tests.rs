@@ -2003,7 +2003,9 @@ fn broken_plan_does_not_panic() {
     let mut subgraph_schemas = HashMap::default();
     subgraph_schemas.insert(
         "X".to_owned(),
-        query_planner::HashedSubgraphSchema::new(subgraph_schema),
+        query_planner::HashedSubgraphSchema::new(
+            apollo_federation::schema::ValidFederationSchema::new(subgraph_schema).unwrap(),
+        ),
     );
     // Run the plan initialization code to make sure it doesn't panic.
     let root_node = plan.root.as_mut().expect("non-empty query plan");

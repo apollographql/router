@@ -1,7 +1,5 @@
 use std::sync::Arc;
 
-use apollo_compiler::Schema;
-use apollo_federation::link::spec::Identity;
 use tower::ServiceExt;
 
 use crate::Context;
@@ -10,8 +8,6 @@ use crate::metrics::FutureMetricsExt;
 use crate::plugin::Plugin;
 use crate::plugin::PluginInit;
 use crate::plugins::progressive_override::Config;
-use crate::plugins::progressive_override::JOIN_FIELD_DIRECTIVE_NAME;
-use crate::plugins::progressive_override::JOIN_SPEC_VERSION_RANGE;
 use crate::plugins::progressive_override::LABELS_TO_OVERRIDE_KEY;
 use crate::plugins::progressive_override::ProgressiveOverridePlugin;
 use crate::plugins::progressive_override::UNRESOLVED_LABELS_KEY;
@@ -24,74 +20,6 @@ use crate::services::supergraph;
 
 const SCHEMA: &str = include_str!("testdata/supergraph.graphql");
 const SCHEMA_NO_USAGES: &str = include_str!("testdata/supergraph_no_usages.graphql");
-
-#[test]
-fn test_progressive_overrides_are_recognised_vor_join_v0_4_and_above() {
-    let schema_for_version = |version| {
-        format!(
-            r#"
-            schema
-              @link(url: "https://specs.apollo.dev/link/v1.0")
-              @link(url: "https://specs.apollo.dev/join/{version}", for: EXECUTION)
-              @link(url: "https://specs.apollo.dev/context/v0.1", for: SECURITY)
-
-            directive @link(
-              url: String
-              as: String
-              for: link__Purpose
-              import: [link__Import]
-            ) repeatable on SCHEMA
-            scalar link__Import
-            enum link__Purpose {{
-              """
-              `SECURITY` features provide metadata necessary to securely resolve fields.
-              """
-              SECURITY
-
-              """
-              `EXECUTION` features provide metadata necessary for operation execution.
-              """
-              EXECUTION
-            }}
-            directive @join__field repeatable on FIELD_DEFINITION | INPUT_FIELD_DEFINITION
-            "#
-        )
-    };
-
-    let join_v3_schema = Schema::parse(schema_for_version("v0.3"), "test").unwrap();
-    assert!(
-        crate::spec::Schema::directive_name(
-            &join_v3_schema,
-            &Identity::join_identity(),
-            JOIN_SPEC_VERSION_RANGE,
-            &JOIN_FIELD_DIRECTIVE_NAME,
-        )
-        .is_none()
-    );
-
-    let join_v4_schema = Schema::parse(schema_for_version("v0.4"), "test").unwrap();
-    assert!(
-        crate::spec::Schema::directive_name(
-            &join_v4_schema,
-            &Identity::join_identity(),
-            JOIN_SPEC_VERSION_RANGE,
-            &JOIN_FIELD_DIRECTIVE_NAME,
-        )
-        .is_some()
-    );
-
-    let join_v5_schema = Schema::parse(schema_for_version("v0.5"), "test").unwrap();
-
-    assert!(
-        crate::spec::Schema::directive_name(
-            &join_v5_schema,
-            &Identity::join_identity(),
-            JOIN_SPEC_VERSION_RANGE,
-            &JOIN_FIELD_DIRECTIVE_NAME,
-        )
-        .is_some()
-    )
-}
 
 #[tokio::test]
 async fn plugin_disables_itself_with_no_progressive_override_usages() {

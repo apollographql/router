@@ -2,13 +2,11 @@
 
 use std::collections::HashSet;
 use std::ops::ControlFlow;
-use std::sync::Arc;
 
 use apollo_compiler::ExecutableDocument;
 use apollo_compiler::ast;
-use apollo_compiler::validation::Valid;
-use apollo_federation::link::metadata::LinksMetadata;
-use apollo_federation::link::spec::Identity;
+use apollo_federation::schema::AccessControlDirectiveNames;
+use apollo_federation::schema::ValidFederationSchema;
 use http::StatusCode;
 use serde::Deserialize;
 use serde::Serialize;
@@ -18,18 +16,12 @@ use tower::ServiceBuilder;
 use tower::ServiceExt;
 use tower::util::option_layer;
 
-use self::authenticated::AUTHENTICATED_DIRECTIVE_NAME;
-use self::authenticated::AUTHENTICATED_SPEC_VERSION_RANGE;
 use self::authenticated::AuthenticatedCheckVisitor;
 use self::authenticated::AuthenticatedVisitor;
 use self::authorization_requirements::AuthorizationRequirementsLayer;
 use self::extract_authorization_checks_layer::ExtractAuthorizationChecksLayer;
-use self::policy::POLICY_DIRECTIVE_NAME;
-use self::policy::POLICY_SPEC_VERSION_RANGE;
 use self::policy::PolicyExtractionVisitor;
 use self::policy::PolicyFilteringVisitor;
-use self::scopes::REQUIRES_SCOPES_DIRECTIVE_NAME;
-use self::scopes::REQUIRES_SCOPES_SPEC_VERSION_RANGE;
 use self::scopes::ScopeExtractionVisitor;
 use self::scopes::ScopeFilteringVisitor;
 use crate::Configuration;
@@ -70,53 +62,14 @@ pub(crate) struct CacheKeyMetadata {
     pub(crate) policies: Vec<String>,
 }
 
-/// The names the authorization directives have in a supergraph, after any renames on import.
+/// Whether the supergraph links at least one of the authorization directives at a supported
+/// version.
 ///
-/// A name is `None` when the supergraph does not link that directive at a supported version;
-/// the directive is then not enforced.
-#[derive(Clone, Debug, Default, PartialEq, Eq)]
-pub(crate) struct AuthorizationDirectives {
-    pub(crate) authenticated: Option<String>,
-    pub(crate) requires_scopes: Option<String>,
-    pub(crate) policy: Option<String>,
-}
-
-impl AuthorizationDirectives {
-    /// Whether the supergraph links at least one of the directives at a supported version.
-    ///
-    /// This checks the `@link`, not whether any type or field applies the directive.
-    /// Composition links a directive's spec in the supergraph only when some subgraph
-    /// applies the directive, so in a composed supergraph a linked directive is in use.
-    pub(crate) fn any_linked(&self) -> bool {
-        self.authenticated.is_some() || self.requires_scopes.is_some() || self.policy.is_some()
-    }
-
-    /// Resolves authorization directive names by parsing the schema's `@link` metadata.
-    pub(crate) fn from_schema(schema: &apollo_compiler::Schema) -> Self {
-        let Ok(Some(links)) = LinksMetadata::from_schema(schema) else {
-            return Self::default();
-        };
-        Self {
-            authenticated: Schema::directive_name_in_links(
-                &links,
-                &Identity::authenticated_identity(),
-                AUTHENTICATED_SPEC_VERSION_RANGE,
-                &AUTHENTICATED_DIRECTIVE_NAME,
-            ),
-            requires_scopes: Schema::directive_name_in_links(
-                &links,
-                &Identity::requires_scopes_identity(),
-                REQUIRES_SCOPES_SPEC_VERSION_RANGE,
-                &REQUIRES_SCOPES_DIRECTIVE_NAME,
-            ),
-            policy: Schema::directive_name_in_links(
-                &links,
-                &Identity::policy_identity(),
-                POLICY_SPEC_VERSION_RANGE,
-                &POLICY_DIRECTIVE_NAME,
-            ),
-        }
-    }
+/// This checks the `@link`, not whether any type or field applies the directive. Composition
+/// links a directive's spec in the supergraph only when some subgraph applies the directive, so
+/// in a composed supergraph a linked directive is in use.
+pub(crate) fn any_linked(names: &AccessControlDirectiveNames) -> bool {
+    names.authenticated.is_some() || names.requires_scopes.is_some() || names.policy.is_some()
 }
 
 /// Authorization plugin
@@ -253,14 +206,19 @@ pub(crate) struct AuthorizationPlugin {
     require_authentication: bool,
     reject_unauthorized: bool,
     directives_enabled: bool,
-    supergraph_schema: Arc<Valid<apollo_compiler::Schema>>,
-    directives: AuthorizationDirectives,
+    supergraph_schema: ValidFederationSchema,
+    directives: AccessControlDirectiveNames,
 }
 
 impl AuthorizationPlugin {
     pub(crate) fn enable_directives(configuration: &Configuration, schema: &Schema) -> bool {
         Self::configuration(configuration).directives.enabled
-            && schema.authorization_directives.any_linked()
+            && any_linked(
+                &schema
+                    .federation_supergraph()
+                    .schema
+                    .access_control_directive_names(),
+            )
     }
 
     /// Returns a layer for the query parsing service that stores each parsed operation's
@@ -293,7 +251,7 @@ impl AuthorizationPlugin {
     /// layers above are provided under this one condition, so a document reaching the
     /// router-service layer always went through the requirements layer.
     fn directives_in_effect(&self) -> bool {
-        self.directives_enabled && self.directives.any_linked()
+        self.directives_enabled && any_linked(&self.directives)
     }
 
     pub(crate) fn configuration(configuration: &Configuration) -> Conf {
@@ -308,7 +266,7 @@ impl AuthorizationPlugin {
         operation_name: Option<&str>,
         schema: &apollo_compiler::Schema,
         entity_query: bool,
-        directives: &AuthorizationDirectives,
+        directives: &AccessControlDirectiveNames,
     ) -> CacheKeyMetadata {
         let mut is_authenticated = false;
         if let Some(directive_name) = &directives.authenticated {
@@ -423,7 +381,7 @@ impl AuthorizationPlugin {
         configuration: &Conf,
         key: &QueryKey,
         schema: &Schema,
-        directives: &AuthorizationDirectives,
+        directives: &AccessControlDirectiveNames,
     ) -> Result<FilterResult, QueryPlannerError> {
         let dry_run = configuration.directives.dry_run;
 
@@ -519,7 +477,7 @@ impl AuthorizationPlugin {
 
     fn authenticated_filter_query(
         schema: &Schema,
-        directives: &AuthorizationDirectives,
+        directives: &AccessControlDirectiveNames,
         dry_run: bool,
         doc: &ast::Document,
         is_authenticated: bool,
@@ -564,7 +522,7 @@ impl AuthorizationPlugin {
 
     fn scopes_filter_query(
         schema: &Schema,
-        directives: &AuthorizationDirectives,
+        directives: &AccessControlDirectiveNames,
         dry_run: bool,
         doc: &ast::Document,
         scopes: &[String],
@@ -601,7 +559,7 @@ impl AuthorizationPlugin {
 
     fn policies_filter_query(
         schema: &Schema,
-        directives: &AuthorizationDirectives,
+        directives: &AccessControlDirectiveNames,
         dry_run: bool,
 
         doc: &ast::Document,
@@ -645,7 +603,7 @@ impl PluginPrivate for AuthorizationPlugin {
 
     fn licensed_features(
         config: &Self::Config,
-        supergraph: &apollo_compiler::Schema,
+        supergraph: &apollo_federation::Supergraph,
     ) -> Vec<LicensedSetting> {
         let mut settings = Vec::new();
         if config.require_authentication {
@@ -656,7 +614,7 @@ impl PluginPrivate for AuthorizationPlugin {
         }
         // The directives are enforced only when enabled and the supergraph links one of them.
         if config.directives.enabled
-            && AuthorizationDirectives::from_schema(supergraph).any_linked()
+            && any_linked(&supergraph.schema.access_control_directive_names())
         {
             settings.push(LicensedSetting {
                 feature: AllowedFeature::Authorization,
@@ -671,8 +629,8 @@ impl PluginPrivate for AuthorizationPlugin {
             require_authentication: init.config.require_authentication,
             reject_unauthorized: init.config.directives.reject_unauthorized,
             directives_enabled: init.config.directives.enabled,
-            directives: AuthorizationDirectives::from_schema(&init.supergraph_schema),
-            supergraph_schema: init.supergraph_schema,
+            directives: init.supergraph.schema.access_control_directive_names(),
+            supergraph_schema: init.supergraph.schema,
         })
     }
 

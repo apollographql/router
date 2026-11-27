@@ -202,8 +202,8 @@ pub(crate) struct DemandControlledSchema {
 }
 
 impl DemandControlledSchema {
-    pub(crate) fn new(schema: Arc<Valid<Schema>>) -> Result<Self, DemandControlError> {
-        let fed_schema = ValidFederationSchema::new((*schema).clone())?;
+    pub(crate) fn new(fed_schema: ValidFederationSchema) -> Result<Self, DemandControlError> {
+        let schema = fed_schema.schema();
         let mut input_field_definitions: HashMap<Name, HashMap<Name, InputDefinition>> =
             HashMap::with_capacity(schema.types.len());
         let mut output_field_definitions: HashMap<Name, HashMap<Name, FieldDefinition>> =
@@ -260,13 +260,12 @@ impl DemandControlledSchema {
         })
     }
 
-    pub(crate) fn empty(schema: Arc<Valid<Schema>>) -> Result<Self, DemandControlError> {
-        let fed_schema = ValidFederationSchema::new((*schema).clone())?;
-        Ok(Self {
-            inner: fed_schema,
+    pub(crate) fn empty(schema: ValidFederationSchema) -> Self {
+        Self {
+            inner: schema,
             input_field_definitions: Default::default(),
             output_field_definitions: Default::default(),
-        })
+        }
     }
 
     pub(in crate::plugins::demand_control) fn input_field_definition(

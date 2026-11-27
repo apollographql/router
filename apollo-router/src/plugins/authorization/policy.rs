@@ -13,7 +13,6 @@ use apollo_compiler::Name;
 use apollo_compiler::Node;
 use apollo_compiler::ast;
 use apollo_compiler::executable;
-use apollo_compiler::name;
 use apollo_compiler::schema;
 use apollo_compiler::schema::Implementers;
 use tower::BoxError;
@@ -32,9 +31,6 @@ pub(crate) struct PolicyExtractionVisitor<'a> {
     policy_directive_name: &'a str,
     entity_query: bool,
 }
-
-pub(crate) const POLICY_DIRECTIVE_NAME: Name = name!("policy");
-pub(crate) const POLICY_SPEC_VERSION_RANGE: &str = ">=0.1.0, <=0.1.0";
 
 impl<'a> PolicyExtractionVisitor<'a> {
     #[allow(dead_code)]
@@ -590,9 +586,9 @@ mod tests {
     use apollo_compiler::Schema;
     use apollo_compiler::ast;
     use apollo_compiler::ast::Document;
+    use apollo_federation::schema::ValidFederationSchema;
 
     use crate::json_ext::Path;
-    use crate::plugins::authorization::AuthorizationDirectives;
     use crate::plugins::authorization::policy::PolicyExtractionVisitor;
     use crate::plugins::authorization::policy::PolicyFilteringVisitor;
     use crate::spec::query::transform;
@@ -662,7 +658,9 @@ mod tests {
     fn extract(schema: &str, query: &str) -> BTreeSet<String> {
         let schema = Schema::parse_and_validate(schema, "schema.graphql").unwrap();
         let doc = ExecutableDocument::parse(&schema, query, "query.graphql").unwrap();
-        let directives = AuthorizationDirectives::from_schema(&schema);
+        let directives = ValidFederationSchema::new(schema.clone())
+            .unwrap()
+            .access_control_directive_names();
         let mut visitor = PolicyExtractionVisitor::new(
             &schema,
             &doc,
@@ -699,7 +697,9 @@ mod tests {
         let doc = ast::Document::parse(query, "query.graphql").unwrap();
         doc.to_executable_validate(&schema).unwrap();
         let map = schema.implementers_map();
-        let directives = AuthorizationDirectives::from_schema(&schema);
+        let directives = ValidFederationSchema::new(schema.clone())
+            .unwrap()
+            .access_control_directive_names();
         let mut visitor = PolicyFilteringVisitor::new(
             &schema,
             &map,

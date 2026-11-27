@@ -192,7 +192,7 @@ impl PluginPrivate for CoprocessorPlugin<HTTPClientService> {
 
     fn licensed_features(
         _config: &Self::Config,
-        _supergraph: &apollo_compiler::Schema,
+        _supergraph: &apollo_federation::Supergraph,
     ) -> Vec<LicensedSetting> {
         vec![LicensedSetting {
             feature: AllowedFeature::Coprocessors,

@@ -148,12 +148,16 @@ impl PluginPrivate for MockSubgraphsPlugin {
                 let mut response = http::Response::builder();
                 let body = if let Some(config) = &config {
                     *response.headers_mut().unwrap() = config.headers.0.clone();
-                    subgraph_call(config, &subgraph_schema, request.subgraph_request.body())
-                        .unwrap_or_else(|e| {
-                            graphql::Response::builder()
-                                .errors(e.into_iter().map(Into::into).collect())
-                                .build()
-                        })
+                    subgraph_call(
+                        config,
+                        subgraph_schema.schema(),
+                        request.subgraph_request.body(),
+                    )
+                    .unwrap_or_else(|e| {
+                        graphql::Response::builder()
+                            .errors(e.into_iter().map(Into::into).collect())
+                            .build()
+                    })
                 } else {
                     graphql::Response::builder()
                         .error(

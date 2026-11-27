@@ -32,6 +32,8 @@ use crate::error::FederationError;
 use crate::error::SingleFederationError;
 use crate::internal_error;
 use crate::link::Link;
+use crate::link::authenticated_spec_definition::AUTHENTICATED_DIRECTIVE_NAME_IN_SPEC;
+use crate::link::authenticated_spec_definition::AUTHENTICATED_VERSIONS;
 use crate::link::context_spec_definition::ContextSpecDefinition;
 use crate::link::cost_spec_definition;
 use crate::link::cost_spec_definition::CostSpecDefinition;
@@ -49,11 +51,19 @@ use crate::link::federation_spec_definition::ProvidesDirectiveArguments;
 use crate::link::federation_spec_definition::RequiresDirectiveArguments;
 use crate::link::federation_spec_definition::TagDirectiveArguments;
 use crate::link::federation_spec_definition::get_federation_spec_definition_from_subgraph;
+use crate::link::join_spec_definition::JOIN_FIELD_DIRECTIVE_NAME_IN_SPEC;
+use crate::link::join_spec_definition::JOIN_VERSIONS;
 use crate::link::link_spec_definition::LINK_DIRECTIVE_URL_ARGUMENT_NAME;
 use crate::link::metadata::LinksMetadata;
+use crate::link::policy_spec_definition::POLICY_DIRECTIVE_NAME_IN_SPEC;
+use crate::link::policy_spec_definition::POLICY_VERSIONS;
+use crate::link::requires_scopes_spec_definition::REQUIRES_SCOPES_DIRECTIVE_NAME_IN_SPEC;
+use crate::link::requires_scopes_spec_definition::REQUIRES_SCOPES_VERSIONS;
+use crate::link::spec::Identity;
 use crate::link::spec::Url;
 use crate::link::spec::Version;
 use crate::link::spec_definition::SpecDefinition;
+use crate::link::spec_definition::SpecDefinitions;
 use crate::link::spec_registry::SPEC_REGISTRY;
 use crate::schema::blueprint::FederationBlueprint;
 use crate::schema::position::CompositeTypeDefinitionPosition;
@@ -114,6 +124,17 @@ pub(crate) static GRAPHQL_BUILT_IN_DIRECTIVES: [&str; 7] = [
     "stream",
     "oneOf",
 ];
+
+/// The names a schema uses for the access-control directives, after any `@link` renames.
+///
+/// Each name is `None` when the schema doesn't link that spec at a version apollo-federation
+/// knows.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct AccessControlDirectiveNames {
+    pub authenticated: Option<Name>,
+    pub requires_scopes: Option<Name>,
+    pub policy: Option<Name>,
+}
 
 /// A GraphQL schema with federation data.
 #[derive(Clone, Debug)]
@@ -1207,6 +1228,58 @@ impl FederationSchema {
         Ok(features)
     }
 
+    /// Returns the names this schema uses for `@authenticated`, `@requiresScopes` and `@policy`.
+    pub fn access_control_directive_names(&self) -> AccessControlDirectiveNames {
+        let Some(links) = self.metadata() else {
+            return AccessControlDirectiveNames::default();
+        };
+        AccessControlDirectiveNames {
+            authenticated: self.linked_directive_name(
+                links,
+                &Identity::authenticated_identity(),
+                &AUTHENTICATED_VERSIONS,
+                &AUTHENTICATED_DIRECTIVE_NAME_IN_SPEC,
+            ),
+            requires_scopes: self.linked_directive_name(
+                links,
+                &Identity::requires_scopes_identity(),
+                &REQUIRES_SCOPES_VERSIONS,
+                &REQUIRES_SCOPES_DIRECTIVE_NAME_IN_SPEC,
+            ),
+            policy: self.linked_directive_name(
+                links,
+                &Identity::policy_identity(),
+                &POLICY_VERSIONS,
+                &POLICY_DIRECTIVE_NAME_IN_SPEC,
+            ),
+        }
+    }
+
+    /// Returns the name this supergraph uses for `@join__field`, or `None` when it doesn't link
+    /// the join spec at a version apollo-federation knows.
+    pub fn join_field_directive_name(&self) -> Option<Name> {
+        let links = self.metadata()?;
+        self.linked_directive_name(
+            links,
+            &Identity::join_identity(),
+            &JOIN_VERSIONS,
+            &JOIN_FIELD_DIRECTIVE_NAME_IN_SPEC,
+        )
+    }
+
+    fn linked_directive_name<T: SpecDefinition>(
+        &self,
+        links: &LinksMetadata,
+        identity: &Identity,
+        versions: &SpecDefinitions<T>,
+        name_in_spec: &Name,
+    ) -> Option<Name> {
+        links
+            .for_identity(identity)
+            .and_then(|link| versions.find(&link.url.version))
+            .and_then(|spec| spec.directive_name_in_schema(self, name_in_spec))
+    }
+
     pub(crate) fn node_locations<T>(
         &self,
         node: &Node<T>,
@@ -1562,5 +1635,94 @@ pub(crate) fn same_type(t1: &Type, t2: &Type) -> bool {
         (Type::List(inner1), Type::List(inner2)) => same_type(inner1, inner2),
         (Type::NonNullList(inner1), Type::NonNullList(inner2)) => same_type(inner1, inner2),
         _ => false,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use apollo_compiler::Schema;
+    use apollo_compiler::name;
+
+    use super::AccessControlDirectiveNames;
+    use super::ValidFederationSchema;
+
+    const LINK_DEFINITIONS: &str = r#"
+        directive @link(url: String, as: String, for: link__Purpose, import: [link__Import]) repeatable on SCHEMA
+        scalar link__Import
+        enum link__Purpose { SECURITY EXECUTION }
+        type Query { field: Int }
+    "#;
+
+    fn schema_with_links(links: &str, definitions: &str) -> ValidFederationSchema {
+        let sdl = format!(
+            r#"schema @link(url: "https://specs.apollo.dev/link/v1.0") {links} {{ query: Query }}
+            {LINK_DEFINITIONS}
+            {definitions}"#
+        );
+        let schema = Schema::parse_and_validate(sdl, "schema.graphql").unwrap();
+        ValidFederationSchema::new(schema).unwrap()
+    }
+
+    #[test]
+    fn access_control_directive_names_follow_imports() {
+        let schema = schema_with_links(
+            r#"
+            @link(url: "https://specs.apollo.dev/authenticated/v0.1", import: [{ name: "@authenticated", as: "@auth" }])
+            @link(url: "https://specs.apollo.dev/requiresScopes/v0.1", import: ["@requiresScopes"])
+            @link(url: "https://specs.apollo.dev/policy/v0.1", as: "access")
+            "#,
+            r#"
+            directive @auth on FIELD_DEFINITION
+            directive @requiresScopes(scopes: [[String!]!]!) on FIELD_DEFINITION
+            directive @access(policies: [[String!]!]!) on FIELD_DEFINITION
+            "#,
+        );
+
+        assert_eq!(
+            schema.access_control_directive_names(),
+            AccessControlDirectiveNames {
+                authenticated: Some(name!("auth")),
+                requires_scopes: Some(name!("requiresScopes")),
+                policy: Some(name!("access")),
+            }
+        );
+    }
+
+    #[test]
+    fn access_control_directive_names_are_none_when_not_linked() {
+        let linked_elsewhere = schema_with_links("", "");
+        let without_link = ValidFederationSchema::new(
+            Schema::parse_and_validate("type Query { field: Int }", "schema.graphql").unwrap(),
+        )
+        .unwrap();
+
+        for schema in [linked_elsewhere, without_link] {
+            assert_eq!(
+                schema.access_control_directive_names(),
+                AccessControlDirectiveNames::default()
+            );
+        }
+    }
+
+    #[test]
+    fn access_control_directive_names_ignore_unknown_versions() {
+        let schema = schema_with_links(
+            r#"@link(url: "https://specs.apollo.dev/authenticated/v0.9", import: ["@authenticated"])"#,
+            "directive @authenticated on FIELD_DEFINITION",
+        );
+
+        assert_eq!(schema.access_control_directive_names().authenticated, None);
+    }
+
+    #[test]
+    fn join_field_directive_name_follows_the_join_link() {
+        let renamed = schema_with_links(
+            r#"@link(url: "https://specs.apollo.dev/join/v0.4", as: "j")"#,
+            "directive @j__field repeatable on FIELD_DEFINITION",
+        );
+        let unlinked = schema_with_links("", "");
+
+        assert_eq!(renamed.join_field_directive_name(), Some(name!("j__field")));
+        assert_eq!(unlinked.join_field_directive_name(), None);
     }
 }

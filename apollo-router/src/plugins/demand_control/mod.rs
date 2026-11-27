@@ -503,7 +503,7 @@ impl PluginPrivate for DemandControl {
 
     fn licensed_features(
         config: &Self::Config,
-        _supergraph: &apollo_compiler::Schema,
+        _supergraph: &apollo_federation::Supergraph,
     ) -> Vec<LicensedSetting> {
         if config.enabled {
             vec![LicensedSetting {
@@ -521,8 +521,8 @@ impl PluginPrivate for DemandControl {
                 strategy_factory: StrategyFactory::new(
                     init.config.clone(),
                     Arc::new(DemandControlledSchema::empty(
-                        init.supergraph_schema.clone(),
-                    )?),
+                        init.supergraph.schema.clone(),
+                    )),
                     Arc::new(HashMap::new()),
                 ),
                 config: init.config,
@@ -530,7 +530,7 @@ impl PluginPrivate for DemandControl {
         }
 
         let demand_controlled_supergraph_schema =
-            DemandControlledSchema::new(init.supergraph_schema.clone())?;
+            DemandControlledSchema::new(init.supergraph.schema.clone())?;
         let mut demand_controlled_subgraph_schemas = HashMap::new();
         for (subgraph_name, subgraph_schema) in init.subgraph_schemas.iter() {
             let demand_controlled_subgraph_schema =

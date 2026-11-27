@@ -26,7 +26,7 @@ impl PluginPrivate for Restricted {
 
     fn licensed_features(
         config: &Self::Config,
-        _supergraph: &apollo_compiler::Schema,
+        _supergraph: &apollo_federation::Supergraph,
     ) -> Vec<LicensedSetting> {
         if config.enabled {
             vec![LicensedSetting {

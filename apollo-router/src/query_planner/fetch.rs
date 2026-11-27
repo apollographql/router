@@ -7,6 +7,7 @@ use apollo_compiler::ast;
 use apollo_compiler::validation::Valid;
 use apollo_federation::query_plan::requires_selection;
 use apollo_federation::query_plan::serializable_document::SerializableDocument;
+use apollo_federation::schema::AccessControlDirectiveNames;
 use indexmap::IndexSet;
 use serde::Deserialize;
 use serde::Serialize;
@@ -30,7 +31,6 @@ use crate::json_ext::Object;
 use crate::json_ext::Path;
 use crate::json_ext::Value;
 use crate::json_ext::ValueExt;
-use crate::plugins::authorization::AuthorizationDirectives;
 use crate::plugins::authorization::AuthorizationPlugin;
 use crate::plugins::authorization::CacheKeyMetadata;
 use crate::query_planner::HashedSubgraphSchemas;
@@ -712,7 +712,7 @@ impl FetchNode {
         subgraph_schemas: &SubgraphSchemas,
     ) -> Result<(), ValidationErrors> {
         let schema = &subgraph_schemas[self.service_name.as_ref()];
-        self.operation.init_parsed(schema)?;
+        self.operation.init_parsed(schema.schema())?;
         Ok(())
     }
 
@@ -721,7 +721,8 @@ impl FetchNode {
         subgraph_schemas: &HashedSubgraphSchemas,
     ) -> Result<(), ValidationErrors> {
         let subgraph_schema = &subgraph_schemas[self.service_name.as_ref()];
-        self.operation.init_parsed(&subgraph_schema.schema)?;
+        self.operation
+            .init_parsed(subgraph_schema.schema.schema())?;
         self.schema_aware_hash = Arc::new(subgraph_schema.hash.operation_hash(
             self.operation.as_serialized(),
             self.operation_name.as_deref(),
@@ -732,7 +733,7 @@ impl FetchNode {
     pub(crate) fn extract_authorization_metadata(
         &mut self,
         schema: &Valid<apollo_compiler::Schema>,
-        directives: &AuthorizationDirectives,
+        directives: &AccessControlDirectiveNames,
         global_authorisation_cache_key: &CacheKeyMetadata,
     ) {
         let doc = ExecutableDocument::parse(

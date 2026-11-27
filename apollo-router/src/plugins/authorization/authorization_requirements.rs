@@ -6,11 +6,12 @@ use std::task::Poll;
 
 use apollo_compiler::Schema;
 use apollo_compiler::validation::Valid;
+use apollo_federation::schema::AccessControlDirectiveNames;
+use apollo_federation::schema::ValidFederationSchema;
 use futures::future::BoxFuture;
 use tower::Layer;
 use tower::Service;
 
-use crate::plugins::authorization::AuthorizationDirectives;
 use crate::plugins::authorization::AuthorizationPlugin;
 use crate::plugins::authorization::CacheKeyMetadata;
 use crate::services::query_parsing::ParsedDocument;
@@ -22,7 +23,7 @@ use crate::services::query_parsing::Request;
 pub(crate) fn operation_requirements(
     doc: &ParsedDocumentInner,
     supergraph_schema: &Valid<Schema>,
-    directives: &AuthorizationDirectives,
+    directives: &AccessControlDirectiveNames,
 ) -> CacheKeyMetadata {
     AuthorizationPlugin::generate_cache_metadata(
         &doc.executable,
@@ -39,14 +40,14 @@ pub(crate) fn operation_requirements(
 /// the document carries its requirements. Parse errors pass through unchanged.
 #[derive(Clone)]
 pub(crate) struct AuthorizationRequirementsLayer {
-    supergraph_schema: Arc<Valid<Schema>>,
-    directives: Arc<AuthorizationDirectives>,
+    supergraph_schema: ValidFederationSchema,
+    directives: Arc<AccessControlDirectiveNames>,
 }
 
 impl AuthorizationRequirementsLayer {
     pub(crate) fn new(
-        supergraph_schema: Arc<Valid<Schema>>,
-        directives: AuthorizationDirectives,
+        supergraph_schema: ValidFederationSchema,
+        directives: AccessControlDirectiveNames,
     ) -> Self {
         Self {
             supergraph_schema,
@@ -70,8 +71,8 @@ impl<S> Layer<S> for AuthorizationRequirementsLayer {
 #[derive(Clone)]
 pub(crate) struct AuthorizationRequirementsService<S> {
     inner: S,
-    supergraph_schema: Arc<Valid<Schema>>,
-    directives: Arc<AuthorizationDirectives>,
+    supergraph_schema: ValidFederationSchema,
+    directives: Arc<AccessControlDirectiveNames>,
 }
 
 impl<S> Service<Request> for AuthorizationRequirementsService<S>
@@ -95,8 +96,9 @@ where
 
         Box::pin(async move {
             let doc = inner.call(req).await?;
-            doc.authorization
-                .get_or_init(|| operation_requirements(&doc, &supergraph_schema, &directives));
+            doc.authorization.get_or_init(|| {
+                operation_requirements(&doc, supergraph_schema.schema(), &directives)
+            });
             Ok(doc)
         })
     }
@@ -159,8 +161,11 @@ mod tests {
         });
 
         let result = AuthorizationRequirementsLayer::new(
-            Arc::new(schema.supergraph_schema().clone()),
-            schema.authorization_directives.clone(),
+            schema.federation_supergraph().schema.clone(),
+            schema
+                .federation_supergraph()
+                .schema
+                .access_control_directive_names(),
         )
         .layer(mock)
         .oneshot(Request::new(
