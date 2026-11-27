@@ -47,22 +47,24 @@ where
     }
 
     fn call(&mut self, mut req: HttpRequest) -> Self::Future {
+        let form = req
+            .http_request
+            .extensions_mut()
+            .remove::<MultipartFormData>();
+        let Some(form) = form else {
+            return Box::pin(self.inner.call(req));
+        };
+
         let service = self.inner.clone();
         let mut inner = std::mem::replace(&mut self.inner, service);
         Box::pin(async move {
-            let form = req
-                .http_request
-                .extensions_mut()
-                .remove::<MultipartFormData>();
-            if let Some(form) = form {
-                let (mut parts, operations) = req.http_request.into_parts();
-                parts
-                    .headers
-                    .insert(APOLLO_REQUIRE_PREFLIGHT.clone(), TRUE.clone());
-                parts.headers.insert(CONTENT_TYPE, form.content_type());
-                let body = router::body::from_result_stream(form.into_stream(operations).await);
-                req.http_request = http::Request::from_parts(parts, body);
-            }
+            let (mut parts, operations) = req.http_request.into_parts();
+            parts
+                .headers
+                .insert(APOLLO_REQUIRE_PREFLIGHT.clone(), TRUE.clone());
+            parts.headers.insert(CONTENT_TYPE, form.content_type());
+            let body = router::body::from_result_stream(form.into_stream(operations).await);
+            req.http_request = http::Request::from_parts(parts, body);
             inner.call(req).await
         })
     }
