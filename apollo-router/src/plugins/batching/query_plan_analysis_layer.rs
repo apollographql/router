@@ -1,5 +1,6 @@
 use std::sync::Arc;
 
+use futures::TryFutureExt as _;
 use futures::future::BoxFuture;
 use http::StatusCode;
 use tower::BoxError;
@@ -60,51 +61,59 @@ where
     }
 
     fn call(&mut self, req: execution::Request) -> Self::Future {
+        let plan = &req.query_plan;
+        let variables = &req.supergraph_request.body().variables;
+        let is_deferred = plan.is_deferred(variables);
+        let is_subscription = plan.is_subscription();
+
+        let Some(batching) = req.context.extensions().with_lock(|lock| {
+            lock.get::<Arc<crate::plugins::batching::config::BatchingConfig>>()
+                .cloned()
+        }) else {
+            return Box::pin(self.inner.call(req).map_err(Into::into));
+        };
+
+        if is_deferred || is_subscription {
+            let code = if is_deferred {
+                "BATCHING_DEFER_UNSUPPORTED"
+            } else {
+                "BATCHING_SUBSCRIPTION_UNSUPPORTED"
+            };
+            let mut response = execution::Response::new_from_graphql_response(
+                graphql::Response::builder()
+                    .error(
+                        crate::error::Error::builder()
+                            .message(
+                                "Deferred responses and subscriptions aren't supported in batches",
+                            )
+                            .extension_code(code)
+                            .build(),
+                    )
+                    .build(),
+                req.context,
+            );
+            *response.response.status_mut() = StatusCode::NOT_ACCEPTABLE;
+            return Box::pin(std::future::ready(Ok(response)));
+        }
+
+        let batch_query_opt = req
+            .context
+            .extensions()
+            .with_lock(|lock| lock.get::<BatchQuery>().cloned());
+        let Some(batch_query) = batch_query_opt else {
+            return Box::pin(self.inner.call(req).map_err(Into::into));
+        };
+        let query_hashes = match query_hashes(plan, &batching, variables) {
+            Ok(query_hashes) => query_hashes,
+            Err(err) => return Box::pin(std::future::ready(Err(err.into()))),
+        };
+
         let inner = self.inner.clone();
         let mut inner = std::mem::replace(&mut self.inner, inner);
 
         Box::pin(async move {
-            let plan = &req.query_plan;
-            let variables = &req.supergraph_request.body().variables;
-            let is_deferred = plan.is_deferred(variables);
-            let is_subscription = plan.is_subscription();
-
-            let Some(batching) = req.context.extensions().with_lock(|lock| {
-                lock.get::<Arc<crate::plugins::batching::config::BatchingConfig>>()
-                    .cloned()
-            }) else {
-                return inner.call(req).await.map_err(Into::into);
-            };
-
-            if is_deferred || is_subscription {
-                let code = if is_deferred {
-                    "BATCHING_DEFER_UNSUPPORTED"
-                } else {
-                    "BATCHING_SUBSCRIPTION_UNSUPPORTED"
-                };
-                let mut response = execution::Response::new_from_graphql_response(
-                        graphql::Response::builder()
-                        .error(crate::error::Error::builder()
-                            .message("Deferred responses and subscriptions aren't supported in batches")
-                            .extension_code(code)
-                            .build())
-                            .build(),
-                        req.context,
-                    );
-                *response.response.status_mut() = StatusCode::NOT_ACCEPTABLE;
-                return Ok(response);
-            }
-
-            // Now perform query batch analysis
-            let batch_query_opt = req
-                .context
-                .extensions()
-                .with_lock(|lock| lock.get::<BatchQuery>().cloned());
-            if let Some(batch_query) = batch_query_opt {
-                let query_hashes = query_hashes(plan, &batching, variables)?;
-                batch_query.set_query_hashes(query_hashes).await?;
-                tracing::debug!("batch registered: {}", batch_query);
-            }
+            batch_query.set_query_hashes(query_hashes).await?;
+            tracing::debug!("batch registered: {}", batch_query);
 
             inner.call(req).await.map_err(Into::into)
         })

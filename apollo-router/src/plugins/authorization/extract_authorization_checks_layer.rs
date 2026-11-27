@@ -45,10 +45,7 @@ pub(crate) struct ExtractAuthorizationChecksService<S> {
 
 impl<S> Service<supergraph::Request> for ExtractAuthorizationChecksService<S>
 where
-    S: Service<supergraph::Request, Response = supergraph::Response, Error = BoxError>
-        + Clone
-        + Send
-        + 'static,
+    S: Service<supergraph::Request, Response = supergraph::Response, Error = BoxError>,
     S::Future: Send + 'static,
 {
     type Response = supergraph::Response;
@@ -63,57 +60,49 @@ where
     }
 
     fn call(&mut self, req: supergraph::Request) -> Self::Future {
-        let inner = self.inner.clone();
-        let mut inner = std::mem::replace(&mut self.inner, inner);
+        let doc = req
+            .context
+            .extensions()
+            .with_lock(|lock| lock.get::<ParsedDocument>().cloned());
 
-        Box::pin(async move {
-            let doc = req
-                .context
-                .extensions()
-                .with_lock(|lock| lock.get::<ParsedDocument>().cloned());
+        // Only a misbuilt pipeline leaves either missing. Fail the request: a missing value must
+        // never be read as "requires nothing".
+        let Some(doc) = doc else {
+            return Box::pin(std::future::ready(Ok(internal_error(
+                req,
+                "Cannot find executable document",
+                "MISSING_EXECUTABLE_DOCUMENT",
+            ))));
+        };
+        let Some(requirements) = doc.authorization.get() else {
+            return Box::pin(std::future::ready(Ok(internal_error(
+                req,
+                "Cannot find the operation's authorization requirements",
+                "MISSING_AUTHORIZATION_REQUIREMENTS",
+            ))));
+        };
+        let CacheKeyMetadata {
+            is_authenticated,
+            scopes,
+            policies,
+        } = requirements.clone();
+        if is_authenticated {
+            req.context
+                .insert(AUTHENTICATION_REQUIRED_KEY, true)
+                .unwrap();
+        }
 
-            // Neither should ever be missing unless the pipeline was set up improperly (i.e.
-            // programmer error: this layer must run after `ParseQueryLayer`, and the
-            // authorization plugin provides it only together with the layer that stores the
-            // requirements), but do something better than panicking just in case. A missing
-            // value never means the operation requires nothing.
-            let Some(doc) = doc else {
-                return Ok(internal_error(
-                    req,
-                    "Cannot find executable document",
-                    "MISSING_EXECUTABLE_DOCUMENT",
-                ));
-            };
-            let Some(requirements) = doc.authorization.get() else {
-                return Ok(internal_error(
-                    req,
-                    "Cannot find the operation's authorization requirements",
-                    "MISSING_AUTHORIZATION_REQUIREMENTS",
-                ));
-            };
-            let CacheKeyMetadata {
-                is_authenticated,
-                scopes,
-                policies,
-            } = requirements.clone();
-            if is_authenticated {
-                req.context
-                    .insert(AUTHENTICATION_REQUIRED_KEY, true)
-                    .unwrap();
-            }
+        if !scopes.is_empty() {
+            req.context.insert(REQUIRED_SCOPES_KEY, scopes).unwrap();
+        }
 
-            if !scopes.is_empty() {
-                req.context.insert(REQUIRED_SCOPES_KEY, scopes).unwrap();
-            }
+        if !policies.is_empty() {
+            let policies: HashMap<String, Option<bool>> =
+                policies.into_iter().map(|policy| (policy, None)).collect();
+            req.context.insert(REQUIRED_POLICIES_KEY, policies).unwrap();
+        }
 
-            if !policies.is_empty() {
-                let policies: HashMap<String, Option<bool>> =
-                    policies.into_iter().map(|policy| (policy, None)).collect();
-                req.context.insert(REQUIRED_POLICIES_KEY, policies).unwrap();
-            }
-
-            inner.call(req).await
-        })
+        Box::pin(self.inner.call(req))
     }
 }
 

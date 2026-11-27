@@ -112,15 +112,15 @@ where
     }
 
     fn call(&mut self, mut request: SubgraphRequest) -> Self::Future {
+        if !self.enabled.load(Relaxed) {
+            return Box::pin(self.inner.call(request));
+        }
+
         let enabled = self.enabled.clone();
         let inner = self.inner.clone();
         let mut inner = std::mem::replace(&mut self.inner, inner);
 
         Box::pin(async move {
-            if !enabled.load(Relaxed) {
-                return inner.call(request).await;
-            }
-
             // APQ: send only the hash on the first attempt, preserving all other body fields.
             let body = request.subgraph_request.body_mut();
             let original_query = body.query.take();
