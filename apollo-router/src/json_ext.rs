@@ -637,15 +637,12 @@ fn iterate_path<'a, F>(
                             parent.pop();
                         }
                     } else if let Value::Array(array) = data {
+                        // Map the key over the array; the type condition applies to each
+                        // row's selected child, which the object branch above checks.
                         for (i, value) in array.iter().enumerate() {
-                            if let Value::Object(o) = value
-                                && let Some(Value::String(type_name)) = o.get("__typename")
-                                && tc.iter().any(|tc| tc.as_str() == type_name.as_str())
-                            {
-                                parent.push(PathElement::Index(i));
-                                iterate_path(schema, parent, path, value, f);
-                                parent.pop();
-                            }
+                            parent.push(PathElement::Index(i));
+                            iterate_path(schema, parent, path, value, f);
+                            parent.pop();
                         }
                     }
                 }
@@ -736,15 +733,12 @@ fn iterate_path_mut<'a, F>(
                             parent.pop();
                         }
                     } else if let Value::Array(array) = data {
+                        // Map the key over the array; the type condition applies to each
+                        // row's selected child, which the object branch above checks.
                         for (i, value) in array.iter_mut().enumerate() {
-                            if let Value::Object(o) = value
-                                && let Some(Value::String(type_name)) = o.get("__typename")
-                                && tc.iter().any(|tc| tc.as_str() == type_name.as_str())
-                            {
-                                parent.push(PathElement::Index(i));
-                                iterate_path_mut(schema, parent, path, value, f);
-                                parent.pop();
-                            }
+                            parent.push(PathElement::Index(i));
+                            iterate_path_mut(schema, parent, path, value, f);
+                            parent.pop();
                         }
                     }
                 }
@@ -1556,6 +1550,38 @@ mod tests {
         assert_eq!(
             serde_json::to_string(&path).unwrap(),
             "[\"k\",\"... on T\",\"@\",\"arr\",3]",
+        );
+    }
+
+    /// For an object, `child|[A]` checks the `__typename` of the selected `child`. Mapping the key
+    /// over an array must apply the same check to each row's child, not to the row itself.
+    #[test]
+    fn conditioned_key_array_mapping_filters_child_type_instead_of_parent_type() {
+        let schema = test_schema();
+        let mut document = json!([
+            {"__typename": "B", "child": {"__typename": "A", "x": 1}},
+            {"__typename": "A", "child": {"__typename": "B", "x": 2}}
+        ]);
+        let path = Path(vec![
+            PathElement::Key("child".into(), Some(vec!["A".into()])),
+            PathElement::Key("x".into(), None),
+        ]);
+        let mut selected = Vec::new();
+        document.select_values_and_paths(&schema, &path, |p, v| selected.push((p.clone(), v)));
+        assert_eq!(selected, vec![(Path::from("0/child/x"), &Value::from(1))]);
+
+        let mut visited = Vec::new();
+        document.select_values_and_paths_mut(&schema, &path, |p, value| {
+            visited.push(p.clone());
+            *value = Value::from("matched")
+        });
+        assert_eq!(visited, vec![Path::from("0/child/x")]);
+        assert_eq!(
+            document,
+            json!([
+                {"__typename": "B", "child": {"__typename": "A", "x": "matched"}},
+                {"__typename": "A", "child": {"__typename": "B", "x": 2}}
+            ])
         );
     }
 }
