@@ -33,7 +33,6 @@ pub(crate) struct Config {}
 pub(crate) struct ProgressiveOverridePlugin {
     enabled: bool,
     schema: ValidFederationSchema,
-    /// The supergraph's name for `@join__field`, or `None` when it doesn't link the join spec.
     join_field_directive_name: Option<Name>,
     labels_from_schema: LabelsFromSchema,
     // We have to visit each operation to find out which labels from the schema

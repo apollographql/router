@@ -237,9 +237,12 @@ where
     #[builder(entry = "try_builder", exit = "build", visibility = "pub")]
     /// Try to build a new PluginInit for the supplied json configuration and SDL.
     ///
-    /// You can reuse a notify instance, or Build your own.
-    /// invoking build() will fail if the JSON doesn't comply with the configuration format,
-    /// or if `supergraph_sdl` isn't a valid supergraph.
+    /// You can reuse a notify instance, or build your own.
+    ///
+    /// # Errors
+    ///
+    /// `build()` returns an error if the JSON doesn't match the configuration format, or if
+    /// `supergraph_sdl` isn't a valid supergraph.
     pub(crate) fn try_new_builder(
         config: serde_json::Value,
         previous_config: Option<serde_json::Value>,
