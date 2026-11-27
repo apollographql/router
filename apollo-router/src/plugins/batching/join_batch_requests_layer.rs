@@ -90,41 +90,28 @@ where
     }
 
     fn call(&mut self, req: HttpRequest) -> Self::Future {
-        let inner = self.inner.clone();
-        let mut inner = std::mem::replace(&mut self.inner, inner);
+        let Some(query) = BatchQuery::joined_by(&req.context, &self.subgraph_name) else {
+            return Box::pin(self.inner.call(req));
+        };
 
+        // The batching worker calls this service without readying it, so it must get the one
+        // `poll_ready` readied.
+        let inner = self.inner.clone();
+        let inner = std::mem::replace(&mut self.inner, inner).boxed_clone();
         let subgraph_name = self.subgraph_name.clone();
         let metrics = self.metrics.clone();
 
         Box::pin(async move {
-            // If we are processing a batch, then we'd like to park tasks here, but we can't park them whilst
-            // we have the context extensions lock held. That would be very bad...
-            // We grab the (potential) BatchQuery and then operate on it later
-            let opt_batch_query = BatchQuery::joined_by(&req.context, &subgraph_name);
+            let response_rx = query
+                .signal_progress(subgraph_name.clone(), inner, req, metrics)
+                .await?;
 
-            // If we have a batch query, then it's time for batching
-            if let Some(query) = opt_batch_query {
-                let response_rx = query
-                    .signal_progress(
-                        subgraph_name.clone(),
-                        // Send our type-erased inner service to the batching worker.
-                        // Only one of the inner services will actually be called
-                        inner.boxed_clone(),
-                        req,
-                        metrics,
-                    )
-                    .await?;
-
-                // Park this query until we have our response and pass it back up
-                response_rx
-                    .await
-                    .map_err(|err| FetchError::SubrequestBatchingError {
-                        service: subgraph_name.to_string(),
-                        reason: format!("tx receive failed: {err}"),
-                    })?
-            } else {
-                inner.call(req).await
-            }
+            response_rx
+                .await
+                .map_err(|err| FetchError::SubrequestBatchingError {
+                    service: subgraph_name.to_string(),
+                    reason: format!("tx receive failed: {err}"),
+                })?
         })
     }
 }
