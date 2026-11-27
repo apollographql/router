@@ -52,10 +52,7 @@ pub(crate) struct ExtendedReferencesService<S> {
 
 impl<S> Service<supergraph::Request> for ExtendedReferencesService<S>
 where
-    S: Service<supergraph::Request, Response = supergraph::Response, Error = BoxError>
-        + Clone
-        + Send
-        + 'static,
+    S: Service<supergraph::Request, Response = supergraph::Response, Error = BoxError>,
     S::Future: Send + 'static,
 {
     type Response = supergraph::Response;
@@ -70,49 +67,42 @@ where
     }
 
     fn call(&mut self, req: supergraph::Request) -> Self::Future {
-        let inner = self.inner.clone();
-        let mut inner = std::mem::replace(&mut self.inner, inner);
-        let schema = self.schema.clone();
+        let doc = req
+            .context
+            .extensions()
+            .with_lock(|lock| lock.get::<ParsedDocument>().cloned());
 
-        Box::pin(async move {
-            let doc = req
-                .context
-                .extensions()
-                .with_lock(|lock| lock.get::<ParsedDocument>().cloned());
+        let doc = match doc {
+            Some(doc) => doc,
+            None => {
+                // Only a misbuilt pipeline gets here; fail the request rather than panic.
+                let errors = vec![
+                    Error::builder()
+                        .message("Cannot find executable document".to_string())
+                        .extension_code("MISSING_EXECUTABLE_DOCUMENT")
+                        .build(),
+                ];
+                return Box::pin(std::future::ready(Ok(supergraph::Response::builder()
+                    .errors(errors)
+                    .status_code(StatusCode::INTERNAL_SERVER_ERROR)
+                    .context(req.context)
+                    .build()
+                    .expect("response is valid"))));
+            }
+        };
 
-            let doc = match doc {
-                Some(doc) => doc,
-                None => {
-                    // We shouldn't ever reach here unless the pipeline was set up improperly
-                    // (i.e. programmer error), but do something better than panicking just in case.
-                    let errors = vec![
-                        Error::builder()
-                            .message("Cannot find executable document".to_string())
-                            .extension_code("MISSING_EXECUTABLE_DOCUMENT")
-                            .build(),
-                    ];
-                    return Ok(supergraph::Response::builder()
-                        .errors(errors)
-                        .status_code(StatusCode::INTERNAL_SERVER_ERROR)
-                        .context(req.context)
-                        .build()
-                        .expect("response is valid"));
-                }
-            };
+        let operation_name = req.supergraph_request.body().operation_name.clone();
+        let stats = generate_extended_references(
+            doc.executable.clone(),
+            operation_name,
+            self.schema.api_schema(),
+            &req.supergraph_request.body().variables,
+        );
+        req.context
+            .extensions()
+            .with_lock(|lock| lock.insert::<ExtendedReferenceStats>(stats));
 
-            let operation_name = req.supergraph_request.body().operation_name.clone();
-            let stats = generate_extended_references(
-                doc.executable.clone(),
-                operation_name,
-                schema.api_schema(),
-                &req.supergraph_request.body().variables,
-            );
-            req.context
-                .extensions()
-                .with_lock(|lock| lock.insert::<ExtendedReferenceStats>(stats));
-
-            inner.call(req).await
-        })
+        Box::pin(self.inner.call(req))
     }
 }
 
