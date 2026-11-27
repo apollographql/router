@@ -76,7 +76,7 @@ pub(crate) struct AuthorizationRequirementsService<S> {
 
 impl<S> Service<Request> for AuthorizationRequirementsService<S>
 where
-    S: Service<Request, Response = ParsedDocument> + Clone + Send + 'static,
+    S: Service<Request, Response = ParsedDocument>,
     S::Future: Send + 'static,
 {
     type Response = ParsedDocument;
@@ -88,13 +88,12 @@ where
     }
 
     fn call(&mut self, req: Request) -> Self::Future {
-        let inner = self.inner.clone();
-        let mut inner = std::mem::replace(&mut self.inner, inner);
         let supergraph_schema = self.supergraph_schema.clone();
         let directives = self.directives.clone();
+        let parsed = self.inner.call(req);
 
         Box::pin(async move {
-            let doc = inner.call(req).await?;
+            let doc = parsed.await?;
             doc.authorization
                 .get_or_init(|| operation_requirements(&doc, &supergraph_schema, &directives));
             Ok(doc)
