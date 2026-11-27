@@ -171,7 +171,7 @@ impl<T> PluginInit<T>
 where
     T: for<'de> Deserialize<'de>,
 {
-    /// Builds the initialisation context the router gives its plugins for `schema`.
+    /// Shares `schema`'s parsed supergraph rather than parsing the SDL again.
     #[builder(entry = "router_builder", exit = "build", visibility = "pub(crate)")]
     // buildstructor rejects an elided lifetime on a reference parameter.
     #[allow(clippy::needless_lifetimes)]

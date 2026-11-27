@@ -134,11 +134,8 @@ pub(crate) static GRAPHQL_BUILT_IN_DIRECTIVES: [&str; 7] = [
 /// knows.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct AccessControlDirectiveNames {
-    /// The name of `@authenticated`.
     pub authenticated: Option<Name>,
-    /// The name of `@requiresScopes`.
     pub requires_scopes: Option<Name>,
-    /// The name of `@policy`.
     pub policy: Option<Name>,
 }
 

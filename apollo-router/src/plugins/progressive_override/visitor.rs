@@ -12,8 +12,6 @@ use super::OVERRIDE_LABEL_ARG_NAME;
 use crate::spec::query::traverse;
 
 impl<'a> OverrideLabelVisitor<'a> {
-    /// Collects the override labels on the fields an operation selects, from the
-    /// `@join__field` directives named `join_field_directive_name` in `schema`.
     pub(crate) fn new(schema: &'a schema::Schema, join_field_directive_name: Name) -> Self {
         Self {
             schema,
