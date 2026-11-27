@@ -759,7 +759,7 @@ mod tests {
     #[tokio::test(start_paused = true)]
     async fn max_lifetime_closes_subscription_while_events_keep_arriving() {
         let subscription_config = SubscriptionConfig {
-            max_lifetime: Some(Duration::from_secs(60).into()),
+            max_lifetime: Some(Duration::from_secs(60)),
             ..Default::default()
         };
         let mut harness = Harness::start(Context::new(), subscription_config);
