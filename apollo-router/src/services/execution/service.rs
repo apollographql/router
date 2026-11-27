@@ -319,13 +319,25 @@ impl ExecutionService {
                 );
                 (deferred_responses, paths)
             } else {
-                let paths = query.format_response(
+                // Format with the authorization-filtered query first, so fields the request
+                // is not authorized to see are nulled, then with the original query.
+                let mut paths = Vec::new();
+                if let Some(filtered_query) = query.filtered_query.as_ref() {
+                    paths = filtered_query.format_response(
+                        &mut response,
+                        variables.clone(),
+                        schema.api_schema(),
+                        variables_set,
+                        insert_result_coercion_errors,
+                    );
+                }
+                paths.extend(query.format_response(
                     &mut response,
                     variables.clone(),
                     schema.api_schema(),
                     variables_set,
                     insert_result_coercion_errors,
-                );
+                ));
                 (Vec::new(), paths)
             };
 
