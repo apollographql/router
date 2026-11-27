@@ -539,8 +539,9 @@ mod tests {
                     })
                     .build(),
             );
-            let supergraph_request = http::Request::builder()
-                .body(graphql::Request::builder().build())
+            let supergraph_request = SupergraphRequest::fake_builder()
+                .context(context.clone())
+                .build()
                 .unwrap();
 
             let events: BoxGqlStream = Box::pin(
