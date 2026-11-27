@@ -9,6 +9,7 @@ use axum::body::Body;
 use axum::body::Bytes;
 use axum::response::IntoResponse;
 use axum::response::Response;
+use futures::TryFutureExt as _;
 use futures::future::BoxFuture;
 use http::Request;
 use http::StatusCode;
@@ -84,9 +85,8 @@ pub(crate) struct LicenseService<S> {
 
 impl<S, ReqBody, ResBody> Service<Request<ReqBody>> for LicenseService<S>
 where
-    S: Service<Request<ReqBody>, Response = http::Response<ResBody>> + Clone + Send + 'static,
+    S: Service<Request<ReqBody>, Response = http::Response<ResBody>>,
     S::Future: Send + 'static,
-    ReqBody: Send + 'static,
     ResBody: http_body::Body<Data = Bytes> + Send + 'static,
     ResBody::Error: Into<BoxError>,
 {
@@ -99,26 +99,22 @@ where
     }
 
     fn call(&mut self, request: Request<ReqBody>) -> Self::Future {
-        let license = self.license.clone();
-        let start = self.start;
-        let delta = self.delta.clone();
-        let service = self.inner.clone();
-        let mut inner = std::mem::replace(&mut self.inner, service);
+        log_license_expired_rate_limited(&self.license, self.start, &self.delta);
 
-        Box::pin(async move {
-            log_license_expired_rate_limited(&license, start, &delta);
+        if matches!(&*self.license, LicenseState::LicensedHalt { limits: _ }) {
+            let response = http::Response::builder()
+                .status(StatusCode::INTERNAL_SERVER_ERROR)
+                .body(Body::default())
+                .expect("canned response must be valid")
+                .into_response();
+            return Box::pin(async move { Ok(response) });
+        }
 
-            if matches!(&*license, LicenseState::LicensedHalt { limits: _ }) {
-                return Ok(http::Response::builder()
-                    .status(StatusCode::INTERNAL_SERVER_ERROR)
-                    .body(Body::default())
-                    .expect("canned response must be valid")
-                    .into_response());
-            }
-
-            let response = inner.call(request).await?;
-            Ok(response.map(Body::new))
-        })
+        Box::pin(
+            self.inner
+                .call(request)
+                .map_ok(|response| response.map(Body::new)),
+        )
     }
 }
 
