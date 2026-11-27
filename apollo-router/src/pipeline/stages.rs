@@ -171,7 +171,7 @@ pub(crate) fn build_http_client_service(
             b.join_batch_requests_layer(name)
         })
         .apply_required_plugin_layer(&plugins, |l: &LimitsPlugin| {
-            l.subgraph_response_size_limit_layer(name)
+            l.response_size_limit_layer(target)
         })
         .apply_plugin_layer(&plugins, Telemetry::overhead_subgraph_request_timing_layer)
         .apply_plugin_layer(&plugins, Telemetry::instrument_http_client_layer)

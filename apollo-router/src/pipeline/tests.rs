@@ -12,6 +12,7 @@ use crate::spec::Schema;
 
 mod plugin_instantiation;
 mod query_parsing;
+mod response_size_limit;
 pub(crate) mod stage_stack;
 mod subgraph_apq;
 mod traffic_shaping;

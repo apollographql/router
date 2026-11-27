@@ -28,6 +28,7 @@ use crate::configuration::subgraph::SubgraphConfiguration;
 use crate::graphql;
 use crate::layers::OptionLayer;
 use crate::layers::ServiceBuilderExt;
+use crate::pipeline::HttpClientTarget;
 use crate::plugin::PluginInit;
 use crate::plugin::PluginPrivate;
 use crate::plugins::limits::layer::RequestBodyLimitLayer;
@@ -35,12 +36,9 @@ use crate::plugins::limits::layer::RequestSizeLimitError;
 use crate::plugins::limits::measure_operation_limits::MeasureOperationLimitsLayer;
 use crate::plugins::limits::operation_limits_layer::EnforceOperationLimitsLayer;
 use crate::plugins::limits::response_size_limit::ResponseSizeLimitLayer;
-use crate::plugins::limits::response_size_limit::SubgraphResponseSizeLimit;
-use crate::services::SubgraphRequest;
 use crate::services::connector;
 use crate::services::query_parsing::recursive_selections_limit::LimitRecursiveSelectionLayer;
 use crate::services::router;
-use crate::services::subgraph;
 use crate::uplink::license_enforcement::AllowedFeature;
 use crate::uplink::license_enforcement::LicensedSetting;
 
@@ -224,29 +222,15 @@ pub(crate) struct ConnectorLimits {
 pub(crate) struct ConnectorResponseSizeLimit(pub usize);
 
 impl Config {
-    fn subgraph_response_size_limit(
-        &self,
-        subgraph_name: &str,
-    ) -> Option<SubgraphResponseSizeLimit> {
-        // check for non-null subgraph.http_max_response_size or all.http_max_response_size
+    /// `subgraph_name`'s response size limit in bytes: its own, or the one for all subgraphs.
+    fn subgraph_response_size_limit(&self, subgraph_name: &str) -> Option<usize> {
         let subgraph_limit = self
             .subgraph
             .subgraphs
             .get(subgraph_name)
             .and_then(|s| s.http_max_response_size);
         let limit = subgraph_limit.or(self.subgraph.all.http_max_response_size)?;
-
-        // convert to usize (needed for limits plugin)
-        Some(SubgraphResponseSizeLimit(limit.as_u64().try_into().ok()?))
-    }
-
-    fn has_subgraph_response_size_limit(&self) -> bool {
-        self.subgraph.all.http_max_response_size.is_some()
-            || self
-                .subgraph
-                .subgraphs
-                .values()
-                .any(|s| s.http_max_response_size.is_some())
+        limit.as_u64().try_into().ok()
     }
 
     fn connector_response_size_limit(
@@ -306,18 +290,18 @@ impl LimitsPlugin {
         EnforceOperationLimitsLayer::new(&self.config.router)
     }
 
-    pub(crate) fn subgraph_response_size_limit_layer(
+    /// The response size check for the HTTP client calling `target`, present only when the target
+    /// is a subgraph with a limit of its own or one for all subgraphs.
+    pub(crate) fn response_size_limit_layer(
         &self,
-        name: &str,
+        target: HttpClientTarget<'_>,
     ) -> OptionLayer<ResponseSizeLimitLayer> {
-        // Kept for every subgraph once any has a limit, not only for subgraphs with their own:
-        // the check enforces whichever limit a subgraph call last put in the request context,
-        // which also reaches later calls to other subgraphs in the same request.
-        option_layer(
-            self.config
-                .has_subgraph_response_size_limit()
-                .then(|| ResponseSizeLimitLayer::new(name)),
-        )
+        let limit = match target {
+            HttpClientTarget::Subgraph(name) => self.config.subgraph_response_size_limit(name),
+            // The connector checks its source's response against `limits.connector` itself.
+            HttpClientTarget::ConnectorSource(_) => None,
+        };
+        option_layer(limit.map(|limit| ResponseSizeLimitLayer::new(target, limit)))
     }
 }
 
@@ -372,23 +356,6 @@ impl PluginPrivate for LimitsPlugin {
             .map_response(Into::into)
             .service(service)
             .boxed_clone()
-    }
-
-    fn subgraph_service(
-        &self,
-        name: &str,
-        service: subgraph::BoxCloneService,
-    ) -> subgraph::BoxCloneService {
-        match self.config.subgraph_response_size_limit(name) {
-            None => service,
-            Some(limit) => ServiceBuilder::new()
-                .map_request(move |req: SubgraphRequest| {
-                    req.context.extensions().with_lock(|e| e.insert(limit));
-                    req
-                })
-                .service(service)
-                .boxed_clone(),
-        }
     }
 
     fn connector_request_service(
@@ -511,10 +478,10 @@ mod test {
 
     use crate::Context;
     use crate::metrics::FutureMetricsExt;
+    use crate::pipeline::HttpClientTarget;
     use crate::plugin::PluginPrivate;
     use crate::plugins::limits::LimitsPlugin;
     use crate::plugins::limits::layer::BodyLimitControl;
-    use crate::plugins::limits::response_size_limit::SubgraphResponseSizeLimit;
     use crate::plugins::telemetry::Telemetry;
     use crate::plugins::test::PluginTestHarness;
     use crate::services::connector;
@@ -912,7 +879,6 @@ mod test {
         use crate::configuration::subgraph::SubgraphConfiguration;
         use crate::plugins::limits::Config;
         use crate::plugins::limits::SubgraphLimits;
-        use crate::plugins::limits::response_size_limit::SubgraphResponseSizeLimit;
 
         #[test]
         fn get_response_limit_no_config() {
@@ -927,14 +893,8 @@ mod test {
             subgraph_config.all.http_max_response_size = Some(ByteSize::kb(1));
 
             let config: Config = subgraph_config.into();
-            assert_eq!(
-                config.subgraph_response_size_limit("products"),
-                Some(SubgraphResponseSizeLimit(1000))
-            );
-            assert_eq!(
-                config.subgraph_response_size_limit("reviews"),
-                Some(SubgraphResponseSizeLimit(1000))
-            );
+            assert_eq!(config.subgraph_response_size_limit("products"), Some(1000));
+            assert_eq!(config.subgraph_response_size_limit("reviews"), Some(1000));
         }
 
         #[test]
@@ -948,10 +908,7 @@ mod test {
             );
 
             let config: Config = subgraph_config.into();
-            assert_eq!(
-                config.subgraph_response_size_limit("products"),
-                Some(SubgraphResponseSizeLimit(512))
-            );
+            assert_eq!(config.subgraph_response_size_limit("products"), Some(512));
             assert_eq!(config.subgraph_response_size_limit("reviews"), None);
         }
 
@@ -974,15 +931,9 @@ mod test {
 
             let config: Config = subgraph_config.into();
             // per-subgraph override wins
-            assert_eq!(
-                config.subgraph_response_size_limit("products"),
-                Some(SubgraphResponseSizeLimit(500))
-            );
+            assert_eq!(config.subgraph_response_size_limit("products"), Some(500));
             // fallback to all despite having an entry in the map
-            assert_eq!(
-                config.subgraph_response_size_limit("reviews"),
-                Some(SubgraphResponseSizeLimit(1024))
-            );
+            assert_eq!(config.subgraph_response_size_limit("reviews"), Some(1024));
         }
     }
 
@@ -1238,9 +1189,12 @@ mod test {
         crate::plugin::test::await_mock_driver(driver).await;
     }
 
-    // --- LimitsPlugin::subgraph_service ---
+    // --- LimitsPlugin::response_size_limit_layer ---
 
-    async fn read_oversized_products_response(config: &str) -> Result<bytes::Bytes, BoxError> {
+    async fn read_oversized_response(
+        config: &str,
+        target: HttpClientTarget<'_>,
+    ) -> Result<bytes::Bytes, BoxError> {
         let plugin: PluginTestHarness<LimitsPlugin> = PluginTestHarness::builder()
             .config(config)
             .build()
@@ -1259,24 +1213,24 @@ mod test {
         });
 
         let service = ServiceBuilder::new()
-            .layer(plugin.subgraph_response_size_limit_layer("products"))
+            .layer(plugin.response_size_limit_layer(target))
             .service(mock);
 
-        let context = Context::new();
-        context
-            .extensions()
-            .with_lock(|lock| lock.insert(SubgraphResponseSizeLimit(1000)));
         let request = HttpRequest {
             http_request: http::Request::builder()
                 .body(router::body::empty())
                 .unwrap(),
-            context,
+            context: Context::new(),
         };
 
         let response = service.oneshot(request).await.unwrap();
         let body = router::body::into_bytes(response.http_response.into_body()).await;
         crate::plugin::test::await_mock_driver(driver).await;
         body.map_err(BoxError::from)
+    }
+
+    async fn read_oversized_products_response(config: &str) -> Result<bytes::Bytes, BoxError> {
+        read_oversized_response(config, HttpClientTarget::Subgraph("products")).await
     }
 
     #[tokio::test]
@@ -1295,14 +1249,14 @@ mod test {
         "})
         .await;
         assert_eq!(
-            body.expect_err("the context's limit is enforced")
+            body.expect_err("the limit for all subgraphs is enforced")
                 .to_string(),
-            "subgraph response body exceeded limit of 1000 bytes"
+            "subgraph response body exceeded limit of 1024 bytes"
         );
     }
 
     #[tokio::test]
-    async fn subgraph_response_size_layer_applied_for_subgraphs_without_their_own_limit() {
+    async fn subgraph_response_size_layer_left_out_for_subgraphs_without_their_own_limit() {
         let body = read_oversized_products_response(indoc::indoc! {"
             limits:
               subgraph:
@@ -1311,70 +1265,6 @@ mod test {
                     http_max_response_size: 1024b
         "})
         .await;
-        assert_eq!(
-            body.expect_err("the context's limit is enforced")
-                .to_string(),
-            "subgraph response body exceeded limit of 1000 bytes"
-        );
-    }
-
-    #[tokio::test]
-    async fn subgraph_service_sets_limit_on_context() {
-        let plugin: PluginTestHarness<LimitsPlugin> = PluginTestHarness::builder()
-            .config("limits:\n  subgraph:\n    all:\n      http_max_response_size: 1024b")
-            .build()
-            .await
-            .expect("test harness");
-
-        let result = plugin
-            .subgraph_service(
-                "products",
-                |req: crate::services::SubgraphRequest| async move {
-                    let limit = req
-                        .context
-                        .extensions()
-                        .with_lock(|e| e.get::<SubgraphResponseSizeLimit>().copied());
-                    assert_eq!(
-                        limit.map(|l| l.0),
-                        Some(1024),
-                        "limit should be set on context"
-                    );
-                    Ok(crate::services::SubgraphResponse::fake_builder()
-                        .context(req.context)
-                        .build())
-                },
-            )
-            .call_default()
-            .await;
-
-        assert!(result.is_ok());
-    }
-
-    #[tokio::test]
-    async fn subgraph_service_no_limit_does_not_set_extension() {
-        let plugin: PluginTestHarness<LimitsPlugin> = PluginTestHarness::builder()
-            .config(include_str!("fixtures/content_length_limit.router.yaml"))
-            .build()
-            .await
-            .expect("test harness");
-
-        let result = plugin
-            .subgraph_service(
-                "products",
-                |req: crate::services::SubgraphRequest| async move {
-                    let limit = req
-                        .context
-                        .extensions()
-                        .with_lock(|e| e.get::<SubgraphResponseSizeLimit>().copied());
-                    assert!(limit.is_none(), "no limit should be set on context");
-                    Ok(crate::services::SubgraphResponse::fake_builder()
-                        .context(req.context)
-                        .build())
-                },
-            )
-            .call_default()
-            .await;
-
-        assert!(result.is_ok());
+        assert_eq!(body.expect("products has no limit").len(), 10_000);
     }
 }

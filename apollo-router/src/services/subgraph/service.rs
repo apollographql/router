@@ -1,7 +1,6 @@
 //! Tower fetcher for subgraphs.
 
 use std::collections::HashMap;
-use std::error::Error as _;
 use std::sync::Arc;
 use std::sync::atomic::Ordering::Relaxed;
 use std::task::Poll;
@@ -198,13 +197,7 @@ async fn call_http(
             .await
             .map_err(|err| {
                 tracing::error!(fetch_error = ?err);
-                // HACK(@goto-bus-stop): the error ends up double-boxed because we mix `axum::Error` and
-                // `tower::BoxError` types, so we have to look into the source error here.
-                if err
-                    .source()
-                    .and_then(|source| source.downcast_ref::<ResponseSizeLimitError>())
-                    .is_some()
-                {
+                if ResponseSizeLimitError::find(&err).is_some() {
                     tracing::Span::current()
                         .record("apollo.subgraph.response.aborted", "response_size_limit");
                 } else {
@@ -386,8 +379,7 @@ mod tests {
     use crate::graphql::Response;
     use crate::metrics::FutureMetricsExt;
     use crate::pipeline::tests::stage_stack::test_http_client_service;
-    use crate::pipeline::tests::stage_stack::test_http_client_service_with_limits;
-    use crate::plugins::limits::response_size_limit::SubgraphResponseSizeLimit;
+    use crate::pipeline::tests::stage_stack::test_http_client_service_with;
     use crate::plugins::subscription::CallbackMode;
     use crate::plugins::subscription::HeartbeatInterval;
     use crate::plugins::subscription::SUBSCRIPTION_CALLBACK_HMAC_KEY;
@@ -856,6 +848,15 @@ mod tests {
         }
     }
 
+    async fn http_client_service_with_response_size_limit(
+        limit: &str,
+    ) -> crate::services::http::BoxCloneService {
+        let limits = serde_json::json!({ "subgraph": { "subgraphs": {
+            "test": { "http_max_response_size": limit }
+        } } });
+        test_http_client_service_with("test", &[("apollo.limits", limits)]).await
+    }
+
     /// Wraps a bare `SubgraphService` with `SubgraphContentNegotiationLayer`, mirroring
     /// the position it occupies in the `build_subgraph_service` pipeline function. Most
     /// unit tests construct a `SubgraphService` directly and call it without that stack,
@@ -1061,17 +1062,10 @@ mod tests {
         tokio::task::spawn(emulate_subgraph_large_response(listener));
         let subgraph_service = with_content_negotiation_layer(SubgraphService::new(
             "test",
-            test_http_client_service_with_limits(
-                "test",
-                serde_json::json!({ "subgraph": { "all": { "http_max_response_size": "1024b" } } }),
-            )
-            .await,
+            http_client_service_with_response_size_limit("10B").await,
         ));
 
         let context = Context::new();
-        context
-            .extensions()
-            .with_lock(|e| e.insert(SubgraphResponseSizeLimit(10)));
 
         let url = Uri::from_str(&format!("http://{socket_addr}")).unwrap();
         let response = subgraph_service
@@ -1157,20 +1151,13 @@ mod tests {
         let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
         let socket_addr = listener.local_addr().unwrap();
         tokio::task::spawn(emulate_subgraph_application_json_response(listener));
+        // Limit of 1000 bytes — well above {"data": null} (14 bytes)
         let subgraph_service = with_content_negotiation_layer(SubgraphService::new(
             "test",
-            test_http_client_service_with_limits(
-                "test",
-                serde_json::json!({ "subgraph": { "all": { "http_max_response_size": "1024b" } } }),
-            )
-            .await,
+            http_client_service_with_response_size_limit("1000B").await,
         ));
 
         let context = Context::new();
-        // Limit of 1000 bytes — well above {"data": null} (14 bytes)
-        context
-            .extensions()
-            .with_lock(|e| e.insert(SubgraphResponseSizeLimit(1000)));
 
         let url = Uri::from_str(&format!("http://{socket_addr}")).unwrap();
         let response = subgraph_service
