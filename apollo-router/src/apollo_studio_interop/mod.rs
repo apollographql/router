@@ -446,7 +446,9 @@ impl std::hash::Hash for ByAddress<'_> {
     }
 }
 
-fn extract_enums_from_selection_set(
+/// This is used for extracting deferred responses, which start with a `selection_set`.
+/// Regular (primary) responses continue to use [`extract_enums_from_response`].
+pub(crate) fn extract_enums_from_selection_set(
     selection_set: &[SpecSelection],
     fragments: &Fragments,
     schema: &Valid<Schema>,
