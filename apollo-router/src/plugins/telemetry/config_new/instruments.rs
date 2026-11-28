@@ -2074,10 +2074,15 @@ where
             .unwrap_or_default();
         extend_attributes(&mut inner.attributes, attrs);
 
-        if let Some(selected_value) = inner
-            .selector
-            .as_ref()
-            .and_then(|s| s.on_response(response))
+        // A selector such as `static` returns its value on both the request and the response.
+        // Keep the value `on_request` stored and record it below; selecting it again is not a
+        // new value.
+        let has_request_value = matches!(inner.increment, Increment::Custom(Some(_)));
+        if !has_request_value
+            && let Some(selected_value) = inner
+                .selector
+                .as_ref()
+                .and_then(|s| s.on_response(response))
         {
             let new_incr = match &inner.increment {
                 Increment::EventCustom(None) => Increment::Custom(Some(selected_value)),
@@ -2504,10 +2509,15 @@ where
             .map(|s| s.on_response(response))
             .unwrap_or_default();
         extend_attributes(&mut inner.attributes, attrs);
-        if let Some(selected_value) = inner
-            .selector
-            .as_ref()
-            .and_then(|s| s.on_response(response))
+        // A selector such as `static` returns its value on both the request and the response.
+        // Keep the value `on_request` stored and record it below; selecting it again is not a
+        // new value.
+        let has_request_value = matches!(inner.increment, Increment::Custom(Some(_)));
+        if !has_request_value
+            && let Some(selected_value) = inner
+                .selector
+                .as_ref()
+                .and_then(|s| s.on_response(response))
         {
             let new_incr = match &inner.increment {
                 Increment::EventCustom(None) => Increment::EventCustom(Some(selected_value)),

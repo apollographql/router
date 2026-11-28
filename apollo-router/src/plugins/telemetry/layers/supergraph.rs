@@ -914,4 +914,60 @@ telemetry:
         .with_metrics()
         .await;
     }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn test_static_value_is_recorded_once_per_request() {
+        let config = r#"
+telemetry:
+  instrumentation:
+    instruments:
+      default_requirement_level: none
+      supergraph:
+        test.static.counter:
+          type: counter
+          unit: unit
+          description: counter with a static value
+          value:
+            static: 5
+        test.static.histogram:
+          type: histogram
+          unit: unit
+          description: histogram with a static value
+          value:
+            static: 5
+        test.static.ok.counter:
+          type: counter
+          unit: unit
+          description: counter with a static value and a condition that passes on the response
+          value:
+            static: 5
+          condition:
+            eq:
+              - 200
+              - response_status: code
+        test.static.failed.counter:
+          type: counter
+          unit: unit
+          description: counter with a static value and a condition that fails on the response
+          value:
+            static: 5
+          condition:
+            eq:
+              - 500
+              - response_status: code
+"#;
+        let _guard = crate::test_harness::tracing_test::dispatcher_guard();
+        async {
+            send_requests(config, 2, response_chunks(3), false).await;
+
+            assert_counter!("test.static.counter", 10.0);
+            assert_histogram_count!("test.static.histogram", 2);
+            assert_histogram_sum!("test.static.histogram", 10.0);
+            assert_counter!("test.static.ok.counter", 10.0);
+            assert_counter_not_exists!("test.static.failed.counter", f64);
+        }
+        .with_metrics()
+        .await;
+        assert_no_instrument_bug_logged();
+    }
 }
