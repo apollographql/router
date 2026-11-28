@@ -8,6 +8,7 @@ use std::sync::atomic::Ordering;
 use std::task::Poll;
 use std::time::Duration;
 
+use async_compression::tokio::write::BrotliEncoder;
 use async_compression::tokio::write::GzipDecoder;
 use async_compression::tokio::write::GzipEncoder;
 use futures::Future;
@@ -791,7 +792,61 @@ async fn mismatched_compression_header() -> Result<(), ApolloRouterError> {
         .await
         .unwrap();
 
-    assert_eq!(response.status(), StatusCode::INTERNAL_SERVER_ERROR);
+    assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+
+    server.shutdown().await?;
+    crate::plugin::test::assert_no_mock_calls(supergraph_handle).await;
+    Ok(())
+}
+
+#[tokio::test]
+async fn truncated_brotli_request_body() -> Result<(), ApolloRouterError> {
+    let (supergraph_mock, supergraph_handle) = tower_test::mock::pair::<
+        crate::services::supergraph::Request,
+        crate::services::supergraph::Response,
+    >();
+    let original_body = json!({ "query": "query { me { name } }" });
+    let mut encoder = BrotliEncoder::new(Vec::new());
+    encoder
+        .write_all(original_body.to_string().as_bytes())
+        .await
+        .unwrap();
+    encoder.shutdown().await.unwrap();
+    let mut compressed_body = encoder.into_inner();
+    // Drop the last few bytes so the brotli stream ends before its final block
+    compressed_body.truncate(compressed_body.len() - 3);
+
+    let router_service = crate::pipeline::from_supergraph_mock(supergraph_mock).await;
+    let (server, client) = init(router_service).await;
+    let url = format!("{}/", server.graphql_listen_address().as_ref().unwrap());
+
+    let response = client
+        .post(url.as_str())
+        .header(CONTENT_ENCODING, HeaderValue::from_static("br"))
+        .header(CONTENT_TYPE, APPLICATION_JSON.essence_str())
+        .body(compressed_body)
+        .send()
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+    assert_eq!(
+        response.headers().get(CONTENT_TYPE).unwrap(),
+        &HeaderValue::from_static("application/json")
+    );
+    let response_json: serde_json::Value = response.json().await.unwrap();
+    assert_eq!(
+        response_json,
+        json!({
+            "errors": [{
+                "message": "Invalid GraphQL request",
+                "extensions": {
+                    "code": "INVALID_GRAPHQL_REQUEST",
+                    "details": "failed to decompress the request body: reached unexpected EOF",
+                },
+            }],
+        })
+    );
 
     server.shutdown().await?;
     crate::plugin::test::assert_no_mock_calls(supergraph_handle).await;
