@@ -129,12 +129,6 @@ pub(crate) struct Conf {
     directives: Directives,
 }
 
-impl Conf {
-    pub(crate) fn error_config(&self) -> ErrorConfig {
-        self.directives.errors
-    }
-}
-
 #[apollo_configuration::configuration]
 #[derive(Copy)]
 #[schemars(rename = "AuthorizationDirectivesConfig")]
@@ -180,7 +174,6 @@ pub(crate) enum ErrorLocation {
 #[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub(crate) struct UnauthorizedPaths {
     pub(crate) paths: Vec<Path>,
-    pub(crate) errors: ErrorConfig,
 }
 
 /// What [`AuthorizationPlugin::filter_query`] did to an operation.
@@ -195,64 +188,12 @@ pub(crate) enum FilterResult {
     },
 }
 
-impl UnauthorizedPaths {
-    pub(crate) fn log_unauthorized_paths(&self) {
-        // nothing to do if we have no paths or we're not supposed to log
-        if self.paths.is_empty() || !self.errors.log {
-            return;
-        }
-
-        tracing::Span::current().in_scope(|| {
-            let unauthorized_paths = self
-                .paths
-                .iter()
-                .map(|path| path.to_string())
-                .collect::<Vec<_>>();
-
-            tracing::event!(tracing_core::Level::ERROR, unauthorized_query_paths = ?unauthorized_paths, "Authorization error",);
-        })
-    }
-
-    pub(crate) fn update_response_with_unauthorized_path_errors(
-        &self,
-        response: &mut graphql::Response,
-    ) {
-        let unauthorized_path_errors = self.paths.iter().map(|path| {
-            graphql::Error::builder()
-                .message("Unauthorized field or type")
-                .path(path.clone())
-                .extension_code("UNAUTHORIZED_FIELD_OR_TYPE")
-                .build()
-        });
-
-        match self.errors.response {
-            ErrorLocation::Errors => {
-                response.errors.extend(unauthorized_path_errors);
-            }
-            ErrorLocation::Extensions => {
-                let serialized_auth_errors = unauthorized_path_errors
-                    .map(|err| {
-                        serde_json_bytes::to_value(err)
-                            .expect("error serialization should not fail")
-                    })
-                    .collect();
-                response
-                    .extensions
-                    .insert("authorizationErrors", Value::Array(serialized_auth_errors));
-            }
-            ErrorLocation::Disabled => {}
-        }
-    }
-}
-
 fn default_enable_directives() -> bool {
     true
 }
 
 pub(crate) struct AuthorizationPlugin {
-    require_authentication: bool,
-    reject_unauthorized: bool,
-    directives_enabled: bool,
+    config: Conf,
     supergraph_schema: Arc<Valid<apollo_compiler::Schema>>,
     directives: AuthorizationDirectives,
 }
@@ -293,7 +234,7 @@ impl AuthorizationPlugin {
     /// layers above are provided under this one condition, so a document reaching the
     /// router-service layer always went through the requirements layer.
     fn directives_in_effect(&self) -> bool {
-        self.directives_enabled && self.directives.any_linked()
+        self.config.directives.enabled && self.directives.any_linked()
     }
 
     pub(crate) fn configuration(configuration: &Configuration) -> Conf {
@@ -301,6 +242,64 @@ impl AuthorizationPlugin {
             .typed_plugin_config::<Conf>("apollo.authorization")
             .cloned()
             .unwrap_or_default()
+    }
+
+    fn report_authorization_errors_inner(
+        errors: &ErrorConfig,
+        unauthorized: &UnauthorizedPaths,
+        response: &mut graphql::Response,
+    ) {
+        if unauthorized.paths.is_empty() {
+            return;
+        }
+        if errors.log {
+            tracing::Span::current().in_scope(|| {
+                let unauthorized_paths = unauthorized
+                    .paths
+                    .iter()
+                    .map(|path| path.to_string())
+                    .collect::<Vec<_>>();
+
+                tracing::event!(tracing_core::Level::ERROR, unauthorized_query_paths = ?unauthorized_paths, "Authorization error",);
+            })
+        }
+
+        let graphql_errors = unauthorized.paths.iter().map(|path| {
+            graphql::Error::builder()
+                .message("Unauthorized field or type")
+                .path(path.clone())
+                .extension_code("UNAUTHORIZED_FIELD_OR_TYPE")
+                .build()
+        });
+
+        match errors.response {
+            ErrorLocation::Errors => {
+                response.errors.extend(graphql_errors);
+            }
+            ErrorLocation::Extensions => {
+                let serialized_auth_errors = graphql_errors
+                    .map(|err| {
+                        serde_json_bytes::to_value(err)
+                            .expect("error serialization should not fail")
+                    })
+                    .collect();
+                response
+                    .extensions
+                    .insert("authorizationErrors", Value::Array(serialized_auth_errors));
+            }
+            ErrorLocation::Disabled => {}
+        }
+    }
+
+    /// Report authorization errors for the given unauthorized paths, as an error log and/or on the
+    /// given GraphQL response.
+    pub(crate) fn report_authorization_errors(
+        configuration: &Configuration,
+        unauthorized: &UnauthorizedPaths,
+        response: &mut graphql::Response,
+    ) {
+        let error_config = Self::configuration(configuration).directives.errors;
+        Self::report_authorization_errors_inner(&error_config, unauthorized, response);
     }
 
     pub(crate) fn generate_cache_metadata(
@@ -420,12 +419,12 @@ impl AuthorizationPlugin {
     }
 
     pub(crate) fn filter_query(
-        configuration: &Conf,
+        config: &Conf,
         key: &QueryKey,
         schema: &Schema,
         directives: &AuthorizationDirectives,
     ) -> Result<FilterResult, QueryPlannerError> {
-        let dry_run = configuration.directives.dry_run;
+        let dry_run = config.directives.dry_run;
 
         // The filtered query will then be used
         // to generate selections for response formatting, to execute introspection and
@@ -667,12 +666,12 @@ impl PluginPrivate for AuthorizationPlugin {
     }
 
     async fn new(init: PluginInit<Self::Config>) -> Result<Self, BoxError> {
+        let directives = AuthorizationDirectives::from_schema(&init.supergraph_schema);
+
         Ok(AuthorizationPlugin {
-            require_authentication: init.config.require_authentication,
-            reject_unauthorized: init.config.directives.reject_unauthorized,
-            directives_enabled: init.config.directives.enabled,
-            directives: AuthorizationDirectives::from_schema(&init.supergraph_schema),
+            config: init.config,
             supergraph_schema: init.supergraph_schema,
+            directives,
         })
     }
 
@@ -680,7 +679,7 @@ impl PluginPrivate for AuthorizationPlugin {
         &self,
         service: supergraph::BoxCloneService,
     ) -> supergraph::BoxCloneService {
-        if self.require_authentication {
+        if self.config.require_authentication {
             ServiceBuilder::new()
                 .checkpoint_async(move |request: supergraph::Request| async move {
                     // Whether to reject unauthenticated requests is an authorization policy,
@@ -716,22 +715,24 @@ impl PluginPrivate for AuthorizationPlugin {
         if !self.directives_in_effect() {
             return service;
         }
-        let reject_unauthorized = self.reject_unauthorized;
+        let errors = self.config.directives.errors;
+        let reject_unauthorized = self.config.directives.reject_unauthorized;
 
         ServiceBuilder::new()
             // Ahead of the counter below, so a refused operation stays uncounted.
             .checkpoint_async(move |request: execution::Request| async move {
                 if reject_unauthorized && !request.query_plan.query.unauthorized.paths.is_empty() {
-                    let unauthorized = request.query_plan.query.unauthorized.clone();
-                    unauthorized.log_unauthorized_paths();
-
                     // We knowingly build an invalid response here. Execution was prevented,
                     // so we should respond with a request error and no data. Instead, we're
                     // responding with execution errors and a fake/incorrect `data: null`. We
                     // maintain backwards compatibility for the time being.
                     // Tracked in ROUTER-2063.
                     let mut response = graphql::Response::builder().data(Value::Null).build();
-                    unauthorized.update_response_with_unauthorized_path_errors(&mut response);
+                    Self::report_authorization_errors_inner(
+                        &errors,
+                        &request.query_plan.query.unauthorized,
+                        &mut response,
+                    );
 
                     return Ok(ControlFlow::Break(
                         execution::Response::new_from_graphql_response(response, request.context),
